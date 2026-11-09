@@ -114,6 +114,32 @@ existence of a link (CSM's rows for them carry no Salesforce id to match on; an
 invoice event makes entity-service ingest its opportunity inline), and the
 account's status and primary partner (CSM's account read does not return them).
 
+### Running without sales-entity-service reads
+
+`ACP_SALES_ENTITY_READS=off` (default `on`) makes ACP read **nothing** from
+sales-entity-service: no project, customer, contacts, linked opportunities,
+opportunities or invoices. Every decision is taken from CSM's copy through
+entity-service, with the reads ACP already had for CSM: the project's dates and
+account, the account's people and flags, the contacts, the opportunity links,
+opportunities and invoices. The account's life cycle is the one thing an account
+read does not return, so ACP lists the accounts whose life cycle is Customer once
+per run (`POST /accounts/search`, `lifeCycle` filter); an account not in that list
+is not a Customer, and a list that cannot be read in full stops the run before
+anything is sent. Primary-partner presence is entity-service's approximation (any
+partner link), which can only make an invoice's suspend date later, never earlier.
+
+The trade-off, plainly: **there is no live confirmation.** The decision is only
+as good as the CSM copy. A stale or missing invoice, end date or partner flag can
+send a wrong notice or a wrong suspension, which is exactly what the live read
+exists to prevent. For that reason screening (nothing live to confirm), the weekly
+full sweep and the repair of CSM's copy (nothing live to compare) are all disabled
+in this mode, and a warning at startup says so. The filters (project type,
+overridden flag, account status, partner account) still apply, from the CSM data.
+
+The Salesforce `State__c` write of a suspension is a write, not a read, and stays,
+so a real run still needs `ACP_SALES_ENTITY_*`. A dry run in this mode builds no
+sales-entity-service client and needs none of those settings.
+
 ### Two systems, two jobs
 
 | System | What ACP reads | What ACP writes |

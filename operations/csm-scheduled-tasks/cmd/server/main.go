@@ -1414,19 +1414,6 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
-	// Salesforce: sales-entity-service, with its own client credentials.
-	salesEntityClient, err := salesentity.NewClient(salesentity.Config{
-		BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
-		TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
-		ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
-		ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
-		Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
-	})
-	if err != nil {
-		slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
-		os.Exit(1)
-	}
-
 	// The unsafe combinations are refused here, not warned about: see
 	// acpConfig.
 	debug := debugFor(recipientOverrides, acpTaskName)
@@ -1439,10 +1426,31 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
+	// Salesforce: sales-entity-service, with its own client credentials. It is
+	// read by the live path and written by a suspension (State__c). With
+	// ACP_SALES_ENTITY_READS=off nothing is read, so a dry run builds no client
+	// and needs no ACP_SALES_ENTITY_* setting; a real run still needs it for the
+	// write.
+	var salesEntity acp.SalesEntity
+	if !cfg.NoSalesEntityReads || !cfg.DryRun {
+		salesEntityClient, err := salesentity.NewClient(salesentity.Config{
+			BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
+			TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
+			ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
+			ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
+			Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		salesEntity = salesEntityClient
+	}
+
 	to, cc := recipientsFor(recipientOverrides, acpTaskName)
 	clients := acp.Clients{
 		CSM:         csmClient,
-		SalesEntity: salesEntityClient,
+		SalesEntity: salesEntity,
 		// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
 		// instead, the same as a report task's debug mail mode.
 		Email: notify.ForReport(emailClient, debug),

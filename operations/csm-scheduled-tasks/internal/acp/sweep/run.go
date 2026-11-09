@@ -216,6 +216,12 @@ func RunWith(ctx context.Context, reader sweepReader, details DetailSource, upda
 	rr := newRepairRun(opts.Repair, snap)
 	defer func() { rr.log(ctx) }()
 
+	if prep, ok := details.(preparer); ok {
+		if err := prep.prepare(ctx); err != nil {
+			return result, fmt.Errorf("sweep: prepare details: %w", err)
+		}
+	}
+
 	if projectID != "" {
 		if skipExcluded(ctx, projectID, excludedProjectIDs, &result) {
 			return result, nil

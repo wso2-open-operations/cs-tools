@@ -134,3 +134,11 @@ func (c *Client) PostSalesforceEvent(ctx context.Context, body []byte) error {
 	_, err := c.do(ctx, http.MethodPost, "/salesforce/events", body)
 	return err
 }
+
+// SearchAccounts calls POST /accounts/search. Response is returned as raw
+// JSON. ACP uses its lifeCycle filter to learn which accounts are Customers
+// when it runs without sales-entity-service reads: the account reads do not
+// return the life cycle itself.
+func (c *Client) SearchAccounts(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/accounts/search", body)
+}

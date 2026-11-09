@@ -43,6 +43,8 @@ type acpSettings struct {
 	Screening, FullSweepWeekday string
 	// Repair is ACP_REPAIR and RepairMaxEvents ACP_REPAIR_MAX_EVENTS as set.
 	Repair, RepairMaxEvents string
+	// SalesEntityReads is ACP_SALES_ENTITY_READS as set.
+	SalesEntityReads string
 
 	AlertsEnabled    bool
 	EmailBaseURL     string
@@ -68,6 +70,7 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 		FullSweepWeekday:       strings.TrimSpace(os.Getenv("ACP_SCREENING_FULL_SWEEP_WEEKDAY")),
 		Repair:                 strings.TrimSpace(os.Getenv("ACP_REPAIR")),
 		RepairMaxEvents:        strings.TrimSpace(os.Getenv("ACP_REPAIR_MAX_EVENTS")),
+		SalesEntityReads:       strings.TrimSpace(os.Getenv("ACP_SALES_ENTITY_READS")),
 		AlertsEnabled:          alertsEnabled,
 		EmailBaseURL:           emailBaseURL,
 		EmailFromAddress:       strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS")),
@@ -139,7 +142,15 @@ func acpConfig(s acpSettings) (acp.Config, []string, error) {
 	if cfg.RepairMaxEvents, err = parseACPRepairMax(s.RepairMaxEvents); err != nil {
 		return acp.Config{}, nil, err
 	}
+	reads, err := parseACPOnOff("ACP_SALES_ENTITY_READS", s.SalesEntityReads)
+	if err != nil {
+		return acp.Config{}, nil, err
+	}
+	cfg.NoSalesEntityReads = !reads
 	var warnings []string
+	if cfg.NoSalesEntityReads {
+		warnings = append(warnings, "ACP_SALES_ENTITY_READS is off: acp_closure makes no sales-entity-service read and decides only from CSM's copy, with no live confirmation; screening, the weekly full sweep and the repair of CSM's copy are disabled by this mode")
+	}
 	if s.Tryout && !cfg.DryRun && cfg.TestProjectID == "" {
 		warnings = append(warnings, "TRYOUT_TASK is acp_closure without ACP_TEST_PROJECT_ID: running as a dry run, nothing will be written; set ACP_DRY_RUN=true explicitly to silence this")
 		cfg.DryRun = true

@@ -34,7 +34,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
 	acpnotify "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/sweep"
 )
 
@@ -50,9 +49,19 @@ type EmailSender interface {
 // sales-entity-service) has the dates, people, opportunities and invoices,
 // and takes State__c=Suspended on suspension.
 type Clients struct {
-	CSM         *entity.Client
-	SalesEntity *salesentity.Client
+	CSM *entity.Client
+	// SalesEntity is read by the live path and takes the State__c write of a
+	// suspension. Nil only with Config.NoSalesEntityReads in a dry run.
+	SalesEntity SalesEntity
 	Email       EmailSender
+}
+
+// SalesEntity is the sales-entity-service client: the reads of the live path
+// and the one write, a suspended project's State__c. Satisfied by
+// *salesentity.Client.
+type SalesEntity interface {
+	sweep.SalesforceReader
+	UpdateProjectStatus(ctx context.Context, id, status string) error
 }
 
 // Config is the ACP_* configuration, read in cmd/server/main.go.
@@ -105,6 +114,13 @@ type Config struct {
 	// 0 is repair off. ACP_REPAIR_MAX_EVENTS, default 200.
 	Repair          bool
 	RepairMaxEvents int
+	// NoSalesEntityReads (ACP_SALES_ENTITY_READS=off) makes no
+	// sales-entity-service read at all: every decision is taken from CSM's
+	// copy through entity-service, so there is no live confirmation, and
+	// screening, the full sweep and the repair have nothing to compare and are
+	// off. The State__c write of a suspension is a write and stays. The zero
+	// value is reads on.
+	NoSalesEntityReads bool
 }
 
 // repairFor is the run's repair setup, nil when repair is off.
@@ -149,7 +165,8 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"excludedProjectIDs", sortedKeys(cfg.ExcludedProjectIDs),
 			"dailyLimit", cfg.DailyLimit,
 			"screening", cfg.Screening,
-			"repair", cfg.Repair && cfg.RepairMaxEvents > 0,
+			"repair", cfg.Repair && cfg.RepairMaxEvents > 0 && !cfg.NoSalesEntityReads,
+			"salesEntityReads", !cfg.NoSalesEntityReads,
 			"standingRecipientsCount", len(cfg.StandingRecipients),
 		)
 
@@ -190,13 +207,28 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			}
 		}
 
+		var details sweep.DetailSource
 		screening, whyNot := screeningApplies(cfg, now)
+		repair := repairFor(clients, cfg)
+		if cfg.NoSalesEntityReads {
+			// Nothing live to confirm or compare against.
+			details = sweep.CSMOnlyDetails(clients.CSM, clients.CSM)
+			screening, whyNot, repair = false, "", nil
+		} else {
+			if clients.SalesEntity == nil {
+				return fmt.Errorf("acp run %s: no sales-entity-service client: set ACP_SALES_ENTITY_* or ACP_SALES_ENTITY_READS=off in a dry run", runID)
+			}
+			details = sweep.NewSalesforceDetails(clients.SalesEntity)
+		}
+		if !cfg.DryRun && clients.SalesEntity == nil {
+			return fmt.Errorf("acp run %s: a real run needs the sales-entity-service client for the State__c write of a suspension", runID)
+		}
 		if whyNot != "" {
 			slog.InfoContext(ctx, "acp: screening is on but this run evaluates every project live", "runID", runID, "reason", whyNot)
 		}
 		ctx = entity.WithCorrelationID(ctx, runID)
-		result, err := sweep.RunWith(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs,
-			sweep.Options{Limit: cfg.DailyLimit, Screening: screening, Repair: repairFor(clients, cfg)})
+		result, err := sweep.RunWith(ctx, clients.CSM, details, updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs,
+			sweep.Options{Limit: cfg.DailyLimit, Screening: screening, Repair: repair})
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,

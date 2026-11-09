@@ -218,3 +218,34 @@ func TestACPRepairSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestACPSalesEntityReadsSetting(t *testing.T) {
+	for _, tc := range []struct {
+		v           string
+		wantNoReads bool
+		wantErr     bool
+	}{
+		{"", false, false},
+		{"on", false, false},
+		{"OFF", true, false},
+		{"false", false, true},
+		{"0", false, true},
+	} {
+		t.Run(tc.v, func(t *testing.T) {
+			cfg, warnings, err := acpConfig(acpSettings{DryRun: true, AlertsEnabled: true, SalesEntityReads: tc.v})
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "ACP_SALES_ENTITY_READS") {
+					t.Fatalf("err = %v, want one naming ACP_SALES_ENTITY_READS", err)
+				}
+				return
+			}
+			if err != nil || cfg.NoSalesEntityReads != tc.wantNoReads {
+				t.Fatalf("noReads=%v err=%v, want %v", cfg.NoSalesEntityReads, err, tc.wantNoReads)
+			}
+			warned := strings.Contains(strings.Join(warnings, "\n"), "ACP_SALES_ENTITY_READS is off")
+			if warned != tc.wantNoReads {
+				t.Errorf("startup warning = %v, want %v (screening, full sweep and repair are disabled by this mode)", warned, tc.wantNoReads)
+			}
+		})
+	}
+}
