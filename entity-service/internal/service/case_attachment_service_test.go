@@ -311,7 +311,7 @@ func TestValidateCreateCaseRequest_NeedsNoAttachmentsForAnyType(t *testing.T) {
 
 // A request for deleted attachments is honoured only from the CSM portal
 // backend; any other caller's flag is ignored, so the repo is never asked.
-func TestCaseService_SearchCaseAttachments_IncludeDeletedOnlyForCSMPortalBackend(t *testing.T) {
+func TestCaseService_SearchCaseAttachments_DeletedOnlyHonouredOnlyForCSMPortalBackend(t *testing.T) {
 	const portalClient = "csm-portal-backend-client"
 	tests := []struct {
 		name      string
@@ -330,11 +330,11 @@ func TestCaseService_SearchCaseAttachments_IncludeDeletedOnlyForCSMPortalBackend
 			var got bool
 			repo := &stubCaseRepo{
 				searchCaseAttachments: func(ctx context.Context, _ string, _ domain.Pagination) ([]domain.Attachment, int, error) {
-					got = repository.DeletedAttachmentsRequested(ctx)
+					got = repository.DeletedAttachmentsOnlyRequested(ctx)
 					return nil, 0, nil
 				},
 				searchWorkItemAttachments: func(ctx context.Context, _ string, _ domain.ReferenceType, _ domain.Pagination) ([]domain.Attachment, int, error) {
-					got = repository.DeletedAttachmentsRequested(ctx)
+					got = repository.DeletedAttachmentsOnlyRequested(ctx)
 					return nil, 0, nil
 				},
 			}
@@ -346,7 +346,7 @@ func TestCaseService_SearchCaseAttachments_IncludeDeletedOnlyForCSMPortalBackend
 			for _, rt := range []domain.ReferenceType{domain.ReferenceTypeCase, domain.ReferenceTypeIncident} {
 				got = false
 				if _, err := svc.SearchCaseAttachments(ctx, domain.SearchAttachmentsRequest{
-					ReferenceID: testCaseID, ReferenceType: rt, IncludeDeleted: tc.include,
+					ReferenceID: testCaseID, ReferenceType: rt, DeletedOnly: tc.include,
 				}); err != nil {
 					t.Fatalf("%s: %v", rt, err)
 				}

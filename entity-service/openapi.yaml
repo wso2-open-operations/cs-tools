@@ -8156,10 +8156,11 @@ paths:
         deployment_attachment, scoped to the caller's projects by row-level
         security; a failed or still-uploading attachment is not listed. A deleted
         attachment is not listed either, unless the caller is the CSM portal
-        backend and sets `includeDeleted` (it does, for a portal admin): the
-        deleted ones then come last, with `status: deleted`, `deletedOn` and
-        `deletedBy`. `includeDeleted` is ignored from any other caller and for a
-        deployment.
+        backend and sets `deletedOnly` (it does, when a portal admin asks): the
+        list is then of the deleted attachments only, most recently deleted
+        first, with `status: deleted`, `deletedOn` and `deletedBy`, and its
+        total and paging count only those. `deletedOnly` is ignored from any
+        other caller and for a deployment.
       operationId: searchCaseAttachments
       requestBody:
         required: true
@@ -25585,7 +25586,7 @@ components:
         Lifecycle state of a listed attachment. Complete attachments are listed; a
         pending (still uploading) or failed one is not returned by
         POST /attachments/search. `deleted` appears only when the CSM portal backend
-        asked for deleted attachments (`includeDeleted`), after the complete ones.
+        asked for the deleted attachments (`deletedOnly`); that list holds only them.
 
     Attachment:
       type: object
@@ -25654,12 +25655,13 @@ components:
           $ref: '#/components/schemas/ReferenceType'
         pagination:
           $ref: '#/components/schemas/Pagination'
-        includeDeleted:
+        deletedOnly:
           type: boolean
           description: >
-            Also list deleted attachments, after the others. Honoured only from the
-            CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID); ignored from any other
-            caller and for referenceType `deployment`.
+            List the deleted attachments instead of the available ones, most
+            recently deleted first (total and paging are of the deleted ones).
+            Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID);
+            ignored from any other caller and for referenceType `deployment`.
 
     SearchAttachmentsResponse:
       type: object

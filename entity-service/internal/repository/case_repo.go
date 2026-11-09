@@ -2886,7 +2886,10 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // SELECT, so the total and the page rows always agree.
 //
 // A row is skipped while PENDING, and when it is failed, deleted or still
-// uploading (listedStoredAttachmentSQL).
+// uploading (listedStoredAttachmentSQL). A caller allowed to see deleted
+// attachments can ask for ONLY those instead (WithDeletedAttachmentsOnly): the
+// list, its total and its paging are then all about deleted rows, so the two
+// lists never mix.
 //
 // The rows are joined to work_item so that work_item's row-level security
 // scopes them like every other work item read. The uploader is matched to a
@@ -2896,8 +2899,8 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
 	listed := listedStoredAttachmentSQL
-	if DeletedAttachmentsRequested(ctx) {
-		listed = listedWithDeletedStoredAttachmentSQL
+	if DeletedAttachmentsOnlyRequested(ctx) {
+		listed = listedDeletedStoredAttachmentSQL
 	}
 	combined := `
 		SELECT wa.id, wa.work_item_id AS reference_id, COALESCE(wa.name, '') AS name,
@@ -2930,13 +2933,14 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 		  AND wa.state IS DISTINCT FROM 'PENDING'
 		  ` + listed
 	countQuery := `SELECT COUNT(*) FROM (` + combined + `) att`
-	// Deleted rows come last, most recently deleted first.
+	// Most recently deleted first for the deleted list; the others have no
+	// deleted_on, so they stay newest upload first.
 	dataQuery := `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
 		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status,
 		       deleted_on, deleter_email, deleter_id, deleter_name
 		FROM (` + combined + `) att
-		ORDER BY (status = 'deleted'), deleted_on DESC NULLS LAST, created_on DESC, id
+		ORDER BY deleted_on DESC NULLS LAST, created_on DESC, id
 		LIMIT $2 OFFSET $3`
 
 	// The id names ANY work item, a change request included: one the caller may
@@ -3017,11 +3021,9 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
 		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
 
-// listedWithDeletedStoredAttachmentSQL is listedStoredAttachmentSQL for a caller
-// who may also see deleted attachments: a deleted row is kept, the rest of the
-// filter is the same.
-const listedWithDeletedStoredAttachmentSQL = `AND wa.status <> 'FAILED'
-		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
+// listedDeletedStoredAttachmentSQL is the filter for a caller who asked for the
+// deleted attachments only: just the rows the uploader or an admin deleted.
+const listedDeletedStoredAttachmentSQL = `AND wa.status = 'DELETED'`
 
 // SearchWorkItemAttachments implements CaseRepository.
 //
@@ -3056,8 +3058,8 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 	}
 
 	listed := listedStoredAttachmentSQL
-	if DeletedAttachmentsRequested(ctx) {
-		listed = listedWithDeletedStoredAttachmentSQL
+	if DeletedAttachmentsOnlyRequested(ctx) {
+		listed = listedDeletedStoredAttachmentSQL
 	}
 	where := `
 		WHERE wa.work_item_id = $1
@@ -3093,7 +3095,7 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			ORDER BY u3.id
 			LIMIT 1
 		) d ON TRUE` + where + `
-		ORDER BY (wa.status = 'DELETED'), wa.deleted_on DESC NULLS LAST, wa.created_on DESC, wa.id
+		ORDER BY wa.deleted_on DESC NULLS LAST, wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int

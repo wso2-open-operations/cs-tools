@@ -4351,7 +4351,7 @@ const (
 	AttachmentStatusComplete AttachmentStatus = "complete"
 	// AttachmentStatusDeleted marks a row a person deleted. It is listed only
 	// when the CSM portal backend asks for deleted rows (see
-	// SearchAttachmentsRequest.IncludeDeleted); it has no file and no link.
+	// SearchAttachmentsRequest.DeletedOnly); it has no file and no link.
 	AttachmentStatusDeleted AttachmentStatus = "deleted"
 )
 
@@ -4398,11 +4398,12 @@ type SearchAttachmentsRequest struct {
 	ReferenceID   string        `json:"referenceId"`
 	ReferenceType ReferenceType `json:"referenceType"`
 	Pagination    Pagination    `json:"pagination"`
-	// IncludeDeleted asks for deleted attachments too, listed after the
-	// others. Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID),
+	// DeletedOnly lists the deleted attachments of the reference INSTEAD of the
+	// available ones (total and paging are of the deleted rows), most recently
+	// deleted first. Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID),
 	// which sets it for a portal admin; from any other caller it is ignored.
 	// Not read for "deployment".
-	IncludeDeleted bool `json:"includeDeleted,omitempty"`
+	DeletedOnly bool `json:"deletedOnly,omitempty"`
 }
 
 // SearchAttachmentsResponse is the paginated result of an attachment search.

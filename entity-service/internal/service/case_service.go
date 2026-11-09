@@ -39,7 +39,7 @@ import (
 
 type caseService struct {
 	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
-	// ask for deleted attachments in a list (SearchAttachmentsRequest.IncludeDeleted).
+	// ask for deleted attachments in a list (SearchAttachmentsRequest.DeletedOnly).
 	csmPortalClientID string
 	repo              repository.CaseRepository
 	userRepo          repository.UserRepository
@@ -233,13 +233,13 @@ func WithDeletedAttachmentsForCSMPortal(svc CaseService, csmPortalClientID strin
 	return svc
 }
 
-// mayListDeletedAttachments is whether this search may include deleted
-// attachments: the request asks AND the caller is the CSM portal backend, which
+// mayListDeletedAttachments is whether this search may list the deleted
+// attachments (only those): the request asks AND the caller is the CSM portal backend, which
 // sets the flag only for a portal admin (decided from the person's token roles
 // there, the same trust the admin delete uses). Any other caller's request for
 // it is ignored.
 func (s *caseService) mayListDeletedAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) bool {
-	if !req.IncludeDeleted || s.csmPortalClientID == "" {
+	if !req.DeletedOnly || s.csmPortalClientID == "" {
 		return false
 	}
 	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
@@ -4005,7 +4005,7 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 		err         error
 	)
 	if s.mayListDeletedAttachments(ctx, req) {
-		ctx = repository.WithDeletedAttachments(ctx)
+		ctx = repository.WithDeletedAttachmentsOnly(ctx)
 	}
 	if isCase {
 		attachments, total, err = s.repo.SearchCaseAttachments(ctx, req.ReferenceID, req.Pagination)
