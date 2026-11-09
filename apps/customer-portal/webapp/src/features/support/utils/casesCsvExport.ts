@@ -26,7 +26,7 @@ import { downloadPdfFile } from "@utils/pdf";
 
 export const ALL_CASES_CSV_HEADERS = [
   "Number",
-  "Sequence ID",
+  "WSO2 Case ID",
   "State",
   "Short Description",
   "Severity",
@@ -38,7 +38,7 @@ export const ALL_CASES_CSV_HEADERS = [
 
 export const CASE_LIST_EXPORT_CSV_HEADERS = [
   "Number",
-  "Sequence ID",
+  "WSO2 Case ID",
   "State",
   "Short Description",
   "Type",

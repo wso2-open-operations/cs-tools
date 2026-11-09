@@ -1681,20 +1681,6 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 	if err != nil {
 		return err
 	}
-	// Customers see Work In Progress and Waiting On WSO2 as one In Progress
-	// state: they are emailed the merged label, and not at all when the change
-	// is a move between the two. Only the customer-portal group is affected
-	// (any link other than the CSM one); staff keep the real status and every
-	// change.
-	csmLink := d.links.CSMLink(p.CaseID)
-	if !customerSeesStatusChange(p.PreviousStatus, p.NewStatus) {
-		for caseLink := range groups {
-			if caseLink != csmLink {
-				delete(groups, caseLink)
-				delete(groupUserIDs, caseLink)
-			}
-		}
-	}
 	baseKey := recordBaseKey(record)
 	caseRef := displayCaseRef(p.CaseNumber, p.CaseID)
 	title := p.CaseTitle
@@ -1704,12 +1690,8 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 		title = "Status changed to " + p.NewStatus
 	}
 	subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, title)
-	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, csmLink, func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
-		status := p.NewStatus
-		if caseLink != csmLink {
-			status = customerStatus(status)
-		}
-		return notifications.RenderStatusChangedEmail(caseRef, status, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
+	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
+		return notifications.RenderStatusChangedEmail(caseRef, p.NewStatus, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))

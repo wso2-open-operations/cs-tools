@@ -184,9 +184,6 @@ func TestCaseService_CreateCaseComment_CustomerReplyMovesToWaitingOnWSO2(t *test
 				if payload.NewStatus != "Waiting on WSO2" {
 					t.Errorf("NewStatus = %q, want %q", payload.NewStatus, "Waiting on WSO2")
 				}
-				if payload.PreviousStatus != tc.label {
-					t.Errorf("PreviousStatus = %q, want %q (consumers use it to tell whether the change is visible to customers)", payload.PreviousStatus, tc.label)
-				}
 				// comment_added still goes out first, then status_changed --
 				// the order snCaseService.CreateCaseComment produces.
 				if types := publishedTypes(publisher.calls); len(types) != 2 || types[0] != events.TypeCommentAdded || types[1] != events.TypeStatusChanged {

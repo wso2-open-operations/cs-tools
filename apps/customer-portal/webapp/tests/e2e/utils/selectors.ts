@@ -817,7 +817,7 @@ export const ENGAGEMENTS = {
     overviewSection: "Engagement Overview",
     overviewLabels: [
       "Engagement ID",
-      "Sequence ID",
+      "WSO2 Case ID",
       "Status",
       "Engagement Type",
       "Created by",
@@ -1593,7 +1593,7 @@ export const CASE_DETAILS_PANEL = {
   fields: {
     caseOverview: [
       "Case ID",
-      "Sequence ID",
+      "WSO2 Case ID",
       "Status",
       "Severity",
       "Category",
@@ -2419,7 +2419,7 @@ export const CASE_DETAIL = {
   },
   /** Label on the Details tab. The header shows the same value, so the view spec
    * asserts it there rather than switching tabs. */
-  wso2CaseIdLabel: "Sequence ID",
+  wso2CaseIdLabel: "WSO2 Case ID",
   confirmDialog: {
     title: "Confirm State Change",
     confirmButton: "Confirm",

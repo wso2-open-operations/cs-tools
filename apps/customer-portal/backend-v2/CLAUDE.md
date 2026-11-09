@@ -823,19 +823,6 @@ If a future endpoint has this same problem (frontend still expects a legacy nume
 entity-service no longer speaks), follow this same two-file, two-direction pattern rather than
 inventing a new one per endpoint.
 
-**Work In Progress and Waiting On WSO2 are one state to customers, "In Progress".** Customers act on
-Awaiting Info; the split between the other two only says the case is with the support team. The
-merge is display-only and lives in this backend (`isInProgressFamily` and friends in
-`case_enum_mapping.go`): entity-service, the database and every internal view keep the real states.
-What it covers, so a new endpoint that surfaces a case state should go through the same helpers:
-`caseStatusRef` (id `10`, label `In Progress`), `normalizeCaseStateChoices` (filter lists and
-`stateCount`, counts added), `expandInProgressStateIDs` (a filter on `10` also matches
-`waiting_on_wso2` cases, otherwise they would vanish from results) and the activity feed
-(`MapSearchCaseActivities` rewrites state changes to the merged label and drops a move between the
-two, which shows the customer nothing). `PATCH /cases/{id}` still accepts `1003`, because the
-"Wait on WSO2" and "Reject Solution" actions send it directly now that it is not in the state list.
-Not covered: emails to customers still carry the real status text.
-
 **Project scoping via a `{id}` path parameter is the source of truth — never a client-settable body
 field, even when entity-service's own request struct has one.**
 `POST /projects/{id}/cases/search` and `POST /projects/{id}/deployments/search` both scope every

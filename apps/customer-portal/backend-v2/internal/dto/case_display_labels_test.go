@@ -32,12 +32,11 @@ import (
 // flag. See CaseDetailsContent.tsx.
 func TestCaseStatusRef_EmitsDisplayLabel(t *testing.T) {
 	for in, want := range map[string]string{
-		// Both show as the one merged state; see caseStateInProgressLabel.
-		"work_in_progress":  "In Progress",
+		"work_in_progress":  "Work In Progress",
 		"closed":            "Closed",
 		"open":              "Open",
 		"awaiting_info":     "Awaiting Info",
-		"waiting_on_wso2":   "In Progress",
+		"waiting_on_wso2":   "Waiting On WSO2",
 		"reopened":          "Reopened",
 		"solution_proposed": "Solution Proposed",
 	} {

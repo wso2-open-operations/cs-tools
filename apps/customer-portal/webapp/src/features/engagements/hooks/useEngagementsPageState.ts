@@ -311,10 +311,9 @@ export function useEngagementsPageState() {
         break;
       }
       case "onHold": {
-        // Waiting On WSO2 is part of In Progress now, so on hold is just
-        // Awaiting Info.
         const awaitingId = getStateId(CaseStatus.AWAITING_INFO);
-        ids = [awaitingId].filter((id): id is number => id != null);
+        const waitingId = getStateId(CaseStatus.WAITING_ON_WSO2);
+        ids = [awaitingId, waitingId].filter((id): id is number => id != null);
         break;
       }
       default:
