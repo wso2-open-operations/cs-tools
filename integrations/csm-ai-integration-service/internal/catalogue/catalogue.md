@@ -20,12 +20,17 @@ resource types exist in the portal but are not in this catalogue. A dashboard ma
 - If the request cannot be built exactly with this catalogue, build the **closest dashboard** it can
   express that still answers the request, and add a top-level `"note"`: one sentence saying what differs
   from the request. Its `displayName` names what it shows, not what was asked. You decide what is
-  closest. A dashboard built as asked has no `note`. Example: "time logged per ABT" (time cards cannot
-  be split by team) can be my hours per day, with
-  `"note": "Time cards can't be shown per ABT team, so this shows your own logged hours instead."`
+  closest. A dashboard built as asked has no `note`. Example: "incidents by assignment group"
+  (operations cannot be grouped by assignment group) can be incidents by state, with
+  `"note": "Incidents can't be grouped by assignment group, so this shows them by state instead."`
+- A closest dashboard never shows more people's records than the request asks for. If a team or a
+  grouping by team cannot be expressed, show only the viewer's own records (`__current_user__`), never
+  everyone's. It never guesses who or what the user named: decline a person named without an email
+  address and a team not in the Teams section.
 - Reply instead with `{"error": "<one sentence: what is missing>"}` only when nothing close answers the
-  request: it is not about this portal's data (e.g. "a+b", a general question, writing text), or a
-  substitute would show something the user did not mean (a guessed person or team, other data).
+  request: it is not about this portal's data (e.g. "a+b", a general question, writing text), it names
+  a person, team or filter that cannot be used (above), or a substitute would show other data than the
+  user meant.
 
 ---
 
@@ -118,7 +123,8 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `issueType` | `in` | `error`, `partial_outage`, `performance_degradation`, `question`, `security_or_compliance`, `total_outage` *(case only)* |
 | `workState` | `in` | `ongoing`, `paused` *(not announcements)* |
 | `engagementType` | `in` | `migration`, `consultancy`, `new_feature_improvement`, `follow_up`, `onboarding` *(engagement only)* |
-| `assignedUserId` | `in` | `["__current_user__"]` (the viewer). **`isEmpty` (unassigned) is not supported.** |
+| `assignedUserId` | `in` | `["__current_user__"]` (the viewer) |
+| `assignedUserId` | `isEmpty` | no `values`: unassigned, no engineer assigned |
 | `createdBy` | `in` | creator email addresses, any person, **only those the request gives** (e.g. `["person.one@example.com", "person.two@example.com"]`) |
 | `createdBy` | `eq` | exactly `["__current_user_email__"]` (raised by the viewer); `eq` takes no other value |
 | `escalation` | `isEmpty`, `isNotEmpty` | no `values` (not escalated / escalated) |
@@ -470,7 +476,7 @@ Never set both `slices` and `groupBy`.
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
 | "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn gte <token>` |
-| "unassigned", "no assignee" | not expressible: there is no unassigned filter (section 1) |
+| "unassigned", "no assignee" | `assignedUserId isEmpty` (case family only) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
 | "about to breach", "near SLA" | `taskSLABusinessElapsedPercent gte ["80"]` plus `slaBreached eq ["false"]` |

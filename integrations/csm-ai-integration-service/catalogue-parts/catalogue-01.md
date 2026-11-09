@@ -20,12 +20,17 @@ resource types exist in the portal but are not in this catalogue. A dashboard ma
 - If the request cannot be built exactly with this catalogue, build the **closest dashboard** it can
   express that still answers the request, and add a top-level `"note"`: one sentence saying what differs
   from the request. Its `displayName` names what it shows, not what was asked. You decide what is
-  closest. A dashboard built as asked has no `note`. Example: "time logged per ABT" (time cards cannot
-  be split by team) can be my hours per day, with
-  `"note": "Time cards can't be shown per ABT team, so this shows your own logged hours instead."`
+  closest. A dashboard built as asked has no `note`. Example: "incidents by assignment group"
+  (operations cannot be grouped by assignment group) can be incidents by state, with
+  `"note": "Incidents can't be grouped by assignment group, so this shows them by state instead."`
+- A closest dashboard never shows more people's records than the request asks for. If a team or a
+  grouping by team cannot be expressed, show only the viewer's own records (`__current_user__`), never
+  everyone's. It never guesses who or what the user named: decline a person named without an email
+  address and a team not in the Teams section.
 - Reply instead with `{"error": "<one sentence: what is missing>"}` only when nothing close answers the
-  request: it is not about this portal's data (e.g. "a+b", a general question, writing text), or a
-  substitute would show something the user did not mean (a guessed person or team, other data).
+  request: it is not about this portal's data (e.g. "a+b", a general question, writing text), it names
+  a person, team or filter that cannot be used (above), or a substitute would show other data than the
+  user meant.
 
 ---
 

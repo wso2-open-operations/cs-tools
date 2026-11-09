@@ -10,7 +10,8 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `issueType` | `in` | `error`, `partial_outage`, `performance_degradation`, `question`, `security_or_compliance`, `total_outage` *(case only)* |
 | `workState` | `in` | `ongoing`, `paused` *(not announcements)* |
 | `engagementType` | `in` | `migration`, `consultancy`, `new_feature_improvement`, `follow_up`, `onboarding` *(engagement only)* |
-| `assignedUserId` | `in` | `["__current_user__"]` (the viewer). **`isEmpty` (unassigned) is not supported.** |
+| `assignedUserId` | `in` | `["__current_user__"]` (the viewer) |
+| `assignedUserId` | `isEmpty` | no `values`: unassigned, no engineer assigned |
 | `createdBy` | `in` | creator email addresses, any person, **only those the request gives** (e.g. `["person.one@example.com", "person.two@example.com"]`) |
 | `createdBy` | `eq` | exactly `["__current_user_email__"]` (raised by the viewer); `eq` takes no other value |
 | `escalation` | `isEmpty`, `isNotEmpty` | no `values` (not escalated / escalated) |

@@ -63,7 +63,7 @@
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
 | "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn gte <token>` |
-| "unassigned", "no assignee" | not expressible: there is no unassigned filter (section 1) |
+| "unassigned", "no assignee" | `assignedUserId isEmpty` (case family only) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
 | "about to breach", "near SLA" | `taskSLABusinessElapsedPercent gte ["80"]` plus `slaBreached eq ["false"]` |
