@@ -933,7 +933,7 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 	}
 
 	t.Run("a lead's tag gets a code from its label", func(t *testing.T) {
-		repo := &fakeScheduleRepo{leadsTeam: true}
+		repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 		svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
 		k, err := svc.CreateAbsenceKind(leadCtx("castor.01@example.com"), ok)
 		if err != nil {
@@ -948,7 +948,7 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 	})
 
 	t.Run("an allocation tag may exclude from the timesheet, with a description", func(t *testing.T) {
-		repo := &fakeScheduleRepo{leadsTeam: true}
+		repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 		svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
 		req := ok
 		req.ExcludesFromTimesheet, req.Description = true, "  Off support while on the SRE rotation  "
@@ -986,7 +986,7 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 	}
 	for name, mutate := range bad {
 		t.Run(name, func(t *testing.T) {
-			repo := &fakeScheduleRepo{leadsTeam: true}
+			repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 			svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
 			req := ok
 			mutate(&req)
@@ -1051,6 +1051,7 @@ func TestDeletingATagNeedsALead(t *testing.T) {
 	}
 
 	repo.leadsTeam = true
+	repo.leadFamilies = []string{"CRE"}
 	if err := svc.DeleteAbsenceKind(leadCtx("castor.01@example.com"), " TRAINING "); err != nil {
 		t.Fatalf("a lead was refused: %v", err)
 	}

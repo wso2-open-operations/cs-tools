@@ -134,3 +134,19 @@ func TestPortalAdminTagFamily(t *testing.T) {
 		}
 	}
 }
+
+// A lead of a team that works no rota (a change approval board, say) passes
+// the "any lead" gate but has no family, so may neither add a tag -- for any
+// family or shared -- nor delete one. Only a portal admin may without a family.
+func TestAbsenceKinds_ALeadWithNoRotaFamilyIsRefused(t *testing.T) {
+	req := domain.CreateScheduleAbsenceKindRequest{ShortCode: "TR", Label: "TR", Bucket: "ALLOCATION", ColourToken: "INT", Family: "SRE"}
+	repo := &fakeScheduleRepo{leadsTeam: true}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	var forbidden *apierror.ForbiddenError
+	if _, err := svc.CreateAbsenceKind(scheduleCaller("board.lead@example.com"), req); !errors.As(err, &forbidden) || repo.called {
+		t.Fatalf("create: want ForbiddenError and no write, got %v", err)
+	}
+	if err := svc.DeleteAbsenceKind(scheduleCaller("board.lead@example.com"), "SOME_TAG"); !errors.As(err, &forbidden) || repo.called {
+		t.Fatalf("delete: want ForbiddenError and no write, got %v", err)
+	}
+}

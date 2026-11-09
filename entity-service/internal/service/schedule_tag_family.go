@@ -87,6 +87,12 @@ func kindFamilyFor(admin []string, requested string) (*string, error) {
 	return &f, nil
 }
 
+// errNoTagFamily refuses a tag change from a caller with no family of their
+// own: someone who leads only a team that works no rota (a change approval
+// board, say) passes the "any lead" gate, but a tag belongs to a family, so
+// only a portal admin may add or delete one without a family.
+var errNoTagFamily = &apierror.ForbiddenError{Msg: "only a rota admin or the lead of a rota team can change tags"}
+
 // portalAdminTagFamily is what a caller who neither runs nor leads a rota (a
 // portal admin) may add a tag for: the family they name, when it is one, else
 // none (a shared tag).
