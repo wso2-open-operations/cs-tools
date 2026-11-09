@@ -12941,7 +12941,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MigrationCaseReport'
         "400":
-          description: olderThanDays is not a whole number of days in range, variant is not a known value, or both are given.
+          description: olderThanDays is not a whole number of days in range.
           content:
             application/json:
               schema:
@@ -13038,7 +13038,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/LongOpenCaseReport'
         "400":
-          description: olderThanDays is not a whole number of days in range.
+          description: olderThanDays is not a whole number of days in range, variant is not a known value, or both are given.
           content:
             application/json:
               schema:
