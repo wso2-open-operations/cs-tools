@@ -54,7 +54,13 @@ import (
 // "open" (see resetToOpen): nothing is left to chase on this track, either no
 // due invoice (paid), an account the track doesn't apply to, or a suspend
 // date more than 90 days away.
+//
+// A track whose own closure state is not Open has no cascade and is not
+// reset (see buildSubscriptionCascade, actInvoice): nothing is read for it.
 func buildInvoiceCascade(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, now time.Time) (cascade *cascadeDecision, renewed bool, err error) {
+	if !dimensionOpen(proj.InvoiceDueDateClosureState) {
+		return nil, false, nil
+	}
 	dueInvoices, err := resolveDueInvoices(ctx, reader, proj)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve due invoice for project %s: %w", proj.ID, err)
@@ -64,7 +70,7 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 	if err != nil {
 		return nil, false, fmt.Errorf("parse suspensionProcessState for project %s: %w", proj.ID, err)
 	}
-	canReset := lastWindow != nil && dimensionOpen(proj.InvoiceDueDateClosureState)
+	canReset := lastWindow != nil
 
 	if len(dueInvoices) == 0 {
 		return nil, canReset, nil
@@ -110,8 +116,12 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 // exactly, writing based_on_due_invoices/invoiceDueDateClosureState instead
 // of the subscription equivalents. alreadyClosed reflects every
 // higher-priority cascade's own decision.ShouldSuspend so far this run —
-// see processProject.
+// see processProject. Does nothing when the invoice track's own closure
+// state is not Open, as actSubscription.
 func actInvoice(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, invoice dueInvoice, alreadyClosed bool, history *json.RawMessage, now time.Time) error {
+	if !dimensionOpen(proj.InvoiceDueDateClosureState) {
+		return nil
+	}
 	if decision.ShouldNotify {
 		delivered := false
 		var err error

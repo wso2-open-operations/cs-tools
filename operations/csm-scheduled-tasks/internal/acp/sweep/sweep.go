@@ -225,9 +225,15 @@ func resetToOpen(ctx context.Context, updater projectUpdater, projectID string, 
 // buildSubscriptionCascade evaluates the subscription end-date closure
 // reason and, if it fires, returns a cascadeDecision ready to be ordered
 // against any other firing reason. Returns (nil, nil) when there's no end
-// date at all, or the decision simply doesn't fire yet.
+// date at all, when the track's own closure state is not Open (see
+// actSubscription), or the decision simply doesn't fire yet.
+//
+// A track that is not Open is left out of the cascades, not just made
+// inert in act: processProject sorts the cascades and marks the project
+// closed once one that should suspend has run, and a cascade that suspends
+// nothing must not suppress the other track's notice.
 func buildSubscriptionCascade(reader entityReader, updater projectUpdater, ntf notifier, proj project, now time.Time) (*cascadeDecision, error) {
-	if proj.EndDate == nil {
+	if proj.EndDate == nil || !dimensionOpen(proj.EndDateClosureState) {
 		return nil, nil
 	}
 
@@ -257,7 +263,15 @@ func buildSubscriptionCascade(reader entityReader, updater projectUpdater, ntf n
 // from notify returns immediately — this ordering, not a separate flag, is
 // what guarantees suspend never proceeds after a failed notify (the day-0
 // "email first, stop on failure" contract).
+//
+// A track whose own closure state is not Open (a person reopened the
+// project, say, leaving "Pending Suspended" or "Notified" behind) does
+// nothing: suspend would skip it, so a notice would tell the customer the
+// project is suspended when nothing is.
 func actSubscription(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, alreadyClosed bool, history *json.RawMessage, now time.Time) error {
+	if !dimensionOpen(proj.EndDateClosureState) {
+		return nil
+	}
 	if decision.ShouldNotify {
 		delivered := false
 		var err error
