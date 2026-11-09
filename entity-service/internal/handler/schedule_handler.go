@@ -97,6 +97,22 @@ func (h *ScheduleHandler) SearchScheduleEngagementAllocations(w http.ResponseWri
 	writeScheduleJSON(w, http.StatusOK, resp)
 }
 
+// DismissScheduleEngagementAllocation handles
+// POST /team-schedule/engagement-allocations/dismiss: take a synced
+// allocation off a person's roster over some days, or put them back.
+func (h *ScheduleHandler) DismissScheduleEngagementAllocation(w http.ResponseWriter, r *http.Request) {
+	var req domain.DismissScheduleEngagementAllocationRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.DismissEngagementAllocation(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeScheduleJSON(w, http.StatusOK, resp)
+}
+
 // GetScheduleOnDuty handles GET /team-schedule/on-duty[?at=RFC3339][&includeOnLeave=true]
 // -- who is responsible right now, or at the instant asked for; with
 // includeOnLeave, people away that day too, marked onLeave.

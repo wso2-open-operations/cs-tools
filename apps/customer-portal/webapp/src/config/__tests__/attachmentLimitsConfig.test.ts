@@ -24,6 +24,7 @@ import {
   formatLimit,
   formatLimitMb,
   inlineImageMaxBytes,
+  inlineImagesTotalMaxBytes,
 } from "@config/attachmentLimitsConfig";
 
 const MIB = 1024 * 1024;
@@ -35,11 +36,13 @@ describe("attachment size limits", () => {
   afterEach(() => setConfig(undefined));
 
   it("default to entity-service's own defaults", () => {
-    expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
-    expect(inlineImageMaxBytes()).toBe(10 * MIB);
+    expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
+    expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
+    expect(inlineImageMaxBytes()).toBe(1 * MIB);
     setConfig({});
-    expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
-    expect(inlineImageMaxBytes()).toBe(10 * MIB);
+    expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
+    expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
+    expect(inlineImageMaxBytes()).toBe(1 * MIB);
   });
 
   it("read a number or a numeric string, at call time", () => {
@@ -50,12 +53,47 @@ describe("attachment size limits", () => {
     expect(entityAttachmentMaxBytes()).toBe(2.5 * MIB);
   });
 
+  it("prefers the total key over the older per-image key", () => {
+    setConfig({
+      CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: "20",
+    });
+    expect(inlineImagesTotalMaxBytes()).toBe(20 * MIB);
+    setConfig({ CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: "bad", CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5 });
+    expect(inlineImagesTotalMaxBytes()).toBe(5 * MIB);
+  });
+
+  it("gives the default, not the older key's value, for a new key over the ceiling", () => {
+    setConfig({
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 26,
+      CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+    });
+    expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
+    expect(inlineImageMaxBytes()).toBe(1 * MIB);
+  });
+
+  it("ignores a value above the 100 MB / 25 MB ceilings and accepts the ceilings", () => {
+    setConfig({
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 101,
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 26,
+    });
+    expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
+    expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
+    setConfig({
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
+    });
+    expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
+    expect(inlineImagesTotalMaxBytes()).toBe(25 * MIB);
+  });
+
   it.each([0, -1, "0", "-3", "abc", "", "  ", null, true, NaN, Infinity])(
     "fall back to the default for %j",
     (bad) => {
       setConfig({ CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: bad, CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: bad });
-      expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
-      expect(inlineImageMaxBytes()).toBe(10 * MIB);
+      expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
+      expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
+    expect(inlineImageMaxBytes()).toBe(1 * MIB);
     },
   );
 

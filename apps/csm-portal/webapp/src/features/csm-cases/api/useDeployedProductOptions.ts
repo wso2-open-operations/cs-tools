@@ -18,11 +18,18 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
+  BeDeployedProduct,
   BeDeployedProductSearchPayload,
   BeDeployedProductSearchResponse,
 } from "@api/backend/types";
 
 const PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on pages per deployment: 200 pages * BE_MAX_PAGE_LIMIT is far
+ * beyond any real deployment, this only stops an unbounded loop if the BE's
+ * `hasMore` were ever wrong. Same convention as `MAX_ATTACHMENT_PAGES`, except
+ * exhausting it throws: callers classify the whole list, so a silently
+ * truncated one would be misleading. */
+const MAX_DEPLOYED_PRODUCT_PAGES = 200;
 
 export interface DeployedProductOption {
   /** Deployed-product id — the value the case-create payload needs. */
@@ -32,8 +39,8 @@ export interface DeployedProductOption {
   /**
    * Opaque category code carried straight through from `BeDeployedProduct.category`
    * (e.g. "ms", "pc"), or `null`/`undefined` when the record has none. Used by
-   * callers (e.g. the service-request create page) that need to narrow the
-   * option list to a project's `srProductCategories`.
+   * callers (e.g. the service-request create page) that need to classify
+   * options against a project's `srProductCategories`.
    */
   category?: string | null;
 }
@@ -68,16 +75,32 @@ export function useDeployedProductOptions(
   return useQuery<DeployedProductOption[], Error>({
     queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId ?? "", categoriesKey],
     queryFn: async (): Promise<DeployedProductOption[]> => {
-      const dpRes = await api.post<
-        BeDeployedProductSearchPayload,
-        BeDeployedProductSearchResponse
-      >(`/deployments/${encodeURIComponent(deploymentId as string)}/products/search`, {
-        pagination: { offset: 0, limit: PAGE_LIMIT },
-        ...(productCategories && productCategories.length > 0
-          ? { productCategories }
-          : {}),
-      });
-      const deployed = dpRes.deployedProducts ?? [];
+      // Page through the full set: a deployment can hold more products than
+      // one page, and callers (e.g. the service-request picker) classify the
+      // whole list client-side.
+      const deployed: BeDeployedProduct[] = [];
+      let exhausted = true;
+      for (let page = 0; page < MAX_DEPLOYED_PRODUCT_PAGES; page += 1) {
+        const offset = page * PAGE_LIMIT;
+        const dpRes = await api.post<
+          BeDeployedProductSearchPayload,
+          BeDeployedProductSearchResponse
+        >(`/deployments/${encodeURIComponent(deploymentId as string)}/products/search`, {
+          pagination: { offset, limit: PAGE_LIMIT },
+          ...(productCategories && productCategories.length > 0
+            ? { productCategories }
+            : {}),
+        });
+        const rows = dpRes.deployedProducts ?? [];
+        deployed.push(...rows);
+        if (rows.length < PAGE_LIMIT || dpRes.hasMore === false) {
+          exhausted = false;
+          break;
+        }
+      }
+      if (exhausted) {
+        throw new Error("Too many deployed products to load for this deployment.");
+      }
 
       return deployed.map((d) => {
         // Fall back to the product id (not a generic "Product") so distinct

@@ -92,9 +92,11 @@ type PagingTeamRef struct {
 	Family  string
 }
 
-// CallablePhonePattern is the E.164 shape a number must have to be called:
-// the shape paging_contact's CHECK enforces, applied to "user".phone too.
-const CallablePhonePattern = `^\+[1-9][0-9]{6,14}$`
+// CallablePhonePattern is the E.164 shape a profile number must have to be
+// called: a +, then 8 to 15 digits, the first not 0. It matches the rule
+// PATCH /users/me enforces on write. paging_contact's own CHECK is looser (7
+// digits) and unchanged.
+const CallablePhonePattern = `^\+[1-9][0-9]{7,14}$`
 
 // PagingDialRow is one person's two numbers: the one on their own profile
 // ("user".phone, migration 0141; "" when blank) and their paging-only number

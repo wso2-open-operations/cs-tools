@@ -132,6 +132,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardHandler *handler.CustomDashboardHandler
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
+	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -142,6 +143,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardTeamShareHandler = handler.NewCustomDashboardTeamShareHandler(
 			service.NewCustomDashboardTeamShareService(repository.NewCustomDashboardTeamShareRepository(db), customDashboardRepo, userRepo),
+		)
+		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
+			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
 		)
 	}
 
@@ -754,16 +758,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// access rules (row-level security) live in Postgres: without one the routes
 	// are not registered and 404.
 	var storedAttachmentHandler *handler.StoredAttachmentHandler
+	var storedAttachmentSvc service.StoredAttachmentService
 	var inlineImageLinker service.InlineImageLinker
 	if db != nil {
 		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
-		storedAttachmentSvc := service.NewStoredAttachmentService(
+		storedAttachmentSvc = service.NewStoredAttachmentService(
 			storedAttachmentRepo,
 			service.StoredAttachmentLimits{
-				MaxBytes:       cfg.AttachmentMaxBytes,
-				InlineMaxBytes: cfg.InlineImageMaxBytes,
+				MaxBytes:            cfg.AttachmentMaxBytes,
+				InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
 			},
 		)
+		// A portal admin may delete an attachment they did not upload, asked
+		// for by the CSM portal backend alone.
+		storedAttachmentSvc = service.WithStoredAttachmentAdminDelete(storedAttachmentSvc, cfg.CSMPortalBackendClientID)
 		// Comments created or edited from here on attach the images they show.
 		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
@@ -1129,6 +1137,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
 		pgCaseFallbackSvc := service.NewCaseService(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo)
+		pgCaseFallbackSvc = service.WithDeletedAttachmentsForCSMPortal(pgCaseFallbackSvc, cfg.CSMPortalBackendClientID)
 		pgCaseFallbackSvc = service.WithInlineImageLinker(pgCaseFallbackSvc, inlineImageLinker)
 		activeCaseSvc = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, pgCaseFallbackSvc, eventPublisher, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, slaEngineSvc)
 	case config.DataSourcePostgresServiceNowDualWrite:
@@ -1189,6 +1198,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// registration with a foreign-key violation).
 		snCaseMirrorSvc := service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
 		activeCaseSvc = service.NewCaseServiceWithSNWriteback(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo, snWritebackDispatcher, snCaseMirrorSvc, slaEngineSvc, cfg.CSEngineerRole)
+		activeCaseSvc = service.WithDeletedAttachmentsForCSMPortal(activeCaseSvc, cfg.CSMPortalBackendClientID)
 		activeCaseSvc = service.WithInlineImageLinker(activeCaseSvc, inlineImageLinker)
 		// CreateCase rejects a case/SR whose deployed product's category
 		// doesn't satisfy its project type's own Default Case/SR Creation
@@ -1214,6 +1224,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeCaseSvc = service.WithCaseTypeTransfer(activeCaseSvc, caseRepo)
 	default:
 		activeCaseSvc = service.NewCaseService(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo)
+		activeCaseSvc = service.WithDeletedAttachmentsForCSMPortal(activeCaseSvc, cfg.CSMPortalBackendClientID)
 		activeCaseSvc = service.WithInlineImageLinker(activeCaseSvc, inlineImageLinker)
 		// See the matching comment in the DataSourcePostgresServiceNowDualWrite
 		// case above.
@@ -1272,8 +1283,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slog.Info("service request events enabled", "topic", cfg.SREEventHubTopic, "automatedTeams", len(cfg.SRAlertSRETeamIDs))
 	}
 	if githubSync != nil {
+		// slaEngineSvc is nil when CSM_SLA_ENGINE_ENABLED=false or no database
+		// is configured; WithGithubSLAEngine then leaves the sync without one.
+		service.WithGithubSLAEngine(githubSync, slaEngineSvc)
 		service.WithGithubCaseStates(githubSync, activeCaseSvc)
 		service.WithGithubSeverity(githubSync, activeCaseSvc)
+	}
+	// A customer's completed work item attachment moves its case like a comment does.
+	// Set in place, so the attachment handler built above already has it.
+	if storedAttachmentSvc != nil {
+		service.WithStoredAttachmentCaseStates(storedAttachmentSvc, activeCaseSvc)
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
 	if db != nil {
@@ -1424,6 +1443,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	default:
 		activeChangeRequestSvc = service.NewChangeRequestService(changeRequestRepo, userRepo)
 	}
+	activeChangeRequestSvc = service.WithChangeRequestInlineImageLinker(activeChangeRequestSvc, inlineImageLinker)
 	changeRequestHandler := handler.NewChangeRequestHandler(activeChangeRequestSvc)
 
 	timeCardRepo := repository.NewTimeCardRepository(repository.NewScoped(db))
@@ -2100,6 +2120,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
 		mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
 		mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
+		mux.HandleFunc("POST /attachments/inline/{id}/relocated", storedAttachmentHandler.InlineImageRelocated)
 		mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
 	}
 
@@ -2299,6 +2320,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /team-schedule/my-lead-teams", scheduleHandler.GetMyLeadTeams)
 		mux.HandleFunc("POST /team-schedule/assignments/apply", scheduleHandler.ApplyScheduleRange)
 		mux.HandleFunc("POST /team-schedule/absences/apply", scheduleHandler.ApplyScheduleAbsence)
+		mux.HandleFunc("POST /team-schedule/engagement-allocations/dismiss", scheduleHandler.DismissScheduleEngagementAllocation)
 		mux.HandleFunc("POST /team-schedule/rotas/{code}/import", scheduleHandler.ImportRota)
 		mux.HandleFunc("DELETE /team-schedule/absences/{id}", scheduleHandler.DeleteScheduleAbsence)
 		mux.HandleFunc("POST /team-schedule/absence-kinds", scheduleHandler.CreateScheduleAbsenceKind)
@@ -2416,6 +2438,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PUT /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.AddTeamShare)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.RemoveTeamShare)
 	}
+	if customDashboardLinkHandler != nil {
+		// Sharing the caller's saved dashboards by link (owner), and opening
+		// a link (anyone internal); an opened dashboard is read through the
+		// shared-dashboards routes above.
+		mux.HandleFunc("GET /users/me/dashboards/{id}/link", customDashboardLinkHandler.GetLink)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/link", customDashboardLinkHandler.EnableLink)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/link", customDashboardLinkHandler.DisableLink)
+		mux.HandleFunc("POST /users/me/shared-dashboards/link", customDashboardLinkHandler.OpenLink)
+	}
 
 	if membershipRegistrationHandler != nil {
 		mux.HandleFunc("POST /users/me/memberships/register", membershipRegistrationHandler.RegisterInvitedMemberships)
@@ -2496,6 +2527,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("GET /projects/{id}/conversations/stats", projectStatsHandler.GetProjectConversationStats)
 	mux.HandleFunc("GET /projects/{id}/deployments/stats", projectStatsHandler.GetProjectDeploymentStats)
 	mux.HandleFunc("GET /projects/{id}/time-cards/stats", projectStatsHandler.GetProjectTimeCardStats)
+	mux.HandleFunc("GET /projects/{id}/time-cards/report", projectStatsHandler.GetProjectTimeCardReport)
 	mux.HandleFunc("GET /projects/{id}/change-requests/stats", projectStatsHandler.GetProjectChangeRequestStats)
 	if snProductHandler != nil {
 		mux.HandleFunc("POST /products/search", snProductHandler.SearchProducts)
@@ -2626,6 +2658,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
 
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
+	// Read-only, so open to the same callers as the search (RLS scopes both).
+	mux.HandleFunc("POST /time-cards/aggregate", timeCardHandler.AggregateTimeCards)
 	// Time cards are logged, edited and deleted by internal staff only;
 	// customers can read them (the two search routes) but never write. The
 	// gate makes that a property of entity-service itself rather than of

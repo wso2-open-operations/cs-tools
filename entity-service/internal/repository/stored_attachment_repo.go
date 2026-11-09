@@ -60,6 +60,10 @@ type StoredAttachmentRepository interface {
 	// and when. It reports false when the row is no longer COMPLETE (already
 	// deleted by another request). Meant for repository.WithSystemIdentity.
 	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
+	// UpdateStorageKey changes the stored key of a COMPLETE attachment from `from`
+	// to `to`, and reports whether it did (false when the row no longer has the key
+	// `from`, so a repeated call is harmless). Meant for repository.WithSystemIdentity.
+	UpdateStorageKey(ctx context.Context, kind domain.StoredAttachmentKind, id, from, to string) (bool, error)
 	// ListAbandoned returns up to limit uploads, across the three tables, that
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
@@ -69,8 +73,44 @@ type StoredAttachmentRepository interface {
 	// linked (repeating the call for an already linked image returns it again).
 	// Meant for repository.WithSystemIdentity: UPDATE is internal-only.
 	LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error)
+	// LinkedImageIDs returns those of ids that are already linked to the comment.
+	LinkedImageIDs(ctx context.Context, commentID string, ids []string) ([]string, error)
+	// GetProject returns the project a draft description image is uploaded to,
+	// as the caller may see it: an external caller must be a REGISTERED member,
+	// an internal one is unrestricted. A project that does not exist or that the
+	// caller may not see is a *apierror.NotFoundError. Only ID, Number and
+	// ProjectNumber of the result are set (the last two are the project's number).
+	GetProject(ctx context.Context, projectID string) (domain.StoredAttachmentParent, error)
+	// ListDescriptionDrafts returns the COMPLETE draft description images among
+	// ids: uploaded to that project by email, not linked to a comment or work
+	// item. Meant for repository.WithSystemIdentity (the filters are explicit).
+	ListDescriptionDrafts(ctx context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error)
+	// LinkDescriptionImages links the drafts in ids to the work item whose
+	// description shows them: work_item_id set and description_image true, in one
+	// guarded UPDATE that only touches a row that is still a draft of that project
+	// uploaded by email. It returns the ids now linked to that work item (repeating
+	// the call returns them again). Meant for repository.WithSystemIdentity: UPDATE
+	// is internal-only.
+	LinkDescriptionImages(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error)
+	// ListReportDrafts returns the COMPLETE draft work item attachments (reports
+	// uploaded before their case exists) among ids: uploaded to that project by
+	// email, not linked to a work item, and uploaded at or after notBefore (an
+	// older one is on its way to the cleanup). Meant for repository.WithSystemIdentity
+	// (the filters are explicit).
+	ListReportDrafts(ctx context.Context, projectID, email string, ids []string, notBefore time.Time) ([]domain.StoredAttachmentRow, error)
+	// ListUnlinkedReportDrafts returns up to limit stored report drafts, created
+	// before olderThan, that no case was ever linked to. Meant for WithSystemIdentity.
+	ListUnlinkedReportDrafts(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error)
+	// LinkReportDrafts links the drafts in ids to the work item that was just
+	// created: work_item_id set, in one guarded UPDATE that only touches a row that
+	// is still a draft of that project, stored, and uploaded by email. It returns
+	// the ids now linked to that work item (repeating the call returns them again).
+	// Meant for repository.WithSystemIdentity: UPDATE is internal-only.
+	LinkReportDrafts(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error)
 	// ListUnlinkedImages returns up to limit stored comment images, created before
-	// olderThan, that no comment was ever linked to. Meant for WithSystemIdentity.
+	// olderThan, that no comment was ever linked to. Draft description images
+	// (no work item yet) count; an image linked to a work item's description
+	// (description_image = true) never does. Meant for WithSystemIdentity.
 	ListUnlinkedImages(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error)
 	// RecordCleanupAttempt moves a row to the back of the cleanup queue (updated_on =
 	// now) after a cleanup of it failed, so rows that keep failing cannot fill every
@@ -103,14 +143,27 @@ func NewStoredAttachmentRepository(db *Scoped) StoredAttachmentRepository {
 type storedAttachmentTable struct {
 	table     string
 	parentCol string
+	// parentExpr is the SQL that yields the parent id as text (parentCol, except
+	// for a comment image that is still a draft: its project) and draftExpr the SQL
+	// boolean "this is a draft description image".
+	parentExpr string
+	draftExpr  string
 }
 
 var storedAttachmentTables = map[domain.StoredAttachmentKind]storedAttachmentTable{
-	domain.StoredAttachmentWorkItem: {"work_item_attachment", "work_item_id"},
+	// A draft report (migration 0280) has only a project_id until the case it
+	// belongs to is created: its parent reads as that project until it is linked.
+	domain.StoredAttachmentWorkItem: {"work_item_attachment", "work_item_id",
+		"COALESCE(work_item_id, project_id)::TEXT",
+		"(work_item_id IS NULL AND project_id IS NOT NULL)"},
 	// A comment image is linked to its work item at upload and to its comment
 	// when the comment is saved (migration 0150).
-	domain.StoredAttachmentComment:    {"comment_attachment", "work_item_id"},
-	domain.StoredAttachmentDeployment: {"deployment_attachment", "deployment_id"},
+	// A draft description image (migration 0250) has only a project_id: its parent
+	// reads as that project until it is linked to the work item.
+	domain.StoredAttachmentComment: {"comment_attachment", "work_item_id",
+		"COALESCE(work_item_id, project_id)::TEXT",
+		"(comment_id IS NULL AND work_item_id IS NULL AND project_id IS NOT NULL)"},
+	domain.StoredAttachmentDeployment: {"deployment_attachment", "deployment_id", "deployment_id::TEXT", "false"},
 }
 
 func storedAttachmentTableFor(kind domain.StoredAttachmentKind) (storedAttachmentTable, error) {
@@ -161,12 +214,12 @@ func (r *storedAttachmentRepo) GetParent(ctx context.Context, kind domain.Stored
 // storedAttachmentColumns is the column list every query returning a row uses,
 // kept next to scanStoredAttachment so the two cannot drift apart.
 func storedAttachmentColumns(t storedAttachmentTable) string {
-	return `id::TEXT, number, name, content_type, size_bytes, status::TEXT, storage_key, created_by, ` + t.parentCol + `::TEXT`
+	return `id::TEXT, number, name, content_type, size_bytes, status::TEXT, storage_key, created_by, ` + t.parentExpr + `, ` + t.draftExpr
 }
 
 func scanStoredAttachment(row pgx.Row) (domain.StoredAttachmentRow, error) {
 	var a domain.StoredAttachmentRow
-	err := row.Scan(&a.ID, &a.Number, &a.Name, &a.ContentType, &a.SizeBytes, &a.Status, &a.StorageKey, &a.CreatedBy, &a.ParentID)
+	err := row.Scan(&a.ID, &a.Number, &a.Name, &a.ContentType, &a.SizeBytes, &a.Status, &a.StorageKey, &a.CreatedBy, &a.ParentID, &a.Draft)
 	return a, err
 }
 
@@ -180,8 +233,16 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 	// an id default (migration 0179). number comes from its own column default
 	// (WIA/CA/DA + a sequence); status defaults to PENDING and storage_key stays
 	// NULL, which is exactly what the external INSERT policy requires.
+	parentCol := t.parentCol
+	if in.Draft {
+		if kind != domain.StoredAttachmentComment && kind != domain.StoredAttachmentWorkItem {
+			return domain.StoredAttachmentRow{}, &apierror.ValidationError{Msg: "only a comment image or a work item attachment can be a draft"}
+		}
+		// A draft description image or report has a project and no work item yet.
+		parentCol = "project_id"
+	}
 	row := r.db.QueryRow(ctx, `
-		INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+t.parentCol+`)
+		INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`)
 		VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5)
 		RETURNING `+storedAttachmentColumns(t),
 		in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID)
@@ -201,6 +262,168 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		return domain.StoredAttachmentRow{}, callerError(fmt.Errorf("insert pending attachment: %w", err))
 	}
 	return a, nil
+}
+
+// GetProject implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) GetProject(ctx context.Context, projectID string) (domain.StoredAttachmentParent, error) {
+	var p domain.StoredAttachmentParent
+	// project itself has no row-level security, so the caller's membership is
+	// checked here with the same function the attachment policies use.
+	err := r.db.QueryRow(ctx, `
+		SELECT p.id::TEXT, COALESCE(p.number, '')
+		FROM project p
+		WHERE p.id = $1
+		  AND ((SELECT current_setting('app.is_internal', true) = 'true') OR is_project_member(p.id))`,
+		projectID).Scan(&p.ID, &p.ProjectNumber)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.StoredAttachmentParent{}, &apierror.NotFoundError{Msg: "project not found"}
+		}
+		return domain.StoredAttachmentParent{}, callerError(fmt.Errorf("get attachment project: %w", err))
+	}
+	p.Number = p.ProjectNumber
+	return p, nil
+}
+
+// ListDescriptionDrafts implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListDescriptionDrafts(ctx context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentComment)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM comment_attachment
+		WHERE id = ANY($1::uuid[])
+		  AND project_id = $2
+		  AND comment_id IS NULL AND work_item_id IS NULL AND description_image = false
+		  AND status = 'COMPLETE'
+		  AND lower(created_by) = lower($3)`, ids, projectID, email)
+	if err != nil {
+		return nil, callerError(fmt.Errorf("list description drafts: %w", err))
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan description draft: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate description drafts: %w", err)
+	}
+	return out, nil
+}
+
+// LinkDescriptionImages implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) LinkDescriptionImages(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	// The WHERE is the guard: a row is only taken while it is still a draft of
+	// this project, stored, and the author's. An image already linked to this same
+	// work item is returned again, so a repeated call is harmless. The storage key
+	// (built from the project number and "drafts") is left as it is.
+	rows, err := r.db.Query(ctx, `
+		UPDATE comment_attachment
+		SET work_item_id = $1, description_image = true, updated_on = now()
+		WHERE id = ANY($4::uuid[])
+		  AND project_id = $2
+		  AND status = 'COMPLETE'
+		  AND lower(created_by) = lower($3)
+		  AND comment_id IS NULL
+		  AND ((work_item_id IS NULL AND description_image = false)
+		       OR (work_item_id = $1 AND description_image = true))
+		RETURNING id::TEXT`, workItemID, projectID, email, ids)
+	if err != nil {
+		return nil, fmt.Errorf("link description images: %w", err)
+	}
+	defer rows.Close()
+	var linked []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan linked description image: %w", err)
+		}
+		linked = append(linked, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate linked description images: %w", err)
+	}
+	return linked, nil
+}
+
+// ListReportDrafts implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListReportDrafts(ctx context.Context, projectID, email string, ids []string, notBefore time.Time) ([]domain.StoredAttachmentRow, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentWorkItem)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM work_item_attachment
+		WHERE id = ANY($1::uuid[])
+		  AND project_id = $2
+		  AND work_item_id IS NULL
+		  AND status = 'COMPLETE'
+		  AND lower(created_by) = lower($3)
+		  AND created_on >= $4`, ids, projectID, email, notBefore)
+	if err != nil {
+		return nil, callerError(fmt.Errorf("list report drafts: %w", err))
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan report draft: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate report drafts: %w", err)
+	}
+	return out, nil
+}
+
+// LinkReportDrafts implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) LinkReportDrafts(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	// The WHERE is the guard: a row is only taken while it is still a draft of this
+	// project, stored, and the author's. A file already linked to this same work
+	// item is returned again, so a repeated call is harmless. The storage key (built
+	// from the project number and "drafts") is left as it is.
+	rows, err := r.db.Query(ctx, `
+		UPDATE work_item_attachment
+		SET work_item_id = $1, updated_on = now()
+		WHERE id = ANY($4::uuid[])
+		  AND project_id = $2
+		  AND status = 'COMPLETE'
+		  AND lower(created_by) = lower($3)
+		  AND (work_item_id IS NULL OR work_item_id = $1)
+		RETURNING id::TEXT`, workItemID, projectID, email, ids)
+	if err != nil {
+		return nil, fmt.Errorf("link report drafts: %w", err)
+	}
+	defer rows.Close()
+	var linked []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan linked report: %w", err)
+		}
+		linked = append(linked, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate linked reports: %w", err)
+	}
+	return linked, nil
 }
 
 // GetByIDs implements StoredAttachmentRepository.
@@ -281,6 +504,22 @@ func (r *storedAttachmentRepo) MarkDeleted(ctx context.Context, kind domain.Stor
 	return ct.RowsAffected() == 1, nil
 }
 
+// UpdateStorageKey implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) UpdateStorageKey(ctx context.Context, kind domain.StoredAttachmentKind, id, from, to string) (bool, error) {
+	t, err := storedAttachmentTableFor(kind)
+	if err != nil {
+		return false, err
+	}
+	ct, err := r.db.Exec(ctx, `
+		UPDATE `+t.table+`
+		SET storage_key = $3, updated_on = now()
+		WHERE id = $1 AND status = 'COMPLETE' AND storage_key = $2`, id, from, to)
+	if err != nil {
+		return false, fmt.Errorf("update storage key: %w", err)
+	}
+	return ct.RowsAffected() == 1, nil
+}
+
 // ListAbandoned implements StoredAttachmentRepository.
 func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error) {
 	var out []domain.AbandonedUpload
@@ -320,6 +559,7 @@ func (r *storedAttachmentRepo) LinkInlineImages(ctx context.Context, commentID, 
 		WHERE id = ANY($4::uuid[])
 		  AND work_item_id = $2
 		  AND status = 'COMPLETE'
+		  AND description_image = false
 		  AND lower(created_by) = lower($3)
 		  AND (comment_id IS NULL OR comment_id = $1)
 		RETURNING id::TEXT`, commentID, workItemID, email, ids)
@@ -341,6 +581,32 @@ func (r *storedAttachmentRepo) LinkInlineImages(ctx context.Context, commentID, 
 	return linked, nil
 }
 
+// LinkedImageIDs implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) LinkedImageIDs(ctx context.Context, commentID string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT id::TEXT FROM comment_attachment
+		WHERE comment_id = $1 AND id = ANY($2::uuid[])`, commentID, ids)
+	if err != nil {
+		return nil, callerError(fmt.Errorf("get linked images: %w", err))
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan linked image id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate linked image ids: %w", err)
+	}
+	return out, nil
+}
+
 // ListUnlinkedImages implements StoredAttachmentRepository.
 func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
 	t, err := storedAttachmentTableFor(domain.StoredAttachmentComment)
@@ -348,7 +614,7 @@ func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan
 		return nil, err
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM comment_attachment
-		WHERE comment_id IS NULL AND status = 'COMPLETE' AND created_on < $1
+		WHERE comment_id IS NULL AND description_image = false AND status = 'COMPLETE' AND created_on < $1
 		ORDER BY updated_on, created_on LIMIT $2`, olderThan, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list unlinked images: %w", err)
@@ -364,6 +630,33 @@ func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate unlinked images: %w", err)
+	}
+	return out, nil
+}
+
+// ListUnlinkedReportDrafts implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListUnlinkedReportDrafts(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentWorkItem)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM work_item_attachment
+		WHERE work_item_id IS NULL AND project_id IS NOT NULL AND status = 'COMPLETE' AND created_on < $1
+		ORDER BY updated_on, created_on LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list unlinked report drafts: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan unlinked report draft: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unlinked report drafts: %w", err)
 	}
 	return out, nil
 }

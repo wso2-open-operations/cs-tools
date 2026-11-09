@@ -51,6 +51,10 @@ func (f *fakeStoredAttachmentSvc) LocateInlineImage(_ context.Context, id string
 	return domain.AttachmentLocation{ID: id, Available: true, StorageKey: "k"}, f.err
 }
 
+func (f *fakeStoredAttachmentSvc) InlineImageRelocated(context.Context, string, domain.InlineImageRelocatedRequest) error {
+	return f.err
+}
+
 func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
 	f.deleted = req
 	return f.err

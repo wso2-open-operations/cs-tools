@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useAttachmentDownloadProgress } from "@features/csm-cases/api/attachmentDownloadProgress";
+import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import {
   Box,
   Button,
@@ -1012,69 +1012,6 @@ export function TimeLogsWidget({
 // 4b. Attachments (all files on the case, newest first)
 // ---------------------------------------------------------------------------
 
-/** The Download button of an attachment row; while it downloads it shows the percentage. */
-function AttachmentDownloadButton({
-  attachment,
-  onDownload,
-}: {
-  attachment: CaseAttachment;
-  onDownload?: (attachment: CaseAttachment) => void;
-}) {
-  const progress = useAttachmentDownloadProgress(attachment.id);
-  const downloading = progress !== undefined;
-  const known = progress !== undefined && progress >= 0;
-  // Announced from beside the button: a disabled button is skipped by screen
-  // readers, so a status inside it would never be read. Every 10 percent only.
-  const announced = known ? Math.floor(progress / 10) * 10 : null;
-  return (
-    <>
-      <Box
-        component="span"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        sx={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          overflow: "hidden",
-          clip: "rect(0 0 0 0)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {downloading
-          ? announced === null
-            ? `Downloading ${attachment.filename}`
-            : `Downloading ${attachment.filename}: ${announced}%`
-          : ""}
-      </Box>
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={
-          downloading ? (
-            <CircularProgress
-              size={14}
-              color="inherit"
-              variant={known ? "determinate" : "indeterminate"}
-              value={known ? progress : undefined}
-              aria-hidden
-            />
-          ) : (
-            <Download size={14} />
-          )
-        }
-        onClick={() => onDownload?.(attachment)}
-        disabled={!onDownload || downloading}
-        aria-busy={downloading || undefined}
-        aria-label={`Download ${attachment.filename}`}
-      >
-        {known ? `${progress}%` : downloading ? "Starting" : "Download"}
-      </Button>
-    </>
-  );
-}
-
 /**
  * Lists every attachment on the case in descending order of upload time, with
  * a "Download all" affordance. Downloads are surfaced through the parent's
@@ -1094,6 +1031,7 @@ export function AttachmentsWidget({
   onDownload,
   onDelete,
   canDeleteAttachment,
+  deletedAttachments,
   deletingId,
   preview,
   onRefresh,
@@ -1129,6 +1067,12 @@ export function AttachmentsWidget({
    * example "only the uploader"). Omit to show it on every row, as before.
    */
   canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
+  /**
+   * Attachments that were deleted, shown under the available ones with who
+   * deleted them and when, in place of the Download button. Only an admin's list
+   * carries them; omit to show none.
+   */
+  deletedAttachments?: CaseAttachment[];
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1267,7 +1211,7 @@ export function AttachmentsWidget({
               </Button>
             )}
           </Box>
-        ) : sorted.length === 0 ? (
+        ) : sorted.length === 0 && !deletedAttachments?.length ? (
           <Typography variant="body2" color="text.secondary">
             No attachments on this case.
           </Typography>
@@ -1284,6 +1228,8 @@ export function AttachmentsWidget({
                   borderRadius: 1,
                   border: 1,
                   borderColor: "divider",
+                  position: "relative",
+                  overflow: "hidden",
                   transition: "background-color 120ms, border-color 120ms",
                   "&:hover": {
                     borderColor: "primary.main",
@@ -1291,6 +1237,7 @@ export function AttachmentsWidget({
                   },
                 }}
               >
+                <AttachmentDownloadBar id={a.id} />
                 <Paperclip size={16} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   {onDownload ? (
@@ -1382,6 +1329,60 @@ export function AttachmentsWidget({
                     )}
                   </IconButton>
                 )}
+              </Box>
+            ))}
+            {(deletedAttachments ?? []).map((a) => (
+              <Box
+                key={a.id}
+                data-testid="deleted-attachment"
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  p: 1,
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <Paperclip size={16} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    color="text.secondary"
+                    sx={{ fontWeight: 500, textDecoration: "line-through" }}
+                  >
+                    {a.filename}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {formatBytes(a.size)} · {a.contentType} · uploaded by{" "}
+                    <UserRefLink
+                      name={a.uploadedBy}
+                      email={a.uploadedByUser?.email || a.uploadedByEmail}
+                      userId={a.uploadedByUser?.id}
+                    />{" "}
+                    · <RelativeTime iso={a.uploadedAt} /> · deleted by{" "}
+                    <UserRefLink
+                      name={a.deletedBy ?? "Unknown"}
+                      email={a.deletedByUser?.email || a.deletedByEmail}
+                      userId={a.deletedByUser?.id}
+                    />
+                    {a.deletedAt && (
+                      <>
+                        {" "}
+                        · <RelativeTime iso={a.deletedAt} />
+                      </>
+                    )}
+                  </Typography>
+                </Box>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  label="Deleted"
+                  sx={{ flexShrink: 0 }}
+                />
               </Box>
             ))}
           </Box>

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import {
   Box,
   Button,
@@ -36,6 +37,10 @@ import Editor from "@components/rich-text-editor/Editor";
 import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import type { PendingAttachment } from "@components/attachments/pendingAttachment";
+import {
+  preCreateImagesErrorMessage,
+  usePreCreateInlineImages,
+} from "@features/csm-cases/api/usePreCreateInlineImages";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useNewCaseDraft } from "@context/new-case-draft/NewCaseDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
@@ -147,6 +152,8 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const [description, setDescription] = useState(restored?.description ?? "");
   // Files are not kept in the draft (they cannot be stored); they are chosen again.
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+
+  const descriptionImages = usePreCreateInlineImages(projectId || undefined);
 
   const deployments = useSearchDeployments(projectId || undefined);
 
@@ -316,6 +323,17 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit || !severity || !issueType || descriptionOverLimit) return;
     setSubmitting(true);
+    // The description's images are stored first, under the project, so the
+    // create request carries `/<attachment id>` references. If one cannot be
+    // stored nothing is created and the form stays as it is.
+    let descriptionHtml: string;
+    try {
+      descriptionHtml = await descriptionImages.uploadImages(description);
+    } catch (err) {
+      setSubmitting(false);
+      showError(preCreateImagesErrorMessage(err));
+      return;
+    }
     try {
       const created = await postCase.mutateAsync({
         type: "case",
@@ -323,12 +341,13 @@ export default function CsmCaseCreatePage(): JSX.Element {
         deploymentId: effectiveDeploymentId,
         deployedProductId,
         subject: subject.trim(),
-        description,
+        description: descriptionHtml,
         severity: priorityFromSeverity(severity),
         issueType: issueType,
         relatedCaseId,
         ...(watchers.length > 0 && { watchList: watchers.map((w) => w.email) }),
       });
+      descriptionImages.release(description);
       submitted.current = true;
       draftStore.clear();
       // Files are uploaded to the new case afterwards. A partial failure still
@@ -595,6 +614,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 toolbarVariant="full"
                 disabled={submitting}
                 ariaRequired
+                onImageUpload={descriptionImages.onImageUpload}
               />
             </Box>
             {descriptionError && (
@@ -636,6 +656,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
+              maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
             />
           </Grid>
         </Grid>

@@ -89,9 +89,13 @@ func NewInstanceRepository(db *Scoped) InstanceRepository {
 //     different project, so matching on the number alone would attach those
 //     nodes to the wrong project. Requiring the project to agree leaves them
 //     unresolved instead (Deployment/DeployedProduct nil, Project still set).
-//   - DeployedProduct additionally requires deployed_product.version_id to
-//     match the node's product_version, since deployment_id alone doesn't
-//     uniquely identify one deployed product.
+//   - DeployedProduct additionally requires the deployed product to be the same
+//     product and version as the node's product_version (see
+//     deployedProductForNodeJoin), since deployment_id alone doesn't uniquely
+//     identify one deployed product. Deployment profile is ignored: a node
+//     reports only a product name and version, so ingestion cannot know which
+//     profile row of product_version its product runs, while the deployed
+//     product records one specific profile.
 //
 // Verified against staging's 16 nodes: 14 resolve to a project and 11 to a
 // deployment (each within the node's own project), and none resolves to a
@@ -108,7 +112,35 @@ const instanceRefJoins = `
 	LEFT JOIN product p ON p.id = pv.product_id
 	LEFT JOIN project proj ON proj.key = dn.project_key
 	LEFT JOIN deployment dep ON dep.number = dn.deployment_number AND dep.project_id = proj.id
-	LEFT JOIN deployed_product dprod ON dprod.deployment_id = dep.id AND dprod.version_id = dn.product_version_id`
+	LEFT JOIN ` + deployedProductForNodeJoin
+
+// deployedProductForNodeJoin picks the one deployed product (alias dprod) a node
+// reports on, from the aliases dn (deployment_node), dep (deployment) and pv
+// (the node's product_version). It is the target of a LEFT JOIN or JOIN and
+// carries its own ON clause.
+//
+// product_version has one row per (product, version, deployment profile), but a
+// node reports only a product and version, so the catalogue row ingestion
+// resolves it to can be a different profile from the one the deployment's
+// deployed product references, and matching on version_id equality never
+// matched. This compares (product_id, version) instead and ignores the profile.
+//
+// A deployment can hold several deployed products of the same product and
+// version under different profiles. A plain join would repeat the node once per
+// such product and multiply its usage, so exactly one is chosen: the one on the
+// node's own product_version row if there is one, else the lowest id. The
+// choice depends only on the node and the deployment's rows, so every query that
+// goes through it agrees on which deployed product owns the node.
+const deployedProductForNodeJoin = `LATERAL (
+		SELECT dp.id, dp.name
+		FROM deployed_product dp
+		JOIN product_version dppv ON dppv.id = dp.version_id
+		WHERE dp.deployment_id = dep.id
+		  AND dppv.product_id = pv.product_id
+		  AND dppv.version = pv.version
+		ORDER BY (dp.version_id = dn.product_version_id) DESC, dp.id
+		LIMIT 1
+	) dprod ON TRUE`
 
 // dailyUsageSourcePreference orders daily_usage_summary rows of one node, count
 // type and day so the first is the one to count: a

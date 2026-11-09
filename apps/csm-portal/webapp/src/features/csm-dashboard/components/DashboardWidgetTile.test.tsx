@@ -82,11 +82,15 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   BarChart: ({
     children,
     data,
+    tooltip,
   }: {
     children: ReactNode;
     data?: { name: string; value: number }[];
+    tooltip?: { formatter?: (value: unknown) => string };
   }) => (
     <div>
+      {/* Only a widget that formats its values passes a tooltip formatter. */}
+      {tooltip?.formatter && data?.[0] && <span>tooltip:{tooltip.formatter(data[0].value)}</span>}
       {Children.map(children, (child) =>
         isValidElement(child)
           ? cloneElement(child as ReactElement<{ data?: typeof data }>, { data })
@@ -97,9 +101,11 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   Bar: ({
     data,
     onClick,
+    label,
   }: {
     data?: { name: string; value: number }[];
     onClick?: (item: unknown, index: number, event?: unknown) => void;
+    label?: { formatter?: (value: unknown) => string };
   }) => (
     <div>
       {(data ?? []).map((item, i) => (
@@ -107,6 +113,8 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
         // above.
         <button key={item.name} type="button" onClick={(e) => onClick?.(item, i, e)}>
           bar:{item.name}:{item.value}
+          {/* The bar's value label, only when the widget formats it. */}
+          {label?.formatter && ` label:${label.formatter(item.value)}`}
         </button>
       ))}
     </div>
@@ -525,6 +533,34 @@ describe("DashboardWidgetTile", () => {
     expect(params.get("f")).toBeNull();
   });
 
+  it("list shape: 'View more' carries a `from` location.state pointing back to this dashboard page, for the preview page's Back", async () => {
+    postMock.mockResolvedValue({
+      total: 6,
+      cases: [{ id: "11111111-1111-1111-1111-111111111111", number: "CS-1", subject: "Disk full", state: "open" }],
+      limit: 5,
+      offset: 0,
+      hasMore: true,
+    });
+
+    renderWithRoutes(
+      <DashboardWidgetTile
+        widgetId="my_critical_open_back"
+        displayName="My Critical & High Cases"
+        resourceType="case"
+        shape="list"
+        filters={{}}
+        listLimit={5}
+      />,
+      "/dashboard/preview/cases",
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: /view more/i }));
+    await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+    expect(screen.getByTestId("location-state-probe").textContent).toBe(
+      JSON.stringify({ from: "/" }),
+    );
+  });
+
   it("masks the signed-in user's own id in the 'View more' link's filter query params", async () => {
     postMock.mockResolvedValue({
       total: 6,
@@ -825,7 +861,7 @@ describe("DashboardWidgetTile", () => {
     expect(params.get("states")).toBe("open");
   });
 
-  it("resolves a relative-date filter in the click-through href, so the destination list matches the number that was clicked", async () => {
+  it("keeps a case widget's relative date in the click-through href, for the cases list to resolve browser-local", async () => {
     postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
 
     renderWithClient(
@@ -842,23 +878,20 @@ describe("DashboardWidgetTile", () => {
 
     await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
 
+    // The cases list resolves the placeholder itself, in the viewer's own
+    // local day (`useGetCsmCases`), so it counts what the tile counted; an
+    // instant frozen into the link showed as an empty date in the list's
+    // Advanced date row.
     const params = new URLSearchParams(
       (screen.getByRole("link").getAttribute("href") ?? "").split("?")[1],
     );
-    const createdFrom = params.get("createdFrom") ?? "";
-    // An unresolved placeholder reaching the list page is forwarded to the
-    // backing service, which resolves "today" against UTC rather than the
-    // viewer's own local day — so the tile's count and the list behind it
-    // disagreed by the offset between the two midnights. The href must
-    // carry the same browser-local instant the tile itself counted with.
-    expect(createdFrom).not.toContain("__today__");
-    const now = new Date();
-    expect(createdFrom).toBe(
-      new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString(),
-    );
+    expect(params.get("createdFrom")).toBe("__today__");
+    // The tile's own count still went out resolved.
+    const sent = JSON.stringify(postMock.mock.calls[0]?.[1]);
+    expect(sent).not.toContain("__today__");
   });
 
-  it("resolves a relative-date filter in the View more preview href too", async () => {
+  it("keeps a case widget's relative date in the View more preview href too", async () => {
     postMock.mockResolvedValue({
       total: 6,
       cases: [
@@ -881,14 +914,37 @@ describe("DashboardWidgetTile", () => {
         resourceType="case"
         shape="list"
         filters={{
-          filters: [{ field: "createdOn", op: "gte", values: ["__today__"] }],
+          filters: [{ field: "createdOn", op: "gte", values: ["__daysAgo:30__"] }],
         }}
         listLimit={5}
       />,
     );
 
     const viewMoreLink = await screen.findByRole("link", { name: /view more/i });
-    expect(viewMoreLink.getAttribute("href") ?? "").not.toContain("__today__");
+    expect(decodeURIComponent(viewMoreLink.getAttribute("href") ?? "")).toContain(
+      "createdOn~gte=__daysAgo:30__",
+    );
+  });
+
+  it("still resolves a relative date in a non-case widget's href (its list page has no resolver)", async () => {
+    postMock.mockResolvedValue({ total: 2, timeCards: [], limit: 1, offset: 0, hasMore: false });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_month"
+        displayName="My Time Cards This Month"
+        resourceType="time_card"
+        shape="count"
+        filters={{ startDate: "__startOfMonth:0__" }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
+    const href = decodeURIComponent(screen.getByRole("link").getAttribute("href") ?? "");
+    const now = new Date();
+    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    expect(href).not.toContain("__startOfMonth");
+    expect(href).toContain(`startDate=${firstOfMonth}`);
   });
 
   it("shape count: click-through carries a `from` location.state pointing back to this dashboard page, so the destination list can offer a Back button", async () => {
@@ -2306,5 +2362,187 @@ describe("DashboardWidgetTile", () => {
         screen.queryByRole("button", { name: "View all cases for Cases by severity" }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  describe("time card totals", () => {
+    const hoursPerUser = {
+      groups: [
+        { key: "u-bob", label: "Bob", count: 2, totalMinutes: 255 },
+        { key: "u-ann", label: "Ann", count: 4, totalMinutes: 135 },
+      ],
+      othersCount: 3,
+      totalRecords: 9,
+      othersMinutes: 90,
+      totalMinutes: 480,
+    };
+
+    it("shape bar, measure hours: bars, tooltip and the total read in hours", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours", maxGroups: 2 }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Bob:4.25 label:4.3 h")).toBeInTheDocument());
+      expect(screen.getByText("bar:Ann:2.25 label:2.3 h")).toBeInTheDocument();
+      expect(screen.getByText("tooltip:4.3 h")).toBeInTheDocument();
+      // A bar chart drops Others, so the total is Bob's and Ann's hours.
+      expect(screen.getByText("6.5 h")).toBeInTheDocument();
+    });
+
+    it("shape bar, measure count: plain numbers, no formatter", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="cards-per-user"
+          displayName="Time Cards per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "count" }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Bob:2")).toBeInTheDocument());
+      expect(screen.queryByText(/tooltip:/)).not.toBeInTheDocument();
+      expect(screen.getByText("6")).toBeInTheDocument();
+    });
+
+    it("shape pie, measure hours: the legend and the centre total read in hours", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-pie"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="pie"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours", maxGroups: 2 }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("4.3 h (53%)")).toBeInTheDocument());
+      expect(screen.getByText("1.5 h (19%)")).toBeInTheDocument();
+      expect(screen.getByText("8 h")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Bob: 4.3 h (53%)" })).toBeInTheDocument();
+    });
+
+    it("a role that may not read time card totals sees no access, not an error", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours" }}
+        />,
+      );
+
+      expect(await screen.findByText("You don't have access to time card totals.")).toBeInTheDocument();
+      expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+    });
+
+    it("any other failure is still an error", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("bad gateway"), { status: 502 }));
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="pie"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours" }}
+        />,
+      );
+
+      // The widget retries once before it shows the error.
+      expect(await screen.findByText("Could not load this widget.", {}, { timeout: 5000 })).toBeInTheDocument();
+      expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+    });
+
+    it("a day grouping labels its bars as short dates, in date order", async () => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "2026-10-31", label: "2026-10-31", count: 1, totalMinutes: 90 },
+          { key: "2026-11-01", label: "2026-11-01", count: 0, totalMinutes: 0 },
+        ],
+        othersCount: 0,
+        totalRecords: 1,
+        othersMinutes: 0,
+        totalMinutes: 90,
+      });
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="per-day"
+          displayName="My Hours per Day"
+          resourceType="time_card"
+          shape="bar"
+          filters={{ startDate: "2026-10-31", endDate: "2026-11-01" }}
+          groupBy={{ field: "day", measure: "hours" }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Oct 31:1.5 label:1.5 h")).toBeInTheDocument());
+      const bars = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((t) => t.startsWith("bar:"));
+      expect(bars).toEqual(["bar:Oct 31:1.5 label:1.5 h", "bar:Nov 1:0 label:0 h"]);
+    });
+
+    for (const [field, key, expected] of [
+      ["user", "u-bob", { userIds: "u-bob" }],
+      ["project", "p-1", { projectIds: "p-1" }],
+      ["state", "approved", { states: "approved" }],
+      ["day", "2026-10-31", { startDate: "2026-10-31", endDate: "2026-10-31" }],
+    ] as const) {
+      it(`clicking a ${field} bar opens the time card list filtered to that ${field}`, async () => {
+        postMock.mockResolvedValue({
+          groups: [{ key, label: key, count: 1, totalMinutes: 60 }],
+          othersCount: 0,
+          totalRecords: 1,
+          othersMinutes: 0,
+          totalMinutes: 60,
+        });
+
+        renderWithRoutes(
+          <DashboardWidgetTile
+            widgetId="tc"
+            displayName="Time card totals"
+            resourceType="time_card"
+            shape="bar"
+            filters={{ startDate: "2026-10-01", endDate: "2026-10-31" }}
+            groupBy={{ field, measure: "hours" }}
+          />,
+          "*",
+        );
+
+        const bar = await screen.findByText(/^bar:/);
+        fireEvent.click(bar);
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const probe = screen.getByTestId("location-probe").textContent ?? "";
+        expect(probe).toContain("/time-cards");
+        const params = new URLSearchParams(probe.split("?")[1]);
+        for (const [k, v] of Object.entries(expected)) expect(params.get(k)).toBe(v);
+        if (field !== "day") {
+          // The widget's own window still applies.
+          expect(params.get("startDate")).toBe("2026-10-01");
+          expect(params.get("endDate")).toBe("2026-10-31");
+        }
+        // Never the raw grouping name, which the time card search refuses.
+        expect(params.get(field)).toBeNull();
+      });
+    }
   });
 });

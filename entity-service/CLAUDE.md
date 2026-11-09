@@ -65,7 +65,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 10 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
+| `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1855,8 +1856,8 @@ create.
 ## Attachment files held by the portal backends (Azure Blob Storage)
 
 Work item, comment-image and deployment attachment files (`work_item_attachment`,
-`comment_attachment`, `deployment_attachment`; `case_attachment` is the older flow: nothing writes it any
-more, existing rows are only listed and moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
+`comment_attachment`, `deployment_attachment`; `case_attachment` is an older table: nothing writes it and
+nothing lists it any more, existing rows are only moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
 `apps/csm-portal/backend`) in Azure Blob Storage, through `libs/azblobstore`. **This service never
 touches a file**: it has no file store and needs no storage setting. It keeps the access checks (the
 caller's own row-level security), the three attachment tables, the size and type rules, and the
@@ -1925,8 +1926,13 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    `GET /attachments/inline/{id}/location` is the same for an inline image (comment row first, then a
    migrated work-item image; `410 attachment_removed`). Not charged.
 5. Delete: `POST /attachments/delete` marks the row `DELETED` (soft delete; `deleted_on`/`deleted_by`,
-   migration 0249). Only the person who uploaded it may delete (403 otherwise), never once the work item
-   is closed (409), an image embedded in a comment is not deleted on its own (400), and a repeated
+   migration 0249). Only the person who uploaded it may delete (403 otherwise), **or a portal admin through
+   the CSM portal backend**: the backend sets `asAdmin: true` in the body when the caller's token roles give
+   `PermAdmin`, and this service honours it only when the caller's client id is `CSM_PORTAL_BACKEND_CLIENT_ID`
+   (`WithStoredAttachmentAdminDelete`, like portal banners: the admin decision is made once, in the backend, not
+   against a second `AUTH_ADMIN_ROLES` list here; from any other caller the flag is ignored and the 403 stands;
+   the audit line carries `adminOverride`). Never once the work item
+   is closed (409), even for an admin, an image embedded in a comment is not deleted on its own (400), and a repeated
    delete answers 204. It **does not remove the file**: the backend removes it afterwards, so it
    should `locate` first to get the key. A `DELETED` attachment has no file to download, and the case
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
@@ -1940,19 +1946,92 @@ HTML refers to it as `src="/<attachment id>"`. When a comment is created or edit
 `InlineImageLinker.LinkFromContent`) entity-service reads those ids out of the content and links each
 image (`comment_id` set), but only if the comment's author uploaded it, it is stored, and it belongs to
 the comment's own work item. That is best effort: a failure is logged and the comment is saved anyway.
-Content that still embeds a base64 image is saved as written; this service stores no file.
+Content that embeds a base64 image is saved as written (this service stores no file), but a NEW comment or a
+record's description typed by a user is held to the same limits (`ValidateEmbeddedImages`: at most 5 images and
+the total size, decoded). A machine caller (no user) and an edit of an existing comment are not checked.
+
+**Limits per comment or description.** One comment or description shows at most 5 images
+(`MaxInlineImagesPerContent`) and at most `INLINE_IMAGES_TOTAL_MAX_MB` together (1 MB by default); one image is at most
+that big too. Comment create (`commentService.CreateComment`,
+`caseService.createCaseCommentAs`) and edit (`UpdateComment`) call `InlineImageLinker.ValidateCommentImages`
+BEFORE saving and answer a 400 in words; only the author's own images on the comment's work item are counted
+(the same rule `LinkFromContent` links by). The check costs nothing for content with no image reference
+(`mayHaveInlineImages`, one regexp).
+On an edit, images already linked to that comment are kept: they count toward the 5 but not toward the size limit,
+which applies to the images the edit adds (so lowering `INLINE_IMAGES_TOTAL_MAX_MB` never blocks editing an older comment).
+
+**A security report's file is uploaded before the case exists.** A `security_report_analysis` must never
+exist without its report, and creating the case first and uploading afterwards left a case with no file
+whenever the upload was cancelled or the tab refreshed. So the file goes first: `POST /attachments/upload`
+with `type: "work_item"` and `projectId` (instead of `parentId`) records a **draft** `work_item_attachment`
+(`work_item_id` NULL, `project_id` set; migration 0280, policies 100028) that only its uploader can see and
+that no list shows (every list joins `work_item`). The chunks and the confirm are the ordinary calls. Then
+`POST /cases` carries `attachmentIds`: `validateReportDrafts` checks them BEFORE anything is created (each a
+COMPLETE draft of that project uploaded by the caller, not linked, at most `MaxCreateAttachments` = 10) and,
+for a `security_report_analysis` created by a user, refuses a request with none (400, `reportRequiredMessage`);
+the link itself differs by data source. **Plain `postgres`: atomic.** `createCaseTx` calls `linkReportDraftsTx` in the
+create transaction (the service passes the email it validated as `ReportDraftOwnerEmail`): one guarded UPDATE
+takes only rows that are still COMPLETE drafts of that project uploaded by that email, and unless it takes every
+named file the create fails with a 400 and rolls back, so a case never exists without the files it was created
+with. Two creates naming the same file cannot both succeed: the second UPDATE waits on the row, then finds it
+taken (`TestCaseCreateMemberRLS_LinksReportDraftsAtomically` races two creates). The UPDATE is internal-only, so the
+transaction is marked internal for that one statement, as `insertAsCheckedProjectMember` does for the insert.
+**Dual-write (`createCaseSNFirst`): not atomic, on purpose.** ServiceNow already has the case when the Postgres row
+is written, and that insert must not fail (an orphaned ServiceNow case is the worse outcome, see
+`CreateCaseFromServiceNow`), so `linkReportDrafts` runs after it, best effort: a link that fails leaves a case
+whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
+A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
+**An abandoned draft is cleaned up.** A PENDING one is marked FAILED by the ordinary cleanup after 24 hours. A
+COMPLETE one whose case was never created is handed over by `POST /attachments/uploads/cleanup` in `orphans`
+(`type: "work_item"`, with its storage key; `ListUnlinkedReportDrafts`, served by
+`idx_work_item_attachment_unlinked_drafts`) once it is 25 hours old, and marked DELETED only when the caller
+acknowledges it, exactly like a comment image. The 1 hour past 24 is deliberate: `POST /cases` refuses a draft
+older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a `notBefore`), so a draft is never linked to a
+case after its file was handed over for deletion. A form left open more than a day gets a 400 and the file must be
+attached again. Still not built: the job in the portal backends that deletes the files and acknowledges them (it is
+missing for comment images too).
+
+**Description images (uploaded before the record exists).** A rich-text description can show inline images
+before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
+`parentId` (exactly one; both or neither is a 400): the row is a **draft** (`comment_attachment`:
+`comment_id` and `work_item_id` NULL, `project_id` set, migration 0250). The caller must be a REGISTERED
+member of the project (internal callers unrestricted, an unseen project is 404; `repo.GetProject`, since
+`project` has no RLS); same PNG/JPEG/WebP rule and per-image limit. A draft's storage key is
+`csm/projects/<project>/workitems/drafts/inline_attachments/<number>_<name>` (`storageKeyFor`, `draftFolder`);
+it is stored at confirm. Once the image is linked to a record, the next time a portal backend reads it
+`GET /attachments/inline/{id}/location` returns `relocateTo` (`csm/projects/<project>/workitems/<work item>/inline_attachments/<number>_<name>`,
+the same folder as a comment's images; the number tells them apart); the backend copies the file there, removes the draft copy and
+calls `POST /attachments/inline/{id}/relocated` with that key, which makes the row point at it (only the key this service computes is
+accepted; `UpdateStorageKey` is guarded on the old key, so a repeat is harmless). Until then, and if the backend cannot move it,
+the draft key stays valid. Authorize/confirm resolve the parent through
+`parentOf` (the project for a draft). RLS (100027): a draft is visible only to its uploader while a project
+member; a LINKED description image (`comment_id` NULL, `description_image` true, `work_item_id` set) is
+visible to anyone who can see the work item's project, except a CHANGE REQUEST's (internal-only: the customer-visibility rule cannot be restated in RLS); an external INSERT of a draft must be PENDING, no
+`storage_key`, `created_by` = their email, project member. UPDATE/DELETE stay internal-only.
+Every create path with a rich-text description (`caseService.CreateCase`, both plain and dual-write, so all of
+case/service_request/engagement/security_report_analysis/announcement, and `changeRequestService.CreateChangeRequest`)
+calls `validateDescriptionImages` BEFORE creating anything (`ValidateDescriptionImages`: at most 5 distinct
+images, total within the limit, each a COMPLETE draft of that project uploaded by the caller and not linked
+elsewhere, no `src="blob:`; a 400 in words otherwise; unreferenced drafts are ignored) and `linkDescriptionImages`
+right after the record exists (`LinkDescriptionImages`, best effort: one guarded UPDATE as the system that sets
+`work_item_id` and `description_image = true` only while the row is still a draft of that project by that
+email). Both are free for a description without an image reference. `data:image` base64 images are NOT
+refused (other callers still send them) but count against the same 5-image and total-size limits when a
+user typed them (`ValidateEmbeddedImages`; a machine caller is not checked). Incidents and problems have no project on their create request, so
+they take no draft images; the ServiceNow-only data source stores no images.
+`LinkInlineImages` (comments) never takes a `description_image` row.
 
 **Cleanup.** Nothing here deletes a blob, so cleanup is a two-step handoff to a caller that can both
 delete blobs and call this service (internal callers only). `POST /attachments/uploads/cleanup` marks
 uploads still `PENDING` after 24 hours `FAILED` (an upload that was never confirmed leaves nothing in
 storage: uncommitted blocks expire by themselves) and returns the comment images that were never linked
-in `orphans` (`{id, storageKey}`) **without marking them `DELETED`**, so every run lists them again until
+to a comment or (for drafts) a record's description in `orphans` (`{id, storageKey}`) **without marking them `DELETED`**, so every run lists them again until
 the caller removes the files and then calls `POST /attachments/uploads/cleanup/acknowledge` with their
 ids (at most 200). Only then are they marked `DELETED`. A `DELETED` row is never listed again, so marking
 first would lose the key if the response were lost; this way nothing is lost and a repeated call is safe.
 Acknowledge only marks an id that is still an orphan (re-read from the unlinked list), so it cannot be
 used to delete an arbitrary image; others are counted as `skipped`. An unlinked image with no file is
-marked `DELETED` straight away.
+marked `DELETED` straight away. A draft description image (no work item, `project_id` set) is abandoned after 24 hours like an unlinked comment image; a LINKED one (`description_image = true`) is never listed (`ListUnlinkedImages` filters `description_image = false`).
 
 **Audit.** Each upload start, link, delete and cleanup writes an `audit: true` line with the
 `callerId` (the user's UUID, else the client id of a machine caller), the `correlationId`, the kind and
@@ -3136,6 +3215,7 @@ the Query/SecReport Analysis family) on no severity at all.
   `sla_live`'s own flat-wall-clock computation, so a clock could report
   `BREACHED` with a corrected percentage well under 100 in the same
   response.
+- **`TaskSlaRepository`'s own business-day correction still fed itself from `sla.duration` after migration `0272` — a real, reported case, not a theoretical gap.** `migration 0272`'s own fix (above) made `sla_live`'s flat-time columns and `GetClockState`/`SearchActiveSLAStatuses` read `sla_policy.duration` exclusively, but `task_sla_repo.go`'s two queries (`SearchTaskSlas`'s `taskSlaViewColumns`, backing `POST /slas/search` — the case-detail SLA tab — and `GetTaskSla`) still computed the duration fed into `businessDayCorrectedLiveState` as `COALESCE(sla.duration, sla_policy.duration)`, preferring the clock's own frozen snapshot. A real case showed exactly the failure this invites: its `sla.duration` was permanently stuck at a value over an order of magnitude smaller than its policy's real duration, so the business-day correction confidently reported 1000%+ elapsed and `BREACHED` for a clock that was, by its own policy's real duration, only a fraction elapsed and still in progress — the portal's SLA tab and the raw `sla`/`sla_policy` tables visibly disagreed. Fixed the same way migration `0272` already decided for every other read path: `pol.duration` only, `sla.duration` never consulted. `GetTaskSla` already separately selected a pure `pol.duration` value (`policyDurationSecs`, for the definition's own displayed duration) — the fix removes the redundant, wrong-preferring second column entirely and reuses that one value for both purposes.
 - **`RecomputeActive` was removed, not wired to a periodic worker** — see
   "CSM-native SLA clock engine" below for why a background recompute worker
   was already removed once before. `sla_live` (migration `0204`/`0245`)
@@ -4080,6 +4160,44 @@ already use — no route path, request, or response shape changed.
   filtering, the same deliberate posture as `AccountContactRepository`/
   `ProjectContactRepository`'s own `callerEmail` parameter below.
 
+## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
+
+Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
+the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+`timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
+`project_stats_repo.go`), so the aggregate can never count a different set of cards from
+the search, or a different total from the search's `totalTime`; keep it that way.
+
+- **Response:** the shared `AggregateResponse`, plus `groups[].totalMinutes`,
+  `othersMinutes` and `totalMinutes`. Those three are pointers with `omitempty`, set only
+  here: every other aggregate leaves them nil and its JSON is unchanged
+  (`aggregate_response_json_test.go` pins both shapes). A zero is sent as `0`, not dropped.
+- **Ranking:** `measure` (`count`, the default, or `minutes`) decides which buckets survive
+  `maxGroups` (default 10); the rest fold into `othersCount` / `othersMinutes`. The top 10
+  users by cards and by hours are different people, so a widget showing hours must send
+  `minutes`.
+- **Keys and labels:** a `state` key is lower-cased (what the `states` filter accepts).
+  `user` and `project` keys are ids. Their labels never come back empty or NULL: a user with
+  no name falls back to their email, then their user name; a project with no name falls back
+  to its key. A NULL `p.name` used to fail the scan. A card with no project has no
+  `project` bucket: it is counted in `othersCount` / `othersMinutes`, so every grouping's
+  totals match the search's.
+- **`day`:** groups by `work_date` and needs both `startDate` and `endDate`, at most
+  `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
+  The query runs `generate_series` over the window, so every day comes back in date order,
+  days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
+  time card aggregate.
+- **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
+  (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
+  `CLAUDE.md`).
+
+Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
+check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
+(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+ranking by minutes disagree, it has a card with all five minute columns NULL, and the
+search-parity test compares both counts and minutes with `SearchTimeCards`.
+
 ## Linking a case to its originating conversation, and the activity feed's work-note count
 
 Reported live: a case created from a Novera chat ("create case" from an
@@ -4368,7 +4486,7 @@ changed.
   empty — nothing has asked for it on that path, this only wires up the
   search filter.
 - **Case activities** (`CaseRepository.SearchCaseActivities`): merges
-  `comment` and complete `case_attachment` rows into one newest-first feed
+  `comment` and `work_item_attachment` rows into one newest-first feed
   via a `UNION ALL` CTE — was previously an unconditional
   `ServiceUnavailableError` stub. There is no field-change audit table in
   this schema, so `req.IncludeFieldChanges` has no effect on this data
@@ -12176,6 +12294,60 @@ ingest is not built is reported `skipped` with a reason, by both endpoints.
   call (they carry line items), lists use keyset paging (`minLastModifiedDate` + `minId`). A component the cap (or the
   request deadline, `resyncTimeMargin`) stops is `skipped` as a whole and `capped` is set; apply reads a component
   completely before writing any of it. The server's `REQUEST_TIMEOUT` still bounds a request.
+
+## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
+
+A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view
+only with people (`custom_dashboard_share`), with teams (`custom_dashboard_team_share`) and, since
+migration 0275, with anyone internal who has its link. Postgres-only: no other data source holds any of it.
+Saved dashboards are live in production, so a change here must leave the stored rows as they are.
+
+**The link** (migration 0275, `custom_dashboard_link_repo.go`, `custom_dashboard_link_service.go`,
+`custom_dashboard_link_handler.go`):
+
+- `custom_dashboard.link_enabled` is the owner's switch; `link_id` is the id in the link, a new random
+  UUID each time the switch is turned on (never derived from the dashboard's id), so turning it off and on
+  again makes every earlier copy stop working. A CHECK keeps them in step (an id exactly when on); a partial
+  unique index serves the lookup by link id.
+- `GET /users/me/dashboards/{id}/link` answers `{enabled, linkId?, openedBy}`; `PUT` turns it on (no body;
+  on again keeps the same id) and `DELETE` turns it off (204), which in the same transaction deletes the
+  dashboard's `custom_dashboard_link_access` rows, so everyone who had it only through the link loses it.
+  All three touch only the caller's own row: another user's dashboard is the same 404 as a missing one.
+- `POST /users/me/shared-dashboards/link` with `{linkId}` opens a link and answers `{dashboardId, own}`.
+  **The link id is a bearer secret**: it travels in the body (never the path, so it is not in access
+  logs), and no error or log line quotes it (`linkId is not a UUID`, never the value; `writeServiceError`
+  logs validation errors). An unknown link, a link that is off and a caller who is not internal staff all
+  get the same 404, so the answer tells nobody whether a link id ever existed. The owner opening their own
+  link gets `own: true` and no row.
+- **Who counts as having opened it.** `custom_dashboard_link_access` holds one row per (dashboard, user)
+  for every internal user but the owner who opened the link, also one it is already shared with directly
+  or through one of their teams (the Shared list still shows that share, see below), and opening it again
+  adds nothing. So whether the user opened the link before or after being shared the dashboard, it stays
+  in their list through the link when that share goes. `openedBy` counts these rows only, never who; rows
+  go with the dashboard and with the user.
+- **The Shared list** (`ListSharedWithUser` / `GetSharedWithUser`) shows each dashboard once: a direct
+  share wins, then a team share (`sharedViaTeam`), then the link (`sharedViaLink: true`). A link row is
+  kept when a direct or team share is added later, so the dashboard comes back through the link when that
+  share goes.
+
+**Deleting the owner.** `owner_user_id` is ON DELETE SET NULL (migration 0255): a deleted user's dashboards
+stay with no owner while a person or a team they are shared with can still see them, and nobody can edit,
+share, unshare, delete or turn the link of an ownerless dashboard on or off (every owner route matches no
+one). The rule is "kept while a person or a team share is left":
+
+- `trg_custom_dashboard_delete_unshared_orphan` (0255, its function replaced by 0276) runs as the owner
+  goes. **It turns the dashboard's link off** (link id cleared, every `custom_dashboard_link_access` row
+  deleted), so offboarding a user leaves no working link to their dashboards and the people who had one
+  only through the link lose it; then it deletes the dashboard when no person share and no team share is
+  left. People with a direct or team share keep it.
+- Migration 0277 deletes an ownerless dashboard later, once its last share goes and its link is off:
+  `custom_dashboard_delete_if_orphaned(id)`, from AFTER DELETE triggers on both share tables (their rows go
+  when the recipient user or the team is deleted, both cascade) and from an AFTER UPDATE OF `link_enabled`
+  trigger for an ownerless dashboard whose link goes off (0276's own update fires it as the owner goes; it
+  applies the same rule). A dashboard that has its owner is never touched by any of them.
+- The integration tests pin each case: `custom_dashboard_team_share_repo_integration_test.go`
+  (`DeletingTheOwnerKeepsOnlySharedDashboards`), `custom_dashboard_link_repo_integration_test.go`
+  (`DeletingTheOwnerTurnsTheLinkOff`) and `custom_dashboard_orphan_integration_test.go` (0277).
 
 ## Adding a new entity
 

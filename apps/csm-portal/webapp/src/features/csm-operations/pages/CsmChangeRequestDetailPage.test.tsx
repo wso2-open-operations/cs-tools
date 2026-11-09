@@ -18,7 +18,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { useEffect, useState, type JSX } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeChangeRequestApproval, BeChangeRequestDetail } from "@api/backend/types";
@@ -182,6 +182,7 @@ vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   useGetCsmCaseAttachments: () => ({ data: [] }),
   usePostCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
   useDownloadCsmCaseAttachment: () => vi.fn(),
+  useDeleteCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
   default: () => null,
@@ -293,7 +294,7 @@ function LocationSearchProbe(): JSX.Element {
  * read/write the URL.
  */
 function renderPage(
-  initialEntry = "/operations/change-requests/chg-1",
+  initialEntry: InitialEntry = "/operations/change-requests/chg-1",
 ): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -4977,5 +4978,20 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
       renderPage();
       expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("CsmChangeRequestDetailPage — Back restores the list's own way back", () => {
+  // Operations reached from a dashboard is `{ from: <dashboard> }`; its row
+  // nests that as `parentState`, and Back must hand it back, or Operations
+  // loses its own Back button.
+  it("goes back to the list with the list's own state", () => {
+    navigateMock.mockClear();
+    renderPage({
+      pathname: "/operations/change-requests/chg-1",
+      state: { from: "/operations?tab=x", parentState: { from: "/dashboard/my/d-1" } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenLastCalledWith("/operations?tab=x", { state: { from: "/dashboard/my/d-1" } });
   });
 });

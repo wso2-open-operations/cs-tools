@@ -598,9 +598,10 @@ export interface BeServiceRequestCreatePayload {
 
 /**
  * Security report analysis (`type: "security_report_analysis"`). ServiceNow-only;
- * requires a subject and description. Files are not part of the create request:
- * the report is created first and its files are uploaded afterwards (see
- * `CreateSecurityReportPage.tsx`).
+ * requires a subject, a description and at least one report file. The file bytes
+ * are not part of the request: they are uploaded first as drafts of the project
+ * and named in `attachmentIds`, which the backend links to the report it creates
+ * and refuses the request without (see `CreateSecurityReportPage.tsx`).
  */
 export interface BeSecurityReportCreatePayload {
   type: "security_report_analysis";
@@ -609,6 +610,8 @@ export interface BeSecurityReportCreatePayload {
   deployedProductId: string;
   subject: string;
   description: string;
+  /** Files already uploaded as drafts of `projectId`; at least one is required. */
+  attachmentIds: string[];
 }
 
 /**
@@ -1600,6 +1603,11 @@ export interface BeAttachment {
   createdOn: string;
   downloadUrl?: string | null;
   previewUrl?: string | null;
+  /** `"deleted"` on a deleted attachment, which only an admin's list carries
+   * (with {@link deletedOn} and {@link deletedBy}); `"complete"` otherwise. */
+  status?: string;
+  deletedOn?: string | null;
+  deletedBy?: BeUserReference | null;
 }
 
 /**
@@ -4661,13 +4669,25 @@ export interface BeDashboardGroupByConfig {
    * existing widget config is unaffected. Meaningless when `bucket` is set,
    * same as `maxGroups`/`othersLabel`. */
   hideOthers?: boolean;
+  /** What a `time_card` widget's slices show: `"count"` (the default, the
+   * number of cards) or `"hours"` (the time logged on them). Sent to
+   * `POST /time-cards/aggregate` as `"count"` / `"minutes"`, which also
+   * decides which buckets survive `maxGroups`. Backend-enforced to appear
+   * only on a field-grouped `time_card` widget; absent everywhere else. */
+  measure?: BeTimeCardMeasure;
 }
+
+/** `BeDashboardGroupByConfig.measure`'s values. */
+export type BeTimeCardMeasure = "count" | "hours";
 
 /** One bucket of a `POST /{resourceType}/aggregate` response. */
 export interface BeGroupByBucket {
   key: string;
   label: string;
   count: number;
+  /** Time logged on this bucket's cards, in minutes. Only
+   * `POST /time-cards/aggregate` sets it. */
+  totalMinutes?: number;
 }
 
 /** Response shape of `POST /{resourceType}/aggregate`. `othersCount` covers
@@ -4677,6 +4697,10 @@ export interface BeGroupByResponse {
   groups: BeGroupByBucket[];
   othersCount: number;
   totalRecords: number;
+  /** The minutes counterparts of `othersCount` / `totalRecords`. Only
+   * `POST /time-cards/aggregate` sets them. */
+  othersMinutes?: number;
+  totalMinutes?: number;
 }
 
 /**

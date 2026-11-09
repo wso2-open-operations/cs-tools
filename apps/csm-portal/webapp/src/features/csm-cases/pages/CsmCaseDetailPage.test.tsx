@@ -262,14 +262,19 @@ usePostCsmCaseAttachmentMock.mockReturnValue({
   variables: undefined,
   uploadProgress: null,
 });
+const refetchCaseFeedbackMock = vi.fn();
+const useGetCsmCaseFeedbackMock = vi.fn();
 vi.mock("@features/csm-cases/api/useCsmCaseFeedback", () => ({
-  useGetCsmCaseFeedback: () => ({
-    data: undefined,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-    isFetching: false,
-  }),
+  useGetCsmCaseFeedback: (caseId: string | undefined, isClosed: boolean) => {
+    useGetCsmCaseFeedbackMock(caseId, isClosed);
+    return {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      refetch: refetchCaseFeedbackMock,
+      isFetching: false,
+    };
+  },
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   useGetCsmCaseAttachments: () => ({
@@ -1895,6 +1900,42 @@ describe("CsmCaseDetailPage — role-based controls", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("enables the case feedback query only for a closed case, and refresh never refetches it otherwise", () => {
+    const withState = (state: string) =>
+      useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+        ...(defaultCaseDetailImpl(id) as object),
+        data: id ? { ...buildCase(id), state } : undefined,
+      }));
+    const refreshLabel = { name: "Refresh activity timeline" };
+
+    withState("open");
+    useGetCsmCaseFeedbackMock.mockClear();
+    refetchCaseFeedbackMock.mockClear();
+    let view = renderPage();
+    expect(useGetCsmCaseFeedbackMock).toHaveBeenCalled();
+    for (const call of useGetCsmCaseFeedbackMock.mock.calls) expect(call[1]).toBe(false);
+    fireEvent.click(screen.getByRole("button", refreshLabel));
+    expect(refetchCaseFeedbackMock).not.toHaveBeenCalled();
+    view.unmount();
+
+    // Case detail not loaded yet: stays disabled.
+    useGetCsmCaseDetailMock.mockImplementation(() => ({
+      ...(defaultCaseDetailImpl(undefined) as object),
+      isLoading: true,
+    }));
+    useGetCsmCaseFeedbackMock.mockClear();
+    view = renderPage();
+    for (const call of useGetCsmCaseFeedbackMock.mock.calls) expect(call[1]).toBe(false);
+    view.unmount();
+
+    withState("closed");
+    useGetCsmCaseFeedbackMock.mockClear();
+    view = renderPage();
+    expect(useGetCsmCaseFeedbackMock.mock.calls.at(-1)?.[1]).toBe(true);
+    fireEvent.click(screen.getByRole("button", refreshLabel));
+    expect(refetchCaseFeedbackMock).toHaveBeenCalledTimes(1);
+  });
+
   it("a viewer's own note offers no edit or delete (both are write-only on the backend)", () => {
     for (const [role, expected] of [["viewer", "false"], ["cs_engineer", "true"]] as const) {
       currentUserRoles.value = [role];
@@ -2951,5 +2992,73 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
       'The GitHub issue was created, but the case tag "s_rg" could not be added.',
       expect.any(Error),
     );
+  });
+});
+
+describe("CsmCaseDetailPage — Back restores the list's own way back", () => {
+  // A Cases list reached from a dashboard is `{ from: <dashboard> }`; its row
+  // nests that as `parentState`, and Back must hand it back to the list, or
+  // the list loses its own Back button.
+  const LIST = "/cases?states=open";
+  const DASHBOARD_STATE = { from: "/dashboard/my/d-1" };
+
+  function renderWithState(pathname: string): void {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[{ pathname, state: { from: LIST, parentState: DASHBOARD_STATE } }]}>
+          <NavigateBridge />
+          <LocationProbe />
+          <Routes>
+            <Route path="/cases/:caseId" element={<CsmCaseDetailPage />} />
+            <Route path="/operations/service-requests/:caseId" element={<CsmCaseDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  afterEach(() => {
+    navigateMock.mockReset();
+    useGetCsmCaseDetailMock.mockImplementation(defaultCaseDetailImpl);
+  });
+
+  it("goes back to the list with the list's own state", () => {
+    renderWithState("/cases/case-1");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenLastCalledWith(LIST, { state: DASHBOARD_STATE });
+  });
+
+  it("keeps the list's own state through the redirect to a case's proper route", async () => {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      data: id ? { ...buildCase(id), caseType: "service_request" } : undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+      dataUpdatedAt: 0,
+    }));
+    renderWithState("/cases/case-1");
+    await waitFor(() =>
+      expect(screen.getByTestId("location-probe")).toHaveTextContent("/operations/service-requests/case-1"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenLastCalledWith(LIST, { state: DASHBOARD_STATE });
+  });
+
+  it("goes back with no state when the list had none", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[{ pathname: "/cases/case-1", state: { from: LIST } }]}>
+          <Routes>
+            <Route path="/cases/:caseId" element={<CsmCaseDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenLastCalledWith(LIST, { state: undefined });
   });
 });

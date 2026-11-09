@@ -74,10 +74,15 @@ type Request struct {
 // last object; otherwise Candidates holds every JSON object in the reply, in
 // order (the last valid one is the answer: see the backend).
 type Result struct {
-	Candidates   []json.RawMessage
-	Declined     string
-	InputTokens  int64
-	OutputTokens int64
+	Candidates []json.RawMessage
+	Declined   string
+	// InputTokens is the input that was neither read from nor written to the
+	// cache (the user message, mostly, once the system prompt is cached); the
+	// two cache counts are the rest of the input.
+	InputTokens              int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+	OutputTokens             int64
 }
 
 // Generator makes the model call.
@@ -108,8 +113,16 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 	msg, err := g.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(g.model),
 		MaxTokens: maxTokens,
-		System:    []anthropic.TextBlockParam{{Text: system}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
+		// The system prompt is the same for every user and call of one
+		// deployment (the catalogue, and the team list the backend builds
+		// once at start), so it is cached: a call within the cache's lifetime
+		// (5 minutes, renewed by each hit) reads it at the model's cache-hit
+		// price: 0.05 times the input price on Sonnet 5.5 (the default) and
+		// Opus 5.5, 0.1 times on most other models. Nothing that changes per
+		// request may come before this breakpoint; the prompt and the draft
+		// are in the user message after it.
+		System:   []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
+		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
 	})
 	took := time.Since(start)
 	if err != nil {
@@ -144,7 +157,12 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 	if len(objects) == 0 {
 		return Result{}, outcomeUnusable, fmt.Errorf("%w: no JSON object in the reply", ErrUnusable)
 	}
-	res := Result{InputTokens: msg.Usage.InputTokens, OutputTokens: msg.Usage.OutputTokens}
+	res := Result{
+		InputTokens:              msg.Usage.InputTokens,
+		CacheCreationInputTokens: msg.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     msg.Usage.CacheReadInputTokens,
+		OutputTokens:             msg.Usage.OutputTokens,
+	}
 	if reason, ok := declineReason(objects[len(objects)-1]); ok {
 		res.Declined = reason
 		return res, outcomeDeclined, nil
@@ -161,7 +179,10 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 func logUsage(ctx context.Context, model, outcome string, stopReason anthropic.StopReason, usage anthropic.Usage, took time.Duration) {
 	slog.InfoContext(ctx, "dashboard generate: token usage",
 		"model", model, "outcome", outcome, "stopReason", stopReason,
-		"inputTokens", usage.InputTokens, "outputTokens", usage.OutputTokens,
+		"inputTokens", usage.InputTokens,
+		"cacheCreationInputTokens", usage.CacheCreationInputTokens,
+		"cacheReadInputTokens", usage.CacheReadInputTokens,
+		"outputTokens", usage.OutputTokens,
 		"durationMs", took.Milliseconds())
 }
 

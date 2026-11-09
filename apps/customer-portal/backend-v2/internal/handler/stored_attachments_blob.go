@@ -65,6 +65,7 @@ type blobEntityClient interface {
 	AuthorizeStoredAttachmentUpload(ctx context.Context, id string, body json.RawMessage) ([]byte, error)
 	LocateStoredAttachment(ctx context.Context, body json.RawMessage) ([]byte, error)
 	LocateInlineImage(ctx context.Context, id string) ([]byte, error)
+	InlineImageRelocated(ctx context.Context, id string, body json.RawMessage) error
 }
 
 // uploadTarget mirrors entity-service's AttachmentUploadTarget. StorageKey stays
@@ -87,6 +88,8 @@ type attachmentLocation struct {
 	Available   bool    `json:"available"`
 	Reason      string  `json:"reason"`
 	StorageKey  string  `json:"storageKey"`
+	// RelocateTo is set for a description image still in the drafts folder.
+	RelocateTo string `json:"relocateTo"`
 }
 
 // BlobAttachmentHandler serves attachment files held in Azure Blob Storage.
@@ -399,6 +402,12 @@ func (h *BlobAttachmentHandler) InlineImage(w http.ResponseWriter, r *http.Reque
 	}
 	if !h.available(w, loc) {
 		return
+	}
+	// A description image is uploaded before its case exists, so its file starts
+	// in a drafts folder. The first read after it is linked moves it to the work
+	// item's own folder; if that fails the old file is read, so nothing breaks.
+	if loc.RelocateTo != "" && h.relocateInlineImage(r.Context(), id, loc) {
+		loc.StorageKey = loc.RelocateTo
 	}
 	h.stream(w, r, loc, true)
 }

@@ -131,6 +131,12 @@ func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	if isCommentUpload(body) {
+		if msg := commentUploadTarget(body); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
 	out, err := h.entity.InitiateStoredAttachmentUpload(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity InitiateStoredAttachmentUpload failed", "err", summarizeErr(err))
@@ -138,6 +144,40 @@ func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.
 		return
 	}
 	writeStoredAttachmentJSON(w, http.StatusCreated, out)
+}
+
+// commentUploadTarget checks where a comment (inline image) upload is attached:
+// exactly one of parentId (an existing work item) or projectId (a draft
+// description image, uploaded before the case exists; a valid UUID). It returns
+// a message for the caller when the body is wrong, "" when it is fine. The body
+// itself is forwarded to entity-service untouched.
+func commentUploadTarget(body []byte) string {
+	var t struct {
+		ParentID  *string `json:"parentId"`
+		ProjectID *string `json:"projectId"`
+	}
+	if err := json.Unmarshal(body, &t); err != nil {
+		return "invalid request body"
+	}
+	hasParent := t.ParentID != nil && *t.ParentID != ""
+	hasProject := t.ProjectID != nil && *t.ProjectID != ""
+	switch {
+	case hasParent && hasProject:
+		return "provide either parentId or projectId for a comment image, not both"
+	case !hasParent && !hasProject:
+		return "parentId or projectId is required for a comment image"
+	case hasProject && !uuidRe.MatchString(*t.ProjectID):
+		return "projectId must be a valid UUID"
+	}
+	return ""
+}
+
+// isCommentUpload reports whether the body is for a type "comment" attachment.
+func isCommentUpload(body []byte) bool {
+	var p struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(body, &p) == nil && p.Type == "comment"
 }
 
 // ConfirmUpload handles POST /attachments/upload/{id}/confirm.

@@ -61,6 +61,10 @@ type fakeStoredRepo struct {
 	inserted     []domain.StoredAttachmentInsert
 	insertErr    error
 
+	keyUpdates []struct {
+		id, from, to string
+		sys          bool
+	}
 	deleted      map[string]string // id -> deleted_by
 	deleteCtx    []bool            // whether each MarkDeleted ran as the system
 	deleteOK     bool
@@ -71,14 +75,48 @@ type fakeStoredRepo struct {
 	abandoned    []domain.AbandonedUpload
 	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
 	abandonedSys bool
-	linkWant     []string // ids LinkInlineImages will report as linked
+	linkWant     []string          // ids LinkInlineImages will report as linked
+	linkedTo     map[string]string // image id -> comment it is already linked to
 	linkCall     struct {
 		comment, workItem, email string
 		ids                      []string
 		sys                      bool
 	}
 	unlinked []domain.StoredAttachmentRow
-	deferred []string // rows sent to the back of the cleanup queue
+	// unlinkedReports are the stored report drafts no case was linked to;
+	// reportDraftNotBefore is the age cutoff the last ListReportDrafts was given.
+	unlinkedReports      []domain.StoredAttachmentRow
+	reportDraftNotBefore time.Time
+	deferred             []string // rows sent to the back of the cleanup queue
+
+	// Draft description images.
+	project    domain.StoredAttachmentParent
+	projectErr error
+	drafts     []domain.StoredAttachmentRow // what ListDescriptionDrafts returns
+	draftCall  struct {
+		project, email string
+		ids            []string
+	}
+	// A draft report (a work item attachment uploaded before its case exists).
+	reportDrafts    []domain.StoredAttachmentRow
+	reportDraftCall struct {
+		project, email string
+		ids            []string
+	}
+	reportLinkWant []string
+	reportLinkCall struct {
+		workItem, project, email string
+		ids                      []string
+		sys                      bool
+		calls                    int
+	}
+	draftLinkWant []string
+	draftLinkCall struct {
+		workItem, project, email string
+		ids                      []string
+		sys                      bool
+		calls                    int
+	}
 }
 
 func newFakeStoredRepo() *fakeStoredRepo {
@@ -144,6 +182,15 @@ func (f *fakeStoredRepo) MarkDeleted(ctx context.Context, _ domain.StoredAttachm
 	return true, nil
 }
 
+func (f *fakeStoredRepo) UpdateStorageKey(ctx context.Context, _ domain.StoredAttachmentKind, id, from, to string) (bool, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	f.keyUpdates = append(f.keyUpdates, struct {
+		id, from, to string
+		sys          bool
+	}{id, from, to, ok && scope.Unrestricted})
+	return true, nil
+}
+
 func (f *fakeStoredRepo) ListAbandoned(ctx context.Context, olderThan time.Time, _ int) ([]domain.AbandonedUpload, error) {
 	scope, ok := repository.CallerIdentityFromContext(ctx)
 	f.abandonedSys = ok && scope.Unrestricted
@@ -156,6 +203,57 @@ func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workIt
 	f.linkCall.comment, f.linkCall.workItem, f.linkCall.email, f.linkCall.ids = commentID, workItemID, email, ids
 	f.linkCall.sys = ok && scope.Unrestricted
 	return f.linkWant, nil
+}
+
+func (f *fakeStoredRepo) LinkedImageIDs(_ context.Context, commentID string, ids []string) ([]string, error) {
+	var out []string
+	for _, id := range ids {
+		if f.linkedTo[id] == commentID && commentID != "" {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStoredRepo) GetProject(_ context.Context, id string) (domain.StoredAttachmentParent, error) {
+	if f.projectErr != nil {
+		return domain.StoredAttachmentParent{}, f.projectErr
+	}
+	if f.project.ID == "" {
+		return domain.StoredAttachmentParent{ID: id, Number: "PRJ-9", ProjectNumber: "PRJ-9"}, nil
+	}
+	return f.project, nil
+}
+
+func (f *fakeStoredRepo) ListDescriptionDrafts(_ context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error) {
+	f.draftCall.project, f.draftCall.email, f.draftCall.ids = projectID, email, ids
+	return f.drafts, nil
+}
+
+func (f *fakeStoredRepo) LinkDescriptionImages(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	c := &f.draftLinkCall
+	c.workItem, c.project, c.email, c.ids, c.sys = workItemID, projectID, email, ids, ok && scope.Unrestricted
+	c.calls++
+	return f.draftLinkWant, nil
+}
+
+func (f *fakeStoredRepo) ListReportDrafts(_ context.Context, projectID, email string, ids []string, notBefore time.Time) ([]domain.StoredAttachmentRow, error) {
+	f.reportDraftCall.project, f.reportDraftCall.email, f.reportDraftCall.ids = projectID, email, ids
+	f.reportDraftNotBefore = notBefore
+	return f.reportDrafts, nil
+}
+
+func (f *fakeStoredRepo) ListUnlinkedReportDrafts(context.Context, time.Time, int) ([]domain.StoredAttachmentRow, error) {
+	return f.unlinkedReports, nil
+}
+
+func (f *fakeStoredRepo) LinkReportDrafts(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	c := &f.reportLinkCall
+	c.workItem, c.project, c.email, c.ids, c.sys = workItemID, projectID, email, ids, ok && scope.Unrestricted
+	c.calls++
+	return f.reportLinkWant, nil
 }
 
 func (f *fakeStoredRepo) ListUnlinkedImages(context.Context, time.Time, int) ([]domain.StoredAttachmentRow, error) {
@@ -175,7 +273,7 @@ func (f *fakeStoredRepo) MarkFailed(_ context.Context, _ domain.StoredAttachment
 var saNow = time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)
 
 func newStoredSvc(repo *fakeStoredRepo) *storedAttachmentService {
-	svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100}).(*storedAttachmentService)
+	svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100}).(*storedAttachmentService)
 	svc.now = func() time.Time { return saNow }
 	svc.shares.now = func() time.Time { return saNow }
 	return svc
@@ -370,6 +468,72 @@ func TestDeleteAttachment_SomeoneElseCannotDeleteIt(t *testing.T) {
 	}
 }
 
+// adminDeleteCtx is a delete by `email`, made by the caller with `clientID`.
+func adminDeleteCtx(t *testing.T, email, clientID string) context.Context {
+	t.Helper()
+	return auth.WithIdentity(saCtx(t, email), auth.Identity{ClientID: clientID})
+}
+
+const csmPortalClient = "csm-portal-backend-client"
+
+func adminDeleteReq() domain.DeleteStoredAttachmentRequest {
+	r := deleteReq()
+	r.AsAdmin = true
+	return r
+}
+
+func TestDeleteAttachment_AnAdminThroughTheCSMPortalMayDeleteSomeoneElses(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
+	if err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(repo.deleted) != 1 {
+		t.Errorf("deleted = %d, want 1", len(repo.deleted))
+	}
+}
+
+func TestDeleteAttachment_TheAdminFlagFromAnyOtherCallerIsRefused(t *testing.T) {
+	for name, clientID := range map[string]string{"another client": "customer-portal-client", "no client": ""} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeStoredRepo()
+			storedRow(repo)
+			svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
+			err := svc.DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", clientID), adminDeleteReq())
+			var ferr *apierror.ForbiddenError
+			if !errors.As(err, &ferr) {
+				t.Fatalf("err = %v, want ForbiddenError", err)
+			}
+			if len(repo.deleted) != 0 {
+				t.Error("an attachment was deleted on a forged admin flag")
+			}
+		})
+	}
+}
+
+func TestDeleteAttachment_TheAdminFlagDoesNothingWhenNoClientIsConfigured(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	err := newStoredSvc(repo).DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", ""), adminDeleteReq())
+	var ferr *apierror.ForbiddenError
+	if !errors.As(err, &ferr) {
+		t.Fatalf("err = %v, want ForbiddenError", err)
+	}
+}
+
+func TestDeleteAttachment_AnAdminStillCannotDeleteFromAClosedWorkItem(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	repo.parent.Closed = true
+	svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
+	err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq())
+	var cerr *apierror.ConflictError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %v, want ConflictError", err)
+	}
+}
+
 func TestDeleteAttachment_TheEmailMatchIgnoresCase(t *testing.T) {
 	repo := newFakeStoredRepo()
 	storedRow(repo)
@@ -458,5 +622,441 @@ func TestInlineImageIDs_FindsEveryReferenceShape(t *testing.T) {
 	got := inlineImageIDs(html)
 	if len(got) != 3 || got[0] != a || got[1] != b || got[2] != c {
 		t.Errorf("ids = %v, want [%s %s %s]", got, a, b, c)
+	}
+}
+
+// ---- draft description images ----
+
+const (
+	saProjectID = "c1000000-0000-0000-0000-000000000001"
+	saImgA      = "11111111-1111-4111-8111-111111111111"
+	saImgB      = "22222222-2222-4222-8222-222222222222"
+)
+
+func descImg(id string) string { return `<img src="/attachments/inline/` + id + `/content">` }
+
+func draftRow(id string, size int64) domain.StoredAttachmentRow {
+	return domain.StoredAttachmentRow{ID: id, Status: "COMPLETE", SizeBytes: &size, CreatedBy: saEmail, ParentID: saProjectID, Draft: true}
+}
+
+func TestInitiateUpload_DraftDescriptionImage(t *testing.T) {
+	repo := newFakeStoredRepo()
+	req := domain.InitiateAttachmentUploadRequest{Kind: domain.StoredAttachmentComment, ProjectID: saProjectID, Name: "shot.png", ContentType: "image/png", SizeBytes: 50}
+	if _, err := newStoredSvc(repo).InitiateUpload(saCtx(t, saEmail), req); err != nil {
+		t.Fatalf("InitiateUpload: %v", err)
+	}
+	if len(repo.inserted) != 1 || !repo.inserted[0].Draft || repo.inserted[0].ParentID != saProjectID || repo.inserted[0].CreatedBy != saEmail {
+		t.Errorf("inserted = %+v, want one draft under the project, recorded as the caller", repo.inserted)
+	}
+}
+
+func TestInitiateUpload_DraftValidation(t *testing.T) {
+	mk := func(mut func(*domain.InitiateAttachmentUploadRequest)) domain.InitiateAttachmentUploadRequest {
+		r := domain.InitiateAttachmentUploadRequest{Kind: domain.StoredAttachmentComment, ProjectID: saProjectID, Name: "a.png", ContentType: "image/png", SizeBytes: 50}
+		mut(&r)
+		return r
+	}
+	for name, req := range map[string]domain.InitiateAttachmentUploadRequest{
+		"both parentId and projectId": mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ParentID = saParentID }),
+		"neither":                     mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ProjectID = "" }),
+		"bad projectId":               mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ProjectID = "nope" }),
+		"projectId on a deployment":   mk(func(r *domain.InitiateAttachmentUploadRequest) { r.Kind = domain.StoredAttachmentDeployment }),
+		"a GIF":                       mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ContentType = "image/gif" }),
+		"over the size limit":         mk(func(r *domain.InitiateAttachmentUploadRequest) { r.SizeBytes = 101 }),
+	} {
+		repo := newFakeStoredRepo()
+		_, err := newStoredSvc(repo).InitiateUpload(saCtx(t, saEmail), req)
+		var verr *apierror.ValidationError
+		if !errors.As(err, &verr) {
+			t.Errorf("%s: err = %v, want a ValidationError", name, err)
+		}
+		if len(repo.inserted) != 0 {
+			t.Errorf("%s: a refused request must leave no row", name)
+		}
+	}
+}
+
+func TestInitiateUpload_DraftInAProjectTheCallerCannotSeeIsNotFound(t *testing.T) {
+	repo := newFakeStoredRepo()
+	repo.projectErr = &apierror.NotFoundError{Msg: "project not found"}
+	req := domain.InitiateAttachmentUploadRequest{Kind: domain.StoredAttachmentComment, ProjectID: saProjectID, Name: "a.png", ContentType: "image/png", SizeBytes: 50}
+	_, err := newStoredSvc(repo).InitiateUpload(saCtx(t, saEmail), req)
+	var nerr *apierror.NotFoundError
+	if !errors.As(err, &nerr) {
+		t.Fatalf("err = %v, want NotFoundError", err)
+	}
+}
+
+func TestStorageKeyFor_DraftUsesTheDraftsFolderAndStaysTheSameAfterLinking(t *testing.T) {
+	row := domain.StoredAttachmentRow{Number: "CA0000007", Name: "a.png", Draft: true}
+	parent := domain.StoredAttachmentParent{ProjectNumber: "PRJ-9"}
+	got := storageKeyFor(domain.StoredAttachmentComment, row, parent)
+	if want := "csm/projects/prj_9/workitems/drafts/inline_attachments/ca0000007_a.png"; got != want {
+		t.Errorf("key = %q, want %q", got, want)
+	}
+	// The key is stored on the row at confirm and never recomputed, so linking
+	// (which clears Draft) does not move the file; a normal row keeps its layout.
+	row.Draft = false
+	if k := storageKeyFor(domain.StoredAttachmentComment, row, domain.StoredAttachmentParent{ProjectNumber: "PRJ-9", Number: "CS0001"}); !strings.Contains(k, "/workitems/cs0001/inline_attachments/") {
+		t.Errorf("key = %q, a linked or ordinary row uses its work item number", k)
+	}
+}
+
+func TestBackend_AuthorizeAndConfirmWorkForADraft(t *testing.T) {
+	repo := newFakeStoredRepo()
+	repo.project = domain.StoredAttachmentParent{ID: saProjectID, Number: "PRJ-9", ProjectNumber: "PRJ-9"}
+	size := int64(50)
+	ct := "image/png"
+	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "CA0000007", Name: "a.png", ContentType: &ct, SizeBytes: &size,
+		Status: "PENDING", CreatedBy: saEmail, ParentID: saProjectID, Draft: true}
+	svc := newStoredSvc(repo)
+
+	target, err := svc.AuthorizeUpload(saCtx(t, saEmail), domain.AuthorizeAttachmentUploadRequest{Kind: domain.StoredAttachmentComment, ID: saAttID})
+	if err != nil {
+		t.Fatalf("AuthorizeUpload: %v", err)
+	}
+	if !strings.Contains(target.StorageKey, "/workitems/drafts/inline_attachments/") {
+		t.Errorf("storageKey = %q, want the drafts folder", target.StorageKey)
+	}
+	if _, err := svc.ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: domain.StoredAttachmentComment, ID: saAttID, SizeBytes: &size, ContentType: "image/png"}); err != nil {
+		t.Fatalf("ConfirmUpload: %v", err)
+	}
+	if k := repo.completed[saAttID]; k != target.StorageKey {
+		t.Errorf("stored key = %q, want the one authorized (%q)", k, target.StorageKey)
+	}
+}
+
+func TestValidateDescriptionImages(t *testing.T) {
+	big := int64(60) // two of these exceed a 100 byte total
+	cases := []struct {
+		name    string
+		html    string
+		drafts  []domain.StoredAttachmentRow
+		total   int64
+		email   string
+		wantErr string // substring; "" = accepted
+		wantDB  bool   // whether the repo was asked
+	}{
+		{name: "no images", html: "<p>hello</p>"},
+		{name: "data image is not refused", html: `<img src="data:image/png;base64,AAAA">`},
+		{name: "one complete draft", html: descImg(saImgA), drafts: []domain.StoredAttachmentRow{draftRow(saImgA, 10)}, wantDB: true},
+		{name: "the same image twice counts once", html: descImg(saImgA) + descImg(saImgA), drafts: []domain.StoredAttachmentRow{draftRow(saImgA, 10)}, wantDB: true},
+		{name: "blob source", html: `<img src="blob:https://x/1">`, wantErr: "not uploaded yet"},
+		{name: "blob source with spaces and case", html: `<IMG SRC = 'BLOB:abc'>`, wantErr: "not uploaded yet"},
+		{name: "more than five images", html: strings.Repeat("", 0) + descImg("00000001-1111-4111-8111-111111111111") + descImg("00000002-1111-4111-8111-111111111111") +
+			descImg("00000003-1111-4111-8111-111111111111") + descImg("00000004-1111-4111-8111-111111111111") + descImg("00000005-1111-4111-8111-111111111111") +
+			descImg("00000006-1111-4111-8111-111111111111"), wantErr: "at most 5"},
+		{name: "not a draft of this author and project", html: descImg(saImgA), drafts: nil, wantErr: "could not be used", wantDB: true},
+		{name: "one of two missing", html: descImg(saImgA) + descImg(saImgB), drafts: []domain.StoredAttachmentRow{draftRow(saImgA, 10)}, wantErr: "could not be used", wantDB: true},
+		{name: "total too large", html: descImg(saImgA) + descImg(saImgB), drafts: []domain.StoredAttachmentRow{draftRow(saImgA, big), draftRow(saImgB, big)}, total: 100, wantErr: "together", wantDB: true},
+		{name: "total exactly at the limit", html: descImg(saImgA) + descImg(saImgB), drafts: []domain.StoredAttachmentRow{draftRow(saImgA, 50), draftRow(saImgB, 50)}, total: 100, wantDB: true},
+		{name: "no author", html: descImg(saImgA), email: "-", wantErr: "could not be used"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := newFakeStoredRepo()
+			repo.drafts = c.drafts
+			svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
+			email := saEmail
+			if c.email == "-" {
+				email = ""
+			}
+			err := svc.ValidateDescriptionImages(context.Background(), saProjectID, email, c.html)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want accepted", err)
+				}
+			} else {
+				var verr *apierror.ValidationError
+				if !errors.As(err, &verr) || !strings.Contains(verr.Msg, c.wantErr) {
+					t.Fatalf("err = %v, want a ValidationError containing %q", err, c.wantErr)
+				}
+			}
+			if asked := repo.draftCall.project != ""; asked != c.wantDB {
+				t.Errorf("repo asked = %v, want %v", asked, c.wantDB)
+			}
+			if c.wantDB && (repo.draftCall.project != saProjectID || repo.draftCall.email != saEmail) {
+				t.Errorf("repo call = %+v, want this project and author", repo.draftCall)
+			}
+		})
+	}
+}
+
+func TestLinkDescriptionImages(t *testing.T) {
+	repo := newFakeStoredRepo()
+	repo.draftLinkWant = []string{saImgA}
+	svc := newStoredSvc(repo)
+
+	svc.LinkDescriptionImages(context.Background(), saParentID, saProjectID, saEmail, descImg(saImgA))
+	c := repo.draftLinkCall
+	if c.calls != 1 || c.workItem != saParentID || c.project != saProjectID || c.email != saEmail || !c.sys || len(c.ids) != 1 || c.ids[0] != saImgA {
+		t.Errorf("repo call = %+v: want the new work item, project, author, image ids, as the system", c)
+	}
+
+	svc.LinkDescriptionImages(context.Background(), saParentID, saProjectID, saEmail, "<p>none</p>")
+	svc.LinkDescriptionImages(context.Background(), saParentID, saProjectID, "", descImg(saImgA))
+	if repo.draftLinkCall.calls != 1 {
+		t.Error("nothing should be linked for a description with no image or no author")
+	}
+}
+
+func TestValidateCommentImages(t *testing.T) {
+	own := func(id string, size int64) domain.StoredAttachmentRow {
+		return domain.StoredAttachmentRow{ID: id, Status: "COMPLETE", SizeBytes: &size, CreatedBy: saEmail, ParentID: saParentID}
+	}
+	idN := func(n int) string { return fmt.Sprintf("%08d-1111-4111-8111-111111111111", n) }
+	build := func(n int, size int64) (map[string]domain.StoredAttachmentRow, string) {
+		rows := map[string]domain.StoredAttachmentRow{}
+		var html strings.Builder
+		for i := 1; i <= n; i++ {
+			rows[idN(i)] = own(idN(i), size)
+			html.WriteString(descImg(idN(i)))
+		}
+		return rows, html.String()
+	}
+	t.Run("five of the author's images pass", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(5, 10)
+		if err := newStoredSvc(repo).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html); err != nil {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("six of the author's images are refused", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(6, 10)
+		err := newStoredSvc(repo).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html)
+		var verr *apierror.ValidationError
+		if !errors.As(err, &verr) || !strings.Contains(verr.Msg, "at most 5") {
+			t.Errorf("err = %v, want the 5 image limit", err)
+		}
+	})
+	t.Run("the total is enforced", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(2, 60)
+		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100})
+		err := svc.(InlineImageLinker).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html)
+		var verr *apierror.ValidationError
+		if !errors.As(err, &verr) || !strings.Contains(verr.Msg, "together") {
+			t.Errorf("err = %v, want the total limit", err)
+		}
+	})
+	t.Run("somebody else's and other work items' images do not count", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(8, 10)
+		for id, r := range repo.rows {
+			if id > idN(2) {
+				r.CreatedBy = "someone@example.com"
+				repo.rows[id] = r
+			}
+		}
+		for _, id := range []string{idN(1), idN(2)} {
+			r := repo.rows[id]
+			r.ParentID = "other-work-item"
+			repo.rows[id] = r
+		}
+		if err := newStoredSvc(repo).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html); err != nil {
+			t.Errorf("err = %v, want nothing counted", err)
+		}
+	})
+	t.Run("an edit keeps images already on the comment even past the size limit", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(2, 60)
+		repo.linkedTo = map[string]string{idN(1): "c-1", idN(2): "c-1"}
+		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100}).(InlineImageLinker)
+		if err := svc.ValidateCommentImages(context.Background(), "c-1", saParentID, saEmail, html); err != nil {
+			t.Errorf("err = %v, want retained images not counted", err)
+		}
+		// The same two images on another comment's edit are new there.
+		if err := svc.ValidateCommentImages(context.Background(), "c-2", saParentID, saEmail, html); err == nil {
+			t.Error("want the total limit for images the edit adds")
+		}
+	})
+	t.Run("an edit still limits what it adds", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(2, 60)
+		repo.linkedTo = map[string]string{idN(1): "c-1"}
+		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 50}).(InlineImageLinker)
+		if err := svc.ValidateCommentImages(context.Background(), "c-1", saParentID, saEmail, html); err == nil {
+			t.Error("the new 60-byte image is over the 50-byte limit")
+		}
+	})
+	t.Run("no images costs no lookup", func(t *testing.T) {
+		if err := newStoredSvc(newFakeStoredRepo()).ValidateCommentImages(context.Background(), "", saParentID, saEmail, "plain"); err != nil {
+			t.Errorf("err = %v", err)
+		}
+	})
+}
+
+func TestDescriptionImageHelpers(t *testing.T) {
+	l := &recordingLinker{}
+	if email, err := validateDescriptionImages(saCtx(t, saEmail), l, saProjectID, "<p>plain</p>"); err != nil || email != "" || len(l.descChecks) != 0 {
+		t.Errorf("a plain description must cost nothing: %q %v %d", email, err, len(l.descChecks))
+	}
+	if _, err := validateDescriptionImages(saCtx(t, saEmail), nil, saProjectID, descImg(saImgA)); err != nil {
+		t.Errorf("a nil linker is a no-op: %v", err)
+	}
+	email, err := validateDescriptionImages(saCtx(t, saEmail), l, saProjectID, descImg(saImgA))
+	if err != nil || email != saEmail || len(l.descChecks) != 1 || l.descChecks[0].project != saProjectID {
+		t.Errorf("email %q err %v checks %+v", email, err, l.descChecks)
+	}
+	l.validateDescErr = &apierror.ValidationError{Msg: "bad"}
+	if _, err := validateDescriptionImages(saCtx(t, saEmail), l, saProjectID, descImg(saImgA)); err == nil {
+		t.Error("the validation error must be returned")
+	}
+	linkDescriptionImages(context.Background(), l, "wi", saProjectID, saEmail, "<p>plain</p>")
+	linkDescriptionImages(context.Background(), l, "", saProjectID, saEmail, descImg(saImgA))
+	if len(l.descLinks) != 0 {
+		t.Error("nothing to link for a plain description or no record id")
+	}
+	linkDescriptionImages(context.Background(), l, "wi", saProjectID, saEmail, descImg(saImgA))
+	if len(l.descLinks) != 1 || l.descLinks[0].workItem != "wi" {
+		t.Errorf("links = %+v", l.descLinks)
+	}
+}
+
+// A base64 image in a user's content counts against the same limits as an
+// uploaded one; machine callers and content with no such image are not checked.
+func TestValidateEmbeddedImages(t *testing.T) {
+	// 40 base64 characters without padding decode to 30 bytes.
+	img := func() string { return `<img src="data:image/png;base64,` + strings.Repeat("A", 40) + `">` }
+	cases := []struct {
+		name    string
+		html    string
+		email   string
+		total   int64
+		wantErr string
+	}{
+		{name: "no image", html: "<p>hello</p>", email: saEmail, total: 100},
+		{name: "one image within the limit", html: img(), email: saEmail, total: 100},
+		{name: "five images within the limit", html: strings.Repeat(img(), 3), email: saEmail, total: 100},
+		{name: "more than five images", html: strings.Repeat(img(), 6), email: saEmail, total: 1000, wantErr: "At most 5"},
+		{name: "over the total size", html: strings.Repeat(img(), 4), email: saEmail, total: 100, wantErr: "together"},
+		{name: "exactly at the total size", html: strings.Repeat(img(), 2), email: saEmail, total: 60},
+		{name: "a machine caller is not checked", html: strings.Repeat(img(), 9), email: "-", total: 10},
+		{name: "case of the scheme does not matter", html: strings.Repeat(strings.ToUpper(img()), 6), email: saEmail, total: 1000, wantErr: "At most 5"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := NewStoredAttachmentService(newFakeStoredRepo(), StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
+			email := c.email
+			if email == "-" {
+				email = ""
+			}
+			err := svc.ValidateEmbeddedImages(context.Background(), email, c.html)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			var verr *apierror.ValidationError
+			if !errors.As(err, &verr) || !strings.Contains(verr.Msg, c.wantErr) {
+				t.Fatalf("err = %v, want a ValidationError containing %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
+const saReportA = "33333333-3333-4333-8333-333333333333"
+
+func reportRow(id string) domain.StoredAttachmentRow {
+	size := int64(100)
+	return domain.StoredAttachmentRow{ID: id, Status: "COMPLETE", SizeBytes: &size, CreatedBy: saEmail, ParentID: saProjectID, Draft: true}
+}
+
+func TestInitiateUpload_DraftReportForAWorkItem(t *testing.T) {
+	repo := newFakeStoredRepo()
+	req := domain.InitiateAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ProjectID: saProjectID, Name: "report.pdf", ContentType: "application/pdf", SizeBytes: 50}
+	if _, err := newStoredSvc(repo).InitiateUpload(saCtx(t, saEmail), req); err != nil {
+		t.Fatalf("InitiateUpload: %v", err)
+	}
+	if len(repo.inserted) != 1 || !repo.inserted[0].Draft || repo.inserted[0].ParentID != saProjectID || repo.inserted[0].CreatedBy != saEmail {
+		t.Errorf("inserted = %+v, want one draft under the project, recorded as the caller", repo.inserted)
+	}
+	// A deployment file has no project draft.
+	req.Kind = domain.StoredAttachmentDeployment
+	if _, err := newStoredSvc(newFakeStoredRepo()).InitiateUpload(saCtx(t, saEmail), req); err == nil {
+		t.Error("a deployment attachment must not accept projectId")
+	}
+}
+
+func TestValidateReportDrafts(t *testing.T) {
+	ids := []string{saReportA}
+	t.Run("a stored draft of the caller passes, looked up as the system", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.reportDrafts = []domain.StoredAttachmentRow{reportRow(saReportA)}
+		if err := newStoredSvc(repo).ValidateReportDrafts(context.Background(), saProjectID, saEmail, ids); err != nil {
+			t.Fatalf("ValidateReportDrafts: %v", err)
+		}
+		if c := repo.reportDraftCall; c.project != saProjectID || c.email != saEmail || len(c.ids) != 1 {
+			t.Errorf("repo call = %+v", c)
+		}
+	})
+	t.Run("only drafts from the last 24 hours are looked up", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.reportDrafts = []domain.StoredAttachmentRow{reportRow(saReportA)}
+		svc := newStoredSvc(repo)
+		if err := svc.ValidateReportDrafts(context.Background(), saProjectID, saEmail, ids); err != nil {
+			t.Fatal(err)
+		}
+		if want := saNow.Add(-24 * time.Hour); !repo.reportDraftNotBefore.Equal(want) {
+			t.Errorf("notBefore = %v, want %v: an older draft is on its way to the cleanup and must not be linked", repo.reportDraftNotBefore, want)
+		}
+	})
+	t.Run("a file that is not the caller's, not stored or already linked is refused", func(t *testing.T) {
+		err := newStoredSvc(newFakeStoredRepo()).ValidateReportDrafts(context.Background(), saProjectID, saEmail, ids)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("err = %v, want a ValidationError", err)
+		}
+	})
+	t.Run("no caller email is refused", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.reportDrafts = []domain.StoredAttachmentRow{reportRow(saReportA)}
+		if err := newStoredSvc(repo).ValidateReportDrafts(context.Background(), saProjectID, "", ids); err == nil {
+			t.Error("a draft cannot be proven to be the caller's without an email")
+		}
+	})
+	t.Run("too many and bad ids are refused", func(t *testing.T) {
+		svc := newStoredSvc(newFakeStoredRepo())
+		many := make([]string, MaxCreateAttachments+1)
+		for i := range many {
+			many[i] = fmt.Sprintf("%08d-3333-4333-8333-333333333333", i)
+		}
+		if err := svc.ValidateReportDrafts(context.Background(), saProjectID, saEmail, many); err == nil {
+			t.Error("more than the limit must be refused")
+		}
+		if err := svc.ValidateReportDrafts(context.Background(), saProjectID, saEmail, []string{"nope"}); err == nil {
+			t.Error("a non-UUID id must be refused")
+		}
+	})
+	t.Run("no ids is fine", func(t *testing.T) {
+		if err := newStoredSvc(newFakeStoredRepo()).ValidateReportDrafts(context.Background(), saProjectID, saEmail, nil); err != nil {
+			t.Errorf("err = %v", err)
+		}
+	})
+}
+
+func TestLinkReportDrafts(t *testing.T) {
+	repo := newFakeStoredRepo()
+	repo.reportLinkWant = []string{saReportA}
+	svc := newStoredSvc(repo)
+	if err := svc.LinkReportDrafts(context.Background(), saParentID, saProjectID, saEmail, []string{saReportA}); err != nil {
+		t.Fatalf("LinkReportDrafts: %v", err)
+	}
+	c := repo.reportLinkCall
+	if c.calls != 1 || c.workItem != saParentID || c.project != saProjectID || c.email != saEmail || !c.sys {
+		t.Errorf("repo call = %+v: want the new work item, project and author, as the system", c)
+	}
+	// A link that takes fewer files than named is an error for the caller to log.
+	repo.reportLinkWant = nil
+	if err := svc.LinkReportDrafts(context.Background(), saParentID, saProjectID, saEmail, []string{saReportA}); err == nil {
+		t.Error("linking none of the named files must be reported")
 	}
 }

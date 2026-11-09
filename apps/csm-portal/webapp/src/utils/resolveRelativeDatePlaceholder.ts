@@ -127,6 +127,44 @@ export function resolveRelativeDatePlaceholderToDate(value: string, now: Date): 
   return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
 }
 
+/** "this month", "last month", "next month", "the month 3 months ago". */
+function periodPhrase(unit: "month" | "quarter", n: number): string {
+  if (n === 0) return `this ${unit}`;
+  if (n === -1) return `last ${unit}`;
+  if (n === 1) return `next ${unit}`;
+  return n < 0 ? `the ${unit} ${-n} ${unit}s ago` : `the ${unit} ${n} ${unit}s ahead`;
+}
+
+/**
+ * A relative-date placeholder in words, for showing a filter to a person:
+ * "Today", "30 days ago", "Start of last month", "End of this quarter". The
+ * same wording as the Cases list's `RELATIVE_DATE_PRESETS`, so a widget's
+ * placeholder reads the same wherever it is shown. `undefined` for anything
+ * {@link resolveRelativeDatePlaceholder} would not resolve.
+ */
+export function describeRelativeDatePlaceholder(value: string): string | undefined {
+  // Validity is the resolver's: anything it rejects is not described either.
+  if (relativeDay(value, new Date()) === undefined) return undefined;
+  const [, name, argStr] = RELATIVE_DATE_PLACEHOLDER_PATTERN.exec(value) ?? [];
+  const n = Number(argStr);
+  switch (name) {
+    case "today":
+      return "Today";
+    case "daysAgo":
+      return n === 0 ? "Today" : `${n} ${n === 1 ? "day" : "days"} ago`;
+    case "startOfMonth":
+      return `Start of ${periodPhrase("month", n)}`;
+    case "endOfMonth":
+      return `End of ${periodPhrase("month", n)}`;
+    case "startOfQuarter":
+      return `Start of ${periodPhrase("quarter", n)}`;
+    case "endOfQuarter":
+      return `End of ${periodPhrase("quarter", n)}`;
+    default:
+      return undefined;
+  }
+}
+
 /** The local calendar day a placeholder names, or `undefined` when `value` is not one. */
 function relativeDay(value: string, now: Date): Date | undefined {
   const match = RELATIVE_DATE_PLACEHOLDER_PATTERN.exec(value);

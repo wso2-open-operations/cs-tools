@@ -38,8 +38,11 @@ import (
 )
 
 type caseService struct {
-	repo     repository.CaseRepository
-	userRepo repository.UserRepository
+	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
+	// ask for deleted attachments in a list (SearchAttachmentsRequest.IncludeDeleted).
+	csmPortalClientID string
+	repo              repository.CaseRepository
+	userRepo          repository.UserRepository
 	// projectContactRepo backs updateCaseWatchList's project-membership
 	// validation (see that method's own doc comment) — never nil for a
 	// Postgres-backed caseService (routes.go always constructs and passes
@@ -227,6 +230,25 @@ func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 // in routes.go) keeps working completely unchanged. slaEngine may itself be
 // nil (config.CSMSLAEngineEnabled == false, or no database configured at
 // all) -- that's the normal "engine turned off" case, not an error.
+func WithDeletedAttachmentsForCSMPortal(svc CaseService, csmPortalClientID string) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.csmPortalClientID = csmPortalClientID
+	}
+	return svc
+}
+
+// mayListDeletedAttachments is whether this search may include deleted
+// attachments: the request asks AND the caller is the CSM portal backend, which
+// sets the flag only for a portal admin (decided from the person's token roles
+// there, the same trust the admin delete uses). Any other caller's request for
+// it is ignored.
+func (s *caseService) mayListDeletedAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) bool {
+	if !req.IncludeDeleted || s.csmPortalClientID == "" {
+		return false
+	}
+	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
+}
+
 func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
 	if cs, ok := svc.(*caseService); ok {
 		cs.slaEngine = slaEngine
@@ -733,8 +755,36 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// Postgres.
 	s.fillServiceRequestText(ctx, &req)
 
+	// The description's inline images were uploaded as drafts before this record
+	// existed. Checked BEFORE anything is created, so a bad request leaves nothing
+	// half-created. Nothing runs for a description with no image in it.
+	descImageEmail := ""
+	if descriptionImagesApply(ctx, req) {
+		var err error
+		descImageEmail, err = validateDescriptionImages(ctx, s.imageLinker, req.ProjectID, req.Description)
+		if err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+	}
+
+	// The files uploaded before this record (a security report's report) are checked
+	// the same way, and a security report must have one.
+	var linker any
+	if s.imageLinker != nil {
+		linker = s.imageLinker
+	}
+	reportEmail, err := validateReportDrafts(ctx, linker, req)
+	if err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
 	if s.snMirror != nil {
-		return s.createCaseSNFirst(ctx, req)
+		resp, err := s.createCaseSNFirst(ctx, req)
+		if err == nil {
+			linkDescriptionImages(ctx, s.imageLinker, resp.Case.ID, req.ProjectID, descImageEmail, req.Description)
+			linkReportDrafts(ctx, linker, resp.Case.ID, req, reportEmail)
+		}
+		return resp, err
 	}
 
 	// The pure-Postgres path below (no ServiceNow mirror at all) now writes
@@ -765,10 +815,15 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	// The repository links the report files inside the create transaction (as the
+	// uploader they were checked against), so a file taken by another create in between
+	// fails this one instead of leaving a case without it.
+	req.ReportDraftOwnerEmail = reportEmail
 	c, err := s.repo.CreateCase(ctx, req)
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered
@@ -1442,6 +1497,18 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// comment.created_by (migration 0040) is a free-text VARCHAR, not a
 	// UUID FK -- see CaseRepository.CreateCaseComment's own doc comment.
 	req.CreatedBy = actorEmail
+	// At most MaxInlineImagesPerContent images and the total size limit, checked
+	// before the comment is saved.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		if err := s.imageLinker.ValidateCommentImages(ctx, "", req.CaseID, actorEmail, req.Content); err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+	}
+	if s.imageLinker != nil {
+		if err := s.imageLinker.ValidateEmbeddedImages(ctx, actorEmail, req.Content); err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {
@@ -1721,6 +1788,12 @@ func (s *caseService) applyCustomerAttachmentStateTransition(ctx context.Context
 		return
 	}
 	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, caseID, "customer attachment")
+}
+
+// ApplyCustomerAttachmentStateTransition applies the customer-attachment rule to a case a stored attachment
+// (the work_item_attachment flow) has just been completed on. The caller has checked the attachment's kind.
+func (s *caseService) ApplyCustomerAttachmentStateTransition(ctx context.Context, caseID string) {
+	s.applyCustomerAttachmentStateTransition(ctx, domain.ReferenceTypeCase, caseID)
 }
 
 // moveToWaitingOnWSO2OnCustomerActivity is the rule shared by a customer's
@@ -3926,8 +3999,7 @@ func humanizeSnakeCase(value string) string {
 // from PostgreSQL only; the files are in Azure Blob Storage and are read by the
 // portal backends.
 //
-// referenceType "case" reads case_attachment (older uploads) and the
-// work_item_attachment rows of the same case as one deduplicated list (see
+// referenceType "case" reads the case's work_item_attachment rows (see
 // caseRepo.SearchCaseAttachments). "change_request", "incident" and
 // "conversation" are work_item subtypes and read work_item_attachment through
 // CaseRepository.SearchWorkItemAttachments; "deployment" reads
@@ -3975,6 +4047,9 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 		total       int
 		err         error
 	)
+	if s.mayListDeletedAttachments(ctx, req) {
+		ctx = repository.WithDeletedAttachments(ctx)
+	}
 	if isCase {
 		attachments, total, err = s.repo.SearchCaseAttachments(ctx, req.ReferenceID, req.Pagination)
 	} else {
@@ -4333,4 +4408,16 @@ func (s *caseService) SubmitCaseFeedback(ctx context.Context, id string, req dom
 			CreatedOn: created.CreatedOn,
 		},
 	}, nil
+}
+
+// descriptionImagesApply reports whether a create request's description images
+// are checked and linked. Everyone is checked, with one exception: an
+// announcement created with no user behind it (the scheduled auto-publish, which
+// copies an announcement request's description to one case per project). There is
+// no author to own a draft, so its image references could never pass, and refusing
+// them would stop the announcement from being published at all. They are left as
+// written (nothing is linked, as before description images existed). A caller with
+// a token, and every other case type, is always checked.
+func descriptionImagesApply(ctx context.Context, req domain.CreateCaseRequest) bool {
+	return !(req.Type == "announcement" && callerEmailBestEffort(ctx) == "")
 }

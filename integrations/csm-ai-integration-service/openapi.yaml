@@ -130,9 +130,19 @@ components:
           description: The model's sentence when it declined the request.
         usage:
           type: object
+          description: >-
+            The model call's token counts. The input is in three parts: inputTokens is the input
+            that was neither read from nor written to the prompt cache (mostly the user message,
+            once the system prompt is cached), and the two cache counts are the rest.
           properties:
             inputTokens:
               type: integer
+            cacheCreationInputTokens:
+              type: integer
+              description: Input written to the prompt cache (the system prompt, on a call that found no cache).
+            cacheReadInputTokens:
+              type: integer
+              description: Input read from the prompt cache (the system prompt, on a call within the cache's lifetime).
             outputTokens:
               type: integer
     Error:

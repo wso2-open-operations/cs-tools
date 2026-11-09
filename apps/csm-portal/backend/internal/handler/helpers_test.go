@@ -1136,10 +1136,20 @@ func (m *mockEntityConfigurationItemClient) SearchConfigurationItems(ctx context
 // ----- mock entity time-card client -----
 
 type mockEntityTimeCardClient struct {
-	searchTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
-	createTimeCardFn  func(ctx context.Context, body []byte) ([]byte, error)
-	updateTimeCardFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
-	deleteTimeCardFn  func(ctx context.Context, id string) ([]byte, error)
+	searchTimeCardsFn    func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
+	createTimeCardFn     func(ctx context.Context, body []byte) ([]byte, error)
+	updateTimeCardFn     func(ctx context.Context, id string, body []byte) ([]byte, error)
+	deleteTimeCardFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+// AggregateTimeCards calls aggregateTimeCardsFn when set, else answers an
+// empty aggregate (no groups, zero totals).
+func (m *mockEntityTimeCardClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateTimeCardsFn != nil {
+		return m.aggregateTimeCardsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0,"othersMinutes":0,"totalMinutes":0}`), nil
 }
 
 func (m *mockEntityTimeCardClient) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {

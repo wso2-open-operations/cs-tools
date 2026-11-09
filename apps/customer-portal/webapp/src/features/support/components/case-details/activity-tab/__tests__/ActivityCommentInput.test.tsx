@@ -105,7 +105,11 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onImageUpload,
     onPasteError,
     onAttachmentClick,
+    resetTrigger,
+    attachments,
   }: {
+    resetTrigger?: number;
+    attachments?: File[];
     onAttachmentClick?: () => void;
     onPasteError?: (reason: "size" | "type" | "count") => void;
     onChange?: (html: string) => void;
@@ -137,6 +141,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
       <button type="button" onClick={() => onPasteError?.("count")}>
         report too many images
       </button>
+      {/* What the editor was told: how often it was reset, and the files it lists. */}
+      <span data-testid="editor-reset">{resetTrigger}</span>
+      <span data-testid="editor-files">{attachments?.length ?? 0}</span>
       {overlayElement}
     </div>
   ),
@@ -251,6 +258,20 @@ describe("ActivityCommentInput", () => {
     });
   });
 
+  describe("a comment takes one attachment", () => {
+    it("refuses to open the picker once a file is attached, and says why", () => {
+      renderInput("case-001");
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      fireEvent.click(screen.getByRole("button", { name: "pick file" }));
+      expect(screen.getByTestId("editor-files").textContent).toBe("1");
+
+      // A second attempt shows the reason instead of a picker.
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      expect(screen.getByText(/Only one file allowed/)).toBeTruthy();
+      expect(screen.getByTestId("editor-files").textContent).toBe("1");
+    });
+  });
+
   describe("the comment and the attached files are sent separately", () => {
     const attachAndType = (html: string) => {
       fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
@@ -278,6 +299,47 @@ describe("ActivityCommentInput", () => {
       expect(await screen.findByText(/The comment was not posted \(Comments are closed\.\)/)).toBeTruthy();
       // The file went through, so it is no longer queued.
       expect(screen.queryByRole("button", { name: /send comment/i })).not.toBeDisabled();
+    });
+
+    it("empties the editor as soon as the comment is posted, while the file is still uploading", async () => {
+      let finishUpload!: () => void;
+      mockAttachmentUpload.mockImplementation(
+        () => new Promise((resolve) => (finishUpload = () => resolve({ id: "att-1", status: "COMPLETE" }))),
+      );
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.(),
+      );
+      renderInput("case-001");
+      attachAndType("<p>see the file</p>");
+      await send();
+
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(1));
+      // The upload has not ended, yet the editor was reset and no longer lists the file.
+      await waitFor(() => expect(screen.getByTestId("editor-reset").textContent).toBe("1"));
+      expect(screen.getByTestId("editor-files").textContent).toBe("0");
+      finishUpload();
+    });
+
+    it("puts a file that did not upload back, once the comment is posted and the editor emptied", async () => {
+      mockAttachmentUpload.mockRejectedValue(new Error("The upload was interrupted."));
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.(),
+      );
+      renderInput("case-001");
+      attachAndType("<p>see the file</p>");
+      await send();
+
+      expect(await screen.findByText(/"notes\.txt": The upload was interrupted\./)).toBeTruthy();
+      // The editor was reset, but the failed file is attached again so Send uploads only it.
+      expect(screen.getByTestId("editor-reset").textContent).toBe("1");
+      await waitFor(() => expect(screen.getByTestId("editor-files").textContent).toBe("1"));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /send comment/i })).not.toBeDisabled(),
+      );
+      mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
+      fireEvent.click(screen.getByRole("button", { name: /send comment/i }));
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(2));
+      expect(mockMutate).toHaveBeenCalledTimes(1);
     });
 
     it("posts the comment even when the file cannot be uploaded, and keeps the file attached", async () => {
@@ -440,7 +502,7 @@ describe("ActivityCommentInput", () => {
         screen.getByRole("button", { name: "report too many images" }),
       );
       expect(
-        await screen.findByText("A comment can have at most 5 images."),
+        await screen.findByText("A comment or description can have at most 5 images."),
       ).toBeInTheDocument();
     });
   });

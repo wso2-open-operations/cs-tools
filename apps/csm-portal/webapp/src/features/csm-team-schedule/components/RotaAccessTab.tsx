@@ -19,7 +19,9 @@ import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { memberFamiliesOf, useChangeRotaAccess, useRotaAccess, type RotaAccessChange } from "../api/useRotaAccess";
+import { useScheduleAssignmentsByMonth } from "../api/useTeamSchedule";
 import type { RotaAdminGrant, RotaFamily, RotaMarkerGrant, ScheduleTeam } from "../types";
+import { monthPieces } from "../utils/rota";
 import { teamDisplayName } from "../utils/teamDisplayName";
 import RotaReminderSettings from "./RotaReminderSettings";
 import ScheduleSkeleton from "./ScheduleSkeleton";
@@ -46,8 +48,8 @@ interface Props {
  *
  * And who is on each team: a CSM admin adds and removes any team's members, a
  * rota admin their own group's. Leads are not made here, and a lead (for a
- * rota admin) or anyone with upcoming turns or a Case Alerts tier is not
- * removed -- the server refuses it and says why.
+ * rota admin) or anyone with a Case Alerts tier is not removed -- the server
+ * refuses it and says why. Their upcoming turns on the team go with them.
  *
  * The server decides who may change what and answers with it (canManage); the
  * page only offers what it says. Every change saves the moment it is made.
@@ -167,8 +169,9 @@ export default function RotaAccessTab({ teams: synced }: Props): JSX.Element {
         <section className="ra-sec" aria-labelledby="ra-members-h">
           <h3 id="ra-members-h">Team members</h3>
           <p className="cp-note">
-            Add {family} staff to a team, or take them off it. Someone with upcoming turns or a Case Alerts tier is
-            removed only once those are moved to someone else{canAdmins ? "" : ", and a team lead only by a CSM admin"}.
+            Add {family} staff to a team, or take them off it. Their upcoming turns on that team are removed with them.
+            Someone with a Case Alerts tier is removed only once it is given to someone else
+            {canAdmins ? "" : ", and a team lead only by a CSM admin"}.
           </p>
           <MemberTable
             teams={teams.filter((t) => t.family === family)}
@@ -513,6 +516,7 @@ function MemberTable({
                   {asking ? (
                     <>
                       <span className="ra-mem-q">Remove {who} from {team.name}?</span>
+                      <UpcomingTurnsNote userId={m.userId} teamKey={team.key} teamName={team.name} />
                       <span className="ra-mem-acts">
                         <button
                           type="button"
@@ -558,5 +562,57 @@ function MemberTable({
         )}
       </div>
     </div>
+  );
+}
+
+/** How far ahead the remove confirm looks for turns: the rota is planned a
+ *  month or two ahead, so six months holds everything in practice. */
+const UPCOMING_TURNS_MONTHS = 6;
+
+/**
+ * Says, in the remove confirm, which of the person's turns on the team go with
+ * them: the server deletes every turn on the team that has not ended yet when
+ * somebody is taken off it, and that cannot be undone. Read only while the
+ * confirm is open, one month per request (the rota read's cap). The server's
+ * deletion does not depend on this count; a failed read only drops the number.
+ */
+function UpcomingTurnsNote({
+  userId,
+  teamKey,
+  teamName,
+}: {
+  userId: string;
+  teamKey: string;
+  teamName: string;
+}): JSX.Element {
+  const months = useMemo(() => {
+    const start = new Date();
+    const end = new Date(start.getFullYear(), start.getMonth() + UPCOMING_TURNS_MONTHS, start.getDate());
+    return monthPieces(start, end);
+  }, []);
+  const read = useScheduleAssignmentsByMonth({ userId, teamKeys: [teamKey] }, months);
+  // Taken once, when the confirm opens: what "upcoming" means for this answer.
+  const [now] = useState(() => Date.now());
+  if (read.isLoading) {
+    return <span className="ra-mem-turns">Checking their upcoming turns on {teamName}…</span>;
+  }
+  if (read.isError || !read.data) {
+    return <span className="ra-mem-turns">Their upcoming turns on {teamName} will be removed too.</span>;
+  }
+  const upcoming = read.data.assignments
+    .filter((a) => a.engineer.userId === userId && a.teamKey === teamKey && Date.parse(a.endsAt) > now)
+    .sort((a, b) => a.rotaDate.localeCompare(b.rotaDate));
+  if (upcoming.length === 0) {
+    return <span className="ra-mem-turns">They have no upcoming turns on {teamName}.</span>;
+  }
+  const last = new Date(`${upcoming[upcoming.length - 1].rotaDate}T00:00:00`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+  const turns = upcoming.length === 1 ? "turn" : "turns";
+  return (
+    <span className="ra-mem-turns ra-mem-turns-warn">
+      Their {upcoming.length} upcoming {turns} on {teamName} (until {last}) will be removed too. This cannot be undone.
+    </span>
   );
 }

@@ -29,11 +29,12 @@ import {
 } from "@wso2/oxygen-ui";
 import { ListChecks } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { Link as RouterLink } from "react-router";
+import { Link as RouterLink, useLocation } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { incidentRelatedTabPath } from "@features/csm-operations/utils/incidents";
 import { useSearchIncidentTasks } from "@features/csm-operations/api/useSearchIncidentTasks";
 import RefreshButton from "@components/RefreshButton";
+import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
 
 const INCIDENT_TASKS_COLUMNS = ["Task", "State", "Assignment group", "Assigned to"];
 
@@ -52,6 +53,16 @@ export function IncidentTasksWidget({ incidentId }: IncidentTasksWidgetProps): J
     useSearchIncidentTasks(incidentId);
   const navigate = useNavTransition();
   const backPath = incidentRelatedTabPath(incidentId);
+  // The incident page's own state (e.g. `{ from: <incidents list>, parentState }`),
+  // read where that page reads it (its case tab's, when it is open in one), and
+  // handed to the task as `parentState` so Back from the task keeps the
+  // incident's own Back.
+  const routedState: unknown = useLocation().state;
+  const routeOverride = useCaseRouteOverride();
+  const taskState = {
+    from: backPath,
+    parentState: (routeOverride ? routeOverride.state : routedState) ?? null,
+  };
 
   const tasks = data?.tasks ?? [];
   const total = data?.total ?? tasks.length;
@@ -116,7 +127,7 @@ export function IncidentTasksWidget({ incidentId }: IncidentTasksWidgetProps): J
                     <TableRow
                       key={t.id}
                       hover
-                      onClick={() => navigate(taskPath, { state: { from: backPath } })}
+                      onClick={() => navigate(taskPath, { state: taskState })}
                       sx={{ cursor: "pointer" }}
                     >
                       <TableCell sx={{ maxWidth: 0, width: "45%" }}>
@@ -125,7 +136,7 @@ export function IncidentTasksWidget({ incidentId }: IncidentTasksWidgetProps): J
                         <Typography
                           component={RouterLink}
                           to={taskPath}
-                          state={{ from: backPath }}
+                          state={taskState}
                           variant="body2"
                           noWrap
                           title={label}

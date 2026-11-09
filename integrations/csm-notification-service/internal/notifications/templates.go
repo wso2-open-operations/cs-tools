@@ -678,7 +678,10 @@ func sanitizeRichTextMode(s string, budget *inlineImageBudget, keepStyles bool) 
 						// inline image ahead of the text it was inserted after,
 						// even though the underlying HTML keeps the original
 						// text-then-image source order — a real reported bug.
-						b.WriteString(`<br><img src="cid:` + contentID + `" alt="` + escapeHTML(alt) + `" style="display:block;max-width:100%;height:auto;margin:8px 0;"><br>`)
+						// A thumbnail, not the picture at its full size: 360x240 at most, the
+						// same size the portals' activity tabs show an inline image at. The
+						// picture itself is still attached in full.
+						b.WriteString(`<br><img src="cid:` + contentID + `" alt="` + escapeHTML(alt) + `" style="display:block;max-width:360px;max-height:240px;width:auto;height:auto;margin:8px 0;border:1px solid #e0e0e0;border-radius:4px;"><br>`)
 					}
 				}
 				continue

@@ -68,6 +68,7 @@ import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
 import CsmDashboardsLayout from "@features/csm-dashboard/pages/CsmDashboardsLayout";
 import MyDashboardsPage from "@features/csm-custom-dashboards/pages/MyDashboardsPage";
 import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDashboardsPage";
+import OpenDashboardLinkPage from "@features/csm-custom-dashboards/pages/OpenDashboardLinkPage";
 import GenerateDashboardPage from "@features/csm-custom-dashboards/pages/GenerateDashboardPage";
 import EditCustomDashboardPage from "@features/csm-custom-dashboards/pages/EditCustomDashboardPage";
 import CsMonitorDashboardPage from "@features/csm-dashboard/pages/CsMonitorDashboardPage";
@@ -263,6 +264,8 @@ function LegacySettingsRedirect({ to }: { to: string }): JSX.Element {
   return <Navigate to={to} state={state} replace />;
 }
 
+/** The app's root: signals the boot loading screen once React has mounted,
+ * then renders the providers and every route. */
 export default function App(): JSX.Element {
   // Signals the index.html boot loading screen that React has mounted and
   // taken over rendering, so it can remove itself. Not gated on auth/data —
@@ -499,6 +502,9 @@ export default function App(): JSX.Element {
                     <Route path="dashboard/my/:dashboardId" element={<MyDashboardsPage />} />
                     <Route path="dashboard/shared" element={<SharedDashboardsPage />} />
                     <Route path="dashboard/shared/:dashboardId" element={<SharedDashboardsPage />} />
+                    {/* A dashboard's link (DASHBOARD_LINK_PATH): opens it and
+                        replaces itself with the dashboard. */}
+                    <Route path="dashboard/shared/link/:linkId" element={<OpenDashboardLinkPage />} />
                   </Route>
                   {/* Generating a dashboard is its own page, outside the tab
                       strip (its Back button goes first); static "new"

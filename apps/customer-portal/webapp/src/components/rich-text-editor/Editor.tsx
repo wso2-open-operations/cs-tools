@@ -31,6 +31,7 @@ import {
   Tooltip,
 } from "@wso2/oxygen-ui";
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import EditorUploadProgress, { type EditorUpload } from "@components/rich-text-editor/EditorUploadProgress";
 import {
   getFileIcon,
   scrollElement,
@@ -47,6 +48,7 @@ import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import {
   insertImageWithUpload,
+  remainingImageBytes,
   remainingImageSlots,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/localImageUpload";
@@ -239,9 +241,11 @@ const ClipboardImagePlugin = ({
 
       const ALLOWED_PASTE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
       const maxPasteImageSize = inlineImageMaxBytes();
-      // Only the upload-on-paste flow is capped; base64 images have a server cap.
+      // Only the upload-on-paste flow is capped here; base64 images have a server cap.
+      // Read once: an image added in this loop may not be in the editor yet.
       let slots = handlers.onImageUpload ? remainingImageSlots(editor) : Infinity;
-      let countReported = false;
+      let bytesLeft = handlers.onImageUpload ? remainingImageBytes(editor) : Infinity;
+      let refusalReported = false;
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
           event.preventDefault();
@@ -260,12 +264,14 @@ const ClipboardImagePlugin = ({
           }
 
           if (handlers.onImageUpload) {
-            if (slots <= 0) {
-              if (!countReported) handlers.onPasteError?.("count");
-              countReported = true;
+            const refusal = slots <= 0 ? "count" : file.size > bytesLeft ? "size" : null;
+            if (refusal) {
+              if (!refusalReported) handlers.onPasteError?.(refusal);
+              refusalReported = true;
               continue;
             }
             slots -= 1;
+            bytesLeft -= file.size;
             insertImageWithUpload(editor, file, "Pasted Image", handlers.onImageUpload);
             continue;
           }
@@ -332,6 +338,9 @@ const DEFAULT_EDITOR_CONFIG = {
 const Editor = ({
   onAttachmentClick,
   attachments = [],
+  maxAttachments,
+  uploads = [],
+  uploadsWaiting = 0,
   onAttachmentRemove,
   disabled = false,
   value,
@@ -354,6 +363,12 @@ const Editor = ({
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
+  /** The most attachments the editor takes; the attach button is off once it holds that many. */
+  maxAttachments?: number;
+  /** Files a sent comment is still uploading; shown inside the editor with their progress. */
+  uploads?: EditorUpload[];
+  /** Files queued behind the running uploads. */
+  uploadsWaiting?: number;
   onAttachmentRemove?: (index: number) => void;
   disabled?: boolean;
   value?: string;
@@ -460,6 +475,13 @@ const Editor = ({
           <>
             <Toolbar
               onAttachmentClick={onAttachmentClick}
+              attachDisabledReason={
+                maxAttachments !== undefined && attachments.length >= maxAttachments
+                  ? maxAttachments === 1
+                    ? "Only one file allowed."
+                    : `Only ${maxAttachments} files allowed.`
+                  : undefined
+              }
               disabled={disabled}
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
@@ -585,6 +607,7 @@ const Editor = ({
             {overlayElement}
           </Box>
         )}
+        <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
         {attachments.length > 0 && (
           <>
             <Divider sx={{ my: 1.5 }} />

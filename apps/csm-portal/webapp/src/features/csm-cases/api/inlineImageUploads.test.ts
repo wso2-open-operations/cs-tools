@@ -32,6 +32,7 @@ import {
   queueInlineImage,
   releaseInlineImages,
   resolveInlineImageSources,
+  uploadImagesBeforeCreate,
   uploadQueuedImages,
 } from "@features/csm-cases/api/inlineImageUploads";
 
@@ -207,5 +208,101 @@ describe("releaseInlineImages", () => {
     await running;
 
     expect(inspectInlineImages(img(src))).toEqual({ ...none, unknown: 1 });
+  });
+});
+
+describe("uploadImagesBeforeCreate", () => {
+  const PROJECT = "33333333-3333-4333-8333-333333333333";
+  const ID_A = "AAAAAAAA-1111-4111-8111-111111111111";
+  const ID_B = "BBBBBBBB-2222-4222-8222-222222222222";
+
+  it("does nothing for HTML without a local image", async () => {
+    const html = '<p>text</p><img src="/aaaaaaaa-1111-4111-8111-111111111111">';
+
+    await expect(uploadImagesBeforeCreate(api, PROJECT, html)).resolves.toBe(html);
+    await expect(uploadImagesBeforeCreate(api, undefined, "<p>x</p>")).resolves.toBe("<p>x</p>");
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("uploads every local image under the project (no parent) and rewrites each src to its id", async () => {
+    const a = queueInlineImage(file);
+    const b = queueInlineImage(file);
+    upload.mockImplementation((async (_api: unknown, args: { file: File }) => ({
+      id: args === upload.mock.calls[0][1] ? ID_A : ID_B,
+    })) as never);
+    const html = `<p>x</p>${img(a)}${img(b)}${img(a)}`;
+
+    const out = await uploadImagesBeforeCreate(api, PROJECT, html);
+
+    expect(upload).toHaveBeenCalledTimes(2);
+    for (const call of upload.mock.calls) {
+      expect(call[1]).toMatchObject({ type: "comment", projectId: PROJECT });
+      expect(call[1]).not.toHaveProperty("parentId");
+    }
+    expect(out).not.toContain("blob:");
+    expect(out).toBe(
+      `<p>x</p>${img(`/${ID_A.toLowerCase()}`)}${img(`/${ID_B.toLowerCase()}`)}${img(`/${ID_A.toLowerCase()}`)}`,
+    );
+  });
+
+  it("starts the uploads together, not one after another", async () => {
+    const a = queueInlineImage(file);
+    const b = queueInlineImage(file);
+    let running = 0;
+    let peak = 0;
+    upload.mockImplementation((async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await Promise.resolve();
+      running -= 1;
+      return { id: ID_A };
+    }) as never);
+
+    await uploadImagesBeforeCreate(api, PROJECT, img(a) + img(b));
+
+    expect(peak).toBe(2);
+  });
+
+  it("throws the first failure, and a retry uploads only the image that failed", async () => {
+    const a = queueInlineImage(file);
+    const b = queueInlineImage(file);
+    const html = img(a) + img(b);
+    upload.mockImplementation((async () => {
+      const call = upload.mock.calls.length;
+      if (call === 2) throw new Error("Storage is busy.");
+      return { id: ID_A };
+    }) as never);
+
+    await expect(uploadImagesBeforeCreate(api, PROJECT, html)).rejects.toThrow("Storage is busy.");
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(inspectInlineImages(html)).toEqual({ ...none, queued: 1 });
+
+    upload.mockClear();
+    upload.mockResolvedValue({ id: ID_B } as never);
+    const out = await uploadImagesBeforeCreate(api, PROJECT, html);
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(out).toBe(img(`/${ID_A.toLowerCase()}`) + img(`/${ID_B.toLowerCase()}`));
+  });
+
+  it("uploads again when the project changed after an earlier success", async () => {
+    const a = queueInlineImage(file);
+    upload.mockResolvedValue({ id: ID_A } as never);
+    await uploadImagesBeforeCreate(api, PROJECT, img(a));
+    upload.mockClear();
+
+    await uploadImagesBeforeCreate(api, "44444444-4444-4444-8444-444444444444", img(a));
+
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses local images without a project, and ones this page did not make", async () => {
+    const a = queueInlineImage(file);
+
+    await expect(uploadImagesBeforeCreate(api, undefined, img(a))).rejects.toThrow(/project/);
+    await expect(
+      uploadImagesBeforeCreate(api, PROJECT, img("blob:https://csm.example.com/other")),
+    ).rejects.toThrow(/Remove it/);
+    expect(upload).not.toHaveBeenCalled();
   });
 });

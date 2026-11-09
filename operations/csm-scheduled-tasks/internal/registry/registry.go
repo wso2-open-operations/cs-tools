@@ -82,10 +82,17 @@ type Task struct {
 	// task is configured with, never loosen it, and returns an error for a
 	// value it cannot honour. Nil means the task takes no narrowing flags and a
 	// run-now of it runs Handler as is.
+	//
+	// The one deliberate exception is time_card_report (--project-key, --to,
+	// --cc): its flags may WIDEN a run, to a project that is not configured or
+	// to an audience that is not the project's contacts. They exist so an
+	// operator can send one customer's report on demand, or a safe test send to
+	// themselves, which a configured list cannot express. Every address is
+	// validated, the list is capped, and the run-now WARN says what changed.
 	RunNowNarrow func(o RunNowOptions) (handler func(ctx context.Context) error, settings []any, err error)
 	// RunNowFlags names the run-now flags RunNowNarrow honours ("--dry-run",
 	// "--limit", "--states", "--from-date", "--to-date", "--recipients",
-	// "--cc"). A flag on the command line that is not listed is refused for
+	// "--cc", "--to", "--project-key"). A flag on the command line that is not listed is refused for
 	// this task rather than ignored.
 	RunNowFlags []string
 }
@@ -106,4 +113,8 @@ type RunNowOptions struct {
 	// Recipients and Cc replace the audience of one manual run; nil means not
 	// given. Only report tasks that list them in RunNowFlags take them.
 	Recipients, Cc []string
+	// ProjectKey names the one project a manual run covers, whether or not it is
+	// configured; empty means not given. Only time_card_report takes it, and for
+	// that task Recipients carries its --to list.
+	ProjectKey string
 }

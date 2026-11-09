@@ -373,7 +373,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/InitiateAttachmentUploadResponse'
         "400":
-          description: 'Invalid request: type, parentId, name, contentType, or sizeBytes over the limit.'
+          description: 'Invalid request: type, parentId / projectId (exactly one for a comment image), name, contentType, or sizeBytes over the limit.'
           content:
             application/json:
               schema:
@@ -385,7 +385,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: The parent does not exist or the caller may not see it.
+          description: The parent (or, with projectId, the project) does not exist or the caller may not see it.
           content:
             application/json:
               schema:
@@ -657,13 +657,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/inline/{id}/relocated:
+    post:
+      summary: >-
+        Record that a portal backend moved an inline image's file to the key
+        GET /attachments/inline/{id}/location named in relocateTo. Only that key is
+        accepted (anything else is 400); a repeated call, once the row has the key,
+        is 204; an image that has nothing to move is 409. The file is moved by the
+        backend: this service never touches one.
+      operationId: postInlineImageRelocated
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storageKey]
+              properties:
+                storageKey:
+                  type: string
+                  description: The key the file was moved to; must equal relocateTo.
+      responses:
+        "204":
+          description: The image now points at the new key.
+        "400":
+          description: The id is not a UUID, or storageKey is not where this image belongs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found, not visible to the caller, not stored, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: This image does not need to be moved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: The image was deleted or removed (errorCode attachment_removed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/uploads/cleanup:
     post:
       summary: >-
         Clear out uploads that were started and never confirmed. Each upload still
         PENDING after 24 hours is marked FAILED (lists hide it and a later confirm
         refuses it), at most 200 per run, and the comment images never linked to a
-        comment are returned in orphans for the caller to remove. Internal callers
+        comment, and the security report files never linked to a case (25 hours old),
+        are returned in orphans for the caller to remove. Internal callers
         only. Meant to be called on a schedule.
       operationId: cleanupAttachmentUploads
       security:
@@ -685,10 +744,14 @@ paths:
                     type: integer
                     description: Comment images stored but never linked to a comment within 24 hours, removed.
                   imagesFailed: {type: integer}
+                  reportDraftsRemoved:
+                    type: integer
+                    description: Security report files stored but never linked to a case, with no file to remove, marked DELETED.
+                  reportDraftsFailed: {type: integer}
                   orphans:
                     type: array
                     description: >-
-                      The unlinked comment images whose files the caller must
+                      The unlinked comment images and security report files whose files the caller must
                       remove from storage. They are not
                       marked DELETED yet, so every run lists them again until the
                       caller removes the files and acknowledges them with
@@ -696,11 +759,15 @@ paths:
                       keys are internal and must never reach a browser.
                     items:
                       type: object
-                      required: [id, storageKey]
+                      required: [id, type, storageKey]
                       properties:
                         id:
                           type: string
                           format: uuid
+                        type:
+                          type: string
+                          enum: [comment, work_item]
+                          description: comment for an unlinked comment image, work_item for an unlinked security report file.
                         storageKey:
                           type: string
         "403":
@@ -719,7 +786,7 @@ paths:
   /attachments/uploads/cleanup/acknowledge:
     post:
       summary: >-
-        Acknowledge orphaned comment images whose files the caller has removed from
+        Acknowledge orphaned comment images and security report files whose files the caller has removed from
         storage. POST /attachments/uploads/cleanup hands the orphans over without
         marking them DELETED. An id is marked DELETED only if it is still an orphan (an
         unlinked comment image past the cleanup age); one that was linked to a
@@ -786,8 +853,8 @@ paths:
         Delete an attachment (soft delete). Marks the attachment DELETED; the row
         stays, with who deleted it and when, and no list includes it afterwards.
         The file is not removed here: the portal backend removes it. Only the person
-        who uploaded the attachment can delete it, and not once its work item is
-        closed. Repeating a delete that already succeeded answers the same. An image
+        who uploaded the attachment can delete it, or a portal admin through the CSM
+        portal backend (asAdmin), and not once its work item is closed. Repeating a delete that already succeeded answers the same. An image
         embedded in a comment cannot be deleted on its own.
       operationId: deleteStoredAttachment
       security:
@@ -4175,6 +4242,127 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /users/me/dashboards/{id}/link:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved dashboards.
+      description: >
+        Postgres-only. Owner only: a dashboard that is not the caller's
+        (missing, or another user's) is not found. Off for every dashboard
+        until its owner turns it on.
+      operationId: getCustomDashboardLink
+      responses:
+        "200":
+          description: The dashboard's link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Turn on the link to one of the caller's saved dashboards.
+      description: >
+        Postgres-only. No request body. Owner only. Any internal staff member
+        who opens the link (POST /users/me/shared-dashboards/link) can then
+        view the dashboard, view only, while the link stays on. Turning on a
+        link that is already on keeps the same link (200).
+      operationId: enableCustomDashboardLink
+      responses:
+        "200":
+          description: The dashboard's link, on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Turn off the link to one of the caller's saved dashboards.
+      description: >
+        Postgres-only. Owner only. Everyone who had the dashboard only
+        through the link loses it, and the old link stops working; turning
+        it on again makes a new link. Turning off a link that is off is not
+        an error (204).
+      operationId: disableCustomDashboardLink
+      responses:
+        "204":
+          description: The link is off.
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/me/shared-dashboards:
     get:
       summary: List the dashboards other users shared with the caller.
@@ -4203,6 +4391,57 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found — no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/shared-dashboards/link:
+    post:
+      summary: Open a saved dashboard's link.
+      description: >
+        Postgres-only, internal staff only. The link id is in the body, not
+        the path, so it stays out of access logs. From then on the dashboard
+        is listed under GET /users/me/shared-dashboards while the link stays
+        on, unless the caller owns it: through the link (sharedViaLink true),
+        or through a person or team share while the caller has one, and
+        through the link again if that share goes. Opening it again changes
+        nothing. A link that is unknown or off, and a caller who is not
+        internal staff, are not found.
+      operationId: openCustomDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenCustomDashboardLinkRequest'
+      responses:
+        "200":
+          description: The dashboard the link opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedCustomDashboardLink'
+        "400":
+          description: Bad request — the body is not valid, linkId is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the link does not open a dashboard (unknown, or turned off), the caller is not internal staff, or no platform user matches the token email.
           content:
             application/json:
               schema:
@@ -4385,7 +4624,7 @@ paths:
         Asgardeo admin acting through apps/csm-portal/backend, when
         reassigning a team lead whose paging number needs to be set) can
         update someone else's profile. Both fields are optional but at least
-        one must be present; phone has the same trim/length/clear rules as
+        one must be present; phone has the same trim/E.164/length/clear rules as
         PATCH /users/me. The incident call-escalation ladder dials this
         number for a team's lead, so fine-grained authorization beyond
         "internal service" (e.g. admin-only) is the caller's own job.
@@ -4412,7 +4651,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PatchUserMeResponse'
         '400':
-          description: Bad request (malformed id, neither field present, or phone too long).
+          description: Bad request (malformed id, neither field present, or phone too long or not E.164).
           content:
             application/json:
               schema:
@@ -6118,6 +6357,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/{id}/time-cards/report:
+    get:
+      summary: Get a project's approved time cards aggregated per case for a date range.
+      description: >-
+        Postgres data source only; the other data source returns 400. Counts
+        only APPROVED time cards of the project's cases whose work date falls
+        within from..to, inclusive on both ends. Every figure, billable,
+        non-billable and patching included, is scoped to the project. All
+        durations are MINUTES, unrounded; the caller formats them. Per case,
+        totalMinutes is the sum of the five per-activity minute columns,
+        billableMinutes covers cards flagged billable, nonBillableMinutes covers
+        the rest (so billable + non-billable = total), and patchingMinutes is the
+        patching share, which is already included in the total. Cases are
+        ordered by case number ascending. Contact details are never returned. A
+        range with no approved cards returns 200 with an empty cases array and
+        zero totals.
+
+
+        To identify the project by its key rather than its id, resolve the id
+        first with POST /projects/search (searchQuery set to the key; take the
+        result whose key matches exactly), then call this endpoint with that id.
+      operationId: getProjectTimeCardReport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: First work date to include (yyyy-MM-dd).
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Last work date to include (yyyy-MM-dd). Must not be before from.
+      responses:
+        "200":
+          description: The project's per-case time-card report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectTimeCardReportResponse'
+        "400":
+          description: >-
+            Bad request: from or to is missing or not a yyyy-MM-dd date, from is
+            after to, or the data source does not support the report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found, or not visible to the caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}/change-requests/stats:
     get:
       summary: Get a project's change-request statistics.
@@ -7579,6 +7889,13 @@ paths:
     post:
       summary: Create a new support case.
       operationId: createCase
+      description: >-
+        If the description shows inline images (src="/<attachmentId>") they must
+        be draft images uploaded to the request's project by the caller
+        (POST /attachments/upload with projectId): at most 5, within
+        INLINE_IMAGES_TOTAL_MAX_MB together, none still a blob: URL; otherwise
+        a 400 and nothing is created. They are linked to the new record right
+        after it exists. data:image base64 images are still accepted as before.
       requestBody:
         required: true
         content:
@@ -9168,6 +9485,13 @@ paths:
     post:
       summary: Create a change request.
       operationId: createChangeRequest
+      description: >-
+        If the description shows inline images (src="/<attachmentId>") they must
+        be draft images uploaded to the request's project by the caller
+        (POST /attachments/upload with projectId): at most 5, within
+        INLINE_IMAGES_TOTAL_MAX_MB together, none still a blob: URL; otherwise
+        a 400 and nothing is created. They are linked to the new record right
+        after it exists. data:image base64 images are still accepted as before.
       requestBody:
         required: true
         content:
@@ -10047,6 +10371,62 @@ paths:
             Not found — the schedule routes are registered only when a database
             pool is configured, so an entity-service running without one has no
             such path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
           content:
             application/json:
               schema:
@@ -11763,7 +12143,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The person still has upcoming turns on the team, or holds its Case Alerts responder tier; the message says which.
+          description: The person holds the team's Case Alerts responder tier. Their upcoming turns on the team are removed with the membership, never a reason to refuse.
           content:
             application/json:
               schema:
@@ -11917,7 +12297,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The person is on both teams, holds a lead role, has upcoming turns, or holds a responder tier on the source team; the message says which.
+          description: The person is on both teams, holds a lead role, holds a responder tier on the source team, or is already moved to the target by a tag on the roster; the message says which. Their upcoming turns on the source team are removed with the move.
           content:
             application/json:
               schema:
@@ -18609,6 +18989,54 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /time-cards/aggregate:
+    post:
+      summary: >-
+        Count time cards and sum their logged minutes per state, user,
+        project or day (Postgres data sources only).
+      description: >-
+        Matches exactly the time cards POST /time-cards/search matches for the
+        same filters. A "day" grouping requires filters.startDate and
+        filters.endDate, a window of at most 31 days (both inclusive), and
+        returns one bucket per day of that window in date order, days without
+        cards included at zero;
+        maxGroups and measure do not apply to it. Refused with 400 when the
+        configured data source has no time card aggregate.
+      operationId: aggregateTimeCards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateTimeCardsRequest'
+      responses:
+        "200":
+          description: >-
+            Time card counts and summed minutes per value of groupBy
+            (groups[].totalMinutes, othersMinutes and totalMinutes are set).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/time-cards/search:
     post:
       summary: Search time cards rolled up by case (ServiceNow data source only).
@@ -22420,10 +22848,12 @@ components:
           type: string
           nullable: true
           description: >
-            The user's phone number. Surrounding whitespace is trimmed and no format is
-            enforced. The 32-character limit applies after trimming; longer is a 400. An
-            empty (or whitespace-only) value clears it. Omit or send null to leave it
-            unchanged. Accepted but ignored by the alternate (non-PostgreSQL) data source.
+            The user's phone number. Surrounding whitespace is trimmed, then a non-empty
+            value must be E.164 (`+` and 8 to 15 digits, first digit not 0, no spaces or
+            separators, e.g. `+14155552671`); anything else, including longer than 32
+            characters, is a 400. Values are not normalized. An empty (or whitespace-only)
+            value clears it. Omit or send null to leave it unchanged. Accepted but ignored
+            by the alternate (non-PostgreSQL) data source.
       anyOf:
         - required: [timeZone]
           properties:
@@ -22784,6 +23214,9 @@ components:
         updatedOn:
           type: string
           format: date-time
+        phone:
+          type: string
+          description: The user's phone number. Omitted when none is stored.
         roles:
           type: array
           uniqueItems: true
@@ -25572,11 +26005,25 @@ components:
             payload for one — and is rejected with 400 if supplied here.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
+            - `security_report_analysis`: security report; requires `subject`, `description` and, for a user caller, at least one report file in `attachmentIds` (uploaded first as a draft, see `attachmentIds`). A machine caller (no user token) is not held to the minimum.
             - `engagement`: professional-services engagement (e.g. migration, onboarding); requires `subject`, `description`, `engagementType`, `engagementPaymentType`.
         projectId:
           type: string
           format: uuid
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Files uploaded BEFORE this request as draft work item attachments of
+            `projectId` (`POST /attachments/upload` with `type: work_item` and
+            `projectId`, then the chunks and the confirm). Every id must be a COMPLETE
+            draft uploaded to this project by the caller and not linked yet, else 400
+            and nothing is created. They are linked to the new case right after it is
+            created. Required (at least one) for a `security_report_analysis` created
+            by a user, so a security report never exists without its report file.
         deploymentId:
           type: string
           format: uuid
@@ -26831,6 +27278,11 @@ components:
         count:
           type: integer
           description: Number of matching records in this bucket.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on this bucket's time cards, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     AggregateResponse:
       type: object
@@ -26854,6 +27306,17 @@ components:
           description: >-
             Total number of records matching the request's filters; always
             equals the sum of groups' counts plus othersCount.
+        othersMinutes:
+          type: integer
+          description: >-
+            The minutes counterpart of othersCount. Set only by
+            POST /time-cards/aggregate.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on every matching time card, in minutes; equals the
+            sum of groups' totalMinutes plus othersMinutes. Set only by
+            POST /time-cards/aggregate.
 
     AddCaseTagRequest:
       type: object
@@ -29334,6 +29797,35 @@ components:
           enum: [asc, desc]
           description: Sort direction. Defaults to desc when omitted.
 
+    AggregateTimeCardsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchTimeCardsFilters'
+        groupBy:
+          type: string
+          enum: [state, user, project, day]
+          description: >-
+            What to group by. "day" groups by work date and requires
+            filters.startDate and filters.endDate (at most 31 days, both
+            inclusive). A card with no project has no "project" bucket;
+            it is counted in othersCount and othersMinutes.
+        measure:
+          type: string
+          enum: [count, minutes]
+          default: count
+          description: >-
+            What the buckets are ranked by, and so which survive maxGroups.
+            Ignored for "day".
+        maxGroups:
+          type: integer
+          minimum: 0
+          default: 10
+          description: >-
+            How many buckets to return; the rest are folded into othersCount
+            and othersMinutes. Ignored for "day".
+
     SearchTimeCardsRequest:
       type: object
       properties:
@@ -30785,6 +31277,31 @@ components:
           description: Percentage of the person's time the allocation takes.
         startDate: { type: string, format: date }
         endDate: { type: string, format: date }
+        dismissedDates:
+          type: array
+          items: { type: string, format: date }
+          description: >
+            The days in the window the allocation was taken off this person's roster;
+            absent when there are none.
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     ScheduleEngagementAllocationsResponse:
       type: object
       required: [allocations, count]
@@ -32968,9 +33485,41 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CustomDashboardTeamShare'
+    CustomDashboardLink:
+      type: object
+      required: [enabled, openedBy]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether anyone internal with the link may view the dashboard.
+        linkId:
+          type: string
+          format: uuid
+          description: The id in the link; absent while the link is off. A new one each time the link is turned on.
+        openedBy:
+          type: integer
+          description: How many people have opened the link since it was turned on (and so see the dashboard as shared with them). Who they are is not listed.
+    OpenCustomDashboardLinkRequest:
+      type: object
+      required: [linkId]
+      additionalProperties: false
+      properties:
+        linkId:
+          type: string
+          format: uuid
+    OpenedCustomDashboardLink:
+      type: object
+      required: [dashboardId, own]
+      properties:
+        dashboardId:
+          type: string
+          format: uuid
+        own:
+          type: boolean
+          description: True when the caller owns the dashboard (read it as one of their own); otherwise read it with GET /users/me/shared-dashboards/{id}.
     SharedCustomDashboardSummary:
       type: object
-      required: [id, name, owner, sharedViaTeam, sharedOn, updatedOn]
+      required: [id, name, owner, sharedViaTeam, sharedViaLink, sharedOn, updatedOn]
       properties:
         id:
           type: string
@@ -32986,7 +33535,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
           nullable: true
-          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name). sharedOn is that share's date.
+          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name). sharedOn is that share's date.
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link (POST /users/me/shared-dashboards/link); false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -33004,7 +33556,7 @@ components:
             $ref: '#/components/schemas/SharedCustomDashboardSummary'
     SharedCustomDashboard:
       type: object
-      required: [id, name, definition, owner, sharedViaTeam, sharedOn, updatedOn]
+      required: [id, name, definition, owner, sharedViaTeam, sharedViaLink, sharedOn, updatedOn]
       properties:
         id:
           type: string
@@ -33023,7 +33575,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
           nullable: true
-          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name). sharedOn is that share's date.
+          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name). sharedOn is that share's date.
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link (POST /users/me/shared-dashboards/link); false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -36779,6 +37334,85 @@ components:
         nonBillableHours:
           type: number
           format: double
+
+    ProjectTimeCardReportResponse:
+      type: object
+      description: The response for GET /projects/{id}/time-cards/report. All durations are minutes.
+      required: [project, from, to, totals, cases]
+      properties:
+        project:
+          type: object
+          required: [id, key, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            key:
+              type: string
+              description: The project's key.
+            name:
+              type: string
+              nullable: true
+        from:
+          type: string
+          format: date
+          description: The first work date included (yyyy-MM-dd), as requested.
+        to:
+          type: string
+          format: date
+          description: The last work date included (yyyy-MM-dd), as requested.
+        totals:
+          $ref: '#/components/schemas/ProjectTimeCardReportTotals'
+        cases:
+          type: array
+          description: One row per case with approved time in the range, ordered by case number ascending.
+          items:
+            $ref: '#/components/schemas/ProjectTimeCardReportCase'
+
+    ProjectTimeCardReportTotals:
+      type: object
+      description: Project-wide sums of the case rows, in minutes.
+      required: [totalMinutes, billableMinutes, nonBillableMinutes, patchingMinutes]
+      properties:
+        totalMinutes:
+          type: integer
+        billableMinutes:
+          type: integer
+        nonBillableMinutes:
+          type: integer
+        patchingMinutes:
+          type: integer
+          description: Patching share of totalMinutes.
+
+    ProjectTimeCardReportCase:
+      type: object
+      description: One case's approved time in the range, in minutes.
+      required: [caseId, caseNumber, externalCaseId, caseType, totalMinutes, billableMinutes, nonBillableMinutes, patchingMinutes]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        caseNumber:
+          type: string
+        externalCaseId:
+          type: string
+          nullable: true
+          description: The case's external (WSO2) case id.
+        caseType:
+          type: string
+          nullable: true
+          description: The case's type, lowercase (for example case, service_request, engagement).
+        totalMinutes:
+          type: integer
+        billableMinutes:
+          type: integer
+          description: Minutes on cards flagged billable.
+        nonBillableMinutes:
+          type: integer
+          description: Minutes on cards not flagged billable.
+        patchingMinutes:
+          type: integer
+          description: Patching share of totalMinutes.
 
     ProjectChangeRequestStatsResponse:
       type: object
@@ -42275,8 +42909,15 @@ components:
 
     InitiateAttachmentUploadRequest:
       type: object
-      required: [type, parentId, name, sizeBytes]
+      required: [type, name, sizeBytes]
       additionalProperties: false
+      description: >-
+        Send parentId, except for a comment image that is a draft for the
+        description of a record that does not exist yet, or a work item
+        attachment that is a draft report for a case that does not exist yet:
+        then send projectId instead. For types comment and work_item exactly
+        one of parentId and projectId is required (both or neither is a 400);
+        for deployment parentId is required and projectId is refused.
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentKind'
@@ -42286,6 +42927,25 @@ components:
           description: >-
             The work item (types work_item and comment) or the deployment (type
             deployment) the file belongs to.
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            Types comment and work_item only, instead of parentId. The project the draft
+            is uploaded to. The caller must be a REGISTERED member of it (internal callers
+            are unrestricted); a project the caller cannot see is a 404. A draft is private
+            to its uploader until the record it belongs to is created.
+
+            - work_item: a security report's file. It is listed nowhere and linked to the
+              case by `POST /cases` with `attachmentIds`. Its key is
+              csm/projects/<project>/workitems/drafts/attachments/... and stays valid
+              after linking.
+            - comment: a description image. The create request's description then refers
+              to it as src="/<attachmentId>" and entity-service links it (work_item_id
+              set, description_image true) when the record exists. Its key is
+              csm/projects/<project>/workitems/drafts/inline_attachments/... and stays
+              valid after linking. Draft images never linked within 24 hours are removed
+              by the upload cleanup; linked ones never are.
         name:
           type: string
           maxLength: 255
@@ -42299,8 +42959,12 @@ components:
           format: int64
           minimum: 1
           description: >-
-            The file's size. Checked against ATTACHMENT_MAX_BYTES (type comment:
-            INLINE_IMAGE_MAX_BYTES), and the uploaded file must match it.
+            The file's size. Checked against ATTACHMENT_MAX_MB (type comment:
+            INLINE_IMAGES_TOTAL_MAX_MB, default 1 MB, so one image is at most
+            that big), and the uploaded file must match it. One comment or description may show at most 5 images and
+            at most INLINE_IMAGES_TOTAL_MAX_MB (default 1 MB) together; a
+            comment (create or edit) or a record whose description exceeds
+            either is a 400 and nothing is saved.
 
     InitiateAttachmentUploadResponse:
       type: object
@@ -42332,6 +42996,13 @@ components:
           type: string
           format: uuid
           description: The attachment's id.
+        asAdmin:
+          type: boolean
+          description: >-
+            Set by the CSM portal backend, and only by it, when the person deleting
+            holds the portal's admin role: they may then delete an attachment they
+            did not upload. From any other caller the flag is ignored and the
+            uploader-only rule applies (403).
 
     ConfirmAttachmentUploadRequest:
       type: object
@@ -42432,6 +43103,25 @@ components:
         storageKey:
           type: string
           description: Where the file is stored. Absent when available is false.
+        relocateTo:
+          type: string
+          description: >-
+            Only on an inline image location, and only for a description image whose
+            file still sits in the project's drafts folder. The key it belongs under
+            now that it has a work item. The backend copies the file there, removes
+            the old one, then calls POST /attachments/inline/{id}/relocated. Internal,
+            like storageKey.
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            Only on an inline image location: the work item the image belongs to, or
+            the project while draft is true.
+        draft:
+          type: boolean
+          description: >-
+            Only on an inline image location: true for a description image whose
+            record does not exist yet (parentId is then the project).
 
     ConfirmAttachmentUploadResponse:
       type: object

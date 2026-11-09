@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { formatLimitMb, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { formatLimitMb, inlineImagesTotalMaxBytes } from "@config/attachmentLimitsConfig";
 
 /** Max height for Select menu lists backed by paginated APIs (~10 rows visible, scrollbar when more). */
 export const PAGINATED_SELECT_MENU_MAX_HEIGHT_PX = 320;
@@ -48,13 +48,19 @@ export const BANNER_RIGHT_GAP_PX = 24;
 
 export const ERROR_UNSUPPORTED_TYPE =
   "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment.";
-/** Most images one comment draft may hold when images are uploaded on paste. */
-export const MAX_COMMENT_IMAGES = 5;
+/** Most inline images one comment or description may hold. */
+export const INLINE_IMAGE_MAX_COUNT = 5;
+/** @deprecated Use INLINE_IMAGE_MAX_COUNT. */
+export const MAX_COMMENT_IMAGES = INLINE_IMAGE_MAX_COUNT;
 /** The refusal for adding an image to a draft that already holds the maximum. */
 export function imageCountExceededMessage(): string {
-  return `A comment can have at most ${MAX_COMMENT_IMAGES} images.`;
+  return `A comment or description can have at most ${INLINE_IMAGE_MAX_COUNT} images.`;
+}
+/** The refusal for adding an image that takes the draft's images over the total limit. */
+export function imageTotalSizeExceededMessage(): string {
+  return `Images in one comment or description can't exceed ${formatLimitMb(inlineImagesTotalMaxBytes())} MB in total.`;
 }
 /** The refusal for an image over the configured inline image limit. */
 export function imageSizeExceededMessage(): string {
-  return `Image exceeds the maximum allowed size of ${formatLimitMb(inlineImageMaxBytes())} MB.`;
+  return imageTotalSizeExceededMessage();
 }

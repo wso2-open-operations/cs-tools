@@ -16,12 +16,14 @@
 
 import { useCallback } from "react";
 import { useBackendApi } from "@api/backend/client";
-import { downloadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
+import { downloadWithProgress } from "@features/csm-cases/api/trackedDownload";
 import type { DeploymentAttachment } from "@features/csm-projects/types/csmProjects";
 
 /**
  * Returns a function that downloads a deployment attachment: it is streamed
  * through the portal backend (which checks access) and saved under its own name.
+ * Its progress is in the shared store, so the row shows the percentage and a
+ * Cancel button; a download the person cancels ends quietly.
  */
 export function useDownloadDeploymentAttachment(): (
   attachment: DeploymentAttachment,
@@ -30,7 +32,15 @@ export function useDownloadDeploymentAttachment(): (
 
   return useCallback(
     async (attachment: DeploymentAttachment): Promise<void> => {
-      await downloadEntityAttachment(api, { type: "deployment", id: attachment.id });
+      // The name and size are the attachment's own: they name the saved file and give the
+      // total size even when the browser hides the response's Content-Disposition and
+      // Content-Range, and a small size skips the save dialog.
+      await downloadWithProgress(api, {
+        type: "deployment",
+        id: attachment.id,
+        name: attachment.name,
+        size: attachment.sizeBytes,
+      });
     },
     [api],
   );

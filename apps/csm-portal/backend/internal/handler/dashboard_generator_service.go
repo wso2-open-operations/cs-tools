@@ -78,7 +78,10 @@ func (g *serviceDashboardGenerator) Generate(ctx context.Context, prompt string,
 		return GeneratedDashboard{}, serviceGenerateError(err)
 	}
 	slog.InfoContext(ctx, "dashboard generate: model replied",
-		"inputTokens", res.Usage.InputTokens, "outputTokens", res.Usage.OutputTokens, "candidates", len(res.Candidates))
+		"inputTokens", res.Usage.InputTokens,
+		"cacheCreationInputTokens", res.Usage.CacheCreationInputTokens,
+		"cacheReadInputTokens", res.Usage.CacheReadInputTokens,
+		"outputTokens", res.Usage.OutputTokens, "candidates", len(res.Candidates))
 	if res.Declined != "" {
 		return GeneratedDashboard{}, &generateDeclinedError{Reason: res.Declined}
 	}

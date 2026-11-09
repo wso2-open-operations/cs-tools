@@ -2104,6 +2104,44 @@ type ProjectTimeCardStatsResponse struct {
 	NonBillableHours float64 `json:"nonBillableHours"`
 }
 
+// ProjectTimeCardReportProject identifies the project a time-card report is for.
+type ProjectTimeCardReportProject struct {
+	ID   string  `json:"id"`
+	Key  string  `json:"key"`
+	Name *string `json:"name"`
+}
+
+// ProjectTimeCardReportTotals is the project-wide sum of a time-card report's
+// per-case rows. All figures are minutes.
+type ProjectTimeCardReportTotals struct {
+	TotalMinutes       int `json:"totalMinutes"`
+	BillableMinutes    int `json:"billableMinutes"`
+	NonBillableMinutes int `json:"nonBillableMinutes"`
+	PatchingMinutes    int `json:"patchingMinutes"`
+}
+
+// ProjectTimeCardReportCase is one case's row in a time-card report. All
+// figures are minutes.
+type ProjectTimeCardReportCase struct {
+	CaseID             string  `json:"caseId"`
+	CaseNumber         string  `json:"caseNumber"`
+	ExternalCaseID     *string `json:"externalCaseId"`
+	CaseType           *string `json:"caseType"`
+	TotalMinutes       int     `json:"totalMinutes"`
+	BillableMinutes    int     `json:"billableMinutes"`
+	NonBillableMinutes int     `json:"nonBillableMinutes"`
+	PatchingMinutes    int     `json:"patchingMinutes"`
+}
+
+// ProjectTimeCardReportResponse is the response for GET /projects/{id}/time-cards/report.
+type ProjectTimeCardReportResponse struct {
+	Project ProjectTimeCardReportProject `json:"project"`
+	From    string                       `json:"from"`
+	To      string                       `json:"to"`
+	Totals  ProjectTimeCardReportTotals  `json:"totals"`
+	Cases   []ProjectTimeCardReportCase  `json:"cases"`
+}
+
 // ProjectChangeRequestStatsResponse is the response for GET /projects/{id}/change-requests/stats.
 type ProjectChangeRequestStatsResponse struct {
 	TotalCount          int                    `json:"totalCount"`
@@ -3475,10 +3513,15 @@ type CaseGroup struct {
 // display form (identical to Key when the grouped field has no separate
 // label, e.g. an already-friendly account name). Count is the number of
 // matching records whose value of the grouped field falls in this bucket.
+//
+// TotalMinutes is set only by POST /time-cards/aggregate (the summed time
+// logged on the bucket's cards); every other aggregate leaves it nil, so
+// their responses carry no such field.
 type AggregateBucket struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Count int    `json:"count"`
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Count        int    `json:"count"`
+	TotalMinutes *int   `json:"totalMinutes,omitempty"`
 }
 
 // AggregateResponse is the shared result shape for every resource's dedicated
@@ -3488,10 +3531,16 @@ type AggregateBucket struct {
 // cap into a single count. TotalRecords is the total number of records
 // matching the request's filters, and always equals the sum of Groups'
 // counts plus OthersCount.
+//
+// OthersMinutes and TotalMinutes are the minute counterparts of OthersCount
+// and TotalRecords, set (like AggregateBucket.TotalMinutes) only by
+// POST /time-cards/aggregate.
 type AggregateResponse struct {
-	Groups       []AggregateBucket `json:"groups"`
-	OthersCount  int               `json:"othersCount"`
-	TotalRecords int               `json:"totalRecords"`
+	Groups        []AggregateBucket `json:"groups"`
+	OthersCount   int               `json:"othersCount"`
+	TotalRecords  int               `json:"totalRecords"`
+	OthersMinutes *int              `json:"othersMinutes,omitempty"`
+	TotalMinutes  *int              `json:"totalMinutes,omitempty"`
 }
 
 // CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a
@@ -3963,8 +4012,12 @@ type Variable struct {
 // id, number, and internal_id are auto-generated; state defaults to open.
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
 // For type "service_request": catalogId, catalogItemId, and variables are required.
-// For type "security_report_analysis": subject and description are required. Files are
-// uploaded after the case exists, through the stored-attachment routes.
+// For type "security_report_analysis": subject, description and at least one report file
+// are required. The files are uploaded BEFORE the case, as drafts of its project
+// (POST /attachments/upload with type work_item and projectId), and named here in
+// attachmentIds; they are linked to the case in the same request, so a case never
+// exists without its report. Machine callers (no user token) are not held to the
+// minimum.
 type CreateCaseRequest struct {
 	CreatedBy         string        `json:"-"`
 	Type              string        `json:"type"`
@@ -3979,6 +4032,14 @@ type CreateCaseRequest struct {
 	CatalogID     string     `json:"catalogId"`
 	CatalogItemID string     `json:"catalogItemId"`
 	Variables     []Variable `json:"variables"`
+	// AttachmentIDs are draft work item attachments the caller uploaded to ProjectID
+	// before this request (see the type's comment): checked before the case is
+	// created and linked to it right after. At most service.MaxCreateAttachments.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	// ReportDraftOwnerEmail is the email AttachmentIDs were checked against, set by the
+	// service (never read from the request). The plain-Postgres create links the files in
+	// its own transaction as that uploader, atomically with the case.
+	ReportDraftOwnerEmail string `json:"-"`
 	// Optional fields
 	RelatedCaseID string `json:"relatedCaseId"`
 	// ResolvedRelatedCaseID is the related-case id already checked against
@@ -4379,6 +4440,10 @@ const (
 	// AttachmentStatusComplete marks a row whose file is confirmed present in
 	// Azure Blob Storage (or was migrated there).
 	AttachmentStatusComplete AttachmentStatus = "complete"
+	// AttachmentStatusDeleted marks a row a person deleted. It is listed only
+	// when the CSM portal backend asks for deleted rows (see
+	// SearchAttachmentsRequest.IncludeDeleted); it has no file and no link.
+	AttachmentStatusDeleted AttachmentStatus = "deleted"
 )
 
 // Attachment represents a file attachment linked to a reference entity.
@@ -4402,6 +4467,10 @@ type Attachment struct {
 	StorageKey *string `json:"storageKey,omitempty"`
 	// Status is the lifecycle state -- see AttachmentStatus.
 	Status AttachmentStatus `json:"status,omitempty"`
+	// DeletedOn and DeletedBy say when and by whom a deleted attachment was
+	// deleted. Set only on a row whose Status is AttachmentStatusDeleted.
+	DeletedOn *time.Time     `json:"deletedOn,omitempty"`
+	DeletedBy *UserReference `json:"deletedBy,omitempty"`
 }
 
 // ReferenceType identifies the entity type an attachment is associated with.
@@ -4420,6 +4489,11 @@ type SearchAttachmentsRequest struct {
 	ReferenceID   string        `json:"referenceId"`
 	ReferenceType ReferenceType `json:"referenceType"`
 	Pagination    Pagination    `json:"pagination"`
+	// IncludeDeleted asks for deleted attachments too, listed after the
+	// others. Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID),
+	// which sets it for a portal admin; from any other caller it is ignored.
+	// Not read for "deployment".
+	IncludeDeleted bool `json:"includeDeleted,omitempty"`
 }
 
 // SearchAttachmentsResponse is the paginated result of an attachment search.
@@ -5418,6 +5492,45 @@ type SearchTimeCardsRequest struct {
 	Filters    *SearchTimeCardsFilters `json:"filters,omitempty"`
 	SortBy     TimeCardSort            `json:"sortBy"`
 	Pagination Pagination              `json:"pagination"`
+}
+
+// Time card aggregate groupings (AggregateTimeCardsRequest.GroupBy).
+const (
+	TimeCardGroupByState   = "state"
+	TimeCardGroupByUser    = "user"
+	TimeCardGroupByProject = "project"
+	TimeCardGroupByDay     = "day"
+)
+
+// Time card aggregate measures (AggregateTimeCardsRequest.Measure): what the
+// buckets are ranked by, and so which ones survive the MaxGroups cap.
+const (
+	TimeCardMeasureCount   = "count"
+	TimeCardMeasureMinutes = "minutes"
+)
+
+// MaxTimeCardAggregateDays caps a "day" grouping's window (startDate to
+// endDate, both inclusive): one bucket per day, so the window is the
+// response size.
+const MaxTimeCardAggregateDays = 31
+
+// AggregateTimeCardsRequest is the request body for POST /time-cards/aggregate:
+// the time cards POST /time-cards/search would match for Filters, counted and
+// their logged minutes summed per value of GroupBy.
+//
+// GroupBy is one of the TimeCardGroupBy* values (required). "day" requires
+// both Filters.StartDate and Filters.EndDate, a window of at most
+// MaxTimeCardAggregateDays (both inclusive), and returns one bucket per day of
+// that window in date order, including days with no cards; MaxGroups and
+// Measure do not apply to it.
+// Every other grouping returns the top MaxGroups buckets (default 10) ranked
+// by Measure ("count", the default, or "minutes"), the rest folded into
+// OthersCount / OthersMinutes.
+type AggregateTimeCardsRequest struct {
+	Filters   *SearchTimeCardsFilters `json:"filters,omitempty"`
+	GroupBy   string                  `json:"groupBy"`
+	Measure   string                  `json:"measure,omitempty"`
+	MaxGroups int                     `json:"maxGroups,omitempty"`
 }
 
 // TimeCardRef is a lightweight reference used for user, approvedBy, and project fields.
@@ -8887,12 +9000,42 @@ type SearchSLAStatusResponse struct {
 // named ranges rather than an open gte/lte pair (unlike the unrelated,
 // generic taskSLABusinessElapsedPercent case-search filter in
 // internal/service/sla_filters.go): the CSM Portal's SLA Engine admin table
-// offers exactly these four buckets, not an arbitrary range.
+// offers exactly these eleven buckets, not an arbitrary range. Ten percent
+// wide each (0-10, 10-20, ... 90-100), plus a final open-ended "over100" for
+// an already-breached clock whose elapsed time keeps climbing past its own
+// duration -- replaced the original four coarser buckets (under50/50to75/
+// 75to100/over100) at explicit request for finer-grained filtering. Each
+// bucket's own lower bound is inclusive, its upper bound exclusive, except
+// the final 90to100 bucket (inclusive of exactly 100%) and over100 (strictly
+// greater than 100%) -- same boundary convention the original four buckets
+// already used, just applied at every ten-point step instead of only three.
 const (
-	SLAElapsedBucketUnder50 = "under50"
-	SLAElapsedBucket50To75  = "50to75"
-	SLAElapsedBucket75To100 = "75to100"
+	SLAElapsedBucketUnder10 = "under10"
+	SLAElapsedBucket10To20  = "10to20"
+	SLAElapsedBucket20To30  = "20to30"
+	SLAElapsedBucket30To40  = "30to40"
+	SLAElapsedBucket40To50  = "40to50"
+	SLAElapsedBucket50To60  = "50to60"
+	SLAElapsedBucket60To70  = "60to70"
+	SLAElapsedBucket70To80  = "70to80"
+	SLAElapsedBucket80To90  = "80to90"
+	SLAElapsedBucket90To100 = "90to100"
 	SLAElapsedBucketOver100 = "over100"
+)
+
+// SLA status/stage filter keys -- GET /sla-status's own status query param,
+// and SLAStatusFilters.Stage's accepted values. Named after the same three
+// states the CSM Portal's SLA Engine table already renders as status chips
+// (scanSLAStatus's own IsPaused/HasBreached fields) rather than the raw
+// sla_stage_enum label: a clock can be IsPaused AND HasBreached at once (a
+// clock paused after its own wall-clock time ran out), which the UI already
+// shows as both chips together -- StatusPaused/StatusBreached are therefore
+// not mutually exclusive filter matches against the same row, same as the
+// chips aren't mutually exclusive display states.
+const (
+	SLAStatusInProgress = "in_progress"
+	SLAStatusPaused     = "paused"
+	SLAStatusBreached   = "breached"
 )
 
 // SLAStatusFilters narrows GET /sla-status's result set for the CSM Portal's
@@ -8915,12 +9058,18 @@ type SLAStatusFilters struct {
 	// product, or any other field: this is a case-identity lookup, not a
 	// general-purpose search box.
 	Search string
-	// ElapsedBucket is one of the four SLAElapsedBucket* constants above, or
-	// "" for no bucket filter. Applied AFTER the same business-day
-	// correction scanSLAStatus already applies to BusinessElapsedPercent --
-	// see SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for
-	// why this can't be a plain SQL WHERE/HAVING clause.
+	// ElapsedBucket is one of the SLAElapsedBucket* constants above, or ""
+	// for no bucket filter. Applied AFTER the same business-day correction
+	// scanSLAStatus already applies to BusinessElapsedPercent -- see
+	// SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for why
+	// this can't be a plain SQL WHERE/HAVING clause.
 	ElapsedBucket string
+	// Stage is one of the SLAStatus* constants above, or "" for no status
+	// filter. Matched against IsPaused/HasBreached, not the raw sla_stage_enum
+	// column, for the same reason ElapsedBucket isn't matched against the
+	// raw business_elapsed_percentage column -- see SearchActiveSLAStatuses'
+	// own doc comment.
+	Stage string
 }
 
 // SLAClockState is GET /sla-status/clock-state's response — the full,

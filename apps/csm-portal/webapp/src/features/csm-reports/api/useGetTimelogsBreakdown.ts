@@ -14,22 +14,42 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
-import type { TimeLogBreakdownDetails } from "@features/csm-reports/api/reportTypes";
+import type { TimeLogBreakdownDetails, TimelogsPeriodParams } from "@features/csm-reports/api/reportTypes";
 
-/** `GET /generate-timelogs-breakdown-report` — see the backend's internal/handler/reports.go. */
+/** Builds the request path; only set period params are sent so the backend default applies otherwise. */
+export function buildTimelogsBreakdownPath(projectId: string, period: TimelogsPeriodParams = {}): string {
+  const query = new URLSearchParams({ projectId });
+  if (period.allTime) {
+    query.set("allTime", "true");
+  } else {
+    if (period.from) query.set("from", period.from);
+    if (period.to) query.set("to", period.to);
+  }
+  return `/generate-timelogs-breakdown-report?${query.toString()}`;
+}
+
+/**
+ * `GET /generate-timelogs-breakdown-report` — see the backend's internal/handler/reports.go.
+ * The previous period's data stays visible while a new period loads.
+ */
 export function useGetTimelogsBreakdown(
   projectId: string | undefined,
+  period: TimelogsPeriodParams = {},
 ): UseQueryResult<TimeLogBreakdownDetails, Error> {
   const api = useBackendApi();
+  const from = period.allTime ? "" : (period.from ?? "");
+  const to = period.allTime ? "" : (period.to ?? "");
+  const allTime = Boolean(period.allTime);
 
   return useQuery<TimeLogBreakdownDetails, Error>({
-    queryKey: ["spl-timelogs-breakdown", projectId ?? ""],
+    queryKey: ["spl-timelogs-breakdown", projectId ?? "", from, to, allTime],
     queryFn: () =>
       api.get<TimeLogBreakdownDetails>(
-        `/generate-timelogs-breakdown-report?projectId=${encodeURIComponent(projectId ?? "")}`,
+        buildTimelogsBreakdownPath(projectId ?? "", { from, to, allTime }),
       ) as Promise<TimeLogBreakdownDetails>,
     enabled: Boolean(projectId),
+    placeholderData: keepPreviousData,
   });
 }

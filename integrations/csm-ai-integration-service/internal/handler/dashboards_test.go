@@ -56,10 +56,13 @@ func post(t *testing.T, h *DashboardHandler, body string) (int, map[string]any) 
 	return rec.Code, out
 }
 
+// TestGenerateReturnsTheCandidates: the generator gets the trimmed prompt, the
+// draft and the teams, and the 200 response carries the candidates and all
+// four token counts.
 func TestGenerateReturnsTheCandidates(t *testing.T) {
 	gen := &fakeGenerator{res: dashboards.Result{
 		Candidates:  []json.RawMessage{json.RawMessage(`{"displayName":"A"}`), json.RawMessage(`{"displayName":"B"}`)},
-		InputTokens: 10, OutputTokens: 2,
+		InputTokens: 10, CacheCreationInputTokens: 30, CacheReadInputTokens: 40, OutputTokens: 2,
 	}}
 	status, out := post(t, &DashboardHandler{generator: gen}, `{"prompt":"  Open cases by severity  ",
 		"draft":{"displayName":"Old"},"teams":[{"key":"rigel","name":"Rigel","family":"cre-abt","field":"creTeam"}]}`)
@@ -69,7 +72,8 @@ func TestGenerateReturnsTheCandidates(t *testing.T) {
 	if c, _ := out["candidates"].([]any); len(c) != 2 || out["declined"] != nil {
 		t.Errorf("body = %v, want two candidates and no decline", out)
 	}
-	if u, _ := out["usage"].(map[string]any); u["inputTokens"] != float64(10) || u["outputTokens"] != float64(2) {
+	if u, _ := out["usage"].(map[string]any); u["inputTokens"] != float64(10) || u["outputTokens"] != float64(2) ||
+		u["cacheCreationInputTokens"] != float64(30) || u["cacheReadInputTokens"] != float64(40) {
 		t.Errorf("usage = %v", out["usage"])
 	}
 	if gen.got.Prompt != "Open cases by severity" || string(gen.got.Draft) != `{"displayName":"Old"}` ||

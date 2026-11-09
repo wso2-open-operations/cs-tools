@@ -80,11 +80,16 @@ import { mergeRegister, $getNearestNodeOfType } from "@lexical/utils";
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_IMAGE_TYPES_LABEL,
-  MAX_COMMENT_IMAGES,
   MAX_COMMENT_IMAGES_MESSAGE,
   RICH_TEXT_BLOCK_TAGS,
 } from "@components/rich-text-editor/richTextConstants";
-import { countUploadedImages } from "@components/rich-text-editor/ImageNode";
+import {
+  imagePasteRefusalMessage,
+  inlineImageRefusal,
+  inlineImagesInEditor,
+  inlineImagesTotalMessage,
+  rememberInlineImageSize,
+} from "@components/rich-text-editor/inlineImageLimits";
 import { formatMegabytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
@@ -108,6 +113,7 @@ export type ToolbarVariant = "full" | "describeIssue";
 
 const Toolbar = ({
   onAttachmentClick,
+  attachDisabledReason,
   disabled = false,
   variant = "full",
   showKeyboardHint = false,
@@ -115,6 +121,8 @@ const Toolbar = ({
   imageUploader,
 }: {
   onAttachmentClick?: () => void;
+  /** Why attaching is off (the form is full): the button is disabled and says so. */
+  attachDisabledReason?: string;
   disabled?: boolean;
   variant?: ToolbarVariant;
   showKeyboardHint?: boolean;
@@ -281,38 +289,24 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      if (imageUploader) {
-        if (countUploadedImages(editor) >= MAX_COMMENT_IMAGES) {
-          showError(MAX_COMMENT_IMAGES_MESSAGE);
-          resetInput();
-          return;
-        }
-        const src = imageUploader(file);
-        editor.focus(() => {
-          editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });
-        });
+      if (!imageUploader) {
+        showError(imagePasteRefusalMessage("disabled"));
         resetInput();
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          editor.focus(() => {
-            editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-              src: reader.result as string,
-              altText: file.name,
-            });
-          });
-        }
+      const refusal = inlineImageRefusal(inlineImagesInEditor(editor), file.size);
+      if (refusal) {
+        showError(refusal === "count" ? MAX_COMMENT_IMAGES_MESSAGE : inlineImagesTotalMessage());
         resetInput();
-      };
-      reader.onerror = () => {
-        showError(
-          `Failed to read image file "${file.name}". Please try again.`,
-        );
-        resetInput();
-      };
-      reader.readAsDataURL(file);
+        return;
+      }
+      const src = imageUploader(file);
+      rememberInlineImageSize(src, file.size);
+      editor.focus(() => {
+        editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });
+      });
+      resetInput();
+      return;
     }
   };
 
@@ -841,31 +835,37 @@ const Toolbar = ({
 
           {!isDescribeIssue && (
             <>
-              <Tooltip title="Upload Image">
-                <ToggleButton size="small" component="label" value="image">
-                  <ImageIcon size={16} />
-                  <input
-                    ref={imageInputRef}
-                    type="file"
-                    hidden
-                    accept={ALLOWED_IMAGE_MIME_TYPES.join(",")}
-                    onChange={onImageUpload}
-                  />
-                </ToggleButton>
-              </Tooltip>
+              {imageUploader && (
+                <Tooltip title="Upload Image">
+                  <ToggleButton size="small" component="label" value="image">
+                    <ImageIcon size={16} />
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      hidden
+                      accept={ALLOWED_IMAGE_MIME_TYPES.join(",")}
+                      onChange={onImageUpload}
+                    />
+                  </ToggleButton>
+                </Tooltip>
+              )}
 
               {onAttachmentClick && (
-                <Tooltip title="Attach File">
-                  <ToggleButton
-                    size="small"
-                    value="attachment"
-                    onClick={() => {
-                      focusEditor();
-                      onAttachmentClick();
-                    }}
-                  >
-                    <Paperclip size={16} />
-                  </ToggleButton>
+                <Tooltip title={attachDisabledReason ?? "Attach File"}>
+                  <span>
+                    <ToggleButton
+                      size="small"
+                      value="attachment"
+                      disabled={!!attachDisabledReason}
+                      aria-label={attachDisabledReason ?? "Attach File"}
+                      onClick={() => {
+                        focusEditor();
+                        onAttachmentClick();
+                      }}
+                    >
+                      <Paperclip size={16} />
+                    </ToggleButton>
+                  </span>
                 </Tooltip>
               )}
             </>

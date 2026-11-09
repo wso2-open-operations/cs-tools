@@ -207,11 +207,50 @@ type githubSyncService struct {
 	// repoConfigs reads each repository's own mapping file. Nil (the
 	// default) leaves account_github_repo the only source, as before.
 	repoConfigs *githubRepoConfigs
+	// issueTemplates reads each repository's issue form labels. Set with WithGithubRepoConfig; nil splits on every ### heading.
+	issueTemplates *githubIssueTemplates
 	// snCases creates a service request in ServiceNow first, under
 	// dual-write, so it takes ServiceNow's CS number and WSO2 Case ID as a
 	// portal-created one does (github_sn_case.go). Nil writes Postgres only
 	// and numbers the record SR-GH-<n>. Set with WithServiceNowGithubCases.
 	snCases snGithubCaseAPI
+	// slaEngine registers the CSM SLA clocks for a service request created
+	// from an issue, as caseService.CreateCase does for one created in the
+	// portal. Nil (CSM_SLA_ENGINE_ENABLED off, or no database) registers
+	// none. Set with WithGithubSLAEngine.
+	slaEngine SLAEngineService
+}
+
+// WithGithubSLAEngine gives the sync the SLA clock engine, so a service
+// request created from a GitHub issue gets the same clocks one created in the
+// portal does. A no-op if svc is not a *githubSyncService; a nil engine (the
+// engine is disabled) leaves the sync registering no clocks.
+func WithGithubSLAEngine(svc GithubSyncService, e SLAEngineService) GithubSyncService {
+	if s, ok := svc.(*githubSyncService); ok && e != nil {
+		s.slaEngine = e
+	}
+	return svc
+}
+
+// registerServiceRequestClocks registers the SLA clocks for a service request
+// the sync just inserted, or found already inserted by an earlier or
+// concurrent delivery. Best-effort, as on every other creation path: the
+// record exists, so a failure is logged by the engine and never fails the
+// delivery. Idempotent: the engine registers a clock only when no active
+// (or already-completed) one exists for that record and policy, so running it
+// again on a redelivery adds nothing and repairs a registration that failed
+// the first time. It runs before the SR automation so a consumer reacting to
+// the sr.created event finds the clocks already there, the order the portal's
+// create path keeps for cases.
+func (s *githubSyncService) registerServiceRequestClocks(ctx context.Context, id string) {
+	if s.slaEngine == nil || id == "" {
+		return
+	}
+	// The engine writes the sla table as the system: a webhook delivery
+	// carries no user identity of its own.
+	ctx, cancel := context.WithTimeout(repository.WithSystemIdentity(ctx), applyCaseStateSLATimeout)
+	defer cancel()
+	s.slaEngine.RegisterCaseClocks(ctx, id, nil, "")
 }
 
 // WithServiceNowGithubCases makes the sync create each new service request in
@@ -437,6 +476,7 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		return Outcome{Action: "creation_prepared"}, nil
 	}
 	issue := snGithubIssueOf(p)
+	issue.Headings = s.issueHeadingsFor(ctx, p.Repository.Owner.Login, p.Repository.Name)
 	if existing != "" {
 		// The issue already produced a record. Its text is the source of
 		// truth, so an edit overwrites -- servicenow_update_case.yml re-sends
@@ -447,10 +487,10 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 			GitReference: p.Issue.HTMLURL,
 			Catalog:      catalog,
 			SRType:       srType,
-			Fields:       ExtractTemplateFields(p.Issue.Body),
+			Fields:       extractTemplateFields(p.Issue.Body, issue.Headings),
 		}
 		if s.snCases != nil {
-			update.ServiceNowDescription = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body), issue)
+			update.ServiceNowDescription = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
 		}
 		if err := s.mutate.UpdateFromIssue(ctx, existing, update); err != nil {
 			return Outcome{}, err
@@ -479,7 +519,7 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		Repository:   p.Repository.Name,
 		Catalog:      catalog,
 		SRType:       srType,
-		Fields:       ExtractTemplateFields(p.Issue.Body),
+		Fields:       extractTemplateFields(p.Issue.Body, issue.Headings),
 		CreatedBy:    p.Issue.User.Login,
 	}
 	in.Severity = githubTemplateSeverity(in.Fields["u_priority"])
@@ -508,7 +548,7 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		in.ServiceNowWSO2ID = res.WSO2CaseID
 		// The same text ServiceNow holds, so both stores read alike and the
 		// portal renders it as it renders every ServiceNow-numbered record.
-		in.Description = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body), issue)
+		in.Description = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
 	}
 
 	id, number, err := s.mutate.CreateServiceRequestFromIssue(ctx, in)
@@ -524,12 +564,15 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		if errors.Is(err, repository.ErrAlreadyExists()) {
 			slog.InfoContext(ctx, "github: issue already had a service request",
 				"serviceRequestId", id, "issue", p.Issue.Number)
+			// Idempotent: repairs a registration an earlier delivery missed.
+			s.registerServiceRequestClocks(ctx, id)
 			return Outcome{Action: "exists", ChangeRequestID: id}, nil
 		}
 		return Outcome{}, err
 	}
 	slog.InfoContext(ctx, "github: service request created from issue",
 		"serviceRequestId", id, "number", number, "issue", p.Issue.Number, "catalog", catalog)
+	s.registerServiceRequestClocks(ctx, id)
 	// Only for a new record: an issue that already had one ("exists" above)
 	// was announced when that record was created.
 	//

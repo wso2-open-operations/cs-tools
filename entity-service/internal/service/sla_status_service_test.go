@@ -350,3 +350,40 @@ func TestSLAStatusService_RequestRecalculation_PublishFailurePropagates(t *testi
 		t.Fatal("err = nil, want the publisher's error propagated")
 	}
 }
+
+func TestParseSLAStatusFilters(t *testing.T) {
+	t.Run("all empty leaves every field at its zero value", func(t *testing.T) {
+		f, err := ParseSLAStatusFilters("", "", "", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if f != (domain.SLAStatusFilters{}) {
+			t.Errorf("f = %+v, want the zero value", f)
+		}
+	})
+
+	t.Run("valid elapsedBucket and status, case-insensitive", func(t *testing.T) {
+		f, err := ParseSLAStatusFilters("", "", "", "90TO100", "BREACHED")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if f.ElapsedBucket != domain.SLAElapsedBucket90To100 {
+			t.Errorf("ElapsedBucket = %q, want %q", f.ElapsedBucket, domain.SLAElapsedBucket90To100)
+		}
+		if f.Stage != domain.SLAStatusBreached {
+			t.Errorf("Stage = %q, want %q", f.Stage, domain.SLAStatusBreached)
+		}
+	})
+
+	t.Run("unknown elapsedBucket is rejected", func(t *testing.T) {
+		if _, err := ParseSLAStatusFilters("", "", "", "under50", ""); err == nil {
+			t.Fatal("err = nil, want a validation error for a bucket value from the old, replaced four-bucket vocabulary")
+		}
+	})
+
+	t.Run("unknown status is rejected", func(t *testing.T) {
+		if _, err := ParseSLAStatusFilters("", "", "", "", "pending"); err == nil {
+			t.Fatal("err = nil, want a validation error for an unrecognized status")
+		}
+	})
+}
