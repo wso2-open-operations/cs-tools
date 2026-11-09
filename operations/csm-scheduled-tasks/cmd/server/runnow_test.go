@@ -556,8 +556,10 @@ func (fakeStale) Report(context.Context, int) (longopenreport.Report, error) {
 
 type fakeOpen struct{}
 
+// fakeOpen returns one case so the report is not empty (an empty report is
+// not sent at all).
 func (fakeOpen) SearchCasesInStateCreatedBeforeYesterday(context.Context, string) ([]entitycases.Case, error) {
-	return nil, nil
+	return []entitycases.Case{{Number: "CS0000001", Type: "case"}}, nil
 }
 
 type fakeMigration struct{}

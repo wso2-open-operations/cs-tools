@@ -176,7 +176,8 @@ analysis), and each row's number links to the item's CSM portal page, built from
 `CSM_PORTAL_WEB_BASE_URL` and the item's UUID: `/cases/<id>`, `/operations/service-requests/<id>` or
 `/security-center/security-reports/<id>`. The base is empty, the row has no id or the type has no
 known route: plain text. A result over the pagination cap is an error, never a partial list. With no
-matching rows the email is still sent, with a single "No matching cases." row and a count of 0.
+matching rows no mail is sent: the handler logs a count-only line and succeeds (also for a
+`--run-now` with `--recipients`, which then sends nothing either), like "Stale cases report".
 
 "Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
 time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a

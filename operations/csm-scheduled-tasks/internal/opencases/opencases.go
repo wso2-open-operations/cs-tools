@@ -27,6 +27,7 @@ package opencases
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -64,6 +65,9 @@ type EmailSender interface {
 // set, each row's number links to that item's page in the portal (see
 // notify.OpenCasesReportData.CaseLinkBase), else it is plain text.
 //
+// When no case matches, the handler sends nothing and succeeds: the report
+// omits itself on a day with nothing to act on, like stalecases.SendReport.
+//
 // If emailsEnabled is false or to is empty, the returned handler skips the
 // case search entirely and returns nil (success) — same reasoning as
 // stalecases.SendReport.
@@ -77,6 +81,12 @@ func SendReport(cases CaseSearcher, email EmailSender, to, cc []string, caseLink
 		if err != nil {
 			return fmt.Errorf("opencases: search open cases: %w", err)
 		}
+
+		if len(found) == 0 {
+			slog.Info("no open cases created before yesterday; the open cases report is not sent")
+			return nil
+		}
+		slog.Info("sending the open cases report", "cases", len(found), "to", len(to), "cc", len(cc))
 
 		subject := "[Action-Required][Report] Cases created before yesterday still in Open state"
 		body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{
