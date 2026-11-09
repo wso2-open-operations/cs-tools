@@ -2436,12 +2436,10 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
           description: >-
-            Seven clouds, where the ServiceNow script accepted five. choreo-eu
-            and agent-manager have monitors and a dashboard but have never
-            been reachable, because the notification flow's URL script has no
-            branch for them.
+            Every registered cloud is served, so a cloud added to the registry
+            needs no API change.
       responses:
         "200":
           description: >-
@@ -2480,7 +2478,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: Six month keys, newest first in the dashboard's rendering.
@@ -2518,7 +2516,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: >-
@@ -2558,7 +2556,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: >-
@@ -2624,7 +2622,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: The outage's detail, or an attachments-only object.
