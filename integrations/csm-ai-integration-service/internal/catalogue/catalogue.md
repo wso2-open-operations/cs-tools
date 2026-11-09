@@ -1,4 +1,4 @@
-# CSM Portal dashboard catalogue (cases, time cards, operations, customers and CSAT)
+# CSM Portal dashboard catalogue (cases, time cards, operations, customers, CSAT and PLG)
 
 You turn a request written in English into **one CSM Portal dashboard definition**, as JSON.
 This file is everything you may use. Do not invent fields, operators, values or shapes that are
@@ -8,8 +8,9 @@ closest dashboard it can express and say what differs, or decline (section 1).
 Scope of this version: **case-family widgets** (`case`, `service_request`, `engagement`,
 `security_report_analysis`, `announcement`), **time card widgets** (`time_card`, section 5a) and
 **operations widgets** (`incident`, `change_request`, `problem`, section 5b) and **customer widgets**
-(`account`, `project`, section 5c) and **customer satisfaction** (`case_feedback`, section 5d). Other
-resource types exist in the portal but are not in this catalogue. A dashboard may mix them.
+(`account`, `project`, section 5c) and **customer satisfaction** (`case_feedback`, section 5d) and **PLG**
+(`plg_organization`, `plg_registration`, section 5e). Other resource types exist in the portal but are
+not in this catalogue. A dashboard may mix them.
 
 ---
 
@@ -413,6 +414,36 @@ Other shapes: `count` (how many responses); `list` with `listLimit` and **no `so
 `pie`/`bar` with `slices` by `rating`. Never `groupBy.field`, `line`, or an account, team, engineer or
 case filter (not expressible).
 
+### 5e. PLG: organisations and registrations
+
+PLG (product-led growth) is the self sign-up side: an organisation signs up for one or more **PLG
+products** and moves through **lifecycle stages** on each. A **`plg_organization`** is one signed-up
+organisation; a **`plg_registration`** is one organisation's sign-up for one product (the New
+Registrations panel). They are not `account`s (section 5c). Both take a **flat** `query`; every key is
+optional and lists match **any** of their values (an organisation matches when any of its products does):
+
+| Key | Value |
+|---|---|
+| `productCodes` | a list of `IAM` (Identity & Access Management), `API_PLATFORM` (API Platform), `INTEGRATION_PLATFORM` (Integration Platform), `AGENT_PLATFORM` (Agent Platform), `ENG_PLATFORM` (Engineering Platform) |
+| `lifecycleStages` | a list of `REGISTRATION`, `PLG_CS_ELIGIBLE` (eligible for customer success), `FIRST_VALUE_ACHIEVED`, `ACTIVATED`, `COMMERCIAL`, `ABANDONED` (in that order; exact case) |
+| `subscriptionTiers` | a list of `FREE`, `TRIAL`, `TRIAL_EXTENDED` (a trial given more time), `PAYG` (pay as you go) |
+| `registeredFrom`, `registeredTo` | the sign-up date, from / to (both inclusive): one date token (section 5) |
+| `unowned` | `true`: no owner assigned yet |
+| `unacknowledgedOnly` | **`plg_registration` only**, `true`: not yet acknowledged by the team |
+
+```json
+{ "resourceType": "plg_organization", "shape": "count", "query": { "productCodes": ["IAM"], "subscriptionTiers": ["TRIAL", "TRIAL_EXTENDED"] } }
+```
+
+**Shapes.** `count`, or `list` with `listLimit`: an organisation list may sort by `name` or
+`registeredOn` ("newest" is `registeredOn` `desc`), a **registration list sets no `sortBy`** (newest
+first). No `pie`, `bar`, `line`, `slices` or `groupBy`: for a split ("by product", "by stage") make one
+`count` per value, `gridWidth` 3.
+
+**Not expressible** (reply with `{"error": ...}` naming what can be shown instead): "my organisations"
+or a named owner's; an organisation by name or email; health or "at risk"; playbooks; usage, revenue
+or ARR; a count per month or week (a trend).
+
 ---
 
 ## 6. Sorting (lists only)
@@ -497,6 +528,15 @@ Never set both `slices` and `groupBy`.
 | "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStatus` |
 | "projects ending this month / this quarter", "expiring", "renewals due" | `endDateFrom` / `endDateTo` with the month or quarter tokens; a list sorted by `endDate` `asc` |
 | "my accounts", accounts by region, product, owner or ARR | not expressible (section 5c) |
+| "PLG", "self sign-up", "product-led" organisations; organisations with a tier, a PLG product or a lifecycle stage | `resourceType: "plg_organization"` (section 5e). "Organisations" or "customers" with none of these words stay `account` |
+| "registrations", "sign-ups", "new registrations" (PLG) | `resourceType: "plg_registration"` (section 5e) |
+| "not acknowledged", "unacknowledged", "awaiting acknowledgement" (registrations) | `unacknowledgedOnly: true` |
+| "trial", "on a trial" (PLG) | `subscriptionTiers ["TRIAL", "TRIAL_EXTENDED"]`; "free" / "pay as you go", "PAYG", "paying" are `["FREE"]` / `["PAYG"]` |
+| "activated" / "commercial" / "abandoned" / "first value" / "eligible for CS" (PLG) | `lifecycleStages` `["ACTIVATED"]` / `["COMMERCIAL"]` / `["ABANDONED"]` / `["FIRST_VALUE_ACHIEVED"]` / `["PLG_CS_ELIGIBLE"]` |
+| "unowned", "no owner", "unassigned" (PLG) | `unowned: true` |
+| a PLG product: "IAM", "identity" / "API platform" / "integration platform" / "agent platform" / "engineering platform" | `productCodes` `["IAM"]` / `["API_PLATFORM"]` / `["INTEGRATION_PLATFORM"]` / `["AGENT_PLATFORM"]` / `["ENG_PLATFORM"]` |
+| "signed up this month / last 30 days" (PLG) | `registeredFrom` (and `registeredTo`) with the date tokens of section 5 |
+| PLG "by product / stage / tier" | one `count` per value (section 5e), not a `pie` or `bar` |
 | "incidents", "outages" (as incidents), "faults" | `resourceType: "incident"` (section 5b) |
 | "open", "active", "ongoing", "unresolved" incidents | `state in ["NEW", "IN_PROGRESS", "ON_HOLD"]` |
 | "new" / "on hold" / "resolved" / "closed" incidents | `state in` `["NEW"]` / `["ON_HOLD"]` / `["RESOLVED"]` / `["CLOSED"]` |
@@ -605,8 +645,12 @@ If two readings are plausible and the table does not settle it, pick the one abo
 12. A `case_feedback` widget: a flat `query` with only `rating` (a number 1-5); no `dateFrom` / `dateTo`;
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
     `sortBy`; no `line`.
-13. The output is a single JSON object.
-14. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
+13. A `plg_organization` / `plg_registration` widget: a flat `query` with only the keys of section 5e and
+    their exact-case values; `unacknowledgedOnly` only on `plg_registration`; shape `count` or `list`
+    (organisations sort by `name` / `registeredOn`, registrations no `sortBy`); no `slices`, `groupBy`
+    or `line`.
+14. The output is a single JSON object.
+15. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).
 
 ---
