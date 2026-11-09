@@ -1440,18 +1440,31 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 	}
 
 	to, cc := recipientsFor(recipientOverrides, acpTaskName)
+	clients := acp.Clients{
+		CSM:         csmClient,
+		SalesEntity: salesEntityClient,
+		// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
+		// instead, the same as a report task's debug mail mode.
+		Email: notify.ForReport(emailClient, debug),
+	}
+	// An on-demand run uses the configured settings narrowed by --dry-run and
+	// --limit, which can only tighten them (narrowACP).
+	runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		runCfg, err := narrowACP(cfg, o, len(debug) > 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		return acp.Run(clients, runCfg),
+			[]any{"dryRun", runCfg.DryRun, "emailEnabled", runCfg.EmailEnabled, "dailyLimit", runCfg.DailyLimit}, nil
+	}
 	return registry.Task{
 		// 04:00 UTC is 09:30 in Colombo, Monday to Friday. The handler also
 		// skips a weekend in Colombo time, for a retry that lands on one.
-		Name:     acpTaskName,
-		Schedule: scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
-		Handler: acp.Run(acp.Clients{
-			CSM:         csmClient,
-			SalesEntity: salesEntityClient,
-			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
-			// instead, the same as a report task's debug mail mode.
-			Email: notify.ForReport(emailClient, debug),
-		}, cfg),
+		Name:         acpTaskName,
+		Schedule:     scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
+		Handler:      acp.Run(clients, cfg),
+		RunNowNarrow: runNowNarrow,
+		RunNowFlags:  []string{"--dry-run", "--limit"},
 		RetryBackoff: acpRetryBackoff,
 		MaxAttempts:  acpMaxAttempts,
 		To:           to,

@@ -74,7 +74,7 @@ func TestRun_CSMNotTakingWritesStopsTheRun(t *testing.T) {
 			ntf := delivering()
 			updater := NewWriter(csmWriterFunc(func() error { return tc.err }), nil)
 
-			result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil)
+			result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil, 0)
 			var stopped *writesFailingError
 			if !errors.As(err, &stopped) || !strings.Contains(err.Error(), "2 project(s) not evaluated") {
 				t.Fatalf("err = %v, want the run stopped with 2 projects left", err)
@@ -99,7 +99,7 @@ func TestRun_AProjectsOwnWriteErrorDoesNotStopTheRun(t *testing.T) {
 	ntf := delivering()
 	updater := NewWriter(csmWriterFunc(func() error { return &apierror.Error{StatusCode: 422} }), nil)
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestProcessProject_RecordRefusedSendsNothingUntilFixed(t *testing.T) {
 		return &apierror.Error{StatusCode: 400}
 	}}
 	for day := 0; day < 3; day++ {
-		err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now.AddDate(0, 0, day), proj)
+		_, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now.AddDate(0, 0, day), proj)
 		var bad *dataError
 		if !errors.As(err, &bad) {
 			t.Fatalf("day %d: err = %v, want a dataError (skipped)", day, err)
@@ -135,7 +135,7 @@ func TestProcessProject_RecordRefusedSendsNothingUntilFixed(t *testing.T) {
 	}
 
 	updater.checkFn = nil
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now.AddDate(0, 0, 3), proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now.AddDate(0, 0, 3), proj); err != nil {
 		t.Fatalf("after the fix: %v", err)
 	}
 	if len(ntf.sent) == 0 || len(updater.calls) != 1 {
@@ -160,7 +160,7 @@ func TestRun_DecidesFromAFreshCSMRead(t *testing.T) {
 	}
 	ntf := delivering()
 
-	if _, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, ntf, now, "", nil); err != nil {
+	if _, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, ntf, now, "", nil, 0); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(reader.getProjectCalls) != 1 || reader.getProjectCalls[0] != "p1" {
@@ -184,7 +184,7 @@ func TestRun_AFailedReReadFailsThatProjectOnly(t *testing.T) {
 	}
 	ntf := delivering()
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, ntf, now, "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, ntf, now, "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

@@ -382,7 +382,7 @@ func TestRun_SalesforceDetailsDecideAndCSMIsWritten(t *testing.T) {
 
 	for _, scoped := range []string{"", proj.ID} {
 		updater.calls, ntf.sent = nil, nil
-		result, err := Run(context.Background(), csmListing(t, proj), NewSalesforceDetails(partnerFixture()), updater, ntf, now, scoped, nil)
+		result, err := Run(context.Background(), csmListing(t, proj), NewSalesforceDetails(partnerFixture()), updater, ntf, now, scoped, nil, 0)
 		if err != nil || len(result.Failures) != 0 || result.ProjectsEvaluated != 1 {
 			t.Fatalf("scoped=%q: Run = %+v, %v", scoped, result, err)
 		}
@@ -434,7 +434,7 @@ func TestRun_UnknownToSalesforceIsSkipped(t *testing.T) {
 	p.EndDate = nil
 	f.projects["a0dP"] = p
 
-	result, err := Run(context.Background(), csmListing(t, missing, ok), NewSalesforceDetails(f), &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	result, err := Run(context.Background(), csmListing(t, missing, ok), NewSalesforceDetails(f), &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

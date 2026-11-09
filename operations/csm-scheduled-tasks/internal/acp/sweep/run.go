@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,36 @@ const (
 	maxProjectPages = 1000
 	maxSearchPages  = 200
 )
+
+// ineligibleSubscriptionTypes are the project types ACP never evaluates, as
+// the legacy process did not: evaluation, cloud support, cloud evaluation
+// support and internal projects. The values are entity-service's
+// SubscriptionType enum, which the project read carries.
+var ineligibleSubscriptionTypes = map[string]bool{
+	"evaluation_subscription":  true,
+	"cloud_support":            true,
+	"cloud_evaluation_support": true,
+	"internal":                 true,
+}
+
+// skipIneligible reports whether proj is outside ACP's selection (see
+// ineligibleSubscriptionTypes), counting it in result. It logs nothing per
+// project: Run logs the count once.
+func skipIneligible(proj project, result *Result) bool {
+	if proj.SubscriptionType == nil || !ineligibleSubscriptionTypes[strings.ToLower(strings.TrimSpace(*proj.SubscriptionType))] {
+		return false
+	}
+	result.ProjectsFiltered++
+	return true
+}
+
+// logFiltered logs how many projects the selection filter skipped, once.
+func logFiltered(ctx context.Context, result Result) {
+	if result.ProjectsFiltered > 0 {
+		slog.InfoContext(ctx, "acp: projects skipped by the selection filter (evaluation, cloud support, cloud evaluation support or internal project type)",
+			"projectsFiltered", result.ProjectsFiltered)
+	}
+}
 
 // Run performs one full ACP evaluation pass over every open project,
 // paginating through /projects/search. The list comes from CSM (reader),
@@ -89,7 +120,13 @@ const (
 // bugs — a project excluded here produces zero log signal about whatever
 // might be wrong with it, which is the opposite of what you want for an
 // actual bug. nil is equivalent to an empty set (nothing excluded).
-func Run(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool) (Result, error) {
+//
+// limit (ACP_DAILY_LIMIT) caps how many projects a run acts on (see
+// Result.ProjectsActed); 0 is no cap. The list is most overdue first, so the
+// cap takes those. Once it is reached the remaining projects are not
+// evaluated, which is not a failure. A dry run counts the same way, so it
+// shows what a capped real run would do.
+func Run(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, limit int) (Result, error) {
 	var result Result
 
 	if projectID != "" {
@@ -108,6 +145,10 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		}
 
 		result.ProjectsEvaluated++
+		if skipIneligible(proj, &result) {
+			logFiltered(ctx, result)
+			return result, nil
+		}
 		// One project: a stop has nothing left to stop, and the failure is
 		// already in result.
 		_ = evaluate(ctx, details, updater, ntf, now, proj, &result)
@@ -120,9 +161,18 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		return result, err
 	}
 
+	defer func() { logFiltered(ctx, result) }()
 	for i, listed := range projects {
 		if skipExcluded(ctx, listed.ID, excludedProjectIDs, &result) {
 			continue
+		}
+
+		if limit > 0 && result.ProjectsActed >= limit {
+			result.NotEvaluatedByLimit = len(projects) - i
+			slog.InfoContext(ctx, "acp: daily limit reached, remaining projects not evaluated",
+				"limit", limit, "projectsActed", result.ProjectsActed,
+				"projectsEvaluated", result.ProjectsEvaluated, "projectsNotEvaluated", result.NotEvaluatedByLimit)
+			break
 		}
 
 		result.ProjectsEvaluated++
@@ -130,6 +180,9 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		if err != nil {
 			slog.ErrorContext(ctx, "processProject failed", "projectID", listed.ID, "err", err)
 			result.Failures = append(result.Failures, ProjectFailure{ProjectID: listed.ID, Err: err})
+			continue
+		}
+		if skipIneligible(proj, &result) {
 			continue
 		}
 		if err := evaluate(ctx, details, updater, ntf, now, proj, &result); err != nil {
@@ -238,7 +291,11 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
 	if err == nil {
-		err = processProject(ctx, reader, updater, ntf, now, full)
+		var acted bool
+		acted, err = processProject(ctx, reader, updater, ntf, now, full)
+		if acted {
+			result.ProjectsActed++
+		}
 	} else {
 		err = fmt.Errorf("read project details: %w", err)
 	}

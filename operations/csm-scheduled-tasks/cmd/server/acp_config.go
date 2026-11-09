@@ -18,7 +18,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
@@ -33,6 +35,8 @@ type acpSettings struct {
 	StandingRecipients     []string
 	TestProjectID          string
 	ExcludedProjectIDs     map[string]bool
+	// DailyLimit is ACP_DAILY_LIMIT as set, parsed by acpConfig.
+	DailyLimit string
 
 	AlertsEnabled    bool
 	EmailBaseURL     string
@@ -53,6 +57,7 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 		StandingRecipients:     splitComma(os.Getenv("ACP_STANDING_CC_RECIPIENTS")),
 		TestProjectID:          strings.TrimSpace(os.Getenv("ACP_TEST_PROJECT_ID")),
 		ExcludedProjectIDs:     acp.ParseProjectIDs(os.Getenv("ACP_EXCLUDED_PROJECT_IDS")),
+		DailyLimit:             strings.TrimSpace(os.Getenv("ACP_DAILY_LIMIT")),
 		AlertsEnabled:          alertsEnabled,
 		EmailBaseURL:           emailBaseURL,
 		EmailFromAddress:       strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS")),
@@ -88,6 +93,9 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 // crossed the 15- and 7-day windows meanwhile gets neither, and one whose end
 // date passed gets the day-0 notice and is suspended in the same run.
 //
+// ACP_DAILY_LIMIT caps the projects one run acts on (acp.Config.DailyLimit); a
+// malformed or negative value is refused.
+//
 // A TRYOUT_TASK=acp_closure not scoped to one test project is a dry run
 // (it would otherwise write to every open project), and runs on weekends.
 func acpConfig(s acpSettings) (acp.Config, []string, error) {
@@ -100,6 +108,11 @@ func acpConfig(s acpSettings) (acp.Config, []string, error) {
 		ExcludedProjectIDs:     s.ExcludedProjectIDs,
 		RunOnWeekends:          s.Tryout,
 	}
+	limit, err := parseACPDailyLimit(s.DailyLimit)
+	if err != nil {
+		return acp.Config{}, nil, err
+	}
+	cfg.DailyLimit = limit
 	var warnings []string
 	if s.Tryout && !cfg.DryRun && cfg.TestProjectID == "" {
 		warnings = append(warnings, "TRYOUT_TASK is acp_closure without ACP_TEST_PROJECT_ID: running as a dry run, nothing will be written; set ACP_DRY_RUN=true explicitly to silence this")
@@ -126,4 +139,18 @@ func acpConfig(s acpSettings) (acp.Config, []string, error) {
 		return acp.Config{}, warnings, errors.New("a debug list for acp_closure is set with ACP_DRY_RUN=false and no ACP_TEST_PROJECT_ID: notices would reach only the debug list while every project is recorded as notified and suspended on day 0")
 	}
 	return cfg, warnings, nil
+}
+
+// parseACPDailyLimit reads ACP_DAILY_LIMIT: a plain non-negative integer, 0 or
+// unset meaning no cap. Anything else refuses to start: a typo that silently
+// lifted the cap would let a first real run email and suspend every project.
+func parseACPDailyLimit(v string) (int, error) {
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("ACP_DAILY_LIMIT=%q must be a non-negative integer (0 = no cap)", v)
+	}
+	return n, nil
 }

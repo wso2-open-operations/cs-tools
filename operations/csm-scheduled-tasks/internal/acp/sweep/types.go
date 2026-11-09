@@ -58,6 +58,10 @@ type project struct {
 	// project genuinely without a synced Salesforce record has no value
 	// here, and the notice then falls back to plain (unlinked) text.
 	SfID *string `json:"sfId"`
+	// SubscriptionType is the project's type, a lowercase snake_case value
+	// (entity-service's SubscriptionType enum); see ineligibleSubscriptionTypes.
+	// Nil when the response has none.
+	SubscriptionType *string `json:"subscriptionType"`
 	// StartDate is nil only when genuinely absent on the wire — mirrors
 	// EndDate's existing nullable-pointer convention.
 	StartDate *time.Time `json:"startDate"`
@@ -312,7 +316,17 @@ type searchInvoicesRequest struct {
 type Result struct {
 	ProjectsEvaluated int
 	ProjectsExcluded  int
-	Failures          []ProjectFailure
+	// ProjectsActed counts projects with at least one notice sent or
+	// recorded, or a suspension attempted (what ACP_DAILY_LIMIT caps).
+	ProjectsActed int
+	// ProjectsFiltered counts projects read but not decided because the
+	// selection filter excludes them (see ineligibleSubscriptionTypes). They
+	// are included in ProjectsEvaluated, which counts every project read.
+	ProjectsFiltered int
+	// NotEvaluatedByLimit counts listed projects left unevaluated because
+	// the limit was reached.
+	NotEvaluatedByLimit int
+	Failures            []ProjectFailure
 	// Skipped are projects whose own record is unusable (dataError): logged
 	// and left for someone to fix, without failing the run.
 	Skipped []ProjectFailure
