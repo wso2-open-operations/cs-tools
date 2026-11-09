@@ -100,17 +100,18 @@ func renderLongOpenRows(rows []longopenreport.Row, caseLinkBase string, loc *tim
 }
 
 // longOpenCaseLink is a case cell linked to the case page in the CSM portal
-// (<caseLinkBase>/cases/<internal id>, the id the portal routes on, not the case
-// number) when a base URL is configured; plain text otherwise. The id is
-// path-escaped because it is data.
+// (<caseLinkBase>/cases/<case id>) when a base URL is configured; plain text
+// otherwise. The case page opens by the case's UUID only, so neither the
+// number nor the internal ID can be used in the path. The id is path-escaped
+// because it is data.
 func longOpenCaseLink(caseLinkBase string, row longopenreport.Row, text string) string {
 	if text == "" {
 		return "-"
 	}
-	if caseLinkBase == "" || row.InternalID == "" {
+	if caseLinkBase == "" || row.ID == "" {
 		return escapeHTML(text)
 	}
-	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(row.InternalID)
+	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(row.ID)
 	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
 

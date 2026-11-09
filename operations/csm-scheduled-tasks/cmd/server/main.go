@@ -758,14 +758,14 @@ func main() {
 		{
 			Name:     openCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "0 8 * * *"),
-			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
+			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
 			RunNowFlags: reportRunNowFlags,
 			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
-					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, worklogCaseLinkBase, alertsEnabled)
 				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
