@@ -108,6 +108,20 @@ func skipByAccount(proj project, result *Result) bool {
 	return false
 }
 
+// logScreening logs what screening did, once, counts only.
+func logScreening(ctx context.Context, result Result, listed int) {
+	if result.ScreenCandidates == nil {
+		return
+	}
+	slog.InfoContext(ctx, "acp: screening done",
+		"projectsListed", listed,
+		"projectsScreenedOut", result.ProjectsScreenedOut,
+		"candidatesByDate", result.ScreenCandidates[reasonDate],
+		"candidatesByRecordedState", result.ScreenCandidates[reasonState],
+		"candidatesByDueInvoice", result.ScreenCandidates[reasonInvoice],
+		"candidatesByFailOpen", result.ScreenCandidates[reasonOpen])
+}
+
 // logFiltered logs how many projects the selection filter skipped, once.
 func logFiltered(ctx context.Context, result Result) {
 	if result.ProjectsFilteredOverrideUnknown > 0 {
@@ -177,6 +191,22 @@ func logFiltered(ctx context.Context, result Result) {
 // evaluated, which is not a failure. A dry run counts the same way, so it
 // shows what a capped real run would do.
 func Run(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, limit int) (Result, error) {
+	return RunWith(ctx, reader, details, updater, ntf, now, projectID, excludedProjectIDs, Options{Limit: limit})
+}
+
+// Options are Run's optional settings.
+type Options struct {
+	// Limit is ACP_DAILY_LIMIT, 0 for no cap.
+	Limit int
+	// Screening skips, before any re-read or Salesforce call, the listed
+	// projects CSM's copy of the data shows the live path cannot act on (see
+	// screen). It never applies to a single-project run.
+	Screening bool
+}
+
+// RunWith is Run with Options.
+func RunWith(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, opts Options) (Result, error) {
+	limit := opts.Limit
 	var result Result
 
 	if projectID != "" {
@@ -213,13 +243,30 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 	}
 
 	defer func() { logFiltered(ctx, result) }()
+	var screened map[string]string
+	if opts.Screening {
+		screened = screen(ctx, reader, projects, now).candidates
+		result.ScreenCandidates = map[string]int{}
+		for _, reason := range screened {
+			result.ScreenCandidates[reason]++
+		}
+		defer func() { logScreening(ctx, result, len(projects)) }()
+	}
 	for i, listed := range projects {
 		if skipExcluded(ctx, listed.ID, excludedProjectIDs, &result) {
 			continue
 		}
+		if screened != nil && screened[listed.ID] == "" {
+			result.ProjectsScreenedOut++
+			continue
+		}
 
 		if limit > 0 && result.ProjectsActed >= limit {
-			result.NotEvaluatedByLimit = len(projects) - i
+			for _, rest := range projects[i:] {
+				if screened == nil || screened[rest.ID] != "" {
+					result.NotEvaluatedByLimit++
+				}
+			}
 			slog.InfoContext(ctx, "acp: daily limit reached, remaining projects not evaluated",
 				"limit", limit, "projectsActed", result.ProjectsActed,
 				"projectsEvaluated", result.ProjectsEvaluated, "projectsNotEvaluated", result.NotEvaluatedByLimit)
