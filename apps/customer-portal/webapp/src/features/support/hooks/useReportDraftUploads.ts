@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import {
   uploadReportDrafts,
@@ -44,12 +44,24 @@ export function useReportDraftUploads(projectId: string | undefined): {
   const controller = useRef<AbortController | null>(null);
   const [progress, setProgress] = useState<ReportDraftProgress | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const mounted = useRef(true);
+
+  // Leaving the form aborts the file in flight and stops a later upload from starting,
+  // so the caller never goes on to create the case from a form that is gone.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      controller.current?.abort();
+    };
+  }, []);
 
   const upload = useCallback(
     async (files: readonly ReportDraftFile[]): Promise<ReportDraftUploadResult> => {
       if (!projectId) {
         return { ok: false, cancelled: false, message: "Select a project first." };
       }
+      if (!mounted.current) return { ok: false, cancelled: true, message: "The upload was cancelled." };
       const own = new AbortController();
       controller.current = own;
       setIsUploading(true);
@@ -60,7 +72,7 @@ export function useReportDraftUploads(projectId: string | undefined): {
         });
       } finally {
         if (controller.current === own) controller.current = null;
-        setIsUploading(false);
+        if (mounted.current) setIsUploading(false);
       }
     },
     [authFetch, projectId],
