@@ -2930,13 +2930,13 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 		  AND wa.state IS DISTINCT FROM 'PENDING'
 		  ` + listed
 	countQuery := `SELECT COUNT(*) FROM (` + combined + `) att`
-	// Deleted rows come last, so they sit under every available attachment.
+	// Deleted rows come last, most recently deleted first.
 	dataQuery := `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
 		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status,
 		       deleted_on, deleter_email, deleter_id, deleter_name
 		FROM (` + combined + `) att
-		ORDER BY (status = 'deleted'), created_on DESC, id
+		ORDER BY (status = 'deleted'), deleted_on DESC NULLS LAST, created_on DESC, id
 		LIMIT $2 OFFSET $3`
 
 	// The id names ANY work item, a change request included: one the caller may
@@ -3093,7 +3093,7 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			ORDER BY u3.id
 			LIMIT 1
 		) d ON TRUE` + where + `
-		ORDER BY (wa.status = 'DELETED'), wa.created_on DESC, wa.id
+		ORDER BY (wa.status = 'DELETED'), wa.deleted_on DESC NULLS LAST, wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int
