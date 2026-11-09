@@ -69,11 +69,44 @@ func skipIneligible(proj project, result *Result) bool {
 	return true
 }
 
+// skipByAccount reports whether proj is outside ACP's selection by its
+// account, counting it in result: an account whose status is not "Customer"
+// (or has none: the legacy selection required Customer, so a missing status
+// fails closed), or one that is itself a partner. A partner account is
+// skipped whole, before either cascade; this is not hasPrimaryPartner (a
+// customer that has a partner), which the invoice cascade still handles. It
+// runs after the details are read, which is where the account comes from.
+// The status test applies only when the details source read one
+// (salesforceDetails).
+func skipByAccount(proj project, result *Result) bool {
+	if proj.accountStatusRead {
+		status := strings.TrimSpace(stringValue(proj.accountStatus))
+		if status == "" {
+			result.ProjectsFilteredNoStatus++
+			return true
+		}
+		if !strings.EqualFold(status, "Customer") {
+			result.ProjectsFilteredStatus++
+			return true
+		}
+	}
+	if proj.Account != nil && proj.Account.IsPartner != nil && *proj.Account.IsPartner {
+		result.ProjectsFilteredPartner++
+		return true
+	}
+	return false
+}
+
 // logFiltered logs how many projects the selection filter skipped, once.
 func logFiltered(ctx context.Context, result Result) {
-	if result.ProjectsFiltered > 0 {
-		slog.InfoContext(ctx, "acp: projects skipped by the selection filter (evaluation, cloud support, cloud evaluation support or internal project type)",
-			"projectsFiltered", result.ProjectsFiltered)
+	n := result.ProjectsFiltered + result.ProjectsFilteredStatus + result.ProjectsFilteredNoStatus + result.ProjectsFilteredPartner
+	if n > 0 {
+		slog.InfoContext(ctx, "acp: projects skipped by the selection filter",
+			"projectsFiltered", n,
+			"byProjectType", result.ProjectsFiltered,
+			"byAccountStatus", result.ProjectsFilteredStatus,
+			"byMissingAccountStatus", result.ProjectsFilteredNoStatus,
+			"byPartnerAccount", result.ProjectsFilteredPartner)
 	}
 }
 
@@ -152,6 +185,7 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		// One project: a stop has nothing left to stop, and the failure is
 		// already in result.
 		_ = evaluate(ctx, details, updater, ntf, now, proj, &result)
+		logFiltered(ctx, result)
 
 		return result, nil
 	}
@@ -290,6 +324,9 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 // again.
 func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
+	if err == nil && skipByAccount(full, result) {
+		return nil
+	}
 	if err == nil {
 		var acted bool
 		acted, err = processProject(ctx, reader, updater, ntf, now, full)

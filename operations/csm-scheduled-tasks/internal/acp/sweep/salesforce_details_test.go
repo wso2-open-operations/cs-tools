@@ -92,7 +92,7 @@ func partnerFixture() *fakeSalesforce {
 		customers: map[string]salesentity.Customer{
 			"001P": {ID: "001P", Owner: &salesentity.User{Name: sp("Kim Owner"), Email: sp("owner@example.com")},
 				TechnicalOwner: sp("to@wso2.com"), RenewalManager: &salesentity.User{Name: sp("Robin Renewal"), Email: sp("renewal@example.com")},
-				AccountClassification: sp("Partner")},
+				AccountClassification: sp("Partner"), Status: sp("Customer")},
 		},
 		members: map[string][]salesentity.ProjectContact{
 			"a0dP": {
@@ -365,11 +365,13 @@ func csmListing(t *testing.T, projects ...project) *mockEntityReader {
 	}
 }
 
-// TestRun_SalesforceDetailsDecideAndCSMIsWritten: the partner project ended
-// on 13 Oct in Salesforce, though CSM's copy says next year. The run suspends
-// it from Salesforce's date, emails Salesforce's account people and business
+// TestRun_SalesforceDetailsDecideAndCSMIsWritten: the project ended on 13
+// Oct in Salesforce, though CSM's copy says next year. The run suspends it
+// from Salesforce's date, emails Salesforce's account people and business
 // contact, and writes the notice and the suspension to the CSM project id.
-// The invoice cascade is off for a partner account with no primary partner.
+// The account is a Customer and not a partner (a partner account is skipped
+// before the cascades, see TestRun_AccountSelectionFilter) and has no linked
+// opportunity, so only the end-date cascade acts.
 func TestRun_SalesforceDetailsDecideAndCSMIsWritten(t *testing.T) {
 	proj := csmPartnerProject()
 	proj.EndDate = timePtr(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
@@ -379,10 +381,15 @@ func TestRun_SalesforceDetailsDecideAndCSMIsWritten(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 	now := time.Date(2026, 10, 14, 9, 30, 0, 0, time.UTC)
+	fixture := partnerFixture()
+	cu := fixture.customers["001P"]
+	cu.AccountClassification = sp("Enterprise")
+	fixture.customers["001P"] = cu
+	fixture.links = nil
 
 	for _, scoped := range []string{"", proj.ID} {
 		updater.calls, ntf.sent = nil, nil
-		result, err := Run(context.Background(), csmListing(t, proj), NewSalesforceDetails(partnerFixture()), updater, ntf, now, scoped, nil, 0)
+		result, err := Run(context.Background(), csmListing(t, proj), NewSalesforceDetails(fixture), updater, ntf, now, scoped, nil, 0)
 		if err != nil || len(result.Failures) != 0 || result.ProjectsEvaluated != 1 {
 			t.Fatalf("scoped=%q: Run = %+v, %v", scoped, result, err)
 		}

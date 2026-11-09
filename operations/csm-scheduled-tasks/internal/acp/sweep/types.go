@@ -62,6 +62,12 @@ type project struct {
 	// (entity-service's SubscriptionType enum); see ineligibleSubscriptionTypes.
 	// Nil when the response has none.
 	SubscriptionType *string `json:"subscriptionType"`
+	// accountStatus and accountStatusRead are set by the Salesforce details
+	// source only (CSM's project read has no account status): the account's
+	// status as Salesforce gave it, and that it was read at all. The status
+	// filter applies only when it was read.
+	accountStatus     *string
+	accountStatusRead bool
 	// StartDate is nil only when genuinely absent on the wire — mirrors
 	// EndDate's existing nullable-pointer convention.
 	StartDate *time.Time `json:"startDate"`
@@ -323,6 +329,13 @@ type Result struct {
 	// selection filter excludes them (see ineligibleSubscriptionTypes). They
 	// are included in ProjectsEvaluated, which counts every project read.
 	ProjectsFiltered int
+	// ProjectsFilteredStatus counts projects whose account status is not
+	// "Customer", ProjectsFilteredNoStatus those whose account has no status
+	// (skipped too: the legacy selection required Customer), and
+	// ProjectsFilteredPartner those whose account is itself a partner. All
+	// are decided after the details are read, and are included in
+	// ProjectsEvaluated.
+	ProjectsFilteredStatus, ProjectsFilteredNoStatus, ProjectsFilteredPartner int
 	// NotEvaluatedByLimit counts listed projects left unevaluated because
 	// the limit was reached.
 	NotEvaluatedByLimit int

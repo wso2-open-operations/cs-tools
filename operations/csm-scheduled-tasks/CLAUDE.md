@@ -573,17 +573,29 @@ both places.
   again, the combination startup refuses); `--limit=N` needs `N` > 0 and at most `ACP_DAILY_LIMIT` when
   that is non-zero (refused otherwise), else it sets the cap for the run. Suggested first real run:
   `--run-now=acp_closure --dry-run --limit=20`, read the log, then `--limit=20` for real.
-- **Selection filter.** The legacy process evaluated only some projects. What is applied here is only
-  what the project read already carries: a project whose `subscriptionType` is `evaluation_subscription`,
-  `cloud_support`, `cloud_evaluation_support` or `internal` is read and skipped (`skipIneligible`, in
-  `Result.ProjectsFiltered`, one INFO line with the count, never a failure, no cap use). It applies to a
-  scoped `ACP_TEST_PROJECT_ID` run too. Not applied, because the data is not read today: the project's
-  "suspension process overridden" flag, and the account's life cycle (Customer only; the sales-entity
-  `/customer-search` row carries a `status` that entity-service maps to the account life cycle, but
-  `salesentity.Customer` does not decode it yet). Partner accounts are not skipped as a whole either: the
-  invoice cascade's existing partner rule (a partner is skipped only without a primary partner) is kept,
-  pending an owner decision. Open and Restricted are both evaluated by the legacy process; the list here
-  asks for Open only.
+- **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
+  (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
+  - its `subscriptionType` is `evaluation_subscription`, `cloud_support`, `cloud_evaluation_support` or
+    `internal` (`skipIneligible`, `Result.ProjectsFiltered`; decided from the project read, before the
+    Salesforce read);
+  - its account's status is not `Customer`, trimmed and case-insensitive (`Result.ProjectsFilteredStatus`).
+    The status is the sales-entity `/customer-search` row's `status` (`salesentity.Customer.Status`; the
+    live `isRealTime` query ACP uses selects the account status field), which is what CSM's account life
+    cycle mirrors. **A missing or empty status is skipped too** (fail closed, counted separately in
+    `ProjectsFilteredNoStatus`), since the legacy selection required Customer; a project with no linked
+    account is the same case. Applies only when the details come from Salesforce, as they do in a real run;
+  - its account is itself a partner (`accountClassification == "Partner"`, `Result.ProjectsFilteredPartner`):
+    both cascades are skipped. This is not `hasPrimaryPartner` (a customer that has a partner), which the
+    invoice cascade still handles with its grace-period rule. The invoice cascade's own
+    `isPartner && !hasPrimaryPartner` rule is kept and tested but a partner account is now skipped before
+    the cascades, so Run no longer reaches it.
+
+  The account filters run after the details are read (`skipByAccount`, in `evaluate`), so they apply to a
+  scoped `ACP_TEST_PROJECT_ID` run as well, and an `ACP_TEST_PROJECT_ID` project that is a Prospect or a
+  partner is skipped, not tested. **Not implemented:** the project's "suspension process overridden"
+  flag: neither CSM nor Salesforce holds it, so ACP cannot honour it; until a source exists, list such
+  projects in `ACP_EXCLUDED_PROJECT_IDS`. Open and Restricted are both evaluated by the legacy process; the
+  list here asks for Open only.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
