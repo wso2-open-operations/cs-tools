@@ -942,6 +942,24 @@ widget saved before the field changes. The registry refuses an unknown value and
 The view and the draft carry it (`widgetViews` / `widgetTemplates`): `TestDraftToDefinition_KeepsLineWindow`.
 Deploy this backend before the catalogue that teaches it, as for `series`.
 
+**PLG widgets.** A widget's `resourceType` may be `plg_organization` (`POST /plg/organizations/search`)
+or `plg_registration` (`POST /plg/registrations/search`, one row per organisation and product). Both
+take the PLG searches' flat filters, and a generated one only those a prompt can name
+(`generatedResourceRules` in `internal/dashboard/generated_resources.go`): `productCodes`,
+`lifecycleStages`, `subscriptionTiers` (exact-case values from `plg/domain` and the products seeded in
+`plg_product`), `registeredFrom` / `registeredTo` (a date or a relative date token), `unowned` (a JSON
+boolean) and, on registrations only, `unacknowledgedOnly`. Never owner ids or free text. Shapes are
+`count` and `list` only: neither search groups on the server. An organisation list sorts by `name` or
+`registeredOn`; a registration list has one order and takes no `sortBy`.
+`TestParseGenerated_AcceptsPlgWidgets` / `TestParseGenerated_RejectsPlgWidgetsItCannotRun`
+(`generated_plg_test.go`) pin them. The AI integration service's catalogue (section 5e) teaches the
+model these widgets, and `TestParseGenerated_TheCataloguePlgExamplesAreValid` runs its examples through
+`ParseGenerated`. **Access:** the PLG routes need `PermUsePlg` (CS engineer and admin), narrower than
+`PermView`. Every role that can generate or save a dashboard (`PermWrite`) also holds it
+(`TestAccessGuard_DashboardWritersCanReadPlg`), so the author can always see what they built; a
+recipient of a shared dashboard without PLG access gets a 403 on those widgets alone, and the webapp's
+tile says so. PLG widgets are new resource types, so no saved dashboard changes.
+
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
 the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same

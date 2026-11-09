@@ -850,6 +850,24 @@ Four of the five shapes do the same thing — issue that `resourceType`'s own `P
 
 Separately, `CsmProjectsPage.tsx`'s `onboardingStatus` used to be seeded from the URL **only in a `useState` initializer**, which only ever runs once on mount — so a URL change that doesn't remount the page (the route stays `/customers/projects`, only the query string differs: browser back/forward across two different dashboard-tile click-throughs, or any other same-route navigation) left the filter control and the search request showing the first click's status instead of the URL's current one. Fixed by dropping the separate state entirely: `onboardingStatus` is now derived straight from `searchParams.get("onboardingStatus")` on every render (`useMemo`, keyed on that string so the array reference stays stable across unrelated re-renders), and `handleOnboardingStatusChange` writes directly to the URL instead of to local state — one source of truth, nothing to go stale. Pagination still needs resetting whenever the param changes, including from an external navigation `handleOnboardingStatusChange` didn't cause (and so didn't already reset itself for) — a small `useEffect` keyed on the param handles that one piece, with the same `eslint-disable-next-line react-hooks/set-state-in-effect` escape hatch (and the same justification: syncing state to an external source) `QuickNav.tsx`'s own initial-`q`/`goto`-param sync already uses.
 
+**PLG widgets (`plg_organization`, `plg_registration`).** Count and list only. Both searches take the
+same `filters` (`OrganizationSearchFilters`), so `plgSearchFilters` cleans them in one place: the
+single-valued keys and `unowned` are unwrapped after the preview page's URL round trip (which decodes every
+value as an array), View more's `searchQuery` is sent as `query`, and a plain `registeredFrom` /
+`registeredTo` date is sent as `T00:00:00Z` / `T23:59:59Z` of that day, so both bounds include it (the
+searches take timestamps). Relative tokens in those two keys are resolved first, like any flat date key
+(`FLAT_DATE_FILTER_KEYS` in `resolveRelativeDateFilters.ts`). The organisation search sorts by `sortBy:
+"name"` or, by default, the registration date, with `sortOrder` beside it. The registration search takes a
+widget's `unacknowledgedOnly` **beside** `filters`, not in it, and refuses an unknown field, so
+`plgRegistrationSearchBody` moves it out and sends no `sortBy`. A tile's click: the PLG pages read no
+filters from their URL, so an unfiltered organisation tile opens `/plg/organizations`, a registration tile
+counting exactly the unacknowledged ones opens `/plg/new-registrations`, and any other opens the preview
+page (lossless-or-preview, above). A list row opens the organisation's PLG page (a registration row, that
+product's tab) with the dashboard's return state, so its Back goes back to the dashboard. **No access:**
+the PLG routes are CS engineers and admins only; a PLG count or list whose fetch answers 403 says "You
+don't have access to PLG data." (`noAccessMessage` in `DashboardWidgetTile.tsx`) instead of "Could not
+load this widget.", and its count links nowhere.
+
 ### Current-user placeholder
 
 The backend resolves a `"__current_user__"` filter placeholder into the caller's real platform user id **before** it reaches the frontend (see the backend's `ResolveFilters`/`ResolveSliceFilters`) — the frontend never sees or handles that placeholder for a widget's own data-fetching. Separately, the "View more" preview page's own **URL** masks the current user's id to a `@me` sentinel (`widgetPreviewUrl.ts`'s `buildWidgetPreviewHref`/`resolveCurrentUserSentinels`) purely so a bookmarked/shared link doesn't carry a bare internal user id — that's a frontend-only, URL-display concern, unrelated to the backend's own placeholder resolution.
