@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/claude"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/teams"
 )
@@ -297,6 +299,40 @@ func TestGenerateUsageLimitIsOnlyA429(t *testing.T) {
 			Generate(context.Background(), Request{Prompt: "p"})
 		if !errors.Is(err, ErrCall) || errors.Is(err, ErrUsageLimit) {
 			t.Errorf("%d: err = %v, want ErrCall and not ErrUsageLimit", status, err)
+		}
+	}
+}
+
+// TestGenerateALongRetryAfterIsTheUsageLimit: a 429 asking for a wait past
+// the call's deadline is the usage limit at once, not a timeout after the
+// wait.
+func TestGenerateALongRetryAfterIsTheUsageLimit(t *testing.T) {
+	gw := &fakeGateway{status: http.StatusTooManyRequests, header: map[string]string{"retry-after": "60"},
+		body: `{"type":"error","error":{"type":"rate_limit_error","message":"limit reached"}}`}
+	start := time.Now()
+	_, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 2*time.Second).
+		Generate(context.Background(), Request{Prompt: "p"})
+	if !errors.Is(err, ErrUsageLimit) || errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want ErrUsageLimit and not the deadline", err)
+	}
+	if n := gw.calls.Load(); n != 1 {
+		t.Errorf("%d gateway calls, want 1", n)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("took %v, want the usage limit at once", took)
+	}
+}
+
+// TestIsUsageLimitNeedsTheSDKError: a 429 wrapped with %w is still the usage
+// limit; an error that only says 429 in its text is not.
+func TestIsUsageLimitNeedsTheSDKError(t *testing.T) {
+	apiErr := &anthropic.Error{StatusCode: http.StatusTooManyRequests}
+	if !isUsageLimit(fmt.Errorf("call: %w", apiErr)) {
+		t.Error("a wrapped 429: want the usage limit")
+	}
+	for _, err := range []error{errors.New("429 Too Many Requests"), fmt.Errorf("call: %v", apiErr), &anthropic.Error{StatusCode: 529}} {
+		if isUsageLimit(err) {
+			t.Errorf("%v: want not the usage limit", err)
 		}
 	}
 }
