@@ -84,7 +84,7 @@ Do not use any other dashboard field.
 | `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
-| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). |
+| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project or day, counting cards or summing hours; no `line`).
@@ -110,6 +110,11 @@ today), plus a `bucket`:
 "Per day" over more than 90 days uses `week` instead (and "per week" over more than 53 weeks, `month`),
 with a `description` saying so. Over 24 months: reply with `{"error": ...}`. "Last N weeks" / "last N
 months" is `__startOfWeek:-<N-1>__` / `__startOfMonth:-<N-1>__` to `__today__`, by week / month.
+
+**A trend as bars.** Cases per day, week or month, or over time, asked for as a bar ("bar chart",
+"bars", "as a bar", "column chart") is still a `line` widget, with `"chart": "bar"` and the same window,
+`bucket` and `series` it would have as a line. It is never a `bar` widget (cases have no date grouping
+or slices per period). Leave `chart` out for lines.
 
 ```json
 { "id": "cases-per-day-dec-2025", "displayName": "Cases Created per Day in December 2025",

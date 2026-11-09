@@ -84,7 +84,7 @@ Do not use any other dashboard field.
 | `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
-| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). |
+| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project or day, counting cards or summing hours; no `line`).
@@ -110,6 +110,11 @@ today), plus a `bucket`:
 "Per day" over more than 90 days uses `week` instead (and "per week" over more than 53 weeks, `month`),
 with a `description` saying so. Over 24 months: reply with `{"error": ...}`. "Last N weeks" / "last N
 months" is `__startOfWeek:-<N-1>__` / `__startOfMonth:-<N-1>__` to `__today__`, by week / month.
+
+**A trend as bars.** Cases per day, week or month, or over time, asked for as a bar ("bar chart",
+"bars", "as a bar", "column chart") is still a `line` widget, with `"chart": "bar"` and the same window,
+`bucket` and `series` it would have as a line. It is never a `bar` widget (cases have no date grouping
+or slices per period). Leave `chart` out for lines.
 
 ```json
 { "id": "cases-per-day-dec-2025", "displayName": "Cases Created per Day in December 2025",
@@ -531,6 +536,8 @@ Never set both `slices` and `groupBy`.
 | "closed cases per day", "cases closed per day" | a `line` widget with `series: ["closed"]` |
 | editing a `line` widget: "remove the closed line", "only opened" | set `series: ["opened"]` on it (`["closed"]` for the opened line) |
 | editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
+| a trend or cases per day / week / month as a bar | that `line` with `"chart": "bar"` (section 4) |
+| editing a `line` widget: "show it as bars" / "as a line" | set `"chart": "bar"` / remove `chart` |
 | a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
@@ -566,8 +573,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
    except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
 5. `line` only on `resourceType: "case"`, with `days` 1-90 or `startDate` + `endDate` (both plain
    dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
-   absent (both lines) or exactly `["opened"]` or `["closed"]`. An edit keeps a line widget's `series`
-   and window unless the request changes them.
+   absent (both lines) or exactly `["opened"]` or `["closed"]`; `chart` absent or `"bar"`. An edit keeps
+   a line widget's `series`, window and `chart` unless the request changes them.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),
