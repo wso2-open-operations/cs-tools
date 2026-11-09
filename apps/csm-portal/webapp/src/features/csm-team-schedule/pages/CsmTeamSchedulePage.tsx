@@ -50,7 +50,7 @@ import RosterFreezeBanner from "../components/RosterFreezeBanner";
 import UndoToast, { type UndoOffer } from "../components/UndoToast";
 import { UndoIncomplete, applyRevertRuns, awayIsRevertible, rotaRevertRuns } from "../utils/undo";
 import { useEngagementAllocations } from "../api/useEngagementAllocations";
-import { distinctUserIds } from "../utils/engagementAllocations";
+import { distinctUserIds, engagementUndoIsExact } from "../utils/engagementAllocations";
 import { weekClear } from "../utils/weekEdit";
 import WeekTable, { type WeekEditControls, type WeekPerson, type WeekTurn } from "../components/WeekTable";
 import CasePagingTab, { type PagingRotaTarget } from "../components/CasePagingTab";
@@ -1121,15 +1121,18 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     dismissEngagement.mutate(
       { id: engagement.id, teamKey: target.teamKey, from, to, restore },
       {
-        onSuccess: () =>
+        // An undo only where it restores exactly what was there before.
+        onSuccess: (res) =>
           recordChange(
             target,
             from,
             to,
             `${engagement.label} ${restore ? "restored" : "removed"}`,
-            async () => {
-              await send(!restore);
-            },
+            engagementUndoIsExact(from, to, res.days)
+              ? async () => {
+                  await send(!restore);
+                }
+              : undefined,
           ),
         onError: (err) =>
           showError(

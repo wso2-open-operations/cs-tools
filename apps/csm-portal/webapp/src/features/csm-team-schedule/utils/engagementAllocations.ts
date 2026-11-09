@@ -242,3 +242,11 @@ export const ENGAGEMENT_MARK_LEGEND_ITEM: LegendItem = {
     "Customer engagement from the allocation app: Allo- and the engagement id, a dot when a tag holds the day; hover for the details (read-only)",
   swatch: "engagement-mark",
 };
+
+/** Whether sending the opposite remove/restore is an exact undo of one that
+ *  changed `days` days over `from`-`to`. The answer is only a count, not which
+ *  days, so over a range the opposite call could also flip days that were
+ *  already in the target state before; only one day that did change is exact. */
+export function engagementUndoIsExact(from: string, to: string, days: number): boolean {
+  return from === to && days === 1;
+}

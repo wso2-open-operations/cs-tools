@@ -23,6 +23,7 @@ import {
   allocationTitle,
   allocationsByPersonAndDay,
   dismissedByPersonAndDay,
+  engagementUndoIsExact,
   chunk,
   distinctUserIds,
   humaniseEnum,
@@ -194,5 +195,20 @@ describe("days taken off the roster", () => {
     );
     expect([...out.get(U1)!.keys()]).toEqual(["2026-09-22"]);
     expect(dismissedByPersonAndDay([alloc()], days).size).toBe(0);
+  });
+});
+
+describe("engagementUndoIsExact", () => {
+  it("offers the undo for one day that changed", () => {
+    expect(engagementUndoIsExact("2026-11-04", "2026-11-04", 1)).toBe(true);
+  });
+
+  it("offers none for a day that was already in that state", () => {
+    expect(engagementUndoIsExact("2026-11-04", "2026-11-04", 0)).toBe(false);
+  });
+
+  it("offers none over a range, which may hold days already in that state", () => {
+    expect(engagementUndoIsExact("2026-11-02", "2026-11-06", 4)).toBe(false);
+    expect(engagementUndoIsExact("2026-11-02", "2026-11-06", 5)).toBe(false);
   });
 });

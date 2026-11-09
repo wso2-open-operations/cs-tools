@@ -16093,6 +16093,13 @@ paths:
                         engagementType: { type: string, description: "Raw enum value, for example CONSULTANCY." }
                         modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
                         utilization: { type: number }
+                        dismissedDates:
+                          type: array
+                          items: { type: string, format: date }
+                          description: >
+                            The days in the window the allocation was taken off this person's
+                            roster (`POST /team-schedule/engagement-allocations/dismiss`); absent
+                            when there are none.
                   count: { type: integer }
         "400":
           description: Bad request.
