@@ -1965,6 +1965,23 @@ BEFORE saving and answer a 400 in words; only the author's own images on the com
 On an edit, images already linked to that comment are kept: they count toward the 5 but not toward the size limit,
 which applies to the images the edit adds (so lowering `INLINE_IMAGES_TOTAL_MAX_MB` never blocks editing an older comment).
 
+**A security report's file is uploaded before the case exists.** A `security_report_analysis` must never
+exist without its report, and creating the case first and uploading afterwards left a case with no file
+whenever the upload was cancelled or the tab refreshed. So the file goes first: `POST /attachments/upload`
+with `type: "work_item"` and `projectId` (instead of `parentId`) records a **draft** `work_item_attachment`
+(`work_item_id` NULL, `project_id` set; migration 0280, policies 100028) that only its uploader can see and
+that no list shows (every list joins `work_item`). The chunks and the confirm are the ordinary calls. Then
+`POST /cases` carries `attachmentIds`: `validateReportDrafts` checks them BEFORE anything is created (each a
+COMPLETE draft of that project uploaded by the caller, not linked, at most `MaxCreateAttachments` = 10) and,
+for a `security_report_analysis` created by a user, refuses a request with none (400, `reportRequiredMessage`);
+`linkReportDrafts` sets `work_item_id` right after the case exists (`ReportDraftLinker`, found by type
+assertion on the case service's linker, implemented by `storedAttachmentService`). A machine caller (no user
+token) is not held to the minimum. The link runs after the case (the dual-write path creates it in ServiceNow
+first), so a link that fails leaves a case whose file is still a draft: it is logged at ERROR with the ids.
+A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
+Not built yet: a COMPLETE draft whose case was never created is not removed (a PENDING one is marked FAILED
+by the ordinary cleanup after 24 hours); `idx_work_item_attachment_unlinked_drafts` is the queue for that job.
+
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
 `parentId` (exactly one; both or neither is a 400): the row is a **draft** (`comment_attachment`:

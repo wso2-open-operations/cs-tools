@@ -738,10 +738,22 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		}
 	}
 
+	// The files uploaded before this record (a security report's report) are checked
+	// the same way, and a security report must have one.
+	var linker any
+	if s.imageLinker != nil {
+		linker = s.imageLinker
+	}
+	reportEmail, err := validateReportDrafts(ctx, linker, req)
+	if err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
 	if s.snMirror != nil {
 		resp, err := s.createCaseSNFirst(ctx, req)
 		if err == nil {
 			linkDescriptionImages(ctx, s.imageLinker, resp.Case.ID, req.ProjectID, descImageEmail, req.Description)
+			linkReportDrafts(ctx, linker, resp.Case.ID, req, reportEmail)
 		}
 		return resp, err
 	}
@@ -779,6 +791,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		return domain.CreateCaseResponse{}, err
 	}
 	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
+	linkReportDrafts(ctx, linker, c.ID, req, reportEmail)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered

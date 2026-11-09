@@ -229,8 +229,8 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	draft := req.ProjectID != ""
 	switch {
-	case draft && req.Kind != domain.StoredAttachmentComment:
-		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "projectId can only be used for a comment image"}
+	case draft && req.Kind != domain.StoredAttachmentComment && req.Kind != domain.StoredAttachmentWorkItem:
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "projectId can only be used for a comment image or a work item attachment"}
 	case draft && req.ParentID != "":
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "send either parentId or projectId, not both"}
 	case draft && !validate.IsUUID(req.ProjectID):
@@ -497,6 +497,78 @@ func (s *storedAttachmentService) ValidateDescriptionImages(ctx context.Context,
 		return &apierror.ValidationError{Msg: "The images in the description are larger than " + formatByteLimit(limit) + " together."}
 	}
 	return nil
+}
+
+// MaxCreateAttachments is how many draft files one create request may link.
+const MaxCreateAttachments = 10
+
+// ValidateReportDrafts implements ReportDraftLinker.
+//
+// It runs BEFORE a record is created, so a bad request leaves nothing behind. Every
+// id must be a COMPLETE draft work item attachment uploaded to this project by
+// authorEmail and not linked anywhere yet.
+func (s *storedAttachmentService) ValidateReportDrafts(ctx context.Context, projectID, authorEmail string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) > MaxCreateAttachments {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("At most %d attachments can be added when creating a record.", MaxCreateAttachments)}
+	}
+	if err := validateUUIDs("attachmentIds", ids); err != nil {
+		return err
+	}
+	if authorEmail == "" || !validate.IsUUID(projectID) {
+		return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project."}
+	}
+	drafts, err := s.repo.ListReportDrafts(repository.WithSystemIdentity(ctx), projectID, authorEmail, ids)
+	if err != nil {
+		return err
+	}
+	found := map[string]bool{}
+	for _, d := range drafts {
+		found[strings.ToLower(d.ID)] = true
+	}
+	for _, id := range ids {
+		if !found[strings.ToLower(id)] {
+			return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, or is already used by another record."}
+		}
+	}
+	return nil
+}
+
+// LinkReportDrafts implements ReportDraftLinker. The caller validated the ids first,
+// so a link that does not take every one of them means the database failed or a
+// draft was taken in between: it is an error, for the caller to log loudly.
+func (s *storedAttachmentService) LinkReportDrafts(ctx context.Context, workItemID, projectID, authorEmail string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	linked, err := s.repo.LinkReportDrafts(repository.WithSystemIdentity(ctx), workItemID, projectID, authorEmail, ids)
+	if err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "report attachments linked",
+		"audit", true, "action", "link", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"workItemId", workItemID, "referenced", len(ids), "linked", len(linked))
+	if len(linked) != len(distinctLower(ids)) {
+		return fmt.Errorf("linked %d of %d report attachments", len(linked), len(distinctLower(ids)))
+	}
+	return nil
+}
+
+// distinctLower is ids lower-cased with duplicates removed.
+func distinctLower(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		k := strings.ToLower(id)
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // LinkDescriptionImages implements InlineImageLinker. Best effort, like

@@ -1685,6 +1685,20 @@ type AttachmentUploadCleanupService interface {
 	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
 }
 
+// ReportDraftLinker attaches the files a record's creator uploaded BEFORE the record
+// existed (draft work item attachments, migration 0280) to the record being created.
+// storedAttachmentService implements it beside InlineImageLinker; the case service
+// finds it by type assertion on its linker, so a nil or older linker means "none".
+type ReportDraftLinker interface {
+	// ValidateReportDrafts checks, BEFORE the record is created, that every id is a
+	// COMPLETE draft uploaded to projectID by authorEmail and not linked yet
+	// (*apierror.ValidationError otherwise), so a bad request creates nothing.
+	ValidateReportDrafts(ctx context.Context, projectID, authorEmail string, ids []string) error
+	// LinkReportDrafts, right after the record exists, links the drafts to it. An
+	// error means the record exists but a file was not linked.
+	LinkReportDrafts(ctx context.Context, workItemID, projectID, authorEmail string, ids []string) error
+}
+
 // InlineImageLinker attaches the comment images a saved comment shows to that
 // comment. Best effort: it never returns an error, and a nil linker is a no-op.
 type InlineImageLinker interface {

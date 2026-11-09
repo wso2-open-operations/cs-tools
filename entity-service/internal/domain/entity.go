@@ -3933,8 +3933,12 @@ type Variable struct {
 // id, number, and internal_id are auto-generated; state defaults to open.
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
 // For type "service_request": catalogId, catalogItemId, and variables are required.
-// For type "security_report_analysis": subject and description are required. Files are
-// uploaded after the case exists, through the stored-attachment routes.
+// For type "security_report_analysis": subject, description and at least one report file
+// are required. The files are uploaded BEFORE the case, as drafts of its project
+// (POST /attachments/upload with type work_item and projectId), and named here in
+// attachmentIds; they are linked to the case in the same request, so a case never
+// exists without its report. Machine callers (no user token) are not held to the
+// minimum.
 type CreateCaseRequest struct {
 	CreatedBy         string        `json:"-"`
 	Type              string        `json:"type"`
@@ -3949,6 +3953,10 @@ type CreateCaseRequest struct {
 	CatalogID     string     `json:"catalogId"`
 	CatalogItemID string     `json:"catalogItemId"`
 	Variables     []Variable `json:"variables"`
+	// AttachmentIDs are draft work item attachments the caller uploaded to ProjectID
+	// before this request (see the type's comment): checked before the case is
+	// created and linked to it right after. At most service.MaxCreateAttachments.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 	// Optional fields
 	RelatedCaseID string `json:"relatedCaseId"`
 	// ResolvedRelatedCaseID is the related-case id already checked against
