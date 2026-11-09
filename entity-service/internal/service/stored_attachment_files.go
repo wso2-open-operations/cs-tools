@@ -386,11 +386,17 @@ func (s *storedAttachmentFileService) OpenAttachment(ctx context.Context, kind d
 	if err := unavailable(loc); err != nil {
 		return nil, err
 	}
+	return s.download(ctx, id, loc, loc.StorageKey, rangeHeader)
+}
+
+// download opens the file at key for a transfer. It holds a transfer slot until
+// the caller closes the file.
+func (s *storedAttachmentFileService) download(ctx context.Context, id string, loc domain.AttachmentLocation, key, rangeHeader string) (*FileDownload, error) {
 	release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
-	obj, err := s.open(ctx, id, loc.StorageKey, rangeHeader)
+	obj, err := s.open(ctx, id, key, rangeHeader)
 	if err != nil {
 		release()
 		return nil, err
@@ -433,17 +439,7 @@ func (s *storedAttachmentFileService) OpenInlineImage(ctx context.Context, id, w
 	if loc.RelocateTo != "" && s.relocateInlineImage(ctx, id, key, loc.RelocateTo) {
 		key = loc.RelocateTo
 	}
-	release, err := s.acquire()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := s.open(ctx, id, key, "")
-	if err != nil {
-		release()
-		return nil, err
-	}
-	obj.Body = &releasingBody{ReadCloser: obj.Body, release: release}
-	return &FileDownload{Name: loc.Name, ContentType: derefString(loc.ContentType), Object: obj}, nil
+	return s.download(ctx, id, loc, key, "")
 }
 
 // relocateInlineImage moves a description image's file from the project's drafts

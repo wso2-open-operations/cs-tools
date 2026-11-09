@@ -409,4 +409,3 @@ func TestStoredAttachmentHandler_FileRoutesAre404WithoutStorageService(t *testin
 		}
 	}
 }
-

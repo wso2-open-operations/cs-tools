@@ -39,9 +39,6 @@ const ChunkBytes = 8 << 20
 // beyond the server's global WriteTimeout: 100 MiB over a slow link.
 const attachmentStreamWriteDeadline = 30 * time.Minute
 
-// maxChunkBodyBytes is the most one chunk request may carry.
-const maxChunkBodyBytes = ChunkBytes
-
 // attachmentChunkDeadline is how long one chunk may take to arrive and be stored,
 // beyond the server's global read and write timeouts: 8 MiB over a slow link.
 const attachmentChunkDeadline = 10 * time.Minute
@@ -114,8 +111,8 @@ func (h *BlobAttachmentHandler) PutChunk(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusLengthRequired, "A chunk must declare its length.")
 		return
 	}
-	if size > maxChunkBodyBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("A chunk may be at most %d bytes.", maxChunkBodyBytes))
+	if size > ChunkBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("A chunk may be at most %d bytes.", ChunkBytes))
 		return
 	}
 	// A slow link can need longer than the server's global timeouts for one
@@ -126,7 +123,7 @@ func (h *BlobAttachmentHandler) PutChunk(w http.ResponseWriter, r *http.Request)
 	_ = rc.SetWriteDeadline(deadline)
 	ctx, cancel := context.WithTimeout(r.Context(), attachmentChunkDeadline)
 	defer cancel()
-	body := http.MaxBytesReader(w, r.Body, maxChunkBodyBytes)
+	body := http.MaxBytesReader(w, r.Body, ChunkBytes)
 	if err := h.entity.PutStoredAttachmentChunk(ctx, id, kind, index, size, body); err != nil {
 		slog.ErrorContext(ctx, "entity PutStoredAttachmentChunk failed", "attachmentID", id, "err", summarizeErr(err))
 		mapStoredAttachmentError(w, err, "Failed to store the chunk.")

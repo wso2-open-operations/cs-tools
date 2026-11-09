@@ -143,7 +143,7 @@ func TestBlobPutChunk_Refusals(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", NewBlobAttachmentHandler(sh, e).PutChunk)
 	big := httptest.NewRequest(http.MethodPut, base, strings.NewReader("x"))
-	big.ContentLength = maxChunkBodyBytes + 1
+	big.ContentLength = ChunkBytes + 1
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, big.WithContext(middleware.WithUserInfo(big.Context(), &middleware.UserInfo{UserID: "u1"})))
 	if rec.Code != http.StatusRequestEntityTooLarge || e.put.id != "" {
