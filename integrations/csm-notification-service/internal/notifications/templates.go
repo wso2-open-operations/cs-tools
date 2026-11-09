@@ -85,10 +85,6 @@ var projectReactivatedTemplateRaw string
 // isn't reachable from outside WSO2's network.
 const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
 
-// wso2LogoWhiteURL is the same logo for the dark header band of the
-// onboarding emails, written straight into those templates' HTML.
-const wso2LogoWhiteURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
-
 // bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder.
 // Done once per template at package init rather than on every Render* call,
 // since the logo never varies between emails.
@@ -112,37 +108,6 @@ var (
 
 	projectReactivatedTemplate = bakeLogo(projectReactivatedTemplateRaw)
 )
-
-// logoTemplates lists every template that carries a logo URL.
-func logoTemplates() []*string {
-	return []*string{
-		&commentAddedTemplate, &statusChangedTemplate, &crApprovalRequestedTemplate,
-		&crPlanDateNoticeTemplate, &caseAssignedTemplate, &caseCreatedTemplate,
-		&internalNoteTemplate, &severityChangedTemplate,
-		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
-		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
-		&projectReactivatedTemplate, &slaBreachTeamTemplate, &slaBreachAssigneeTemplate,
-		&caseEscalatedTemplate, &outageNotificationTemplate, &outageCommunicationTemplate,
-		&casePagingTemplate,
-	}
-}
-
-// SetLogoURLs replaces the logo every email carries: logo for the emails with
-// a light header (the default above), logoWhite for the dark header band of
-// the onboarding emails. An empty value keeps the default. It rewrites the
-// already-baked templates, so call it once at startup, before any email is
-// rendered.
-func SetLogoURLs(logo, logoWhite string) {
-	logo, logoWhite = strings.TrimSpace(logo), strings.TrimSpace(logoWhite)
-	for _, t := range logoTemplates() {
-		if logo != "" {
-			*t = strings.ReplaceAll(*t, wso2LogoURL, html.EscapeString(logo))
-		}
-		if logoWhite != "" {
-			*t = strings.ReplaceAll(*t, wso2LogoWhiteURL, html.EscapeString(logoWhite))
-		}
-	}
-}
 
 // safeLinkSchemes is the allow-list of URL schemes sanitizeRichText permits
 // on an <a href>. Everything else (javascript:, data:, vbscript:, a bare

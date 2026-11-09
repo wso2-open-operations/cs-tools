@@ -35,7 +35,6 @@ import {
   CallRequestStatus,
   CaseType,
   type CaseTypeInput,
-  WAITING_ON_WSO2_STATE_KEY,
 } from "@features/support/constants/supportConstants";
 import { CaseReportType } from "@features/security/types/security";
 import { SEVERITY_LABEL_TO_DISPLAY } from "@/features/dashboard/constants/dashboard";
@@ -989,7 +988,6 @@ export function getStatusIcon(
     case normalized === CaseStatus.OPEN.toLowerCase():
       return CircleAlert;
     case normalized === CaseStatus.WORK_IN_PROGRESS.toLowerCase():
-    case normalized === LEGACY_WORK_IN_PROGRESS_LABEL.toLowerCase():
       return Clock;
     case normalized === CaseStatus.AWAITING_INFO.toLowerCase():
       return MessageCircle;
@@ -1112,7 +1110,6 @@ export function getStatusColor(label?: string): string {
     case CaseStatus.OPEN:
       return colors.lightBlue[500];
     case CaseStatus.WORK_IN_PROGRESS:
-    case LEGACY_WORK_IN_PROGRESS_LABEL:
       return colors.green[500];
     case CaseStatus.AWAITING_INFO:
       return colors.orange[900];
@@ -1647,39 +1644,6 @@ export function toPresentContinuousActionLabel(label: string): string {
     "Reject Solution": "Rejecting...",
   };
   return map[label] ?? `${label}...`;
-}
-
-/**
- * The label a state carried before Work In Progress and Waiting On WSO2 were
- * shown as one In Progress. Still matched so a response that bypasses the merge
- * does not fall back to the default colour and icon.
- */
-const LEGACY_WORK_IN_PROGRESS_LABEL = "Work In Progress";
-
-/**
- * Resolves the state key an action button sends. Looks the label up in the
- * project's case states; "Waiting On WSO2" is not listed there any more (it is
- * folded into In Progress), so its key is supplied directly.
- *
- * @param actionLabel - Action button label (e.g. "Waiting on WSO2").
- * @param caseStates - Case states from the project filters.
- * @returns {number | undefined} The state key, or undefined when none applies.
- */
-export function resolveActionStateKey(
-  actionLabel: string,
-  caseStates?: { id: string; label: string }[],
-): number | undefined {
-  const stateLabel = ACTION_TO_CASE_STATE_LABEL[actionLabel];
-  if (!stateLabel) return undefined;
-  const entry = caseStates?.find(
-    (s) => s.label.toLowerCase() === stateLabel.toLowerCase(),
-  );
-  const num = entry?.id ? Number(entry.id) : NaN;
-  if (!Number.isNaN(num)) return num;
-  if (stateLabel === CaseStatus.WAITING_ON_WSO2) {
-    return WAITING_ON_WSO2_STATE_KEY;
-  }
-  return undefined;
 }
 
 /** Maps action labels (from getAvailableCaseActions) to caseState labels for lookup. */

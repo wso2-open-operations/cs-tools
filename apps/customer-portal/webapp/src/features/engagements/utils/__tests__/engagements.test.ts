@@ -133,8 +133,6 @@ describe("computeEngagementsStatValues", () => {
       stateCount: [
         { label: SUPPORT_STATE_CLOSED, count: 3 },
         { label: SUPPORT_STATE_AWAITING_INFO, count: 1 },
-        // Waiting On WSO2 is folded into In Progress, so it no longer counts
-        // as on hold.
         { label: SUPPORT_STATE_WAITING_ON_WSO2, count: 2 },
       ],
     } as never);
@@ -142,7 +140,7 @@ describe("computeEngagementsStatValues", () => {
       total: 10,
       active: 4,
       completed: 3,
-      onHold: 1,
+      onHold: 3,
     });
   });
 });

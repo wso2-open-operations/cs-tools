@@ -39,8 +39,9 @@ describe("AllCasesStatCards", () => {
       averageResponseTime: 0,
       resolvedCases: { total: 60, currentMonth: 0 },
       stateCount: [
-        { id: "1", label: "In Progress", count: 10 },
+        { id: "1", label: "Work In Progress", count: 10 },
         { id: "2", label: "Awaiting Info", count: 20 },
+        { id: "3", label: "Waiting On WSO2", count: 30 },
         { id: "4", label: "Closed", count: 40 },
       ],
       severityCount: [],
@@ -63,7 +64,7 @@ describe("AllCasesStatCards", () => {
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("10")).toBeInTheDocument();
     expect(screen.getByText("20")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting on WSO2")).not.toBeInTheDocument();
+    expect(screen.getByText("30")).toBeInTheDocument();
   });
 
   it("should render skeletons when loading", () => {
