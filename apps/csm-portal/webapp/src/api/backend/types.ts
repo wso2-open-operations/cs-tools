@@ -1581,6 +1581,11 @@ export interface BeAttachment {
   createdOn: string;
   downloadUrl?: string | null;
   previewUrl?: string | null;
+  /** `"deleted"` on a deleted attachment, which only an admin's list carries
+   * (with {@link deletedOn} and {@link deletedBy}); `"complete"` otherwise. */
+  status?: string;
+  deletedOn?: string | null;
+  deletedBy?: BeUserReference | null;
 }
 
 /**

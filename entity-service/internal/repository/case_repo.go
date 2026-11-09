@@ -2962,13 +2962,21 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // while the count still counted it once); an unmatched uploader is still
 // returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
-	const combined = `
+	listed := listedStoredAttachmentSQL
+	if includeDeletedAttachments(ctx) {
+		listed = listedWithDeletedStoredAttachmentSQL
+	}
+	combined := `
 		SELECT wa.id, wa.work_item_id AS reference_id, COALESCE(wa.name, '') AS name,
 		       COALESCE(wa.content_type, '') AS content_type,
 		       COALESCE(wa.size_bytes, 0)::bigint AS size_bytes, NULL::text AS description,
 		       COALESCE(su.id::text, '') AS uploader_id, COALESCE(wa.created_by, '') AS uploader_email,
 		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), '') AS uploader_name,
-		       wa.created_on, NULL::text AS storage_key, 'complete' AS status
+		       wa.created_on, NULL::text AS storage_key,
+		       CASE WHEN wa.status = 'DELETED' THEN 'deleted' ELSE 'complete' END AS status,
+		       wa.deleted_on, COALESCE(wa.deleted_by, '') AS deleter_email,
+		       COALESCE(du.id::text, '') AS deleter_id,
+		       COALESCE(du.name, NULLIF(TRIM(CONCAT_WS(' ', du.first_name, du.last_name)), ''), '') AS deleter_name
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -2978,15 +2986,24 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			ORDER BY u2.id
 			LIMIT 1
 		) su ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) du ON TRUE
 		WHERE wa.work_item_id = $1
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  ` + listedStoredAttachmentSQL
-	const countQuery = `SELECT COUNT(*) FROM (` + combined + `) att`
-	const dataQuery = `
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM (` + combined + `) att`
+	// Deleted rows come last, so they sit under every available attachment.
+	dataQuery := `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
-		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status
+		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status,
+		       deleted_on, deleter_email, deleter_id, deleter_name
 		FROM (` + combined + `) att
-		ORDER BY created_on DESC, id
+		ORDER BY (status = 'deleted'), created_on DESC, id
 		LIMIT $2 OFFSET $3`
 
 	// The id names ANY work item, a change request included: one the caller may
@@ -3024,11 +3041,14 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 				// storageKey is nullable: the list query selects NULL for it.
 				// *string (not string) is required here so a NULL column
 				// value scans as a nil pointer instead of erroring.
-				storageKey *string
+				storageKey                           *string
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes, &a.Description,
 				&uploaderID, &uploaderEmail, &uploaderName, &a.CreatedOn, &storageKey, &a.Status,
+				&deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan case attachment: %w", err)
 			}
@@ -3036,6 +3056,10 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			a.ReferenceType = domain.ReferenceTypeCase
 			a.CreatedBy = domain.NewUserReference(uploaderID, uploaderEmail, uploaderName)
 			a.StorageKey = storageKey
+			if a.Status == domain.AttachmentStatusDeleted {
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -3058,6 +3082,12 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 // created, which is told apart from a migrated row waiting for its file by its
 // legacy state column, always NULL for a row this service wrote).
 const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
+		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
+
+// listedWithDeletedStoredAttachmentSQL is listedStoredAttachmentSQL for a caller
+// who may also see deleted attachments: a deleted row is kept, the rest of the
+// filter is the same.
+const listedWithDeletedStoredAttachmentSQL = `AND wa.status <> 'FAILED'
 		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
 
 // SearchWorkItemAttachments implements CaseRepository.
@@ -3092,22 +3122,28 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		}
 	}
 
-	const where = `
+	listed := listedStoredAttachmentSQL
+	if includeDeletedAttachments(ctx) {
+		listed = listedWithDeletedStoredAttachmentSQL
+	}
+	where := `
 		WHERE wa.work_item_id = $1
 		  AND wi.type = ANY($2::text[]::work_item_type_enum[])
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  ` + listedStoredAttachmentSQL
-	const countQuery = `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
 	// created_by is a free-form string on this table; it is matched to a user
 	// by email (same convention as comment.created_by). The match is a
 	// LATERAL ... LIMIT 1 because "user".email has no unique constraint, and a
 	// plain join would fan one attachment out into several rows while
 	// countQuery above counts it once.
-	const dataQuery = `
+	dataQuery := `
 		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
 		       COALESCE(wa.size_bytes, 0), wa.created_by, COALESCE(u.id::text, ''),
 		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
-		       wa.created_on
+		       wa.created_on, wa.status = 'DELETED', wa.deleted_on,
+		       COALESCE(wa.deleted_by, ''), COALESCE(d.id::text, ''),
+		       COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', d.first_name, d.last_name)), ''), '')
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -3116,8 +3152,15 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			WHERE LOWER(u2.email) = LOWER(wa.created_by)
 			ORDER BY u2.id
 			LIMIT 1
-		) u ON TRUE` + where + `
-		ORDER BY wa.created_on DESC, wa.id
+		) u ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) d ON TRUE` + where + `
+		ORDER BY (wa.status = 'DELETED'), wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int
@@ -3142,13 +3185,17 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		result := make([]domain.Attachment, 0, pagination.Limit)
 		for rows.Next() {
 			var (
-				a                                   domain.Attachment
-				sizeBytes                           int64
-				createdBy, uploaderID, uploaderName string
+				a                                    domain.Attachment
+				sizeBytes                            int64
+				createdBy, uploaderID, uploaderName  string
+				deleted                              bool
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
 				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
+				&deleted, &deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan work item attachment: %w", err)
 			}
@@ -3156,6 +3203,11 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			a.ReferenceType = referenceType
 			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
 			a.Status = domain.AttachmentStatusComplete
+			if deleted {
+				a.Status = domain.AttachmentStatusDeleted
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {

@@ -387,7 +387,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // which surface opened it.
   const [previewTarget, setPreviewTarget] = useState<CaseAttachment | null>(null);
 
-  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
+  // Deleted attachments (an admin's list carries them) are shown only at the
+  // bottom of the Attachments tab, never in the feed, the counts or Download all.
+  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
   // The read model's entries already carry the platform user UUID the write
   // side is keyed by, so the widget can compute a replacement list straight
   // from what is on screen.
@@ -1160,6 +1163,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentList}
             uploading={postAttachment.isPending}
             uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
             onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
