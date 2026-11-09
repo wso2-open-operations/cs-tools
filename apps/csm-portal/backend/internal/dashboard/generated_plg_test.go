@@ -16,7 +16,10 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -81,6 +84,58 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 		_, err := ParseGenerated([]byte(c.raw))
 		if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want ErrGeneratedInvalid mentioning %q", c.name, err, c.want)
+		}
+	}
+}
+
+// TestParseGenerated_TheCataloguePlgExamplesAreValid: every PLG widget the
+// catalogue shows the model (section 5e) passes this backend's own check, so
+// the catalogue cannot teach a PLG widget the save would refuse. The
+// catalogue writes a widget without the keys every widget has (id,
+// displayName, gridWidth); those are filled in, the rest is checked as
+// written.
+func TestParseGenerated_TheCataloguePlgExamplesAreValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "### 5e. PLG")
+	if !ok {
+		t.Fatal("catalogue has no section 5e")
+	}
+	section, _, _ = strings.Cut(section, "\n## ")
+	var blocks []string
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		blocks = append(blocks, block)
+		rest = next
+	}
+	if len(blocks) == 0 {
+		t.Fatal("found no PLG example in section 5e")
+	}
+	for i, block := range blocks {
+		var w map[string]any
+		if err := json.Unmarshal([]byte(block), &w); err != nil {
+			t.Fatalf("section 5e example %d is not JSON: %v\n%s", i+1, err, block)
+		}
+		for key, value := range map[string]any{"id": "example", "displayName": "Example", "gridWidth": 6} {
+			if _, set := w[key]; !set {
+				w[key] = value
+			}
+		}
+		widget, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseGenerated([]byte(plgDashboard(string(widget)))); err != nil {
+			t.Errorf("section 5e example %d is rejected: %v\n%s", i+1, err, block)
 		}
 	}
 }
