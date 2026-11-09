@@ -234,10 +234,10 @@ func WithDeletedAttachmentsForCSMPortal(svc CaseService, csmPortalClientID strin
 }
 
 // mayListDeletedAttachments is whether this search may list the deleted
-// attachments (only those): the request asks AND the caller is the CSM portal backend, which
-// sets the flag only for a portal admin (decided from the person's token roles
-// there, the same trust the admin delete uses). Any other caller's request for
-// it is ignored.
+// attachments (only those): the request asks AND the caller is the CSM portal
+// backend, which passes the flag on only for a portal admin who asked (decided
+// from the person's token roles there, the same trust the admin delete uses).
+// Any other caller's request for it is ignored.
 func (s *caseService) mayListDeletedAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) bool {
 	if !req.DeletedOnly || s.csmPortalClientID == "" {
 		return false
