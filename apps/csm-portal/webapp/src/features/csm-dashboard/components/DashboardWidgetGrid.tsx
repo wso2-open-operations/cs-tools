@@ -314,6 +314,7 @@ export default function DashboardWidgetGrid({
           startDate={widget.startDate}
           endDate={widget.endDate}
           bucket={widget.bucket}
+          chart={widget.chart}
           linePointClickThrough={linePointClickThrough}
           inlineDrilldown={widget.inlineDrilldown}
           inlineLabels={widget.inlineLabels}

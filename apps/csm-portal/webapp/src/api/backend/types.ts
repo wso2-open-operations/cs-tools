@@ -4957,7 +4957,15 @@ export interface BeDashboardWidget {
   /** Only meaningful for shape "line" with `startDate`/`endDate`: one point
    * per day (the default), per week (Monday to Sunday) or per month. */
   bucket?: BeLineBucket;
+  /** Only meaningful for shape "line": "bar" draws its points as bars (two
+   * side by side when both series are shown); "line" or absent draws lines,
+   * as every line widget did before this field. Same data and window either
+   * way. */
+  chart?: BeLineChart;
 }
+
+/** How a `shape: "line"` widget draws its points (`BeDashboardWidget.chart`). */
+export type BeLineChart = "line" | "bar";
 
 /** One of a `shape: "line"` widget's two lines (`BeDashboardWidget.series`). */
 export type BeLineSeries = "opened" | "closed";

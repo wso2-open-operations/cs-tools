@@ -25,6 +25,38 @@ import { vi } from "vitest";
 // stand-in that renders enough of its own props to assert on, same approach
 // DashboardPieChart.test.tsx uses for this same package.
 vi.mock("@wso2/oxygen-ui-charts-react", () => ({
+  // Renders each bar series' data, as LineChart below does for its lines.
+  BarChart: ({
+    data,
+    bars,
+  }: {
+    data: Record<string, unknown>[];
+    bars: {
+      dataKey: string;
+      name?: string;
+      fill?: string;
+      onClick?: (data: unknown, index: number, event?: unknown) => void;
+    }[];
+  }) => (
+    <div>
+      {bars.map((bar) => (
+        <div key={bar.dataKey} data-testid={`bar-${bar.dataKey}`} data-fill={bar.fill}>
+          {bar.name}: {data.map((row) => `${row.label}=${row[bar.dataKey]}`).join(", ")}
+          {/* A clickable bar per row, as recharts calls Bar.onClick. */}
+          {bar.onClick &&
+            data.map((row, i) => (
+              <button
+                key={String(row.label)}
+                type="button"
+                data-testid={`bar-point-${bar.dataKey}-${i}`}
+                onClick={(e) => bar.onClick?.(row, i, e)}
+              />
+            ))}
+        </div>
+      ))}
+    </div>
+  ),
+  XAxis: () => null,
   LineChart: ({
     data,
     lines,
@@ -214,5 +246,106 @@ describe("DashboardLineChart", () => {
 
     render(<DashboardLineChart points={onlyClosed} isLoading={false} isError={false} series={["closed"]} />);
     expect(screen.getByTestId("line-closed")).toBeInTheDocument();
+  });
+
+  describe("chart: bar", () => {
+    it("draws a bar per point and series, Opened and Closed, instead of lines", () => {
+      render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} chart="bar" />);
+      expect(screen.getByTestId("bar-opened")).toHaveTextContent("Opened: Sep 1=3, Sep 2=2");
+      expect(screen.getByTestId("bar-closed")).toHaveTextContent("Closed: Sep 1=1, Sep 2=4");
+      expect(screen.queryByTestId(/^line-/)).not.toBeInTheDocument();
+      expect(screen.getByText("Opened")).toBeInTheDocument();
+      expect(screen.getByText("Closed")).toBeInTheDocument();
+    });
+
+    it("draws only the series asked for, in the lines' colors", () => {
+      render(
+        <DashboardLineChart points={POINTS} isLoading={false} isError={false} chart="bar" series={["closed"]} />,
+      );
+      expect(screen.queryByTestId("bar-opened")).not.toBeInTheDocument();
+      const closed = screen.getByTestId("bar-closed");
+      render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} series={["closed"]} />);
+      expect(closed.getAttribute("data-fill")).toBe(screen.getByTestId("line-closed").getAttribute("data-stroke"));
+    });
+
+    it("labels month bars by month and year, as the line does", () => {
+      const months: CaseVolumeTrendChartPoint[] = [
+        { date: "2026-01-01", endDate: "2026-01-31", opened: 4, closed: 0 },
+        { date: "2026-02-01", endDate: "2026-02-28", opened: 6, closed: 0 },
+      ];
+      render(
+        <DashboardLineChart
+          points={months}
+          isLoading={false}
+          isError={false}
+          bucket="month"
+          series={["opened"]}
+          chart="bar"
+        />,
+      );
+      expect(screen.getByTestId("bar-opened")).toHaveTextContent("Opened: Jan 2026=4, Feb 2026=6");
+    });
+
+    it("shows the empty state when the drawn series is all zero", () => {
+      const onlyClosed: CaseVolumeTrendChartPoint[] = [{ date: "2026-09-01", opened: 0, closed: 5 }];
+      render(
+        <DashboardLineChart
+          points={onlyClosed}
+          isLoading={false}
+          isError={false}
+          series={["opened"]}
+          chart="bar"
+        />,
+      );
+      expect(screen.getByText("Nothing to show here right now")).toBeInTheDocument();
+    });
+
+    it("reports the clicked bar's day and series when bars are clickable", () => {
+      const onPointClick = vi.fn();
+      render(
+        <DashboardLineChart
+          points={POINTS}
+          isLoading={false}
+          isError={false}
+          chart="bar"
+          onPointClick={onPointClick}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("bar-point-closed-1"));
+      expect(onPointClick).toHaveBeenCalledWith("2026-09-02", "closed");
+      fireEvent.click(screen.getByTestId("bar-point-opened-0"));
+      expect(onPointClick).toHaveBeenLastCalledWith("2026-09-01", "opened");
+    });
+
+    it("reports a week or month bar's last day too", () => {
+      const onPointClick = vi.fn();
+      const weeks: CaseVolumeTrendChartPoint[] = [
+        { date: "2025-12-01", endDate: "2025-12-07", opened: 2, closed: 0 },
+        { date: "2025-12-29", endDate: "2025-12-31", opened: 1, closed: 3 },
+      ];
+      render(
+        <DashboardLineChart
+          points={weeks}
+          isLoading={false}
+          isError={false}
+          bucket="week"
+          chart="bar"
+          onPointClick={onPointClick}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("bar-point-opened-1"));
+      expect(onPointClick).toHaveBeenCalledWith("2025-12-29", "opened", "2025-12-31");
+    });
+
+    it("has no clickable bars without onPointClick", () => {
+      render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} chart="bar" />);
+      expect(screen.queryByTestId(/^bar-point-/)).not.toBeInTheDocument();
+    });
+
+    it("draws lines for chart: line, as with no chart", () => {
+      render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} chart="line" />);
+      expect(screen.getByTestId("line-opened")).toBeInTheDocument();
+      expect(screen.queryByTestId(/^bar-/)).not.toBeInTheDocument();
+    });
   });
 });

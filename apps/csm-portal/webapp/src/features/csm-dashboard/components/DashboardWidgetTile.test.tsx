@@ -83,12 +83,29 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
     children,
     data,
     tooltip,
+    bars,
   }: {
     children: ReactNode;
     data?: { name: string; value: number }[];
     tooltip?: { formatter?: (value: unknown) => string };
+    // A line widget drawn as bars passes its series here (DashboardLineChart).
+    bars?: { dataKey: string; name?: string; onClick?: (data: unknown, index: number, event?: unknown) => void }[];
   }) => (
     <div>
+      {bars?.map((bar) => (
+        <div key={bar.dataKey} data-testid={`bar-${bar.dataKey}`}>
+          {bar.name}:{" "}
+          {(data as Record<string, unknown>[] | undefined)?.map((row) => `${row.label}=${row[bar.dataKey]}`).join(", ")}
+          {/* Row 1's bar, clickable as recharts calls Bar.onClick. */}
+          {bar.onClick && (
+            <button
+              type="button"
+              data-testid={`bar-point-${bar.dataKey}`}
+              onClick={(e) => bar.onClick?.((data ?? [])[1], 1, e)}
+            />
+          )}
+        </div>
+      ))}
       {/* Only a widget that formats its values passes a tooltip formatter. */}
       {tooltip?.formatter && data?.[0] && <span>tooltip:{tooltip.formatter(data[0].value)}</span>}
       {Children.map(children, (child) =>
@@ -1411,6 +1428,79 @@ describe("DashboardWidgetTile", () => {
       expect(params.get("createdFrom")).toBe("2025-12-29");
       expect(params.get("createdTo")).toBe("2025-12-31");
       expect(params.get("states")).toBe("open");
+    });
+
+    it("draws the trend as bars with chart: bar, from the same request", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="case_volume_bars"
+          displayName="Case volume"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+          days={2}
+          chart="bar"
+        />,
+      );
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.getByTestId("bar-opened")).toHaveTextContent("Opened: Sep 1=3, Sep 2=1");
+      expect(screen.getByTestId("bar-closed")).toHaveTextContent("Closed: Sep 1=0, Sep 2=2");
+      expect(screen.queryByTestId("line-opened")).not.toBeInTheDocument();
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        { filters: { filters: [{ field: "state", op: "in", values: ["open"] }] }, days: 2 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it.each([
+      ["closed", "closedFrom", "closedTo"],
+      ["opened", "createdFrom", "createdTo"],
+    ] as const)(
+      "opens the cases %s on a clicked bar's day, with the widget's own filters",
+      async (key, fromParam, toParam) => {
+        postMock.mockResolvedValue(TREND);
+        renderWithRoutes(
+          <DashboardWidgetTile
+            widgetId="case_volume_bars"
+            displayName="Case volume"
+            resourceType="case"
+            shape="line"
+            filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+            days={2}
+            chart="bar"
+            linePointClickThrough
+          />,
+          "/cases",
+        );
+
+        fireEvent.click(await screen.findByTestId(`bar-point-${key}`));
+
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const params = new URLSearchParams((screen.getByTestId("location-probe").textContent ?? "").split("?")[1]);
+        expect(params.get(fromParam)).toBe("2026-09-02");
+        expect(params.get(toParam)).toBe("2026-09-02");
+        expect(params.get("states")).toBe("open");
+      },
+    );
+
+    it("has no clickable bars unless the page turns it on", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="case_volume_bars"
+          displayName="Case volume"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [] }}
+          days={2}
+          chart="bar"
+        />,
+      );
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.queryByTestId(/^bar-point-/)).not.toBeInTheDocument();
     });
 
     it("has no clickable points unless the page turns it on", async () => {

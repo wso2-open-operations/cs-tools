@@ -29,6 +29,7 @@ import type {
   BeDashboardPieSlice,
   BeDashboardWidgetColumn,
   BeLineBucket,
+  BeLineChart,
   BeLineSeries,
   BeWidgetResourceType,
   BeWidgetShape,
@@ -139,6 +140,9 @@ interface DashboardWidgetTileProps {
   startDate?: string;
   endDate?: string;
   bucket?: BeLineBucket;
+  /** Only meaningful for shape "line" (see `BeDashboardWidget.chart`): "bar"
+   * draws the points as bars; `undefined` or "line" draws lines. */
+  chart?: BeLineChart;
   /** Only meaningful for shape "line": a click on a point opens that day's
    * opened or closed cases, as a pie slice opens its own. Off unless the
    * page turns it on (saved and shared dashboards do; system dashboards and
@@ -284,6 +288,7 @@ function DashboardWidgetTile({
   startDate,
   endDate,
   bucket,
+  chart,
   linePointClickThrough = false,
   selectedTeamCreGroupId,
   selectedTeamSreGroupId,
@@ -996,6 +1001,7 @@ function DashboardWidgetTile({
           isError={volumeTrendData.isError}
           series={series}
           bucket={startDate && endDate ? bucket : undefined}
+          chart={chart}
           onPointClick={linePointClickThrough ? handlePointClick : undefined}
         />
       </Card>

@@ -16,10 +16,10 @@
 
 import { Box, Skeleton, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { Inbox } from "@wso2/oxygen-ui-icons-react";
-import { LineChart } from "@wso2/oxygen-ui-charts-react";
-import type { JSX } from "react";
+import { BarChart, LineChart, XAxis } from "@wso2/oxygen-ui-charts-react";
+import type { JSX, SyntheticEvent } from "react";
 import type { CaseVolumeTrendChartPoint } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
-import type { BeLineBucket, BeLineSeries } from "@api/backend/types";
+import type { BeLineBucket, BeLineChart, BeLineSeries } from "@api/backend/types";
 import { useDarkMode } from "@utils/useDarkMode";
 
 const CHART_HEIGHT_PX = 220;
@@ -35,7 +35,11 @@ interface DashboardLineChartProps {
   /** How the points are grouped (`BeDashboardWidget.bucket`), which decides
    * the x-axis labels; `undefined` is one point per day. */
   bucket?: BeLineBucket;
-  /** Makes each point clickable: called with the point's day (`YYYY-MM-DD`,
+  /** How the points are drawn (`BeDashboardWidget.chart`): "bar" draws a bar
+   * per point and series (Opened and Closed side by side), anything else
+   * lines. */
+  chart?: BeLineChart;
+  /** Makes each point (each bar, with `chart: "bar"`) clickable: called with the point's day (`YYYY-MM-DD`,
    * a UTC calendar day), its line, and for a week or month point its last
    * day. Absent, the points are not clickable, as on a system dashboard. */
   onPointClick?: (date: string, series: BeLineSeries, endDate?: string) => void;
@@ -99,7 +103,8 @@ function formatPointLabel(
  * elsewhere in this app, not by picking hues. `series` leaves one of the two
  * lines out (its legend entry too); the empty state then counts only the
  * lines drawn. `onPointClick` makes the hovered point's dot clickable (the
- * dashboard page decides whether to pass it).
+ * dashboard page decides whether to pass it). `chart: "bar"` draws the same
+ * points as bars, with the same colors, labels, legend and empty state.
  */
 export default function DashboardLineChart({
   points,
@@ -107,6 +112,7 @@ export default function DashboardLineChart({
   isError,
   series,
   bucket,
+  chart,
   onPointClick,
 }: DashboardLineChartProps): JSX.Element {
   const theme = useTheme();
@@ -204,59 +210,102 @@ export default function DashboardLineChart({
           </Box>
         ))}
       </Box>
-      <Box sx={{ width: "100%", height: CHART_HEIGHT_PX }}>
-        <LineChart
-          data={chartData}
-          xAxisDataKey="label"
-          height={CHART_HEIGHT_PX}
-          width="100%"
-          legend={{ show: false }}
-          grid={{ show: true, strokeDasharray: "3 3" }}
-          margin={{ top: 8, right: 8, bottom: 8, left: 0 }}
-          tooltip={{ show: true, wrapperStyle: { zIndex: 1000 } }}
-          // `interval: "preserveStartEnd"` thins the x-axis down to as many
-          // evenly-spaced labels as actually fit the rendered width (always
-          // keeping the first/last), rather than printing every single day
-          // in the window -- which crowds into illegibility well before 30
-          // days, and far sooner once this tile shares a row with another
-          // widget instead of spanning the full 12-column width.
-          xAxis={{ show: true, interval: "preserveStartEnd" }}
-          yAxis={{ show: true }}
-          lines={shown.map((key) => ({
-            dataKey: key,
-            name: lineStyles[key].label,
-            stroke: lineStyles[key].color,
-            strokeWidth: 2,
-            dot: false,
-            isAnimationActive: false,
-            // The hovered point's dot, drawn by this function so a click on
-            // it knows both the day (recharts' row `index`) and the line
-            // (`key`); the library's object form gets the event only.
-            ...(onPointClick && {
-              activeDot: ({ cx, cy, index }: ActiveDotProps) => {
-                const point = index === undefined ? undefined : points[index];
-                if (cx === undefined || cy === undefined || !point) return <g />;
-                return (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={ACTIVE_DOT_RADIUS_PX}
-                    fill={lineStyles[key].color}
-                    stroke={theme.palette.background.paper}
-                    strokeWidth={2}
-                    style={{ cursor: "pointer" }}
-                    data-testid={`line-point-${key}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (point.endDate) onPointClick(point.date, key, point.endDate);
-                      else onPointClick(point.date, key);
-                    }}
-                  />
-                );
-              },
-            }),
-          }))}
-        />
+      <Box
+        sx={{
+          width: "100%",
+          height: CHART_HEIGHT_PX,
+          ...(onPointClick && chart === "bar" && { "& .recharts-bar-rectangle": { cursor: "pointer" } }),
+        }}
+      >
+        {chart === "bar" ? (
+          <BarChart
+            data={chartData}
+            xAxisDataKey="label"
+            height={CHART_HEIGHT_PX}
+            width="100%"
+            legend={{ show: false }}
+            grid={{ show: true, strokeDasharray: "3 3" }}
+            margin={{ top: 8, right: 8, bottom: 8, left: 0 }}
+            tooltip={{ show: true, wrapperStyle: { zIndex: 1000 } }}
+            // The library's own x-axis has no `interval`; this one thins the
+            // labels to what fits, keeping the first and last, as the lines do.
+            xAxis={{ show: false }}
+            yAxis={{ show: true }}
+            bars={shown.map((key) => ({
+              dataKey: key,
+              name: lineStyles[key].label,
+              fill: lineStyles[key].color,
+              radius: [4, 4, 0, 0] as [number, number, number, number],
+              isAnimationActive: false,
+              // A bar is one point of one series, so a click opens its cases
+              // the way a line's point does (`onPointClick`).
+              ...(onPointClick && {
+                onClick: (_data: unknown, index: number, event?: SyntheticEvent) => {
+                  event?.stopPropagation();
+                  const point = points[index];
+                  if (!point) return;
+                  if (point.endDate) onPointClick(point.date, key, point.endDate);
+                  else onPointClick(point.date, key);
+                },
+              }),
+            }))}
+          >
+            <XAxis dataKey="label" interval="preserveStartEnd" tickLine={false} />
+          </BarChart>
+        ) : (
+          <LineChart
+            data={chartData}
+            xAxisDataKey="label"
+            height={CHART_HEIGHT_PX}
+            width="100%"
+            legend={{ show: false }}
+            grid={{ show: true, strokeDasharray: "3 3" }}
+            margin={{ top: 8, right: 8, bottom: 8, left: 0 }}
+            tooltip={{ show: true, wrapperStyle: { zIndex: 1000 } }}
+            // `interval: "preserveStartEnd"` thins the x-axis down to as many
+            // evenly-spaced labels as actually fit the rendered width (always
+            // keeping the first/last), rather than printing every single day
+            // in the window -- which crowds into illegibility well before 30
+            // days, and far sooner once this tile shares a row with another
+            // widget instead of spanning the full 12-column width.
+            xAxis={{ show: true, interval: "preserveStartEnd" }}
+            yAxis={{ show: true }}
+            lines={shown.map((key) => ({
+              dataKey: key,
+              name: lineStyles[key].label,
+              stroke: lineStyles[key].color,
+              strokeWidth: 2,
+              dot: false,
+              isAnimationActive: false,
+              // The hovered point's dot, drawn by this function so a click on
+              // it knows both the day (recharts' row `index`) and the line
+              // (`key`); the library's object form gets the event only.
+              ...(onPointClick && {
+                activeDot: ({ cx, cy, index }: ActiveDotProps) => {
+                  const point = index === undefined ? undefined : points[index];
+                  if (cx === undefined || cy === undefined || !point) return <g />;
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={ACTIVE_DOT_RADIUS_PX}
+                      fill={lineStyles[key].color}
+                      stroke={theme.palette.background.paper}
+                      strokeWidth={2}
+                      style={{ cursor: "pointer" }}
+                      data-testid={`line-point-${key}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (point.endDate) onPointClick(point.date, key, point.endDate);
+                        else onPointClick(point.date, key);
+                      }}
+                    />
+                  );
+                },
+              }),
+            }))}
+          />
+        )}
       </Box>
     </Box>
   );
