@@ -273,3 +273,25 @@ type AcknowledgeOrphansResult struct {
 	Acknowledged int `json:"acknowledged"`
 	Skipped      int `json:"skipped"`
 }
+
+// CompleteAttachmentUploadRequest is the body of POST /attachments/upload/{id}/confirm:
+// the number of chunks the browser sent. This service assembles them into the file,
+// reads its real size and type, and runs the final checks.
+type CompleteAttachmentUploadRequest struct {
+	Kind   StoredAttachmentKind `json:"type"`
+	ID     string               `json:"-"`
+	Chunks int                  `json:"chunks"`
+}
+
+// UploadChunkList is the chunks already stored for an upload, so an interrupted
+// upload can carry on where it stopped.
+type UploadChunkList struct {
+	ChunkBytes int           `json:"chunkBytes"`
+	Chunks     []UploadChunk `json:"chunks"`
+}
+
+// UploadChunk is one stored chunk of an upload.
+type UploadChunk struct {
+	Index int   `json:"index"`
+	Size  int64 `json:"size"`
+}
