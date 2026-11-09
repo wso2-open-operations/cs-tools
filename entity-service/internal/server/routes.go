@@ -732,10 +732,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// access rules (row-level security) live in Postgres: without one the routes
 	// are not registered and 404.
 	var storedAttachmentHandler *handler.StoredAttachmentHandler
+	var storedAttachmentSvc service.StoredAttachmentService
 	var inlineImageLinker service.InlineImageLinker
 	if db != nil {
 		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
-		storedAttachmentSvc := service.NewStoredAttachmentService(
+		storedAttachmentSvc = service.NewStoredAttachmentService(
 			storedAttachmentRepo,
 			service.StoredAttachmentLimits{
 				MaxBytes:            cfg.AttachmentMaxBytes,
@@ -1254,6 +1255,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// is configured; WithGithubSLAEngine then leaves the sync without one.
 		service.WithGithubSLAEngine(githubSync, slaEngineSvc)
 		service.WithGithubCaseStates(githubSync, activeCaseSvc)
+	}
+	// A customer's completed work item attachment moves its case like a comment does.
+	// Set in place, so the attachment handler built above already has it.
+	if storedAttachmentSvc != nil {
+		service.WithStoredAttachmentCaseStates(storedAttachmentSvc, activeCaseSvc)
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
 	if db != nil {

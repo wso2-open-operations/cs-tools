@@ -1740,6 +1740,12 @@ func (s *caseService) applyCustomerAttachmentStateTransition(ctx context.Context
 	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, caseID, "customer attachment")
 }
 
+// ApplyCustomerAttachmentStateTransition applies the customer-attachment rule to a case a stored attachment
+// (the work_item_attachment flow) has just been completed on. The caller has checked the attachment's kind.
+func (s *caseService) ApplyCustomerAttachmentStateTransition(ctx context.Context, caseID string) {
+	s.applyCustomerAttachmentStateTransition(ctx, domain.ReferenceTypeCase, caseID)
+}
+
 // moveToWaitingOnWSO2OnCustomerActivity is the rule shared by a customer's
 // comment and a customer's attachment: when the caller is a customer and the
 // record is Awaiting Info or Solution Proposed, move it to Waiting on WSO2
