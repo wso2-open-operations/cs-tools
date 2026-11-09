@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
@@ -131,8 +133,12 @@ const generatedNoteMaxChars = 500
 // into the chat reply only, so the draft, and a dashboard saved from it, never
 // carries one. A definition without a note, or one that is not a JSON
 // object, is returned as it is (ParseGenerated rejects the latter). A note
-// that is not a string, or longer than generatedNoteMaxChars, makes the
-// definition invalid.
+// that is not a string (null included), or longer than generatedNoteMaxChars,
+// makes the definition invalid. Spaces and invisible format characters (such
+// as a zero-width space) are trimmed from both ends, so a note of only those
+// is blank and keeps the plain reply. Only the top-level "note" is taken off:
+// one in a widget, or a differently cased key, stays for ParseGenerated to
+// reject as an unknown field.
 func splitGeneratedNote(raw json.RawMessage) (json.RawMessage, string, error) {
 	var top map[string]json.RawMessage
 	if json.Unmarshal(raw, &top) != nil {
@@ -143,10 +149,10 @@ func splitGeneratedNote(raw json.RawMessage) (json.RawMessage, string, error) {
 		return raw, "", nil
 	}
 	var note string
-	if err := json.Unmarshal(rawNote, &note); err != nil {
+	if bytes.Equal(bytes.TrimSpace(rawNote), []byte("null")) || json.Unmarshal(rawNote, &note) != nil {
 		return nil, "", fmt.Errorf("%w: \"note\" must be a string", dashboard.ErrGeneratedInvalid)
 	}
-	note = strings.TrimSpace(note)
+	note = strings.TrimFunc(note, func(r rune) bool { return unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) })
 	if utf8.RuneCountInString(note) > generatedNoteMaxChars {
 		return nil, "", fmt.Errorf("%w: \"note\" is longer than %d characters", dashboard.ErrGeneratedInvalid, generatedNoteMaxChars)
 	}
