@@ -1200,7 +1200,7 @@ describe("AttachmentsWidget — deleted attachments", () => {
     expect(screen.getByText("Loading deleted attachments…")).toBeInTheDocument();
   });
 
-  it("lists the deleted rows newest deletion first, marked Deleted with who deleted them and no actions", () => {
+  it("lists the deleted rows in the order the backend sends them (newest deletion first), marked Deleted with who deleted them and no actions", () => {
     const OLDER: CaseAttachment = {
       ...GONE,
       id: "gone-0",
@@ -1210,7 +1210,7 @@ describe("AttachmentsWidget — deleted attachments", () => {
     renderWithRouter(
       <AttachmentsWidgetHarness
         attachments={[LIVE]}
-        deletedAttachments={tab({ attachments: [OLDER, GONE] })}
+        deletedAttachments={tab({ attachments: [GONE, OLDER] })}
         onDownload={vi.fn()}
       />,
     );

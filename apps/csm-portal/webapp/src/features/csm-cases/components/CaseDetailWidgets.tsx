@@ -1120,10 +1120,8 @@ export function AttachmentsWidget({
   const [view, setView] = useState<"active" | "deleted">("active");
   const showDeletedTab = deletedAttachments !== undefined;
   const showingDeleted = showDeletedTab && view === "deleted";
-  const deletedSorted = [...(deletedAttachments?.attachments ?? [])].sort(
-    (a, b) =>
-      new Date(b.deletedAt ?? 0).getTime() - new Date(a.deletedAt ?? 0).getTime(),
-  );
+  // The backend returns the deleted attachments newest deletion first; kept as is.
+  const deletedList = deletedAttachments?.attachments ?? [];
   const sorted = [...attachments].sort(
     (a, b) =>
       new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
@@ -1235,9 +1233,11 @@ export function AttachmentsWidget({
             />
             <Tab
               value="deleted"
+              // The deleted attachments are fetched when this tab is first opened, so
+              // the count shows only once they are known.
               label={
                 deletedAttachments?.attachments
-                  ? `Deleted (${deletedSorted.length})`
+                  ? `Deleted (${deletedList.length})`
                   : "Deleted"
               }
               sx={{ minHeight: 36, py: 0.5 }}
@@ -1274,7 +1274,7 @@ export function AttachmentsWidget({
               </Button>
             )}
           </Box>
-        ) : showingDeleted && deletedSorted.length === 0 ? (
+        ) : showingDeleted && deletedList.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No deleted attachments.
           </Typography>
@@ -1398,7 +1398,7 @@ export function AttachmentsWidget({
                 )}
               </Box>
             ))}
-            {showingDeleted && deletedSorted.map((a) => (
+            {showingDeleted && deletedList.map((a) => (
               <Box
                 key={a.id}
                 data-testid="deleted-attachment"
