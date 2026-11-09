@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -37,6 +38,10 @@ import (
 // table, undelivered, which is what makes the failure visible instead of
 // merely absent.
 const cloudStatusMaxAttempts = 5
+
+// errEmptyCloudRegistry is returned instead of claiming webhooks while the cloud
+// registry holds no active cloud.
+var errEmptyCloudRegistry = errors.New("cloud registry has no active clouds; not claiming webhooks")
 
 // cloudStatusPendingLimit caps one delivery batch.
 const cloudStatusPendingLimit = 50
@@ -368,6 +373,14 @@ func (s *cloudStatusService) PendingWebhooks(ctx context.Context) (domain.Pendin
 	catalog, err := s.registry.Catalog(ctx)
 	if err != nil {
 		return domain.PendingCloudStatusWebhooksResponse{}, err
+	}
+	// An empty registry is a valid load result, not an error, and it is what an
+	// environment looks like between the migration and its seed. It knows no
+	// cloud, so every claimed row would be closed below as a failed attempt:
+	// one of the cloudStatusMaxAttempts per row per tick, until webhooks recorded
+	// before the seed are exhausted and never posted. Refuse before claiming.
+	if len(catalog.Slugs()) == 0 {
+		return domain.PendingCloudStatusWebhooksResponse{}, errEmptyCloudRegistry
 	}
 	rows, err := s.repo.ClaimPending(ctx, cloudStatusPendingLimit, cloudStatusMaxAttempts, cloudStatusDeliveryLease)
 	if err != nil {

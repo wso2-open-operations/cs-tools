@@ -29,6 +29,8 @@ import (
 
 // fakeCloudStatusRepo records what the service asked it to do.
 type fakeCloudStatusRepo struct {
+	// claimCalls counts ClaimPending calls, to prove a refused read claims nothing.
+	claimCalls int
 	// registry overrides the seeded clouds when a test needs its own.
 	registry *fixtureClouds
 
@@ -147,6 +149,7 @@ func (f *fakeCloudStatusRepo) SetMonitorStatus(_ context.Context, ids []string, 
 }
 
 func (f *fakeCloudStatusRepo) ClaimPending(_ context.Context, _, _ int, _ time.Duration) ([]domain.PendingCloudStatusWebhook, error) {
+	f.claimCalls++
 	return f.pending, f.pendingErr
 }
 

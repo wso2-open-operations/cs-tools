@@ -243,6 +243,33 @@ func TestRegistry_NewCloudIsRoutableForWebhooks(t *testing.T) {
 	}
 }
 
+// Between the migration and its seed the registry is empty. Claiming then would
+// close every pending row as a failed attempt and burn its retries, so
+// PendingWebhooks refuses before claiming, and claims once a cloud exists.
+func TestPendingWebhooks_EmptyRegistryClaimsNothing(t *testing.T) {
+	repo := &fakeCloudStatusRepo{
+		registry: &fixtureClouds{},
+		pending: []domain.PendingCloudStatusWebhook{
+			{ID: "w1", OutageID: "a", Cloud: "CHOREO", Event: domain.CloudStatusEventOutageBegin},
+		},
+	}
+	svc := NewCloudStatusService(repo, []string{testServiceID})
+
+	if _, err := svc.PendingWebhooks(context.Background()); !errors.Is(err, errEmptyCloudRegistry) {
+		t.Fatalf("got %v, want errEmptyCloudRegistry", err)
+	}
+	if repo.claimCalls != 0 {
+		t.Errorf("ClaimPending called %d times against an empty registry, want 0", repo.claimCalls)
+	}
+
+	repo.registry.defs = seededDefinitions()
+	svc = NewCloudStatusService(repo, []string{testServiceID})
+	resp, err := svc.PendingWebhooks(context.Background())
+	if err != nil || repo.claimCalls != 1 || len(resp.Webhooks) != 1 {
+		t.Errorf("seeded registry: err=%v claims=%d webhooks=%d, want one claim and one webhook", err, repo.claimCalls, len(resp.Webhooks))
+	}
+}
+
 // The cache serves a snapshot for its TTL, refreshes after it, and survives a
 // failed refresh with the previous snapshot rather than failing the dashboard.
 func TestCloudRegistry_Cache(t *testing.T) {
