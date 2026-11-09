@@ -54,6 +54,33 @@ func TestParseGenerated_AcceptsPlgWidgets(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsPlgSlices checks a PLG pie or bar grouped with
+// slices: each slice's query takes the same filters as the widget's, so a
+// registration slice may set unacknowledgedOnly and relative registration
+// dates.
+func TestParseGenerated_AcceptsPlgSlices(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-product","displayName":"Organisations by Product","resourceType":"plg_organization","shape":"pie","gridWidth":6,
+		  "query":{"subscriptionTiers":["TRIAL","TRIAL_EXTENDED"]},
+		  "slices":[{"label":"Identity & Access Management","query":{"productCodes":["IAM"]}},{"label":"API Platform","query":{"productCodes":["API_PLATFORM"]}}]}`,
+		`{"id":"by-stage","displayName":"Organisations by Stage","resourceType":"plg_organization","shape":"bar","gridWidth":6,"query":{},
+		  "slices":[{"label":"Activated","query":{"lifecycleStages":["ACTIVATED"]}},{"label":"Unowned","query":{"unowned":true}}]}`,
+		`{"id":"signups","displayName":"Sign-ups, Last 3 Months","resourceType":"plg_registration","shape":"bar","gridWidth":6,"query":{"unacknowledgedOnly":true},
+		  "slices":[{"label":"2 Months Ago","query":{"registeredFrom":"__startOfMonth:-2__","registeredTo":"__endOfMonth:-2__"}},
+		            {"label":"Last Month","query":{"registeredFrom":"__startOfMonth:-1__","registeredTo":"__endOfMonth:-1__"}},
+		            {"label":"This Month","query":{"registeredFrom":"__startOfMonth:0__","registeredTo":"__today__"}}]}`,
+		`{"id":"new-by-tier","displayName":"New Registrations by Tier","resourceType":"plg_registration","shape":"pie","gridWidth":6,"query":{},
+		  "slices":[{"label":"Free","query":{"subscriptionTiers":["FREE"],"unacknowledgedOnly":true}},{"label":"Pay as You Go","query":{"subscriptionTiers":["PAYG"],"unacknowledgedOnly":true}}]}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if len(d.Widgets) != 4 || len(d.Widgets[2].Slices) != 3 {
+		t.Fatalf("widgets = %d, signups slices = %d, want 4 and 3", len(d.Widgets), len(d.Widgets[2].Slices))
+	}
+}
+
 // TestParseGenerated_RejectsPlgWidgetsItCannotRun checks that a PLG widget
 // holds only what the PLG searches take and a prompt can name.
 func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
@@ -66,8 +93,13 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 	cases := []struct {
 		name, raw, want string
 	}{
-		{"pie", org("pie", `,"query":{},"slices":[{"label":"IAM","query":{"productCodes":["IAM"]}}]`), "shape must be count or list"},
-		{"line", org("line", `,"query":{},"days":30`), "shape must be count or list"},
+		{"line", org("line", `,"query":{},"days":30`), "shape must be count, list, pie or bar"},
+		{"pie without slices", org("pie", `,"query":{}`), "needs either"},
+		{"pie grouped on the server", org("pie", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "cannot use groupBy; group with slices"},
+		{"slice with owner ids", org("bar", `,"query":{},"slices":[{"label":"Mine","query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}}]`), `slices[0].query: "ownerIds" is not a PLG organisation filter`},
+		{"slice with an unknown stage", reg("pie", `,"query":{},"slices":[{"label":"Won","query":{"lifecycleStages":["WON"]}}]`), `"WON" is not a PLG registration lifecycle stage`},
+		{"slice unacknowledged on organisations", org("pie", `,"query":{},"slices":[{"label":"New","query":{"unacknowledgedOnly":true}}]`), `slices[0].query: "unacknowledgedOnly" is not a PLG organisation filter`},
+		{"slice with a bad date", reg("bar", `,"query":{},"slices":[{"label":"Sep","query":{"registeredFrom":"September"}}]`), "slices[0].query.registeredFrom must be a date"},
 		{"unknown product", org("count", `,"query":{"productCodes":["CHOREO"]}`), `"CHOREO" is not a PLG organisation product`},
 		{"lower-case stage", org("count", `,"query":{"lifecycleStages":["activated"]}`), `"activated" is not a PLG organisation lifecycle stage`},
 		{"unknown tier", org("count", `,"query":{"subscriptionTiers":["ENTERPRISE"]}`), `"ENTERPRISE" is not a PLG organisation subscription tier`},

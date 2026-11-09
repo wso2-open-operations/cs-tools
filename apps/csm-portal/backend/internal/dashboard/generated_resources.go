@@ -197,23 +197,24 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	// /plg/registrations/search) take the PLG list's flat filters, and only
 	// those a prompt can name: products, lifecycle stages, subscription
 	// tiers, the registration dates and "unowned" (no owner ids, no free
-	// text). Neither groups on the server yet, so count and list only. The
-	// organisation search sorts by name or registration date; the
-	// registration search has one order and takes no sortBy.
+	// text). Neither groups on the server, so a pie or bar uses slices (one
+	// search per slice, each slice's query held to the same filters), never
+	// groupBy. The organisation search sorts by name or registration date;
+	// the registration search has one order and takes no sortBy.
 	ResourcePlgOrganization: {
 		noun:      "PLG organisation",
 		shapes:    plgShapes,
 		flat:      plgFilters,
 		dateKeys:  plgDateKeys,
 		sortBy:    []string{"name", "registeredOn"},
-		slicesVia: "it is a count or a list",
+		slicesVia: "group with slices",
 	},
 	ResourcePlgRegistration: {
 		noun:      "PLG registration",
 		shapes:    plgShapes,
 		flat:      withRule(plgFilters, "unacknowledgedOnly", valueRule{kind: valuesJSONBool}),
 		dateKeys:  plgDateKeys,
-		slicesVia: "it is a count or a list",
+		slicesVia: "group with slices",
 	},
 	ResourceProblem: {
 		noun:    "problem",
@@ -230,7 +231,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 // (plg/domain ValidLifecycleStage, ValidSubscriptionTier) and the products
 // seeded in plg_product.
 var (
-	plgShapes  = []Shape{ShapeCount, ShapeList}
+	plgShapes  = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar}
 	plgFilters = map[string]valueRule{
 		"productCodes":      {kind: valuesEnum, values: []string{"IAM", "API_PLATFORM", "INTEGRATION_PLATFORM", "AGENT_PLATFORM", "ENG_PLATFORM"}},
 		"lifecycleStages":   {kind: valuesEnum, values: []string{"REGISTRATION", "PLG_CS_ELIGIBLE", "FIRST_VALUE_ACHIEVED", "ACTIVATED", "COMMERCIAL", "ABANDONED"}},
