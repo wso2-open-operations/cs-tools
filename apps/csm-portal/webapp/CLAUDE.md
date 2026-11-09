@@ -181,10 +181,12 @@ reaches the app through `useSharedFeatureOverrides` (mounted in `AppLayout`) int
 and `featureFlags.ts` reads it instead of `CSM_PORTAL_FEATURE_OVERRIDES`.
 
 * **Source order.** Once an admin has saved (`savedOnce`), only the saved rows count and `config.js` is not
-  read. Before that, `config.js` is the base and any rows (a first save that stopped part-way) sit on top. If
-  the shared map cannot be loaded (old backend, missing table, not staff) the store is cleared and `config.js`
-  alone applies, exactly as before — the loader never blocks the shell, and `FeatureRouteGuard` waits for the
-  first response only briefly (2.5s) so a Preview page never opens for a moment from a stale config.
+  read. Before that, `config.js` is the base and any rows (a first save that stopped part-way) sit on top —
+  including a `hidden` section already written as `preview`, which can open an explicitly `enabled` child
+  even though the mark was never set. If the shared map cannot be loaded (old backend, missing table, not
+  staff) the store is cleared and `config.js` alone applies, exactly as before — the loader never blocks the
+  shell, and `FeatureRouteGuard` waits for the first response only briefly (2.5s) so a Preview page never
+  opens for a moment from a stale config.
 * **`preview` replaced `wip`.** A `preview` page is open to an admin only: tagged **Preview**
   through `isPreviewedOnly` (sidebar badge, filled tab chip) and under a thin `PreviewPageNotice`.
   An admin (`access.isAdmin`) sees it as `enabled` (`ownFeatureState`). A signed-in person who is
@@ -204,7 +206,8 @@ and `featureFlags.ts` reads it instead of `CSM_PORTAL_FEATURE_OVERRIDES`.
   every node from `listFeatureNodes()` except shortcuts. Ids are database keys now, so renaming one orphans its row.
 * **Save** (`featureSave.ts`): one write per changed page. The first save also writes every config line that has
   no row yet (`wip`/`hidden` as `preview`), then the edits, and the last write carries `markSaved`, sent only
-  if every other write succeeded, so a save that stops part-way leaves `config.js` in charge.
+  if every other write succeeded. A save that stops part-way leaves no mark, so `config.js` stays the base,
+  but any rows that already landed still override it (see Source order).
 
 **A tab an admin can open only because of Preview (the shared Preview state, or their own Feature Preview toggle) gets a distinct, filled "Preview" chip**
 (`SectionTabs.tsx`, `tab.previewedOnly`) — solid, in the theme's own primary (button) colour
