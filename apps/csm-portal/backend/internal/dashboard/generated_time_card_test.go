@@ -214,7 +214,16 @@ func TestRelativeDate(t *testing.T) {
 			t.Errorf("relativeDate(%s) on %s = %v %v, want %s", c.token, c.today, got.Format("2006-01-02"), ok, c.want)
 		}
 	}
-	for _, token := range []string{"__today:1__", "__daysAgo__", "__daysAgo:-1__", "__startOfMonth__", "__startOfWeek__", "__endOfYear__", "__yesterday__", "2026-11-02"} {
+	// At the argument bound a token still resolves; past it, and at the
+	// values that used to wrap to a date that looks valid, it does not.
+	for _, token := range []string{"__daysAgo:4000000__", "__startOfWeek:4000000__", "__startOfMonth:-4000000__", "__endOfYear:4000000__"} {
+		if _, ok := relativeDate(token, day("2026-11-02")); !ok {
+			t.Errorf("relativeDate(%s) left unresolved, want it resolved (at the bound)", token)
+		}
+	}
+	for _, token := range []string{"__today:1__", "__daysAgo__", "__daysAgo:-1__", "__startOfMonth__", "__startOfWeek__", "__endOfYear__", "__yesterday__", "2026-11-02",
+		"__daysAgo:4000001__", "__startOfWeek:-4000001__", "__startOfYear:9223372036854775807__", "__endOfYear:9223372036854775807__",
+		"__startOfWeek:9223372036854775807__", "__endOfWeek:9223372036854775807__", "__startOfMonth:-9223372036854775808__", "__endOfQuarter:9223372036854775807__"} {
 		if _, ok := relativeDate(token, day("2026-11-02")); ok {
 			t.Errorf("relativeDate(%s) resolved, want it left unresolved (the webapp does)", token)
 		}

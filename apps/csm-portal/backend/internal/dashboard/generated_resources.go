@@ -504,7 +504,8 @@ func windowDays(start, end time.Time) int {
 // __startOfMonth:N__, __endOfMonth:N__, __startOfQuarter:N__,
 // __endOfQuarter:N__, __startOfYear:N__, __endOfYear:N__ (N weeks / months /
 // quarters / years from the current one; the argument is required). A week
-// runs Monday to Sunday. false for a token the webapp leaves unresolved.
+// runs Monday to Sunday. false for a token the webapp leaves unresolved,
+// and for an argument beyond maxRelativeDateOffset.
 func relativeDate(token string, today time.Time) (time.Time, bool) {
 	m := relativeDateParts.FindStringSubmatch(token)
 	if m == nil {
@@ -513,7 +514,7 @@ func relativeDate(token string, today time.Time) (time.Time, bool) {
 	name, arg, hasArg := m[1], 0, m[2] != ""
 	if hasArg {
 		n, err := strconv.Atoi(m[2])
-		if err != nil {
+		if err != nil || n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
 			return time.Time{}, false
 		}
 		arg = n
@@ -547,6 +548,14 @@ func relativeDate(token string, today time.Time) (time.Time, bool) {
 	}
 	return time.Time{}, false
 }
+
+// maxRelativeDateOffset bounds a relative date token's argument, as
+// entity-service's resolveRelativeDate and the webapp's resolver do. Without
+// it a huge argument overflows the date arithmetic and wraps to a date that
+// looks valid (__startOfYear:9223372036854775807__ gave 2024-12-31). Every
+// argument beyond it lands outside the years 0000-9999, which entity-service
+// rejects, so the bound refuses nothing that used to resolve there.
+const maxRelativeDateOffset = 4_000_000
 
 // relativeDateParts splits a generatedRelativeDate token into its name and
 // optional argument.
