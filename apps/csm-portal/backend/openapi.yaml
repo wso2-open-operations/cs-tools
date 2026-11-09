@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate-pause` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -18163,6 +18163,16 @@ paths:
       responses:
         "200":
           description: The recalculation ran; see each clock's own outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseSLAPauseRecalcResponse'
+        "400":
+          description: Invalid case id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
           content:
@@ -30305,6 +30315,39 @@ components:
         levelTypes:
           type: array
           items: {$ref: '#/components/schemas/SkillLevelType'}
+    CaseSLAPauseRecalcClock:
+      type: object
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      properties:
+        target: {type: string, example: RESOLUTION}
+        schedule: {type: string, example: WSO2 Business days}
+        skipped: {type: boolean}
+        skipReason:
+          type: string
+          description: Empty when skipped is false.
+        oldPauseSeconds: {type: integer, format: int64}
+        newPauseSeconds: {type: integer, format: int64}
+        oldBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        newBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        updated: {type: boolean}
+    CaseSLAPauseRecalcResponse:
+      type: object
+      properties:
+        hasHistory:
+          type: boolean
+          description: >-
+            False (clocks always empty) when the case has no state-change
+            activity history at all to replay -- its clocks are left exactly
+            as they are, never guessed at.
+        clocks:
+          type: array
+          items: {$ref: '#/components/schemas/CaseSLAPauseRecalcClock'}
     SkillCategory:
       type: object
       required: [id, name, isLowestCategory]

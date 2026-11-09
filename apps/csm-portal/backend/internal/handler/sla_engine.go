@@ -109,7 +109,13 @@ func (h *SLAEngineHandler) RecalculateCasePauseTotals(w http.ResponseWriter, r *
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	result, err := h.entity.RecalculateCasePauseTotals(r.Context(), r.PathValue("id"))
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.RecalculateCasePauseTotals(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity RecalculateCasePauseTotals failed", "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to recalculate this case's SLA pause totals.")

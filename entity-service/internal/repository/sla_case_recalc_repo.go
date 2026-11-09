@@ -141,7 +141,13 @@ func (r *slaEngineRepo) ListActiveClocksForRecalc(ctx context.Context, workItemI
 	return clocks, nil
 }
 
-// UpdateClockPauseTotals implements SLAEngineRepository.
+// UpdateClockPauseTotals implements SLAEngineRepository. Scoped to the
+// active, IN_PROGRESS row for (workItemID, policyID) -- ReviseClocks can
+// leave a CANCELLED row for the same policy coexisting with a freshly
+// registered active one (RegisterClock only blocks a new row when an
+// active-stage or other blocking-stage row already exists), so a plain
+// (work_item_id, sla_policy_id) match would also silently overwrite that
+// terminal row's own frozen pause_duration/business_pause_duration.
 func (r *slaEngineRepo) UpdateClockPauseTotals(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64) error {
 	query := `
 		UPDATE sla
@@ -150,7 +156,8 @@ func (r *slaEngineRepo) UpdateClockPauseTotals(ctx context.Context, workItemID, 
 		                                   ELSE make_interval(secs => $4::DOUBLE PRECISION)
 		                              END,
 		    updated_on = NOW(), updated_by = $5
-		WHERE work_item_id = $1::uuid AND sla_policy_id = $2::uuid`
+		WHERE work_item_id = $1::uuid AND sla_policy_id = $2::uuid
+		  AND is_active IS TRUE AND stage = 'IN_PROGRESS'::sla_stage_enum`
 	if _, err := r.db.Exec(ctx, query, workItemID, policyID, pauseSeconds, businessPauseSeconds, sqlActorLiteral); err != nil {
 		return fmt.Errorf("update clock pause totals: %w", err)
 	}
@@ -166,7 +173,9 @@ func (r *slaEngineRepo) UpdateClockPauseTotals(ctx context.Context, workItemID, 
 // paused, from the exact same formula setPausedFlat/setPausedBusinessDays
 // already use (see those functions' own doc comments) -- correcting the
 // pause total without also recomputing what it froze would leave the row
-// disagreeing with itself.
+// disagreeing with itself. Scoped to the active, PAUSED row -- see
+// UpdateClockPauseTotals' own doc comment for why a plain
+// (work_item_id, sla_policy_id) match isn't narrow enough.
 func (r *slaEngineRepo) UpdateClockPausedSnapshot(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64, elapsedPercent float64, elapsedSeconds, remainingSeconds int64) error {
 	query := `
 		UPDATE sla
@@ -178,7 +187,8 @@ func (r *slaEngineRepo) UpdateClockPausedSnapshot(ctx context.Context, workItemI
 		    business_duration = make_interval(secs => $6::DOUBLE PRECISION),
 		    remaining_business_duration = make_interval(secs => $7::DOUBLE PRECISION),
 		    updated_on = NOW(), updated_by = $8
-		WHERE work_item_id = $1::uuid AND sla_policy_id = $2::uuid`
+		WHERE work_item_id = $1::uuid AND sla_policy_id = $2::uuid
+		  AND is_active IS TRUE AND stage = 'PAUSED'::sla_stage_enum`
 	if _, err := r.db.Exec(ctx, query, workItemID, policyID, pauseSeconds, businessPauseSeconds, elapsedPercent, elapsedSeconds, remainingSeconds, sqlActorLiteral); err != nil {
 		return fmt.Errorf("update clock paused snapshot: %w", err)
 	}

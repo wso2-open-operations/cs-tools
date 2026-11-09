@@ -161,10 +161,11 @@ func TestSLAEngineHandler_RequestRecalculation_UpstreamErrorMapped(t *testing.T)
 }
 
 func TestSLAEngineHandler_RecalculateCasePauseTotals_RequiresUser(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
 	h := NewSLAEngineHandler(&stubSLAEngineClient{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/cases/case-1/sla/recalculate-pause", nil)
-	req.SetPathValue("id", "case-1")
+	req := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate-pause", nil)
+	req.SetPathValue("id", caseID)
 
 	h.RecalculateCasePauseTotals(rec, req)
 
@@ -173,8 +174,8 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_RequiresUser(t *testing.T) 
 	}
 }
 
-func TestSLAEngineHandler_RecalculateCasePauseTotals_ForwardsCaseIDAndReturnsResult(t *testing.T) {
-	client := &stubSLAEngineClient{caseRecalcResult: []byte(`{"hasHistory":true,"clocks":[]}`)}
+func TestSLAEngineHandler_RecalculateCasePauseTotals_RejectsInvalidCaseID(t *testing.T) {
+	client := &stubSLAEngineClient{}
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
 	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/sla/recalculate-pause", nil))
@@ -182,8 +183,27 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_ForwardsCaseIDAndReturnsRes
 
 	h.RecalculateCasePauseTotals(rec, req)
 
-	if client.caseRecalcCaseID != "case-1" {
-		t.Errorf("caseRecalcCaseID = %q, want %q", client.caseRecalcCaseID, "case-1")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	assertErrorMessage(t, rec, ErrMsgInvalidUUID)
+	if client.caseRecalcCaseID != "" {
+		t.Errorf("caseRecalcCaseID = %q, want no upstream call for an invalid id", client.caseRecalcCaseID)
+	}
+}
+
+func TestSLAEngineHandler_RecalculateCasePauseTotals_ForwardsCaseIDAndReturnsResult(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
+	client := &stubSLAEngineClient{caseRecalcResult: []byte(`{"hasHistory":true,"clocks":[]}`)}
+	h := NewSLAEngineHandler(client)
+	rec := httptest.NewRecorder()
+	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate-pause", nil))
+	req.SetPathValue("id", caseID)
+
+	h.RecalculateCasePauseTotals(rec, req)
+
+	if client.caseRecalcCaseID != caseID {
+		t.Errorf("caseRecalcCaseID = %q, want %q", client.caseRecalcCaseID, caseID)
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -194,11 +214,12 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_ForwardsCaseIDAndReturnsRes
 }
 
 func TestSLAEngineHandler_RecalculateCasePauseTotals_UpstreamErrorMapped(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
 	client := &stubSLAEngineClient{caseRecalcErr: &apierror.Error{StatusCode: http.StatusForbidden}}
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
-	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/sla/recalculate-pause", nil))
-	req.SetPathValue("id", "case-1")
+	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate-pause", nil))
+	req.SetPathValue("id", caseID)
 
 	h.RecalculateCasePauseTotals(rec, req)
 

@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/businessdays"
@@ -73,17 +74,34 @@ const recalcScheduleWSO2BusinessDays = "WSO2 Business days"
 // history (work_item_activity) and corrects their stored pause_duration/
 // business_pause_duration when they disagree.
 //
-// Why state history is enough on its own: every real pause_condition/
-// resume_condition in this system only ever references the case's state --
-// nothing else. That isn't a simplifying assumption of convenience, it's
-// structural: anything that WOULD make a different fact change mid-clock
-// (a severity revision, a case-type transfer) already cancels the clock
-// outright and registers a fresh one (ReviseCaseClocks) rather than merely
-// pausing the old one -- so within one clock's own lifetime, state is the
-// only fact that can ever matter to its own pause/resume decision. This
-// replay reuses applyCaseStateEffectsForPolicy's own exact decision order
+// Why state history is enough on its own, for the clocks this actually
+// corrects: every RESOLUTION/RESPONSE pause_condition/resume_condition in
+// this system only ever references the case's state -- nothing else. That
+// isn't a simplifying assumption of convenience, it's structural: anything
+// that WOULD make a different fact change mid-clock (a severity revision, a
+// case-type transfer) already cancels the clock outright and registers a
+// fresh one (ReviseCaseClocks) rather than merely pausing the old one -- so
+// within one such clock's own lifetime, state is the only fact that can
+// ever matter to its own pause/resume decision. This replay reuses
+// applyCaseStateEffectsForPolicy's own exact decision order
 // (decidePauseTransition below), not a reimplementation, so it can never
 // disagree with what the live engine would have done for the same history.
+//
+// A WORKAROUND-target clock's own pause_condition can instead reference
+// u_workaround_provided, not state (see ApplyCaseStateEffects' own doc
+// comment) -- replaying that against today's live facts rather than that
+// fact's own history would misjudge the clock's past pause/resume state
+// wherever that fact's value differed from today's, so
+// clockPauseResumeReferencesOnlyState detects this up front and such a
+// clock is reported and skipped, never guessed at.
+//
+// A case's real state-change history (work_item_activity) records each
+// transition under its own ServiceNow-style display label ("Awaiting
+// Info"), the same vocabulary caseStateDisplayLabel writes, never the raw
+// case_state_enum value every pause_condition/resume_condition is actually
+// authored against -- normalizeActivityState converts every recorded label
+// back to that enum vocabulary before it's ever compared against a
+// condition.
 //
 // Why only Postgres-native cases: work_item_activity (migration 0055) is
 // only ever written by caseService's own write path -- snCaseService (the
@@ -110,6 +128,10 @@ const recalcScheduleWSO2BusinessDays = "WSO2 Business days"
 // exact same freeze formula those two functions already use, anchored on
 // this clock's own paused_on instant instead of NOW().
 func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseID string) (CaseSLAPauseRecalcReport, error) {
+	if err := validateUUIDs("caseId", []string{caseID}); err != nil {
+		return CaseSLAPauseRecalcReport{}, err
+	}
+
 	events, err := s.repo.ListCaseActivityEvents(ctx, caseID, []string{"state", "severity", "type"})
 	if err != nil {
 		return CaseSLAPauseRecalcReport{}, err
@@ -159,6 +181,13 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 			continue
 		}
 
+		if !clockPauseResumeReferencesOnlyState(clock) {
+			result.Skipped = true
+			result.SkipReason = "this clock's own pause/resume condition references something other than state -- this replay only reconstructs state history, so it can't be trusted here"
+			report.Clocks = append(report.Clocks, result)
+			continue
+		}
+
 		isPaused := clock.Stage == "PAUSED"
 		pauseSeconds, businessPauseSeconds, ok, reason := replayClockPauseHistory(clock, stateEvents, facts, now, isPaused)
 		if !ok {
@@ -192,7 +221,7 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 			if writeErr != nil {
 				slog.ErrorContext(ctx, "sla engine: recalculate case pause totals: update failed", "caseId", caseID, "target", clock.Target, "err", writeErr)
 				result.Skipped = true
-				result.SkipReason = "recomputed a correction but failed to write it: " + writeErr.Error()
+				result.SkipReason = "recomputed a correction but failed to write it"
 				report.Clocks = append(report.Clocks, result)
 				continue
 			}
@@ -221,6 +250,45 @@ func abs64(v int64) int64 {
 		return -v
 	}
 	return v
+}
+
+// clockPauseResumeReferencesOnlyState reports whether clock's own translated
+// pause_condition/resume_condition reference nothing but "state" -- see
+// RecalculateCasePauseTotals' own doc comment for why a clock referencing
+// anything else can't be replayed from state history alone. An empty
+// condition (never pauses, or never resumes once paused) trivially
+// qualifies.
+func clockPauseResumeReferencesOnlyState(clock repository.ActiveClockForRecalc) bool {
+	source := repository.SLAPolicyRef{Source: clock.Source}
+	return conditionReferencesOnlyState(slaPolicyConditionText(source, clock.PauseCondition)) &&
+		conditionReferencesOnlyState(slaPolicyConditionText(source, clock.ResumeCondition))
+}
+
+func conditionReferencesOnlyState(translated string) bool {
+	for _, group := range slacondition.Parse(translated) {
+		for _, term := range group {
+			for _, clause := range term {
+				if clause.Field != "" && clause.Field != "state" {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// normalizeActivityState converts a work_item_activity "state" row's own
+// value -- recorded as caseStateDisplayLabel's ServiceNow-style display
+// label ("Awaiting Info"), never the raw case_state_enum value
+// (AWAITING_INFO) every pause_condition/resume_condition is actually
+// authored against -- into that enum vocabulary. Reuses
+// snCaseLikeStateLabels, the same lowercase-label-to-enum table this
+// package's own ServiceNow-backed callers already rely on for exactly this
+// label set. ok is false for a value this table doesn't recognize -- the
+// caller must treat that as "can't replay this", never guess.
+func normalizeActivityState(label string) (string, bool) {
+	v, ok := snCaseLikeStateLabels[strings.ToLower(label)]
+	return v, ok
 }
 
 // frozenPausedSnapshot recomputes a PAUSED clock's own frozen
@@ -296,13 +364,30 @@ func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents 
 	// before start_on tells us the state it changed TO; absent that, the
 	// earliest known event's own "old" value tells us the state before
 	// anything in this log ever changed -- nothing changed between then and
-	// start_on either, so it was already that value.
-	currentState := stateEvents[0].OldValue
+	// start_on either, so it was already that value. The fallback's own
+	// OldValue is only ever normalized if it's actually used -- it can be a
+	// placeholder with no real case_state_enum meaning (e.g. a case's
+	// pre-creation "state" on its very first recorded row) that the loop
+	// below would otherwise overwrite before it's ever read.
+	var currentState string
+	sawStateAtOrBeforeStart := false
 	for _, e := range stateEvents {
 		if e.CreatedOn.After(clock.StartOn) {
 			break
 		}
-		currentState = e.NewValue
+		normalized, ok := normalizeActivityState(e.NewValue)
+		if !ok {
+			return 0, 0, false, "an activity row's own state value (" + e.NewValue + ") isn't a recognized state label -- needs manual review"
+		}
+		currentState = normalized
+		sawStateAtOrBeforeStart = true
+	}
+	if !sawStateAtOrBeforeStart {
+		normalized, ok := normalizeActivityState(stateEvents[0].OldValue)
+		if !ok {
+			return 0, 0, false, "an activity row's own state value (" + stateEvents[0].OldValue + ") isn't a recognized state label -- needs manual review"
+		}
+		currentState = normalized
 	}
 
 	f := currentFacts
@@ -333,7 +418,11 @@ func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents 
 		accumulate(lastEventTime, e.CreatedOn)
 		lastEventTime = e.CreatedOn
 
-		f.State = e.NewValue
+		normalized, ok := normalizeActivityState(e.NewValue)
+		if !ok {
+			return 0, 0, false, "an activity row's own state value (" + e.NewValue + ") isn't a recognized state label -- needs manual review"
+		}
+		f.State = normalized
 		newPaused, settled := decidePauseTransition(policy, caseConditionFacts{c: f}, paused)
 		if settled {
 			return 0, 0, false, "history shows this clock should have stopped or been cancelled partway through -- the live engine still treats it as open; needs manual review"
