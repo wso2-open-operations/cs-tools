@@ -520,7 +520,7 @@ func (s *storedAttachmentService) ValidateReportDrafts(ctx context.Context, proj
 	if authorEmail == "" || !validate.IsUUID(projectID) {
 		return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project."}
 	}
-	drafts, err := s.repo.ListReportDrafts(repository.WithSystemIdentity(ctx), projectID, authorEmail, ids)
+	drafts, err := s.repo.ListReportDrafts(repository.WithSystemIdentity(ctx), projectID, authorEmail, ids, s.now().Add(-reportDraftUsableAge))
 	if err != nil {
 		return err
 	}
@@ -530,7 +530,7 @@ func (s *storedAttachmentService) ValidateReportDrafts(ctx context.Context, proj
 	}
 	for _, id := range ids {
 		if !found[strings.ToLower(id)] {
-			return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, or is already used by another record."}
+			return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, was uploaded more than 24 hours ago, or is already used by another record."}
 		}
 	}
 	return nil

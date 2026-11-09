@@ -1986,8 +1986,15 @@ is written, and that insert must not fail (an orphaned ServiceNow case is the wo
 `CreateCaseFromServiceNow`), so `linkReportDrafts` runs after it, best effort: a link that fails leaves a case
 whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
 A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
-Not built yet: a COMPLETE draft whose case was never created is not removed (a PENDING one is marked FAILED
-by the ordinary cleanup after 24 hours); `idx_work_item_attachment_unlinked_drafts` is the queue for that job.
+**An abandoned draft is cleaned up.** A PENDING one is marked FAILED by the ordinary cleanup after 24 hours. A
+COMPLETE one whose case was never created is handed over by `POST /attachments/uploads/cleanup` in `orphans`
+(`type: "work_item"`, with its storage key; `ListUnlinkedReportDrafts`, served by
+`idx_work_item_attachment_unlinked_drafts`) once it is 25 hours old, and marked DELETED only when the caller
+acknowledges it, exactly like a comment image. The 1 hour past 24 is deliberate: `POST /cases` refuses a draft
+older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a `notBefore`), so a draft is never linked to a
+case after its file was handed over for deletion. A form left open more than a day gets a 400 and the file must be
+attached again. Still not built: the job in the portal backends that deletes the files and acknowledges them (it is
+missing for comment images too).
 
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of

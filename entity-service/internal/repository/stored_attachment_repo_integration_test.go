@@ -572,21 +572,45 @@ func TestStoredAttachment_DraftReportLifecycle(t *testing.T) {
 
 	// Not stored yet: it is not a usable draft.
 	ids := []string{row.ID}
-	if got, err := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids); err != nil || len(got) != 0 {
+	if got, err := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Time{}); err != nil || len(got) != 0 {
 		t.Fatalf("a PENDING draft listed as usable: %+v, %v", got, err)
 	}
 	if ok, err := repo.MarkComplete(saSystemCtx(), kind, row.ID, "csm/projects/sa-prj-1/workitems/drafts/attachments/wia_report.pdf", 10); err != nil || !ok {
 		t.Fatalf("MarkComplete = %v, %v", ok, err)
 	}
-	got, err := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids)
+	got, err := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Time{})
 	if err != nil || len(got) != 1 {
 		t.Fatalf("a stored draft of the uploader: %+v, %v", got, err)
 	}
+	// A draft uploaded before the cutoff is not usable (it is on its way to the cleanup).
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Now().Add(time.Hour)); len(got) != 0 {
+		t.Error("a draft older than the cutoff is still listed as usable")
+	}
+	// The cleanup queue lists an unlinked, stored draft once it is old enough, and
+	// not before.
+	inQueue := func(olderThan time.Time) bool {
+		rows, err := repo.ListUnlinkedReportDrafts(saSystemCtx(), olderThan, 100)
+		if err != nil {
+			t.Fatalf("ListUnlinkedReportDrafts: %v", err)
+		}
+		for _, r := range rows {
+			if r.ID == row.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if inQueue(time.Now().Add(-time.Hour)) {
+		t.Error("a fresh draft must not be in the cleanup queue yet")
+	}
+	if !inQueue(time.Now().Add(time.Hour)) {
+		t.Error("an old unlinked draft must be in the cleanup queue")
+	}
 	// Not for another project, another uploader.
-	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject2, saCustomer, ids); len(got) != 0 {
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject2, saCustomer, ids, time.Time{}); len(got) != 0 {
 		t.Error("a draft listed for a project it was not uploaded to")
 	}
-	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saStranger, ids); len(got) != 0 {
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saStranger, ids, time.Time{}); len(got) != 0 {
 		t.Error("a draft listed for someone who did not upload it")
 	}
 
@@ -625,8 +649,11 @@ func TestStoredAttachment_DraftReportLifecycle(t *testing.T) {
 	if taken, err := repo.LinkReportDrafts(saSystemCtx(), saWIClosed, saProject1, saCustomer, ids); err != nil || len(taken) != 0 {
 		t.Errorf("a linked file was taken by another case: %v, %v", taken, err)
 	}
+	if inQueue(time.Now().Add(time.Hour)) {
+		t.Error("a linked file must never be in the cleanup queue")
+	}
 	// Once linked it is no longer a draft, and no longer usable as one.
-	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids); len(got) != 0 {
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Time{}); len(got) != 0 {
 		t.Error("a linked file is still listed as a usable draft")
 	}
 	if rows, _ := repo.GetByIDs(saCustomerCtx(), kind, ids); len(rows) != 1 || rows[0].Draft || rows[0].ParentID != saWIOpen {

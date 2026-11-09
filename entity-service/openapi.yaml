@@ -590,7 +590,8 @@ paths:
         Clear out uploads that were started and never confirmed. Each upload still
         PENDING after 24 hours is marked FAILED (lists hide it and a later confirm
         refuses it), at most 200 per run, and the comment images never linked to a
-        comment are returned in orphans for the caller to remove. Internal callers
+        comment, and the security report files never linked to a case (25 hours old),
+        are returned in orphans for the caller to remove. Internal callers
         only. Meant to be called on a schedule.
       operationId: cleanupAttachmentUploads
       security:
@@ -612,10 +613,14 @@ paths:
                     type: integer
                     description: Comment images stored but never linked to a comment within 24 hours, removed.
                   imagesFailed: {type: integer}
+                  reportDraftsRemoved:
+                    type: integer
+                    description: Security report files stored but never linked to a case, with no file to remove, marked DELETED.
+                  reportDraftsFailed: {type: integer}
                   orphans:
                     type: array
                     description: >-
-                      The unlinked comment images whose files the caller must
+                      The unlinked comment images and security report files whose files the caller must
                       remove from storage. They are not
                       marked DELETED yet, so every run lists them again until the
                       caller removes the files and acknowledges them with
@@ -623,11 +628,15 @@ paths:
                       keys are internal and must never reach a browser.
                     items:
                       type: object
-                      required: [id, storageKey]
+                      required: [id, type, storageKey]
                       properties:
                         id:
                           type: string
                           format: uuid
+                        type:
+                          type: string
+                          enum: [comment, work_item]
+                          description: comment for an unlinked comment image, work_item for an unlinked security report file.
                         storageKey:
                           type: string
         "403":
@@ -646,7 +655,7 @@ paths:
   /attachments/uploads/cleanup/acknowledge:
     post:
       summary: >-
-        Acknowledge orphaned comment images whose files the caller has removed from
+        Acknowledge orphaned comment images and security report files whose files the caller has removed from
         storage. POST /attachments/uploads/cleanup hands the orphans over without
         marking them DELETED. An id is marked DELETED only if it is still an orphan (an
         unlinked comment image past the cleanup age); one that was linked to a

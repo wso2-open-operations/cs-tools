@@ -239,19 +239,25 @@ type UploadCleanupResult struct {
 	// uploaded and never linked to a comment.
 	ImagesRemoved int `json:"imagesRemoved"`
 	ImagesFailed  int `json:"imagesFailed"`
-	// Orphans are the unlinked comment images whose files the caller must
+	// ReportDraftsRemoved and ReportDraftsFailed are the same for a security
+	// report's files that were uploaded and never linked to a case.
+	ReportDraftsRemoved int `json:"reportDraftsRemoved"`
+	ReportDraftsFailed  int `json:"reportDraftsFailed"`
+	// Orphans are the unlinked comment images and report files whose files the caller must
 	// remove from storage. They are NOT yet marked DELETED, so every run lists
 	// them again until the caller removes the files and acknowledges them
 	// (AcknowledgeOrphansRequest). A lost response therefore loses nothing.
 	Orphans []OrphanedImage `json:"orphans,omitempty"`
 }
 
-// OrphanedImage is an unlinked comment image whose file is in storage this
-// service cannot reach. StorageKey is internal: it is for the caller that removes
-// the file and must never reach a browser.
+// OrphanedImage is an unlinked comment image or draft report file whose file is
+// in storage this service cannot reach. Type says which: "comment" or
+// "work_item". StorageKey is internal: it is for the caller that removes the
+// file and must never reach a browser.
 type OrphanedImage struct {
-	ID         string `json:"id"`
-	StorageKey string `json:"storageKey"`
+	ID         string               `json:"id"`
+	Type       StoredAttachmentKind `json:"type"`
+	StorageKey string               `json:"storageKey"`
 }
 
 // AcknowledgeOrphansRequest is the body of POST /attachments/uploads/cleanup/acknowledge:

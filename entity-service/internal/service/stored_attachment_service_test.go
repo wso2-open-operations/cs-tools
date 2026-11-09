@@ -83,7 +83,11 @@ type fakeStoredRepo struct {
 		sys                      bool
 	}
 	unlinked []domain.StoredAttachmentRow
-	deferred []string // rows sent to the back of the cleanup queue
+	// unlinkedReports are the stored report drafts no case was linked to;
+	// reportDraftNotBefore is the age cutoff the last ListReportDrafts was given.
+	unlinkedReports      []domain.StoredAttachmentRow
+	reportDraftNotBefore time.Time
+	deferred             []string // rows sent to the back of the cleanup queue
 
 	// Draft description images.
 	project    domain.StoredAttachmentParent
@@ -234,9 +238,14 @@ func (f *fakeStoredRepo) LinkDescriptionImages(ctx context.Context, workItemID, 
 	return f.draftLinkWant, nil
 }
 
-func (f *fakeStoredRepo) ListReportDrafts(_ context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error) {
+func (f *fakeStoredRepo) ListReportDrafts(_ context.Context, projectID, email string, ids []string, notBefore time.Time) ([]domain.StoredAttachmentRow, error) {
 	f.reportDraftCall.project, f.reportDraftCall.email, f.reportDraftCall.ids = projectID, email, ids
+	f.reportDraftNotBefore = notBefore
 	return f.reportDrafts, nil
+}
+
+func (f *fakeStoredRepo) ListUnlinkedReportDrafts(context.Context, time.Time, int) ([]domain.StoredAttachmentRow, error) {
+	return f.unlinkedReports, nil
 }
 
 func (f *fakeStoredRepo) LinkReportDrafts(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
@@ -987,6 +996,17 @@ func TestValidateReportDrafts(t *testing.T) {
 		}
 		if c := repo.reportDraftCall; c.project != saProjectID || c.email != saEmail || len(c.ids) != 1 {
 			t.Errorf("repo call = %+v", c)
+		}
+	})
+	t.Run("only drafts from the last 24 hours are looked up", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.reportDrafts = []domain.StoredAttachmentRow{reportRow(saReportA)}
+		svc := newStoredSvc(repo)
+		if err := svc.ValidateReportDrafts(context.Background(), saProjectID, saEmail, ids); err != nil {
+			t.Fatal(err)
+		}
+		if want := saNow.Add(-24 * time.Hour); !repo.reportDraftNotBefore.Equal(want) {
+			t.Errorf("notBefore = %v, want %v: an older draft is on its way to the cleanup and must not be linked", repo.reportDraftNotBefore, want)
 		}
 	})
 	t.Run("a file that is not the caller's, not stored or already linked is refused", func(t *testing.T) {
