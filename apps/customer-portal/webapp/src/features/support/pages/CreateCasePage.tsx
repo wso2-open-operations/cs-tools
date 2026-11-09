@@ -95,6 +95,8 @@ import {
   htmlToPlainText,
 } from "@features/support/utils/richTextEditor";
 import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
+import { useReportDraftUploads } from "@features/support/hooks/useReportDraftUploads";
+import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgress";
 import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
 import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
@@ -276,6 +278,10 @@ export default function CreateCasePage(): JSX.Element {
   // Images in the description stay local previews until submit, when they are
   // uploaded to the project before the case is created.
   const inlineImages = useInlineImageUploads({ projectId });
+  // A security report's files are uploaded BEFORE its case is created (as drafts of
+  // the project), so the case never exists without its report: a cancel or a refresh
+  // while they upload leaves nothing behind. Every other case uploads after creating.
+  const reportDrafts = useReportDraftUploads(projectId);
   // Set synchronously when a submit starts, so a second click before the pending
   // state renders cannot create the case twice.
   const isSubmittingRef = useRef(false);
@@ -1143,6 +1149,29 @@ export default function CreateCasePage(): JSX.Element {
     }
     payload.description = imageUpload.html;
 
+    // The report's files go before the case, and the case is created only once they
+    // are stored: it names them, and entity-service refuses a security report without.
+    if (isSecurityReport) {
+      const report = await reportDrafts.upload(
+        attachments.map((item) => ({
+          key: item.id,
+          file: item.file,
+          name: attachmentNamesRef.current.get(item.id) || item.file.name,
+        })),
+      );
+      if (!report.ok) {
+        isSubmittingRef.current = false;
+        // Stopped by the person: nothing was created and there is nothing to report.
+        if (!report.cancelled) {
+          showError(
+            `${report.message} The security report was not submitted; try again.`,
+          );
+        }
+        return;
+      }
+      payload.attachmentIds = report.ids;
+    }
+
     postCase(payload, {
       onSuccess: async (data) => {
         setIsNavigatingAfterCreate(true);
@@ -1186,7 +1215,8 @@ export default function CreateCasePage(): JSX.Element {
 
         let failedAttachmentNames: string[] = [];
         let attachmentsStillUploading = false;
-        if (attachments.length > 0) {
+        // A security report's files are already stored and linked to the case.
+        if (!isSecurityReport && attachments.length > 0) {
           setIsPreparingAttachments(true);
           const uploadPromise = uploadAttachments();
           const timedOut = await Promise.race([
@@ -1528,6 +1558,20 @@ export default function CreateCasePage(): JSX.Element {
                 isLoading={isContactsLoading}
               />
 
+              {/* The report's files going up before the case is created. */}
+              {reportDrafts.progress && (
+                <EditorUploadProgress
+                  uploads={[
+                    {
+                      name: reportDrafts.progress.name,
+                      percent: reportDrafts.progress.percent,
+                      onCancel: reportDrafts.cancel,
+                    },
+                  ]}
+                  waiting={reportDrafts.progress.waiting}
+                />
+              )}
+
               {/* form actions container */}
               <Box sx={{ display: "flex", justifyContent: "right" }}>
                 {/* submit button */}
@@ -1544,6 +1588,7 @@ export default function CreateCasePage(): JSX.Element {
                     isNavigatingAfterCreate ||
                     isPreparingAttachments ||
                     inlineImages.isUploadingImages ||
+                    reportDrafts.isUploading ||
                     !projectId ||
                     !selectedDeploymentId ||
                     deploymentProductsLoading ||
@@ -1552,6 +1597,7 @@ export default function CreateCasePage(): JSX.Element {
                   }
                 >
                   {inlineImages.isUploadingImages ||
+                  reportDrafts.isUploading ||
                   isPreparingAttachments ||
                   isCreatePending
                     ? isSecurityReport
