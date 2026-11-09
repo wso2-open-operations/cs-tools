@@ -141,7 +141,7 @@ entity-service without it the task fails (404) and the engine alerts.
 
 A table that entity-service cut at its cap carries a "Showing only the oldest N of TOTAL" note, and an
 empty table shows "No cases." If both tables are empty the report omits itself: nothing is sent, a
-count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<internal id>` (plain text when it is unset).
+count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<case UUID>` (the `id` of each report row; the portal cannot open a case by number or internal ID), as plain text when the base is unset or a row has no `id`.
 
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
@@ -166,10 +166,17 @@ package's own doc comment for why case search isn't just another method on `ledg
 sibling of "Stale cases report" above: it flags a case nobody has even started working on yet,
 rather than any case that's merely been open a long time. Queries entity-service's
 `POST /cases/search` (via `internal/entitycases.Client.SearchCasesInStateCreatedBeforeYesterday`)
-for every case whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
-moved to `work_in_progress` or anything else no longer belongs here) and whose `createdOn` falls
-before the start of yesterday, then emails a report table of them (oldest first) via
-`notify.RenderOpenCasesReport`.
+for every item whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
+moved to `work_in_progress` or anything else no longer belongs here), whose `type` is one of `case`,
+`service_request` or `security_report_analysis` (`entitycases.OpenCaseTypes`; without the filter the
+search also returns announcements and engagements, tens of thousands of rows) and whose `createdOn`
+falls before the start of yesterday, then emails a report table of them (oldest first) via
+`notify.RenderOpenCasesReport`. The table has a Type column (Case, Service request, Security report
+analysis), and each row's number links to the item's CSM portal page, built from
+`CSM_PORTAL_WEB_BASE_URL` and the item's UUID: `/cases/<id>`, `/operations/service-requests/<id>` or
+`/security-center/security-reports/<id>`. The base is empty, the row has no id or the type has no
+known route: plain text. A result over the pagination cap is an error, never a partial list. With no
+matching rows the email is still sent, with a single "No matching cases." row and a count of 0.
 
 "Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
 time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
@@ -877,7 +884,7 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
-| `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
+| `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its

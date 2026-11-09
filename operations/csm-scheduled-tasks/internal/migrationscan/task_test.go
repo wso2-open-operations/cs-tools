@@ -103,7 +103,7 @@ func TestSendReportMergesConfiguredAndDerivedRecipients(t *testing.T) {
 		t.Errorf("subject = %q", email.subject)
 	}
 	for _, want := range []string{
-		"ENG0000001", "ACME-MIG-1", "https://support.example.com/cases/ENG0000001",
+		"ENG0000001", "ACME-MIG-1", "https://support.example.com/cases/11111111-1111-1111-1111-111111111111",
 		"Dana Example", "Team Alpha", "EU", "Morgan Example / Sam Example", "2026-03-02 15:00:00", "2026-09-01 09:35:00",
 		"<strong>180 days</strong>",
 		"Team &lt;Beta&gt;",
