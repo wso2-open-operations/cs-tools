@@ -3430,35 +3430,50 @@
    the bar's edge colour: 4.3:1 or better against the cell in light (4.27
    on the reader's row tint, 4.38 on a weekend) and 6.1:1 or better in dark.
    Keyed on the marker, not on td.c: a read-only, unsplit day cell has no .c. */
-.csm-ts .roster td:has(> .engmk) {
-  position: relative;
-}
-.csm-ts .roster td:has(> .engmk) .engmk {
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  bottom: 0;
-  height: 7px;
+/* A customer engagement from the allocation app, read-only: a chip reading
+   Allo- and the engagement id, in the engagement colours. */
+.csm-ts .chip.eng {
+  background: var(--eng-bg);
+  color: var(--eng-fg);
+  box-shadow: inset 3px 0 0 var(--eng-edge);
   cursor: default;
 }
-.csm-ts .roster td:has(> .engmk) .engmk::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 1px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--eng-edge);
+/* The picker's engagement rows: one per allocation covering the day. */
+.csm-ts .pk-remove.pk-eng {
+  flex-direction: column;
+  align-items: stretch;
 }
-/* The legend's swatch: the same strip, on its own. */
-.csm-ts .engmksw {
-  display: inline-block;
-  width: 26px;
-  height: 3px;
-  border-radius: 2px;
+.csm-ts .pk-eng .pkeng-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.csm-ts .pk-eng .pkeng-row .pkrm-t {
+  flex: 1;
+  min-width: 0;
+}
+.csm-ts .pk-eng .pkeng-row .pkrm-t small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.csm-ts .chip.eng.gone {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+/* A tag holds the day: the engagement is a dot in the cell's corner. */
+.csm-ts .roster td:has(> .engdot) {
+  position: relative;
+}
+.csm-ts .roster td > .engdot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: var(--eng-edge);
-  align-self: center;
+  cursor: default;
 }
 /* A yes or no and a pick from a few are changed right in their row. */
 .csm-ts .cas-inline { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }

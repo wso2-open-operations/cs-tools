@@ -19,7 +19,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import CellPicker, { type CellPickerTarget } from "./CellPicker";
+import CellPicker, { type CellEngagement, type CellPickerTarget } from "./CellPicker";
 import type { CellAbsence } from "../types";
 import type { ScheduleAbsenceKind } from "../types";
 import { ANNUAL_LEAVE, EVENING, LIEU_LEAVE, REGULAR, REGULAR_IND, RND, TZ1, TZ1_L1, TZ2, TZ3, WEEKEND, shift } from "../test/fixtures";
@@ -839,5 +839,45 @@ describe("CellPicker: moving somebody to the India team", () => {
     expect(within(rota).queryByRole("button", { name: /India region shift/ })).not.toBeInTheDocument();
     expect(within(rota).queryByRole("button", { name: /AEST regular hours/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Move to India Team/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("CellPicker: customer engagements from the allocation app", () => {
+  const live: CellEngagement = { id: "al1", label: "Allo-E08110", title: "Quartz Robotics - E08110: Firefighting", dismissed: false };
+  const gone: CellEngagement = { id: "al2", label: "Allo-E07202", title: "Lumen Partners - E07202: Consultancy", dismissed: true };
+
+  function renderWith(engagements: CellEngagement[], onDismissEngagement = vi.fn()) {
+    render(
+      <CellPicker
+        target={target({ engagements })}
+        shifts={[REGULAR, EVENING, WEEKEND]}
+        awayKinds={[ANNUAL_LEAVE, LIEU_LEAVE, RND]}
+        onApply={vi.fn()}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onDismissEngagement={onDismissEngagement}
+        onClose={vi.fn()}
+      />,
+    );
+    return onDismissEngagement;
+  }
+
+  it("offers to remove one on the roster for the picked day", () => {
+    const onDismiss = renderWith([live]);
+    const group = screen.getByRole("group", { name: /customer engagements from the allocation app/i });
+    expect(within(group).getByText("Allo-E08110")).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole("button", { name: /^Remove/ }));
+    expect(onDismiss).toHaveBeenCalledWith(live, "2026-09-23", "2026-09-23", false);
+  });
+
+  it("offers to restore one that was removed", () => {
+    const onDismiss = renderWith([gone]);
+    fireEvent.click(screen.getByRole("button", { name: /^Restore/ }));
+    expect(onDismiss).toHaveBeenCalledWith(gone, "2026-09-23", "2026-09-23", true);
+  });
+
+  it("shows nothing without engagements or without the handler", () => {
+    renderWith([]);
+    expect(screen.queryByRole("group", { name: /customer engagements/i })).toBeNull();
   });
 });
