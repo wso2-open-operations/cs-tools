@@ -75,6 +75,20 @@ describe("generateErrorMessage", () => {
   });
 
   it.each([
+    ["no body", new BackendApiError(429, "Too Many Requests")],
+    ["a JSON body without a message", new BackendApiError(429, "Too Many Requests", {})],
+  ])("says too many requests for a proxy's own 429 (%s)", (_name, err) => {
+    expect(generateErrorMessage(err, false)).toBe("Too many requests right now. Wait a minute and try again.");
+    expect(generateErrorMessage(err, true)).toBe("Too many requests right now. Wait a minute and try again.");
+  });
+
+  it("words a proxy's own 413 like the backend's draft-too-large message", () => {
+    expect(generateErrorMessage(new BackendApiError(413, "Payload Too Large"), true)).toBe(
+      "The dashboard being edited is too large to change in the chat. Start a new one.",
+    );
+  });
+
+  it.each([
     ["offline", new TypeError("Failed to fetch")],
     ["a dropped connection", new TypeError("NetworkError when attempting to fetch resource.")],
     ["an unexpected error", new Error("boom")],
@@ -97,7 +111,13 @@ describe("generateErrorMessage", () => {
   });
 
   it("never says the input did not work when the failure was elsewhere", () => {
-    for (const err of [new TypeError("Failed to fetch"), new BackendApiError(504, "Gateway Timeout"), backend(500, "x")]) {
+    for (const err of [
+      new TypeError("Failed to fetch"),
+      new BackendApiError(504, "Gateway Timeout"),
+      new BackendApiError(429, "Too Many Requests"),
+      new BackendApiError(413, "Payload Too Large"),
+      backend(500, "x"),
+    ]) {
       expect(generateErrorMessage(err, false)).not.toMatch(/input/);
     }
   });

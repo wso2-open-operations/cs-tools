@@ -39,6 +39,9 @@ const BACKEND_MESSAGE_STATUSES: ReadonlySet<number> = new Set([400, 413, 429, 50
  *
  * - a proxy in front of the backend answering its own 504 (its error page,
  *   no JSON): too slow; its own 502 / 503: the AI assistant unreachable;
+ *   its own 429 (its rate limit): too many requests, wait and try again;
+ *   its own 413 (its body size limit, reached only by a draft): the same
+ *   words as the backend's own draft-too-large message;
  * - no answer at all (fetch threw: offline, or the connection was dropped,
  *   as a proxy does when its timeout is shorter than the model call's): the
  *   portal got no answer;
@@ -63,6 +66,12 @@ export function generateErrorMessage(err: unknown, editing: boolean): string {
   }
   if (err.status === 502 || err.status === 503) {
     return "The AI assistant can't be reached right now. Try again in a few minutes.";
+  }
+  if (err.status === 429) {
+    return "Too many requests right now. Wait a minute and try again.";
+  }
+  if (err.status === 413) {
+    return "The dashboard being edited is too large to change in the chat. Start a new one.";
   }
   return editing
     ? "Something went wrong while changing the dashboard. Try again."
