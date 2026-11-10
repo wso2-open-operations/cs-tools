@@ -133,8 +133,8 @@ func NewStandardChangeRepository(db *Scoped) StandardChangeRepository {
 // one a change request's CAB stage has ("CAB Approval"). Older proposals carry
 // other labels, read like any other: "Standard Change Authority" on one
 // submitted before 2026-11-10 (that group authorised templates until migration
-// 0289), and, before it, a one-approval "CAB Approval" stage on one decided
-// before migration 0287 removed the separate CAB stage. A proposal's stages are
+// 0292), and, before it, a one-approval "CAB Approval" stage on one decided
+// before migration 0290 removed the separate CAB stage. A proposal's stages are
 // only ever read by its own id, never as a change request's, so sharing the
 // label with change requests mixes nothing up.
 const standardChangeCABStageLabel = approvalStageLabelCAB
@@ -588,7 +588,7 @@ func (r *standardChangeRepo) ClearReviewRequired(ctx context.Context, id, actor,
 	return r.GetTemplate(ctx, id)
 }
 
-// recordTemplateEvent appends to a template's history (migration 0277).
+// recordTemplateEvent appends to a template's history (migration 0282).
 func recordTemplateEvent(ctx context.Context, tx pgx.Tx, templateID, action string, note, changeRequestID *string, actor string) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO standard_change_template_event (template_id, action, note, change_request_id, actor)
 		VALUES ($1::uuid, $2, NULLIF(btrim(COALESCE($3, '')), ''), $4::uuid, $5)`, templateID, action, note, changeRequestID, actor); err != nil {

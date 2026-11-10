@@ -120,11 +120,11 @@ var standardChangeTemplateStates = map[domain.StandardChangeTemplateState]string
 	domain.StandardChangeTemplateStateRetired:   "RETIRED",
 }
 
-// legacyCABReviewState was a proposal state until migration 0287 removed the CAB
+// legacyCABReviewState was a proposal state until migration 0290 removed the CAB
 // stage. SearchProposals still accepts it, and it matches no proposal, because a
 // webapp deployed before this release (services deploy separately) or a
 // bookmarked URL may still send it. Remove it, and its branch in
-// SearchProposals, in the release after the one that ships 0287.
+// SearchProposals, in the release after the one that ships 0290.
 const legacyCABReviewState domain.StandardChangeProposalState = "cab_review"
 
 var standardChangeProposalStates = map[domain.StandardChangeProposalState]string{
@@ -507,7 +507,7 @@ func (s *standardChangeService) SearchProposals(ctx context.Context, req domain.
 	for _, st := range req.States {
 		v, ok := standardChangeProposalStates[st]
 		if st == legacyCABReviewState {
-			// No row holds it (0287's check), so it narrows to nothing.
+			// No row holds it (0290's check), so it narrows to nothing.
 			v, ok = "CAB_REVIEW", true
 		}
 		if !ok {

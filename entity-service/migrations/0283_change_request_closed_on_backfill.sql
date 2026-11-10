@@ -46,7 +46,7 @@
 -- without closed_on until they are replaced; this file is recorded as applied and
 -- `make migrate` never runs it again. Re-running it by hand afterwards fills those
 -- (and touches nothing else):
---   psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0279_change_request_closed_on_backfill.sql
+--   psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0283_change_request_closed_on_backfill.sql
 --
 -- change_request and work_item are row-level-secured with FORCE (100006, 100008):
 -- a migrating role without BYPASSRLS that is not flagged internal sees no row, and

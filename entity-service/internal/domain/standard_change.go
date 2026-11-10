@@ -29,7 +29,7 @@ import "time"
 // group that approves normal change requests), of whom StandardChangeCABApprovals
 // different people must approve; the proposer cannot, and one rejection ends it.
 // (Until 2026-11-10 a separate "Standard Change Authority" group did this;
-// migration 0289 returned the proposals still waiting on it to draft.)
+// migration 0292 returned the proposals still waiting on it to draft.)
 const StandardChangeCABApprovals = 2
 
 // StandardChangeTemplateState is a template's lifecycle state.
@@ -65,8 +65,8 @@ const (
 	StandardChangeProposalStateDraft StandardChangeProposalState = "draft"
 	// AuthorityReview: submitted, waiting on the CAB's approval. The name is
 	// historical: until 2026-11-10 the authorising group was the "Standard Change
-	// Authority" (migration 0289 moved that to the CAB). (Before 0287 a proposal
-	// went through a separate CAB stage first, in cab_review; 0287 returned the
+	// Authority" (migration 0292 moved that to the CAB). (Before 0290 a proposal
+	// went through a separate CAB stage first, in cab_review; 0290 returned the
 	// ones still there to draft, and no proposal holds that state any more.)
 	StandardChangeProposalStateAuthorityReview StandardChangeProposalState = "authority_review"
 	StandardChangeProposalStateApproved        StandardChangeProposalState = "approved"
@@ -325,9 +325,9 @@ type StandardChangeEvidence struct {
 // StandardChangeProposalStage is one approval stage of a proposal: the CAB's
 // ("CAB Approval", two approvals). A proposal decided before 2026-11-10 has a
 // "Standard Change Authority" stage instead (the group that authorised templates
-// until then); one decided before migration 0287 removed the separate CAB stage
+// until then); one decided before migration 0290 removed the separate CAB stage
 // also shows that older "CAB Approval" stage first, with one required approval
-// (0287 removed it from every open proposal).
+// (0290 removed it from every open proposal).
 type StandardChangeProposalStage struct {
 	ID string `json:"id"`
 	// Label is the stage's name: "CAB Approval"; "Standard Change Authority" on

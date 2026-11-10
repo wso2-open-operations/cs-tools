@@ -45,7 +45,7 @@ const (
 	stdProposer = "std-proposer@scp.test"
 	stdOutsider = "std-outsider@scp.test"
 	// The CAB ("CAB Approval", migration 0188), which authorises proposals
-	// (migration 0289): stdAuth1, stdAuth2 and stdCAB1, and nobody else while
+	// (migration 0292): stdAuth1, stdAuth2 and stdCAB1, and nobody else while
 	// the tests run (isolateStdCAB). stdColleague is internal and not on the
 	// CAB, like the proposer: neither has a say on a proposal.
 	stdCAB1      = "std-cab-one@scp.test"
@@ -593,7 +593,7 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	if err != nil || mine.Total != 3 {
 		t.Fatalf("proposed by me = %d, %v", mine.Total, err)
 	}
-	// cab_review is no longer a state (0287), but a webapp from before it may
+	// cab_review is no longer a state (0290), but a webapp from before it may
 	// still ask for it: accepted, and it matches nothing, alone or beside others.
 	cabOnly, err := env.svc.SearchProposals(stdCtx(stdProposer), domain.SearchStandardChangeProposalsRequest{ProposedByMe: true,
 		States: []domain.StandardChangeProposalState{"cab_review"}})
@@ -1738,9 +1738,9 @@ func stdDuplicates(t *testing.T, env *stdEnv) {
 
 // stdOldLabelledProposal: a proposal's stages are read and decided whatever
 // their label. This one has the two stages of the oldest flow: a settled "CAB
-// Approval" stage needing one approval (the CAB stage 0287 removed), then a
-// "Standard Change Authority" stage (the group 0289 replaced), as a proposal an
-// old pod submits after 0289 has run would end up with (0289's rollout note).
+// Approval" stage needing one approval (the CAB stage 0290 removed), then a
+// "Standard Change Authority" stage (the group 0292 replaced), as a proposal an
+// old pod submits after 0292 has run would end up with (0292's rollout note).
 // It is decided on its latest stage only: a decision sent for the settled stage
 // is refused, the old CAB approver has no row on the latest stage and cannot
 // decide, and the second authorisation applies it; both labels read back as
@@ -1794,7 +1794,7 @@ func stdOldLabelledProposal(t *testing.T, env *stdEnv) {
 	}
 }
 
-// Migration 0287 removes the CAB stage. A proposal still in CAB review goes back
+// Migration 0290 removes the CAB stage. A proposal still in CAB review goes back
 // to draft, submitted_on cleared, and loses its CAB stage: a clean draft again,
 // which can be deleted; submitted again it goes to the authority, and a decision
 // sent for its old stage is refused. A proposal the CAB approved under the old
@@ -1803,9 +1803,9 @@ func stdOldLabelledProposal(t *testing.T, env *stdEnv) {
 // the template in force. The state check no longer admits CAB_REVIEW. Running it
 // twice changes nothing more.
 //
-// 0287 was written while the "Standard Change Authority" decided proposals, and
-// its DELETE keeps only stages of that label on an open proposal; since 0289 a
-// proposal's stage is labelled "CAB Approval", which 0287 would take for the old
+// 0290 was written while the "Standard Change Authority" decided proposals, and
+// its DELETE keeps only stages of that label on an open proposal; since 0292 a
+// proposal's stage is labelled "CAB Approval", which 0290 would take for the old
 // CAB stage. So the fixtures are labelled as the code of that time wrote them,
 // and the open "CAB Approval" stages of proposals the test did not make (a local
 // stack's, say) are parked under the authority's label while it runs and put
@@ -1820,9 +1820,9 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	dsns := stdDSNs(t)
 	ownerDSN, ok := dsns["owner"]
 	if !ok {
-		t.Skip("STANDARD_CHANGE_TEST_DSN not set: only the tables' owner can run 0287")
+		t.Skip("STANDARD_CHANGE_TEST_DSN not set: only the tables' owner can run 0290")
 	}
-	migration, err := os.ReadFile("../../migrations/0287_standard_change_no_cab_stage.sql")
+	migration, err := os.ReadFile("../../migrations/0290_standard_change_no_cab_stage.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
@@ -1927,7 +1927,7 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 		return got
 	}
 	for run1 := 1; run1 <= 2; run1++ {
-		run(env.pool, fmt.Sprintf("run %d of 0287", run1), string(migration))
+		run(env.pool, fmt.Sprintf("run %d of 0290", run1), string(migration))
 		checkReturned(fmt.Sprintf("run %d", run1), cab)
 		if got, _ := env.svc.GetProposal(stdCtx(stdProposer), waiting.ID); got.State != domain.StandardChangeProposalStateAuthorityReview ||
 			len(got.Stages) != 1 || got.Stages[0].Label != "Standard Change Authority" ||
@@ -1970,7 +1970,7 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 		return
 	}
 	// Without FORCE row-level security on the proposal (migration 100026) the
-	// app role's run would find the rows with or without 0287's app.is_internal
+	// app role's run would find the rows with or without 0290's app.is_internal
 	// bracket, and prove nothing about it.
 	var forced bool
 	if err := env.scoped.QueryRow(sys, `SELECT relforcerowsecurity FROM pg_class WHERE oid = 'standard_change_proposal'::regclass`).Scan(&forced); err != nil {
@@ -1978,7 +1978,7 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	}
 	if !forced {
 		t.Skip("standard_change_proposal is not FORCE row-level secured on this database (apply migrations/100026_standard_change_rls.sql): " +
-			"the app role's run of 0287 would not exercise its app.is_internal bracket")
+			"the app role's run of 0290 would not exercise its app.is_internal bracket")
 	}
 	appPool, err := pgxpool.New(context.Background(), appDSN)
 	if err != nil {
@@ -1988,24 +1988,24 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	exec("relax the state check", `ALTER TABLE standard_change_proposal DROP CONSTRAINT IF EXISTS standard_change_proposal_state_check`)
 	again := inCAB(stdTag + " Waiting on the CAB, row-level security")
 	// The app role, on a session nobody flagged internal, sees no proposal: what
-	// 0287's UPDATEs find below, they find through its bracket.
+	// 0290's UPDATEs find below, they find through its bracket.
 	var seen int
 	if err := appPool.QueryRow(context.Background(), `SELECT COUNT(*) FROM standard_change_proposal WHERE id = $1::uuid`, again.ID).Scan(&seen); err != nil || seen != 0 {
 		t.Fatalf("the app role sees %d proposal(s) unflagged (%v): row-level security is not in force for it", seen, err)
 	}
 	updatesOnly := regexp.MustCompile(`(?s)ALTER TABLE standard_change_proposal [^;]*;`).ReplaceAllString(string(migration), "")
 	if strings.Contains(updatesOnly, "ALTER TABLE") || !strings.Contains(updatesOnly, "UPDATE standard_change_proposal") {
-		t.Fatalf("could not take the ALTERs out of 0287:\n%s", updatesOnly)
+		t.Fatalf("could not take the ALTERs out of 0290:\n%s", updatesOnly)
 	}
-	run(appPool, "0287's updates as the app role", updatesOnly)
+	run(appPool, "0290's updates as the app role", updatesOnly)
 	checkReturned("as the app role", again)
-	run(env.pool, "0287 again", string(migration))
+	run(env.pool, "0290 again", string(migration))
 }
 
 // parkOthersCABStages relabels the "CAB Approval" stage of every open proposal
 // the tests did not make to "Standard Change Authority" while the calling test
 // runs, and puts the label back on cleanup (so after any cleanup the test
-// registers later), for a test that re-runs migration 0287, whose DELETE removes
+// registers later), for a test that re-runs migration 0290, whose DELETE removes
 // every other stage of an open proposal.
 func parkOthersCABStages(t *testing.T, env *stdEnv) {
 	t.Helper()
@@ -2060,13 +2060,13 @@ func stdRunSQL(t *testing.T, pool *pgxpool.Pool, what, sql string) {
 	}
 }
 
-// Migration 0289 has the CAB authorise proposals. A proposal still waiting on
+// Migration 0292 has the CAB authorise proposals. A proposal still waiting on
 // the Standard Change Authority (its open stage labelled so) goes back to draft:
 // submitted_on cleared, customer_locked kept, its stage and approver rows gone
 // (an approval already given with them), so a clean draft that can be deleted;
 // submitted again, it goes to the CAB. A proposal already submitted to the CAB,
 // and a decided one, are left as they are. The authority group's description
-// says it is no longer used, reworded only while it reads as 0287 left it.
+// says it is no longer used, reworded only while it reads as 0290 left it.
 // Running it twice changes nothing more. It writes no DDL, so it also runs, whole,
 // as STANDARD_CHANGE_TEST_APP_DSN's role (no BYPASSRLS: FORCE row-level security
 // applies) on a session nobody flagged internal, and must still find the rows.
@@ -2076,7 +2076,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 	if !ok {
 		t.Skip("STANDARD_CHANGE_TEST_DSN not set")
 	}
-	migration, err := os.ReadFile("../../migrations/0289_standard_change_cab_authorises.sql")
+	migration, err := os.ReadFile("../../migrations/0292_standard_change_cab_authorises.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
@@ -2089,10 +2089,10 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 		}
 	}
 	const authorityGroupID = "00000000-0000-4000-8000-0000000005ca"
-	const description0287 = "Authorises standard change templates: two members must approve every new template, revision and retirement, and only a member may resume a suspended template or clear a review flag."
+	const description0290 = "Authorises standard change templates: two members must approve every new template, revision and retirement, and only a member may resume a suspended template or clear a review flag."
 	var savedDescription *string
 	if err := env.scoped.QueryRow(sys, `SELECT description FROM "group" WHERE id = $1::uuid`, authorityGroupID).Scan(&savedDescription); err != nil {
-		t.Fatalf("read the authority group (migration 0277): %v", err)
+		t.Fatalf("read the authority group (migration 0282): %v", err)
 	}
 	t.Cleanup(func() {
 		if _, err := env.scoped.Exec(sys, `UPDATE "group" SET description = $2 WHERE id = $1::uuid`, authorityGroupID, savedDescription); err != nil {
@@ -2108,7 +2108,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 		return stringOr(d)
 	}
 
-	// A proposal submitted to the authority, as the code before 0289 left it:
+	// A proposal submitted to the authority, as the code before 0292 left it:
 	// its one stage labelled "Standard Change Authority", two approvals needed.
 	toAuthority := func(name string) domain.StandardChangeProposal {
 		t.Helper()
@@ -2133,7 +2133,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), atCAB.ID); err != nil {
 		t.Fatal(err)
 	}
-	exec("the description 0287 left", `UPDATE "group" SET description = $2 WHERE id = $1::uuid`, authorityGroupID, description0287)
+	exec("the description 0290 left", `UPDATE "group" SET description = $2 WHERE id = $1::uuid`, authorityGroupID, description0290)
 
 	checkReturned := func(what string, before domain.StandardChangeProposal) {
 		t.Helper()
@@ -2148,7 +2148,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 		var locked bool
 		var by string
 		if err := env.scoped.QueryRow(sys, `SELECT p.customer_locked, w.updated_by FROM standard_change_proposal p JOIN work_item w ON w.id = p.id WHERE p.id = $1::uuid`,
-			before.ID).Scan(&locked, &by); err != nil || !locked || by != "migration:0289_standard_change_cab_authorises" {
+			before.ID).Scan(&locked, &by); err != nil || !locked || by != "migration:0292_standard_change_cab_authorises" {
 			t.Fatalf("%s: customer_locked %v, updated_by %q, %v", what, locked, by, err)
 		}
 	}
@@ -2164,23 +2164,23 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 		}
 	}
 	for run := 1; run <= 2; run++ {
-		stdRunSQL(t, env.pool, fmt.Sprintf("run %d of 0289", run), string(migration))
+		stdRunSQL(t, env.pool, fmt.Sprintf("run %d of 0292", run), string(migration))
 		checkReturned(fmt.Sprintf("run %d", run), waiting)
 		checkLeftAlone(fmt.Sprintf("run %d", run))
 		if d := description(); !strings.HasPrefix(d, "No longer used") || !strings.Contains(d, "CAB Approval") {
 			t.Fatalf("run %d: the authority group's description = %q", run, d)
 		}
 	}
-	// So is 0277's own wording, which an earlier draft of 0287 left; someone's
+	// So is 0282's own wording, which an earlier draft of 0290 left; someone's
 	// own wording is left alone.
-	exec("the description 0277 wrote", `UPDATE "group" SET description = $2 WHERE id = $1::uuid`, authorityGroupID,
+	exec("the description 0282 wrote", `UPDATE "group" SET description = $2 WHERE id = $1::uuid`, authorityGroupID,
 		"Authorises standard change templates after the CAB: two members must approve every new template, revision and retirement, and only a member may resume a suspended template or clear a review flag.")
-	stdRunSQL(t, env.pool, "0289 over 0277's description", string(migration))
+	stdRunSQL(t, env.pool, "0292 over 0282's description", string(migration))
 	if d := description(); !strings.HasPrefix(d, "No longer used") {
-		t.Fatalf("0277's description was not reworded: %q", d)
+		t.Fatalf("0282's description was not reworded: %q", d)
 	}
 	exec("an operator's description", `UPDATE "group" SET description = 'Kept by ops' WHERE id = $1::uuid`, authorityGroupID)
-	stdRunSQL(t, env.pool, "0289 over an operator's description", string(migration))
+	stdRunSQL(t, env.pool, "0292 over an operator's description", string(migration))
 	if d := description(); d != "Kept by ops" {
 		t.Fatalf("an operator's description was reworded: %q", d)
 	}
@@ -2210,7 +2210,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 	}
 	if !forced {
 		t.Skip("standard_change_proposal is not FORCE row-level secured on this database (apply migrations/100026_standard_change_rls.sql): " +
-			"the app role's run of 0289 would not exercise its app.is_internal bracket")
+			"the app role's run of 0292 would not exercise its app.is_internal bracket")
 	}
 	appPool, err := pgxpool.New(context.Background(), appDSN)
 	if err != nil {
@@ -2222,7 +2222,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 	if err := appPool.QueryRow(context.Background(), `SELECT COUNT(*) FROM standard_change_proposal WHERE id = $1::uuid`, again.ID).Scan(&seen); err != nil || seen != 0 {
 		t.Fatalf("the app role sees %d proposal(s) unflagged (%v): row-level security is not in force for it", seen, err)
 	}
-	stdRunSQL(t, appPool, "0289 as the app role", string(migration))
+	stdRunSQL(t, appPool, "0292 as the app role", string(migration))
 	checkReturned("as the app role", again)
 	checkLeftAlone("as the app role")
 }

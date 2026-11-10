@@ -73,7 +73,7 @@ type StandardChangeSuggestionRepository interface {
 	// SkipCustomer records that a customer could not be computed in this run
 	// (reason, e.g. too large for its deadline): no suggestions, and it is
 	// reported as skipped. The customer's cluster keys are carried over from the
-	// latest published run (carried_keys, migration 0286), so the next run keeps
+	// latest published run (carried_keys, migration 0289), so the next run keeps
 	// them (SnapshotKeys). 409 when the run is gone or published.
 	SkipCustomer(ctx context.Context, runID, accountID, reason string) error
 	// SkippedCustomers are the customers a run skipped (of one customer when
@@ -142,7 +142,7 @@ func NewStandardChangeSuggestionRepository(db *Scoped) StandardChangeSuggestionR
 
 // candidateFilter is what makes a change request a candidate: completed (Closed
 // or Rollback) since $1, not raised from a template, with a customer. The
-// completion is closed_on (0279 stamps it on every completion and backfilled the
+// completion is closed_on (0283 stamps it on every completion and backfilled the
 // CSM's own); a row completed with none recorded falls back to the work item's
 // last update, which is never earlier than its completion.
 const candidateFilter = `

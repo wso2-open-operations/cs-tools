@@ -97,10 +97,10 @@
 # CONVERGING AN EARLIER VERSION'S DATA. What an earlier version of this script
 # left is brought to what this version would leave where the real flow allows it:
 #   * the memory limit proposal, which an earlier version left in CAB review:
-#     CAB review is no longer a state, and migration 0287 returned it to Draft,
+#     CAB review is no longer a state, and migration 0290 returned it to Draft,
 #     so it is found again as a draft and left as it is (what this version leaves);
 #   * a proposal an interrupted earlier run left awaiting the Standard Change
-#     Authority: migration 0289 returned it to Draft, so it is found again as a
+#     Authority: migration 0292 returned it to Draft, so it is found again as a
 #     draft, submitted to the CAB and decided by alice and carol;
 #   * the suspended template's reason: when the stored reason differs from this
 #     script's, alice resumes it with a note (only a CAB member may put a
@@ -894,7 +894,7 @@ cat >"$WORK/purge.json" <<'JSON'
 JSON
 
 # The proposal left as a complete draft, ready to submit. (An earlier version of
-# this script submitted it to the CAB; migration 0287 returned that one to Draft.)
+# this script submitted it to the CAB; migration 0290 returned that one to Draft.)
 cat >"$WORK/memory.json" <<'JSON'
 {"evidenceMatch": "\\b(memory limit|oom|out of memory)\\b",
  "evidenceNote": "<p>The cited evidence is earlier memory limit work closed on this stack.</p>",

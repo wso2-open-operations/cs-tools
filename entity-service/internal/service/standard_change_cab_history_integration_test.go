@@ -27,7 +27,7 @@ import (
 )
 
 // The CAB's pushback against PostgreSQL: which approval stages are the CAB's
-// (labelled and ServiceNow-style unlabelled ones), the rejections and comments
+// (labelled and unlabelled ones, as migrated rows have), the rejections and comments
 // read from them, the look-alikes, and what a suggestion and a proposal show.
 // Same DSNs as the other standard change integration tests.
 
@@ -98,7 +98,7 @@ func TestStandardChangeCABHistoryIntegration_Suggestions(t *testing.T) {
 			d3 := e.cr("A", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, 30)
 			e.cr("A", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, 40)
 			e.cr("A", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, 50)
-			// d1, ServiceNow-style (no labels): a peer's rejection at position 0 is not
+			// d1, migrated style (no labels): a peer's rejection at position 0 is not
 			// the CAB's; the CAB (position 1) rejected it, then approved it with a comment.
 			peer := c.stage(d1, nil, nil)
 			c.row(d1, peer, bob, "REJECTED", "peer says no", 40)

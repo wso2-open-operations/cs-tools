@@ -64,7 +64,7 @@ type CABChangeRequest struct {
 type CABDecision struct {
 	// State is the row's state: APPROVED, REJECTED, REQUESTED, CANCELLED, ...
 	State string
-	// Comment as stored: plain text, or rich text copied from ServiceNow.
+	// Comment as stored: plain text, or rich text migrated from the previous system.
 	Comment      string
 	DecidedOn    time.Time
 	ApproverName string

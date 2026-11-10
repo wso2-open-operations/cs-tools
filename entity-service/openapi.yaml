@@ -29678,7 +29678,7 @@ components:
             The change request this one is a clone of (the portal's Clone), recorded as its
             clonedFrom and never changed afterwards. Must be an existing change request (400
             otherwise, refused before the previous system is called on dual-write).
-            Recorded on the PostgreSQL data sources only: DATA_SOURCE=servicenow ignores it.
+            Recorded on the PostgreSQL data sources only: the legacy data source ignores it.
 
     ChangeRequestLinkOptionsRequest:
       type: object
@@ -35178,7 +35178,7 @@ components:
         member: {type: boolean}
         approverName: {type: string}
         state: {type: string, description: "The approver's decision: APPROVED, REJECTED, REQUESTED, CANCELLED, ..."}
-        comment: {type: string, description: "Plain text (markup removed; ServiceNow comments can be rich text), at most 2000 characters."}
+        comment: {type: string, description: "Plain text (markup removed; comments migrated from the previous system can be rich text), at most 2000 characters."}
         decidedOn: {type: string, format: date-time}
     StandardChangeSuggestionBreakdown:
       type: object
@@ -35433,7 +35433,7 @@ components:
         states:
           type: array
           description: >
-            cab_review (a state until migration 0287 removed the CAB stage) is still accepted for one
+            cab_review (a state until migration 0290 removed the CAB stage) is still accepted for one
             release, for a client deployed before it, and matches no proposal.
           items: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled, cab_review]}
         kinds:

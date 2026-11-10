@@ -16,15 +16,15 @@
 
 -- Standard change proposals: the CAB authorises them (2026-11-10). The CAB
 -- (the "CAB Approval" group, the one that approves normal change requests)
--- replaces the "Standard Change Authority" group (0277): a proposal (new
+-- replaces the "Standard Change Authority" group (0282): a proposal (new
 -- template, revision, retirement) is submitted to one stage, labelled "CAB
 -- Approval", of which two different CAB members, never the proposer, must
--- approve; one rejection ends it. This is still the single stage 0287 left: no
+-- approve; one rejection ends it. This is still the single stage 0290 left: no
 -- CAB stage is put back in front of another, and CAB_REVIEW stays gone.
 --
 -- A proposal still waiting on the authority (AUTHORITY_REVIEW, with no "CAB
 -- Approval" stage) goes back to DRAFT, for its proposer to submit again (it then
--- goes to the CAB), as 0287 did for the proposals in CAB review: submitted_on is
+-- goes to the CAB), as 0290 did for the proposals in CAB review: submitted_on is
 -- cleared, since a draft has not been submitted, customer_locked stays set, as
 -- at submit, and the authority's open stage is deleted (its approver rows go with
 -- it, ON DELETE CASCADE, an approval already given included), so the returned
@@ -35,12 +35,12 @@
 -- "Standard Change Authority" stages: that is the record of who approved the
 -- template in force. So the group row is kept (those stages point at it); only
 -- its description is reworded to say it is no longer used, and only while it
--- still reads as 0287 left it, or as 0277 wrote it (a database that applied an
--- earlier draft of 0287, which did not reword it); an operator's own wording is
+-- still reads as 0290 left it, or as 0282 wrote it (a database that applied an
+-- earlier draft of 0290, which did not reword it); an operator's own wording is
 -- left alone.
 --
--- Rollout: run 0289 IMMEDIATELY BEFORE the entity-service build that asks the
--- CAB is rolled out. A proposal an old pod submits after 0289 has run asks the
+-- Rollout: run 0292 IMMEDIATELY BEFORE the entity-service build that asks the
+-- CAB is rolled out. A proposal an old pod submits after 0292 has run asks the
 -- authority's members; it still works (a decision is taken on the proposal's
 -- latest stage, by the people that stage asked), it is just not returned to
 -- draft.
@@ -54,7 +54,7 @@
 -- work_item (100008) are row-level-secured with FORCE: a migrating role without
 -- BYPASSRLS that is not flagged internal sees no row, and the statements would
 -- write nothing without an error. So the session is flagged internal, as the
--- application's own writes are, and cleared afterwards, as 0287 does
+-- application's own writes are, and cleared afterwards, as 0290 does
 -- (session-level: a LOCAL setting would not outlive a statement in autocommit).
 --
 -- Safe to re-run: a proposal submitted to the CAB has a "CAB Approval" stage and
@@ -97,7 +97,7 @@ WITH returned AS (
     RETURNING s.work_item_id
 )
 UPDATE work_item w
-   SET updated_on = NOW(), updated_by = 'migration:0289_standard_change_cab_authorises'
+   SET updated_on = NOW(), updated_by = 'migration:0292_standard_change_cab_authorises'
  WHERE w.id IN (SELECT id FROM returned)
     OR w.id IN (SELECT work_item_id FROM dropped);
 

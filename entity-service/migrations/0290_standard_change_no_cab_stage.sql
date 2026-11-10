@@ -32,13 +32,13 @@
 -- WITHDRAWN, CANCELLED) keep their stages: that is the record of who approved
 -- the template in force. A decided proposal is never CAB_REVIEW, so once the
 -- UPDATE has run no row holds it, and standard_change_proposal_state_check is
--- recreated without it. The one-open-per-template index (0277) still names
+-- recreated without it. The one-open-per-template index (0282) still names
 -- CAB_REVIEW in its predicate; with no row able to hold it, it is left as it is.
 --
--- Rollout: run 0287 IMMEDIATELY BEFORE the entity-service build without the CAB
--- stage is rolled out. A new pod running before 0287 no longer knows CAB_REVIEW,
+-- Rollout: run 0290 IMMEDIATELY BEFORE the entity-service build without the CAB
+-- stage is rolled out. A new pod running before 0290 no longer knows CAB_REVIEW,
 -- so nobody can act on a proposal still in it: those proposals would be
--- stranded until 0287 runs. An old pod still running after 0287 works except for
+-- stranded until 0290 runs. An old pod still running after 0290 works except for
 -- one thing: its submit, which writes CAB_REVIEW, fails on the new check (an
 -- error, nothing written) until that pod is replaced.
 --
@@ -56,11 +56,11 @@
 -- work_item (100008) are row-level-secured with FORCE: a migrating role without
 -- BYPASSRLS that is not flagged internal sees no row, and the UPDATEs would
 -- write nothing without an error. So the session is flagged internal, as the
--- application's own writes are, and cleared afterwards, as 0193 and 0279 do
+-- application's own writes are, and cleared afterwards, as 0193 and 0283 do
 -- (session-level: a LOCAL setting would not outlive a statement in autocommit).
 --
--- The authority group's description (0277) said it authorises "after the CAB";
--- it is reworded, only while it still reads as 0277 wrote it.
+-- The authority group's description (0282) said it authorises "after the CAB";
+-- it is reworded, only while it still reads as 0282 wrote it.
 --
 -- Safe to re-run: a second run finds no CAB_REVIEW proposal, recreates the same
 -- check and leaves the description alone.
@@ -93,7 +93,7 @@ WITH dropped AS (
     RETURNING s.work_item_id
 )
 UPDATE work_item w
-   SET updated_on = NOW(), updated_by = 'migration:0287_standard_change_no_cab_stage'
+   SET updated_on = NOW(), updated_by = 'migration:0290_standard_change_no_cab_stage'
  WHERE w.id IN (SELECT work_item_id FROM dropped);
 
 ALTER TABLE standard_change_proposal ADD CONSTRAINT standard_change_proposal_state_check

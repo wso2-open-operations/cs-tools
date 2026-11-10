@@ -5162,7 +5162,7 @@ the same `validChangeRequestSortField`/`validChangeRequestSortOrder` maps
 value is a 400 on both data sources instead of silently falling back to
 `created_on DESC` only on Postgres.
 
-### Completion: `closed_on` / `closed_by_user_id` (migration 0279)
+### Completion: `closed_on` / `closed_by_user_id` (migration 0283)
 
 Both columns (0043) were written only by the previous system's sync, never by this service, so
 a change request completed in the CSM had no completion time (the `closedStartDate` /
@@ -5176,7 +5176,7 @@ counts because it is a completion too (a failed one), and both states are final,
 clears the stamp; a resend of the state keeps the first one; Canceled stamps nothing. An actor
 email with no `"user"` row records no closer.
 
-`0279_change_request_closed_on_backfill.sql` fills the rows completed before this from
+`0283_change_request_closed_on_backfill.sql` fills the rows completed before this from
 `event_outbox` (0051): the first outbox row whose `state` went from any other state to Closed /
 Rollback gives `closed_on` (its `occurred_on`, the writing transaction's `NOW()`); the closer is
 `work_item.updated_by` only while the work item still carries that exact `updated_on` (the PATCH
@@ -5191,21 +5191,21 @@ re-running it writes nothing else.
 - **Post-deploy step: run it again once the new code is fully rolled out.** `make migrate` runs
   before the rollout, so change requests completed by pods still on the old code meanwhile get no
   `closed_on`, and `make migrate` never runs the recorded file again. Its UPDATE is idempotent, so
-  run it by hand afterwards: `psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0279_change_request_closed_on_backfill.sql`.
+  run it by hand afterwards: `psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0283_change_request_closed_on_backfill.sql`.
   (No copy under a new filename: the repo has no precedent for shipping a migration twice.)
 
 Tests: `change_request_closure_integration_test.go` (`CHANGE_REQUEST_TEST_DSN`, superuser and
 `csm_app`; the backfill runs on a plain pooled connection with nobody flagged internal, as `make
 migrate` runs it, and checks the flag is cleared afterwards).
 
-### Clone lineage: `cloned_from_change_request_id` (migration 0282)
+### Clone lineage: `cloned_from_change_request_id` (migration 0285)
 
 The portal's Clone used to leave no trace: a clone could not be told apart from a change request
 typed from scratch. `change_request.cloned_from_change_request_id` (UUID, `REFERENCES
-change_request(id) ON DELETE SET NULL`) records the source. 0282 adds the column under
+change_request(id) ON DELETE SET NULL`) records the source. 0285 adds the column under
 `lock_timeout = '5s'` (it takes an ACCESS EXCLUSIVE lock on `change_request`, so it fails fast
 rather than queueing every reader behind a long transaction; re-run it if it times out), and its
-partial index is built by 0284 with `CREATE INDEX CONCURRENTLY`, alone in its file as 0152/0226/0263
+partial index is built by 0287 with `CREATE INDEX CONCURRENTLY`, alone in its file as 0152/0226/0263
 are (an interrupted build leaves an INVALID index that `IF NOT EXISTS` skips: find it with
 `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it and re-run).
 - **Write**: `POST /change-requests` `clonedFromChangeRequestId` (`change_request_clone_source.go`):
@@ -5214,7 +5214,7 @@ are (an interrupted build leaves an INVALID index that `IF NOT EXISTS` skips: fi
   creates nothing. Checked in the create transaction and written by the create's own INSERT
   (`checkCloneSource`, both create paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
   called (`ValidateChangeRequestLinks`, `ChangeRequestLinkSelection.CloneSourceID`). The mirror
-  leaves it out, and `DATA_SOURCE=servicenow` ignores it (dropped with a debug log: the portal's
+  leaves it out, and the legacy data source ignores it (dropped with a debug log: the portal's
   Clone sends it for every clone, and lineage is not content, so it must not fail the create; the
   standard change template fields are still refused there, and so is `projectId`). Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
   is a 400).
@@ -8629,11 +8629,11 @@ free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repo
 service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
 migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, number series
 `STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by), `0254`
-(the customer: `account_id` on template and proposal), `0277` (the authority, its stage,
-summary / priority / deployment types, the template history), `0287` (no CAB stage: the proposals
-still in CAB review returned to draft, `CAB_REVIEW` out of the state check), `0288` (retirement in the
-template history: `RETIRED` and `proposal_id`, backfilled; retired templates' review flags cleared), `0289` (the CAB
-authorises: proposals still waiting on the authority returned to draft) and `100026` / `100028`
+(the customer: `account_id` on template and proposal), `0282` (the authority, its stage,
+summary / priority / deployment types, the template history), `0290` (no CAB stage: the proposals
+still in CAB review returned to draft, `CAB_REVIEW` out of the state check), `0291` (retirement in the
+template history: `RETIRED` and `proposal_id`, backfilled; retired templates' review flags cleared), `0292` (the CAB
+authorises: proposals still waiting on the authority returned to draft) and `100026` / `100031`
 (row-level security). PostgreSQL data sources only; every route is `internalOnly`.
 
 **Tables.** `standard_change_template` (STD number, its customer `account_id`, name unique among the
@@ -8646,12 +8646,12 @@ reuses `approval_stage` / `approval_stage_approver` for its approval stage; kind
 columns as a version) and `standard_change_proposal_evidence` (closed change requests the proposer
 cites). `change_request.standard_change_template_version_id` (`ON DELETE RESTRICT`) and
 `standard_change_parameter_values` (JSONB object) record what a change request was raised from.
-`standard_change_template_event` (0277) is the template's append-only history
-(`SUSPENDED` / `RESUMED` / `REVIEW_FLAGGED` / `REVIEW_CLEARED`, and since 0288 `RETIRED`; a note, the
+`standard_change_template_event` (0282) is the template's append-only history
+(`SUSPENDED` / `RESUMED` / `REVIEW_FLAGGED` / `REVIEW_CLEARED`, and since 0291 `RETIRED`; a note, the
 flagging change request, the retirement proposal `proposal_id`, the actor; a `RETIRED` entry's note is
 the proposal's rationale, rich text, every other note plain text), read newest first as `history` on `GET /standard-change-templates/{id}`; the template row
 itself keeps only the current values. All five tables are internal-only under row-level security
-(`100026`, `100028`).
+(`100026`, `100031`).
 
 **A template is one customer's** (migration 0254; the user's rule: "one standard change of a customer
 cannot be added against another customer"). A customer is an `account`; a change request's customer
@@ -8756,13 +8756,13 @@ risk that is not high, every placeholder declared) and opens the proposal's one 
 (`DRAFT` -> `AUTHORITY_REVIEW`).
 
 **One stage: the CAB** (the user's rule, 2026-11-10: "Two CAB approvals to make a change template
-viable"; migration 0289). The group is the CAB that approves normal change requests,
+viable"; migration 0292). The group is the CAB that approves normal change requests,
 `domain.CABApprovalGroupName` ("CAB Approval", 0188), resolved by name through the same
 `resolveApprovalPool` / `namedGroup` as a change request's CAB stage (members: `team_member.group_id`,
 `group_member`, a team of that name; active internal users only). The stage
 (`standardChangeCABCheckpoint`, position 0, label "CAB Approval", `assignment_group_id` the CAB) lists
 those members, the proposer listed cancelled by every user row of their email
-(`changeRequestCreatorUserIDs`). `approval_stage.required_approvals` (0277, default 1, so every change
+(`changeRequestCreatorUserIDs`). `approval_stage.required_approvals` (0282, default 1, so every change
 request stage is unchanged) is `domain.StandardChangeCABApprovals` = 2: the stage stays open until two
 different CAB members approve, each once; the second approval applies the proposal. Any rejection ends
 it and needs a comment. Only a REQUESTED row on the stage lets someone decide (403 otherwise).
@@ -8770,21 +8770,21 @@ it and needs a comment. Only a REQUESTED row on the stage lets someone decide (4
 `stages` show both count distinct emails of APPROVED rows (`stageApprovalsSQL`), an approval cancels
 the approver's other REQUESTED rows on the stage, a second decision by an email that already approved
 is a 403, and `resolveProposalCABPool` counts eligible members by distinct email. This is still the one
-stage 0287 left: no CAB stage in front of another, no hand-over, no `CAB_REVIEW` (stored state
+stage 0290 left: no CAB stage in front of another, no hand-over, no `CAB_REVIEW` (stored state
 `AUTHORITY_REVIEW` keeps its name and now means "awaiting CAB approval").
 
-History, kept short: until 2026-11-10 a separate Standard Change Authority group (0277, `…05ca`, the
-heads of SaaS SRE, each SaaS ABT and SRE) held this stage; before 0287 (2026-11-06) a proposal also
+History, kept short: until 2026-11-10 a separate Standard Change Authority group (0282, `…05ca`, the
+heads of SaaS SRE, each SaaS ABT and SRE) held this stage; before 0290 (2026-11-06) a proposal also
 went through a one-approval CAB stage first. The proposal shares the label "CAB Approval" with a change
 request's CAB stage, which mixes nothing up: a proposal's stages are only read by its own id (every
-change request read joins or filters on the change request's id). It does affect migration 0287,
-whose DELETE keeps only "Standard Change Authority" stages on an open proposal: 0287 never runs
+change request read joins or filters on the change request's id). It does affect migration 0290,
+whose DELETE keeps only "Standard Change Authority" stages on an open proposal: 0290 never runs
 again on a server (`make migrate` records it), and its integration test labels its fixtures the old
 way and parks other open proposals' "CAB Approval" stages while it re-runs the file.
 
 `DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
 the stage it was meant for (`stageId`, which the webapp always sends): when that is not the stage the
-proposal waits on (its old stage, on a page loaded before 0287 or 0289), it
+proposal waits on (its old stage, on a page loaded before 0290 or 0292), it
 is a 409 with nothing written. Submit refuses (400) when the CAB has fewer than two
 eligible members besides the proposer (`resolveProposalCABPool`, the message names the CAB), so a
 proposal never waits on a group that could not authorise it. **Approved**: `NEW`
@@ -8795,11 +8795,11 @@ untouched and the proposal stays as the record. A modification starts from the c
 refused (409) at submit and approval when the template moved on to another version since; a
 retirement is checked only for the template having been retired meanwhile (it carries no content, so
 a revision approved in between does not stop it); at most one is open (`DRAFT`,
-`AUTHORITY_REVIEW`) per template (unique partial index, recreated by 0277; its predicate still names
+`AUTHORITY_REVIEW`) per template (unique partial index, recreated by 0282; its predicate still names
 `CAB_REVIEW`, which no row can hold). The approval stage writes `approval_stage.raw_status` in the
 enum's own spelling (`APPROVED` / `REJECTED`). The proposal reads `stages` (label, required and
 received approvals, decision, generically: a proposal decided before 2026-11-10 shows a "Standard
-Change Authority" stage, and one decided before 0287 also a "CAB Approval" stage, required 1, before
+Change Authority" stage, and one decided before 0290 also a "CAB Approval" stage, required 1, before
 it; an open proposal has only its "CAB Approval" stage, required 2) and each approver row's `stageId`;
 `awaitingMyDecision` covers `AUTHORITY_REVIEW` only.
 
@@ -8815,34 +8815,34 @@ affected (the template is checked only at Request Approval). Approved, it sets t
 `RETIRED`, clears its suspension and its review flag (nothing is left to review on a template never
 used again, and clear-review refuses a retired one), and writes a `RETIRED` history entry with the
 proposal (`proposal_id`, read as the entry's `proposal`) and its rationale (rich text, rendered as such) as the note (migration
-0288, which also backfilled the entry for templates retired before it and cleared their flag). A
+0291, which also backfilled the entry for templates retired before it and cleared their flag). A
 rollback or deviation of a change raised from a retired template no longer flags it
 (`flagStandardTemplateReview` skips `RETIRED`). Final: there is no un-retire.
 
-**0287** returned every proposal still in `CAB_REVIEW` to `DRAFT` (`submitted_on` cleared,
+**0290** returned every proposal still in `CAB_REVIEW` to `DRAFT` (`submitted_on` cleared,
 `customer_locked` kept), then deleted every stage other than the authority's (its approver rows go
 with it) from every open proposal, `DRAFT` or `AUTHORITY_REVIEW`: a returned draft is a clean draft
 again (it can be deleted), and a proposal the CAB approved under the old flow carries on in
 `AUTHORITY_REVIEW` with only the authority's stage. Decided proposals keep their stages, the record of
 who approved the template in force. Then it recreated `standard_change_proposal_state_check` without
 `CAB_REVIEW`.
-**Run 0287 immediately before rolling out the entity-service build without the CAB stage**: a new pod
-before 0287 does not know `CAB_REVIEW`, so the proposals still in it are stranded until 0287 runs; an
-old pod after 0287 fails only on submit (its `CAB_REVIEW` write breaks the new check, nothing
-written) until it is replaced. 0287 locks the `work_item` rows of the open proposals it changes before taking
+**Run 0290 immediately before rolling out the entity-service build without the CAB stage**: a new pod
+before 0290 does not know `CAB_REVIEW`, so the proposals still in it are stranded until 0290 runs; an
+old pod after 0290 fails only on submit (its `CAB_REVIEW` write breaks the new check, nothing
+written) until it is replaced. 0290 locks the `work_item` rows of the open proposals it changes before taking
 `standard_change_proposal`'s ACCESS EXCLUSIVE lock, the order `lockProposal` takes, so a concurrent
 proposal write waits instead of deadlocking. `SearchProposals` still accepts `states: ["cab_review"]`
 (it matches nothing) for a webapp deployed before this release; remove that
 (`legacyCABReviewState`) in the next release.
 
-**0289** (2026-11-10) returned every proposal still in `AUTHORITY_REVIEW` with no "CAB Approval"
+**0292** (2026-11-10) returned every proposal still in `AUTHORITY_REVIEW` with no "CAB Approval"
 stage (so still waiting on the authority) to `DRAFT` (`submitted_on` cleared, `customer_locked`
-kept) and deleted its stage, approver rows and any approval already given with it, as 0287 did for
+kept) and deleted its stage, approver rows and any approval already given with it, as 0290 did for
 `CAB_REVIEW`: the proposer submits it again, to the CAB. Decided proposals keep their "Standard Change
 Authority" stages; the group row stays (they point at it) and its description says it is no longer
-used (reworded only while it reads as 0287 left it, or as 0277 wrote it). One transaction,
+used (reworded only while it reads as 0290 left it, or as 0282 wrote it). One transaction,
 `lock_timeout` 5s, the `app.is_internal` bracket and `lockProposal`'s lock order; safe to re-run (a
-proposal submitted to the CAB is never selected). **Run 0289 immediately before rolling out the build
+proposal submitted to the CAB is never selected). **Run 0292 immediately before rolling out the build
 that asks the CAB**; a proposal an old pod submits after it asks the authority's members and still
 works (decisions go by the latest stage's rows), it is just not returned.
 
@@ -8947,16 +8947,16 @@ suspend body),
 without BYPASSRLS so the internal-only policies apply; run with `-p 1`). The tests seat their own
 authorisers on the CAB and take everyone else off it while they run (`isolateStdCAB`, put back on
 cleanup, as the change request flow tests' `isolateApprovalGroup` does), since a local or synced
-database has real CAB members; `TestStandardChangeIntegration_CABAuthorisesMigration` re-runs 0289.
+database has real CAB members; `TestStandardChangeIntegration_CABAuthorisesMigration` re-runs 0292.
 
 ## Standard change suggestions (`GET /standard-change-suggestions`)
 
 Which of a customer's completed change requests look like the same change done again and again, so a
 standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
 normalising, clustering, judging), `standard_change_suggestion_service.go`,
-`standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
-dismissals), `0283` (the snapshot), `0285` (skipped customers), `0286` (the keys a skip carries) and
-`100029` / `100030` (their row-level security, internal only). The refresh needs 0283, 0285, 0286 and
+`standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0284` (the
+dismissals), `0286` (the snapshot), `0288` (skipped customers), `0289` (the keys a skip carries) and
+`100029` / `100030` (their row-level security, internal only). The refresh needs 0286, 0288, 0289 and
 100030 applied before csm-scheduled-tasks' task is turned on.
 PostgreSQL data sources only.
 
@@ -9018,7 +9018,7 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
   Same totals (3,955 clusters, 23 eligible).
 
 **What is considered.** Change requests in Closed or Rollback, completed within `windowMonths` (by
-`closed_on`, which 0279 made reliable; a row with none falls back to the work item's last update), **not**
+`closed_on`, which 0283 made reliable; a row with none falls back to the work item's last update), **not**
 raised from a template (`standard_change_template_version_id IS NULL`: those already are standard changes),
 whose project has a customer. Clusters never mix customers: a template belongs to one
 (`project.account_id`), so the clustering runs per customer.
@@ -9046,7 +9046,7 @@ whose project has a customer. Clusters never mix customers: a template belongs t
      when the text has a digit, the HTML / entity / placeholder / tag passes only when their marker is
      present, then one `FieldsFunc`); `TestSuggestionWords_SameAsTheRegexPasses` pins it to the old
      ten-pass version (about 4x faster on plain text).
-3. Clone lineage (`cloned_from_change_request_id`, 0282) joins a member to its source's cluster directly,
+3. Clone lineage (`cloned_from_change_request_id`, 0285) joins a member to its source's cluster directly,
    whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
 Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
 self-hosted models would be allowed anyway.
@@ -9070,7 +9070,7 @@ refresh to the next**, or a dismissal stops applying:
   larger overlap keeps it. One extra read per customer (`SnapshotKeys` of the previous run: keys and member ids only).
 - **A skipped customer keeps its keys.** A skip stores no rows, and publishing deletes the previous run, so
   `SkipCustomer` copies the customer's keys and member ids from the latest published run (its rows, or what
-  that run carried when it skipped the customer too) into `run_customer.carried_keys` (migration 0286).
+  that run carried when it skipped the customer too) into `run_customer.carried_keys` (migration 0289).
   `SnapshotKeys` returns them after the run's own rows; GET and the counts never read them. Computing the
   customer after all (`SaveCustomer`) clears them.
 - A cluster with no predecessor (new, or the first refresh) is **minted** a key, largest first: the bare subject key when no other cluster of that subject holds it,
@@ -9120,9 +9120,9 @@ before reads zero counts and empty lists until the next refresh, and GET returns
   number, subject, state, when, by whom, the comment; `member` false for a look-alike) and `cabCommentCount`
   / `cabComments` (every non-blank comment on a CAB stage of a member or an attached look-alike, with any
   decision: an approval that says "add the verification steps" is pushback too). Newest first, at most 20
-  each, the counts true. Comments copied from ServiceNow can be rich text, so they are sent as plain text
+  each, the counts true. Comments migrated from the previous system can be rich text, so they are sent as plain text
   (`cabPlainText`: tags removed, entities decoded, white space collapsed, at most 2,000 characters). The
-  portal's own CR decision path writes no comment yet, so today only ServiceNow-era rows have them.
+  portal's own CR decision path writes no comment yet, so today only migrated rows have them.
 - `deviationCount` counts every member that deviated (the listed `members` stop at 100). A snapshot computed
   before it was kept decodes it as 0, so `readSuggestions` raises it to the listed members that deviated
   (`listedDeviations`); a kept count is never below those, so it is left alone.

@@ -4609,8 +4609,8 @@ func IsCreatableChangeRequestType(t ChangeRequestType) bool {
 //     only approval stage (the previous system has no Emergency CAB: an Emergency change is
 //     approved by this same group). It also authorises standard change
 //     templates: two of its members (StandardChangeCABApprovals) approve every
-//     standard change proposal (migration 0289; until 2026-11-10 a separate
-//     "Standard Change Authority" group, created by 0277, did).
+//     standard change proposal (migration 0292; until 2026-11-10 a separate
+//     "Standard Change Authority" group, created by 0282, did).
 //   - PeerApprovalFallbackGroupName: the peer approval fallback group
 //     ("Devops Approval" in the ServiceNow flow). A Normal change's peer stage
 //     draws its approvers from the active internal members of the change's
@@ -4804,7 +4804,7 @@ type CreateChangeRequestRequest struct {
 	// (the portal's Clone), recorded as change_request.cloned_from_change_request_id
 	// and never changed afterwards. Optional; must be an existing change request
 	// (400). PostgreSQL data sources only: the previous system has no field for
-	// it (DATA_SOURCE=servicenow refuses it; the dual-write mirror leaves it out).
+	// it (the legacy data source refuses it; the dual-write mirror leaves it out).
 	ClonedFromChangeRequestID *string `json:"clonedFromChangeRequestId,omitempty"`
 }
 
@@ -5825,7 +5825,7 @@ type ChangeRequest struct {
 	StandardChange *ChangeRequestStandardChange `json:"standardChange,omitempty"`
 
 	// ClonedFrom is the change request this one was cloned from ({id, name: its
-	// number}), when one was recorded on create (migration 0282). Staff only,
+	// number}), when one was recorded on create (migration 0285). Staff only,
 	// PostgreSQL data sources only; omitted otherwise, and once the source is
 	// deleted.
 	ClonedFrom *EntityRef `json:"clonedFrom,omitempty"`

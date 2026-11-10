@@ -40,7 +40,7 @@ const (
 	cabCommentMaxRunes  = 2000
 )
 
-// cabPlainText is a CAB comment as plain text: a comment copied from ServiceNow
+// cabPlainText is a CAB comment as plain text: a comment migrated from the previous system
 // can be rich text, so tags are removed, entities decoded and white space
 // collapsed, then it is cut to cabCommentMaxRunes.
 func cabPlainText(s string) string {

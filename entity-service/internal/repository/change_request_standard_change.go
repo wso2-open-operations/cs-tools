@@ -124,7 +124,7 @@ func DeploymentTypesText(types []string) string {
 
 // checkStandardChangeDeployments refuses (400, CodeChangeRequestStandardTemplateField)
 // a change request raised from template version templateVersionID, when that
-// version names deployment types (migration 0277), if it has no deployment, or a
+// version names deployment types (migration 0282), if it has no deployment, or a
 // deployment of another type (an untyped one included). The deployments are the
 // link rows and the single work_item.deployment_id an older client still writes.
 // Run in the writing transaction, after its deployments are written, by create

@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- A standard change template's history (migration 0277) is internal, like the
+-- A standard change template's history (migration 0282) is internal, like the
 -- template itself (100026): only WSO2 staff read or write it.
 --
 -- DROP POLICY IF EXISTS before CREATE POLICY: safe to re-run.

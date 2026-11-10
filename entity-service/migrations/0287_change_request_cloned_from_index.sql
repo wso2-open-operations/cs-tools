@@ -14,10 +14,10 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- The index on change_request.cloned_from_change_request_id (migration 0282):
+-- The index on change_request.cloned_from_change_request_id (migration 0285):
 -- the standard change suggestions read clones by their source, and deleting a
 -- source change request (ON DELETE SET NULL) finds its clones through it. Partial:
--- nearly every row has no source. (0282 created it in the same transaction as the
+-- nearly every row has no source. (0285 created it in the same transaction as the
 -- column at first; where that ran, this is a no-op.)
 --
 -- IF NOT EXISTS: safe to run again, and an index already there is left as it is, an INVALID one

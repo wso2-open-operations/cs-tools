@@ -549,9 +549,9 @@ like the same change done again, which Operations > Change requests > Standard c
 The page reads the snapshot only and never computes, because computing reads every completed change
 request in the window with its plan text (tens of thousands); see entity-service's CLAUDE.md, "Standard
 change suggestions". **Off unless `STANDARD_CHANGE_SUGGESTIONS_ENABLED=true`**, like every task here that
-calls a route a deployed entity-service may not have yet: deploy entity-service with migrations **0283,
-0285, 0286 and 100030** applied first (the refresh's first call writes the skipped column and the nullable
-per-customer count 0285 adds, and a skip writes 0286's carried keys, so without them a run fails), then
+calls a route a deployed entity-service may not have yet: deploy entity-service with migrations **0286,
+0288, 0289 and 100030** applied first (the refresh's first call writes the skipped column and the nullable
+per-customer count 0288 adds, and a skip writes 0289's carried keys, so without them a run fails), then
 turn it on. Until the first run
 publishes, the page says no suggestions have been computed yet.
 

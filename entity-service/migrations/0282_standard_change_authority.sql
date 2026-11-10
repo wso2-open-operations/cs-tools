@@ -22,7 +22,7 @@
 -- "Standard Change Authority" group (the heads of SaaS SRE, of each SaaS ABT and
 -- of SRE), of whom two different people must approve; the proposer may not.
 -- (This migration was written for two stages, the CAB and then the authority,
--- and so keeps CAB_REVIEW in the state check below; 0287 removed the CAB stage,
+-- and so keeps CAB_REVIEW in the state check below; 0290 removed the CAB stage,
 -- returned the proposals still in CAB review to draft and recreated the check
 -- without it.)
 --
