@@ -707,7 +707,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
 2. Every widget has `id`, `displayName`, `resourceType`, `shape`, `gridWidth` 1-12, `query`.
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
-   except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
+   except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12), and a
+   `plg_registration` list, which has none either (item 13).
 5. `line` only on `resourceType: "case"` or `"plg_registration"`, with `days` 1-90 or `startDate` +
    `endDate` (both plain dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24
    months); `series` only on a case line, absent (both lines) or exactly `["opened"]` or `["closed"]`;
@@ -739,7 +740,7 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `plg_registration`; shape `count`, `list` (organisations sort by `name` / `registeredOn`,
     registrations no `sortBy`) or `pie`/`bar` with `slices`, or a registration `line` (item 5, no
     `series`); `groupBy` only on a `pie`/`bar`: organisations by `owner` or `country`, registrations by
-    `country` or `playbookAnswer` (with `playbookTask` in the `query`); `ownerIds` only
+    `country` or `playbookAnswer` (with `playbookTask` in the `query`), `maxGroups` at most 50; `ownerIds` only
     `["__current_user__"]`; `ownerEmails` only addresses the request gave, never with `unowned`; `countryNames` never with `countryUnknown`; `playbookAnswers` and
     `playbookUnanswered` only with `playbookTask`, never together, and every code from the "PLG playbook
     answers" section; never an organisation `line`.
