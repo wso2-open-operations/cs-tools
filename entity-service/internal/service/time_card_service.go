@@ -158,6 +158,7 @@ func validateTimeCardFilters(f *domain.SearchTimeCardsFilters) error {
 
 	ids := append([]string{}, f.ProjectIDs...)
 	ids = append(ids, f.UserIDs...)
+	ids = append(ids, f.TeamIDs...)
 	if f.CaseID != nil {
 		ids = append(ids, *f.CaseID)
 	}
@@ -225,6 +226,7 @@ var (
 		domain.TimeCardGroupByUser:    true,
 		domain.TimeCardGroupByProject: true,
 		domain.TimeCardGroupByDay:     true,
+		domain.TimeCardGroupByTeam:    true,
 	}
 	validTimeCardMeasure = map[string]bool{
 		domain.TimeCardMeasureCount:   true,
@@ -248,6 +250,9 @@ func validateTimeCardAggregate(req domain.AggregateTimeCardsRequest) error {
 	}
 	if req.MaxGroups < 0 {
 		return &apierror.ValidationError{Msg: "maxGroups must not be negative"}
+	}
+	if req.GroupBy == domain.TimeCardGroupByTeam && (req.Filters == nil || len(req.Filters.TeamIDs) == 0) {
+		return &apierror.ValidationError{Msg: "groupBy team requires filters.teamIds"}
 	}
 	if req.GroupBy != domain.TimeCardGroupByDay {
 		return nil
