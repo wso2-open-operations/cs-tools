@@ -20169,6 +20169,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    post:
+      summary: Create a skill category.
+      operationId: createSkillCategory
+      description: >
+        A sub-category goes under an active parent with no skills filed directly under it. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "201":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /skills/search:
     post:
       summary: Search the skill catalogue.
@@ -20671,8 +20726,8 @@ paths:
       summary: Everybody's skills (Skill Manager).
       operationId: searchUserSkills
       description: >
-        Requires the view permission here; the entity service allows only a skill manager and refuses anyone
-        else with 403. Paged and filtered by the entity service.
+        Requires the view permission here; the entity service allows only a holder of the skill directory
+        capability and refuses anyone else with 403. Paged and filtered by the entity service.
       requestBody:
         required: true
         content:
@@ -20717,6 +20772,698 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /skills/me/capabilities:
+    get:
+      summary: The caller's skills capabilities.
+      operationId: getMySkillCapabilities
+      description: >
+        canViewDirectory, canReviewRequests, canManageCatalogue and, for a reviewer, pendingRequestCount.
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/categories/{id}:
+    patch:
+      summary: Edit a skill category.
+      operationId: updateSkillCategory
+      description: >
+        Rename, describe, deactivate or activate. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/check:
+    post:
+      summary: Duplicate preview for a skill request.
+      operationId: checkSkillRequest
+      description: >
+        Exact match, similar names and a pending request for the same name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests:
+    post:
+      summary: Request a skill the catalogue lacks.
+      operationId: createSkillRequest
+      description: >
+        levelId is required - the skill is added at it on approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "201":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/mine:
+    get:
+      summary: The caller's own skill requests.
+      operationId: listMySkillRequests
+      description: >
+        Pending first, then the newest.
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/search:
+    post:
+      summary: The skill request queue.
+      operationId: searchSkillRequests
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/withdraw:
+    post:
+      summary: Withdraw one's own pending skill request.
+      operationId: withdrawSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/approve:
+    post:
+      summary: Approve a skill request.
+      operationId: approveSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/reject:
+    post:
+      summary: Reject a skill request (a reason is required).
+      operationId: rejectSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/directory/search:
+    post:
+      summary: The skill directory, one row per person.
+      operationId: searchSkillDirectory
+      description: >
+        Criteria of skill and minimum level matched ALL or ANY. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/users/{userId}:
+    get:
+      summary: One person's skills.
+      operationId: getUserSkillProfile
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/users/{userId}/history:
+    get:
+      summary: One person's skill history.
+      operationId: getUserSkillHistory
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: skillId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 components:
   securitySchemes:
     bearerAuth:
