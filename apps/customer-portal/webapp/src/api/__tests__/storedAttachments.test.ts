@@ -886,11 +886,30 @@ describe("storedAttachments", () => {
       expect(confirmBody()).toEqual({ type: "work_item", chunks: 2 });
     });
 
-    it("falls back to the backend, without retrying, when Azure refuses a link", async () => {
+    const directCalls = () => authFetch.mock.calls.filter(([u]) => String(u).includes("/direct"));
+
+    it("asks for new links when they expire part-way, and carries on", async () => {
+      let served = 0;
+      backend(() => {
+        served += 1;
+        const l = links(3);
+        return json(served === 1 ? l : { ...l, links: l.links.map((u) => `${u}&fresh=1`) });
+      });
+      rawFetch.mockImplementation(async (url: string) =>
+        new Response(null, { status: String(url).includes("fresh") ? 201 : 403 }),
+      );
+      await upload(bigFile(2 * CHUNK + 5));
+      expect(directCalls()).toHaveLength(2); // one replacement, shared by every chunk in flight
+      expect(chunkRoute()).toHaveLength(0); // never fell back
+      expect(confirmBody()).toEqual({ type: "work_item", chunks: 3 });
+      expect(rawFetch.mock.calls.filter(([u]) => String(u).includes("fresh"))).toHaveLength(3);
+    });
+
+    it("falls back to the backend when Azure keeps refusing, after replacing the links a few times", async () => {
       backend(() => json(links(2)));
       rawFetch.mockImplementation(async () => new Response(null, { status: 403 }));
       await upload(bigFile(2 * CHUNK));
-      expect(rawFetch.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(directCalls()).toHaveLength(4); // the first links and three replacements
       expect(chunkRoute()).toHaveLength(2);
       expect(confirmBody()).toEqual({ type: "work_item", chunks: 2 });
     });
