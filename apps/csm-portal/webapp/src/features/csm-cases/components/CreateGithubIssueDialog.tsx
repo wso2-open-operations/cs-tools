@@ -38,28 +38,43 @@ import type {
   BeCreateCaseGithubIssueResponse,
 } from "@api/backend/types";
 import { useGetProductRepoMapping } from "@features/csm-cases/api/useGetProductRepoMapping";
+import githubIssueOptions from "@features/csm-cases/utils/githubIssueOptions.json";
 
 // ---------------------------------------------------------------------------
-// Option lists. Every select starts unset ("" → "-- Select --") and omits its
-// field from the payload when left unset. Type is Patch or Discussion. Severity
-// is sent as a GitHub priority label only for Discussion.
+// Option lists. Every select starts unset ("" → "-- Select --"). Every issue
+// is filed as a Discussion (Type/Discussion → Type/Incident on GitHub), so
+// there is no type selector. Priority is sent as the GitHub priority label.
 // ---------------------------------------------------------------------------
 
 const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
 
-type IssueTypeValue = "" | "Type/Patch" | "Type/Discussion";
+/** Every Git issue raised from a case is a Discussion. */
+const GITHUB_DISCUSSION_ISSUE_TYPE = "Type/Discussion";
 
-const TYPE_OPTIONS: Array<{ value: IssueTypeValue; label: string }> = [
-  { value: "Type/Patch", label: "Patch" },
-  { value: "Type/Discussion", label: "Discussion" },
+const PRIORITY_P1 = "Priority/Critical(P1)";
+const PRIORITY_P2 = "Priority/High(P2)";
+const PRIORITY_P3 = "Priority/Medium(P3)";
+
+const PRIORITY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: PRIORITY_P1, label: "P1 - Critical" },
+  { value: PRIORITY_P2, label: "P2 - High" },
+  { value: PRIORITY_P3, label: "P3 - Medium" },
 ];
 
-const SEVERITY_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "Priority/Critical(P1)", label: "P1 - Critical" },
-  { value: "Priority/High(P2)", label: "P2 - High" },
-  { value: "Priority/Medium(P3)", label: "P3 - Medium" },
-];
+// The justification and hotfix-reason options live in githubIssueOptions.json.
+// The backend refuses any other value, and its copy of the lists
+// (case_github_issue.go) is checked against that file by
+// TestGitHubIssueChoiceListsMatchTheWebapp, so edit both together.
+
+/** Justifications offered per priority label. P3 needs none, so it has no entry. */
+const PRIORITY_JUSTIFICATION_OPTIONS: Record<string, string[]> =
+  githubIssueOptions.priorityJustifications;
+
+const HOTFIX_REASON_OPTIONS: string[] = githubIssueOptions.hotfixReasons;
+
+const toOptions = (values: string[]): Array<{ value: string; label: string }> =>
+  values.map((v) => ({ value: v, label: v }));
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,13 +91,10 @@ export interface CreateGithubIssueDialogProps {
   createdIssue?: BeCreateCaseGithubIssueResponse | null;
   /** Prefill for the update-level field, taken from the case's product context. */
   defaultUpdateLevel?: string;
-  /** Prefill for the Subject field, taken from the case's subject. */
-  defaultTitle?: string;
-  /** Prefill for the Description field, taken from the case's description. */
-  defaultDescription?: string;
+  /** Initial state of the Migration switch: true for a migration engagement. */
+  defaultMigration?: boolean;
   /** Cloud cases pass true. There is no repository dropdown either way.
-   * When true, Update Level and Public Git Issue are hidden. When false, a
-   * Patch must fill Update Level; Public Git Issue is shown but optional. */
+   * When true, Update Level and Public Git Issue are hidden. */
   showRepoField?: boolean;
   /** Deployed product name on the case. Matched to the catalogue. */
   productName?: string;
@@ -110,12 +122,13 @@ export interface CreateGithubIssueDialogProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Form for filing an internal GitHub issue from a case (ISSU-020).
- * Subject and Description are always required. Type is Patch or Discussion:
- *   - Discussion: Severity is required. Hotfix Required and Regression are hidden.
- *   - Patch: Severity is hidden. Hotfix Required and Regression are shown. On a
- *     non-cloud case, Update Level is required; Public Git Issue is shown but
- *     always optional -- not every patch has a public issue or JIRA to link.
+ * Form for filing an internal GitHub issue from a case (ISSU-020). Every issue
+ * is a Discussion. Fields, in order: Subject*, Description*, Reproducing Steps,
+ * Priority*, Priority Justification* (P1/P2 only, options per priority),
+ * Update Level, Public Git Issue (both hidden on cloud cases, never required),
+ * Hotfix Required, Hotfix Reason* (only while Hotfix Required is on),
+ * Regression, Migration (on by default for a migration engagement) and
+ * Related Internal Issue(s). Subject and Description start empty.
  * Migration sends reason "migration"; otherwise reason is "default".
  * The repository comes from GET /products/github-repo for the case product.
  * Submit stays disabled until that lookup returns a mapping.
@@ -126,8 +139,7 @@ export function CreateGithubIssueDialog({
   error,
   createdIssue,
   defaultUpdateLevel,
-  defaultTitle,
-  defaultDescription,
+  defaultMigration,
   showRepoField,
   productName,
   onboardingInProgress,
@@ -138,15 +150,18 @@ export function CreateGithubIssueDialog({
   onSubmit,
   onOpenConfirm,
 }: CreateGithubIssueDialogProps): JSX.Element {
-  const [type, setType] = useState<IssueTypeValue>(UNSET);
-  const [title, setTitle] = useState(defaultTitle ?? "");
-  const [description, setDescription] = useState(defaultDescription ?? "");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [reproducingSteps, setReproducingSteps] = useState("");
+  const [priorityLevel, setPriorityLevel] = useState<string>(UNSET);
+  const [priorityJustification, setPriorityJustification] = useState<string>(UNSET);
   const [updateLevel, setUpdateLevel] = useState(defaultUpdateLevel ?? "");
   const [publicIssueUrl, setPublicIssueUrl] = useState("");
-  const [priorityLevel, setPriorityLevel] = useState<string>(UNSET);
   const [hotFix, setHotFix] = useState(false);
+  const [hotFixReason, setHotFixReason] = useState<string>(UNSET);
   const [regression, setRegression] = useState(false);
-  const [migration, setMigration] = useState(false);
+  const [migration, setMigration] = useState(defaultMigration ?? false);
+  const [relatedInternalIssues, setRelatedInternalIssues] = useState("");
   // Set once the user clicks "Create issue" on the form; holds the built
   // payload until they confirm on the follow-up step below. Filing this issue
   // is a real write to an external GitHub repo, so it gets an explicit
@@ -172,45 +187,58 @@ export function CreateGithubIssueDialog({
       }
     : undefined;
 
-  // Type drives which fields apply — see the component doc comment above.
-  const showSeverity = type === "Type/Discussion";
-  const requireSeverity = type === "Type/Discussion";
-  const showHotFix = type === "Type/Patch";
-  const showRegression = type === "Type/Patch";
-  // Update Level / Public Git Issue apply to non-cloud projects only — cloud
-  // projects route via the repo field instead (see showRepoField).
+  // Only P1 and P2 carry a justification; the options depend on which.
+  const justificationOptions = PRIORITY_JUSTIFICATION_OPTIONS[priorityLevel];
+  const showJustification = !!justificationOptions;
+  // Update Level / Public Git Issue apply to non-cloud projects only.
   const showUpdateLevelAndIssueUrl = !showRepoField;
-  const requireUpdateLevel =
-    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
-  // Public Git Issue is shown alongside Update Level on a non-cloud Patch, but
-  // is never required: a patch can legitimately have no public issue or
-  // internal JIRA to link yet.
 
+  /** Sets the priority and clears the justification, which belongs to the previous priority. */
+  const handlePriorityChange = (value: string) => {
+    setPriorityLevel(value);
+    setPriorityJustification(UNSET);
+  };
+
+  /** Toggles Hotfix Required; switching it off also clears the Hotfix Reason. */
+  const handleHotFixChange = (checked: boolean) => {
+    setHotFix(checked);
+    if (!checked) setHotFixReason(UNSET);
+  };
+
+  /** Returns every field to its initial value (empty, or the case's default) and closes the dialog. */
   const resetAndClose = () => {
-    setType(UNSET);
-    setTitle(defaultTitle ?? "");
-    setDescription(defaultDescription ?? "");
+    setTitle("");
+    setDescription("");
+    setReproducingSteps("");
+    setPriorityLevel(UNSET);
+    setPriorityJustification(UNSET);
     setUpdateLevel(defaultUpdateLevel ?? "");
     setPublicIssueUrl("");
-    setPriorityLevel(UNSET);
     setHotFix(false);
+    setHotFixReason(UNSET);
     setRegression(false);
-    setMigration(false);
+    setMigration(defaultMigration ?? false);
+    setRelatedInternalIssues("");
     setConfirmPayload(null);
     onClose();
   };
 
   const canSubmit =
-    !!type &&
     title.trim().length > 0 &&
     description.trim().length > 0 &&
-    (!requireSeverity || !!priorityLevel) &&
-    (!requireUpdateLevel || updateLevel.trim().length > 0) &&
+    !!priorityLevel &&
+    (!showJustification || !!priorityJustification) &&
+    (!hotFix || !!hotFixReason) &&
     !repoOptionsUnavailable &&
     !!selectedRepoOption &&
     !projectStatusPending &&
     !projectStatusFailed;
 
+  /**
+   * Builds the payload from the form and opens the confirm step. Optional
+   * fields are sent only when filled, and the justification and hotfix reason
+   * only while they apply. Nothing is sent until the user confirms.
+   */
   const handleSubmit = () => {
     if (!canSubmit || !selectedRepoOption) return;
 
@@ -218,24 +246,38 @@ export function CreateGithubIssueDialog({
       reason: migration ? "migration" : "default",
       title: title.trim(),
       description: description.trim(),
-      issueTypeLabel: type,
+      issueTypeLabel: GITHUB_DISCUSSION_ISSUE_TYPE,
+      priorityLevel,
       repoOverride: {
         owner: selectedRepoOption.owner,
         repo: selectedRepoOption.repo,
       },
     };
+    if (reproducingSteps.trim()) payload.reproducingSteps = reproducingSteps.trim();
+    if (showJustification && priorityJustification) {
+      payload.priorityJustification = priorityJustification;
+    }
+    // Sent even when hidden on a cloud case: the prefilled update level still
+    // belongs in the issue footer.
     if (updateLevel.trim()) payload.updateLevel = updateLevel.trim();
-    if (publicIssueUrl.trim()) payload.publicIssueUrl = publicIssueUrl.trim();
-    if (showSeverity && priorityLevel) payload.priorityLevel = priorityLevel;
+    if (showUpdateLevelAndIssueUrl && publicIssueUrl.trim()) {
+      payload.publicIssueUrl = publicIssueUrl.trim();
+    }
     if (onboardingInProgress) payload.onboardingInProgress = true;
-    if (showHotFix && hotFix) payload.hotFixRequired = true;
-    if (showRegression && regression) payload.regression = true;
+    if (hotFix) {
+      payload.hotFixRequired = true;
+      payload.hotFixReason = hotFixReason;
+    }
+    if (regression) payload.regression = true;
+    if (relatedInternalIssues.trim()) {
+      payload.relatedInternalIssues = relatedInternalIssues.trim();
+    }
 
     onOpenConfirm?.();
     setConfirmPayload(payload);
   };
 
-  // Shared renderer for a "-- Select --" dropdown.
+  /** Renders a dropdown that starts on the "-- Select --" placeholder. */
   const renderSelect = <V extends string>(
     id: string,
     label: string,
@@ -286,8 +328,6 @@ export function CreateGithubIssueDialog({
             </Typography>
           )}
 
-          {renderSelect("ghi-type", "Type", type, setType, TYPE_OPTIONS, true)}
-
           <TextField
             label="Subject"
             value={title}
@@ -311,14 +351,33 @@ export function CreateGithubIssueDialog({
             helperText="Case number, product and your email (as Opened By) are appended to the issue body automatically."
           />
 
-          {showSeverity &&
+          <TextField
+            label="Reproducing Steps"
+            multiline
+            minRows={3}
+            value={reproducingSteps}
+            onChange={(e) => setReproducingSteps(e.target.value)}
+            fullWidth
+            disabled={submitting}
+          />
+
+          {renderSelect(
+            "ghi-priority",
+            "Priority",
+            priorityLevel,
+            handlePriorityChange,
+            PRIORITY_OPTIONS,
+            true,
+          )}
+
+          {justificationOptions &&
             renderSelect(
-              "ghi-severity",
-              "Severity",
-              priorityLevel,
-              setPriorityLevel,
-              SEVERITY_OPTIONS,
-              requireSeverity,
+              "ghi-priority-justification",
+              "Priority Justification",
+              priorityJustification,
+              setPriorityJustification,
+              toOptions(justificationOptions),
+              true,
             )}
 
           {showUpdateLevelAndIssueUrl && (
@@ -327,7 +386,6 @@ export function CreateGithubIssueDialog({
               value={updateLevel}
               onChange={(e) => setUpdateLevel(e.target.value)}
               disabled={submitting}
-              required={requireUpdateLevel}
               size="small"
               fullWidth
             />
@@ -345,18 +403,37 @@ export function CreateGithubIssueDialog({
             />
           )}
 
-          {showHotFix && (
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={hotFix}
-                  onChange={(e) => setHotFix(e.target.checked)}
-                  disabled={submitting}
-                />
-              }
-              label="Hotfix Required"
-            />
-          )}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={hotFix}
+                onChange={(e) => handleHotFixChange(e.target.checked)}
+                disabled={submitting}
+              />
+            }
+            label="Hotfix Required"
+          />
+
+          {hotFix &&
+            renderSelect(
+              "ghi-hotfix-reason",
+              "Hotfix Reason",
+              hotFixReason,
+              setHotFixReason,
+              toOptions(HOTFIX_REASON_OPTIONS),
+              true,
+            )}
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={regression}
+                onChange={(e) => setRegression(e.target.checked)}
+                disabled={submitting}
+              />
+            }
+            label="Regression"
+          />
 
           <FormControlLabel
             control={
@@ -369,18 +446,16 @@ export function CreateGithubIssueDialog({
             label="Migration"
           />
 
-          {showRegression && (
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={regression}
-                  onChange={(e) => setRegression(e.target.checked)}
-                  disabled={submitting}
-                />
-              }
-              label="Regression"
-            />
-          )}
+          <TextField
+            label="Related Internal Issue(s)"
+            multiline
+            minRows={2}
+            value={relatedInternalIssues}
+            onChange={(e) => setRelatedInternalIssues(e.target.value)}
+            fullWidth
+            disabled={submitting}
+            placeholder="Links or numbers of related internal issues"
+          />
 
           {projectStatusFailed ? (
             <Box>

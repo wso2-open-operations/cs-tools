@@ -128,7 +128,10 @@ import RequestUpdateDialog, {
   type RequestUpdateSavePayload,
 } from "@features/csm-cases/components/RequestUpdateDialog";
 import { useRequestCaseUpdate } from "@features/csm-cases/api/useRequestCaseUpdate";
-import { deriveCaseUpdateRequestCategory } from "@features/csm-cases/utils/caseUpdateRequests";
+import {
+  deriveCaseUpdateRequestCategory,
+  isMigrationEngagement,
+} from "@features/csm-cases/utils/caseUpdateRequests";
 import CreateTaskDialog from "@features/csm-cases/components/CreateTaskDialog";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import EscalateCaseDialog from "@features/csm-cases/components/EscalateCaseDialog";
@@ -372,6 +375,12 @@ const CASE_TAB_IDS: readonly CaseTabId[] = TAB_DEFS.filter(
   (t) => !t.hidden,
 ).map((t) => t.id);
 
+/**
+ * The case detail page: the case header, its action bar (including Raise
+ * internal Git issue), tabs and side widgets. It owns the dialogs those
+ * actions open, and the follow-up writes they trigger, such as the case tags
+ * added after a Git issue is filed.
+ */
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when
@@ -3512,8 +3521,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           error={githubIssueError}
           createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
-          defaultTitle={c.subject}
-          defaultDescription={c.description}
+          defaultMigration={isMigrationEngagement(c)}
           showRepoField={isCloudSupportSubscription(caseProject?.subscriptionType)}
           productName={c.productCatalogueName || c.product}
           onboardingInProgress={caseProject?.onboardingStatus === "In-Progress"}
