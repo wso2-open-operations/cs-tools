@@ -43,7 +43,8 @@ func NewIncidentRepo(pool *pgxpool.Pool, locker *pglock.Locker) *IncidentRepo {
 const incidentColumns = `id, fingerprint, incident_id, incident_number, status, severity, impact, urgency, service,
 	metric_name, category, environment, source, alert_count, first_seen, last_seen, state_checked_at, fallback,
 	csm_confirmed, csm_attempts, csm_permanently_failed, csm_last_attempt_at, fold_version, created_at,
-	assignment_group, source_topic, source_account`
+	assignment_group, source_topic, source_account, unique_identifier, severity_label,
+	muted, muted_at, unmuted_at, mute_rule_id, mute_rule_number`
 
 // FoldPlan is what folding a fingerprint's alerts writes: notes and counters on the current incident, and any new incidents.
 type FoldPlan struct {
@@ -82,8 +83,8 @@ const (
 	insertIncidentQuery = `WITH inc AS (
 	INSERT INTO incidents_processed (fingerprint, incident_number, status, severity, impact, urgency, service, metric_name,
 		category, environment, source, alert_count, first_seen, last_seen, delivery_due_at,
-		assignment_group, source_topic, source_account)
-	VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $18, $19, $20)
+		assignment_group, source_topic, source_account, unique_identifier, severity_label)
+	VALUES ($1, $2, 'new', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $18, $19, $20, $21, $22)
 	RETURNING id)
 	INSERT INTO incident_notes (incident, alert_id, kind, note, chat_pending)
 	SELECT inc.id, n.* FROM inc, unnest($14::text[], $15::text[], $16::text[], $17::bool[]) AS n
@@ -130,7 +131,7 @@ func (r *IncidentRepo) Fold(ctx context.Context, fp string, alertIDs []string, d
 		args := []any{inc.Fingerprint, inc.IncidentNumber, inc.Severity, inc.Impact, inc.Urgency, inc.Service,
 			inc.MetricName, inc.Category, inc.Environment, inc.Source, inc.AlertCount, inc.FirstSeen, inc.LastSeen}
 		args = append(args, noteArrays(n.Notes)...)
-		args = append(args, inc.AssignmentGroup, inc.SourceTopic, inc.SourceAccount)
+		args = append(args, inc.AssignmentGroup, inc.SourceTopic, inc.SourceAccount, inc.UniqueIdentifier, inc.SeverityLabel)
 		writes.Queue(insertIncidentQuery, args...)
 	}
 	writes.Queue(`COMMIT`)
@@ -302,6 +303,49 @@ func (r *IncidentRepo) FinishDelivery(ctx context.Context, id, foldVersion int64
 	return r.exec(ctx, "finish delivery", id, `UPDATE incidents_processed
 		SET delivery_due_at = CASE WHEN fold_version = $2 THEN $3::timestamptz ELSE least(coalesce(delivery_due_at, now()), now()) END
 		WHERE id = $1`, id, foldVersion, next)
+}
+
+// Mute marks the incident muted by alert mute rule ruleID/ruleNumber, keeping the time it was first muted.
+func (r *IncidentRepo) Mute(ctx context.Context, id int64, ruleID, ruleNumber string) error {
+	return r.exec(ctx, "mute", id, `UPDATE incidents_processed
+		SET muted = true, muted_at = coalesce(muted_at, now()), mute_rule_id = $2, mute_rule_number = $3 WHERE id = $1`,
+		id, ruleID, ruleNumber)
+}
+
+// Unmute releases a muted incident for normal delivery.
+func (r *IncidentRepo) Unmute(ctx context.Context, id int64) error {
+	return r.exec(ctx, "unmute", id, `UPDATE incidents_processed SET muted = false, unmuted_at = now() WHERE id = $1`, id)
+}
+
+// MuteOutcome reports, for a muted incident no rule matches any more, whether its last alert was a resolving one
+// and whether a newer incident of the same fingerprint has replaced it.
+func (r *IncidentRepo) MuteOutcome(ctx context.Context, inc model.Incident) (resolved, superseded bool, err error) {
+	var lastKind string
+	err = r.pool.QueryRow(ctx, `SELECT
+		coalesce((SELECT kind FROM incident_notes WHERE incident = $1 ORDER BY id DESC LIMIT 1), ''),
+		EXISTS (SELECT 1 FROM incidents_processed WHERE fingerprint = $2 AND first_seen > $3)`,
+		inc.ID, inc.Fingerprint, inc.FirstSeen).Scan(&lastKind, &superseded)
+	if err != nil {
+		return false, false, fmt.Errorf("read mute outcome for incident %d: %w", inc.ID, err)
+	}
+	return lastKind == model.NoteOK, superseded, nil
+}
+
+// CloseMuted closes a muted incident without delivering anything: it is marked closed and unmuted, every pending note
+// is settled, and nothing more is due. It does nothing, and returns false, if a fold changed it since foldVersion.
+func (r *IncidentRepo) CloseMuted(ctx context.Context, id, foldVersion int64) (bool, error) {
+	var closed int
+	err := r.pool.QueryRow(ctx, `WITH inc AS (
+		UPDATE incidents_processed SET muted = false, unmuted_at = now(), status = 'closed', delivery_due_at = NULL
+		WHERE id = $1 AND fold_version = $2 RETURNING id),
+	notes AS (
+		UPDATE incident_notes SET csm_pending = false, chat_pending = false
+		WHERE incident IN (SELECT id FROM inc) AND (csm_pending OR chat_pending))
+	SELECT count(*) FROM inc`, id, foldVersion).Scan(&closed)
+	if err != nil {
+		return false, fmt.Errorf("close muted incident %d: %w", id, err)
+	}
+	return closed == 1, nil
 }
 
 // Purge deletes up to limit incidents, and their notes, last seen before cutoff with no delivery still owed.

@@ -241,6 +241,99 @@ func TestIncidentRepo_FoldAndDelivery(t *testing.T) {
 	}
 }
 
+func TestIncidentRepo_MuteLifecycle(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	newInc := func(fp string, at time.Time, alertID string) model.Incident {
+		t.Helper()
+		_, err := repo.Fold(ctx, fp, []string{alertID}, func(*model.Incident, map[string]bool) FoldPlan {
+			return FoldPlan{New: []NewIncident{{
+				Incident: model.Incident{Fingerprint: fp, IncidentNumber: "PENDING", Severity: 1, Impact: "HIGH", Urgency: "HIGH",
+					Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, UniqueIdentifier: "host-1", SeverityLabel: "Critical"},
+				Notes: []model.Note{{AlertID: alertID, Kind: model.NoteCreated, Text: "created"}},
+			}}}
+		})
+		if err != nil {
+			t.Fatalf("fold: %v", err)
+		}
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM incidents_processed WHERE fingerprint = $1 AND first_seen = $2`, fp, at).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inc, _, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inc
+	}
+	addNote := func(inc model.Incident, alertID, kind string) {
+		t.Helper()
+		if _, err := repo.Fold(ctx, inc.Fingerprint, []string{alertID}, func(cur *model.Incident, _ map[string]bool) FoldPlan {
+			return FoldPlan{Current: &CurrentFold{ID: cur.ID, Added: 1, LastSeen: now.Add(time.Second),
+				Notes: []model.Note{{AlertID: alertID, Kind: kind, Text: kind, ChatPending: true}}}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	inc := newInc("fpm", now, "M1")
+	if inc.UniqueIdentifier != "host-1" || inc.SeverityLabel != "Critical" || inc.Muted || inc.MutedAt != nil || inc.UnmutedAt != nil || !inc.MuteEligible() {
+		t.Fatalf("new incident = %+v", inc)
+	}
+	if err := repo.Mute(ctx, inc.ID, "b1", "AMR0000001"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Mute(ctx, inc.ID, "b2", "AMR0000002"); err != nil {
+		t.Fatal(err)
+	}
+	muted, _, _ := repo.Get(ctx, inc.ID)
+	if !muted.Muted || muted.MutedAt == nil || muted.MuteRuleID != "b2" || muted.MuteRuleNumber != "AMR0000002" {
+		t.Fatalf("muted = %+v", muted)
+	}
+
+	if resolved, superseded, err := repo.MuteOutcome(ctx, muted); err != nil || resolved || superseded {
+		t.Fatalf("outcome = %v %v %v, want still firing", resolved, superseded, err)
+	}
+	addNote(muted, "M2", model.NoteOK)
+	if resolved, _, err := repo.MuteOutcome(ctx, muted); err != nil || !resolved {
+		t.Fatalf("resolved = %v %v, want an OK last note to count as resolved", resolved, err)
+	}
+	newInc("fpm", now.Add(time.Hour), "M3")
+	if _, superseded, err := repo.MuteOutcome(ctx, muted); err != nil || !superseded {
+		t.Fatalf("superseded = %v %v", superseded, err)
+	}
+
+	if closed, err := repo.CloseMuted(ctx, muted.ID, muted.FoldVersion); err != nil || closed {
+		t.Fatalf("close with a stale fold version = %v %v, want no-op", closed, err)
+	}
+	cur, _, _ := repo.Get(ctx, muted.ID)
+	if closed, err := repo.CloseMuted(ctx, cur.ID, cur.FoldVersion); err != nil || !closed {
+		t.Fatalf("close = %v %v", closed, err)
+	}
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	notes, _ := repo.PendingNotes(ctx, cur.ID, 10)
+	var due *time.Time
+	_ = pool.QueryRow(ctx, `SELECT delivery_due_at FROM incidents_processed WHERE id = $1`, cur.ID).Scan(&due)
+	if cur.Muted || cur.Status != "closed" || cur.UnmutedAt == nil || cur.MuteRuleNumber != "AMR0000002" || len(notes) != 0 || due != nil {
+		t.Fatalf("closed = %+v notes = %v due = %v", cur, notes, due)
+	}
+
+	other := newInc("fpu", now, "U1")
+	if err := repo.Mute(ctx, other.ID, "b1", "AMR0000001"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Unmute(ctx, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	other, _, _ = repo.Get(ctx, other.ID)
+	if other.Muted || other.UnmutedAt == nil || other.MutedAt == nil || other.MuteEligible() {
+		t.Fatalf("unmuted = %+v", other)
+	}
+}
+
 func TestIncidentRepo_ConcurrentFoldsSerializePerFingerprint(t *testing.T) {
 	pool := testDB(t)
 	repo := NewIncidentRepo(pool, testLocker(t, pool))

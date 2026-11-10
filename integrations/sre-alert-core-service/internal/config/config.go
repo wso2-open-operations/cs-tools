@@ -99,6 +99,10 @@ type NotifyConfig struct {
 	ChatThreadingEnabled bool `toml:"chat_threading_enabled"`
 	// DeliveryConcurrency is how many incidents each replica delivers to CSM/Chat in parallel, independent of alert processing.
 	DeliveryConcurrency int `toml:"delivery_concurrency"`
+	// MuteRuleRefreshInterval is how often the active alert mute rules are fetched from CSM, and how often a muted incident is re-checked against them.
+	MuteRuleRefreshInterval Duration `toml:"mute_rule_refresh_interval"`
+	// MuteRuleMaxStaleness is how long the last fetched alert mute rules are still used while refreshes fail; after that nothing is muted (fail open).
+	MuteRuleMaxStaleness Duration `toml:"mute_rule_max_staleness"`
 }
 
 // ServerConfig tunes how long the HTTP server waits for in-flight requests to drain during a graceful shutdown before forcing the process to exit.
@@ -153,6 +157,9 @@ func defaults() Config {
 			ChatThreadingEnabled: true,
 			ChatFallbackDelay:    Duration(25 * time.Second),
 			DeliveryConcurrency:  64,
+
+			MuteRuleRefreshInterval: Duration(30 * time.Second),
+			MuteRuleMaxStaleness:    Duration(5 * time.Minute),
 		},
 		Server: ServerConfig{
 			ShutdownGrace: Duration(15 * time.Second),
@@ -232,6 +239,10 @@ func (c Config) validate() error {
 		return fmt.Errorf("notify.chat_fallback_delay must not be negative")
 	case c.Notify.DeliveryConcurrency <= 0:
 		return fmt.Errorf("notify.delivery_concurrency must be positive")
+	case c.Notify.MuteRuleRefreshInterval <= 0:
+		return fmt.Errorf("notify.mute_rule_refresh_interval must be positive")
+	case c.Notify.MuteRuleMaxStaleness < c.Notify.MuteRuleRefreshInterval:
+		return fmt.Errorf("notify.mute_rule_max_staleness must be at least mute_rule_refresh_interval")
 	case c.Server.ShutdownGrace <= 0:
 		return fmt.Errorf("server.shutdown_grace must be positive")
 	case c.Engine.DedupWindow <= 0:

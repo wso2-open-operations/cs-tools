@@ -67,6 +67,29 @@ notifications independently until they're actually delivered.
   own thread, and Duplicate/OK alerts are collapsed into one digest reply per
   delivery pass ("12 duplicate alerts received.") instead of one Chat message per
   alert, which matters because Chat webhooks allow about one message per second.
+- **Alert mute rules (muting).** An alert mute rule is a one-time mute rule created in the CSM
+  portal: a time window plus conditions on the alert's `service`, `environment`,
+  `source`, `metric_name`, `severity`, `category` or `unique_identifier`. Every
+  replica fetches the active rules from `GET /alert-mute-rules/active` on
+  csm-integration-service at startup and every `notify.mute_rule_refresh_interval`
+  (30s). An incident matches a rule when every condition matches its first alert:
+  `environment` by group (`prod`/`production`/`prd`/`live`, `stg`/`stage`/`staging`,
+  `dev`/`develop`/`development`, `qa`/`test`/`testing`, `uat`,
+  `stress`/`perf`/`performance`; anything else as itself), every other field by
+  case-insensitive, trimmed equality. The check runs in the delivery pass, before
+  anything is sent: a new incident that matches is marked `muted` (with the rule's id
+  and number in `mute_rule_id`/`mute_rule_number`) and nothing goes to CSM or Chat. Its
+  alerts still fold into it as usual, and it is re-checked every
+  `mute_rule_refresh_interval`. Once no active rule matches (the window ended, or the
+  rule was ended early), a muted incident that is still firing (its last alert is not
+  an OK/Clear) is unmuted and delivered to CSM with all its notes, and the Chat fallback
+  grace period counts from that moment. One whose last alert resolved it, or that a
+  newer incident of the same fingerprint replaced, is closed quietly (`status = closed`,
+  nothing owed) without ever creating a CSM incident. Rules never affect an incident
+  that has already been sent anywhere. A failed fetch keeps the last good set for
+  `notify.mute_rule_max_staleness` (5m); after that nothing is muted (fail open), and
+  muted incidents are released by the same rules. Muting is off when CSM delivery is
+  not configured.
 - **CSM status sync.** Open/closed state is read back from CSM, never inferred, and
   only for incidents that are still inside their window and have received alerts
   since the last check, at most once per `state_check_interval`.
@@ -102,7 +125,10 @@ succeeding and its confirmation being stored, the retry creates a second CSM inc
   notes, and the retention job.
 - `internal/pglock`: session advisory try-locks for delivery and retention.
 - `internal/csm`: OAuth2 client for `csm-integration-service` (create incident,
-  update work notes, search by correlation id, resolve service id).
+  update work notes, search by correlation id, resolve service id, list active alert
+  rules).
+- `internal/muterule`: the refreshed cache of active alert mute rules and the
+  condition matching.
 - `internal/notify`: wraps the CSM client and Chat webhooks with retry/backoff.
 - `internal/model`: the `Alert`/`Incident`/`Note` shapes, severity/fingerprint
   normalization, and HTML note formatting.
@@ -136,7 +162,8 @@ Only `PGHOST`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` are required. The service
 applies `schema.sql` itself on every startup (idempotent, under an advisory lock), so
 no manual migration step is needed. `schema.sql` only creates what is missing (every
 statement is `CREATE ... IF NOT EXISTS`), so a change to an existing table needs its own
-migration.
+migration; a new nullable or constant-default column can be added in `schema.sql` with
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (as the routing and muting columns are).
 
 CSM delivery turns on only when all of `CSM_INTEGRATION_BASE_URL`,
 `CSM_INTEGRATION_TOKEN_URL`, `CSM_INTEGRATION_CLIENT_ID`,
