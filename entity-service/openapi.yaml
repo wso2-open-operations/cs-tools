@@ -39737,6 +39737,16 @@ components:
           type: boolean
           nullable: true
           description: true matches the organisations with no owner.
+        ownerEmails:
+          type: array
+          items:
+            type: string
+            maxLength: 254
+          description: >-
+            Matches the organisation's PLG CS owner by email address, any of
+            these, trimmed and ignoring case. A registration matches by its
+            organisation's owner. Each entry must have text on both sides of
+            an @ and be at most 254 characters. Not with unowned.
         registeredFrom:
           type: string
           format: date-time
