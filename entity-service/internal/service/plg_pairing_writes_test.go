@@ -56,6 +56,9 @@ func (f *fakeOrgPlatformRepo) RegistrationVolumeTrend(context.Context, domain.Se
 func (f *fakeOrgPlatformRepo) AggregateRegistrationsByCountry(context.Context, domain.SearchRegistrationsRequest, int) (domain.AggregateResponse, error) {
 	panic("not reached")
 }
+func (f *fakeOrgPlatformRepo) AggregateRegistrationsByPlaybookAnswer(context.Context, domain.SearchRegistrationsRequest, int) (domain.AggregateResponse, error) {
+	panic("not reached")
+}
 func (f *fakeOrgPlatformRepo) LocatePairing(context.Context, string) (string, string, error) {
 	panic("not reached")
 }

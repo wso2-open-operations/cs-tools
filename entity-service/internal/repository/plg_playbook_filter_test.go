@@ -18,6 +18,7 @@ package repository
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -131,6 +132,88 @@ func TestPlaybookAnswerFilters(t *testing.T) {
 		if byOwner.TotalRecords != c.organizations || byCountry.TotalRecords != c.count {
 			t.Errorf("%s: aggregates %d organisations, %d registrations; want %d, %d",
 				c.name, byOwner.TotalRecords, byCountry.TotalRecords, c.organizations, c.count)
+		}
+	}
+}
+
+// TestAggregateRegistrationsByPlaybookAnswer groups the registrations
+// seedPlaybookAnswers seeds (July 2018) by their answer, and checks
+// each group lists, through its click filter, what it counted. Playbook Org F
+// (August 2018) answered with a code the run's options no longer carry.
+func TestAggregateRegistrationsByPlaybookAnswer(t *testing.T) {
+	pool := requireDB(t)
+	ctx := context.Background()
+	seedPlaybookAnswers(t, pool)
+	august := time.Date(2018, 8, 5, 12, 0, 0, 0, time.UTC)
+	seedRegistration(t, pool, "Playbook Org F", "IAM", august, false)
+	seedPlaybookRun(t, pool, "Playbook filter test", "Playbook Org F", "IAM", false, "RETIRED_OUTCOME", nil)
+
+	july := func(f domain.OrganizationSearchFilters) domain.OrganizationSearchFilters {
+		from, to := time.Date(2018, 7, 1, 0, 0, 0, 0, time.UTC), time.Date(2018, 7, 31, 23, 59, 59, 0, time.UTC)
+		f.RegisteredFrom, f.RegisteredTo = &from, &to
+		return f
+	}
+	yes := true
+	const outcome, reasons = "PB_TEST_OUTCOME", "PB_TEST_REASONS"
+	unanswered := func(n int) domain.AggregateBucket {
+		return domain.AggregateBucket{Key: domain.PlgUnansweredGroupKey, Label: "Not answered", Count: n}
+	}
+	monitor := domain.AggregateBucket{Key: "MONITOR", Label: "Monitor", Count: 1}
+	excluded := domain.AggregateBucket{Key: "EXCLUDED", Label: "Excluded", Count: 1}
+	regs := NewOrgPlatformRepository(pool, nil)
+	for _, c := range []struct {
+		name      string
+		filters   domain.OrganizationSearchFilters
+		maxGroups int
+		want      domain.AggregateResponse
+	}{
+		// Org E's Eligible is on a detached run: not answered. Org B is
+		// Excluded once, on two runs.
+		{"every answer, largest first, ties by label", july(domain.OrganizationSearchFilters{PlaybookTask: outcome}), 0,
+			domain.AggregateResponse{TotalRecords: 6, Groups: []domain.AggregateBucket{unanswered(4), excluded, monitor}}},
+		{"the rest folded into others", july(domain.OrganizationSearchFilters{PlaybookTask: outcome}), 1,
+			domain.AggregateResponse{TotalRecords: 6, OthersCount: 2, Groups: []domain.AggregateBucket{unanswered(4)}}},
+		{"the search's filters apply", july(domain.OrganizationSearchFilters{PlaybookTask: outcome, ProductCodes: []string{"IAM"}}), 0,
+			domain.AggregateResponse{TotalRecords: 4, Groups: []domain.AggregateBucket{unanswered(3), monitor}}},
+		{"only the answers asked for", july(domain.OrganizationSearchFilters{PlaybookTask: " " + outcome, PlaybookAnswers: []string{" MONITOR", "EXCLUDED"}}), 0,
+			domain.AggregateResponse{TotalRecords: 2, Groups: []domain.AggregateBucket{excluded, monitor}}},
+		{"not answered only", july(domain.OrganizationSearchFilters{PlaybookTask: outcome, PlaybookUnanswered: &yes}), 0,
+			domain.AggregateResponse{TotalRecords: 4, Groups: []domain.AggregateBucket{unanswered(4)}}},
+		{"a checklist's groups are the ticks asked for", july(domain.OrganizationSearchFilters{PlaybookTask: reasons, PlaybookAnswers: []string{"NO_ACTIVITY"}}), 0,
+			domain.AggregateResponse{TotalRecords: 1, Groups: []domain.AggregateBucket{{Key: "NO_ACTIVITY", Label: "No activity", Count: 1}}}},
+		{"a checklist counts ticks", july(domain.OrganizationSearchFilters{PlaybookTask: reasons}), 0,
+			domain.AggregateResponse{TotalRecords: 7, Groups: []domain.AggregateBucket{
+				unanswered(5), {Key: "DISPOSABLE_EMAIL", Label: "Disposable email", Count: 1}, {Key: "NO_ACTIVITY", Label: "No activity", Count: 1}}}},
+		{"a code the options lost is its own label", domain.OrganizationSearchFilters{
+			PlaybookTask: outcome, RegisteredFrom: &august, RegisteredTo: &august}, 0,
+			domain.AggregateResponse{TotalRecords: 1, Groups: []domain.AggregateBucket{{Key: "RETIRED_OUTCOME", Label: "RETIRED_OUTCOME", Count: 1}}}},
+	} {
+		got, err := regs.AggregateRegistrationsByPlaybookAnswer(ctx, domain.SearchRegistrationsRequest{Filters: c.filters}, c.maxGroups)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s:\n got %+v\nwant %+v", c.name, got, c.want)
+		}
+	}
+
+	// A group's click lists what the group counted.
+	all, err := regs.AggregateRegistrationsByPlaybookAnswer(ctx,
+		domain.SearchRegistrationsRequest{Filters: july(domain.OrganizationSearchFilters{PlaybookTask: outcome})}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range all.Groups {
+		f := july(domain.OrganizationSearchFilters{PlaybookTask: outcome, PlaybookAnswers: []string{g.Key}})
+		if g.Key == domain.PlgUnansweredGroupKey {
+			f = july(domain.OrganizationSearchFilters{PlaybookTask: outcome, PlaybookUnanswered: &yes})
+		}
+		_, n, err := regs.SearchRegistrations(ctx, domain.SearchRegistrationsRequest{Filters: f, Pagination: domain.Pagination{Limit: 50}})
+		if err != nil {
+			t.Fatalf("%s: %v", g.Key, err)
+		}
+		if n != g.Count {
+			t.Errorf("%s: the click lists %d, the group counted %d", g.Key, n, g.Count)
 		}
 	}
 }

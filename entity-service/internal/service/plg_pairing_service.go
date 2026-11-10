@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -64,10 +65,14 @@ func (s *pairingService) SearchRegistrations(ctx context.Context, req domain.Sea
 }
 
 // AggregateRegistrations counts the registrations req's filters match per
-// group (POST /plg/registrations/aggregate): groupBy "country" only.
+// group (POST /plg/registrations/aggregate): groupBy "country", or
+// "playbookAnswer", which needs filters.playbookTask.
 func (s *pairingService) AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error) {
-	if req.GroupBy != "country" {
-		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy must be %q, got %q", "country", req.GroupBy)}
+	if req.GroupBy != "country" && req.GroupBy != "playbookAnswer" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy must be %q or %q, got %q", "country", "playbookAnswer", req.GroupBy)}
+	}
+	if req.GroupBy == "playbookAnswer" && strings.TrimSpace(req.Filters.PlaybookTask) == "" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy playbookAnswer needs filters.playbookTask"}
 	}
 	if err := validatePlgMaxGroups(req.MaxGroups); err != nil {
 		return domain.AggregateResponse{}, err
@@ -75,8 +80,11 @@ func (s *pairingService) AggregateRegistrations(ctx context.Context, req domain.
 	if err := validateOrganizationFilters(&req.Filters); err != nil {
 		return domain.AggregateResponse{}, err
 	}
-	return s.repo.AggregateRegistrationsByCountry(ctx,
-		domain.SearchRegistrationsRequest{UnacknowledgedOnly: req.UnacknowledgedOnly, Filters: req.Filters}, req.MaxGroups)
+	search := domain.SearchRegistrationsRequest{UnacknowledgedOnly: req.UnacknowledgedOnly, Filters: req.Filters}
+	if req.GroupBy == "playbookAnswer" {
+		return s.repo.AggregateRegistrationsByPlaybookAnswer(ctx, search, req.MaxGroups)
+	}
+	return s.repo.AggregateRegistrationsByCountry(ctx, search, req.MaxGroups)
 }
 
 // RegistrationVolumeTrend counts the registrations req's filters match per

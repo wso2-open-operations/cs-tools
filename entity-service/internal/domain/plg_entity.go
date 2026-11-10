@@ -480,11 +480,18 @@ const PlgUnownedGroupKey = "unowned"
 // key is the country as written, which countryNames matches.
 const PlgUnknownCountryGroupKey = "unknown"
 
+// PlgUnansweredGroupKey is the key of the registrations with no answer to the
+// task in a playbook answer grouping (playbookUnanswered matches them); every
+// other group's key is an answer's option code, which playbookAnswers
+// matches.
+const PlgUnansweredGroupKey = "unanswered"
+
 // AggregateRegistrationsRequest is the body of POST
 // /plg/registrations/aggregate: the registration search's filters and
-// unacknowledgedOnly, the field to group by (only "country": the
-// registration's organisation's country) and, optionally, how many groups
-// to return before the rest are folded into othersCount. It answers an
+// unacknowledgedOnly, the field to group by ("country": the registration's
+// organisation's country; "playbookAnswer": its answer to the task
+// filters.playbookTask names) and, optionally, how many groups to return
+// before the rest are folded into othersCount. It answers an
 // AggregateResponse.
 type AggregateRegistrationsRequest struct {
 	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
