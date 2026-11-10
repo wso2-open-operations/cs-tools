@@ -662,6 +662,17 @@ interface DirectUploadLinks {
 /** How many times the links of one upload are replaced when they expire. */
 const MAX_LINK_REFRESHES = 3;
 
+/** True when `links` is a usable answer: a positive whole chunk size and a link for every chunk of `fileSize`. */
+function linksCoverFile(links: DirectUploadLinks | null | undefined, fileSize: number): links is DirectUploadLinks {
+  return (
+    !!links &&
+    Number.isSafeInteger(links.chunkBytes) &&
+    links.chunkBytes > 0 &&
+    Array.isArray(links.links) &&
+    links.links.length >= Math.max(1, Math.ceil(fileSize / links.chunkBytes))
+  );
+}
+
 /**
  * Sends one chunk to its signed link, trying again with a short pause when it
  * fails in passing. A 403 means the link expired (they last a few minutes): the
@@ -724,10 +735,9 @@ export async function sendFileDirect(
   const path = `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`;
   const requestLinks = (): Promise<DirectUploadLinks> => api.postEmpty<DirectUploadLinks>(path);
   let direct = await requestLinks();
+  // An answer that does not make sense is refused here, so the caller falls back to the backend.
+  if (!linksCoverFile(direct, file.size)) throw new Error("The upload links do not cover the file.");
   const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
-  if (!Array.isArray(direct.links) || direct.links.length < count) {
-    throw new Error("The upload links do not cover the file.");
-  }
   // Every chunk in flight may see the expiry at once; one request replaces the links.
   let generation = 0;
   let refreshing: Promise<void> | undefined;
@@ -736,7 +746,7 @@ export async function sendFileDirect(
     if (generation >= MAX_LINK_REFRESHES) throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
     refreshing ??= requestLinks()
       .then((fresh) => {
-        if (fresh.chunkBytes !== direct.chunkBytes || !Array.isArray(fresh.links) || fresh.links.length < count) {
+        if (!linksCoverFile(fresh, file.size) || fresh.chunkBytes !== direct.chunkBytes) {
           throw new Error("The upload links do not cover the file.");
         }
         direct = fresh;

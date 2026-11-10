@@ -878,6 +878,21 @@ describe("storedAttachments", () => {
       expect(chunkRoute()).toHaveLength(1);
     });
 
+    it.each([
+      ["no chunk size", { links: ["https://blob.example/x"] }],
+      ["a zero chunk size", { ...links(2), chunkBytes: 0 }],
+      ["a negative chunk size", { ...links(2), chunkBytes: -8 }],
+      ["a fractional chunk size", { ...links(2), chunkBytes: 1.5 }],
+      ["links that are not a list", { ...links(2), links: "https://blob.example/x" }],
+      ["too few links", links(1)],
+    ])("sends the chunks through the backend when the links answer has %s", async (_name, answer) => {
+      backend(() => json(answer));
+      await upload(bigFile(2 * CHUNK));
+      expect(rawFetch).not.toHaveBeenCalled(); // nothing was sent to an address from a bad answer
+      expect(chunkRoute()).toHaveLength(2);
+      expect(confirmBody()).toEqual({ type: "work_item", chunks: 2 });
+    });
+
     it("sends the chunks through the backend when the links cannot be had", async () => {
       backend(() => json({ message: "This upload cannot be sent directly." }, 400));
       await upload(bigFile(2 * CHUNK));
