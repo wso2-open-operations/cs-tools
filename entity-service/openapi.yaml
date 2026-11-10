@@ -27656,6 +27656,18 @@ components:
             type: string
             format: uuid
           description: Return only time cards submitted by any of these users.
+        teamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only time cards of the people on any of these teams today (the
+            Team Schedule's team ids: a CRE team's CRE group id, an SRE team's
+            SRE group id; a person counts
+            once however many of the teams list them). Membership is the
+            current roster, whenever the card was logged. Not supported when
+            DATA_SOURCE=servicenow (400).
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -27687,12 +27699,17 @@ components:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
         groupBy:
           type: string
-          enum: [state, user, project, day]
+          enum: [state, user, project, day, team]
           description: >-
             What to group by. "day" groups by work date and requires
             filters.startDate and filters.endDate (at most 31 days, both
             inclusive). A card with no project has no "project" bucket;
-            it is counted in othersCount and othersMinutes.
+            it is counted in othersCount and othersMinutes. "team" requires
+            filters.teamIds and returns one bucket per one of those teams
+            (key the team id, label its name, a team with no cards at 0, an
+            unknown id left out); a card counts in every one of the teams
+            its engineer is on, so totalRecords and totalMinutes are the
+            buckets' sums.
         measure:
           type: string
           enum: [count, minutes]

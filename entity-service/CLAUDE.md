@@ -4203,7 +4203,7 @@ already use — no route path, request, or response shape changed.
 ## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
 
 Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
-the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+the minutes logged on them, per `groupBy`: `state`, `user`, `project`, `day` or `team`. It reuses
 `timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
 `project_stats_repo.go`), so the aggregate can never count a different set of cards from
 the search, or a different total from the search's `totalTime`; keep it that way.
@@ -4226,15 +4226,28 @@ the search, or a different total from the search's `totalTime`; keep it that way
   `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
   The query runs `generate_series` over the window, so every day comes back in date order,
   days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`teamIds` (search and aggregate):** the cards of the people on any of the teams **today**:
+  `EXISTS` over `team_member` (the Team Schedule's roster, the list `GET /teams/{id}/members`
+  shows; it can hold a person twice and includes engineers moved onto a team), so a card is
+  matched once however many of the teams, or rows of one team, list its engineer. A team id is
+  the Team Schedule's `team.id`, which is a CRE team's CRE group id or an SRE team's SRE group
+  id. There is no membership
+  history: someone who moved teams counts in the new one, for old cards too.
+- **`team`:** needs `filters.teamIds` and returns one bucket per one of those teams (key the
+  team id, label its name), a team without cards at 0 and an id with no team left out
+  (`aggregateTimeCardsByTeam`). A card counts in every one of the teams its engineer is on, so
+  unlike the other groupings the buckets may overlap: `totalRecords` and `totalMinutes` are the
+  buckets' sums, not the search's total. `measure` and `maxGroups` apply as for `user`.
 - **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
-  time card aggregate.
+  time card aggregate. Its time card search refuses `teamIds` (400) too.
 - **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
   (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
   `CLAUDE.md`).
 
 Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
-check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
-(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+check, the ServiceNow refusal, `teamIds` and `team`), `time_card_aggregate_integration_test.go`
+and `time_card_team_filter_integration_test.go` (both `CASE_STATS_TEST_DSN`; the latter seeds
+teams with a duplicated member, a shared member and no members). The integration fixture is built so that ranking by count and
 ranking by minutes disagree, it has a card with all five minute columns NULL, and the
 search-parity test compares both counts and minutes with `SearchTimeCards`.
 
