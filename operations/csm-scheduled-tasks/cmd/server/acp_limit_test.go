@@ -167,6 +167,41 @@ func TestACPScreeningSettings(t *testing.T) {
 	}
 }
 
+// A full-sweep weekday on a Colombo weekend never comes up in a scheduled run,
+// so the safety net would silently never run: warn, but keep the value valid.
+func TestACPFullSweepWeekendWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		screening  string
+		weekday    string
+		tryout     bool
+		noReads    string
+		wantWarned bool
+	}{
+		{"saturday", "on", "Sat", false, "", true},
+		{"sunday", "", "Sunday", false, "", true},
+		{"friday", "on", "Fri", false, "", false},
+		{"default", "", "", false, "", false},
+		{"screening off", "off", "Sun", false, "", false},
+		{"tryout runs on weekends", "on", "Sat", true, "", false},
+		{"no sales-entity reads", "on", "Sun", false, "off", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, warnings, err := acpConfig(acpSettings{
+				DryRun: true, AlertsEnabled: true, Tryout: tc.tryout,
+				Screening: tc.screening, FullSweepWeekday: tc.weekday, SalesEntityReads: tc.noReads,
+			})
+			if err != nil {
+				t.Fatalf("acpConfig() error = %v, want the value accepted", err)
+			}
+			warned := strings.Contains(strings.Join(warnings, "\n"), "ACP_SCREENING_FULL_SWEEP_WEEKDAY is a weekend day")
+			if warned != tc.wantWarned {
+				t.Errorf("warned = %v, want %v (warnings %q)", warned, tc.wantWarned, warnings)
+			}
+		})
+	}
+}
+
 func TestNarrowACPFullSweep(t *testing.T) {
 	cfg := acp.Config{Screening: true, DailyLimit: 10}
 	got, err := narrowACP(cfg, registry.RunNowOptions{FullSweep: true, Limit: 5}, false)

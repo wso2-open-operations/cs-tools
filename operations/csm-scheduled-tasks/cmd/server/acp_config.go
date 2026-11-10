@@ -151,6 +151,10 @@ func acpConfig(s acpSettings) (acp.Config, []string, error) {
 	if cfg.NoSalesEntityReads {
 		warnings = append(warnings, "ACP_SALES_ENTITY_READS is off: acp_closure makes no sales-entity-service read and decides only from CSM's copy, with no live confirmation; screening, the weekly full sweep and the repair of CSM's copy are disabled by this mode")
 	}
+	if cfg.Screening && !cfg.NoSalesEntityReads && !s.Tryout &&
+		(cfg.FullSweepWeekday == time.Saturday || cfg.FullSweepWeekday == time.Sunday) {
+		warnings = append(warnings, "ACP_SCREENING_FULL_SWEEP_WEEKDAY is a weekend day: acp_closure does nothing on a Colombo weekend, so the weekly full sweep never runs and every scheduled run screens; choose Mon to Fri")
+	}
 	if s.Tryout && !cfg.DryRun && cfg.TestProjectID == "" {
 		warnings = append(warnings, "TRYOUT_TASK is acp_closure without ACP_TEST_PROJECT_ID: running as a dry run, nothing will be written; set ACP_DRY_RUN=true explicitly to silence this")
 		cfg.DryRun = true
