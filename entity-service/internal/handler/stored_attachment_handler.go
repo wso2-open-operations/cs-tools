@@ -120,6 +120,7 @@ func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.
 		writeServiceError(w, r, err)
 		return
 	}
+	resp.DirectUpload = h.files != nil && h.files.DirectUploadAllowed(req.SizeBytes)
 	writeStoredAttachmentJSON(w, http.StatusCreated, resp)
 }
 
@@ -210,6 +211,40 @@ func (h *StoredAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Requ
 		writeServiceError(w, r, err)
 		return
 	}
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// DirectUploadLinks handles POST /attachments/upload/{id}/direct?type=: one signed
+// link per chunk, so a large file goes from the browser straight to Azure. The
+// links are credentials, so the answer is never cached.
+func (h *StoredAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	resp, err := h.files.DirectUploadLinks(r.Context(), kindFromQuery(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// DirectDownloadLink handles GET /attachments/download/{id}/link?type=: a signed
+// link the browser downloads the file from, straight from Azure. The answer is
+// never cached.
+func (h *StoredAttachmentHandler) DirectDownloadLink(w http.ResponseWriter, r *http.Request) {
+	if h.files == nil {
+		http.NotFound(w, r)
+		return
+	}
+	resp, err := h.files.DirectDownloadLink(r.Context(), kindFromQuery(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 

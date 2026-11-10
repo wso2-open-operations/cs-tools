@@ -1590,3 +1590,24 @@ func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
 		t.Errorf("\" s2 \" normalizes to %q, want S2", got)
 	}
 }
+
+// TestLoad_AttachmentDirectTransfers: off unless asked for, and the size above
+// which a file goes direct is 8 MiB unless set.
+func TestLoad_AttachmentDirectTransfers(t *testing.T) {
+	cfg := Load()
+	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 8<<20 {
+		t.Errorf("defaults = %v, %d; want off and 8 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", " TRUE ")
+	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "16")
+	cfg = Load()
+	if !cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 16<<20 {
+		t.Errorf("set = %v, %d; want on and 16 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "yes")
+	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "not a number")
+	cfg = Load()
+	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 8<<20 {
+		t.Errorf("bad values = %v, %d; want off and the 8 MiB default", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+}
