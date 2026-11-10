@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -93,6 +94,34 @@ type queryHourService struct {
 	// internal report.
 	internalDomain string
 	now            func() time.Time
+
+	// projectHoursMu guards projectHoursCursor, the last project the hourly
+	// recompute reached. The next run starts after it, so a run cut short by
+	// its time budget does not leave the same projects at the end of the list
+	// unprocessed every hour. Process-local: a restart starts from the top.
+	projectHoursMu     sync.Mutex
+	projectHoursCursor string
+}
+
+// projectHoursShare is the part of the request's remaining time the hourly
+// recompute may spend on project hours. The rest is reserved for the state
+// comparison after it, which is what produces the usage notifications.
+const projectHoursShare = 2.0 / 3
+
+// rotateAfter returns ids (sorted ascending) reordered to start at the first
+// id after cursor, wrapping round. A blank or last cursor keeps the order.
+func rotateAfter(ids []string, cursor string) []string {
+	if cursor == "" {
+		return ids
+	}
+	i := sort.SearchStrings(ids, cursor)
+	if i < len(ids) && ids[i] == cursor {
+		i++
+	}
+	if i == 0 || i >= len(ids) {
+		return ids
+	}
+	return append(append(make([]string, 0, len(ids)), ids[i:]...), ids[:i]...)
 }
 
 // NewQueryHourService constructs a QueryHourService.
@@ -219,6 +248,18 @@ func (s *queryHourService) RecomputeProjectHours(ctx context.Context, projectID 
 	return s.repo.RecomputeProjectHours(ctx, projectID)
 }
 
+// recomputeProjectHoursBy recomputes one project, cut off at stopAt (when
+// set) so a single slow project cannot spend the time reserved for the state
+// comparison.
+func (s *queryHourService) recomputeProjectHoursBy(ctx context.Context, projectID string, stopAt time.Time) error {
+	if stopAt.IsZero() {
+		return s.RecomputeProjectHours(ctx, projectID)
+	}
+	ctx, cancel := context.WithDeadline(ctx, stopAt)
+	defer cancel()
+	return s.RecomputeProjectHours(ctx, projectID)
+}
+
 // SiblingProjectIDs implements QueryHourService.
 func (s *queryHourService) SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error) {
 	return s.repo.SiblingProjectIDs(ctx, projectID)
@@ -234,23 +275,35 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 	if err != nil {
 		return nil, err
 	}
+	s.projectHoursMu.Lock()
+	projectIDs = rotateAfter(projectIDs, s.projectHoursCursor)
+	s.projectHoursMu.Unlock()
 	var (
 		started     = time.Now()
 		failures    int
+		skipped     int
 		slowestID   string
 		slowestTook time.Duration
+		stopAt      time.Time
 	)
+	if deadline, ok := ctx.Deadline(); ok {
+		stopAt = started.Add(time.Duration(float64(deadline.Sub(started)) * projectHoursShare))
+	}
 	for i, id := range projectIDs {
-		if ctx.Err() != nil {
-			// The request budget is spent: the rest would each fail at once.
-			// Leave them for the next run.
-			slog.WarnContext(ctx, "query hours: recompute project hours stopped, request context done",
+		if ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt)) {
+			// The project hours budget is spent. Leave the rest for the next
+			// run, which starts after the last project reached here, and keep
+			// the remaining time for the state comparison.
+			slog.WarnContext(ctx, "query hours: recompute project hours stopped, time budget spent",
 				"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
-			failures += len(projectIDs) - i
+			skipped = len(projectIDs) - i
 			break
 		}
+		s.projectHoursMu.Lock()
+		s.projectHoursCursor = id
+		s.projectHoursMu.Unlock()
 		t0 := time.Now()
-		err := s.RecomputeProjectHours(ctx, id)
+		err := s.recomputeProjectHoursBy(ctx, id, stopAt)
 		took := time.Since(t0)
 		if took > slowestTook {
 			slowestID, slowestTook = id, took
@@ -262,7 +315,7 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 		}
 	}
 	slog.InfoContext(ctx, "query hours: project hours recomputed",
-		"projects", len(projectIDs), "failures", failures,
+		"projects", len(projectIDs), "failures", failures, "skipped", skipped,
 		"totalMs", time.Since(started).Milliseconds(),
 		"slowestProjectId", slowestID, "slowestMs", slowestTook.Milliseconds())
 
