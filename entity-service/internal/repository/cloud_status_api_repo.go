@@ -24,6 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // The reads behind the public cloud status dashboard.
@@ -93,6 +95,8 @@ type CloudStatusDashboardRepository interface {
 	// OutageComments returns one outage's customer-facing updates, newest
 	// first.
 	OutageComments(ctx context.Context, outageID string) ([]OutageCommentRow, error)
+	// Clouds returns the active cloud registry: slugs, regions and weights.
+	Clouds(ctx context.Context) ([]domain.CloudDefinition, error)
 }
 
 type cloudStatusDashboardRepository struct {
@@ -126,7 +130,7 @@ const monitorsSQL = `
            COALESCE(cm.status::text, ''),
            COALESCE(cm.service_offering_id::text, '')
       FROM cloud_monitor cm
-     WHERE cm.cloud_offering = $1::cloud_monitor_cloud_offering_enum
+     WHERE cm.cloud_offering = $1
        AND cm.is_active IS TRUE
      ORDER BY cm.group_priority DESC NULLS LAST, cm."group", cm.name
 `
@@ -265,6 +269,9 @@ func (r *cloudStatusDashboardRepository) OngoingOutages(ctx context.Context, off
 // task_number IS NOT EMPTY becomes work_item_id IS NOT NULL: the sync maps
 // that reference across. It matters -- only 188 of 636 outages carry one, so
 // the filter removes two thirds of the table.
+//
+// The $1 prefix is the cloud's registered incident prefix (cloud_status_cloud),
+// which is the slug for every cloud seeded today but is not assumed to be.
 //
 // The date window is passed in rather than computed here, so the caller owns
 // "last two quarters" and it can be tested without freezing a clock.
@@ -448,7 +455,7 @@ const monitorsForHistorySQL = `
            COALESCE(cm.name, ''),
            COALESCE(cm.service_offering_id::text, '')
       FROM cloud_monitor cm
-     WHERE cm.cloud_offering = $1::cloud_monitor_cloud_offering_enum
+     WHERE cm.cloud_offering = $1
        AND cm.is_active IS TRUE
      ORDER BY cm."group", cm.name
 `

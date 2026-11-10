@@ -81,6 +81,9 @@ type CloudStatusRepository interface {
 	// open attempt to record it against: the row is already delivered, or
 	// the token is not the attempt's.
 	RecordDelivery(ctx context.Context, id string, o DeliveryOutcome) (bool, error)
+	// Clouds returns the active cloud registry, to route an offering to its
+	// dashboard slug.
+	Clouds(ctx context.Context) ([]domain.CloudDefinition, error)
 }
 
 // DeliveryOutcome is the result of one attempt to post a webhook.
