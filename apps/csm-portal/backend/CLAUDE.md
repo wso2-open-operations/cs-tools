@@ -884,6 +884,19 @@ draft, a save and a share never carry one, and `ParseGenerated` stays strict: a 
 `note` is refused like any unknown field. A note that is not a string or is over
 `generatedNoteMaxChars` (500) makes that candidate invalid.
 
+**Cases that moved to a state.** A case-family widget may filter on `stateEntered` (`in`, case states)
+and `stateEnteredOn` (`gte` / `lte`, one date): the cases whose logged state history has a change to one of
+those states in that window ("moved to Waiting on WSO2 today"), whatever their state now (entity-service's
+`CLAUDE.md` has the search side). Case queries are otherwise passed through unchecked, so
+`checkGeneratedStateEntered` (`internal/dashboard/generated_state_entered.go`) checks just these two at
+generation, where the model can retry, rather than leaving a tile to fail on load: `in` with case states,
+`gte` / `lte` with one date, a window only with a `stateEntered` in the widget (a slice's window may lean on
+the widget's own `stateEntered`, as the webapp merges slices by field), and neither in an `anyOf` branch. A
+widget without them is not touched, so no saved dashboard changes. The catalogue (sections 5, 8 and 9)
+teaches the model these widgets, and `TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid` runs
+every section 5 example that uses them through `ParseGenerated`. Deploy entity-service (which must accept
+the fields) before the catalogue that teaches them.
+
 **Time card totals widgets.** A time card widget may group on the server (`groupBy.field` `state`,
 `user`, `project` or `day`, through `POST /time-cards/aggregate`, see "Time card totals" above), and only
 a time card widget grouped by a field may set `groupBy.measure`: `count` (the default) or `hours`. The
