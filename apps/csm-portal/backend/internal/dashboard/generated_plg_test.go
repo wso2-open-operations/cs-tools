@@ -184,6 +184,20 @@ func TestParseGenerated_AcceptsPlgOrganisationsByOwner(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsPlgMaxGroupsUpTo50: a PLG grouping takes
+// maxGroups up to entity-service's 50, or none for its default.
+func TestParseGenerated_AcceptsPlgMaxGroupsUpTo50(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-owner","displayName":"By Owner","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{},"groupBy":{"field":"owner","maxGroups":50}}`,
+		`{"id":"by-country","displayName":"By Country","resourceType":"plg_registration","shape":"pie","gridWidth":6,
+		  "query":{},"groupBy":{"field":"country"}}`,
+	)
+	if _, err := ParseGenerated([]byte(raw)); err != nil {
+		t.Errorf("ParseGenerated: %v", err)
+	}
+}
+
 // TestParseGenerated_AcceptsPlgCountries checks "by country" on either PLG
 // type (a pie or bar grouped on the server), "in <country>" (countryNames,
 // written as the prompt names them), "no country" (countryUnknown), and
@@ -330,6 +344,10 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 		{"registration line, a bucket alone", reg("line", `,"query":{},"bucket":"month"`), `"bucket" needs "startDate" and "endDate"`},
 		{"registration line, an owner filter", reg("line", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]},"days":30`), `query.ownerIds can only be ["__current_user__"]`},
 		{"registration line, unknown chart", reg("line", `,"query":{},"days":30,"chart":"area"`), `unknown "chart" "area"`},
+		{"51 owner groups", org("bar", `,"query":{},"groupBy":{"field":"owner","maxGroups":51}`), "groupBy.maxGroups is 51; it must be between 1 and 50"},
+		{"negative owner groups", org("pie", `,"query":{},"groupBy":{"field":"owner","maxGroups":-1}`), "groupBy.maxGroups is -1"},
+		{"51 country groups", reg("bar", `,"query":{},"groupBy":{"field":"country","maxGroups":51}`), "groupBy.maxGroups is 51"},
+		{"negative answer groups", reg("pie", `,"query":{"playbookTask":"T"},"groupBy":{"field":"playbookAnswer","maxGroups":-1}`), "groupBy.maxGroups is -1"},
 	}
 	for _, c := range cases {
 		_, err := ParseGenerated([]byte(c.raw))

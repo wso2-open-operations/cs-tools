@@ -90,6 +90,7 @@ type resourceRules struct {
 	groupNeeds map[string]string    // groupBy.field -> the flat key the widget's own query must hold
 	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
 	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
+	maxGroups  int                  // the largest groupBy.maxGroups the read takes (0 is its default); none means no bound here
 }
 
 // dayWindowRule is a "day" grouping's window: both keys must be set, and the
@@ -247,6 +248,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		groupByOn: plgGroupByShapes,
 		exclusive: plgExclusive,
 		needs:     plgNeeds,
+		maxGroups: maxPlgGroups,
 	},
 	ResourcePlgRegistration: {
 		noun:       "PLG registration",
@@ -259,6 +261,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		exclusive:  plgExclusive,
 		needs:      plgNeeds,
 		groupNeeds: map[string]string{"playbookAnswer": "playbookTask"},
+		maxGroups:  maxPlgGroups,
 	},
 	ResourceProblem: {
 		noun:    "problem",
@@ -296,6 +299,10 @@ var (
 	plgExclusive     = [][2]string{{"countryNames", "countryUnknown"}, {"playbookAnswers", "playbookUnanswered"}, {"ownerEmails", "unowned"}}
 	plgNeeds         = map[string]string{"playbookAnswers": "playbookTask", "playbookUnanswered": "playbookTask"}
 )
+
+// maxPlgGroups is the largest maxGroups entity-service's PLG aggregates take
+// (maxPlgAggregateGroups there); a larger one is refused when the tile loads.
+const maxPlgGroups = 50
 
 // plgRegistrationShapes are plgShapes and the registration trend.
 var plgRegistrationShapes = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar, ShapeLine}
@@ -340,6 +347,9 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 			if _, has := w.Query[need]; !has {
 				return fmt.Errorf("%w: %s.groupBy: grouping by %s needs query.%s", ErrGeneratedInvalid, at, w.GroupBy.Field, need)
 			}
+		}
+		if rules.maxGroups > 0 && (w.GroupBy.MaxGroups < 0 || w.GroupBy.MaxGroups > rules.maxGroups) {
+			return fmt.Errorf("%w: %s.groupBy.maxGroups is %d; it must be between 1 and %d (or omitted for the default)", ErrGeneratedInvalid, at, w.GroupBy.MaxGroups, rules.maxGroups)
 		}
 		if w.GroupBy.Field == "day" && rules.dayWindow != nil {
 			if err := checkDayWindow(at, w.Query, *rules.dayWindow); err != nil {
