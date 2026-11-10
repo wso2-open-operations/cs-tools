@@ -73,9 +73,9 @@ export const IMPACT_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
 
 export const CASE_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
   1: "info",
+  // In Progress covers Work In Progress and Waiting On WSO2, which the backend returns under this one id.
   10: "primary",
   18: "success",
-  1003: "info",
   6: "default",
   3: "info",
   1006: "info",

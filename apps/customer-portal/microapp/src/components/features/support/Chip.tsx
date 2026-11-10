@@ -18,6 +18,7 @@ import type { ItemCardProps } from ".";
 import { alpha, Chip, Skeleton, type ChipProps } from "@wso2/oxygen-ui";
 import { overrideOrDefault } from "@root/src/utils/others";
 import { useFilters } from "@root/src/context/filters";
+import { CASE_STATE_IDS } from "@root/src/config/constants";
 
 import {
   CASE_STATUS_CHIP_COLOR_CONFIG,
@@ -81,7 +82,17 @@ interface StatusChipProps extends Omit<ChipProps, "label"> {
   type?: ItemCardProps["type"];
 }
 
-export function StatusChip({ id, type = "case", ...props }: StatusChipProps) {
+/**
+ * Customers see Work In Progress and Waiting On WSO2 as one In Progress state, and the backend returns that
+ * merged state (Work In Progress's id) for both. Waiting On WSO2 is no longer in the case state list, so a
+ * case that still arrives under its id would otherwise show as "N/A": read it as In Progress.
+ */
+function toCustomerCaseStateId(id?: string) {
+  return id === String(CASE_STATE_IDS.WAITING_ON_WSO2) ? String(CASE_STATE_IDS.WORK_IN_PROGRESS) : id;
+}
+
+export function StatusChip({ id: rawId, type = "case", ...props }: StatusChipProps) {
+  const id = type === "case" ? toCustomerCaseStateId(rawId) : rawId;
   const { data, isLoading } = useFilters();
 
   if (isLoading || !data) return <SkeletonChip />;
