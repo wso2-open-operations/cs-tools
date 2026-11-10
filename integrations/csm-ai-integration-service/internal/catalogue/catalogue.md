@@ -431,6 +431,8 @@ optional and lists match **any** of their values (an organisation matches when a
 | `registeredFrom`, `registeredTo` | the sign-up date, from / to (both inclusive): one date token (section 5) |
 | `unowned` | `true`: no owner assigned yet |
 | `ownerIds` | **only** `["__current_user__"]`: the organisations the viewer owns ("my PLG organisations"); on `plg_registration`, those organisations' sign-ups |
+| `countryNames` | a list of countries, each its common English name as the request names it ("Sri Lanka", "India", "United States", "United Kingdom"; "US" / "UK" written out); case does not matter; a registration matches by its organisation's country |
+| `countryUnknown` | `true`: no country recorded ("unknown country"); never with `countryNames` |
 | `unacknowledgedOnly` | **`plg_registration` only**, `true`: not yet acknowledged by the team |
 
 ```json
@@ -440,7 +442,7 @@ optional and lists match **any** of their values (an organisation matches when a
 **Shapes.** `count`; `list` with `listLimit`: an organisation list may sort by `name` or
 `registeredOn` ("newest" is `registeredOn` `desc`), a **registration list sets no `sortBy`** (newest
 first); `pie`/`bar` with **`slices`**, each slice's `query` flat too and
-added to the widget's, or (organisations only) `groupBy` by owner, below. A split by product, stage or tier is one slice per value, in the order of the
+added to the widget's, or `groupBy` by owner (organisations only) or by country, below. A split by product, stage or tier is one slice per value, in the order of the
 table, labelled with the names above ("Trial" is `TRIAL` + `TRIAL_EXTENDED`):
 
 ```json
@@ -459,6 +461,16 @@ a split of registrations by owner is not expressible (the closest is organisatio
 { "resourceType": "plg_organization", "shape": "bar", "query": {}, "groupBy": { "field": "owner", "maxGroups": 10 } }
 ```
 
+**By country.** Organisations or registrations per country ("by country", "per country", "which
+countries") are a `pie` or `bar` with `"groupBy": { "field": "country", "maxGroups": 10 }` and no
+slices, on `plg_organization` or `plg_registration` (sign-ups by country); the ones with no country are
+their own "Unknown" group. "In <country>" or "from <country>" is `countryNames`; a few named countries
+compared side by side are slices, one `countryNames` per slice.
+
+```json
+{ "resourceType": "plg_registration", "shape": "pie", "query": {}, "groupBy": { "field": "country", "maxGroups": 10 } }
+```
+
 **Sign-ups over time.** Registrations (sign-ups) per day, week or month, or a sign-up trend, are one
 `plg_registration` **`line`**: one line, registrations by sign-up date, with section 4's window (`days`,
 or `startDate` + `endDate` + `bucket`) and `"chart": "bar"` when bars are asked for; never `series`, and
@@ -473,7 +485,7 @@ sign-ups per month.
 ```
 
 **Not expressible** (section 1): a named owner's organisations (only the viewer's own, `ownerIds`;
-the closest is organisations by owner, where that owner is one bar); registrations split by owner; an organisation by name or email; health or "at risk"; playbooks; usage, revenue or ARR.
+the closest is organisations by owner, where that owner is one bar); registrations split by owner; a region or continent ("Asia", "EMEA"; the closest is by country); an organisation by name or email; health or "at risk"; playbooks; usage, revenue or ARR.
 
 ---
 
@@ -513,7 +525,7 @@ or breached group, `warning` next, otherwise leave it out.
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
 `change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
-`measure`, section 5a; `plg_organization`: `owner` only, section 5e; `account`, `project`, `plg_registration`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+`measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` only, section 5e; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
 section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
 add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
@@ -567,6 +579,8 @@ Never set both `slices` and `groupBy`.
 | "unowned", "no owner", "unassigned" (PLG) | `unowned: true` |
 | "my PLG / cloud organisations", "organisations I own", "my sign-ups" (PLG) | `ownerIds ["__current_user__"]` (section 5e) |
 | PLG organisations "by owner", "per owner", "per CS owner" | a `plg_organization` `pie` or `bar` with `groupBy` `owner` (section 5e) |
+| PLG organisations or sign-ups "by country", "per country" | a `pie` or `bar` with `groupBy` `country` (section 5e) |
+| PLG "in <country>", "from <country>"; "no country", "unknown country" | `countryNames ["<country>"]`; `countryUnknown: true` (section 5e) |
 | a PLG product: "IAM", "identity" / "API platform" / "integration platform" / "agent platform" / "engineering platform" | `productCodes` `["IAM"]` / `["API_PLATFORM"]` / `["INTEGRATION_PLATFORM"]` / `["AGENT_PLATFORM"]` / `["ENG_PLATFORM"]` |
 | "signed up this month / last 30 days" (PLG) | `registeredFrom` (and `registeredTo`) with the date tokens of section 5 |
 | PLG "by product / stage / tier" | a `pie` (share) or `bar` (comparison) with one slice per value (section 5e) |
@@ -684,8 +698,9 @@ If two readings are plausible and the table does not settle it, pick the one abo
     their exact-case values, in its `query` and every slice's; `unacknowledgedOnly` only on
     `plg_registration`; shape `count`, `list` (organisations sort by `name` / `registeredOn`,
     registrations no `sortBy`) or `pie`/`bar` with `slices`, or a registration `line` (item 5, no
-    `series`); `groupBy` only on an organisation `pie`/`bar`, by `owner`; `ownerIds` only
-    `["__current_user__"]`; never an organisation `line`.
+    `series`); `groupBy` only on a `pie`/`bar`: organisations by `owner` or `country`, registrations by
+    `country`; `ownerIds` only `["__current_user__"]`; `countryNames` never with `countryUnknown`;
+    never an organisation `line`.
 14. The output is a single JSON object.
 15. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).
