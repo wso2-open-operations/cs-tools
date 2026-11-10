@@ -120,11 +120,11 @@ func (d *csmOnlyDetails) prepare(ctx context.Context) error {
 			break
 		}
 		if pages++; pages >= maxProjectPages {
-			return fmt.Errorf("Customer account listing still reports more pages after %d pages", maxProjectPages)
+			return fmt.Errorf("customer account listing still reports more pages after %d pages", maxProjectPages)
 		}
 	}
 	if len(customers) < total {
-		return fmt.Errorf("Customer account listing returned %d distinct accounts of a reported %d", len(customers), total)
+		return fmt.Errorf("customer account listing returned %d distinct accounts of a reported %d", len(customers), total)
 	}
 	d.customers = customers
 	return nil
