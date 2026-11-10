@@ -343,8 +343,8 @@ export default function RotaReminderSettings(): JSX.Element {
                     Send weekday reminders
                   </label>
                   <p className="cp-help" id={id("weekday-help")}>
-                    Morning and Evening rotations. Each person gets one email with a calendar invitation at 09:00 IST
-                    the day before (Sunday to Thursday; on Sunday for Monday).
+                    Morning and Evening rotations. Each person gets one email at 09:00 IST the day before (Sunday to
+                    Thursday; on Sunday for Monday), with a calendar invitation unless invitations are turned off below.
                   </p>
                 </div>
                 <div>
@@ -360,9 +360,10 @@ export default function RotaReminderSettings(): JSX.Element {
                   </label>
                   <p className="cp-help" id={id("weekend-help")}>
                     Sent at 09:00 IST on Monday once the weekend is fully marked (or on the first morning from Tuesday to
-                    Thursday that it is): a summary to everyone on the weekend and one invitation per day. A final
-                    reminder with any changes follows on Friday at 09:00 IST. Until the weekend is fully marked, only
-                    the CRE rota admins get a daily 09:00 IST email listing what is missing.
+                    Thursday that it is): a summary to everyone on the weekend and, unless invitations are turned off
+                    below, one invitation per day. Until then only the CRE rota admins hear about it: a 09:00 IST email
+                    each morning, Monday to Thursday, listing what is missing. On Friday at 09:00 IST a final reminder
+                    with any changes goes to everyone on the weekend, even if gaps remain, listing them.
                   </p>
                 </div>
                 <div>

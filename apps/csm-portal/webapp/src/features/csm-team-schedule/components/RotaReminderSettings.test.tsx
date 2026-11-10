@@ -120,12 +120,12 @@ describe("RotaReminderSettings", () => {
   it("says when each reminder goes out: 09:00 IST the day before, the weekend on Monday and Friday", () => {
     render(<RotaReminderSettings />);
     expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).toHaveAccessibleDescription(
-      /one email with a calendar invitation at 09:00 IST the day before \(Sunday to Thursday; on Sunday for Monday\)/,
+      /one email at 09:00 IST the day before \(Sunday to Thursday; on Sunday for Monday\), with a calendar invitation unless invitations are turned off below/,
     );
     const weekend = screen.getByRole("checkbox", { name: "Send weekend reminders" });
     expect(weekend).toHaveAccessibleDescription(/Sent at 09:00 IST on Monday once the weekend is fully marked/);
-    expect(weekend).toHaveAccessibleDescription(/final reminder with any changes follows on Friday at 09:00 IST/);
-    expect(weekend).toHaveAccessibleDescription(/only the CRE rota admins get a daily 09:00 IST email/);
+    expect(weekend).toHaveAccessibleDescription(/On Friday at 09:00 IST a final reminder with any changes goes to everyone on the weekend, even if gaps remain/);
+    expect(weekend).toHaveAccessibleDescription(/only the CRE rota admins hear about it: a 09:00 IST email each morning, Monday to Thursday/);
     expect(screen.getByText(/an email can arrive up to an hour later/)).toBeInTheDocument();
   });
 
