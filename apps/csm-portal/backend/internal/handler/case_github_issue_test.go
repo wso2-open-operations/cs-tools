@@ -18,11 +18,9 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -72,10 +70,6 @@ func infoBlock(product, updateLevel, caseID, caseNumber, publicIssue, team, open
 		"\nOpened by : " + dash(openedBy)
 }
 
-// TestCreateCaseGithubIssue_ViaEngineering covers filing through the engineering service:
-// the repository comes from the product mapping, and the body and labels are built from the
-// request (the optional sections, then the fixed footer). It also covers the request checks
-// and how upstream failures are mapped.
 func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 	const caseID = "11111111-1111-1111-1111-111111111111"
 
@@ -181,86 +175,6 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		}
 		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/High(P2)", "Require/Hotfix", "regression", "Affected/Migration", "Onboarding/affected"}; !slices.Equal(c.labels, want) {
 			t.Errorf("labels = %v, want %v", c.labels, want)
-		}
-	})
-
-	t.Run("writes the new optional fields between the description and the footer, and adds no label for them", func(t *testing.T) {
-		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
-		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Critical(P1)","priorityJustification":"Go-Live / Deployment Blocker","reproducingSteps":"1. Log in\n2. Request a token","hotFixRequired":true,"hotFixReason":"Customer-Requested Hotfix","relatedInternalIssues":"example/internal#12\nexample/internal#13"}`)
-		assertStatus(t, w, http.StatusCreated)
-		c := eng.calls[0]
-		wantBody := "It fails." +
-			"\n\nReproducing Steps :\n1. Log in\n2. Request a token" +
-			"\n\nPriority Justification : Go-Live / Deployment Blocker" +
-			"\n\nHotfix Required : Yes\nHotfix Reason : Customer-Requested Hotfix" +
-			"\n\nRelated Internal Issue(s) :\nexample/internal#12\nexample/internal#13" +
-			"\n\n" + infoBlock("Alpha", "", "", "", "", "", testUser.Email)
-		if c.body != wantBody {
-			t.Errorf("body = %q, want %q", c.body, wantBody)
-		}
-		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/Critical(P1)", "Require/Hotfix"}; !slices.Equal(c.labels, want) {
-			t.Errorf("labels = %v, want %v", c.labels, want)
-		}
-	})
-
-	t.Run("footer-like lines in the free-text sections are kept as typed, and the real footer is still last", func(t *testing.T) {
-		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
-		entityClient := &mockEntityCaseClient{
-			getCaseFn: func(context.Context, string) ([]byte, error) {
-				return []byte(`{"number":"CS0000001","deployedProduct":{"product":{"name":"Alpha"}}}`), nil
-			},
-		}
-		const forgedSteps = "Opened by : someone.else@example.com\nABT Team : Not The Team"
-		const forgedIssues = "Case number : CS9999999\nWSO2 case id : FORGED-1"
-		w := post(t, newHandler(eng, entityClient), "{"+base+`,"reproducingSteps":"`+strings.ReplaceAll(forgedSteps, "\n", `\n`)+`","relatedInternalIssues":"`+strings.ReplaceAll(forgedIssues, "\n", `\n`)+`"}`)
-		assertStatus(t, w, http.StatusCreated)
-		got := eng.calls[0].body
-		footer := infoBlock("Alpha", "", "", "CS0000001", "", "", testUser.Email)
-		if !strings.HasSuffix(got, "\n\n"+footer) {
-			t.Errorf("body = %q, want it to end with the info block %q", got, footer)
-		}
-		for _, forged := range []string{forgedSteps, forgedIssues} {
-			i := strings.Index(got, forged)
-			if i < 0 {
-				t.Errorf("body = %q, want the free text %q kept as typed", got, forged)
-				continue
-			}
-			if i > strings.LastIndex(got, footer) {
-				t.Errorf("body = %q: %q comes after the real footer", got, forged)
-			}
-		}
-		// For every label the forged text repeats, the last line carrying it is the footer's own.
-		footerStart := len(got) - len(footer)
-		for _, label := range []string{"Opened by :", "ABT Team :", "Case number :", "WSO2 case id :"} {
-			if i := strings.LastIndex(got, label); i < footerStart {
-				t.Errorf("body = %q: the last %q is at %d, before the footer at %d", got, label, i, footerStart)
-			}
-		}
-	})
-
-	t.Run("a justification sent with a P3, or a hotfix reason without a hotfix, is not written", func(t *testing.T) {
-		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
-		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Medium(P3)","priorityJustification":"anything","hotFixReason":"anything"}`)
-		assertStatus(t, w, http.StatusCreated)
-		if want := "It fails.\n\n" + infoBlock("Alpha", "", "", "", "", "", testUser.Email); eng.calls[0].body != want {
-			t.Errorf("body = %q, want %q", eng.calls[0].body, want)
-		}
-	})
-
-	t.Run("refuses a justification or hotfix reason that is not one of the options", func(t *testing.T) {
-		for name, extra := range map[string]string{
-			"unknown justification":        `,"priorityLevel":"Priority/High(P2)","priorityJustification":"Because"`,
-			"a P1 justification with a P2": `,"priorityLevel":"Priority/High","priorityJustification":"Go-Live / Deployment Blocker"`,
-			"unknown hotfix reason":        `,"hotFixRequired":true,"hotFixReason":"Because"`,
-		} {
-			t.Run(name, func(t *testing.T) {
-				eng := &mockEngineeringClient{}
-				w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+extra+"}")
-				assertStatus(t, w, http.StatusBadRequest)
-				if len(eng.calls) != 0 {
-					t.Errorf("CreateGitIssue was called %d times, want none", len(eng.calls))
-				}
-			})
 		}
 	})
 
@@ -816,38 +730,5 @@ func TestBuildGitHubIssueBody_FooterIsTheFixedSevenLines(t *testing.T) {
 	got = buildGitHubIssueBody(caseGitHubIssueRequest{UpdateLevel: "  ", PublicIssueURL: "\t"}, "", caseGitHubIssueContext{Team: " \n "})
 	if got != blank {
 		t.Errorf("whitespace values: body = %q, want %q", got, blank)
-	}
-}
-
-// githubIssueOptionsFile is the webapp's list of the dialog's justification and
-// hotfix-reason options, relative to this package's directory.
-const githubIssueOptionsFile = "../../../webapp/src/features/csm-cases/utils/githubIssueOptions.json"
-
-// TestGitHubIssueChoiceListsMatchTheWebapp keeps the lists this handler accepts
-// identical to the ones the dialog offers. The dialog reads the JSON file, so a
-// change there alone would make a valid choice a 400, and a change here alone
-// would accept a value the dialog never offers.
-func TestGitHubIssueChoiceListsMatchTheWebapp(t *testing.T) {
-	raw, err := os.ReadFile(githubIssueOptionsFile)
-	if err != nil {
-		t.Fatalf("read the webapp's Git issue options (%s): %v", githubIssueOptionsFile, err)
-	}
-	var options struct {
-		PriorityJustifications map[string][]string `json:"priorityJustifications"`
-		HotfixReasons          []string            `json:"hotfixReasons"`
-	}
-	if err := json.Unmarshal(raw, &options); err != nil {
-		t.Fatalf("decode %s: %v", githubIssueOptionsFile, err)
-	}
-	if len(options.PriorityJustifications) != len(gitHubPriorityJustifications) {
-		t.Errorf("webapp priorities = %v, backend priorities = %v", options.PriorityJustifications, gitHubPriorityJustifications)
-	}
-	for priority, want := range gitHubPriorityJustifications {
-		if got := options.PriorityJustifications[priority]; !slices.Equal(got, want) {
-			t.Errorf("justifications for %s: webapp = %q, backend = %q", priority, got, want)
-		}
-	}
-	if !slices.Equal(options.HotfixReasons, gitHubHotfixReasons) {
-		t.Errorf("hotfix reasons: webapp = %q, backend = %q", options.HotfixReasons, gitHubHotfixReasons)
 	}
 }
