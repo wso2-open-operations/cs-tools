@@ -947,6 +947,7 @@ describe("storedAttachments", () => {
       it("hands a large file's signed link to the browser as a download", async () => {
         const click = clickSpy();
         authFetch.mockResolvedValueOnce(json({ url: "https://blob.example/x?sig=s", name: "big.bin" }));
+        rawFetch.mockResolvedValueOnce(new Response("0", { status: 206 }));
         const onSaved = vi.fn();
         await downloadStoredAttachment(authFetch, {
           type: "work_item",
@@ -957,6 +958,10 @@ describe("storedAttachments", () => {
         });
         expect(authFetch).toHaveBeenCalledTimes(1);
         expect(authFetch.mock.calls[0][0]).toBe(`${BASE}/attachments/download/${ID}/link?type=work_item`);
+        // The link is checked with a one-byte read before the browser is handed it.
+        expect(rawFetch).toHaveBeenCalledTimes(1);
+        expect(rawFetch.mock.calls[0][0]).toBe("https://blob.example/x?sig=s");
+        expect(rawFetch.mock.calls[0][1]).toMatchObject({ method: "GET", headers: { Range: "bytes=0-0" } });
         expect(click).toHaveBeenCalledTimes(1);
         expect(onSaved).toHaveBeenCalledWith("started");
       });
@@ -978,6 +983,26 @@ describe("storedAttachments", () => {
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
         }
         // The link request is not a click; only the saved blob's own anchor is.
+        click.mockRestore();
+      });
+
+      it("streams through the backend, and starts no download, when Azure refuses the link", async () => {
+        const click = clickSpy();
+        for (const refusal of [() => new Response("<Error/>", { status: 403 }), () => Promise.reject(new TypeError("blocked by CORS"))]) {
+          authFetch.mockReset();
+          rawFetch.mockReset();
+          authFetch
+            .mockResolvedValueOnce(json({ url: "https://blob.example/x?sig=s", name: "big.bin" }))
+            .mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
+          rawFetch.mockImplementationOnce(async () => refusal());
+          await downloadStoredAttachment(authFetch, {
+            type: "work_item",
+            id: ID,
+            name: "a.txt",
+            size: DIRECT_TRANSFER_MIN_BYTES + 1,
+          });
+          expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
+        }
         click.mockRestore();
       });
 

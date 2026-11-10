@@ -1047,6 +1047,8 @@ describe("direct transfers of large files", () => {
 
     it("hands a large file's signed link to the browser as a download", async () => {
       const clicked = click();
+      const fetchMock = vi.fn().mockResolvedValue(new Response("0", { status: 206 }));
+      vi.stubGlobal("fetch", fetchMock);
       const get = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
       const getResponse = vi.fn();
       const onSaved = vi.fn();
@@ -1059,6 +1061,10 @@ describe("direct transfers of large files", () => {
       });
       expect(done).toBe(true);
       expect(get).toHaveBeenCalledWith(`/attachments/download/${ID}/link?type=work_item`);
+      // The link is checked with a one-byte read before the browser is handed it.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe("https://blob.example/x?sig=s");
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET", headers: { Range: "bytes=0-0" } });
       expect(clicked).toHaveBeenCalledTimes(1);
       expect(onSaved).toHaveBeenCalledWith("started");
       expect(getResponse).not.toHaveBeenCalled(); // nothing streamed through the backend
@@ -1078,6 +1084,29 @@ describe("direct transfers of large files", () => {
           apiFor({ get, getResponse }),
           { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
           save,
+        );
+        expect(done).toBe(true);
+        expect(getResponse).toHaveBeenCalledTimes(1);
+      }
+      expect(clicked).not.toHaveBeenCalled();
+    });
+
+    it("streams through the backend, and starts no download, when Azure refuses the link", async () => {
+      const clicked = click();
+      const body = () =>
+        new Response("0123456789", {
+          status: 206,
+          headers: { "Content-Range": "bytes 0-9/10", "Content-Disposition": 'attachment; filename="big.bin"' },
+        });
+      const refusals = [() => Promise.resolve(new Response("<Error/>", { status: 403 })), () => Promise.reject(new TypeError("blocked by CORS"))];
+      for (const refuse of refusals) {
+        vi.stubGlobal("fetch", vi.fn(refuse));
+        const get = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
+        const getResponse = vi.fn().mockResolvedValue(body());
+        const done = await downloadEntityAttachment(
+          apiFor({ get, getResponse }),
+          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
+          vi.fn(),
         );
         expect(done).toBe(true);
         expect(getResponse).toHaveBeenCalledTimes(1);
