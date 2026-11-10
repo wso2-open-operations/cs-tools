@@ -203,11 +203,8 @@ Handler tests use a mock entity client (`internal/handler/helpers_test.go`) and 
 table covering every `mapUpstreamError` mapping. Entity client tests start real
 `httptest.Server`s to exercise the client-credentials flow, error-body truncation and
 correlation-ID forwarding. Middleware tests cover header injection and ID
-generation/preservation. `cmd/server` tests cover the actor-email parsing, and also
-check that `cloud-status.openapi.yaml` holds exactly `openapi.yaml`'s `/health` and
-`/cloud-status/*` paths, unchanged and all reads, under the same top-level security
-requirement, with every `$ref` resolving inside it, and that each endpoint in
-`.choreo/component.yaml` names its contract. `internal/apierror` has no dedicated tests.
+generation/preservation. `cmd/server` (wiring only) and `internal/apierror` have no
+dedicated tests.
 
 ### Lint and security scan
 
