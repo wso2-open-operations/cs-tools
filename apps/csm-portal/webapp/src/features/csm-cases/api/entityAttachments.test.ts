@@ -640,8 +640,8 @@ describe("chunked upload and streamed download", () => {
         downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
       ).rejects.toThrow("The download was interrupted.");
       expect(save).not.toHaveBeenCalled();
-      // The 100 MB ceiling in 8 MiB ranges, plus the one for the refusal, then it stops.
-      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + Math.ceil(100 / 8) + 1 + 8);
+      // The 1024 MB ceiling in 8 MiB ranges, plus the one for the refusal, then it stops.
+      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + Math.ceil(1024 / 8) + 1 + 8);
     });
 
     it("reads a range again, rather than ending the file, when its body is cut short of its Content-Length", async () => {
@@ -957,14 +957,32 @@ describe("direct transfers of large files", () => {
     expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
   });
 
-  it("falls back to the backend, without retrying, when Azure refuses a link", async () => {
+  it("asks for new links when they expire part-way, and carries on", async () => {
+    // The first links are refused as expired; the new ones work.
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(new Response(null, { status: String(url).includes("fresh") ? 201 : 403 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const fresh = { ...linksFor(3), links: linksFor(3).links.map((l) => `${l}&fresh=1`) };
+    const postEmpty = vi.fn().mockResolvedValueOnce(linksFor(3)).mockResolvedValue(fresh);
+    const putBinary = vi.fn();
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK + 5)));
+    expect(postEmpty).toHaveBeenCalledTimes(2); // one replacement, shared by every chunk in flight
+    expect(putBinary).not.toHaveBeenCalled(); // never fell back
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 3 });
+    const okUrls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("fresh"));
+    expect(okUrls).toHaveLength(3);
+  });
+
+  it("falls back to the backend when Azure keeps refusing, after replacing the links a few times", async () => {
     const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 403 })));
     vi.stubGlobal("fetch", fetchMock);
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
     const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
     const putBinary = vi.fn().mockResolvedValue(undefined);
     await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2); // one try per chunk in flight, no retries
+    expect(postEmpty).toHaveBeenCalledTimes(4); // the first links and three replacements
     expect(putBinary).toHaveBeenCalledTimes(2);
     expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
   });
