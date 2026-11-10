@@ -194,6 +194,7 @@ func register(
 
 	// Organisations and the overview tab.
 	add("POST /plg/organizations/search", csmhandler.PermUsePlg, h.SearchOrganizations)
+	add("POST /plg/organizations/aggregate", csmhandler.PermUsePlg, h.AggregateOrganizations)
 	add("GET /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.GetOrganization)
 	add("PATCH /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.PatchOrganization)
 
@@ -210,6 +211,7 @@ func register(
 
 	// New registrations.
 	add("POST /plg/registrations/search", csmhandler.PermUsePlg, h.SearchRegistrations)
+	add("POST /plg/registrations/volume-trend", csmhandler.PermUsePlg, h.RegistrationVolumeTrend)
 	add("POST /plg/registrations/{orgPlatformId}/acknowledge", csmhandler.PermUsePlg, h.Acknowledge)
 
 	// Playbook manager.

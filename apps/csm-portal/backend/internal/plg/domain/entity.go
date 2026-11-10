@@ -409,6 +409,33 @@ type SearchOrganizationsRequest struct {
 	SortOrder  string                    `json:"sortOrder"`
 }
 
+// AggregateOrganizationsRequest is the body of POST /organizations/aggregate:
+// the organisations the search's filters select, counted per GroupBy ("owner",
+// the only grouping). MaxGroups keeps the largest groups and folds the rest
+// into OthersCount; 0 keeps them all. entity-service checks both.
+type AggregateOrganizationsRequest struct {
+	Filters   OrganizationSearchFilters `json:"filters"`
+	GroupBy   string                    `json:"groupBy"`
+	MaxGroups int                       `json:"maxGroups,omitempty"`
+}
+
+// AggregateGroup is one group of an AggregateResponse. For the owner grouping,
+// Key is the owner's user id (or "unowned") and Label the owner's name.
+type AggregateGroup struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// AggregateResponse answers POST /organizations/aggregate, in entity-service's
+// shared aggregate shape: the groups largest first, the folded rest, and every
+// record the filters selected.
+type AggregateResponse struct {
+	Groups       []AggregateGroup `json:"groups"`
+	OthersCount  int              `json:"othersCount"`
+	TotalRecords int              `json:"totalRecords"`
+}
+
 // PlatformStage is one registered platform with its own lifecycle stage — the
 // column that could not exist while the stage lived on the organisation.
 type PlatformStage struct {
@@ -869,6 +896,45 @@ type SearchRegistrationsResponse struct {
 	Total         int                `json:"total"`
 	Limit         int                `json:"limit"`
 	Offset        int                `json:"offset"`
+}
+
+// RegistrationVolumeTrendRequest is the body of POST
+// /registrations/volume-trend: the registrations the search's filters select,
+// counted by registration day over a window, the case volume trend's window.
+// Days is the trailing window ending today (30 when nothing is set); StartDate,
+// EndDate and Bucket ("day", "week" or "month") are a fixed one. entity-service
+// checks the window and its limits.
+type RegistrationVolumeTrendRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	Days               int                       `json:"days,omitempty"`
+	StartDate          string                    `json:"startDate,omitempty"`
+	EndDate            string                    `json:"endDate,omitempty"`
+	Bucket             string                    `json:"bucket,omitempty"`
+}
+
+// VolumeTrendPoint is one day, or one bucket from Date to EndDate.
+type VolumeTrendPoint struct {
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Count   int    `json:"count"`
+}
+
+// VolumeTrendSeries is one named line of a VolumeTrendResponse.
+type VolumeTrendSeries struct {
+	Label  string             `json:"label"`
+	Points []VolumeTrendPoint `json:"points"`
+}
+
+// VolumeTrendResponse answers POST /registrations/volume-trend in the case
+// volume trend's shape, with one series, "Registered". StartDate, EndDate and
+// Bucket echo a fixed window, and are absent for the trailing one.
+type VolumeTrendResponse struct {
+	Days      int                 `json:"days"`
+	StartDate string              `json:"startDate,omitempty"`
+	EndDate   string              `json:"endDate,omitempty"`
+	Bucket    string              `json:"bucket,omitempty"`
+	Series    []VolumeTrendSeries `json:"series"`
 }
 
 // AcknowledgeRequest claims a pairing. Acknowledging also assigns the

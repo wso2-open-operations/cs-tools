@@ -59,6 +59,7 @@ type OrganizationService interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) (domain.SearchOrganizationsResponse, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) (*domain.OrganizationDetail, error)
+	Aggregate(ctx context.Context, req domain.AggregateOrganizationsRequest) (domain.AggregateResponse, error)
 }
 
 type organizationService struct {
@@ -86,6 +87,15 @@ func (s *organizationService) Search(ctx context.Context, req domain.SearchOrgan
 		Limit:         req.Pagination.Limit,
 		Offset:        req.Pagination.Offset,
 	}, nil
+}
+
+// Aggregate checks the filters as Search does; the grouping and its limit are
+// entity-service's to check.
+func (s *organizationService) Aggregate(ctx context.Context, req domain.AggregateOrganizationsRequest) (domain.AggregateResponse, error) {
+	if err := validateSearchFilters(&req.Filters); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	return s.repo.Aggregate(ctx, req)
 }
 
 func (s *organizationService) Get(ctx context.Context, id string) (*domain.OrganizationDetail, error) {
@@ -137,6 +147,7 @@ type OrgPlatformService interface {
 	UpdateNote(ctx context.Context, req domain.UpdateNoteRequest, actor string) (*domain.ProductDetail, error)
 
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) (domain.SearchRegistrationsResponse, error)
+	RegistrationVolumeTrend(ctx context.Context, req domain.RegistrationVolumeTrendRequest) (domain.VolumeTrendResponse, error)
 	Acknowledge(ctx context.Context, req domain.AcknowledgeRequest, actor string) (*domain.ProductDetail, error)
 }
 
@@ -445,6 +456,15 @@ func (s *orgPlatformService) SearchRegistrations(ctx context.Context, req domain
 		Limit:         req.Pagination.Limit,
 		Offset:        req.Pagination.Offset,
 	}, nil
+}
+
+// RegistrationVolumeTrend checks the filters as SearchRegistrations does; the
+// window and its limits are entity-service's to check.
+func (s *orgPlatformService) RegistrationVolumeTrend(ctx context.Context, req domain.RegistrationVolumeTrendRequest) (domain.VolumeTrendResponse, error) {
+	if err := validateSearchFilters(&req.Filters); err != nil {
+		return domain.VolumeTrendResponse{}, err
+	}
+	return s.repo.RegistrationVolumeTrend(ctx, req)
 }
 
 func (s *orgPlatformService) Acknowledge(ctx context.Context, req domain.AcknowledgeRequest, actor string) (*domain.ProductDetail, error) {

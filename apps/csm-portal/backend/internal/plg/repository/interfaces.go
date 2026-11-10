@@ -33,6 +33,7 @@ type OrganizationRepository interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error
+	Aggregate(ctx context.Context, req domain.AggregateOrganizationsRequest) (domain.AggregateResponse, error)
 }
 
 // OrgPlatformRepository serves the product tab.
@@ -49,6 +50,7 @@ type OrgPlatformRepository interface {
 	CreateNote(ctx context.Context, req domain.CreateNoteRequest, actor string) error
 	UpdateNote(ctx context.Context, req domain.UpdateNoteRequest, actor string) (orgID, productCode string, err error)
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error)
+	RegistrationVolumeTrend(ctx context.Context, req domain.RegistrationVolumeTrendRequest) (domain.VolumeTrendResponse, error)
 	LocatePairing(ctx context.Context, orgPlatformID string) (orgID, productCode string, err error)
 }
 
