@@ -36,8 +36,10 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { History, Lock, Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { History, Lock, MessageSquarePlus, Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
+import MySkillRequests from "@features/csm-skills/components/MySkillRequests";
+import RequestSkillDialog from "@features/csm-skills/components/RequestSkillDialog";
 import QueryErrorState from "@components/QueryErrorState";
 import RefreshButton from "@components/RefreshButton";
 import RelativeTime from "@components/RelativeTime";
@@ -64,7 +66,11 @@ export default function MySkillsTab(): JSX.Element {
   const change = useChangeMySkillLevel();
   const remove = useRemoveMySkill();
 
-  const [adding, setAdding] = useState(false);
+  // Add skills: closed, open, or open with a skill already chosen.
+  const [adding, setAddingState] = useState<false | { skillId?: string }>(false);
+  const setAdding = (open: boolean): void => setAddingState(open ? {} : false);
+  // Request a skill: closed, or open with the name to start from.
+  const [requesting, setRequesting] = useState<false | string>(false);
   const [removing, setRemoving] = useState<UserSkill | null>(null);
   const [history, setHistory] = useState<UserSkill | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +119,9 @@ export default function MySkillsTab(): JSX.Element {
             updatedAt={mine.dataUpdatedAt}
             label="Refresh my skills"
           />
+          <Button variant="outlined" startIcon={<MessageSquarePlus size={16} />} onClick={() => setRequesting("")}>
+            Request a skill
+          </Button>
           <Button variant="contained" startIcon={<Plus size={16} />} onClick={() => setAdding(true)}>
             Add skill
           </Button>
@@ -240,10 +249,40 @@ export default function MySkillsTab(): JSX.Element {
         </Box>
       )}
 
-      {adding && <AddSkillDialog onClose={() => setAdding(false)} heldSkillIds={rows.map((r) => r.skillId)} />}
+      <MySkillRequests onNotice={setNotice} onError={setError} />
+
+      {adding && (
+        <AddSkillDialog
+          onClose={() => setAdding(false)}
+          heldSkillIds={rows.map((r) => r.skillId)}
+          initialSkillId={adding.skillId}
+          onRequestSkill={() => {
+            setAdding(false);
+            setRequesting("");
+          }}
+        />
+      )}
+
+      {requesting !== false && (
+        <RequestSkillDialog
+          initialName={requesting}
+          heldSkillIds={rows.map((r) => r.skillId)}
+          onClose={(sent) => {
+            setRequesting(false);
+            if (sent) {
+              setError(null);
+              setNotice(sent);
+            }
+          }}
+          onAddExisting={(skill) => {
+            setRequesting(false);
+            setAddingState({ skillId: skill.id });
+          }}
+        />
+      )}
 
       {history && (
-        <SkillHistoryDrawer skillId={history.skillId} skillName={history.skillName} onClose={() => setHistory(null)} />
+        <SkillHistoryDrawer skillId={history.skillId} title={history.skillName} onClose={() => setHistory(null)} />
       )}
 
       {removing && (

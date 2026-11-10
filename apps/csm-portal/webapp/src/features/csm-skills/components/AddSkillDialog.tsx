@@ -22,12 +22,15 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Link,
   TextField,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import { useAddMySkill } from "@features/csm-skills/api/useMySkills";
 import {
+  useSkill,
   useSkillCategories,
   useSkillLevelTypes,
   useSkillPickerSearch,
@@ -40,6 +43,10 @@ interface AddSkillDialogProps {
   onClose: () => void;
   /** Skills already on the profile; left out of the picker. */
   heldSkillIds: readonly string[];
+  /** Opens with this skill selected (from All Skills, or a request's match). */
+  initialSkillId?: string;
+  /** "Can't find it?": hands over to the request form. */
+  onRequestSkill?: () => void;
 }
 
 const getSkillId = (s: Skill): string => s.id;
@@ -49,17 +56,21 @@ const getSkillLabel = (s: Skill): string => s.name;
  * Add a skill to the caller's profile: optionally narrow by category (tree),
  * pick a skill (type-ahead, searched by the backend), then a level from that
  * skill's own scale. The backend still validates all of it; its message is
- * shown if it refuses.
+ * shown if it refuses. A skill the catalogue lacks is requested instead.
  */
-export default function AddSkillDialog({ onClose, heldSkillIds }: AddSkillDialogProps): JSX.Element {
+export default function AddSkillDialog({ onClose, heldSkillIds, initialSkillId, onRequestSkill }: AddSkillDialogProps): JSX.Element {
   const categories = useSkillCategories();
   const levelTypes = useSkillLevelTypes();
   const add = useAddMySkill();
+  const preset = useSkill(initialSkillId);
 
   const [categoryId, setCategoryId] = useState("");
-  const [skill, setSkill] = useState<Skill | null>(null);
+  const [picked, setPicked] = useState<Skill | null>(null);
+  const [touched, setTouched] = useState(false);
   const [levelId, setLevelId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Until the person picks something else, the preset skill is the selection.
+  const skill = touched ? picked : (preset.data ?? null);
 
   const scale = findLevelType(levelTypes.data, skill?.levelTypeId);
   const levels = sortedLevels(scale);
@@ -67,11 +78,13 @@ export default function AddSkillDialog({ onClose, heldSkillIds }: AddSkillDialog
 
   const pickCategory = (id: string): void => {
     setCategoryId(id);
-    setSkill(null);
+    setTouched(true);
+    setPicked(null);
     setLevelId("");
   };
   const pickSkill = (id: string, item?: Skill): void => {
-    setSkill(id ? (item ?? null) : null);
+    setTouched(true);
+    setPicked(id ? (item ?? null) : null);
     setLevelId("");
   };
 
@@ -107,6 +120,7 @@ export default function AddSkillDialog({ onClose, heldSkillIds }: AddSkillDialog
             label="Skill"
             placeholder="Search skills…"
             value={skill?.id ?? ""}
+            knownLabel={skill?.name}
             onChange={pickSkill}
             useSearch={useSkillPickerSearch}
             searchExtra={categoryId || undefined}
@@ -115,6 +129,14 @@ export default function AddSkillDialog({ onClose, heldSkillIds }: AddSkillDialog
             excludeIds={heldSkillIds}
             required
           />
+          {onRequestSkill && (
+            <Typography variant="body2" color="text.secondary">
+              Can't find it?{" "}
+              <Link component="button" type="button" onClick={onRequestSkill} sx={{ verticalAlign: "baseline" }}>
+                Request a skill
+              </Link>
+            </Typography>
+          )}
           <TextField
             select
             size="small"
