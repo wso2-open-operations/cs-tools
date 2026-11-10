@@ -47,8 +47,9 @@ export function deviationLabel(n?: number | null): string | null {
 
 /**
  * How many of a suggestion's members deviated from their plan: the count
- * entity-service sends, else (a snapshot computed before it did) the listed
- * members that did.
+ * entity-service sends (for a snapshot computed before it kept one, it counts
+ * the listed members itself), else, from a backend that sends none, the
+ * listed members that did.
  */
 export function suggestionDeviationCount(s: Pick<BeStandardChangeSuggestion, "deviationCount" | "members">): number {
   return s.deviationCount ?? s.members.filter((m) => m.hasDeviation).length;
@@ -105,7 +106,10 @@ export function cabHistorySummary(h?: Partial<BeStandardChangeCabHistory> | null
   } else {
     parts.push(`The CAB left ${plural(commentCount, "comment", "comments")} on change requests like this one`);
   }
-  const latest = rejections.find((r) => r.comment)?.comment ?? comments[0]?.comment;
+  // The newest comment of any decision (a rejection's own comment is among
+  // them): an approval written after a rejection is the latest word. A
+  // rejection's comment stands in only when no comment is listed.
+  const latest = comments[0]?.comment || rejections.find((r) => r.comment)?.comment;
   return `${parts.join(" ")}.${latest ? ` Latest: "${latest}"` : ""}`;
 }
 

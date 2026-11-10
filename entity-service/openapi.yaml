@@ -34229,7 +34229,7 @@ components:
         dismissal:
           allOf: [{$ref: '#/components/schemas/StandardChangeSuggestionDismissal'}]
           nullable: true
-        deviationCount: {type: integer, description: "Members that deviated from their implementation plan (all of them, not only those listed)."}
+        deviationCount: {type: integer, description: "Members that deviated from their implementation plan (all of them, not only those listed). For a snapshot computed before the count was kept, the listed members that deviated."}
         cabRejectionCount: {type: integer, description: "See StandardChangeCABHistory. Shown only: the CAB's pushback is never a criterion, and changes no count, key or cluster."}
         cabRejections: {type: array, items: {$ref: '#/components/schemas/StandardChangeCABRejection'}}
         cabCommentCount: {type: integer}

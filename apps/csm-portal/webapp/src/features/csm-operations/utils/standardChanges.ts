@@ -293,6 +293,13 @@ export const STANDARD_CHANGE_CAB_STAGE = "CAB Approval";
  */
 export const STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE = "Standard Change Authority";
 
+/**
+ * The day (UTC, `YYYY-MM-DD`) the CAB took over from the Standard Change
+ * Authority. A decision time before it (an RFC 3339 string, compared as text)
+ * was that group's: only its members could cancel someone else's proposal.
+ */
+export const STANDARD_CHANGE_CAB_AUTHORISES_SINCE = "2026-11-10";
+
 /** How many different CAB members must approve (the server's `StandardChangeCABApprovals`). */
 export const STANDARD_CHANGE_CAB_APPROVALS = 2;
 

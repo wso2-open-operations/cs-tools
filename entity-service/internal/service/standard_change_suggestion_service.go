@@ -179,6 +179,13 @@ func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, a
 		if sg.CABComments == nil {
 			sg.CABComments = []domain.StandardChangeCABComment{}
 		}
+		// One computed before DeviationCount was kept decodes it as 0 (the
+		// field has no "absent"): count the listed members that deviated, which
+		// is every one that did unless the cluster lists only its newest 100.
+		// A count the refresh kept is never below the listed ones.
+		if listed := listedDeviations(sg.Members); sg.DeviationCount < listed {
+			sg.DeviationCount = listed
+		}
 		seen := map[string]bool{}
 		for _, id := range row.MemberIDs {
 			for _, p := range proposals[id] {
@@ -203,6 +210,17 @@ func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, a
 }
 
 // sortSuggestions: eligible first, then the most often closed, then the most recent.
+// listedDeviations counts the listed members that deviated from their plan.
+func listedDeviations(members []domain.StandardChangeSuggestionMember) int {
+	n := 0
+	for _, m := range members {
+		if m.HasDeviation {
+			n++
+		}
+	}
+	return n
+}
+
 func sortSuggestions(list []domain.StandardChangeSuggestion) {
 	sort.SliceStable(list, func(a, b int) bool {
 		x, y := list[a], list[b]

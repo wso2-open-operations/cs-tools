@@ -885,7 +885,7 @@ describe("StandardChangeProposalPage — the CAB", () => {
     mocks.proposal = {
       ...CAB_REVIEW,
       state: "cancelled",
-      decidedOn: "2026-10-04T00:00:00Z",
+      decidedOn: "2026-11-12T00:00:00Z",
       decidedBy: { id: "u-5", name: "Hana Head", email: "hana@example.com" },
       decisionComment: "The proposer left",
     };
@@ -906,6 +906,26 @@ describe("StandardChangeProposalPage — the CAB", () => {
     };
     renderPage();
     expect(screen.getByRole("region", { name: "Decision" })).toHaveTextContent("Cancelled by the Standard Change Authority");
+  });
+
+  // Before 2026-11-10 only the Standard Change Authority could cancel someone
+  // else's proposal, whatever stage it had reached: a draft has none, and the
+  // oldest flow's one-approval CAB stage was not the CAB's to end.
+  it.each([
+    ["a draft with no stage", []],
+    ["one in the oldest flow's one-approval CAB stage", [{ ...OLDER_STAGE, decision: null }]],
+  ])("says %s cancelled before 2026-11-10 was cancelled by the Standard Change Authority", (_, stages) => {
+    mocks.proposal = { ...CAB_REVIEW, state: "cancelled", stages, approvers: [], decidedOn: "2026-11-09T23:59:00Z" };
+    renderPage();
+    const decision = screen.getByRole("region", { name: "Decision" });
+    expect(decision).toHaveTextContent("Cancelled by the Standard Change Authority");
+    expect(decision).not.toHaveTextContent("CAB member");
+  });
+
+  it("says a draft cancelled since 2026-11-10 was cancelled by a CAB member", () => {
+    mocks.proposal = { ...CAB_REVIEW, state: "cancelled", stages: [], approvers: [], decidedOn: "2026-11-10T08:00:00Z" };
+    renderPage();
+    expect(screen.getByRole("region", { name: "Decision" })).toHaveTextContent("Cancelled by a CAB member");
   });
 });
 
@@ -1006,8 +1026,17 @@ describe("StandardChangeProposalPage — the CAB's history, in front of the appr
           comment: "",
         },
       ],
-      cabCommentCount: 1,
+      // As entity-service sends it: a rejection's comment is one of the comments too.
+      cabCommentCount: 2,
       cabComments: [
+        {
+          changeRequest: { id: "chg-9", number: "CHG0000009", subject: "Rotate the certificate on gw-9", state: "canceled" },
+          member: false,
+          approverName: "Alice CAB",
+          state: "REJECTED",
+          comment: "Not during the freeze",
+          decidedOn: "2026-10-01T00:00:00Z",
+        },
         {
           changeRequest: { id: "chg-2", number: "CHG0000002", subject: "Rotated the certificate on gw-2", state: "closed" },
           member: true,
@@ -1075,7 +1104,7 @@ describe("StandardChangeProposalPage — the CAB's history, in front of the appr
     fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
     const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
     expect(within(dialog).getByRole("note", { name: "CAB history summary" })).toHaveTextContent(
-      'The CAB rejected 2 change requests like this one and left 1 comment. Latest: "Not during the freeze"',
+      'The CAB rejected 2 change requests like this one and left 2 comments. Latest: "Not during the freeze"',
     );
   });
 

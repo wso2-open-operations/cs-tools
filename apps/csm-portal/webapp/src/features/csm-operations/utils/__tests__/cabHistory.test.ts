@@ -75,6 +75,25 @@ describe("cabHistory", () => {
     expect(cabHistorySummary(undefined)).toBe("No CAB rejections or comments.");
   });
 
+  it("quotes the newest comment as the latest, even when it is newer than the rejection", () => {
+    const h: BeStandardChangeCabHistory = {
+      cabRejectionCount: 1,
+      cabRejections: [{ changeRequest: cr, member: true, rejectedOn: "2026-01-01T00:00:00Z", rejectedBy: "Bob", comment: "Plan unclear" }],
+      cabCommentCount: 2,
+      cabComments: [
+        { changeRequest: cr, member: true, approverName: "Alice", state: "APPROVED", comment: "Add the verification steps", decidedOn: "2026-03-01T00:00:00Z" },
+        { changeRequest: cr, member: true, approverName: "Bob", state: "REJECTED", comment: "Plan unclear", decidedOn: "2026-01-01T00:00:00Z" },
+      ],
+    };
+    expect(cabHistorySummary(h)).toBe(
+      'The CAB rejected 1 change request like this one and left 2 comments. Latest: "Add the verification steps"',
+    );
+    // With no comment listed, the rejection's own comment is the only word.
+    expect(cabHistorySummary({ ...h, cabCommentCount: 0, cabComments: [] })).toBe(
+      'The CAB rejected 1 change request like this one. Latest: "Plan unclear"',
+    );
+  });
+
   it("says a decision in words", () => {
     expect(cabDecisionText("APPROVED")).toBe("approved");
     expect(cabDecisionText("REJECTED")).toBe("rejected");

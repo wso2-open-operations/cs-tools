@@ -101,6 +101,7 @@ import {
   retirementChangeRequestsInNewText,
   STANDARD_CHANGE_APPROVAL_RULE,
   STANDARD_CHANGE_CAB_APPROVALS,
+  STANDARD_CHANGE_CAB_AUTHORISES_SINCE,
   STANDARD_CHANGE_CAB_STAGE,
   STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE,
   STANDARD_CHANGE_HIGH_RISK_REASON,
@@ -1329,6 +1330,23 @@ function settledBy(verb: "Approved" | "Rejected", stage: BeStandardChangeProposa
   return `${verb} at the ${stage.label} stage`;
 }
 
+/**
+ * Who cancelled someone else's proposal. A CAB member may since 2026-11-10;
+ * before that only a member of the Standard Change Authority could, whatever
+ * stage the proposal had reached (a draft has none, and the oldest flow's
+ * one-approval "CAB Approval" stage was not the CAB's to end). So the latest
+ * stage settles it when it is today's CAB stage or the authority's, and the
+ * date it was cancelled settles the rest.
+ */
+function cancelledBy(latest: BeStandardChangeProposalStage | undefined, decidedOn: string | null): string {
+  const byAuthority = `Cancelled by the ${STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE}`;
+  if (latest?.label === STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE) return byAuthority;
+  if (latest?.label === STANDARD_CHANGE_CAB_STAGE && latest.requiredApprovals >= STANDARD_CHANGE_CAB_APPROVALS) {
+    return "Cancelled by a CAB member";
+  }
+  return decidedOn && decidedOn < STANDARD_CHANGE_CAB_AUTHORISES_SINCE ? byAuthority : "Cancelled by a CAB member";
+}
+
 /** How a final proposal ended, for the decision banner. */
 function decisionHeadline(proposal: BeStandardChangeProposal): string {
   const stages = proposal.stages ?? [];
@@ -1339,10 +1357,7 @@ function decisionHeadline(proposal: BeStandardChangeProposal): string {
     case "rejected":
       return settledBy("Rejected", stages.find((s) => s.decision === "REJECTED"));
     case "cancelled":
-      // By a member of the group its latest stage asked (the CAB since 2026-11-10).
-      return stages[stages.length - 1]?.label === STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE
-        ? `Cancelled by the ${STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE}`
-        : "Cancelled by a CAB member";
+      return cancelledBy(stages[stages.length - 1], proposal.decidedOn);
     default:
       return "Withdrawn by the proposer";
   }

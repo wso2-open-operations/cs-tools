@@ -768,7 +768,8 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     the list in `components/StandardChangeCabPushback.tsx`) is shown like the incidents, never as a reason a
     suggestion cannot be proposed: on the row, outlined chips "2 CAB rejections" (error), "3 CAB comments"
     (warning) and, for consistency, "1 deviated from plan" (warning; `suggestionDeviationCount`: the
-    `deviationCount` sent, else the listed members that deviated); in the details a "CAB pushback" line lists
+    `deviationCount` sent, which entity-service itself counts from the listed members for a snapshot that
+    predates it, else the listed members that deviated); in the details a "CAB pushback" line lists
     each rejected change request (latest rejection: when, by whom, the comment; a look-alike, one of the
     customer's rejected change requests with the same subject that is not a member, says so) and the CAB's
     comments (approver, decision, date, the comment as plain text), each change request linked to
@@ -928,8 +929,12 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   The decision banner names who ended it (`decisionHeadline` / `settledBy`: "Approved by" / "Rejected by the CAB" for
   the two-approval "CAB Approval" stage; "... by the Standard Change Authority" for that older stage; an older
   proposal settled at its one-approval CAB stage, "Approved at the CAB Approval stage", told apart by
-  `requiredApprovals`; withdrawn; "Cancelled by a CAB member", or by the Standard Change Authority when that was the
-  latest stage). "Copy into a new proposal" only for a rejected / withdrawn / cancelled **new** proposal: the API's
+  `requiredApprovals`; withdrawn; `cancelledBy`: "Cancelled by a CAB member" when the latest stage is the two-approval
+  CAB one, "Cancelled by the Standard Change Authority" when it is that group's, and otherwise (a draft has no stage;
+  the oldest flow's one-approval CAB stage) by `decidedOn`: before 2026-11-10
+  (`STANDARD_CHANGE_CAB_AUTHORISES_SINCE`) only the authority could cancel someone else's proposal). The dialog's
+  summary quotes the newest CAB comment of any decision as "Latest" (a rejection's comment only when none is listed).
+  "Copy into a new proposal" only for a rejected / withdrawn / cancelled **new** proposal: the API's
   `copyFromProposalId` starts new templates only.
 - **Create form**: type Standard shows a template picker (active only, of the project's customer, each result with its
   summary as a second line: `AsyncEntitySelect getCaption`), "Change specifics" (one input per parameter type) and a

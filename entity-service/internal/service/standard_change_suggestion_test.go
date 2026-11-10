@@ -657,6 +657,34 @@ func TestStandardChangeSuggestionService_GetSuggestions(t *testing.T) {
 			t.Fatalf("suggestion = %+v", got)
 		}
 	})
+	t.Run("a snapshot computed before deviationCount was kept counts the listed members that deviated", func(t *testing.T) {
+		run, _ := repo.LatestRun(context.Background())
+		var stored *domain.StandardChangeSuggestion
+		for i := range repo.rows[run.ID] {
+			if repo.rows[run.ID][i].Suggestion.Key == "deploy capps" && repo.rows[run.ID][i].AccountID == sgAccountA {
+				stored = &repo.rows[run.ID][i].Suggestion
+			}
+		}
+		if stored == nil || len(stored.Members) < 2 {
+			t.Fatalf("no stored deploy capps row with members: %+v", stored)
+		}
+		saved, savedMembers := stored.DeviationCount, stored.Members
+		defer func() { stored.DeviationCount, stored.Members = saved, savedMembers }()
+		// As an older snapshot decodes: two members deviated, the count reads 0.
+		members := append([]domain.StandardChangeSuggestionMember(nil), savedMembers...)
+		members[0].HasDeviation, members[1].HasDeviation = true, true
+		stored.Members, stored.DeviationCount = members, 0
+		resp, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{AccountID: sgAccountA, IncludeDismissed: true})
+		if len(resp.Suggestions) != 1 || resp.Suggestions[0].DeviationCount != 2 {
+			t.Fatalf("suggestions = %+v, want deviationCount 2 from the listed members", resp.Suggestions)
+		}
+		// A kept count above the listed ones (members past the newest 100) stands.
+		stored.DeviationCount = 7
+		resp, _ = svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{AccountID: sgAccountA, IncludeDismissed: true})
+		if len(resp.Suggestions) != 1 || resp.Suggestions[0].DeviationCount != 7 {
+			t.Fatalf("suggestions = %+v, want the kept deviationCount 7", resp.Suggestions)
+		}
+	})
 	t.Run("staff only", func(t *testing.T) {
 		var fe *apierror.ForbiddenError
 		if _, err := sgService(repo, false).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{}); !errors.As(err, &fe) {

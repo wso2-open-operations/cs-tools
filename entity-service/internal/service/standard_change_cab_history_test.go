@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -150,9 +151,24 @@ func TestAttachCABLookalikes(t *testing.T) {
 			t.Errorf("cluster %q got %v, want %v", clusters[i].id, numbers(got[i]), want[i])
 		}
 	}
-	// Attaching never changes the clusters.
-	if again := mustCluster(t, cands, 0.5); !reflect.DeepEqual(clusterKeys(again), clusterKeys(clusters)) {
-		t.Error("clusters moved")
+	// Attaching never changes the clusters. Compared as sets of members: two
+	// clusters share the key "deploy capps", and clustering orders clusters by
+	// key only, so clusterKeys would merge them in either order.
+	memberSets := func(cls []suggestionCluster) []string {
+		var out []string
+		for _, cl := range cls {
+			var ns []string
+			for _, n := range cl.nodes {
+				ns = append(ns, n.c.Number)
+			}
+			sort.Strings(ns)
+			out = append(out, cl.key+": "+strings.Join(ns, ","))
+		}
+		sort.Strings(out)
+		return out
+	}
+	if again := mustCluster(t, cands, 0.5); !reflect.DeepEqual(memberSets(again), memberSets(clusters)) {
+		t.Errorf("clusters moved: %v, want %v", memberSets(again), memberSets(clusters))
 	}
 }
 

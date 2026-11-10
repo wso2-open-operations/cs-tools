@@ -8889,7 +8889,9 @@ before reads zero counts and empty lists until the next refresh, and GET returns
   each, the counts true. Comments copied from ServiceNow can be rich text, so they are sent as plain text
   (`cabPlainText`: tags removed, entities decoded, white space collapsed, at most 2,000 characters). The
   portal's own CR decision path writes no comment yet, so today only ServiceNow-era rows have them.
-- `deviationCount` counts every member that deviated (the listed `members` stop at 100).
+- `deviationCount` counts every member that deviated (the listed `members` stop at 100). A snapshot computed
+  before it was kept decodes it as 0, so `readSuggestions` raises it to the listed members that deviated
+  (`listedDeviations`); a kept count is never below those, so it is left alone.
 - **On a proposal** (`GetProposal` and every proposal an action returns, `WithCABHistory` in `routes.go`):
   `cabHistory`, the same shape, read live (not from the snapshot) over the source and evidence change
   requests and the same customer's CAB-rejected look-alikes whose subject key is the source's or an evidence
