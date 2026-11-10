@@ -54,6 +54,7 @@ func readYAML(t *testing.T, file string, out any) {
 
 // openAPISpec is the part of an OpenAPI document these tests compare.
 type openAPISpec struct {
+	Security   []map[string][]string     `yaml:"security"`
 	Paths      map[string]map[string]any `yaml:"paths"`
 	Components map[string]map[string]any `yaml:"components"`
 }
@@ -92,12 +93,18 @@ func isCloudStatusPath(path string) bool {
 }
 
 // TestCloudStatusSpecCopiesTheMainSpec fails unless the copy holds exactly
-// openapi.yaml's /health and /cloud-status/* paths, and each of its paths and
-// components equals openapi.yaml's.
+// openapi.yaml's /health and /cloud-status/* paths, and its top-level security
+// requirement, each of its paths and its components equal openapi.yaml's.
 func TestCloudStatusSpecCopiesTheMainSpec(t *testing.T) {
 	var main, cloudStatus openAPISpec
 	readYAML(t, mainSpec, &main)
 	readYAML(t, cloudStatusSpec, &cloudStatus)
+	// The top-level requirement is what makes every operation need a token;
+	// an operation opts out only with its own (copied) security, as /health does.
+	if len(cloudStatus.Security) == 0 || !reflect.DeepEqual(cloudStatus.Security, main.Security) {
+		t.Errorf("cloud-status.openapi.yaml security %v, want openapi.yaml's %v (and not empty)",
+			cloudStatus.Security, main.Security)
+	}
 	var want []string
 	for path := range main.Paths {
 		if isCloudStatusPath(path) {

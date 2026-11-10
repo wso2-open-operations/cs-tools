@@ -205,9 +205,9 @@ table covering every `mapUpstreamError` mapping. Entity client tests start real
 correlation-ID forwarding. Middleware tests cover header injection and ID
 generation/preservation. `cmd/server` tests cover the actor-email parsing, and also
 check that `cloud-status.openapi.yaml` holds exactly `openapi.yaml`'s `/health` and
-`/cloud-status/*` paths, unchanged and all reads, with every `$ref` resolving inside it,
-and that each endpoint in `.choreo/component.yaml` names its contract.
-`internal/apierror` has no dedicated tests.
+`/cloud-status/*` paths, unchanged and all reads, under the same top-level security
+requirement, with every `$ref` resolving inside it, and that each endpoint in
+`.choreo/component.yaml` names its contract. `internal/apierror` has no dedicated tests.
 
 ### Lint and security scan
 

@@ -32,9 +32,10 @@ only the public status reads (a status page) subscribes to the cloud status API.
 That contract is a copy: a cloud status read is changed in `openapi.yaml` first and
 copied across, and only public reads (GET) belong in it.
 `cmd/server/cloud_status_api_test.go` fails unless the copy's paths are exactly
-`openapi.yaml`'s `/health` and `/cloud-status/*` paths, unchanged and all GET, with every
-`$ref` resolving inside the copy, and unless each endpoint names its contract (Choreo
-would otherwise publish the wildcard route).
+`openapi.yaml`'s `/health` and `/cloud-status/*` paths, unchanged and all GET, under the
+same top-level security requirement, with every `$ref` resolving inside the copy, and
+unless each endpoint names its contract (Choreo would otherwise publish the wildcard
+route).
 
 ## This service is M2M-only — no end-user identity is ever forwarded
 
