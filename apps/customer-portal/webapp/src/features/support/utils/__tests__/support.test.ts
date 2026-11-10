@@ -585,6 +585,16 @@ describe("plainTextCommentToHtml", () => {
     );
   });
 
+  it("does not treat a greeting-worded sentence with its own comma as an opening greeting", () => {
+    expect(plainTextCommentToHtml("Hi, I checked the configuration,\nand it looks good.")).toBe(
+      "Hi, I checked the configuration,<br>and it looks good.",
+    );
+  });
+
+  it("adds a blank line before a sign-off with an escaped ampersand", () => {
+    expect(plainTextCommentToHtml("Body\nThanks & Regards,")).toBe("Body<br><br>Thanks &amp; Regards,");
+  });
+
   it("HTML-escapes a literal <, >, &, quote the author typed as plain text", () => {
     expect(plainTextCommentToHtml("Use < and > and & and \"quotes\" and it's")).toBe(
       "Use &lt; and &gt; and &amp; and &quot;quotes&quot; and it&#39;s",

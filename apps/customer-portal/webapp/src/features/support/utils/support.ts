@@ -1326,11 +1326,17 @@ const ANY_HTML_TAG = /<[a-z][\s\S]*>/i;
  * @returns {string} HTML with real line breaks preserved as `<br>`, or the
  *   input unchanged if it already contains markup.
  */
-const GREETING_OPENING_LINE = /^(?:hello|hi|hey|dear)\b.*,\s*$/i;
+// Matches a bare "Hello,"/"Hi Team," opening greeting only -- `[^,]*` (no
+// comma allowed before the trailing one) keeps this from also matching a
+// sentence that merely starts with a greeting word and has its own comma,
+// e.g. "Hi, I checked the configuration,".
+const GREETING_OPENING_LINE = /^(?:hello|hi|hey|dear)\b[^,]*,\s*$/i;
 // Matches a bare sign-off line only (e.g. "Thanks,", "Thanks and Regards,",
 // "Best regards") -- not a sentence that merely starts with one of these
-// words (e.g. "Thanks for your patience").
-const SIGN_OFF_LINE = /^(?:thanks(?:\s+(?:and|&)\s+regards)?|thank you|regards|kind regards|best regards)\s*[,.]?\s*$/i;
+// words (e.g. "Thanks for your patience"). Matched against the already
+// HTML-escaped line, so "&" must also match its escaped form "&amp;".
+const SIGN_OFF_LINE =
+  /^(?:thanks(?:\s+(?:and|&(?:amp;)?)\s+regards)?|thank you|regards|kind regards|best regards)\s*[,.]?\s*$/i;
 
 export function plainTextCommentToHtml(content: string): string {
   if (!content || typeof content !== "string") return "";
