@@ -436,6 +436,86 @@ describe("useWidgetGroupByData", () => {
     });
   });
 
+  describe("PLG by country", () => {
+    const BY_COUNTRY = {
+      groups: [
+        { key: "Sri Lanka", label: "Sri Lanka", count: 5 },
+        { key: "unknown", label: "Unknown", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 7,
+    };
+
+    it("asks the organisation aggregate with the PLG search's filters", async () => {
+      postMock.mockResolvedValue(BY_COUNTRY);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "orgs-by-country",
+            "plg_organization",
+            { productCodes: ["IAM"], countryUnknown: ["false"] },
+            { field: "country", maxGroups: 8 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        { filters: { productCodes: ["IAM"], countryUnknown: false }, groupBy: "country", maxGroups: 8 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it("asks the registration aggregate with unacknowledgedOnly beside the filters", async () => {
+      postMock.mockResolvedValue(BY_COUNTRY);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "new-by-country",
+            "plg_registration",
+            { productCodes: ["IAM"], unacknowledgedOnly: true, registeredTo: "2026-11-01" },
+            { field: "country", maxGroups: 10 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        {
+          filters: { productCodes: ["IAM"], registeredTo: "2026-11-01T23:59:59Z" },
+          unacknowledgedOnly: true,
+          groupBy: "country",
+          maxGroups: 10,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.total).toBe(7);
+    });
+
+    it.each(["plg_organization", "plg_registration"] as const)(
+      "opens a country's %s from its bar, and the ones with no country from Unknown",
+      async (resourceType) => {
+        postMock.mockResolvedValue(BY_COUNTRY);
+
+        const { result } = renderHook(
+          () => useWidgetGroupByData("by-country", resourceType, {}, { field: "country" }),
+          { wrapper },
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+        expect(result.current.slices).toEqual([
+          { label: "Sri Lanka", query: { countryNames: ["Sri Lanka"] }, value: 5, linkId: "Sri Lanka" },
+          { label: "Unknown", query: { countryUnknown: true }, value: 2, linkId: "unknown" },
+        ]);
+      },
+    );
+  });
+
   describe("time card totals", () => {
     const hoursPerUser = {
       groups: [

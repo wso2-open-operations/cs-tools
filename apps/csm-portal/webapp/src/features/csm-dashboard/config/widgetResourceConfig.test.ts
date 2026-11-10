@@ -819,6 +819,16 @@ describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
     });
   });
 
+  it("turns `countryUnknown` back into a boolean and keeps `countryNames` a list", () => {
+    expect(
+      build({ filters: { countryUnknown: ["true"], productCodes: ["IAM"] }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ countryUnknown: true, productCodes: ["IAM"] });
+    expect(
+      build({ filters: { countryNames: ["Sri Lanka", "India"] }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ countryNames: ["Sri Lanka", "India"] });
+    expect(build({ filters: { countryUnknown: ["maybe"] }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
   it("sends the View more search box's searchQuery as the search's query", () => {
     expect(
       build({ filters: { productCodes: ["IAM"], searchQuery: " acme " }, offset: 0, limit: 5 }).filters,

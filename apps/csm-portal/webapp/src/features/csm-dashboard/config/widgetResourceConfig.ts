@@ -96,11 +96,12 @@ export interface WidgetResourceConfig {
    * by an entity-service group-by endpoint carry this — omitted means that
    * resourceType doesn't support `groupBy` widgets at all. */
   groupByEndpoint?: string;
-  /** The `filters` a `groupBy` request sends, from the widget's resolved
-   * filters, when the group-by endpoint reads them the way this resource's
-   * search body does (the PLG aggregate takes the PLG search's `filters`);
-   * omitted, they are sent as they are. */
-  buildGroupByFilters?: (filters: Record<string, unknown>) => Record<string, unknown>;
+  /** A `groupBy` request's body apart from the grouping, from the widget's
+   * resolved filters, when the group-by endpoint reads them the way this
+   * resource's search body does (the PLG aggregates take the PLG search's
+   * `filters`, and registrations `unacknowledgedOnly` beside them); omitted,
+   * the body is `{filters}` with the filters as they are. */
+  buildGroupByBody?: (filters: Record<string, unknown>) => Record<string, unknown>;
   /** Key the response's item array is nested under. */
   itemsKey: string;
   /** Primary (bold) line for one list-shape row. */
@@ -1370,9 +1371,10 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     searchEndpoint: "/plg/organizations/search",
     buildSearchRequestBody: plgOrganizationSearchBody,
     // `groupBy: {field: "owner"}`: one bucket per organisation owner, and
-    // "Unowned" (see `bucketQuery`), over the search's own filters.
+    // "Unowned"; `{field: "country"}`: one per country, and "Unknown" (see
+    // `bucketQuery`), over the search's own filters.
     groupByEndpoint: "/plg/organizations/aggregate",
-    buildGroupByFilters: plgSearchFilters,
+    buildGroupByBody: (filters) => ({ filters: plgSearchFilters(filters) }),
     itemsKey: "organizations",
     primaryLabel: (item) => asString(item.organizationName) ?? "—",
     secondaryLabel: (item) => asString(item.registeredEmail),
@@ -1393,6 +1395,11 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   plg_registration: {
     searchEndpoint: "/plg/registrations/search",
     buildSearchRequestBody: plgRegistrationSearchBody,
+    // `groupBy: {field: "country"}`: one bucket per organisation country,
+    // and "Unknown" (see `bucketQuery`), over the search's own filters and
+    // `unacknowledgedOnly`, sent as the trend sends them.
+    groupByEndpoint: "/plg/registrations/aggregate",
+    buildGroupByBody: plgRegistrationTrendFilters,
     itemsKey: "registrations",
     primaryLabel: (item) => asString(item.organizationName) ?? "—",
     secondaryLabel: (item) =>
@@ -1454,7 +1461,7 @@ function plgBoolean(v: unknown): boolean | undefined {
  * (`OrganizationSearchFilters`):
  * - The preview page's URL round trip decodes every filter value as a
  *   comma-split array, so the single-valued keys are unwrapped back, and
- *   `unowned` is turned back into a JSON boolean. The preview page's
+ *   `unowned` and `countryUnknown` are turned back into JSON booleans. The preview page's
  *   search box adds `searchQuery`, which these searches call `query`.
  * - `registeredFrom` / `registeredTo` are timestamps: a plain date is sent
  *   as the start of that day (UTC) for `registeredFrom` and its end for
@@ -1468,10 +1475,11 @@ function plgSearchFilters(filters: Record<string, unknown>): Record<string, unkn
     const v = flat[key];
     if (Array.isArray(v)) flat[key] = v[0];
   }
-  if ("unowned" in flat) {
-    const unowned = plgBoolean(flat.unowned);
-    if (unowned === undefined) delete flat.unowned;
-    else flat.unowned = unowned;
+  for (const key of ["unowned", "countryUnknown"]) {
+    if (!(key in flat)) continue;
+    const value = plgBoolean(flat[key]);
+    if (value === undefined) delete flat[key];
+    else flat[key] = value;
   }
   for (const [key, time] of [
     ["registeredFrom", "T00:00:00Z"],

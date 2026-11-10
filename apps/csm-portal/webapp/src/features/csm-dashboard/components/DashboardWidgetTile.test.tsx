@@ -1411,6 +1411,48 @@ describe("DashboardWidgetTile", () => {
     });
   });
 
+  describe("PLG registrations by country", () => {
+    const countryPie = (
+      <DashboardWidgetTile
+        widgetId="new-by-country"
+        displayName="New registrations by country"
+        resourceType="plg_registration"
+        shape="bar"
+        filters={{ unacknowledgedOnly: true }}
+        groupBy={{ field: "country" }}
+      />
+    );
+
+    it.each([
+      ["Sri Lanka:5", "countryNames", "Sri Lanka"],
+      ["Unknown:2", "countryUnknown", "true"],
+    ])("a click on %s opens those registrations, with the widget's own filters", async (bar, param, value) => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "Sri Lanka", label: "Sri Lanka", count: 5 },
+          { key: "unknown", label: "Unknown", count: 2 },
+        ],
+        othersCount: 0,
+        totalRecords: 7,
+      });
+      renderWithRoutes(countryPie, "/dashboard/preview/plg-registrations");
+
+      fireEvent.click(await screen.findByText(`bar:${bar}`));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        { filters: {}, unacknowledgedOnly: true, groupBy: "country", maxGroups: undefined },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probeText.startsWith("/dashboard/preview/plg-registrations?")).toBe(true);
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get(param)).toBe(value);
+      expect(params.get("unacknowledgedOnly")).toBe("true");
+    });
+  });
+
   describe("shape line on PLG registrations", () => {
     const TREND = {
       days: 74,
