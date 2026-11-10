@@ -80,6 +80,12 @@ var newInlineImageTypes = map[string]string{
 type StoredAttachmentLimits struct {
 	// MaxBytes caps one file.
 	MaxBytes int64
+	// DirectMaxBytes, when above MaxBytes, is the cap of an ordinary file (not an
+	// inline image) above DirectMinBytes, which is sent straight to Azure through
+	// signed links and so does not pass through this service. 0 means no larger cap.
+	DirectMaxBytes int64
+	// DirectMinBytes is the size above which a file may be sent that way.
+	DirectMinBytes int64
 	// InlineTotalMaxBytes caps the images of ONE comment or description together
 	// (0 means DefaultInlineImagesTotalMaxBytes). One image can be at most this
 	// big too.
@@ -257,7 +263,7 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	} else if !strings.Contains(req.ContentType, "/") || len(req.ContentType) > 255 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "contentType must look like type/subtype"}
 	}
-	limit := s.limitFor(req.Kind)
+	limit := s.limitForSize(req.Kind, req.SizeBytes)
 	if req.SizeBytes <= 0 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than 0"}
 	}
@@ -829,6 +835,18 @@ func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int
 		return s.limits.inlineTotalMax()
 	}
 	return s.limits.MaxBytes
+}
+
+// limitForSize is the cap that applies to a file of the declared size: the
+// ordinary cap, or, for an ordinary file big enough to be sent straight to Azure,
+// the larger direct cap. An inline image never gets the larger one.
+func (s *storedAttachmentService) limitForSize(kind domain.StoredAttachmentKind, sizeBytes int64) int64 {
+	limit := s.limitFor(kind)
+	if kind != domain.StoredAttachmentComment && sizeBytes > limit &&
+		sizeBytes > s.limits.DirectMinBytes && s.limits.DirectMaxBytes > limit {
+		return s.limits.DirectMaxBytes
+	}
+	return limit
 }
 
 // failQuietly marks a row FAILED as the system. A failure to do so is logged

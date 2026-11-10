@@ -46,14 +46,28 @@ const (
 	// defaultMaxTransfers is the number of chunks and downloads moved at once when
 	// the configuration gives no limit.
 	defaultMaxTransfers = 32
-	// directUploadTTL is how long the links of a direct upload last. Azure checks a
-	// link when a request starts, so it must cover the start of the last chunk of
-	// the slowest allowed upload (a 100 MiB file is 13 chunks).
-	directUploadTTL = 30 * time.Minute
-	// directDownloadTTL is how long a download link lasts. A download that started
-	// before then finishes after it; a resumed one asks for a new link.
-	directDownloadTTL = 10 * time.Minute
 )
+
+// directLinkTTL is how long the links of a direct transfer of a file of sizeBytes
+// last. Azure checks a link when a request starts, so for an upload it must cover
+// the start of the last chunk (a file is sent a few chunks at a time); a bigger
+// file takes longer. A link that expires early is no loss: the browser asks for
+// new ones and carries on, and a download that already started finishes anyway.
+func directLinkTTL(sizeBytes int64) time.Duration {
+	const mib = 1 << 20
+	switch {
+	case sizeBytes <= 50*mib:
+		return 5 * time.Minute
+	case sizeBytes <= 100*mib:
+		return 7 * time.Minute
+	case sizeBytes <= 250*mib:
+		return 10 * time.Minute
+	case sizeBytes <= 500*mib:
+		return 15 * time.Minute
+	default:
+		return 20 * time.Minute
+	}
+}
 
 // FileStore is the part of azblobstore.Store the file routes use. It is nil when no
 // storage is configured, and every file operation then answers 503.
@@ -321,7 +335,7 @@ func (s *storedAttachmentFileService) DirectUploadLinks(ctx context.Context, kin
 	if chunks > maxChunks(target.MaxBytes) {
 		return domain.DirectUploadLinks{}, &apierror.ValidationError{Msg: "The upload is larger than allowed."}
 	}
-	links, expires, err := s.links.UploadLinks(s.uploadKey(target), chunks, directUploadTTL)
+	links, expires, err := s.links.UploadLinks(target.StorageKey, chunks, directLinkTTL(target.SizeBytes))
 	if err != nil {
 		return domain.DirectUploadLinks{}, storeError(ctx, "UploadLinks", id, err, "Failed to prepare the upload.")
 	}
@@ -348,7 +362,7 @@ func (s *storedAttachmentFileService) DirectDownloadLink(ctx context.Context, ki
 	}
 	// An attachment is always an opaque download, whatever type it declares: the
 	// link is signed to answer as one.
-	link, expires, err := s.links.DownloadLink(loc.StorageKey, loc.Name, "application/octet-stream", directDownloadTTL)
+	link, expires, err := s.links.DownloadLink(loc.StorageKey, loc.Name, "application/octet-stream", directLinkTTL(sizeOrZero(loc.SizeBytes)))
 	if err != nil {
 		return domain.DirectDownloadLink{}, storeError(ctx, "DownloadLink", id, err, "Failed to prepare the download.")
 	}

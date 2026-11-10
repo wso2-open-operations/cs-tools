@@ -2021,7 +2021,8 @@ needs CORS for the portal origins.
 - `POST /attachments/upload` answers `directUpload: true` when the declared size is above the threshold.
   `POST /attachments/upload/{id}/direct?type=` then makes the checks of a chunk once (the caller's own `PENDING`
   upload, its work item open, the size within the largest file allowed) and returns one write-only link per chunk
-  (`links[i]` for chunk `i`, `chunkBytes` long, the last shorter), valid 30 minutes (`directUploadTTL`). The browser
+  (`links[i]` for chunk `i`, `chunkBytes` long, the last shorter), valid for a time that grows with the size
+  (`directLinkTTL`: 5 minutes up to 50 MiB, 7 up to 100, then 10, 15 and 20 up to 250, 500 and 1024 MiB). The browser
   PUTs each chunk to its link and calls the ordinary confirm, which commits the staged blocks and **reads the real
   size**: a link cannot cap how much is sent, so an oversize file is refused there and removed. Both paths stage the
   same block ids, so a browser that cannot reach Azure falls back to the chunk route for the same upload.
@@ -2033,10 +2034,16 @@ needs CORS for the portal origins.
   smaller upload has no links and is put at its own key as before. An abandoned upload's staging blocks are not removed
   by the cleanup job (it does not know the key); Azure discards uncommitted blocks about a week after the last write.
 - `GET /attachments/download/{id}/link?type=` makes the checks of a download (`LocateAttachment`, charged one unit
-  of the per-caller allowance) and returns a read-only link valid 10 minutes (`directDownloadTTL`), signed to answer
+  of the per-caller allowance) and returns a read-only link valid for the same size-based time (`directLinkTTL`), signed to answer
   as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
-  With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
-  the webapps answer by streaming the file.
+- **Size limit.** While direct transfers are on, an ordinary file (never an inline image) above
+  `ATTACHMENT_DIRECT_MIN_MB` may be up to `ATTACHMENT_DIRECT_MAX_MB` (default and at most 1024 MB) instead of
+  `ATTACHMENT_MAX_MB` (`limitForSize`). The cap that applied to the size declared at the start is the one the
+  chunks and the confirm hold the file to, and the answer of the upload start reports it as `maxBytes`. Off, or
+  without a key to sign with, `ATTACHMENT_MAX_MB` stands. The chunk route accepts such a file too, so the browser's
+  fallback still works, only through the backend.
+- **Expiry.** A link that expires part-way is not a failure: `POST .../direct` can be called again for a PENDING
+  upload and returns fresh links, and the browser carries on with the chunks it has not sent (the staged blocks stay).
 - Links are credentials: the answers carry `Cache-Control: no-store` and nothing logs a link.
 - **What is lost against the proxy:** access removed after the links are issued does not stop that upload or
   download, and the `nosniff` / CSP headers of the proxy are not sent by Azure (the signed `attachment` disposition

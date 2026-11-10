@@ -450,11 +450,13 @@ paths:
         (the upload start says so with directUpload). The access check, the open parent and
         the size rules are those of storing a chunk, made once when the links are issued.
         The client PUTs chunk i (chunkBytes long, the last one shorter) to links[i], then
-        confirms the upload; the chunks are put under a staging key, and confirm commits
-        them there, checks the real size, and copies the file to its own key (a file that
-        is too large is refused and removed), so a link still valid after the confirm
-        cannot change the confirmed file. The links are credentials, valid
-        for the time in expiresAt, and the response is never cached.
+        confirms the upload; confirm commits the chunks and checks the real size, and a
+        file that is too large is refused and removed. The links are credentials, valid
+        for the time in expiresAt (5 minutes for a file up to 50 MiB, 7 up to 100 MiB, then 10, 15
+        and 20 minutes up to 250, 500 and 1024 MiB), and the response is never cached. Calling this
+        again for an upload still pending returns fresh links, which is how a client carries on after
+        its links expired. A file above ATTACHMENT_MAX_MB may be sent this way, up to
+        ATTACHMENT_DIRECT_MAX_MB (default 1024).
       operationId: createAttachmentDirectUploadLinks
       security:
         - clientAssertion: []
