@@ -431,6 +431,7 @@ optional and lists match **any** of their values (an organisation matches when a
 | `registeredFrom`, `registeredTo` | the sign-up date, from / to (both inclusive): one date token (section 5) |
 | `unowned` | `true`: no owner assigned yet |
 | `ownerIds` | **only** `["__current_user__"]`: the organisations the viewer owns ("my PLG organisations"); on `plg_registration`, those organisations' sign-ups |
+| `ownerEmails` | a list of owners' email addresses, **only those the request gives** ("owned by person@example.com"): the organisations those people own; on `plg_registration`, those organisations' sign-ups; never with `unowned` |
 | `countryNames` | a list of countries, each its common English name as the request names it ("Sri Lanka", "India", "United States", "United Kingdom"; "US" / "UK" written out); case does not matter; a registration matches by its organisation's country |
 | `countryUnknown` | `true`: no country recorded ("unknown country"); never with `countryNames` |
 | `unacknowledgedOnly` | **`plg_registration` only**, `true`: not yet acknowledged by the team |
@@ -462,6 +463,14 @@ a split of registrations by owner is not expressible (the closest is organisatio
 
 ```json
 { "resourceType": "plg_organization", "shape": "bar", "query": {}, "groupBy": { "field": "owner", "maxGroups": 10 } }
+```
+
+**A named owner.** Another person's organisations ("owned by", "assigned to" or "<email>'s" PLG
+organisations or sign-ups) are `ownerEmails` with the email addresses the request gives, several
+people in one list; a person named without an email address is declined, asking for it (section 1).
+
+```json
+{ "resourceType": "plg_organization", "shape": "list", "listLimit": 10, "sortBy": { "field": "name", "order": "asc" }, "query": { "ownerEmails": ["person@example.com"] } }
 ```
 
 **By country.** Organisations or registrations per country ("by country", "per country", "which
@@ -512,8 +521,7 @@ sign-ups per month.
   "startDate": "__startOfMonth:-2__", "endDate": "__today__", "bucket": "month", "chart": "bar" }
 ```
 
-**Not expressible** (section 1): a named owner's organisations (only the viewer's own, `ownerIds`;
-the closest is organisations by owner, where that owner is one bar); registrations split by owner; a region or continent ("Asia", "EMEA"; the closest is by country); an organisation by name or email; health or "at risk"; playbook progress, or a task not in the "PLG playbook answers" section (a number or text one: session minutes, exit point); usage, revenue or ARR.
+**Not expressible** (section 1): an owner named without an email address (decline, asking for it); registrations split by owner; a region or continent ("Asia", "EMEA"; the closest is by country); an organisation by name or email; health or "at risk"; playbook progress, or a task not in the "PLG playbook answers" section (a number or text one: session minutes, exit point); usage, revenue or ARR.
 
 ---
 
@@ -606,6 +614,8 @@ Never set both `slices` and `groupBy`.
 | "activated" / "commercial" / "abandoned" / "first value" / "eligible for CS" (PLG) | `lifecycleStages` `["ACTIVATED"]` / `["COMMERCIAL"]` / `["ABANDONED"]` / `["FIRST_VALUE_ACHIEVED"]` / `["PLG_CS_ELIGIBLE"]` |
 | "unowned", "no owner", "unassigned" (PLG) | `unowned: true` |
 | "my PLG / cloud organisations", "organisations I own", "my sign-ups" (PLG) | `ownerIds ["__current_user__"]` (section 5e) |
+| PLG organisations or sign-ups "owned by <email>", "assigned to <email>", "<email>'s" | `ownerEmails ["<email>"]` (several people: one list with all their emails) (section 5e) |
+| PLG "owned by Bob" (a name, no email) | not expressible: reply with `{"error": ...}` asking for the email address |
 | PLG organisations "by owner", "per owner", "per CS owner" | a `plg_organization` `pie` or `bar` with `groupBy` `owner` (section 5e) |
 | PLG organisations or sign-ups "by country", "per country" | a `pie` or `bar` with `groupBy` `country` (section 5e) |
 | PLG "in <country>", "from <country>"; "no country", "unknown country" | `countryNames ["<country>"]`; `countryUnknown: true` (section 5e) |
@@ -693,7 +703,7 @@ If two readings are plausible and the table does not settle it, pick the one abo
 
 1. Only fields, ops, values and shapes from this file. No ids. A date is a token of section 5 for a
    period counted from today, or a plain `YYYY-MM-DD` date only for a period the request names. Email addresses only in
-   `createdBy in`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
+   `createdBy in` and PLG `ownerEmails`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
 2. Every widget has `id`, `displayName`, `resourceType`, `shape`, `gridWidth` 1-12, `query`.
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
@@ -730,7 +740,7 @@ If two readings are plausible and the table does not settle it, pick the one abo
     registrations no `sortBy`) or `pie`/`bar` with `slices`, or a registration `line` (item 5, no
     `series`); `groupBy` only on a `pie`/`bar`: organisations by `owner` or `country`, registrations by
     `country` or `playbookAnswer` (with `playbookTask` in the `query`); `ownerIds` only
-    `["__current_user__"]`; `countryNames` never with `countryUnknown`; `playbookAnswers` and
+    `["__current_user__"]`; `ownerEmails` only addresses the request gave, never with `unowned`; `countryNames` never with `countryUnknown`; `playbookAnswers` and
     `playbookUnanswered` only with `playbookTask`, never together, and every code from the "PLG playbook
     answers" section; never an organisation `line`.
 14. The output is a single JSON object.
