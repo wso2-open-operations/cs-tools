@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
@@ -208,7 +209,12 @@ func (h *BlobAttachmentHandler) DirectDownloadLink(w http.ResponseWriter, r *htt
 	}
 	out, err := h.entity.DirectStoredAttachmentDownloadLink(r.Context(), id, kind)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity DirectStoredAttachmentDownloadLink failed", "attachmentID", id, "err", summarizeErr(err))
+		// A 404 is the expected answer while direct transfers are off (the webapp asks
+		// before every large download and then streams it): not an error to log.
+		var apiErr *apierror.Error
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+			slog.ErrorContext(r.Context(), "entity DirectStoredAttachmentDownloadLink failed", "attachmentID", id, "err", summarizeErr(err))
+		}
 		mapStoredAttachmentError(w, err, "Failed to prepare the download.")
 		return
 	}
