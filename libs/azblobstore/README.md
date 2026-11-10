@@ -91,17 +91,21 @@ err = store.Copy(ctx, stagingKey, finalKey)
 A link is signed for one blob, for writing only (upload) or reading only
 (download). Azure checks it when a request starts, so a request that started
 before the expiry finishes after it. Choose the shortest lifetime that covers the
-start of the last chunk (entity-service uses 5 minutes up to 50 MiB, up to 20
-minutes for a file of 1 GiB, the largest it allows).
+start of the last chunk (entity-service uses 30 minutes to upload and 10 to
+download).
 
 A link cannot limit how much is sent, and the write permission is for the whole
-blob, so until it expires the holder can overwrite that blob, even after the
-upload was confirmed. Check the real size with `Stat` after an upload, and again
-before handing out a download link (entity-service does both). That catches a file
-whose size changed; it does not catch a swap to a file of the same size, which only
-staging the upload under another key and copying it after the check would. A store that signs in as an
-Entra app cannot sign a link and returns `ErrLinksUnavailable`; the storage
-account also needs CORS for the browsers that use the links.
+blob: until it expires, the holder can put a different file on that blob, even
+after the upload was confirmed. So never sign an upload link for the key readers
+use. Sign it for a staging key (entity-service adds `.upload`), commit and check
+the blocks there, then `Copy` the result to the final key and delete the staging
+blob: a link that is still valid can then only write a file nothing reads. `Copy`
+works inside Azure (Copy Blob, read through a short-lived link of its own), so no
+byte passes through the caller, and it waits for a copy Azure has not finished.
+
+A store that signs in as an Entra app cannot sign a link and returns
+`ErrLinksUnavailable` (`Copy` too); the storage account also needs CORS for the
+browsers that use the links.
 
 ## Limits to know
 

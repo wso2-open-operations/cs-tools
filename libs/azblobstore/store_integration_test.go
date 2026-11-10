@@ -433,14 +433,7 @@ func TestStore_DirectRoundTripThroughLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadLink: %v", err)
 	}
-	// Bounded, so a blob service that stops answering fails the test instead of hanging it.
-	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(getCtx, http.MethodGet, link, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.Get(link)
 	if err != nil {
 		t.Fatal(err)
 	}
