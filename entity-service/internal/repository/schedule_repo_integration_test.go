@@ -2683,3 +2683,59 @@ func TestScheduleIntegration_TheNightCoverMoveTakesTheNightsWithIt(t *testing.T)
 		t.Errorf("after the move was cut short, Wednesday's night is filed under %q, want %q", got, schedSreTeamKey)
 	}
 }
+
+// One person works one set of regular hours a day. IST on their own team and
+// PDT on the Americas team do not overlap in time, so the no-overlap
+// constraint let both through and the roster showed IST and PDT every day.
+// A rotation turn on top of regular hours is still fine.
+func TestScheduleIntegration_ApplyRangeRefusesASecondSetOfRegularHours(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+
+	ist := domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: "CRE_REGULAR",
+		From: schedMonday, To: schedMonday,
+	}
+	if _, err := repo.ApplyRange(ctx, ist, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyRange IST on their own team: %v", err)
+	}
+
+	pdt := ist
+	pdt.TeamKey, pdt.ShiftCode = schedOtherTeam, "CRE_AMERICAS"
+	_, err := repo.ApplyRange(ctx, pdt, schedLeadEmail)
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("ApplyRange PDT over IST on another team: got %v, want a ConflictError", err)
+	}
+	if !strings.Contains(conflict.Msg, schedMonday) {
+		t.Errorf("conflict message %q does not name the day", conflict.Msg)
+	}
+
+	_, err = repo.CreateAssignment(ctx, domain.CreateScheduleAssignmentRequest{
+		UserID: schedMemberID, TeamKey: schedOtherTeam, ShiftCode: "CRE_AMERICAS", RotaDate: schedMonday,
+	}, schedLeadEmail)
+	if !errors.As(err, &conflict) {
+		t.Fatalf("CreateAssignment PDT over IST: got %v, want a ConflictError", err)
+	}
+
+	morning := ist
+	morning.ShiftCode = "CRE_MORNING"
+	morning.TeamKey = schedOtherTeam
+	if _, err := repo.ApplyRange(ctx, morning, schedLeadEmail); err != nil {
+		t.Fatalf("a rotation turn on top of regular hours was refused: %v", err)
+	}
+
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment a JOIN team_schedule_shift s ON s.id = a.shift_id
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $2::date AND s.code = 'CRE_AMERICAS'`,
+		schedMemberID, schedMonday); n != 0 {
+		t.Fatalf("%d PDT rows on the day, want none", n)
+	}
+
+	// Moving them to PDT on their own team replaces the day, so it is allowed.
+	own := ist
+	own.ShiftCode = "CRE_AMERICAS"
+	if _, err := repo.ApplyRange(ctx, own, schedLeadEmail); err != nil {
+		t.Fatalf("replacing IST with PDT on the same team was refused: %v", err)
+	}
+}

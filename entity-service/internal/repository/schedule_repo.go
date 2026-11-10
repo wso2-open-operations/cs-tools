@@ -747,6 +747,47 @@ func slotConflict(err error, isoDate string) error {
 	}
 }
 
+// regularHoursConflict refuses a second set of regular hours for one person on
+// one day.
+//
+// Regular hours (a window that is neither a rotation turn nor an escalation
+// window: Regular hours IST, Americas regular hours PDT, AEST, an SRE zone's
+// regular hours) say where somebody works that day, so a person has one set.
+// The no-overlap constraint does not catch two that do not overlap in time --
+// IST 09:00-18:00 and PDT 21:00-06:00 IST -- and replacing a day clears only
+// the lead's own team's rows, so a lead of the Americas team could put PDT on
+// an ABT engineer who already worked IST on their own team, and the roster
+// then showed both chips every day.
+//
+// Called before the insert, after the day's own rows were displaced, so what
+// is left is on another team (or, from CreateAssignment, anywhere). A turn or
+// an escalation window is never refused here: those go on top of regular
+// hours.
+func regularHoursConflict(ctx context.Context, tx pgx.Tx, userID, shiftCode, isoDate string) error {
+	var held, team string
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(o.short_code, o.code), COALESCE(t.name, a.team_key)
+		  FROM team_schedule_shift n
+		  JOIN team_schedule_assignment a ON a.user_id = $1::uuid AND a.rota_date = $3::date
+		  JOIN team_schedule_shift o ON o.id = a.shift_id
+		  LEFT JOIN team t ON lower(t.key) = lower(a.team_key)
+		 WHERE n.code = $2
+		   AND NOT n.is_rotation AND NOT n.is_escalation
+		   AND NOT o.is_rotation AND NOT o.is_escalation
+		 ORDER BY a.created_on, a.id
+		 LIMIT 1`,
+		userID, shiftCode, isoDate).Scan(&held, &team)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the regular hours held on %s: %w", isoDate, err)
+	}
+	return &apierror.ConflictError{Msg: fmt.Sprintf(
+		"this person already works %s regular hours on %s (%s); one person works one set of regular hours a day, so clear that one first",
+		held, isoDate, team)}
+}
+
 // tierHolderConflict refuses a turn whose tier somebody else already holds.
 //
 // A rung of the SRE pager's ladder is one person. ApplyRange used to put the
@@ -1071,6 +1112,10 @@ func (r *scheduleRepository) CreateAssignment(ctx context.Context, req domain.Cr
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := nameTheActor(ctx, tx, actorEmail); err != nil {
+		return domain.ScheduleAssignment{}, err
+	}
+
+	if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.RotaDate); err != nil {
 		return domain.ScheduleAssignment{}, err
 	}
 
@@ -1748,6 +1793,10 @@ func applyRangeTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleRangeR
 			// does not count towards what the caller is told was applied.
 			out.Applied += len(displaced)
 			continue
+		}
+
+		if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, iso); err != nil {
+			return out, err
 		}
 
 		var id string
