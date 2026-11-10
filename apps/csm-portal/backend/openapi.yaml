@@ -11662,13 +11662,15 @@ paths:
                 $ref: "#/components/schemas/ErrorPayload"
   /plg/registrations/aggregate:
     post:
-      summary: Count registrations per country.
+      summary: Count registrations per country or per playbook answer.
       description: >-
         Passed through to entity-service's POST /plg/registrations/aggregate
         after the filters are checked as the registration search checks them:
-        the registrations counted per their organisation's country, "unknown"
-        ("Unknown") for none. groupBy "country" is the only grouping. Backs
-        the dashboard's PLG registration pie and bar widgets grouped by country.
+        the registrations counted per their organisation's country ("unknown",
+        "Unknown", for none) or, with groupBy "playbookAnswer", per their
+        answer to filters.playbookTask (the option code and label;
+        "unanswered", "Not answered", for none). Backs the dashboard's PLG
+        registration pie and bar widgets grouped by country or by answer.
       operationId: plgAggregateRegistrations
       requestBody:
         required: true
@@ -11678,13 +11680,13 @@ paths:
               $ref: "#/components/schemas/PlgAggregateRegistrationsRequest"
       responses:
         "200":
-          description: Registrations per country.
+          description: Registrations per country or per answer.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AggregateResponse"
         "400":
-          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country filter) with its message."
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country or playbook answer filter) with its message."
           content:
             application/json:
               schema:
@@ -29548,6 +29550,26 @@ components:
           type: boolean
           nullable: true
           description: true matches the organisations (registrations) with no country. Not with countryNames.
+        playbookTask:
+          type: string
+          description: >-
+            A playbook task's code, the task playbookAnswers and
+            playbookUnanswered match on (and the registration aggregate's
+            playbookAnswer grouping groups by).
+        playbookAnswers:
+          type: array
+          items:
+            type: string
+          description: >-
+            Matches the registrations that answered playbookTask with any of
+            these option codes; an organisation matches when any of its
+            registrations does. Needs playbookTask; not with
+            playbookUnanswered. entity-service checks the codes (1 to 100
+            characters).
+        playbookUnanswered:
+          type: boolean
+          nullable: true
+          description: true matches the registrations with no answer to playbookTask. Needs playbookTask; not with playbookAnswers.
     PlgAggregateOrganizationsRequest:
       type: object
       required: [groupBy]
@@ -29572,7 +29594,8 @@ components:
           $ref: "#/components/schemas/PlgOrganizationSearchFilters"
         groupBy:
           type: string
-          enum: [country]
+          enum: [country, playbookAnswer]
+          description: playbookAnswer needs filters.playbookTask.
         maxGroups:
           type: integer
           minimum: 0

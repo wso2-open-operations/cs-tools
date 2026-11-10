@@ -852,7 +852,7 @@ Separately, `CsmProjectsPage.tsx`'s `onboardingStatus` used to be seeded from th
 
 **PLG widgets (`plg_organization`, `plg_registration`).** Count, list, pie and bar, and a registration
 line. Both searches take the same `filters` (`OrganizationSearchFilters`), so `plgSearchFilters` cleans
-them in one place: the single-valued keys, `unowned` and `countryUnknown` are unwrapped after the preview
+them in one place: the single-valued keys (`playbookTask` among them), `unowned`, `countryUnknown` and `playbookUnanswered` are unwrapped after the preview
 page's URL round trip (which decodes every value as an array), View more's `searchQuery` is sent as
 `query`, and a plain `registeredFrom` / `registeredTo` date is sent as `T00:00:00Z` / `T23:59:59Z` of that
 day, so both bounds include it (the searches take timestamps). Relative tokens in those two keys are
@@ -864,10 +864,12 @@ default, the registration date, with `sortOrder` beside it. The registration sea
 `plgRegistrationSearchBody` moves it out and sends no `sortBy`. A pie or bar uses `slices` (one search
 each) or `groupBy` on the server through `useWidgetGroupByData`: `groupByEndpoint` is
 `/plg/organizations/aggregate` (by `owner` or `country`) or `/plg/registrations/aggregate` (by
-`country`), and `buildGroupByBody` sends the search's own body apart from the page (registrations:
+`country`, or `playbookAnswer`: the answers to the widget's `playbookTask`), and `buildGroupByBody` sends the search's own body apart from the page (registrations:
 `unacknowledgedOnly` beside `filters`, as `plgRegistrationTrendFilters` builds it for the trend).
 `bucketQuery` turns a bucket into its click's filter: an owner's id into `ownerIds: [id]` and "unowned"
-into `unowned: true`; a country into `countryNames: [key]` and "unknown" into `countryUnknown: true`. A
+into `unowned: true`; a country into `countryNames: [key]` and "unknown" into `countryUnknown: true`; an
+answer into `playbookAnswers: [code]` and "unanswered" into `playbookUnanswered: true` (the widget's
+`playbookTask` comes with the merge). A
 country with a comma in its name opens an empty preview list, because the preview URL comma-splits every
 value. A registration `line` is `usePlgRegistrationTrendData` (`POST /plg/registrations/volume-trend`, the
 case line's `days` or fixed window and `chart`): one series drawn as "Registered", never `series`; with

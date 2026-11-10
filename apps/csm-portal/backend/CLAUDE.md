@@ -761,7 +761,7 @@ Each upstream service has its own client package under `internal/`:
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
 | `csmnotification` | `integrations/csm-notification-service` | Health check only today (`Health(ctx)`, backing `GET /health/dependencies` — see "Health endpoints" below). Optional: unconfigured (`CSM_NOTIFICATION_SERVICE_BASE_URL` unset) means this dependency reports `not_configured` |
 | `csmintegration` | `integrations/csm-integration-service` | Same shape and same one purpose as `csmnotification` above, for `integrations/csm-integration-service` |
-| `csmai` | `integrations/csm-ai-integration-service` | The dashboard generator's model calls (`POST /ai/dashboards/generate`) plus `Health(ctx)`. Each request carries the correlation id and the signed-in user's id as `X-CSM-User-ID` (never the email), which the service logs with the call's token usage. Optional (`CSM_AI_INTEGRATION_SERVICE_BASE_URL`, `_SCOPES`, `_TIMEOUT` default 55s; https, or http for a local host only). When set, `handler.NewServiceDashboardGenerator` (`dashboard_generator_service.go`) is the generator: the service builds the prompt and calls the model; this backend still converts the draft (`draftToDefinition`), sends the registry teams that have a group, keeps the last candidate `dashboard.ParseGenerated` accepts, swaps team keys for group ids (`WithDashboardTeams`) and maps the service's error `code` to the same statuses and messages (`serviceGenerateError`): `usage_limit` (the model gateway's 429) becomes 503 with "The AI assistant has reached its usage limit", never 429, which stays this backend's own per-user limit; `truncated` has its own message ("too large to create in one go"), apart from `unusable`. Unset: the sample. **This backend holds no model client or model SDK** (`cmd/server/no_model_sdk_test.go` fails if `go.mod` requires, or any file imports, one); the catalogue lives in the service, and `internal/dashboard`'s `TestParseGenerated_TheCatalogueExampleIsValid` reads the service's `catalogue.md` so its example keeps passing this backend's check |
+| `csmai` | `integrations/csm-ai-integration-service` | The dashboard generator's model calls (`POST /ai/dashboards/generate`) plus `Health(ctx)`. Each request carries the correlation id and the signed-in user's id as `X-CSM-User-ID` (never the email), which the service logs with the call's token usage. Optional (`CSM_AI_INTEGRATION_SERVICE_BASE_URL`, `_SCOPES`, `_TIMEOUT` default 55s; https, or http for a local host only). When set, `handler.NewServiceDashboardGenerator` (`dashboard_generator_service.go`) is the generator: the service builds the prompt and calls the model; this backend still converts the draft (`draftToDefinition`), sends the registry teams that have a group, keeps the last candidate `dashboard.ParseGenerated` accepts, sends the PLG playbook answers and checks their codes (`WithPlaybooks`, "PLG widgets"), swaps team keys for group ids (`WithDashboardTeams`) and maps the service's error `code` to the same statuses and messages (`serviceGenerateError`): `usage_limit` (the model gateway's 429) becomes 503 with "The AI assistant has reached its usage limit", never 429, which stays this backend's own per-user limit; `truncated` has its own message ("too large to create in one go"), apart from `unusable`. Unset: the sample. **This backend holds no model client or model SDK** (`cmd/server/no_model_sdk_test.go` fails if `go.mod` requires, or any file imports, one); the catalogue lives in the service, and `internal/dashboard`'s `TestParseGenerated_TheCatalogueExampleIsValid` reads the service's `catalogue.md` so its example keeps passing this backend's check |
 
 New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern. `entity` is the exception: because it hosts multiple, separately-deployed/differently-authenticated services, it uses a `<Name>Config`/`<Name>Client` pair per service/file instead of one shared `Client` for the whole package — `CustomerEntityClient`/`EngineeringEntityClient`.
 
@@ -951,17 +951,28 @@ take the PLG searches' flat filters, and a generated one only those a prompt can
 boolean), `ownerIds` **only** as `["__current_user__"]` ("my PLG organisations": the webapp resolves it to
 the viewer's user id, which is what an owner is), `countryNames` (1 to 20 names as written, each 1 to 100
 characters) and `countryUnknown` (a JSON boolean, never with `countryNames`, in one query or a widget's
-and a slice's together) and, on registrations only, `unacknowledgedOnly`. Never another owner id or free
-text. Shapes: `count`; `list` (an organisation list sorts by `name` or `registeredOn`, a registration
+and a slice's together), the playbook answer filter `playbookTask` (one task code) with `playbookAnswers`
+(1 to 20 option codes) or `playbookUnanswered` (a JSON boolean; each needs `playbookTask` in the query or
+the slice's, and the two never come together) and, on registrations only, `unacknowledgedOnly`. Never
+another owner id or free text. Shapes: `count`; `list` (an organisation list sorts by `name` or `registeredOn`, a registration
 list has one order and takes no `sortBy`); `pie` / `bar` with `slices` (each slice's query held to the
 same filters) or `groupBy` on the server, organisations by `owner` or `country`
-(`POST /plg/organizations/aggregate`) and registrations by `country` (`POST /plg/registrations/aggregate`),
-on a pie or bar only; and, on registrations only, `line` (`POST /plg/registrations/volume-trend`: one
+(`POST /plg/organizations/aggregate`) and registrations by `country` or `playbookAnswer` (with
+`playbookTask` in the widget's query; `POST /plg/registrations/aggregate`), on a pie or bar only; and, on registrations only, `line` (`POST /plg/registrations/volume-trend`: one
 line, "Registered", with the case line's `days` or fixed window and `chart`, never `series`; the
 registry allows a line on `case` or `plg_registration`). The three routes are `PermUsePlg` passthroughs in
 `internal/plg` that check the filters as the searches do and leave the grouping, `maxGroups` and the
 window to entity-service, whose 400 message comes back as it is (`trend_aggregate_wiring_test.go`).
-`generated_plg_test.go` pins the generator's rules. The AI integration service's catalogue (section 5e)
+`generated_plg_test.go` pins the generator's rules. The playbook codes are checked against the live
+playbooks, not by `ParseGenerated`: `handler.WithPlaybooks` (`dashboard_playbook_answers.go`) makes the
+service generator read every PLG playbook on each message (`plg.NewPlaybookLister`, PLG's own
+entity-service configuration, which `cmd/server/main.go` shares with `plg.Mount`), send the AI service
+`playbookAnswers` (`playbookAnswerFields`: the active playbooks' active, non-bookend single choice and
+checklist tasks with options, one per code, sorted, table characters cleaned; left out when none), and
+refuse a dashboard naming a task or an answer they do not have (`errDashboardPlaybook`: 422,
+`generate_playbook`, the reason and the known codes); when the playbooks cannot be read, none are sent
+and any playbook answer filter is refused. **Deploy the AI integration service first**: it refuses a
+request field it does not know. The AI integration service's catalogue (section 5e)
 teaches the model these widgets, and `TestParseGenerated_TheCataloguePlgExamplesAreValid` runs its
 examples through `ParseGenerated`. **Access:** the PLG routes need `PermUsePlg` (CS engineer and admin),
 narrower than `PermView`. Every role that can generate or save a dashboard (`PermWrite`) also holds it
