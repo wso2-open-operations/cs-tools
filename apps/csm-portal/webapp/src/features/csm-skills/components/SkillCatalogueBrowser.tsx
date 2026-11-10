@@ -65,7 +65,9 @@ export default function SkillCatalogueBrowser({ canViewPeople }: SkillCatalogueB
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [openedFor, setOpenedFor] = useState<string | null>(null);
   const treeKey = `${debounced}|${tree.length > 0}|${selectedId ?? ""}`;
-  if (tree.length > 0 && openedFor !== treeKey) {
+  // Not on placeholder data: the previous search's results would be expanded
+  // under the new key and the real results would never be.
+  if (tree.length > 0 && !skills.isPlaceholderData && openedFor !== treeKey) {
     setOpenedFor(treeKey);
     const next = new Set(debounced ? allNodeIds(tree) : openedFor === null ? tree.map((n) => n.id) : expanded);
     for (const id of selectedId ? (pathToSkill(tree, selectedId) ?? []) : []) next.add(id);

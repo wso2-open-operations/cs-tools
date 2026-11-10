@@ -33,6 +33,7 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSkillCategories, useSkillLevelTypes } from "@features/csm-skills/api/useSkillCatalogue";
 import { useCheckSkillRequest, useCreateSkillRequest } from "@features/csm-skills/api/useSkillManagement";
 import { CategorySelect } from "@features/csm-skills/components/CategorySelect";
+import { fileableCategoryIds } from "@features/csm-skills/utils/categoryTree";
 import { defaultLevelType, sortedLevels } from "@features/csm-skills/utils/levels";
 import { personName } from "@features/csm-skills/utils/skillRequests";
 import type { SkillRef } from "@features/csm-skills/types";
@@ -73,12 +74,9 @@ export default function RequestSkillDialog({ initialName = "", onClose, onAddExi
   const pending = checked?.pendingRequest ?? null;
   const similar = checked?.similar ?? [];
 
-  // Skills are filed only under active categories with no sub-categories.
-  const leaves = useMemo(() => {
-    const all = categories.data ?? [];
-    const parents = new Set(all.map((c) => c.parentId).filter(Boolean));
-    return all.filter((c) => c.active !== false && !parents.has(c.id));
-  }, [categories.data]);
+  // Skills are filed only under active categories with no sub-categories;
+  // the others are shown for context but cannot be picked.
+  const fileable = useMemo(() => fileableCategoryIds(categories.data), [categories.data]);
   const scale = defaultLevelType(levelTypes.data);
   const levels = sortedLevels(scale);
 
@@ -172,7 +170,8 @@ export default function RequestSkillDialog({ initialName = "", onClose, onAddExi
           <CategorySelect
             id="request-skill-category"
             label="Category"
-            categories={leaves}
+            categories={categories.data ?? []}
+            selectableIds={fileable}
             loading={categories.isLoading}
             value={categoryId}
             onChange={setCategoryId}
