@@ -21,7 +21,10 @@ import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import type { BeCaseIssueType } from "@api/backend/types";
 import type { WatchListEdits } from "@features/csm-cases/utils/createCaseWatchList";
 
-/** The user-entered values of the New case form. */
+/**
+ * The user-entered values of the New case form. Chosen files are not part of it:
+ * a file cannot be kept in memory here, so it is chosen again.
+ */
 export interface NewCaseDraft {
   /**
    * Identifies how the form was entered (locked project / related case). A

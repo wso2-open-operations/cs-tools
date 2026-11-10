@@ -68,8 +68,12 @@ type Report struct {
 
 // Row is one long-open case.
 type Row struct {
+	// ID is the case's UUID, the identifier the CSM portal's case page opens by.
+	ID     string `json:"id"`
 	Number string `json:"number"`
-	// InternalID is the case's internal identifier; empty when it has none.
+	// InternalID is the case's secondary reference (a short key such as
+	// ABC-1); empty when it has none. Display only: the portal cannot open a
+	// case by it.
 	InternalID string    `json:"internalId"`
 	CreatedOn  time.Time `json:"createdOn"`
 	UpdatedOn  time.Time `json:"updatedOn"`

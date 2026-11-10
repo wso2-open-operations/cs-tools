@@ -171,15 +171,21 @@ func scanUserExtra(row interface{ Scan(...any) error }, extra ...any) (domain.Us
 	return u, nil
 }
 
+// getUserByEmailSQL: lower(email) = lower($1) is the index condition
+// (idx_user_email_lower, migration 0192); email = $1 implies it, so the filter
+// keeps the exact-match branch and the ASCII-only case-insensitive branch
+// ($2) unchanged while letting the planner use the index. phone is selected
+// here only (GET /users/me); the by-id and list reads share userColumns and
+// deliberately do not carry it.
+const getUserByEmailSQL = `SELECT ` + userColumns + `, phone FROM "user"
+		WHERE lower(email) = lower($1) AND (email = $1 OR ($2 AND email !~ '[^[:ascii:]]'))
+		ORDER BY (email = $1) DESC LIMIT 2`
+
 // GetUserByEmail implements UserRepository.
 func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
 	// An exact match wins; otherwise only a single ASCII case-insensitive match counts, so a
 	// Unicode case fold or two rows differing in case can never resolve to another user.
-	// phone is selected here only (GET /users/me); the by-id and list reads share
-	// userColumns and deliberately do not carry it.
-	rows, err := r.db.Query(ctx, `SELECT `+userColumns+`, phone FROM "user"
-		WHERE email = $1 OR ($2 AND lower(email) = lower($1) AND email !~ '[^[:ascii:]]')
-		ORDER BY (email = $1) DESC LIMIT 2`, email, isASCII(email))
+	rows, err := r.db.Query(ctx, getUserByEmailSQL, email, isASCII(email))
 	if err != nil {
 		return domain.User{}, fmt.Errorf("get user by email: %w", err)
 	}

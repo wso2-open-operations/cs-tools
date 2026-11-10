@@ -36,16 +36,10 @@ import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
-import {
-  DOWNLOAD_STARTED,
-  downloadPercent,
-  isAttachmentDownloading,
-  setAttachmentDownloadProgress,
-} from "@features/csm-cases/api/attachmentDownloadProgress";
+import { downloadWithProgress } from "@features/csm-cases/api/trackedDownload";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
   deleteEntityAttachment,
-  downloadEntityAttachment,
   type DownloadSaveOutcome,
   entityAttachmentErrorMessage,
   WORK_ITEM_ATTACHMENT_TYPE,
@@ -83,31 +77,62 @@ export function useGetCsmCaseAttachments(
 
   return useQuery<CaseAttachment[], Error>({
     queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, referenceType, caseId ?? ""],
-    queryFn: async (): Promise<CaseAttachment[]> => {
-      if (!caseId) return [];
-
-      const allAttachments: BeAttachment[] = [];
-      let offset = 0;
-      for (let page = 0; page < MAX_ATTACHMENT_PAGES; page += 1) {
-        const payload: BeAttachmentSearchPayload = {
-          referenceId: caseId,
-          referenceType,
-          pagination: { offset, limit: ATTACHMENTS_PAGE_LIMIT },
-        };
-        const response = await api.post<
-          BeAttachmentSearchPayload,
-          BeAttachmentSearchResponse
-        >("/attachments/search", payload);
-        const rows = response.attachments ?? [];
-        allAttachments.push(...rows);
-        if (!response.hasMore || rows.length === 0) break;
-        offset += rows.length;
-      }
-      return allAttachments.map(uiAttachmentFromBe);
-    },
+    queryFn: () => fetchAllAttachments(api, caseId, referenceType, false),
     enabled: !!caseId,
     staleTime: 10_000,
   });
+}
+
+/**
+ * Load every DELETED attachment of a reference entity, most recently deleted
+ * first. Only an admin gets any (the backend drops the request for anyone
+ * else), and it is a query of its own so nothing is fetched until `enabled`
+ * (the admin opens the Deleted tab). Its key extends the available list's, so
+ * an upload or delete that invalidates that list refreshes this one too.
+ */
+export function useGetCsmDeletedCaseAttachments(
+  caseId: string | undefined,
+  referenceType: BeReferenceType = "case",
+  enabled = true,
+): UseQueryResult<CaseAttachment[], Error> {
+  const api = useBackendApi();
+
+  return useQuery<CaseAttachment[], Error>({
+    queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, referenceType, caseId ?? "", "deleted"],
+    queryFn: () => fetchAllAttachments(api, caseId, referenceType, true),
+    enabled: !!caseId && enabled,
+    staleTime: 10_000,
+  });
+}
+
+/** Pages `POST /attachments/search` to the end; `deletedOnly` asks for the deleted ones. */
+async function fetchAllAttachments(
+  api: ReturnType<typeof useBackendApi>,
+  caseId: string | undefined,
+  referenceType: BeReferenceType,
+  deletedOnly: boolean,
+): Promise<CaseAttachment[]> {
+  if (!caseId) return [];
+
+  const allAttachments: BeAttachment[] = [];
+  let offset = 0;
+  for (let page = 0; page < MAX_ATTACHMENT_PAGES; page += 1) {
+    const payload: BeAttachmentSearchPayload = {
+      referenceId: caseId,
+      referenceType,
+      pagination: { offset, limit: ATTACHMENTS_PAGE_LIMIT },
+      ...(deletedOnly ? { deletedOnly: true } : {}),
+    };
+    const response = await api.post<
+      BeAttachmentSearchPayload,
+      BeAttachmentSearchResponse
+    >("/attachments/search", payload);
+    const rows = response.attachments ?? [];
+    allAttachments.push(...rows);
+    if (!response.hasMore || rows.length === 0) break;
+    offset += rows.length;
+  }
+  return allAttachments.map(uiAttachmentFromBe);
 }
 
 export interface PostCsmCaseAttachmentInput {
@@ -236,33 +261,16 @@ export function useDownloadCsmCaseAttachment(): (
     [showSuccess],
   );
 
-  const download = useCallback(
-    async (attachment: CaseAttachment): Promise<void> => {
-      await downloadEntityAttachment(api, {
+  return useCallback(
+    (attachment: CaseAttachment): Promise<void> =>
+      downloadWithProgress(api, {
         type: WORK_ITEM_ATTACHMENT_TYPE,
         id: attachment.id,
         name: attachment.filename,
         size: attachment.size,
         onSaved: (outcome) => notify(attachment.filename, outcome),
-        onProgress: (received, total) =>
-          setAttachmentDownloadProgress(attachment.id, downloadPercent(received, total)),
-      });
-    },
+      }),
     [api, notify],
-  );
-
-  // One download of an attachment at a time; its row shows how far it has got.
-  return useCallback(
-    async (attachment: CaseAttachment): Promise<void> => {
-      if (isAttachmentDownloading(attachment.id)) return;
-      setAttachmentDownloadProgress(attachment.id, DOWNLOAD_STARTED);
-      try {
-        await download(attachment);
-      } finally {
-        setAttachmentDownloadProgress(attachment.id, undefined);
-      }
-    },
-    [download],
   );
 }
 

@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import AdvancedFiltersBuilder from "@features/csm-cases/components/AdvancedFiltersBuilder";
 import type { UnifiedFilterRow } from "@features/csm-cases/utils/filterFieldAdapters";
+import { RELATIVE_DATE_PRESETS } from "@features/csm-cases/utils/advancedFilters";
 
 // AdvancedFiltersBuilder transitively imports several Async*MultiSelect
 // components, each ultimately reaching the real backend API client/config,
@@ -329,5 +330,75 @@ describe("AdvancedFiltersBuilder — severity options", () => {
     expect(
       openSeverityValues(["S1", "S2", "S3", "S4"].map((v) => ({ value: v, label: v }))),
     ).toEqual(["S1", "S2", "S3", "S4"]);
+  });
+});
+
+describe("AdvancedFiltersBuilder — createdOn relative dates", () => {
+  const dateSelect = (): HTMLElement => screen.getByRole("combobox", { name: "Date" });
+  const menuItems = (): string[] => {
+    fireEvent.mouseDown(dateSelect());
+    return within(screen.getByRole("listbox"))
+      .getAllByRole("option")
+      .map((o) => o.textContent ?? "");
+  };
+
+  it("shows a relative date that is not a preset in words, not as an empty custom date", () => {
+    renderWithRow(createdOnRow(["__daysAgo:13__"]));
+    expect(dateSelect()).toHaveTextContent("13 days ago");
+    expect(screen.queryByText("Exact date")).not.toBeInTheDocument();
+    const items = menuItems();
+    expect(items).toContain("13 days ago");
+    expect(items.indexOf("13 days ago")).toBe(items.indexOf("Custom date…") - 1);
+  });
+
+  it("lets the user pick a preset instead of it", () => {
+    const { onUpdateRow } = renderWithRow(createdOnRow(["__startOfMonth:-2__"]));
+    expect(dateSelect()).toHaveTextContent("Start of the month 2 months ago");
+    fireEvent.mouseDown(dateSelect());
+    fireEvent.click(within(screen.getByRole("listbox")).getByText("30 days ago"));
+    expect(onUpdateRow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ values: ["__daysAgo:30__"] }),
+    );
+  });
+
+  // Saved views and old links hold whatever the menu accepted before: those
+  // values must show exactly as they did.
+  it("shows a preset as before, with no extra entry", () => {
+    renderWithRow(createdOnRow(["__daysAgo:30__"]));
+    expect(dateSelect()).toHaveTextContent("30 days ago");
+    const items = menuItems();
+    expect(items.filter((i) => i === "30 days ago")).toHaveLength(1);
+    expect(items).toHaveLength(RELATIVE_DATE_PRESETS.length + 2); // Choose… and Custom date…
+  });
+
+  it("shows a literal date as an exact date, as before", () => {
+    renderWithRow(createdOnRow(["2026-07-27"]));
+    expect(dateSelect()).toHaveTextContent("Custom date…");
+    expect(dateHiddenInput().value).toBe("07/27/2026");
+  });
+
+  it("shows nothing chosen as before", () => {
+    renderWithRow(createdOnRow([""]));
+    expect(dateSelect()).toHaveTextContent("Choose…");
+    expect(screen.queryByText("Exact date")).not.toBeInTheDocument();
+  });
+
+  it("still treats a value the resolver rejects as a custom date, as before", () => {
+    for (const value of ["__daysAgo:-1__", "__today:5__", "__unknown__", "not a date"]) {
+      const { unmount } = render(
+        <AdvancedFiltersBuilder
+          rows={[createdOnRow([value])]}
+          onUpdateRow={vi.fn()}
+          onRemoveRow={vi.fn()}
+          onAddRow={vi.fn()}
+          creTeamOptions={[]}
+          sreTeamOptions={[]}
+        />,
+      );
+      expect(dateSelect()).toHaveTextContent("Custom date…");
+      expect(dateHiddenInput().value).toBe("");
+      unmount();
+    }
   });
 });

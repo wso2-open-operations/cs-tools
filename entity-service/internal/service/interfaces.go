@@ -165,6 +165,18 @@ type CustomDashboardTeamShareService interface {
 	RemoveTeamShare(ctx context.Context, dashboardID, teamID string) error
 }
 
+// CustomDashboardLinkService lets anyone with a saved dashboard's link view
+// it, view only, internal staff only. Postgres-only; the caller is resolved
+// from x-user-id-token. Only the owner reads or changes the link; whoever
+// opens it then sees the dashboard through CustomDashboardShareService's
+// ListSharedWithMe / GetSharedWithMe.
+type CustomDashboardLinkService interface {
+	GetLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	EnableLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	DisableLink(ctx context.Context, dashboardID string) error
+	OpenLink(ctx context.Context, req domain.OpenCustomDashboardLinkRequest) (domain.OpenedCustomDashboardLink, error)
+}
+
 // RunbookService manages the alert-name to runbook catalog (Operations > Runbooks).
 // PortalBannerService is the HTML banners both portals show. Customer and CSM
 // reads each return only published rows for that portal. Writes require a
@@ -711,6 +723,10 @@ type ProjectStatsService interface {
 	// GetProjectTimeCardStats returns the project's time-card statistics,
 	// optionally filtered by a startDate/endDate range (each yyyy-MM-dd).
 	GetProjectTimeCardStats(ctx context.Context, projectID, startDate, endDate string) (domain.ProjectTimeCardStatsResponse, error)
+	// GetProjectTimeCardReport returns the project's APPROVED time cards
+	// aggregated per case for a required from/to work-date range (each
+	// yyyy-MM-dd, inclusive). Postgres only.
+	GetProjectTimeCardReport(ctx context.Context, projectID, from, to string) (domain.ProjectTimeCardReportResponse, error)
 	// GetProjectChangeRequestStats returns the project's change-request statistics.
 	GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error)
 }
@@ -1153,6 +1169,10 @@ type TimeCardService interface {
 	// SearchCaseTimeCards returns a paginated list of time cards grouped and
 	// rolled up by case, using the same filters as SearchTimeCards.
 	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest) (domain.SearchCaseTimeCardsResponse, error)
+	// AggregateTimeCards counts the time cards SearchTimeCards would match,
+	// and sums their logged minutes, per state, user, project or day (see
+	// domain.AggregateTimeCardsRequest).
+	AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error)
 	// DeleteTimeCard permanently deletes a time card. Matches UpdateTimeCard's
 	// trust model exactly: this only validates the ID's shape and forwards the
 	// caller's token to SN, which enforces that only the submitter may delete
@@ -1713,6 +1733,9 @@ type StoredAttachmentService interface {
 	// LocateInlineImage finds a comment's inline image for a caller who may see it
 	// (a removed image is a GoneError) and returns the key to stream from.
 	LocateInlineImage(ctx context.Context, id string) (domain.AttachmentLocation, error)
+	// InlineImageRelocated records that the backend moved an inline image's file
+	// to storageKey (the RelocateTo of LocateInlineImage). Any other key is refused.
+	InlineImageRelocated(ctx context.Context, id string, req domain.InlineImageRelocatedRequest) error
 }
 
 // AttachmentUploadCleanupService clears out uploads that were started and never
@@ -1729,14 +1752,30 @@ type AttachmentUploadCleanupService interface {
 	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
 }
 
+// ReportDraftLinker attaches the files a record's creator uploaded BEFORE the record
+// existed (draft work item attachments, migration 0280) to the record being created.
+// storedAttachmentService implements it beside InlineImageLinker; the case service
+// finds it by type assertion on its linker, so a nil or older linker means "none".
+type ReportDraftLinker interface {
+	// ValidateReportDrafts checks, BEFORE the record is created, that every id is a
+	// COMPLETE draft uploaded to projectID by authorEmail and not linked yet
+	// (*apierror.ValidationError otherwise), so a bad request creates nothing.
+	ValidateReportDrafts(ctx context.Context, projectID, authorEmail string, ids []string) error
+	// LinkReportDrafts, right after the record exists, links the drafts to it. An
+	// error means the record exists but a file was not linked.
+	LinkReportDrafts(ctx context.Context, workItemID, projectID, authorEmail string, ids []string) error
+}
+
 // InlineImageLinker attaches the comment images a saved comment shows to that
 // comment. Best effort: it never returns an error, and a nil linker is a no-op.
 type InlineImageLinker interface {
 	LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string)
 	// ValidateCommentImages refuses (a *apierror.ValidationError) a comment that
 	// shows more than MaxInlineImagesPerContent of its author's own images, or
-	// more than the total size limit together. Call it BEFORE saving.
-	ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error
+	// more than the total size limit together. Call it BEFORE saving. commentID is
+	// the comment being edited ("" for a new one): its images already stored are
+	// not counted against the size limit, only what the edit adds.
+	ValidateCommentImages(ctx context.Context, commentID, workItemID, authorEmail, content string) error
 	// ValidateEmbeddedImages refuses (a *apierror.ValidationError) content typed by
 	// a user (authorEmail not empty) that embeds more than MaxInlineImagesPerContent
 	// base64 images, or more than the total size limit together. Call it BEFORE

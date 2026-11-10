@@ -54,10 +54,10 @@ func NewSLAStatusHandler(svc service.SLAStatusService) *SLAStatusHandler {
 // (csm-notification-service's own startup reconciliation included) already
 // makes, completely unaffected by this parameter's existence.
 //
-// severity/caseType/search/elapsedBucket are the CSM Portal's SLA Engine
-// admin table's own filters (service.ParseSLAStatusFilters validates each);
-// all four are optional and additive — an existing caller that sends none
-// of them sees byte-identical behavior to before they existed.
+// severity/caseType/search/elapsedBucket/status are the CSM Portal's SLA
+// Engine admin table's own filters (service.ParseSLAStatusFilters validates
+// each); all five are optional and additive — an existing caller that sends
+// none of them sees byte-identical behavior to before they existed.
 func (h *SLAStatusHandler) SearchActiveSLAStatuses(w http.ResponseWriter, r *http.Request) {
 	pagination, ok := parseSLAStatusPaginationQuery(w, r)
 	if !ok {
@@ -69,6 +69,7 @@ func (h *SLAStatusHandler) SearchActiveSLAStatuses(w http.ResponseWriter, r *htt
 		r.URL.Query().Get("caseType"),
 		r.URL.Query().Get("search"),
 		r.URL.Query().Get("elapsedBucket"),
+		r.URL.Query().Get("status"),
 	)
 	if err != nil {
 		writeServiceError(w, r, err)

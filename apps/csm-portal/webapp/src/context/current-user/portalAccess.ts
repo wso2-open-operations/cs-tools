@@ -150,6 +150,14 @@ export interface PortalAccess {
    */
   canUpdateProjectClosureState: boolean;
   /**
+   * Excluding a project from the automatic closure process via
+   * `PATCH /projects/{id}`'s `suspensionProcessOverridden` field. `admin`
+   * only, same shape as {@link canUpdateProjectClosureState} — mirrors the
+   * backend's in-handler `PermAdmin` narrowing on that field. Decides only
+   * whether the switch is editable; the backend's 403 is the real gate.
+   */
+  canUpdateProjectSuspensionOverride: boolean;
+  /**
    * Setting a project's onboarding status and onboarding owner via
    * `PATCH /projects/{id}`'s `onboardingStatus`/`onboardingOwner` fields.
    * `onboarding_lead` or `admin` -- `cs_engineer` alone does not hold it.
@@ -177,6 +185,23 @@ export interface PortalAccess {
    * timecard_approver/dashboard_designer do not hold.
    */
   canUseSecurityCenter: boolean;
+  /**
+   * Seeing a security-report-analysis CASE in a general case search (the
+   * project Work items tab, quick-nav case search) — mirrors the backend's
+   * `PermViewSecurityReportCases`, deliberately NOT {@link canUseSecurityCenter}
+   * (`PermViewSecurityCenter`). The two were split apart on the backend so
+   * `viewer` could read these cases through search without also gaining the
+   * Security Center section/Vulnerabilities routes, which stay gated by
+   * `canUseSecurityCenter` alone — see that backend permission's own doc
+   * comment (`access.go`). Use this (via `caseType.ts`'s `visibleCaseTypes`)
+   * for "which case types should an unlocked, multi-type search ask for",
+   * never `canUseSecurityCenter` — a caller who can reach Security Center
+   * but not this (there is no such caller today) would 403 on exactly the
+   * search this flag exists to keep from doing so, and a `viewer`/
+   * `comment_updater`-only caller who CAN reach it via this flag would be
+   * wrongly excluded by the narrower one.
+   */
+  canViewSecurityReportCases: boolean;
   /**
    * The PLG Customer Success Portal section. `admin` and `cs_engineer` only —
    * mirrors the backend's `PermUsePlg`, which (unlike `PermView`) the view-only
@@ -358,9 +383,11 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canAddWorkNotes: true,
       canCreateUser: true,
       canUpdateProjectClosureState: true,
+      canUpdateProjectSuspensionOverride: true,
       canEditProjectOnboarding: true,
       canManageProductCatalog: true,
       canUseSecurityCenter: true,
+      canViewSecurityReportCases: true,
       canUsePlg: true,
       canManagePlaybooks: true,
       canCreateAnnouncement: true,
@@ -396,9 +423,15 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canAddWorkNotes: full || has(PORTAL_ROLE.worknoteCreator),
     canCreateUser: isAdmin,
     canUpdateProjectClosureState: isAdmin,
+    canUpdateProjectSuspensionOverride: isAdmin,
     canEditProjectOnboarding: isAdmin || has(PORTAL_ROLE.onboardingLead),
     canManageProductCatalog: isAdmin || has(PORTAL_ROLE.productCatalogManager),
     canUseSecurityCenter: full || has(PORTAL_ROLE.securityTeam),
+    canViewSecurityReportCases:
+      full ||
+      has(PORTAL_ROLE.securityTeam) ||
+      has(PORTAL_ROLE.commentUpdater) ||
+      has(PORTAL_ROLE.viewer),
     canUsePlg: full,
     canManagePlaybooks: isAdmin,
     canCreateAnnouncement: full && (isAdmin || has(PORTAL_ROLE.announcementCreator)),

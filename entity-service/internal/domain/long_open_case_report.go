@@ -71,8 +71,12 @@ type LongOpenCaseReport struct {
 
 // LongOpenCaseReportRow is one long-open case.
 type LongOpenCaseReportRow struct {
+	// ID is the case's UUID, the identifier the case page and the case
+	// detail endpoint route on. It is not InternalID.
+	ID     string `json:"id"`
 	Number string `json:"number"`
-	// InternalID is the case's internal identifier; empty when it has none.
+	// InternalID is the case's internal identifier (a display reference, not
+	// the routing id); empty when it has none.
 	InternalID string    `json:"internalId"`
 	CreatedOn  time.Time `json:"createdOn"`
 	UpdatedOn  time.Time `json:"updatedOn"`

@@ -15,8 +15,8 @@
 // under the License.
 
 // Package opencases is the "cases still in Open state" report sub-cron: it
-// finds every case created before yesterday that has never moved out of the
-// initial "open" state, and emails a report of them. Distinct from
+// finds every case created before
+// yesterday that has never moved out of the initial "open" state, and emails a report of them. Distinct from
 // internal/stalecases (the long-open cases report: cases still open after 30 days) — this one flags a
 // narrower, more urgent signal: a case nobody has even started working on
 // yet. Same shape otherwise: see internal/stalecases's own package doc

@@ -128,6 +128,22 @@ func TestSplitRefusesTextThatWouldNotJoinBack(t *testing.T) {
 	}
 }
 
+// TestTheCatalogueIsPlainASCII checks that the catalogue, and so every part
+// mounted from it, holds only ASCII characters. Choreo's file mount editor
+// encodes a file with the browser's btoa(), which refuses any character outside
+// Latin-1 ("The string to be encoded contains characters outside of the Latin1
+// range"), and would store a Latin-1 one such as "é" as a byte the service,
+// reading UTF-8, does not read back as that character.
+func TestTheCatalogueIsPlainASCII(t *testing.T) {
+	for i, line := range strings.Split(DashboardEmbedded(), "\n") {
+		for _, r := range line {
+			if r > 0x7F {
+				t.Errorf("catalogue.md line %d has %q (U+%04X): use ASCII only, Choreo's file mount editor refuses it", i+1, r, r)
+			}
+		}
+	}
+}
+
 // TestTheCommittedPartsAreUpToDate checks that catalogue-parts/, the files
 // mounted in Choreo, are exactly what Split makes of catalogue.md now: an edit
 // to catalogue.md without regenerating them fails here. Each part is also

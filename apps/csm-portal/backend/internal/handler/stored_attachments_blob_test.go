@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
@@ -41,13 +43,24 @@ type fakeBlobEntity struct {
 	authBody       string
 	confirmBody    string
 	deleteCalls    int
+	deleteBody     string
+	locateBody     string
+
+	relocatedBody string
+	relocateErr   error
+}
+
+func (f *fakeBlobEntity) InlineImageRelocated(_ context.Context, _ string, b []byte) error {
+	f.relocatedBody = string(b)
+	return f.relocateErr
 }
 
 func (f *fakeBlobEntity) AuthorizeStoredAttachmentUpload(_ context.Context, _ string, b []byte) ([]byte, error) {
 	f.authBody = string(b)
 	return []byte(f.target), f.authErr
 }
-func (f *fakeBlobEntity) LocateStoredAttachment(context.Context, []byte) ([]byte, error) {
+func (f *fakeBlobEntity) LocateStoredAttachment(_ context.Context, b []byte) ([]byte, error) {
+	f.locateBody = string(b)
 	return []byte(f.locate), f.locateErr
 }
 func (f *fakeBlobEntity) LocateInlineImage(context.Context, string) ([]byte, error) {
@@ -57,7 +70,8 @@ func (f *fakeBlobEntity) ConfirmStoredAttachmentUpload(_ context.Context, _ stri
 	f.confirmBody = string(b)
 	return []byte(`{"id":"x"}`), f.confirmErr
 }
-func (f *fakeBlobEntity) DeleteStoredAttachment(context.Context, []byte) error {
+func (f *fakeBlobEntity) DeleteStoredAttachment(_ context.Context, b []byte) error {
+	f.deleteBody = string(b)
 	f.deleteCalls++
 	return f.deleteErr
 }
@@ -312,6 +326,70 @@ func TestBlobDelete_RemovesTheFileAfterEntityDeletesTheRow(t *testing.T) {
 	}
 }
 
+// deleteAs sends a delete with `body` as a caller holding `roles`, through a
+// handler wired with the test access guard, and returns what entity-service got.
+func deleteAs(t *testing.T, roles []string, body string) (*fakeBlobEntity, int) {
+	t.Helper()
+	e := &fakeBlobEntity{locate: `{"available":true,"storageKey":"` + blobSecretKey + `"}`}
+	h := NewBlobAttachmentHandler(e, &fakeBlobStore{}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+	r := httptest.NewRequest(http.MethodPost, "/attachments/delete", strings.NewReader(body))
+	r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{UserID: "u", Roles: roles}))
+	rec := httptest.NewRecorder()
+	h.DeleteAttachment(rec, r)
+	return e, rec.Code
+}
+
+func TestBlobDelete_AnAdminsDeleteCarriesTheAdminFlag(t *testing.T) {
+	body := `{"type":"work_item","id":"` + storedAttID + `"}`
+	e, code := deleteAs(t, []string{"test-admin"}, body)
+	if code != 204 {
+		t.Fatalf("code = %d", code)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(e.deleteBody), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent["asAdmin"] != true || sent["id"] != storedAttID || sent["type"] != "work_item" {
+		t.Errorf("sent = %v", sent)
+	}
+	// Locate does not know the field, and strict decoding there would refuse it.
+	if strings.Contains(e.locateBody, "asAdmin") {
+		t.Errorf("locate body = %s", e.locateBody)
+	}
+}
+
+func TestBlobDelete_ANonAdminNeverGetsTheAdminFlag_EvenIfTheBrowserSendsIt(t *testing.T) {
+	for name, body := range map[string]string{
+		"plain":      `{"type":"work_item","id":"` + storedAttID + `"}`,
+		"forged":     `{"type":"work_item","id":"` + storedAttID + `","asAdmin":true}`,
+		"other case": `{"type":"work_item","id":"` + storedAttID + `","ASADMIN":true,"asadmin":true}`,
+	} {
+		for _, roles := range [][]string{{"test-cs-engineer"}, {"test-viewer"}, nil} {
+			e, code := deleteAs(t, roles, body)
+			if code != 204 {
+				t.Fatalf("%s %v: code = %d", name, roles, code)
+			}
+			if strings.Contains(strings.ToLower(e.deleteBody), "asadmin") {
+				t.Errorf("%s %v: entity-service got %s", name, roles, e.deleteBody)
+			}
+		}
+	}
+}
+
+func TestBlobDelete_AnAdminsOwnFlagIsOneTrueValue_NotWhateverTheBrowserSent(t *testing.T) {
+	e, _ := deleteAs(t, []string{"test-admin"}, `{"type":"work_item","id":"`+storedAttID+`","asAdmin":false,"ASADMIN":"no"}`)
+	if strings.Count(strings.ToLower(e.deleteBody), "asadmin") != 1 || !strings.Contains(e.deleteBody, `"asAdmin":true`) {
+		t.Errorf("entity-service got %s", e.deleteBody)
+	}
+}
+
+func TestBlobDelete_ABodyThatIsNotAnObjectIsABadRequest(t *testing.T) {
+	_, code := deleteAs(t, []string{"test-admin"}, `[1,2]`)
+	if code != http.StatusBadRequest {
+		t.Errorf("code = %d", code)
+	}
+}
+
 func TestBlobListChunks(t *testing.T) {
 	s := &fakeBlobStore{blocks: map[int][]byte{0: []byte("ab"), 1: []byte("c")}}
 	rec := serveBlob(&fakeBlobEntity{target: blobTarget}, s, http.MethodGet, "/attachments/upload/"+storedAttID+"/chunks?type=work_item", nil, nil, true)
@@ -347,5 +425,49 @@ func TestParseRange(t *testing.T) {
 		if ok != tc.ok || un != tc.unsat || (ok && (r.Offset != tc.off || r.Length != tc.len)) {
 			t.Errorf("%q = %+v ok=%v unsat=%v", tc.h, r, ok, un)
 		}
+	}
+}
+
+const relocateTo = "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
+
+func TestBlobInlineImage_MovesADescriptionImageToItsWorkItemFolder(t *testing.T) {
+	loc := `{"available":true,"contentType":"image/png","storageKey":"` + blobSecretKey + `","relocateTo":"` + relocateTo + `"}`
+	s := &fakeBlobStore{data: []byte("img")}
+	ent := &fakeBlobEntity{locate: loc}
+	rec := serveBlob(ent, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
+	if rec.Code != 200 || rec.Body.String() != "img" {
+		t.Fatalf("response = %d %q", rec.Code, rec.Body.String())
+	}
+	if s.putKey != relocateTo || string(s.blocks[0]) != "img" || s.commits != 1 {
+		t.Errorf("copy: key %q blocks %v commits %d", s.putKey, s.blocks, s.commits)
+	}
+	if ent.relocatedBody != `{"storageKey":"`+relocateTo+`"}` {
+		t.Errorf("entity told %q", ent.relocatedBody)
+	}
+	if len(s.deleted) != 1 || s.deleted[0] != blobSecretKey {
+		t.Errorf("old file removal = %v, want only %q", s.deleted, blobSecretKey)
+	}
+}
+
+func TestBlobInlineImage_AFailedMoveKeepsTheOldFile(t *testing.T) {
+	loc := `{"available":true,"contentType":"image/png","storageKey":"` + blobSecretKey + `","relocateTo":"` + relocateTo + `"}`
+	s := &fakeBlobStore{data: []byte("img")}
+	ent := &fakeBlobEntity{locate: loc, relocateErr: errors.New("entity down")}
+	rec := serveBlob(ent, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
+	if rec.Code != 200 || rec.Body.String() != "img" {
+		t.Fatalf("the image must still be served: %d %q", rec.Code, rec.Body.String())
+	}
+	if len(s.deleted) != 0 {
+		t.Errorf("the old file was removed although entity-service did not accept the new key: %v", s.deleted)
+	}
+}
+
+func TestBlobInlineImage_NoMoveWithoutRelocateTo(t *testing.T) {
+	loc := `{"available":true,"contentType":"image/png","storageKey":"` + blobSecretKey + `"}`
+	s := &fakeBlobStore{data: []byte("img")}
+	ent := &fakeBlobEntity{locate: loc}
+	rec := serveBlob(ent, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
+	if rec.Code != 200 || s.commits != 0 || len(s.deleted) != 0 || ent.relocatedBody != "" {
+		t.Errorf("unexpected move: %d commits %d deleted %v told %q", rec.Code, s.commits, s.deleted, ent.relocatedBody)
 	}
 }

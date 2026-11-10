@@ -99,18 +99,48 @@ type CustomDashboardTeamShareList struct {
 	Shares []CustomDashboardTeamShare `json:"shares"`
 }
 
+// CustomDashboardLink is whether anyone with a saved dashboard's link may view
+// it (migration 0275), as its owner sees it. LinkID is the id in the link, ""
+// while the option is off; a new one each time it is turned on. OpenedBy is
+// how many people have opened the link (and so see the dashboard as shared
+// with them) since it was turned on; who they are is never listed.
+type CustomDashboardLink struct {
+	Enabled  bool   `json:"enabled"`
+	LinkID   string `json:"linkId,omitempty"`
+	OpenedBy int    `json:"openedBy"`
+}
+
+// OpenCustomDashboardLinkRequest is the body of POST
+// /users/me/shared-dashboards/link. The link id travels in the body, not the
+// path, so it stays out of access logs: anyone holding it can open the
+// dashboard.
+type OpenCustomDashboardLinkRequest struct {
+	LinkID string `json:"linkId"`
+}
+
+// OpenedCustomDashboardLink is the dashboard a link opened. Own is true when
+// the caller owns it (read it under My Dashboards); otherwise it is under
+// Shared Dashboards (GET /users/me/shared-dashboards/{id}).
+type OpenedCustomDashboardLink struct {
+	DashboardID string `json:"dashboardId"`
+	Own         bool   `json:"own"`
+}
+
 // SharedCustomDashboardSummary is one dashboard another user shared with the
 // caller, as listed in GET /users/me/shared-dashboards: no definition. Owner
 // is who shared it (the dashboard's owner), nil once that user is deleted
 // (migration 0255). SharedViaTeam is the caller's team
 // it was shared with, nil when it was shared with the caller directly (a
 // direct share wins when there are both; with several teams, the first by
-// name). SharedOn is that share's date.
+// name). SharedViaLink is true when the caller has it only because they
+// opened its link (migration 0275): a direct or team share wins over it.
+// SharedOn is that share's date (for a link, when the caller opened it).
 type SharedCustomDashboardSummary struct {
 	ID            string                        `json:"id"`
 	Name          string                        `json:"name"`
 	Owner         *UserReference                `json:"owner"`
 	SharedViaTeam *CustomDashboardTeamShareTeam `json:"sharedViaTeam"`
+	SharedViaLink bool                          `json:"sharedViaLink"`
 	SharedOn      time.Time                     `json:"sharedOn"`
 	UpdatedOn     time.Time                     `json:"updatedOn"`
 }
@@ -123,13 +153,14 @@ type SharedCustomDashboardList struct {
 // SharedCustomDashboard is one dashboard shared with the caller, with its
 // definition (GET /users/me/shared-dashboards/{id}): the owner's current
 // version, read only. Definition is opaque text, as in CustomDashboard.
-// Owner and SharedViaTeam as in SharedCustomDashboardSummary.
+// Owner, SharedViaTeam and SharedViaLink as in SharedCustomDashboardSummary.
 type SharedCustomDashboard struct {
 	ID            string                        `json:"id"`
 	Name          string                        `json:"name"`
 	Definition    string                        `json:"definition"`
 	Owner         *UserReference                `json:"owner"`
 	SharedViaTeam *CustomDashboardTeamShareTeam `json:"sharedViaTeam"`
+	SharedViaLink bool                          `json:"sharedViaLink"`
 	SharedOn      time.Time                     `json:"sharedOn"`
 	UpdatedOn     time.Time                     `json:"updatedOn"`
 }

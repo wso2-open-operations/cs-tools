@@ -431,15 +431,32 @@ func (s *userService) GetUsersByIDs(ctx context.Context, ids []string) (domain.G
 // so an over-long value is a 400, not a database error.
 const maxPhoneLen = 32
 
+// phoneE164RE is the format a non-empty profile phone must have: E.164 with a
+// leading "+", no separators. Same rule as the webapp and paging.
+var phoneE164RE = regexp.MustCompile(`^\+[1-9]\d{7,14}$`)
+
+// validateProfilePhone trims raw and checks it. An empty result means "clear
+// the phone" and is valid. The value is never echoed in the error.
+func validateProfilePhone(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(trimmed) > maxPhoneLen {
+		return "", &apierror.ValidationError{Msg: fmt.Sprintf("phone must be at most %d characters", maxPhoneLen)}
+	}
+	if trimmed != "" && !phoneE164RE.MatchString(trimmed) {
+		return "", &apierror.ValidationError{Msg: "phone must be in E.164 format, e.g. +14155552671"}
+	}
+	return trimmed, nil
+}
+
 func (s *userService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error) {
 	var timezone, phone *string
 	if req.TimeZone != "" {
 		timezone = &req.TimeZone
 	}
 	if req.Phone != nil {
-		trimmed := strings.TrimSpace(*req.Phone)
-		if utf8.RuneCountInString(trimmed) > maxPhoneLen {
-			return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("phone must be at most %d characters", maxPhoneLen)}
+		trimmed, err := validateProfilePhone(*req.Phone)
+		if err != nil {
+			return domain.PatchUserMeResponse{}, err
 		}
 		phone = &trimmed
 	}
@@ -497,9 +514,9 @@ func (s *userService) UpdateUser(ctx context.Context, userID string, req domain.
 		}
 	}
 	if req.Phone != nil {
-		trimmed := strings.TrimSpace(*req.Phone)
-		if utf8.RuneCountInString(trimmed) > maxPhoneLen {
-			return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("phone must be at most %d characters", maxPhoneLen)}
+		trimmed, err := validateProfilePhone(*req.Phone)
+		if err != nil {
+			return domain.PatchUserMeResponse{}, err
 		}
 		phone = &trimmed
 	}

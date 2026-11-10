@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,9 @@ type fakeBlobEntity struct {
 	authErr   error
 	locateErr error
 	authBody  string
+
+	relocatedBody string
+	relocateErr   error
 }
 
 func (f *fakeBlobEntity) AuthorizeStoredAttachmentUpload(_ context.Context, _ string, b json.RawMessage) ([]byte, error) {
@@ -50,6 +54,10 @@ func (f *fakeBlobEntity) LocateStoredAttachment(context.Context, json.RawMessage
 }
 func (f *fakeBlobEntity) LocateInlineImage(context.Context, string) ([]byte, error) {
 	return []byte(f.locate), f.locateErr
+}
+func (f *fakeBlobEntity) InlineImageRelocated(_ context.Context, _ string, b json.RawMessage) error {
+	f.relocatedBody = string(b)
+	return f.relocateErr
 }
 
 type fakeBlobStore struct {
@@ -326,5 +334,49 @@ func TestParseRange(t *testing.T) {
 		if ok != tc.ok || un != tc.unsat || (ok && (r.Offset != tc.off || r.Length != tc.len)) {
 			t.Errorf("%q = %+v ok=%v unsat=%v", tc.h, r, ok, un)
 		}
+	}
+}
+
+const relocateTo = "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
+
+func TestBlobInlineImage_MovesADescriptionImageToItsWorkItemFolder(t *testing.T) {
+	loc := `{"available":true,"contentType":"image/png","storageKey":"` + secretKey + `","relocateTo":"` + relocateTo + `"}`
+	s := &fakeBlobStore{data: []byte("img")}
+	ent := &fakeBlobEntity{locate: loc}
+	rec := serveBlob(t, ent, s, &fakeStoredEntity{}, http.MethodGet, "/attachments/inline/"+storedID+"/content", nil, nil)
+	if rec.Code != 200 || rec.Body.String() != "img" {
+		t.Fatalf("response = %d %q", rec.Code, rec.Body.String())
+	}
+	if s.putKey != relocateTo || string(s.blocks[0]) != "img" || s.commits != 1 {
+		t.Errorf("copy: key %q blocks %v commits %d", s.putKey, s.blocks, s.commits)
+	}
+	if ent.relocatedBody != `{"storageKey":"`+relocateTo+`"}` {
+		t.Errorf("entity told %q", ent.relocatedBody)
+	}
+	if len(s.deleted) != 1 || s.deleted[0] != secretKey {
+		t.Errorf("old file removal = %v, want only %q", s.deleted, secretKey)
+	}
+}
+
+func TestBlobInlineImage_AFailedMoveKeepsTheOldFile(t *testing.T) {
+	loc := `{"available":true,"contentType":"image/png","storageKey":"` + secretKey + `","relocateTo":"` + relocateTo + `"}`
+	s := &fakeBlobStore{data: []byte("img")}
+	ent := &fakeBlobEntity{locate: loc, relocateErr: errors.New("entity down")}
+	rec := serveBlob(t, ent, s, &fakeStoredEntity{}, http.MethodGet, "/attachments/inline/"+storedID+"/content", nil, nil)
+	if rec.Code != 200 || rec.Body.String() != "img" {
+		t.Fatalf("the image must still be served: %d %q", rec.Code, rec.Body.String())
+	}
+	if len(s.deleted) != 0 {
+		t.Errorf("the old file was removed although entity-service did not accept the new key: %v", s.deleted)
+	}
+}
+
+func TestBlobInlineImage_NoMoveWithoutRelocateTo(t *testing.T) {
+	loc := `{"available":true,"contentType":"image/png","storageKey":"` + secretKey + `"}`
+	s := &fakeBlobStore{data: []byte("img")}
+	ent := &fakeBlobEntity{locate: loc}
+	rec := serveBlob(t, ent, s, &fakeStoredEntity{}, http.MethodGet, "/attachments/inline/"+storedID+"/content", nil, nil)
+	if rec.Code != 200 || s.commits != 0 || len(s.deleted) != 0 || ent.relocatedBody != "" {
+		t.Errorf("unexpected move: %d commits %d deleted %v told %q", rec.Code, s.commits, s.deleted, ent.relocatedBody)
 	}
 }

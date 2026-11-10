@@ -446,3 +446,52 @@ describe("call_request list: the Scheduled / preferred column", () => {
     expect(screen.getByText("Scheduled / preferred")).toBeInTheDocument();
   });
 });
+
+describe("widgetListConfig — rows keep the page's own way back", () => {
+  // On View more the page's state is `{ from: <dashboard> }`; a row nests it
+  // as `parentState`, so the record's Back can hand it back and View more's
+  // own Back still returns to that dashboard.
+  function StateProbe() {
+    const location = useLocation();
+    return <div data-testid="state-probe">{JSON.stringify(location.state)}</div>;
+  }
+
+  function renderFeedbackAt(state: unknown) {
+    const Renderer = WIDGET_LIST_RENDERERS.case_feedback;
+    return render(
+      <MemoryRouter initialEntries={[{ pathname: "/dashboard/preview/case-feedback", search: "?w=w-1", state }]}>
+        <Routes>
+          <Route
+            path="/dashboard/preview/case-feedback"
+            element={
+              <Renderer
+                resourceType="case_feedback"
+                items={[{ instanceId: "fb-1", caseId: "case-1", ratingLabel: "Satisfied" }] as never}
+                isLoading={false}
+              />
+            }
+          />
+          <Route path="/cases/:id" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("passes the page's own state as parentState", () => {
+    renderFeedbackAt({ from: "/dashboard/my/d-1" });
+    fireEvent.click(screen.getByText("Satisfied"));
+    expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+      from: "/dashboard/preview/case-feedback?w=w-1",
+      parentState: { from: "/dashboard/my/d-1" },
+    });
+  });
+
+  it("passes a null parentState when the page had no state", () => {
+    renderFeedbackAt(null);
+    fireEvent.click(screen.getByText("Satisfied"));
+    expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+      from: "/dashboard/preview/case-feedback?w=w-1",
+      parentState: null,
+    });
+  });
+});

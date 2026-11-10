@@ -38,6 +38,7 @@ import {
   Upload,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
+import DownloadCancelButton from "@components/download-progress/DownloadCancelButton";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -493,6 +494,12 @@ function DocumentRow({
               <Download size={16} aria-hidden />
             )}
           </IconButton>
+          {isDownloadLoading && (
+            <DownloadCancelButton
+              name={name}
+              onCancel={() => storedDownload.cancelDownload(doc.id)}
+            />
+          )}
         </Box>
       </Box>
       <DeleteAttachmentModal

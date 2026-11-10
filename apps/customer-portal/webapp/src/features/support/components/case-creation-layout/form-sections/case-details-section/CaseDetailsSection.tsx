@@ -33,6 +33,7 @@ import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/sup
 import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
 import {
+  CREATE_FORM_MAX_ATTACHMENTS,
   entityAttachmentMaxBytes,
   formatLimit,
 } from "@config/attachmentLimitsConfig";
@@ -259,6 +260,7 @@ export function CaseDetailsSection({
             }
             onAttachmentClick={isSecurityReport ? undefined : onAttachmentClick}
             attachments={isSecurityReport ? [] : attachments}
+            maxAttachments={isSecurityReport ? undefined : CREATE_FORM_MAX_ATTACHMENTS}
             onAttachmentRemove={
               isSecurityReport ? undefined : onAttachmentRemove
             }

@@ -65,6 +65,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecards"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/unresolvedproducts"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/usagerollup"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
@@ -167,6 +169,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service long-open-cases client", "err", err)
+		os.Exit(1)
+	}
+
+	// The time card report's own client: the same deployment and credentials,
+	// a project search, the project's contacts and GET /projects/{id}/time-cards/report.
+	timeCardsClient, err := timecards.NewClient(timecards.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service time-card report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -659,6 +675,23 @@ func main() {
 		})
 	}
 
+	// The monthly time card report: each project in TIME_CARD_REPORT_PROJECT_KEYS
+	// gets last calendar month's approved effort per case, mailed to the
+	// project's contacts (one mail each, so customers never see one another's
+	// address). Unset or empty keys make the task a logged no-op, so nothing is
+	// sent until a deployment names its projects. SUB_CRON_RECIPIENTS' to/cc for
+	// this task are the FAILURE alert recipients only, as for every task; the
+	// report audience is the projects' contacts.
+	timeCardProjectKeys := timecardreport.ParseProjectKeys(os.Getenv("TIME_CARD_REPORT_PROJECT_KEYS"))
+	timeCardTo, timeCardCc := recipientsFor(recipientOverrides, timecardreport.TaskName)
+	timeCardEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, timecardreport.TaskName))
+	timeCardSchedule := scheduleFor(scheduleOverrides, timecardreport.TaskName, "30 5 2 * *")
+	if len(timeCardProjectKeys) > 0 {
+		// Its audience is not task.To, so the EMAIL_BASE_URL check below
+		// cannot see it; carry it there by name.
+		regressionTasksWithRecipients = append(regressionTasksWithRecipients, timecardreport.TaskName)
+	}
+
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
 
@@ -903,6 +936,33 @@ func main() {
 			To:       publishScheduledAnnouncementsTo,
 			Cc:       publishScheduledAnnouncementsCc,
 		},
+		// The monthly time card report; see timeCardProjectKeys above. Default
+		// schedule is 05:30 UTC on the 2nd (override via SUB_CRON_SCHEDULES). The
+		// reported month is the one before the PERIOD KEY's month, so every retry
+		// of a period reports the same month.
+		//
+		// MaxAttempts is 2 for the reason acp_closure's is: the handler has no
+		// memory of what it mailed, so a retry after a partial failure mails the
+		// projects that had succeeded again. One retry is the compromise between
+		// that and a transient entity-service outage losing the month's report;
+		// the failure alert says when no retry is coming, and
+		// --run-now=time_card_report --project-key=<KEY> re-sends one project.
+		{
+			Name:     timecardreport.TaskName,
+			Schedule: timeCardSchedule,
+			Handler: timecardreport.SendReports(timeCardsClient, timeCardEmail, periodStart(timeCardSchedule),
+				timecardreport.Config{ProjectKeys: timeCardProjectKeys}, alertsEnabled),
+			To:          timeCardTo,
+			Cc:          timeCardCc,
+			MaxAttempts: 2,
+			// --project-key/--to/--cc of a manual run-now only. These can widen a
+			// run; see registry.Task.RunNowNarrow and timeCardRunNow.
+			RunNowFlags: timeCardRunNowFlags,
+			RunNowNarrow: timeCardRunNow(timeCardEmail, emailClient, timeCardProjectKeys,
+				func(email notify.Sender, cfg timecardreport.Config) func(ctx context.Context) error {
+					return timecardreport.SendReports(timeCardsClient, email, periodStart(timeCardSchedule), cfg, alertsEnabled)
+				}),
+		},
 		// The two outage emails (internal-stakeholder notification and SRE
 		// outage communication) used to be sub-crons here. They moved to
 		// entity-service's outage notice drainer and csm-notification-service,
@@ -1081,7 +1141,7 @@ func main() {
 		weekdayRotations := parseRotations("ROTA_REMINDER_WEEKDAY_SHIFTS",
 			envString("ROTA_REMINDER_WEEKDAY_SHIFTS", "CRE_MORNING=Morning,CRE_MORNING_OC=On-call,CRE_EVENING=Evening"))
 		weekendRotations := parseRotations("ROTA_REMINDER_WEEKEND_SHIFTS",
-			envString("ROTA_REMINDER_WEEKEND_SHIFTS", "CRE_WEEKEND=LK Weekend,CRE_WEEKEND_NIGHT=Americas Weekend,CRE_WEEKEND_NIGHT_OC=LK On-call"))
+			envString("ROTA_REMINDER_WEEKEND_SHIFTS", "CRE_WEEKEND=LK Weekend,CRE_WEEKEND_NIGHT=Americas Weekend,CRE_WEEKEND_NIGHT_OC=Americas On-call"))
 		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 9 * * 1-5")
 		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 14 * * 0-4")
 		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 9 * * 5")

@@ -42,6 +42,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/inlineimages"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/scim"
@@ -123,7 +124,7 @@ type slaEngineService interface {
 	RecalculateFromEntity(ctx context.Context) error
 	// ReviseClocks is called from handleSeverityChanged — see that method's
 	// own doc comment.
-	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string)
+	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -163,6 +164,13 @@ type identityProvisioner interface {
 type fullContentFetcher interface {
 	GetCaseDescription(ctx context.Context, caseID string) (string, error)
 	GetCommentContent(ctx context.Context, commentID string) (string, error)
+}
+
+// inlineImageResolver rewrites the image references in a comment's or
+// description's HTML to the images themselves (see internal/inlineimages), so
+// the email can show them. Satisfied by *inlineimages.Resolver.
+type inlineImageResolver interface {
+	Resolve(ctx context.Context, html string, scope inlineimages.Scope) string
 }
 
 // onboardingStepRecorder abstracts entity.CustomerEntityClient's
@@ -261,6 +269,9 @@ type Dispatcher struct {
 	// a best-effort enrichment of the email body, never a reason to fail or
 	// delay the notification.
 	fullContent fullContentFetcher
+	// images is set via WithInlineImages; nil leaves an image reference as it is
+	// (the email sanitizer drops it).
+	images inlineImageResolver
 
 	// emailSendingEnabled (EMAIL_SENDING_ENABLED, the disable-entirely
 	// `!= "false"` convention CALL_SENDING_ENABLED below also uses) is
@@ -519,6 +530,38 @@ func (d *Dispatcher) WithDurableDedup(client durableDedup) *Dispatcher {
 func (d *Dispatcher) WithFullContentFetcher(f fullContentFetcher) *Dispatcher {
 	d.fullContent = f
 	return d
+}
+
+// WithInlineImages configures the resolution of image references in an email's
+// description or comment (see inlineImageResolver) and returns d for chaining.
+// Optional per deployment: without it the email shows no image that is stored
+// as an attachment.
+func (d *Dispatcher) WithInlineImages(r inlineImageResolver) *Dispatcher {
+	d.images = r
+	return d
+}
+
+// withInlineImages returns html with its image references resolved, or html
+// itself when no resolver is configured. Used where the body is rendered once
+// (the change request notice); see lazyInlineImages for the per-group handlers.
+func (d *Dispatcher) withInlineImages(ctx context.Context, html string, scope inlineimages.Scope) string {
+	if d.images == nil {
+		return html
+	}
+	return d.images.Resolve(ctx, html, scope)
+}
+
+// lazyInlineImages is withInlineImages deferred to the first call and done once
+// per event, not once per recipient group. The images are read only when an
+// email is actually rendered, so an event that sends nothing (sending disabled,
+// no recipient left, a group already claimed by a redelivery) reads no file.
+func (d *Dispatcher) lazyInlineImages(ctx context.Context, html string, scope inlineimages.Scope) func() string {
+	var once sync.Once
+	var out string
+	return func() string {
+		once.Do(func() { out = d.withInlineImages(ctx, html, scope) })
+		return out
+	}
 }
 
 // resolveFullCaseDescription returns the case's full, original description
@@ -1160,6 +1203,8 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleSeverityChanged(ctx, record, env.Payload)
 	case events.TypeWorkaroundProvided:
 		return d.handleWorkaroundProvided(ctx, env.Payload)
+	case events.TypeCaseTypeChanged:
+		return d.handleCaseTypeChanged(ctx, env.Payload)
 	case events.TypeIncidentCreated:
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
 	case events.TypeIncidentAssigned:
@@ -1276,7 +1321,18 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// real publisher (see events.CaseCreatedPayload.CreatedAt); a value
 	// that fails to parse skips registration rather than guessing a
 	// fallback "now" that would start every clock from the wrong instant.
-	if d.slaEngine != nil {
+	//
+	// A service request's SLA state stays UI-only (entity-service's own
+	// sla/clock-state tables already track and expose it) -- a breach alert
+	// here would route to the account's default CRE team, which is often
+	// not the SRE group actually working the SR, a reported false-signal
+	// problem. Rather than register clocks here and suppress the alert
+	// later (slaengine.sendBreachAlert's own CaseType check still exists,
+	// purely as a backstop for a clock that was already registered before
+	// this skip existed), skip registration outright for this one case
+	// type: there is nothing for this engine to track or wake up for, so
+	// there is no reason to write it into Redis at all.
+	if d.slaEngine != nil && p.CaseType != "SERVICE_REQUEST" {
 		createdAt, err := time.Parse(time.RFC3339, p.CreatedAt)
 		if err != nil {
 			slog.WarnContext(ctx, "dispatch: case.created createdAt not RFC3339, sla clocks not registered", "caseId", p.CaseID, "createdAt", p.CreatedAt, "err", err)
@@ -1293,7 +1349,8 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// group. The Google Chat alert below deliberately keeps using p.Product/
 	// p.Team/etc. (not this) — it never reads Description/CaseComment at
 	// all, so it has nothing to recover here.
-	description := d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID)
+	fullDescription := d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID)
+	description := d.lazyInlineImages(ctx, fullDescription, inlineimages.Scope{WorkItemID: p.CaseID})
 
 	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
 	if err != nil {
@@ -1312,7 +1369,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 				Priority:                  emailSeverityLabel(p.Priority),
 				Product:                   p.Product,
 				CreatedAt:                 p.CreatedAt,
-				Description:               description,
+				Description:               description(),
 				IncidentImpactDescription: p.IncidentImpactDescription,
 				CaseLink:                  caseLink,
 				CommentLink:               commentLinkFor(caseLink, ""),
@@ -1477,7 +1534,8 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 	// text): frustration analysis works on the words, which survive
 	// stripping untouched — only the embedded image itself is gone — so it
 	// has no reason to pay for this fetch too.
-	caseComment := d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID)
+	fullComment := d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID)
+	caseComment := d.lazyInlineImages(ctx, fullComment, inlineimages.Scope{WorkItemID: p.CaseID})
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 		if p.IsInternalNote {
 			// See events.CommentAddedPayload.IsInternalNote's own doc
@@ -1485,9 +1543,9 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// as the case reference — this audience is always wso2.com
 			// staff, who recognize the internal reference, not ServiceNow's
 			// own case number.
-			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment, commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
-		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment, commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1856,6 +1914,29 @@ func (d *Dispatcher) handleWorkaroundProvided(ctx context.Context, raw json.RawM
 	return nil
 }
 
+// handleCaseTypeChanged reacts to a case type transfer the same way
+// handleSeverityChanged reacts to a severity change (see
+// events.TypeCaseTypeChanged's own doc comment for the incident this
+// closes): entity-service already cancelled and/or re-registered this
+// case's own SLA clocks on its side before publishing this event; this
+// engine's own Redis-held tracking otherwise has no way to learn that, and
+// would keep ticking a now-cancelled (or now-wrong-duration) clock down
+// indefinitely. No Chat/email reaction reads this event — it exists
+// purely to drive Engine.ReviseClocks, which re-syncs all three of this
+// case's clock types with entity-service's current, post-transfer state
+// (clearing a clock type the new facts no longer cover, rebuilding one
+// they still do).
+func (d *Dispatcher) handleCaseTypeChanged(ctx context.Context, raw json.RawMessage) error {
+	var p events.CaseTypeChangedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode case.type_changed payload: %w", err)
+	}
+	if d.slaEngine != nil {
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.Priority, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, p.NewType)
+	}
+	return nil
+}
+
 // slaRecalculationTimeout bounds one RecalculateFromEntity run — generous
 // relative to Reconcile's own 60s startup budget (cmd/server/main.go) since
 // this is explicitly for recovering from a bulk entity-service data change,
@@ -1935,7 +2016,7 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// indefinitely. ReviseClocks re-syncs all three clock types with
 	// entity-service's current, post-revision state.
 	if d.slaEngine != nil {
-		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team)
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, "")
 	}
 
 	// Registered before anything is claimed (see handleCaseCreated).
@@ -2635,7 +2716,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 		ActorName:        p.ActorName,
 		ProjectName:      p.ProjectName,
 		ShortDescription: p.ShortDescription,
-		Description:      p.Description,
+		Description:      d.withInlineImages(ctx, p.Description, inlineimages.Scope{WorkItemID: p.ChangeRequestID}),
 		Link:             d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
 		IntendedFor:      intendedFor,
 	})

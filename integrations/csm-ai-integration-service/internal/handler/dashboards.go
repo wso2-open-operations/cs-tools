@@ -60,6 +60,7 @@ const (
 	CodeUnusable        = "unusable"
 	CodeTimeout         = "timeout"
 	CodeModelCallFailed = "model_call_failed"
+	CodeUsageLimit      = "usage_limit"
 	CodeInternal        = "internal"
 )
 
@@ -102,8 +103,10 @@ type generateResponse struct {
 }
 
 type usage struct {
-	InputTokens  int64 `json:"inputTokens"`
-	OutputTokens int64 `json:"outputTokens"`
+	InputTokens              int64 `json:"inputTokens"`
+	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+	CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
+	OutputTokens             int64 `json:"outputTokens"`
 }
 
 type errorBody struct {
@@ -119,6 +122,7 @@ type errorBody struct {
 //   - 422 refused                 the model refused
 //   - 502 truncated / unusable    the reply was cut off / holds no JSON object
 //   - 504 timeout                 the model call ran out of time
+//   - 429 usage_limit             the gateway's usage limit (its 429)
 //   - 502 model_call_failed       any other call failure (a gateway 401/403
 //     is this service's key problem, never passed on as the caller's)
 func (h *DashboardHandler) Generate(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +145,12 @@ func (h *DashboardHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, generateResponse{
 		Declined:   res.Declined,
 		Candidates: res.Candidates,
-		Usage:      usage{InputTokens: res.InputTokens, OutputTokens: res.OutputTokens},
+		Usage: usage{
+			InputTokens:              res.InputTokens,
+			CacheCreationInputTokens: res.CacheCreationInputTokens,
+			CacheReadInputTokens:     res.CacheReadInputTokens,
+			OutputTokens:             res.OutputTokens,
+		},
 	})
 }
 
@@ -220,6 +229,9 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, dashboards.ErrUnusable):
 		slog.WarnContext(ctx, "dashboard generate: unusable reply", "err", err)
 		writeError(w, http.StatusBadGateway, CodeUnusable, "the model's reply could not be used")
+	case errors.Is(err, dashboards.ErrUsageLimit):
+		slog.WarnContext(ctx, "dashboard generate: model usage limit reached", "err", err)
+		writeError(w, http.StatusTooManyRequests, CodeUsageLimit, "the model's usage limit was reached")
 	case errors.Is(err, dashboards.ErrCall) && isTimeout(err):
 		slog.WarnContext(ctx, "dashboard generate: model call timed out", "err", err)
 		writeError(w, http.StatusGatewayTimeout, CodeTimeout, "the model call timed out")

@@ -43,6 +43,7 @@ import EditProjectClosureStateDialog from "@features/csm-projects/components/Edi
 import EditProjectOnboardingDialog from "@features/csm-projects/components/EditProjectOnboardingDialog";
 import ProjectMetaCell from "@features/csm-projects/components/ProjectMetaCell";
 import ProjectOnboardingOwnerValue from "@features/csm-projects/components/ProjectOnboardingOwnerValue";
+import ProjectClosureTab from "@features/csm-projects/components/ProjectClosureTab";
 import ProjectOnboardingTab from "@features/csm-projects/components/ProjectOnboardingTab";
 import ProjectContactsTab from "@features/csm-projects/components/ProjectContactsTab";
 import { isOnboardingEnabled } from "@features/csm-projects/utils/projectOnboardingEnabled";
@@ -56,10 +57,17 @@ import { canRaiseServiceRequests } from "@features/csm-projects/utils/subscripti
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
 
-type ProjectTabId = "overview" | "onboarding" | "deployments" | "contacts" | "workItems";
+type ProjectTabId =
+  | "overview"
+  | "onboarding"
+  | "closure"
+  | "deployments"
+  | "contacts"
+  | "workItems";
 const PROJECT_TAB_IDS: readonly ProjectTabId[] = [
   "overview",
   "onboarding",
+  "closure",
   "deployments",
   "contacts",
   "workItems",
@@ -168,6 +176,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
     canWrite,
     canViewWorkItemsStaffView,
     canUpdateProjectClosureState,
+    canUpdateProjectSuspensionOverride,
     canEditProjectOnboarding,
     isAdmin: canCompareWithSalesforce,
   } = usePortalAccess();
@@ -391,6 +400,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
           <Tab value="overview" label="Overview" />
           <Tab value="onboarding" label="Onboarding" />
+          <Tab value="closure" label="Closure" />
           <Tab value="deployments" label="Deployments" />
           <Tab value="contacts" label="Project contacts" />
           {/* A caller without the staff view never sees Chats inside this tab
@@ -502,6 +512,10 @@ export default function CsmProjectDetailPage(): JSX.Element {
           canEdit={canEditProjectOnboarding}
           onEdit={openEditOnboarding}
         />
+      )}
+
+      {activeTab === "closure" && (
+        <ProjectClosureTab project={p} canEdit={canUpdateProjectSuspensionOverride} />
       )}
 
       {activeTab === "deployments" && <DeploymentsTab projectId={p.id} />}

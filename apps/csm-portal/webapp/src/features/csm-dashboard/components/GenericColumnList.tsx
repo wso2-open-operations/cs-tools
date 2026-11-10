@@ -121,7 +121,12 @@ export default function GenericColumnList({
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   const location = useLocation();
   const navigate = useNavTransition();
-  const dashboardReturnState = { from: `${location.pathname}${location.search}` };
+  // `parentState` keeps this page's own state (on View more, its dashboard)
+  // for the record's Back to hand back, as `useDashboardReturnState` does.
+  const dashboardReturnState = {
+    from: `${location.pathname}${location.search}`,
+    parentState: location.state ?? null,
+  };
   const [previewItem, setPreviewItem] = useState<WidgetItem | null>(null);
   const currentUserId = useCurrentUser().user?.id;
   const currentUserEmail = useIdTokenClaims()?.email;

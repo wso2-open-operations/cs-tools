@@ -28,6 +28,10 @@ var ErrAccountNotFound = errors.New("viewer: no account found for that id")
 // ErrProjectNotFound is returned when no project matches the given id.
 var ErrProjectNotFound = errors.New("viewer: no project found for the given id")
 
+// ErrInvalidTimeLogPeriod is returned when the effective time-log period, after
+// project-date defaults are applied, starts after it ends.
+var ErrInvalidTimeLogPeriod = errors.New("viewer: time-log period start is after its end")
+
 // GoLiveStatus is a project's go-live status badge.
 type GoLiveStatus struct {
 	Status string `json:"status"`
@@ -107,12 +111,16 @@ type EscalationDetail struct {
 
 // TimeLogBreakdownDetails is the time-log breakdown report for a project.
 type TimeLogBreakdownDetails struct {
-	ProjectName         string                 `json:"projectName"`
-	ProjectKey          string                 `json:"projectKey"`
-	ProjectType         string                 `json:"projectType"`
-	RemainingQueryHours string                 `json:"remainingQueryHours"`
-	TotalQueryHours     string                 `json:"totalQueryHours"`
-	Cases               []TimeLogBreakdownCase `json:"cases"`
+	ProjectName         string `json:"projectName"`
+	ProjectKey          string `json:"projectKey"`
+	ProjectType         string `json:"projectType"`
+	RemainingQueryHours string `json:"remainingQueryHours"`
+	TotalQueryHours     string `json:"totalQueryHours"`
+	// PeriodStart and PeriodEnd are the inclusive YYYY-MM-DD bounds the report
+	// was computed for; an empty string means that side is unbounded.
+	PeriodStart string                 `json:"periodStart"`
+	PeriodEnd   string                 `json:"periodEnd"`
+	Cases       []TimeLogBreakdownCase `json:"cases"`
 }
 
 // TimeLogBreakdownCase is one case's row in the time-log breakdown report.

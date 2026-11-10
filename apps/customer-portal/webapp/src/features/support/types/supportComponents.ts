@@ -300,6 +300,8 @@ export type AttachmentListItemProps = {
   isDownloadLoading?: boolean;
   /** Percentage (0-100) of the running download, or null while it is not known. */
   downloadProgress?: number | null;
+  /** Stops the running download of this attachment; the button shows only while it downloads. */
+  onCancelDownload?: (attachment: CaseAttachment) => void;
 };
 
 export type DeleteCallRequestModalProps = {

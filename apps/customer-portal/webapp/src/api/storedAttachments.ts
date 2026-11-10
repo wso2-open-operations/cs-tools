@@ -122,10 +122,12 @@ async function postJson(
   authFetch: AuthFetch,
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const response = await authFetch(`${getBackendBaseUrl()}${path}`, {
     method: "POST",
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw await toApiError(response);
   return response;
@@ -208,8 +210,10 @@ async function readRange(
   end: number,
   isWhole: (read: RangeRead) => boolean,
   onBytes?: (bytes: number, response?: Response) => void,
+  signal?: AbortSignal,
 ): Promise<RangeRead> {
   for (let attempt = 1; ; attempt++) {
+    if (signal?.aborted) throw downloadCancelledError();
     let reported = 0;
     const takeBackReported = () => {
       if (reported > 0) onBytes?.(-reported);
@@ -219,6 +223,7 @@ async function readRange(
       const response = await authFetch(url, {
         method: "GET",
         headers: { Range: `bytes=${start}-${end}` },
+        signal,
       });
       if (!response.ok) throw await toApiError(response);
       const parts = await readParts(response, (bytes) => {
@@ -230,6 +235,7 @@ async function readRange(
       takeBackReported();
     } catch (error) {
       takeBackReported();
+      if (signal?.aborted) throw downloadCancelledError();
       if (error instanceof ApiError || isAbortError(error)) throw error;
     }
     if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) {
@@ -249,6 +255,8 @@ async function readRange(
  * in memory; otherwise the ranges are joined in order and saved as one Blob. A
  * range that breaks is fetched again on its own; a refusal stops the other
  * ranges. A closed save dialog ends the download with nothing saved and no error.
+ * `signal` cancels it: the requests in flight are aborted, a half-written picked
+ * file is removed, and an AbortError ({@link isAbortError}) is thrown.
  *
  * Throws an ApiError with status 404 when there is no such stored attachment,
  * which a caller still on the older flow can fall back from. `onSaved` runs once
@@ -258,8 +266,9 @@ async function readRange(
  */
 async function downloadFromBackend(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
 ): Promise<void> {
+  if (input.signal?.aborted) throw downloadCancelledError();
   const target = await openDiskTarget(input.name || "attachment", input.size);
   if (target.kind === "cancelled") return;
   const sink = target.kind === "sink" ? target.sink : undefined;
@@ -274,7 +283,7 @@ async function downloadFromBackend(
 
 async function readAndStore(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; onProgress?: DownloadProgress },
+  input: { type: StoredAttachmentType; id: string; name?: string; onProgress?: DownloadProgress; signal?: AbortSignal },
   sink: DiskSink | undefined,
 ): Promise<void> {
   const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
@@ -307,6 +316,7 @@ async function readAndStore(
       );
     },
     report,
+    input.signal,
   );
   const fileName = input.name || fileNameFromDisposition(first.response.headers);
   const total =
@@ -342,6 +352,7 @@ async function readAndStore(
               );
             },
             report,
+            input.signal,
           );
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
@@ -380,7 +391,7 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
 ): Promise<void> {
   await downloadFromBackend(authFetch, input);
 }
@@ -400,6 +411,8 @@ export async function startStoredUpload(
     name: string;
     contentType?: string;
     sizeBytes: number;
+    /** Cancels the request. */
+    signal?: AbortSignal;
   },
 ): Promise<StoredAttachmentUploadStart> {
   const response = await postJson(authFetch, "/attachments/upload", {
@@ -409,7 +422,7 @@ export async function startStoredUpload(
     name: input.name,
     ...(input.contentType ? { contentType: input.contentType } : {}),
     sizeBytes: input.sizeBytes,
-  });
+  }, input.signal);
   return (await response.json()) as StoredAttachmentUploadStart;
 }
 
@@ -444,9 +457,16 @@ function abortError(): Error {
   return error;
 }
 
-/** True for the error thrown when an upload is cancelled. */
+/** True for the error thrown when an upload or a download is cancelled. */
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+/** What a cancelled download throws: an AbortError, so {@link isAbortError} knows it. */
+function downloadCancelledError(): Error {
+  const error = new Error("The download was cancelled.");
+  error.name = "AbortError";
+  return error;
 }
 
 /** Waits `ms`, or throws as soon as the upload is cancelled. */
@@ -589,14 +609,21 @@ export async function uploadStoredAttachment(
     );
   }
   onStep?.("preparing");
-  const start = await startStoredUpload(authFetch, {
-    type,
-    parentId,
-    projectId,
-    name,
-    contentType: file.type || undefined,
-    sizeBytes: file.size,
-  });
+  let start: StoredAttachmentUploadStart;
+  try {
+    start = await startStoredUpload(authFetch, {
+      type,
+      parentId,
+      projectId,
+      name,
+      contentType: file.type || undefined,
+      sizeBytes: file.size,
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError();
+    throw error;
+  }
   if (start.maxBytes > 0 && file.size > start.maxBytes) {
     throw new Error(
       `File size exceeds the ${formatLimit(start.maxBytes)} limit.`,

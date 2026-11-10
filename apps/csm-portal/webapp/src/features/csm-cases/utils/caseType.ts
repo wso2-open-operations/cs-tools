@@ -69,23 +69,30 @@ export function caseTypeHasSeverity(caseType: BeCaseType | undefined): boolean {
  * {@link ALL_CASE_TYPES}, narrowed to the types a caller may actually see.
  * The backend's `POST /cases/search` denies the WHOLE request with a 403
  * when the type filter names `security_report_analysis` and the caller
- * lacks `PermViewSecurityCenter` (`access.go`) — it does not silently drop
- * just that type and return the rest. Every unlocked, multi-type search
- * (the project Work items tab, the quick-nav case search) must build its
- * "every type" request from this instead of {@link ALL_CASE_TYPES}
+ * lacks `PermViewSecurityReportCases` (`access.go`) — it does not silently
+ * drop just that type and return the rest. Every unlocked, multi-type
+ * search (the project Work items tab, the quick-nav case search) must build
+ * its "every type" request from this instead of {@link ALL_CASE_TYPES}
  * directly, or a caller who can't see security reports gets a 403 on a
  * search that also asks for ordinary cases, service requests, etc. —
  * reported live.
  *
- * `canSeeSecurityReports` must mirror `PermViewSecurityCenter` exactly
- * (`cs_engineer || admin || comment_updater` — see that permission's own
- * doc comment in `access.go`), not just `canUseSecurityCenter`
- * (`cs_engineer || admin`): a `comment_updater`-only caller holds the
- * backend permission too, and passing the narrower flag here would 403 them
- * on exactly the search this function exists to prevent a 403 on.
+ * `canViewSecurityReportCases` must mirror the backend's
+ * `PermViewSecurityReportCases` exactly (`viewer || cs_engineer || admin ||
+ * comment_updater || security_team` — see that permission's own doc comment
+ * in `access.go`), NOT `PortalAccess.canUseSecurityCenter`
+ * (`PermViewSecurityCenter`, narrower: no `viewer`). The two were
+ * deliberately split apart on the backend so `viewer` could read these
+ * cases through search without also gaining the Security Center section —
+ * passing the narrower flag here silently excludes `viewer` (and, before
+ * this was corrected, excluded nobody else it should have) from a type
+ * they're genuinely allowed to see, with nothing on this side erroring to
+ * reveal the gap: the type is just quietly missing from an unfiltered
+ * search's results, only reappearing once the caller explicitly picks it as
+ * a filter (a different, unguarded code path) — reported live.
  */
-export function visibleCaseTypes(canSeeSecurityReports: boolean): BeCaseType[] {
-  return canSeeSecurityReports
+export function visibleCaseTypes(canViewSecurityReportCases: boolean): BeCaseType[] {
+  return canViewSecurityReportCases
     ? ALL_CASE_TYPES
     : ALL_CASE_TYPES.filter((t) => t !== "security_report_analysis");
 }

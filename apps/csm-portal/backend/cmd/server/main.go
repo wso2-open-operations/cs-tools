@@ -465,7 +465,7 @@ func main() {
 	// inline image are streamed through it (so they are PermDownloadAttachment);
 	// upload, confirm and delete are PermWrite.
 	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
-	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore)
+	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore).WithAccessGuard(accessGuard)
 	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
 	route("PUT /attachments/upload/{id}/chunks/{index}", handler.PermWrite, blobAttachmentHandler.PutChunk)
 	route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)
@@ -518,6 +518,11 @@ func main() {
 	route("GET /dashboards/custom/{id}/team-shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardTeamShares)
 	route("PUT /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.AddCustomDashboardTeamShare)
 	route("DELETE /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardTeamShare)
+	// Sharing a saved dashboard by link (owner only): anyone internal who
+	// opens the link sees it under Shared Dashboards while it stays on.
+	route("GET /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.GetCustomDashboardLink)
+	route("PUT /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.EnableCustomDashboardLink)
+	route("DELETE /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.DisableCustomDashboardLink)
 	// Dashboards other users shared with the caller, view only. "shared" is a
 	// literal segment, like "custom", so it never collides with {dashboardId}.
 	// PermView, like the system dashboards: anyone a dashboard can be shared
@@ -525,6 +530,9 @@ func main() {
 	// widgets query with the viewer's own permissions.
 	route("GET /dashboards/shared", handler.PermView, customDashboardHandler.ListSharedDashboards)
 	route("GET /dashboards/shared/{id}", handler.PermView, customDashboardHandler.GetSharedDashboard)
+	// Opening a link is PermView like reading a share: anyone a link can
+	// reach (any internal user) can open it. The link id is in the body.
+	route("POST /dashboards/shared/link", handler.PermView, customDashboardHandler.OpenDashboardLink)
 	route("GET /updates/product-update-levels", handler.PermViewUpdates, updatesHandler.GetProductUpdateLevels)
 	route("POST /updates/levels/search", handler.PermViewUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
@@ -745,6 +753,7 @@ func main() {
 	route("POST /team-schedule/paging-contacts/{userId}/test", handler.PermWrite, scheduleHandler.TestPagingContact)
 	route("POST /team-schedule/assignments/apply", handler.PermWrite, scheduleHandler.ApplyScheduleRange)
 	route("POST /team-schedule/absences/apply", handler.PermWrite, scheduleHandler.ApplyScheduleAbsence)
+	route("POST /team-schedule/engagement-allocations/dismiss", handler.PermWrite, scheduleHandler.DismissScheduleEngagementAllocation)
 	route("DELETE /team-schedule/absences/{id}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsence)
 	route("POST /team-schedule/absence-kinds", handler.PermWrite, scheduleHandler.CreateScheduleAbsenceKind)
 	route("DELETE /team-schedule/absence-kinds/{code}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsenceKind)
@@ -854,8 +863,10 @@ func main() {
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
 	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
+	route("POST /cases/{id}/sla/recalculate-pause", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
+	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)
 	route("PATCH /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.UpdateTimeCard)
 	route("DELETE /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.DeleteTimeCard)

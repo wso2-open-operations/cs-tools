@@ -17,9 +17,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
@@ -54,6 +57,29 @@ func TestServiceGenerator_KeepsTheLastValidCandidate(t *testing.T) {
 	}
 }
 
+// The "model replied" line carries the call's whole input: the uncached part
+// and the prompt cache's write and read counts.
+func TestServiceGenerator_LogsTheCacheTokenCounts(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	ai := &fakeAIClient{res: csmai.DashboardResult{
+		Candidates: []json.RawMessage{json.RawMessage(validGenerated)},
+		Usage:      csmai.Usage{InputTokens: 120, CacheCreationInputTokens: 30, CacheReadInputTokens: 15000, OutputTokens: 400},
+	}}
+	if _, err := NewServiceDashboardGenerator(ai, nil).Generate(context.Background(), "p", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	line := buf.String()
+	for _, want := range []string{"inputTokens=120", "cacheCreationInputTokens=30", "cacheReadInputTokens=15000", "outputTokens=400"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log %q has no %s", line, want)
+		}
+	}
+}
+
 func TestServiceGenerator_DeclinedAndNoValidCandidate(t *testing.T) {
 	var declined *generateDeclinedError
 	_, err := NewServiceDashboardGenerator(&fakeAIClient{res: csmai.DashboardResult{Declined: "No revenue field."}}, nil).
@@ -79,6 +105,7 @@ func TestServiceGenerateError_MapsEveryCode(t *testing.T) {
 		csmai.CodeUnusable:        errGenerateUnusable,
 		csmai.CodeTimeout:         errGenerateCall,
 		csmai.CodeModelCallFailed: errGenerateCall,
+		csmai.CodeUsageLimit:      errGenerateUsageLimit,
 		csmai.CodeInvalidRequest:  errGenerateCall,
 	} {
 		err := serviceGenerateError(&csmai.Error{StatusCode: 500, Code: code})

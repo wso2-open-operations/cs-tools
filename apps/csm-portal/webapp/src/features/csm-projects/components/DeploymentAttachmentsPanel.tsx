@@ -28,7 +28,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Download, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
@@ -38,6 +38,7 @@ import { formatBytes } from "@utils/formatBytes";
 import { useSearchDeploymentAttachments } from "@features/csm-projects/api/useSearchDeploymentAttachments";
 import { useCreateDeploymentAttachment } from "@features/csm-projects/api/useCreateDeploymentAttachment";
 import { useDeleteDeploymentAttachment } from "@features/csm-projects/api/useDeleteDeploymentAttachment";
+import { AttachmentDownloadIconButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import { useDownloadDeploymentAttachment } from "@features/csm-projects/api/useDownloadDeploymentAttachment";
 import type { DeploymentAttachment } from "@features/csm-projects/types/csmProjects";
 
@@ -75,7 +76,6 @@ export default function DeploymentAttachmentsPanel({
 
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<DeploymentAttachment | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
@@ -127,7 +127,6 @@ export default function DeploymentAttachmentsPanel({
   };
 
   const handleDownload = async (a: DeploymentAttachment): Promise<void> => {
-    setDownloadingId(a.id);
     try {
       await downloadAttachment(a);
     } catch (err) {
@@ -135,8 +134,6 @@ export default function DeploymentAttachmentsPanel({
         message: `Could not download ${a.name}: ${err instanceof Error ? err.message : String(err)}`,
         severity: "error",
       });
-    } finally {
-      setDownloadingId(null);
     }
   };
 
@@ -243,20 +240,11 @@ export default function DeploymentAttachmentsPanel({
                     </IconButton>
                   </Tooltip>
                 )}
-                <Tooltip title="Download">
-                  <IconButton
-                    size="small"
-                    aria-label={`Download ${a.name}`}
-                    disabled={downloadingId === a.id}
-                    onClick={() => void handleDownload(a)}
-                  >
-                    {downloadingId === a.id ? (
-                      <CircularProgress size={14} />
-                    ) : (
-                      <Download size={14} />
-                    )}
-                  </IconButton>
-                </Tooltip>
+                <AttachmentDownloadIconButton
+                  id={a.id}
+                  name={a.name}
+                  onDownload={() => void handleDownload(a)}
+                />
               </Box>
             </Box>
           ))}

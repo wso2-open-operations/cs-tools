@@ -25,6 +25,14 @@
  * this constant only ever affects CS Overview. */
 export const CS_OVERVIEW_REFETCH_INTERVAL_MS = 60_000;
 
+/** How often `/cs-monitor-dashboard` does a full page reload, on top of the
+ * per-tile polling above: every 60 minutes. The wallboard stays open for
+ * days, and polling alone never clears anything stuck — a hung request, a
+ * tile whose timer stopped, the long-lived in-memory query cache, or a
+ * frontend bundle that's since been redeployed. A periodic reload resets
+ * all of it, without changing how the tiles themselves poll. */
+export const CS_MONITOR_PAGE_RELOAD_INTERVAL_MS = 60 * 60 * 1000;
+
 /**
  * The wallboard's sizing system. Every text size, padding and gap on
  * `/cs-monitor-dashboard` is written as "N pixels, as designed at

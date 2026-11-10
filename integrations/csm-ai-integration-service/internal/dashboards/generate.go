@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -47,6 +48,10 @@ var (
 	// ErrCall: the call itself failed (the gateway answered an error, the
 	// connection failed, or it timed out). Wraps the SDK error.
 	ErrCall = errors.New("model call failed")
+	// ErrUsageLimit: the gateway answered 429, a request, token or spend
+	// limit on the AI side, also after the SDK's one retry. Wrapped together
+	// with ErrCall, so it is a call failure too.
+	ErrUsageLimit = errors.New("model usage limit reached")
 	// ErrRefused: the model refused (stop reason "refusal").
 	ErrRefused = errors.New("model refused the request")
 	// ErrTruncated: the reply hit maxTokens before finishing.
@@ -74,10 +79,15 @@ type Request struct {
 // last object; otherwise Candidates holds every JSON object in the reply, in
 // order (the last valid one is the answer: see the backend).
 type Result struct {
-	Candidates   []json.RawMessage
-	Declined     string
-	InputTokens  int64
-	OutputTokens int64
+	Candidates []json.RawMessage
+	Declined   string
+	// InputTokens is the input that was neither read from nor written to the
+	// cache (the user message, mostly, once the system prompt is cached); the
+	// two cache counts are the rest of the input.
+	InputTokens              int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+	OutputTokens             int64
 }
 
 // Generator makes the model call.
@@ -108,11 +118,23 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 	msg, err := g.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(g.model),
 		MaxTokens: maxTokens,
-		System:    []anthropic.TextBlockParam{{Text: system}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
+		// The system prompt is the same for every user and call of one
+		// deployment (the catalogue, and the team list the backend builds
+		// once at start), so it is cached: a call within the cache's lifetime
+		// (5 minutes, renewed by each hit) reads it at the model's cache-hit
+		// price: 0.05 times the input price on Sonnet 5.5 (the default) and
+		// Opus 5.5, 0.1 times on most other models. Nothing that changes per
+		// request may come before this breakpoint; the prompt and the draft
+		// are in the user message after it.
+		System:   []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
+		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft, now())))},
 	})
 	took := time.Since(start)
 	if err != nil {
+		if isUsageLimit(err) {
+			logUsage(ctx, g.model, outcomeUsageLimit, "", anthropic.Usage{}, took)
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrCall, ErrUsageLimit, err)
+		}
 		logUsage(ctx, g.model, outcomeFailed, "", anthropic.Usage{}, took)
 		return Result{}, fmt.Errorf("%w: %w", ErrCall, err)
 	}
@@ -129,7 +151,17 @@ const (
 	outcomeTruncated = "truncated"
 	outcomeUnusable  = "unusable"
 	outcomeFailed    = "failed" // no reply: the gateway answered an error, the connection failed, or it timed out
+	// outcomeUsageLimit: no reply, the gateway answered 429 (ErrUsageLimit).
+	outcomeUsageLimit = "usage_limit"
 )
+
+// isUsageLimit reports whether err is the gateway answering 429 Too Many
+// Requests. An overloaded gateway (529 or 503) is not a usage limit: it stays
+// an ordinary call failure.
+func isUsageLimit(err error) bool {
+	var apiErr *anthropic.Error
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
+}
 
 // readReply reads the model's reply into a result, and names its outcome.
 func readReply(msg *anthropic.Message) (Result, string, error) {
@@ -144,7 +176,12 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 	if len(objects) == 0 {
 		return Result{}, outcomeUnusable, fmt.Errorf("%w: no JSON object in the reply", ErrUnusable)
 	}
-	res := Result{InputTokens: msg.Usage.InputTokens, OutputTokens: msg.Usage.OutputTokens}
+	res := Result{
+		InputTokens:              msg.Usage.InputTokens,
+		CacheCreationInputTokens: msg.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     msg.Usage.CacheReadInputTokens,
+		OutputTokens:             msg.Usage.OutputTokens,
+	}
 	if reason, ok := declineReason(objects[len(objects)-1]); ok {
 		res.Declined = reason
 		return res, outcomeDeclined, nil
@@ -161,7 +198,10 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 func logUsage(ctx context.Context, model, outcome string, stopReason anthropic.StopReason, usage anthropic.Usage, took time.Duration) {
 	slog.InfoContext(ctx, "dashboard generate: token usage",
 		"model", model, "outcome", outcome, "stopReason", stopReason,
-		"inputTokens", usage.InputTokens, "outputTokens", usage.OutputTokens,
+		"inputTokens", usage.InputTokens,
+		"cacheCreationInputTokens", usage.CacheCreationInputTokens,
+		"cacheReadInputTokens", usage.CacheReadInputTokens,
+		"outputTokens", usage.OutputTokens,
 		"durationMs", took.Milliseconds())
 }
 
@@ -176,14 +216,22 @@ func messageText(msg *anthropic.Message) string {
 	return text.String()
 }
 
+// now is the clock userMessage reads today's date from; a test sets it.
+var now = time.Now
+
 // userMessage is the prompt alone on a first message, or the draft followed
-// by the prompt as the change to make.
-func userMessage(prompt string, draft json.RawMessage) string {
+// by the prompt as the change to make, and then today's date (UTC). The
+// catalogue resolves a month or quarter named without a year against it
+// ("December" is the most recent December that has begun). It is in the user
+// message, after the cached system prompt, so the cache still hits on every
+// day.
+func userMessage(prompt string, draft json.RawMessage, today time.Time) string {
+	date := "\n\nToday's date: " + today.UTC().Format("2006-01-02")
 	if draft == nil {
-		return prompt
+		return prompt + date
 	}
 	return "This is the dashboard I am editing:\n\n```json\n" + string(draft) +
-		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\n" + prompt
+		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\n" + prompt + date
 }
 
 // jsonObjects returns the top-level JSON objects in text, in order. A reply
