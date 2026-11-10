@@ -16,30 +16,29 @@
 
 -- PLG: WSO2 Cloud signup products.
 --
--- A Cloud signup names its entry point as initiatingProduct; cloud_product_key
--- maps it to a product, and WSO2_CLOUD covers signups on the Cloud itself.
--- Existing products keep their identity_source. Safe to re-run.
-
-ALTER TABLE plg_product ADD COLUMN IF NOT EXISTS cloud_product_key TEXT;
-
-DO $$ BEGIN
-    ALTER TABLE plg_product
-        ADD CONSTRAINT uq_plg_product_cloud_product_key UNIQUE (cloud_product_key);
-EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL; END $$;
-
-COMMENT ON COLUMN plg_product.cloud_product_key IS
-    'WSO2 Cloud name for this product (initiatingProduct, lower case).';
+-- A Cloud signup names its entry point as initiatingProduct;
+-- plg_cloud_product_key maps each name to a product, several names per product
+-- allowed. WSO2_CLOUD covers signups on the Cloud itself. Safe to re-run.
 
 INSERT INTO plg_product (code, name, display_order, identity_source)
 VALUES ('WSO2_CLOUD', 'WSO2 Cloud', 6, 'CLOUD_PLATFORM')
 ON CONFLICT (code) DO NOTHING;
 
-UPDATE plg_product p
-SET    cloud_product_key = k.key
-FROM  (VALUES ('WSO2_CLOUD',           'wso2cloud'),
-              ('AGENT_PLATFORM',       'agent-manager'),
-              ('API_PLATFORM',         'api-platform'),
-              ('INTEGRATION_PLATFORM', 'integration-platform'),
-              ('IAM',                  'core')) AS k (code, key)
-WHERE  p.code = k.code
-  AND  p.cloud_product_key IS DISTINCT FROM k.key;
+CREATE TABLE IF NOT EXISTS plg_cloud_product_key (
+    cloud_key  TEXT PRIMARY KEY CHECK (cloud_key = LOWER(cloud_key)),
+    product_id UUID NOT NULL REFERENCES plg_product (id) ON DELETE CASCADE
+);
+
+COMMENT ON TABLE plg_cloud_product_key IS
+    'WSO2 Cloud names (initiatingProduct, lower case) of each product.';
+
+INSERT INTO plg_cloud_product_key (cloud_key, product_id)
+SELECT k.key, p.id
+FROM  (VALUES ('wso2cloud',            'WSO2_CLOUD'),
+              ('core',                 'WSO2_CLOUD'),
+              ('agent-manager',        'AGENT_PLATFORM'),
+              ('api-platform',         'API_PLATFORM'),
+              ('integration-platform', 'INTEGRATION_PLATFORM'),
+              ('identity-platform',    'IAM')) AS k (key, code)
+JOIN   plg_product p ON p.code = k.code
+ON CONFLICT (cloud_key) DO UPDATE SET product_id = EXCLUDED.product_id;

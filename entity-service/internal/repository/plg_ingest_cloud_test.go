@@ -43,8 +43,8 @@ func TestIngestResolvesCloudInitiatingProduct(t *testing.T) {
 
 	// Each Cloud name lands on its product, by id only, even with a name and email sent.
 	for key, want := range map[string]string{
-		"wso2cloud": "WSO2_CLOUD", "agent-manager": "AGENT_PLATFORM", "api-platform": "API_PLATFORM",
-		"integration-platform": "INTEGRATION_PLATFORM", "core": "IAM",
+		"wso2cloud": "WSO2_CLOUD", "core": "WSO2_CLOUD", "agent-manager": "AGENT_PLATFORM", "api-platform": "API_PLATFORM",
+		"integration-platform": "INTEGRATION_PLATFORM", "identity-platform": "IAM",
 	} {
 		company := "cloudkey-" + key
 		res, err := reg(domain.Registration{CompanyID: company, UserID: owner, InitiatingProduct: strings.ToUpper(key),
@@ -64,11 +64,11 @@ func TestIngestResolvesCloudInitiatingProduct(t *testing.T) {
 
 	// Both fields agreeing is fine; disagreeing is refused and writes nothing.
 	if _, err := reg(domain.Registration{CompanyID: "cloudkey-agree", UserID: owner,
-		InitiatingProduct: "core", InitiatedPlatform: "iam"}); err != nil {
+		InitiatingProduct: "identity-platform", InitiatedPlatform: "iam"}); err != nil {
 		t.Errorf("agreeing fields refused: %v", err)
 	}
 	_, err = reg(domain.Registration{CompanyID: "cloudkey-clash", UserID: owner,
-		InitiatingProduct: "core", InitiatedPlatform: "API_PLATFORM"})
+		InitiatingProduct: "identity-platform", InitiatedPlatform: "API_PLATFORM"})
 	if err == nil || !strings.Contains(err.Error(), "initiatedPlatform") {
 		t.Errorf("clash: err = %v", err)
 	}

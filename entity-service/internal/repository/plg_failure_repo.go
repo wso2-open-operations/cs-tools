@@ -36,9 +36,14 @@ func NewFailureRepository(db *pgxpool.Pool) FailureRepository {
 }
 
 func (r *failureRepository) Record(ctx context.Context, f IngestFailure) error {
+	// An event already open is not recorded again: a scheduled sync re-reads
+	// its window, so the same failing event arrives on every run.
 	const q = `
 		INSERT INTO plg_ingest_failure (event_id, event_type, received_at, payload, failure)
-		VALUES (NULLIF($1, ''), NULLIF($2, ''), $3::TIMESTAMPTZ, $4::JSONB, $5)`
+		SELECT NULLIF($1::TEXT, ''), NULLIF($2, ''), $3::TIMESTAMPTZ, $4::JSONB, $5
+		WHERE  $1::TEXT = ''
+		   OR  NOT EXISTS (SELECT 1 FROM plg_ingest_failure
+		                   WHERE  event_id = $1::TEXT AND resolved_on IS NULL)`
 
 	// A payload that is not valid JSON still has to be kept, so it is stored as
 	// a JSON string rather than rejected by the JSONB cast.

@@ -144,7 +144,10 @@ func describeIngest(orgCreated, pairingCreated bool, platform string) (string, s
 
 // productForCloudKey maps initiatingProduct to a product code; unknown names are refused.
 func productForCloudKey(ctx context.Context, tx pgx.Tx, key string) (string, error) {
-	const q = `SELECT code FROM plg_product WHERE cloud_product_key = LOWER($1)`
+	const q = `
+		SELECT p.code FROM plg_cloud_product_key k
+		JOIN   plg_product p ON p.id = k.product_id
+		WHERE  k.cloud_key = LOWER($1)`
 	var code string
 	err := tx.QueryRow(ctx, q, key).Scan(&code)
 	if errors.Is(err, pgx.ErrNoRows) {
