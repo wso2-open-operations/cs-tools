@@ -18419,6 +18419,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /plg/organizations/aggregate:
+    post:
+      summary: Count organisations per owner or per country.
+      description: >-
+        The organisations the search's filters match (the same conditions as
+        POST /plg/organizations/search, so a group's count is what that
+        search lists for it), counted per groupBy. "owner": one group per PLG
+        CS owner, key the owner's user id and label their name, and the
+        organisations with no owner as key "unowned", label "Unowned".
+        "country": one group per country as plg_organization_v resolves it
+        (inherited from a sibling registered by the same person), grouped
+        ignoring case and surrounding spaces, key and label the country as
+        written, and the ones with no country as key "unknown", label
+        "Unknown". Groups come largest first, ties by label.
+      operationId: plgAggregateOrganizations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateOrganizationsRequest"
+      responses:
+        "200":
+          description: Organisations per group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: Bad request — an invalid enum, groupBy, maxGroups, window, date or country filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /plg/organizations/{organizationId}:
     get:
       summary: One organisation with its platform cards.
@@ -18988,6 +19034,88 @@ paths:
                 $ref: "#/components/schemas/PlgRegistrationSearchResponse"
         "400":
           description: Bad request — an invalid enum, a malformed id or date, or a missing reason.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/registrations/volume-trend:
+    post:
+      summary: Registrations per day, week or month, for a dashboard chart.
+      description: >-
+        The registrations the search's filters and unacknowledgedOnly match
+        (as POST /plg/registrations/search), counted by UTC registration day
+        over a window taken exactly as POST /cases/volume-trend takes it (the
+        trailing days, 30 by default, or startDate/endDate with a day, week or
+        month bucket, within the same limits). One series, "Registered", in
+        the case trend's response shape.
+      operationId: plgRegistrationVolumeTrend
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgRegistrationVolumeTrendRequest"
+      responses:
+        "200":
+          description: Registrations per point of the window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseVolumeTrendResponse"
+        "400":
+          description: Bad request — an invalid enum, groupBy, maxGroups, window, date or country filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/registrations/aggregate:
+    post:
+      summary: Count registrations per country.
+      description: >-
+        The registrations the search's filters and unacknowledgedOnly match
+        (as POST /plg/registrations/search), counted per their organisation's
+        country, grouped, keyed and ordered as POST /plg/organizations/aggregate
+        groups organisations by country. groupBy "country" is the only grouping.
+      operationId: plgAggregateRegistrations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateRegistrationsRequest"
+      responses:
+        "200":
+          description: Registrations per country.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: Bad request — an invalid enum, groupBy, maxGroups, window, date or country filter.
           content:
             application/json:
               schema:
@@ -39567,6 +39695,113 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationSearchFilters:
+      type: object
+      description: >-
+        The filters the PLG organisation and registration searches, the
+        registration trend and both PLG aggregates share. Every key is
+        optional; lists match any of their values; keys are ANDed.
+      properties:
+        query:
+          type: string
+          description: Matches the organisation name or registered email, ignoring case.
+        organizationName:
+          type: string
+        registeredEmail:
+          type: string
+        productCodes:
+          type: array
+          items:
+            type: string
+        lifecycleStages:
+          type: array
+          items:
+            type: string
+        subscriptionTiers:
+          type: array
+          items:
+            type: string
+        ownerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        unowned:
+          type: boolean
+          nullable: true
+          description: true matches the organisations with no owner.
+        registeredFrom:
+          type: string
+          format: date-time
+        registeredTo:
+          type: string
+          format: date-time
+        countryNames:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+          description: >-
+            Matches the organisation's country (inherited from a sibling when
+            its own row has none), any of these, trimmed and ignoring case. A
+            registration matches by its organisation's country. Each entry
+            must be 1 to 100 characters.
+        countryUnknown:
+          type: boolean
+          nullable: true
+          description: >-
+            true matches the organisations (registrations) with no country.
+            Not with countryNames.
+    PlgAggregateOrganizationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [owner, country]
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: The groups after the first maxGroups are folded into othersCount; 0 or omitted keeps every group.
+    PlgAggregateRegistrationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [country]
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: As PlgAggregateOrganizationsRequest's maxGroups.
+    PlgRegistrationVolumeTrendRequest:
+      type: object
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        days:
+          type: integer
+          description: As CaseVolumeTrendRequest's days.
+        startDate:
+          type: string
+          description: As CaseVolumeTrendRequest's startDate.
+        endDate:
+          type: string
+          description: As CaseVolumeTrendRequest's endDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: As CaseVolumeTrendRequest's bucket.
     PlgAcknowledgeRequest:
       type: object
       required:
