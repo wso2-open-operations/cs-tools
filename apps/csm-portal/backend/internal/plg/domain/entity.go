@@ -399,6 +399,12 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// CountryNames matches the organisation's country, any of them, ignoring
+	// case; CountryUnknown true matches the organisations with no country.
+	// A registration matches by its organisation's country. entity-service
+	// checks both.
+	CountryNames   []string `json:"countryNames"`
+	CountryUnknown *bool    `json:"countryUnknown"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.
@@ -410,9 +416,9 @@ type SearchOrganizationsRequest struct {
 }
 
 // AggregateOrganizationsRequest is the body of POST /organizations/aggregate:
-// the organisations the search's filters select, counted per GroupBy ("owner",
-// the only grouping). MaxGroups keeps the largest groups and folds the rest
-// into OthersCount; 0 keeps them all. entity-service checks both.
+// the organisations the search's filters select, counted per GroupBy ("owner"
+// or "country"). MaxGroups keeps the largest groups and folds the rest into
+// OthersCount; 0 keeps them all. entity-service checks both.
 type AggregateOrganizationsRequest struct {
 	Filters   OrganizationSearchFilters `json:"filters"`
 	GroupBy   string                    `json:"groupBy"`
@@ -420,11 +426,25 @@ type AggregateOrganizationsRequest struct {
 }
 
 // AggregateGroup is one group of an AggregateResponse. For the owner grouping,
-// Key is the owner's user id (or "unowned") and Label the owner's name.
+// Key is the owner's user id (or "unowned") and Label the owner's name; for
+// the country grouping, Key and Label are the country (or "unknown",
+// labelled "Unknown").
 type AggregateGroup struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Count int    `json:"count"`
+}
+
+// AggregateRegistrationsRequest is the body of POST /registrations/aggregate:
+// the registrations the search's filters and UnacknowledgedOnly select,
+// counted per GroupBy ("country", the only grouping: the registration's
+// organisation's country), with MaxGroups as an organisation aggregate takes
+// it. entity-service checks the grouping and its limit.
+type AggregateRegistrationsRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	GroupBy            string                    `json:"groupBy"`
+	MaxGroups          int                       `json:"maxGroups,omitempty"`
 }
 
 // AggregateResponse answers POST /organizations/aggregate, in entity-service's

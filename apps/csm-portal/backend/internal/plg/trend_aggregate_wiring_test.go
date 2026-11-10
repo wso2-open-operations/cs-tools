@@ -132,6 +132,14 @@ func TestTrendAndAggregateAreForwarded(t *testing.T) {
 			`{"filters":{"productCodes":["IAM"]},"groupBy":"owner","maxGroups":5}`,
 			`{"groups":[{"key":"11111111-1111-1111-1111-111111111111","label":"Alice Owner","count":2},{"key":"unowned","label":"Unowned","count":1}],"othersCount":0,"totalRecords":3}`,
 			func(s string) any { return decodeAs[domain.AggregateOrganizationsRequest](t, s) }},
+		{"/plg/organizations/aggregate", "/plg/organizations/aggregate",
+			`{"filters":{"productCodes":["IAM"],"countryNames":["Sri Lanka"]},"groupBy":"country","maxGroups":10}`,
+			`{"groups":[{"key":"Sri Lanka","label":"Sri Lanka","count":4}],"othersCount":0,"totalRecords":4}`,
+			func(s string) any { return decodeAs[domain.AggregateOrganizationsRequest](t, s) }},
+		{"/plg/registrations/aggregate", "/plg/registrations/aggregate",
+			`{"unacknowledgedOnly":true,"filters":{"productCodes":["IAM"],"countryUnknown":true},"groupBy":"country","maxGroups":10}`,
+			`{"groups":[{"key":"unknown","label":"Unknown","count":2}],"othersCount":0,"totalRecords":2}`,
+			func(s string) any { return decodeAs[domain.AggregateRegistrationsRequest](t, s) }},
 	} {
 		entity := &fakeEntity{status: http.StatusOK, body: c.answer}
 		w := postAs(t, trendAggregateMux(t, entity), c.path, c.body)
@@ -169,12 +177,15 @@ func TestTrendWithNoBodyIsTheDefaultWindow(t *testing.T) {
 // and an aggregate with no body, are 400 without an entity-service call.
 func TestTrendAndAggregateRefuseABadRequestHere(t *testing.T) {
 	for name, c := range map[string]struct{ path, body string }{
-		"trend, unknown stage":       {"/plg/registrations/volume-trend", `{"filters":{"lifecycleStages":["WON"]}}`},
-		"trend, unknown field":       {"/plg/registrations/volume-trend", `{"months":3}`},
-		"aggregate, unknown tier":    {"/plg/organizations/aggregate", `{"filters":{"subscriptionTiers":["GOLD"]},"groupBy":"owner"}`},
-		"aggregate, unknown field":   {"/plg/organizations/aggregate", `{"groupBy":"owner","limit":5}`},
-		"aggregate, no body":         {"/plg/organizations/aggregate", ""},
-		"aggregate, dates backwards": {"/plg/organizations/aggregate", `{"filters":{"registeredFrom":"2026-02-01T00:00:00Z","registeredTo":"2026-01-01T00:00:00Z"},"groupBy":"owner"}`},
+		"trend, unknown stage":                  {"/plg/registrations/volume-trend", `{"filters":{"lifecycleStages":["WON"]}}`},
+		"trend, unknown field":                  {"/plg/registrations/volume-trend", `{"months":3}`},
+		"aggregate, unknown tier":               {"/plg/organizations/aggregate", `{"filters":{"subscriptionTiers":["GOLD"]},"groupBy":"owner"}`},
+		"aggregate, unknown field":              {"/plg/organizations/aggregate", `{"groupBy":"owner","limit":5}`},
+		"aggregate, no body":                    {"/plg/organizations/aggregate", ""},
+		"aggregate, dates backwards":            {"/plg/organizations/aggregate", `{"filters":{"registeredFrom":"2026-02-01T00:00:00Z","registeredTo":"2026-01-01T00:00:00Z"},"groupBy":"owner"}`},
+		"registration aggregate, unknown stage": {"/plg/registrations/aggregate", `{"filters":{"lifecycleStages":["WON"]},"groupBy":"country"}`},
+		"registration aggregate, unknown field": {"/plg/registrations/aggregate", `{"groupBy":"country","countries":["India"]}`},
+		"registration aggregate, no body":       {"/plg/registrations/aggregate", ""},
 	} {
 		entity := &fakeEntity{status: http.StatusOK, body: `{}`}
 		if w := postAs(t, trendAggregateMux(t, entity), c.path, c.body); w.Code != http.StatusBadRequest {
@@ -191,7 +202,9 @@ func TestTrendAndAggregateRefuseABadRequestHere(t *testing.T) {
 func TestEntityServiceRefusalsComeBackAsTheirMessage(t *testing.T) {
 	for _, c := range []struct{ path, body, message string }{
 		{"/plg/registrations/volume-trend", `{"bucket":"month"}`, "bucket needs startDate and endDate"},
-		{"/plg/organizations/aggregate", `{"groupBy":"tier"}`, `groupBy must be "owner"`},
+		{"/plg/organizations/aggregate", `{"groupBy":"tier"}`, `groupBy must be "owner" or "country", got "tier"`},
+		{"/plg/registrations/aggregate", `{"groupBy":"owner"}`, `groupBy must be "country", got "owner"`},
+		{"/plg/organizations/search", `{"filters":{"countryNames":["India"],"countryUnknown":true}}`, "filters.countryNames and filters.countryUnknown cannot be combined"},
 	} {
 		answer, _ := json.Marshal(map[string]any{"code": 400, "message": c.message})
 		entity := &fakeEntity{status: http.StatusBadRequest, body: string(answer)}

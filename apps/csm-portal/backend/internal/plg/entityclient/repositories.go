@@ -275,6 +275,12 @@ func (c *Client) RegistrationVolumeTrend(ctx context.Context, req domain.Registr
 	return out, err
 }
 
+func (c *Client) AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error) {
+	var out domain.AggregateResponse
+	err := c.post(ctx, "/plg/registrations/aggregate", req, &out)
+	return out, err
+}
+
 func (c *Client) LocatePairing(ctx context.Context, orgPlatformID string) (string, string, error) {
 	var out domain.PairingLocation
 	if err := c.get(ctx, "/plg/pairings/"+esc(orgPlatformID)+"/location", &out); err != nil {

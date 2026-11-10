@@ -148,6 +148,7 @@ type OrgPlatformService interface {
 
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) (domain.SearchRegistrationsResponse, error)
 	RegistrationVolumeTrend(ctx context.Context, req domain.RegistrationVolumeTrendRequest) (domain.VolumeTrendResponse, error)
+	AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error)
 	Acknowledge(ctx context.Context, req domain.AcknowledgeRequest, actor string) (*domain.ProductDetail, error)
 }
 
@@ -465,6 +466,15 @@ func (s *orgPlatformService) RegistrationVolumeTrend(ctx context.Context, req do
 		return domain.VolumeTrendResponse{}, err
 	}
 	return s.repo.RegistrationVolumeTrend(ctx, req)
+}
+
+// AggregateRegistrations checks the filters as SearchRegistrations does; the
+// grouping and its limit are entity-service's to check.
+func (s *orgPlatformService) AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error) {
+	if err := validateSearchFilters(&req.Filters); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	return s.repo.AggregateRegistrations(ctx, req)
 }
 
 func (s *orgPlatformService) Acknowledge(ctx context.Context, req domain.AcknowledgeRequest, actor string) (*domain.ProductDetail, error) {

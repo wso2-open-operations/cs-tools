@@ -212,6 +212,7 @@ func register(
 	// New registrations.
 	add("POST /plg/registrations/search", csmhandler.PermUsePlg, h.SearchRegistrations)
 	add("POST /plg/registrations/volume-trend", csmhandler.PermUsePlg, h.RegistrationVolumeTrend)
+	add("POST /plg/registrations/aggregate", csmhandler.PermUsePlg, h.AggregateRegistrations)
 	add("POST /plg/registrations/{orgPlatformId}/acknowledge", csmhandler.PermUsePlg, h.Acknowledge)
 
 	// Playbook manager.

@@ -324,6 +324,20 @@ func (h *Handlers) RegistrationVolumeTrend(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, res)
 }
 
+// AggregateRegistrations serves POST /registrations/aggregate.
+func (h *Handlers) AggregateRegistrations(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateRegistrationsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.pairings.AggregateRegistrations(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // Acknowledge serves POST /registrations/{orgPlatformId}/acknowledge.
 func (h *Handlers) Acknowledge(w http.ResponseWriter, r *http.Request) {
 	var req domain.AcknowledgeRequest

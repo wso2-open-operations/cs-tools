@@ -63,6 +63,9 @@ func (f *fakePairingRepo) SearchRegistrations(context.Context, domain.SearchRegi
 func (f *fakePairingRepo) RegistrationVolumeTrend(context.Context, domain.RegistrationVolumeTrendRequest) (domain.VolumeTrendResponse, error) {
 	panic("not reached")
 }
+func (f *fakePairingRepo) AggregateRegistrations(context.Context, domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error) {
+	panic("not reached")
+}
 func (f *fakePairingRepo) LocatePairing(context.Context, string) (string, string, error) {
 	panic("not reached")
 }

@@ -89,8 +89,8 @@ func TestRegister_WiresCorrelationForwardingAroundIdentity(t *testing.T) {
 	// selectively — and the lists are shared with the permission tests, so a new
 	// route added without one trips TestRoutes_EveryRouteIsCovered first.
 	all := append(append([]struct{ method, path string }{}, everydayRoutes...), playbookManagementRoutes...)
-	if len(all) != 26 {
-		t.Fatalf("expected 26 PLG routes, found %d — update this test with the route table", len(all))
+	if len(all) != 27 {
+		t.Fatalf("expected 27 PLG routes, found %d — update this test with the route table", len(all))
 	}
 
 	for _, rt := range all {

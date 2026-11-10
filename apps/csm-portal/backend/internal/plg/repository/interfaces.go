@@ -51,6 +51,7 @@ type OrgPlatformRepository interface {
 	UpdateNote(ctx context.Context, req domain.UpdateNoteRequest, actor string) (orgID, productCode string, err error)
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error)
 	RegistrationVolumeTrend(ctx context.Context, req domain.RegistrationVolumeTrendRequest) (domain.VolumeTrendResponse, error)
+	AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error)
 	LocatePairing(ctx context.Context, orgPlatformID string) (orgID, productCode string, err error)
 }
 
