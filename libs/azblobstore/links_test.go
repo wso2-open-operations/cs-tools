@@ -27,6 +27,7 @@ import (
 // A made-up key: the signature only needs it to be valid base64.
 const testKey = "c2VjcmV0LWtleS1mb3ItdGVzdHM="
 
+// keyedStore is a store that signs in with an account key, so it can sign links.
 func keyedStore(t *testing.T) *Store {
 	t.Helper()
 	s, err := New(Config{Container: "files", AccountName: "acct", AccountKey: testKey})
@@ -36,6 +37,7 @@ func keyedStore(t *testing.T) *Store {
 	return s
 }
 
+// TestUploadLinks: one write-only link per block, for one blob, over https, with the block id in it.
 func TestUploadLinks(t *testing.T) {
 	s := keyedStore(t)
 	links, expires, err := s.UploadLinks("projects/p1/a.pdf", 3, 30*time.Minute)
@@ -68,6 +70,7 @@ func TestUploadLinks(t *testing.T) {
 	}
 }
 
+// TestUploadLinks_Refusals: a bad count, key or lifetime makes no link.
 func TestUploadLinks_Refusals(t *testing.T) {
 	s := keyedStore(t)
 	for name, tc := range map[string]struct {
@@ -90,6 +93,7 @@ func TestUploadLinks_Refusals(t *testing.T) {
 	}
 }
 
+// TestDownloadLink: a read-only link that answers as a download of the file's name and type.
 func TestDownloadLink(t *testing.T) {
 	s := keyedStore(t)
 	l, expires, err := s.DownloadLink("projects/p1/a b.pdf", `r"é.pdf`, "application/octet-stream", 10*time.Minute)
@@ -116,6 +120,7 @@ func TestDownloadLink(t *testing.T) {
 	}
 }
 
+// TestLinks_NeedAnAccountKey: a store signed in as an Entra app cannot make a link.
 func TestLinks_NeedAnAccountKey(t *testing.T) {
 	entra, err := New(Config{Container: "c", AccountName: "a", TenantID: "11111111-1111-1111-1111-111111111111", ClientID: "22222222-2222-2222-2222-222222222222", ClientSecret: "s"})
 	if err != nil {
@@ -135,6 +140,7 @@ func TestLinks_NeedAnAccountKey(t *testing.T) {
 	}
 }
 
+// TestLinks_ConnectionString: a connection string with a key signs links, one without does not.
 func TestLinks_ConnectionString(t *testing.T) {
 	cs := "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=" + testKey + ";BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 	s, err := New(Config{Container: "files", ConnectionString: cs})
