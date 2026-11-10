@@ -18,12 +18,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   confirmStoredUpload,
   deleteStoredAttachment,
+  DIRECT_TRANSFER_MIN_BYTES,
   DOWNLOAD_RANGE_BYTES,
   downloadStoredAttachment,
   fetchInlineImageBlob,
   isAbortError,
   toHyphenatedUuid,
   uploadStoredAttachment,
+  UPLOAD_CHUNK_BYTES,
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
 import {
@@ -818,6 +820,141 @@ describe("storedAttachments", () => {
         expect(disk.picker).not.toHaveBeenCalled();
         expect(saved).toHaveLength(1);
         click.mockRestore();
+      });
+    });
+  });
+
+  describe("direct transfers of large files", () => {
+    const ID = "11111111-1111-4111-8111-111111111111";
+    const CHUNK = UPLOAD_CHUNK_BYTES;
+    const bigFile = (size: number) =>
+      ({
+        size,
+        name: "big.bin",
+        type: "application/octet-stream",
+        slice: (from: number, to: number) => new Blob([new Uint8Array(to - from)]),
+      }) as unknown as File;
+    const links = (count: number) => ({
+      links: Array.from({ length: count }, (_, i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`),
+      chunkBytes: CHUNK,
+      expiresAt: "2026-10-27T10:45:00Z",
+    });
+    const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024, directUpload: true };
+    const confirmed = { id: "att-1", name: "big.bin", sizeBytes: 0, status: "COMPLETE" };
+    const upload = (file: File, signal?: AbortSignal) =>
+      uploadStoredAttachment(authFetch, { type: "work_item", parentId: "case-1", file, name: "big.bin", signal });
+    // The backend side of an upload: start, the direct links (or a refusal), the chunk
+    // route and confirm. `direct` answers POST .../direct.
+    const backend = (direct: () => Response | Promise<Response>) =>
+      authFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/attachments/upload")) return json(started, 201);
+        if (url.includes("/direct")) return direct();
+        if (url.includes("/chunks/")) return new Response(null, { status: 204 });
+        return json(confirmed);
+      });
+    const chunkRoute = () => authFetch.mock.calls.filter(([u]) => String(u).includes("/chunks/"));
+    const confirmBody = () =>
+      JSON.parse(authFetch.mock.calls.find(([u]) => String(u).endsWith("/confirm"))?.[1].body as string);
+
+    it("sends each chunk to its own signed link without the session's token, then confirms", async () => {
+      backend(() => json(links(3)));
+      rawFetch.mockImplementation(async () => new Response(null, { status: 201 }));
+      await upload(bigFile(2 * CHUNK + 5));
+      const sent = rawFetch.mock.calls.map(([u]) => String(u)).sort();
+      expect(sent).toEqual([0, 1, 2].map((i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`));
+      for (const [, init] of rawFetch.mock.calls) {
+        expect(init.method).toBe("PUT");
+        expect(init.headers).toBeUndefined();
+      }
+      expect(chunkRoute()).toHaveLength(0);
+      expect(confirmBody()).toEqual({ type: "work_item", chunks: 3 });
+    });
+
+    it("never asks for links for a file that fits in one chunk, even when the server allows direct", async () => {
+      backend(() => json(links(1)));
+      await upload(bigFile(DIRECT_TRANSFER_MIN_BYTES));
+      expect(authFetch.mock.calls.some(([u]) => String(u).includes("/direct"))).toBe(false);
+      expect(rawFetch).not.toHaveBeenCalled();
+      expect(chunkRoute()).toHaveLength(1);
+    });
+
+    it("sends the chunks through the backend when the links cannot be had", async () => {
+      backend(() => json({ message: "This upload cannot be sent directly." }, 400));
+      await upload(bigFile(2 * CHUNK));
+      expect(rawFetch).not.toHaveBeenCalled();
+      expect(chunkRoute()).toHaveLength(2);
+      expect(confirmBody()).toEqual({ type: "work_item", chunks: 2 });
+    });
+
+    it("falls back to the backend, without retrying, when Azure refuses a link", async () => {
+      backend(() => json(links(2)));
+      rawFetch.mockImplementation(async () => new Response(null, { status: 403 }));
+      await upload(bigFile(2 * CHUNK));
+      expect(rawFetch.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(chunkRoute()).toHaveLength(2);
+      expect(confirmBody()).toEqual({ type: "work_item", chunks: 2 });
+    });
+
+    it("stops, and does not fall back, when the upload is cancelled", async () => {
+      const controller = new AbortController();
+      backend(() => json(links(2)));
+      rawFetch.mockImplementation(async () => {
+        controller.abort();
+        throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      });
+      await expect(upload(bigFile(2 * CHUNK), controller.signal)).rejects.toSatisfy(isAbortError);
+      expect(chunkRoute()).toHaveLength(0);
+      expect(authFetch.mock.calls.some(([u]) => String(u).endsWith("/confirm"))).toBe(false);
+    });
+
+    describe("download", () => {
+      const clickSpy = () => vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+      it("hands a large file's signed link to the browser as a download", async () => {
+        const click = clickSpy();
+        authFetch.mockResolvedValueOnce(json({ url: "https://blob.example/x?sig=s", name: "big.bin" }));
+        const onSaved = vi.fn();
+        await downloadStoredAttachment(authFetch, {
+          type: "work_item",
+          id: ID,
+          name: "big.bin",
+          size: DIRECT_TRANSFER_MIN_BYTES + 1,
+          onSaved,
+        });
+        expect(authFetch).toHaveBeenCalledTimes(1);
+        expect(authFetch.mock.calls[0][0]).toBe(`${BASE}/attachments/download/${ID}/link?type=work_item`);
+        expect(click).toHaveBeenCalledTimes(1);
+        expect(onSaved).toHaveBeenCalledWith("started");
+      });
+
+      it("streams through the backend when no link is available", async () => {
+        const click = clickSpy();
+        for (const refusal of [json({ message: "off" }, 400), json({ message: "gone" }, 404)]) {
+          authFetch.mockReset();
+          authFetch
+            .mockResolvedValueOnce(refusal)
+            .mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
+          await downloadStoredAttachment(authFetch, {
+            type: "work_item",
+            id: ID,
+            name: "a.txt",
+            size: DIRECT_TRANSFER_MIN_BYTES + 1,
+          });
+          expect(authFetch).toHaveBeenCalledTimes(2);
+          expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
+        }
+        // The link request is not a click; only the saved blob's own anchor is.
+        click.mockRestore();
+      });
+
+      it("does not ask for a link for a small file, or when the size is not known", async () => {
+        clickSpy();
+        for (const size of [DIRECT_TRANSFER_MIN_BYTES, undefined]) {
+          authFetch.mockReset();
+          authFetch.mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
+          await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, name: "a.txt", size });
+          expect(authFetch.mock.calls.some(([u]) => String(u).includes("/link"))).toBe(false);
+        }
       });
     });
   });
