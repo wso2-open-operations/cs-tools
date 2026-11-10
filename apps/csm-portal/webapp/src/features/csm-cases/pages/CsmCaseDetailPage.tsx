@@ -131,7 +131,10 @@ import RequestUpdateDialog, {
   type RequestUpdateSavePayload,
 } from "@features/csm-cases/components/RequestUpdateDialog";
 import { useRequestCaseUpdate } from "@features/csm-cases/api/useRequestCaseUpdate";
-import { deriveCaseUpdateRequestCategory } from "@features/csm-cases/utils/caseUpdateRequests";
+import {
+  deriveCaseUpdateRequestCategory,
+  isMigrationEngagement,
+} from "@features/csm-cases/utils/caseUpdateRequests";
 import CreateTaskDialog from "@features/csm-cases/components/CreateTaskDialog";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import EscalateCaseDialog from "@features/csm-cases/components/EscalateCaseDialog";
@@ -382,7 +385,10 @@ const CASE_TAB_IDS: readonly CaseTabId[] = TAB_DEFS.filter(
  * an open case tab. Back goes to `state.from` with `state.parentState` (the
  * list the case was opened from, with that list's own state), else to the
  * record type's list; a case reached on another type's route is redirected to
- * its own route with that state kept.
+ * its own route with that state kept. It shows the header, its action bar
+ * (including Raise internal Git issue), tabs and side widgets, and owns the
+ * dialogs those actions open and the follow-up writes they trigger, such as
+ * the case tags added after a Git issue is filed.
  */
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
@@ -3551,8 +3557,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           error={githubIssueError}
           createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
-          defaultTitle={c.subject}
-          defaultDescription={c.description}
+          defaultMigration={isMigrationEngagement(c)}
           showRepoField={isCloudSupportSubscription(caseProject?.subscriptionType)}
           productName={c.productCatalogueName || c.product}
           onboardingInProgress={caseProject?.onboardingStatus === "In-Progress"}

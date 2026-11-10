@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -41,7 +42,10 @@ const (
 
 	errMsgGitHubRepoNotMapped = "No GitHub repository is mapped for this product."
 	errMsgGitHubTitleInvalid  = "A title of up to 256 characters is required."
-	errMsgGitHubBodyTooLong   = "The issue description is too long."
+	errMsgGitHubBodyTooLong   = "The issue is too long."
+
+	errMsgGitHubPriorityJustificationInvalid = "Choose a priority justification from the list for this priority."
+	errMsgGitHubHotfixReasonInvalid          = "Choose a hotfix reason from the list."
 
 	regressionLabel          = "regression"
 	originLabel              = "Origin/CS"
@@ -64,6 +68,37 @@ const (
 	// page bound only guards a response that never reports the end.
 	deployedProductLookupMaxPages = 4
 )
+
+// gitHubPriorityJustifications are the reasons the dialog offers for a P1 or P2
+// Discussion, keyed by the priority label they belong to. A P3 has none.
+//
+// This and gitHubHotfixReasons must match the webapp's
+// src/features/csm-cases/utils/githubIssueOptions.json, which the dialog
+// reads: a choice missing here is a 400 for the engineer.
+// TestGitHubIssueChoiceListsMatchTheWebapp fails when the two differ.
+var gitHubPriorityJustifications = map[string][]string{
+	priorityCriticalLabel: {
+		"Immediate Product Team Attention",
+		"Production Outage / Severe Degradation",
+		"Security, Privacy, or Legal Exposure",
+		"Go-Live / Deployment Blocker",
+		"Regression from Recent Release",
+	},
+	priorityHighLabel: {
+		"Product Bug (ETA-Based Fix)",
+		"Customer Business Escalation",
+		"Major Operational / Dev Blocker",
+		"Project / Production Deadline",
+	},
+}
+
+// gitHubHotfixReasons are the reasons the dialog offers when a hotfix is required.
+var gitHubHotfixReasons = []string{
+	"Customer-Requested Hotfix",
+	"Critical Production Bug / Downtime",
+	"Defect Blocking Operations / Development",
+	"Unable to Upgrade to Latest U2",
+}
 
 // deployedProductLookupTimeout bounds the deployed-product lookup so a slow
 // entity service can delay filing a Git issue by at most this long, never block
@@ -104,6 +139,43 @@ type caseGitHubIssueRequest struct {
 	IssueTypeLabel       string `json:"issueTypeLabel"`
 	PriorityLevel        string `json:"priorityLevel"`
 	OnboardingInProgress bool   `json:"onboardingInProgress"`
+	// The four below only add to the issue body; none of them is a label.
+	PriorityJustification string `json:"priorityJustification"`
+	ReproducingSteps      string `json:"reproducingSteps"`
+	HotFixReason          string `json:"hotFixReason"`
+	RelatedInternalIssues string `json:"relatedInternalIssues"`
+}
+
+// priorityJustification is the request's justification when its priority is P1
+// or P2, "" otherwise: a P3 or an unknown priority carries none, so one sent
+// with it is not written.
+func (req caseGitHubIssueRequest) priorityJustification() string {
+	if _, ok := gitHubPriorityJustifications[githubPriorityLabel(req.PriorityLevel)]; !ok {
+		return ""
+	}
+	return strings.TrimSpace(req.PriorityJustification)
+}
+
+// hotFixReason is the request's hotfix reason when a hotfix is required, "" otherwise.
+func (req caseGitHubIssueRequest) hotFixReason() string {
+	if !req.HotFixRequired {
+		return ""
+	}
+	return strings.TrimSpace(req.HotFixReason)
+}
+
+// validateGitHubIssueChoices checks that the justification and the hotfix reason,
+// when they will be written, are one of the dialog's own options. Neither is
+// required here: the dialog requires them, and refusing a request without them
+// would break a webapp one release behind this backend.
+func validateGitHubIssueChoices(req caseGitHubIssueRequest) string {
+	if j := req.priorityJustification(); j != "" && !slices.Contains(gitHubPriorityJustifications[githubPriorityLabel(req.PriorityLevel)], j) {
+		return errMsgGitHubPriorityJustificationInvalid
+	}
+	if r := req.hotFixReason(); r != "" && !slices.Contains(gitHubHotfixReasons, r) {
+		return errMsgGitHubHotfixReasonInvalid
+	}
+	return ""
 }
 
 type caseGitHubIssueResponse struct {
@@ -294,7 +366,9 @@ func idKey(id string) string {
 const issueInfoBlankValue = "undefined"
 
 // buildGitHubIssueBody is the caller's own description, then the optional
-// Hotfix Required line, then the info block as the footer: always the same
+// sections the engineer filled in (Reproducing Steps, Priority Justification,
+// the Hotfix Required line with its Hotfix Reason, Related Internal Issue(s)),
+// then the info block as the footer: always the same
 // seven lines (Product, Update level, WSO2 case id, Case number, Public Git
 // Issue, ABT Team, Opened by), in this order and spelling, as the issues filed
 // before the portal moved to the engineering service carry it. A value that is
@@ -342,10 +416,27 @@ func buildGitHubIssueBody(req caseGitHubIssueRequest, productLabel string, caseC
 		}
 		b.WriteString(value)
 	}
-	section(strings.TrimSpace(req.Description))
-	if req.HotFixRequired {
-		section("Hotfix Required : Yes")
+	// A free-text section keeps its own line breaks: it is read by people, and
+	// only the footer is parsed line by line.
+	labelled := func(label, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			section(label + " :\n" + value)
+		}
 	}
+	section(strings.TrimSpace(req.Description))
+	labelled("Reproducing Steps", req.ReproducingSteps)
+	if j := req.priorityJustification(); j != "" {
+		section("Priority Justification : " + j)
+	}
+	if req.HotFixRequired {
+		// "Hotfix Required : Yes" stays a line of its own, spelled as before.
+		hotfix := "Hotfix Required : Yes"
+		if r := req.hotFixReason(); r != "" {
+			hotfix += "\nHotfix Reason : " + r
+		}
+		section(hotfix)
+	}
+	labelled("Related Internal Issue(s)", req.RelatedInternalIssues)
 	section(info.String())
 	return strings.TrimSpace(b.String())
 }
@@ -462,6 +553,11 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 	// before any upstream call.
 	if utf8.RuneCountInString(strings.TrimSpace(req.Description)) > maxGitHubIssueBodyChars {
 		writeError(w, http.StatusBadRequest, errMsgGitHubBodyTooLong)
+		return
+	}
+
+	if msg := validateGitHubIssueChoices(req); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 

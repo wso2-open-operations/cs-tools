@@ -624,11 +624,13 @@ vi.mock("@features/csm-cases/components/LinkedChangeRequestsWidget", () => ({
 // Captures the props the page hands the dialog so a test can submit it the way
 // the real dialog does (the dialog's own behaviour is covered in
 // CreateGithubIssueDialog.test.tsx).
-let githubDialogProps: { onSubmit: (payload: Record<string, unknown>) => void } | undefined;
+type GithubDialogProbeProps = {
+  onSubmit: (payload: Record<string, unknown>) => void;
+  [prop: string]: unknown;
+};
+let githubDialogProps: GithubDialogProbeProps | undefined;
 vi.mock("@features/csm-cases/components/CreateGithubIssueDialog", () => ({
-  CreateGithubIssueDialog: (props: {
-    onSubmit: (payload: Record<string, unknown>) => void;
-  }) => {
+  CreateGithubIssueDialog: (props: GithubDialogProbeProps) => {
     githubDialogProps = props;
     return <div data-testid="create-github-issue-dialog-probe" />;
   },
@@ -2865,6 +2867,14 @@ describe("CsmCaseDetailPage — case tags added once a Git issue is filed", () =
   };
 
   const addedTags = (): unknown[] => addTagMutateAsyncMock.mock.calls.map(([label]) => label);
+
+  it("does not prefill Subject or Description, and leaves Migration off for a non-migration case", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /stub open raise git issue/i }));
+    expect(githubDialogProps).not.toHaveProperty("defaultTitle");
+    expect(githubDialogProps).not.toHaveProperty("defaultDescription");
+    expect(githubDialogProps?.defaultMigration).toBe(false);
+  });
 
   it("sends the submitted payload for this case, and adds no tag until the issue exists", () => {
     const { variables } = submitGithubIssue({

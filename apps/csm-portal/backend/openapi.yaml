@@ -28622,6 +28622,27 @@ components:
         priorityLevel:
           type: string
           description: GitHub priority label for a Discussion. Sent as Priority/Critical(P1), Priority/High(P2), or Priority/Medium(P3). Bare Priority/Critical (etc.) is rewritten to the (Pn) form. Discussion also gets Type/Incident.
+        priorityJustification:
+          type: string
+          description: >
+            Why a P1 or P2 Discussion has that priority, one of the dialog's fixed options for
+            that priority. Written to the issue body as "Priority Justification : <value>".
+            Ignored for any other priority. A value that is not an option for the priority is a 400.
+        reproducingSteps:
+          type: string
+          description: Steps to reproduce, written to the issue body under "Reproducing Steps :".
+        hotFixReason:
+          type: string
+          description: >
+            Why a hotfix is required, one of the dialog's fixed options. Written under the
+            "Hotfix Required : Yes" line as "Hotfix Reason : <value>". Ignored unless
+            hotFixRequired is true. A value that is not an option is a 400.
+        relatedInternalIssues:
+          type: string
+          description: Related internal issues, written to the issue body under "Related Internal Issue(s) :".
+        onboardingInProgress:
+          type: boolean
+          description: The case's project is onboarding. Adds Onboarding/affected.
 
     CreateCaseGithubIssueResponse:
       type: object
