@@ -209,6 +209,24 @@ type RunbookService interface {
 	Import(ctx context.Context, req domain.ImportRunbooksRequest) (domain.ImportRunbooksResponse, error)
 }
 
+// AlertMuteRuleService manages alert mute rules (Operations > Alert mute rules): one-time windows during which SRE alerts matching every
+// condition are muted. Internal callers only (the routes are internalOnly). A write in the wrong state is a ConflictError.
+type AlertMuteRuleService interface {
+	Search(ctx context.Context, req domain.SearchAlertMuteRulesRequest) (domain.SearchAlertMuteRulesResponse, error)
+	Get(ctx context.Context, id string) (domain.AlertMuteRule, error)
+	// Active is every rule muting alerts now, for alert-core.
+	Active(ctx context.Context) (domain.ActiveAlertMuteRulesResponse, error)
+	Create(ctx context.Context, req domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error)
+	// Update replaces every field of a scheduled rule.
+	Update(ctx context.Context, id string, req domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error)
+	// Extend moves the end of a scheduled or active rule later.
+	Extend(ctx context.Context, id string, req domain.ExtendAlertMuteRuleRequest) (domain.AlertMuteRule, error)
+	// End ends an active rule now.
+	End(ctx context.Context, id string) (domain.AlertMuteRule, error)
+	// Delete removes a scheduled rule.
+	Delete(ctx context.Context, id string) error
+}
+
 // StandardChangeService serves the standard change catalogue (templates and their
 // CAB-approved versions) and the proposals that create, modify or retire them.
 // Internal (WSO2) callers only.
