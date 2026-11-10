@@ -1673,7 +1673,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/{id}/sla/recalculate-pause:
+  /cases/{id}/sla/recalculate:
     post:
       summary: >-
         Recompute one case's currently IN_PROGRESS SLA clocks' pause history
@@ -31754,7 +31754,7 @@ components:
                 description: The link the removed runbook had.
     CaseSLAPauseRecalcClock:
       type: object
-      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate.
       properties:
         target:
           type: string
