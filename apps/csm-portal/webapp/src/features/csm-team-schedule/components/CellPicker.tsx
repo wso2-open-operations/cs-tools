@@ -70,6 +70,11 @@ export interface CellPickerTarget {
   engagements?: CellEngagement[];
   /** Where on screen the cell is, so the picker can grow out of it. */
   anchor: { top: number; left: number; bottom: number; right: number };
+  /** The person is not on this team, but days are still filed under it --
+   *  left on the Americas rota after a Brazil rotation ended, say. All the
+   *  team's lead or rota admin can do is take those days off it, so the
+   *  picker offers the dates and Clear and nothing else. */
+  clearOnly?: boolean;
   /** The standing window this engineer sits in on an ordinary weekday, so
    *  clearing a weekday puts them back on it rather than leaving a hole.
    *  Absent when they hold no standing window to go back to. */
@@ -683,7 +688,7 @@ export default function CellPicker({
           </div>
         ) : null}
 
-        {target.engagements?.length && onDismissEngagement ? (
+        {!target.clearOnly && target.engagements?.length && onDismissEngagement ? (
           // Synced from the allocation app, so never edited here: a removal
           // takes the picked days (the range below) off this roster and the
           // timesheet, and Restore puts them back.
@@ -709,6 +714,7 @@ export default function CellPicker({
         ) : null}
 
         <div className="pk-body">
+          {target.clearOnly ? null : (
           <section className="pk-col" aria-labelledby="pk-rota-t">
             <div className="pk-coltitle" id="pk-rota-t">
               Rota
@@ -802,13 +808,20 @@ export default function CellPicker({
               </div>
             ) : null}
           </section>
+          )}
 
           {/* The range heads this column: leave and allocations are almost
               always marked over days, so the dates sit with them. */}
           <section className="pk-col pk-awaycol" aria-labelledby="pk-away-t">
             <div className="pk-coltitle" id="pk-away-t">
-              Leave &amp; allocations
+              {target.clearOnly ? "Days to clear" : <>Leave &amp; allocations</>}
             </div>
+            {target.clearOnly ? (
+              <p className="pk-note">
+                {target.name} is not on {teamNameOf(target.teamKey)}, but these days are still on its rota.
+                They can only be taken off it here; set their hours from their own team&apos;s row.
+              </p>
+            ) : null}
             <div className="pk-range">
               <label className="pkr-f">
                 <span>From</span>
@@ -888,6 +901,8 @@ export default function CellPicker({
               </span>
             </div>
 
+            {target.clearOnly ? null : (
+              <>
             {/* Leave on one side; moving to another team and allocations on
                 the other. Both take the From / To dates above, so a move or an
                 allocation is marked over a period like leave is. */}
@@ -1048,6 +1063,8 @@ export default function CellPicker({
               )
             ) : null}
             </div>
+              </>
+            )}
           </section>
         </div>
 
@@ -1056,13 +1073,15 @@ export default function CellPicker({
             type="button"
             className="pk-c clear"
             disabled={busy}
-            onClick={() => onClear(backTo, firstDay, lastDay)}
+            onClick={() => onClear(target.clearOnly ? "" : backTo, firstDay, lastDay)}
           >
             {/* Says what clearing will actually do here, which is not the same
                 thing in the three cases. Somebody marked away comes back onto
                 whatever the rota already had for them; a weekend has no standing
                 window to fall back to at all. */}
-            {target.otherTurns && target.zoneCode
+            {target.clearOnly
+              ? `Clear — take off ${teamNameOf(target.teamKey)}'s rota`
+              : target.otherTurns && target.zoneCode
               ? `Clear — take off ${target.zoneCode}${target.tier ? ` ${target.tier}` : ""} only`
               : target.absenceKindCode && !target.shiftCode
               ? "Clear — back on the rota"

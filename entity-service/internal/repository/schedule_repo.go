@@ -763,29 +763,69 @@ func slotConflict(err error, isoDate string) error {
 // is left is on another team (or, from CreateAssignment, anywhere). A turn or
 // an escalation window is never refused here: those go on top of regular
 // hours.
-func regularHoursConflict(ctx context.Context, tx pgx.Tx, userID, shiftCode, isoDate string) error {
-	var held, team string
-	err := tx.QueryRow(ctx, `
-		SELECT COALESCE(o.short_code, o.code), COALESCE(t.name, a.team_key)
-		  FROM team_schedule_shift n
-		  JOIN team_schedule_assignment a ON a.user_id = $1::uuid AND a.rota_date = $3::date
-		  JOIN team_schedule_shift o ON o.id = a.shift_id
-		  LEFT JOIN team t ON lower(t.key) = lower(a.team_key)
-		 WHERE n.code = $2
+//
+// From the roster (ApplyRange) the new regular hours replace the old ones
+// when the caller may change the team that holds them (mayReplaceOn): each
+// row taken off is recorded in that team's history, as a lead's own change
+// would be, with a note saying what replaced it. Where the caller may not,
+// they are told whose rota it is. A span's own shifts (source MOVE, the
+// Brazil rotation) are never replaced: they follow the span, so the span has
+// to end first. A nil mayReplaceOn (CreateAssignment, a rota import) refuses.
+func regularHoursConflict(ctx context.Context, tx pgx.Tx, userID, shiftCode, teamKey, isoDate string,
+	mayReplaceOn func(string) bool, actorEmail string) error {
+	rows, err := tx.Query(ctx, `SELECT `+assignmentColumns+assignmentFrom+`
+		  JOIN team_schedule_shift n ON n.code = $2
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $3::date
 		   AND NOT n.is_rotation AND NOT n.is_escalation
-		   AND NOT o.is_rotation AND NOT o.is_escalation
-		 ORDER BY a.created_on, a.id
-		 LIMIT 1`,
-		userID, shiftCode, isoDate).Scan(&held, &team)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
+		   AND NOT s.is_rotation AND NOT s.is_escalation
+		 ORDER BY a.created_on, a.id`,
+		userID, shiftCode, isoDate)
 	if err != nil {
 		return fmt.Errorf("read the regular hours held on %s: %w", isoDate, err)
 	}
-	return &apierror.ConflictError{Msg: fmt.Sprintf(
-		"this person already works %s regular hours on %s (%s); one person works one set of regular hours a day, so clear that one first",
-		held, isoDate, team)}
+	held, err := scanAssignments(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	var newCode string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(short_code, code) FROM team_schedule_shift WHERE code = $1`,
+		shiftCode).Scan(&newCode); err != nil {
+		return fmt.Errorf("read the window being set: %w", err)
+	}
+	ids := make([]string, 0, len(held))
+	for _, a := range held {
+		heldCode, team := a.ShiftCode, a.TeamKey
+		_ = tx.QueryRow(ctx, `SELECT COALESCE(s.short_code, s.code), COALESCE(t.name, $2)
+			  FROM team_schedule_shift s LEFT JOIN team t ON lower(t.key) = lower($2)
+			 WHERE s.code = $1`, a.ShiftCode, a.TeamKey).Scan(&heldCode, &team)
+		switch {
+		case a.Source == "MOVE":
+			return &apierror.ConflictError{Msg: fmt.Sprintf(
+				"this person works %s regular hours on %s (%s) because of a span that moves them there; end or shorten the span first",
+				heldCode, isoDate, team)}
+		case mayReplaceOn == nil:
+			return &apierror.ConflictError{Msg: fmt.Sprintf(
+				"this person already works %s regular hours on %s (%s); one person works one set of regular hours a day, so clear that one first",
+				heldCode, isoDate, team)}
+		case !mayReplaceOn(a.TeamKey):
+			return &apierror.ConflictError{Msg: fmt.Sprintf(
+				"this person already works %s regular hours on %s (%s), and that is %s's rota; ask its lead or a rota admin to take them off it first",
+				heldCode, isoDate, team, team)}
+		}
+		note := fmt.Sprintf("replaced by %s on %s", newCode, teamKey)
+		if err := recordActivity(ctx, tx, a, "DELETED", actorEmail, nil, nil, nil, &note); err != nil {
+			return err
+		}
+		ids = append(ids, a.ID)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_assignment WHERE id = ANY($1::uuid[])`, ids); err != nil {
+		return fmt.Errorf("replace the regular hours held on %s: %w", isoDate, err)
+	}
+	return nil
 }
 
 // tierHolderConflict refuses a turn whose tier somebody else already holds.
@@ -1115,7 +1155,7 @@ func (r *scheduleRepository) CreateAssignment(ctx context.Context, req domain.Cr
 		return domain.ScheduleAssignment{}, err
 	}
 
-	if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.RotaDate); err != nil {
+	if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.TeamKey, req.RotaDate, nil, actorEmail); err != nil {
 		return domain.ScheduleAssignment{}, err
 	}
 
@@ -1795,7 +1835,7 @@ func applyRangeTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleRangeR
 			continue
 		}
 
-		if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, iso); err != nil {
+		if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.TeamKey, iso, req.MayReplaceOn, actorEmail); err != nil {
 			return out, err
 		}
 

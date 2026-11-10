@@ -237,6 +237,12 @@ type ApplyScheduleRangeRequest struct {
 	// ZoneCode narrows a clear (ShiftCode empty) to that zone's turn, leaving
 	// the rest of the person's day. Only meaningful when clearing.
 	ZoneCode *string `json:"zoneCode,omitempty"`
+	// MayReplaceOn says whether the caller may take somebody's regular hours
+	// off another team's rota, so that the regular hours being set replace
+	// them for the day (IST set on Vega replaces PDT held on Americas). Set
+	// by the service from the caller's rights; nil -- a rota import, or any
+	// other caller -- refuses a second set of regular hours instead.
+	MayReplaceOn func(teamKey string) bool `json:"-"`
 }
 
 // ApplyScheduleRangeResponse says what actually happened, because it is

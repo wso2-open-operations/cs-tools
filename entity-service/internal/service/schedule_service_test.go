@@ -1276,3 +1276,72 @@ func TestSearchEngagementAllocationsEmptyIsAnEmptyList(t *testing.T) {
 		t.Fatalf("got count %d, allocations nil=%v; want 0 and a non-nil empty list", resp.Count, resp.Allocations == nil)
 	}
 }
+
+// A clear is the one change a team's lead or rota admin may make to rows filed
+// under their team for somebody who is not on it, with no span putting them
+// there: what was left on the Americas team after a Brazil rotation ended.
+// Nobody else can reach those rows -- their own team's lead clears only their
+// own team's rows -- so without this they could only be removed in SQL.
+func TestARotaAdminMayClearRowsLeftOnTheirTeamForANonMember(t *testing.T) {
+	repo := &leadOf{team: "", notOnTeam: true}
+	repo.adminTeams = []string{"americas"}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+
+	if _, err := svc.ApplyRange(leadCtx("cre.rota.admin@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: "22222222-2222-2222-2222-222222222222", TeamKey: "americas",
+		From: "2099-11-10", To: "2099-12-31",
+	}); err != nil {
+		t.Fatalf("a rota admin was refused clearing rows left on their team: %v", err)
+	}
+	if !repo.called {
+		t.Fatal("the clear never reached the repository")
+	}
+}
+
+// The same lead may not use it on a team they do not run, and a clear is all
+// it allows: nothing new is put on a non-member.
+func TestClearingANonMembersRowsStillNeedsTheTeam(t *testing.T) {
+	stranger := "22222222-2222-2222-2222-222222222222"
+	var forbidden *apierror.ForbiddenError
+
+	repo := &leadOf{team: "castor", notOnTeam: true}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	if _, err := svc.ApplyRange(leadCtx("castor.01@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: stranger, TeamKey: "americas", From: "2099-11-10", To: "2099-11-10",
+	}); !errors.As(err, &forbidden) {
+		t.Fatalf("a Castor lead cleared Americas rows: want ForbiddenError, got %v", err)
+	}
+	if repo.called {
+		t.Fatal("a lead cleared rows on a team they do not run")
+	}
+
+	admin := &leadOf{team: "", notOnTeam: true}
+	admin.adminTeams = []string{"americas"}
+	svc = NewScheduleService(admin, alwaysUnrestrictedAccess{})
+	if _, err := svc.ApplyRange(leadCtx("cre.rota.admin@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: stranger, TeamKey: "americas", ShiftCode: "CRE_AMERICAS", From: "2099-11-10", To: "2099-11-10",
+	}); !errors.As(err, &forbidden) {
+		t.Fatalf("a rota admin set a window on a non-member: want ForbiddenError, got %v", err)
+	}
+	if admin.called {
+		t.Fatal("a window was written against somebody not on the team")
+	}
+}
+
+// A former member's past days are the record of what they worked: the clear
+// for rows left on a team starts today.
+func TestClearingANonMembersPastDaysIsRefused(t *testing.T) {
+	repo := &leadOf{team: "", notOnTeam: true}
+	repo.adminTeams = []string{"americas"}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	var forbidden *apierror.ForbiddenError
+	if _, err := svc.ApplyRange(leadCtx("cre.rota.admin@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: "22222222-2222-2222-2222-222222222222", TeamKey: "americas",
+		From: "2020-01-01", To: "2020-01-31",
+	}); !errors.As(err, &forbidden) {
+		t.Fatalf("a non-member's past days were cleared: want ForbiddenError, got %v", err)
+	}
+	if repo.called {
+		t.Fatal("past rows of a non-member reached the repository")
+	}
+}

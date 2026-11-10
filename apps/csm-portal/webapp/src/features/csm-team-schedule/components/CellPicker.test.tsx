@@ -881,3 +881,16 @@ describe("CellPicker: customer engagements from the allocation app", () => {
     expect(screen.queryByRole("group", { name: /customer engagements/i })).toBeNull();
   });
 });
+
+describe("CellPicker: a day left on a team the person is not on", () => {
+  it("offers the dates and Clear and nothing else", () => {
+    const onClear = vi.fn();
+    renderPicker({ target: target({ teamKey: "alpha", shiftCode: EVENING.code, clearOnly: true }), onClear });
+    expect(screen.queryByText("Rotations")).not.toBeInTheDocument();
+    expect(screen.queryByText("Leave")).not.toBeInTheDocument();
+    expect(screen.getByText(/is not on/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Clear — take off .* rota$/ }));
+    // A plain clear: no standing window to fall back to on a team they are not on.
+    expect(onClear).toHaveBeenCalledWith("", "2026-09-23", "2026-09-23");
+  });
+});

@@ -2739,3 +2739,53 @@ func TestScheduleIntegration_ApplyRangeRefusesASecondSetOfRegularHours(t *testin
 		t.Fatalf("replacing IST with PDT on the same team was refused: %v", err)
 	}
 }
+
+// From the roster, regular hours set on one team replace the person's regular
+// hours that day on another team the caller may also change, and the history
+// of the other team says what replaced them. Where the caller may not change
+// that team, they are told whose rota it is and nothing is written.
+func TestScheduleIntegration_ApplyRangeReplacesRegularHoursOnAnotherTeam(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+
+	pdt := domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedOtherTeam, ShiftCode: "CRE_AMERICAS",
+		From: schedMonday, To: schedMonday,
+	}
+	if _, err := repo.ApplyRange(ctx, pdt, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyRange PDT on the other team: %v", err)
+	}
+
+	ist := pdt
+	ist.TeamKey, ist.ShiftCode = schedTeamKey, "CRE_REGULAR"
+	ist.MayReplaceOn = func(string) bool { return false }
+	_, err := repo.ApplyRange(ctx, ist, schedLeadEmail)
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) || !strings.Contains(conflict.Msg, "rota") {
+		t.Fatalf("IST over another team's PDT the caller may not change: got %v, want a ConflictError naming whose rota", err)
+	}
+
+	ist.MayReplaceOn = func(team string) bool { return strings.EqualFold(team, schedOtherTeam) }
+	if _, err := repo.ApplyRange(ctx, ist, schedLeadEmail); err != nil {
+		t.Fatalf("IST over PDT the caller may change was refused: %v", err)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment a JOIN team_schedule_shift s ON s.id = a.shift_id
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $2::date AND NOT s.is_rotation AND NOT s.is_escalation`,
+		schedMemberID, schedMonday); n != 1 {
+		t.Fatalf("%d sets of regular hours on the day, want 1", n)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment a JOIN team_schedule_shift s ON s.id = a.shift_id
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $2::date AND s.code = 'CRE_REGULAR' AND a.team_key = $3`,
+		schedMemberID, schedMonday, schedTeamKey); n != 1 {
+		t.Fatal("IST is not the regular hours left on the day")
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment_activity
+		 WHERE user_id = $1::uuid AND team_key = $2 AND rota_date = $3::date AND action = 'DELETED'
+		   AND shift_code = 'CRE_AMERICAS' AND note LIKE 'replaced by % on ' || $4`,
+		schedMemberID, schedOtherTeam, schedMonday, schedTeamKey); n != 1 {
+		t.Fatalf("%d history rows on the other team for the replaced PDT, want 1", n)
+	}
+}
