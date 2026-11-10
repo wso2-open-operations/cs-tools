@@ -174,6 +174,12 @@ vi.mock("@features/csm-operations/api/useCsmChangeRequestComments", () => ({
   }),
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  useGetCsmDeletedCaseAttachments: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
   useGetCsmCaseAttachments: () => ({ data: [] }),
   usePostCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
   useDownloadCsmCaseAttachment: () => vi.fn(),

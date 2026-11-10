@@ -15,8 +15,8 @@
 // under the License.
 
 // Package opencases is the "cases still in Open state" report sub-cron: it
-// finds every case created before yesterday that has never moved out of the
-// initial "open" state, and emails a report of them. Distinct from
+// finds every case, service request and security report analysis created before
+// yesterday that has never moved out of the initial "open" state, and emails a report of them. Distinct from
 // internal/stalecases (the long-open cases report: cases still open after 30 days) — this one flags a
 // narrower, more urgent signal: a case nobody has even started working on
 // yet. Same shape otherwise: see internal/stalecases's own package doc
@@ -27,6 +27,7 @@ package opencases
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -60,10 +61,17 @@ type EmailSender interface {
 // stalecases.SendReport's own doc comment for why this silences report
 // emails too, not just failure alerts.
 //
+// caseLinkBase is the CSM portal's base URL (CSM_PORTAL_WEB_BASE_URL); when
+// set, each row's number links to that item's page in the portal (see
+// notify.OpenCasesReportData.CaseLinkBase), else it is plain text.
+//
+// When no case matches, the handler sends nothing and succeeds: the report
+// omits itself on a day with nothing to act on, like stalecases.SendReport.
+//
 // If emailsEnabled is false or to is empty, the returned handler skips the
 // case search entirely and returns nil (success) — same reasoning as
 // stalecases.SendReport.
-func SendReport(cases CaseSearcher, email EmailSender, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+func SendReport(cases CaseSearcher, email EmailSender, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
@@ -74,9 +82,16 @@ func SendReport(cases CaseSearcher, email EmailSender, to, cc []string, emailsEn
 			return fmt.Errorf("opencases: search open cases: %w", err)
 		}
 
+		if len(found) == 0 {
+			slog.Info("no open cases created before yesterday; the open cases report is not sent")
+			return nil
+		}
+		slog.Info("sending the open cases report", "cases", len(found), "to", len(to), "cc", len(cc))
+
 		subject := "[Action-Required][Report] Cases created before yesterday still in Open state"
 		body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{
-			Cases: found,
+			Cases:        found,
+			CaseLinkBase: caseLinkBase,
 		})
 		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
 			return fmt.Errorf("opencases: send report email: %w", err)

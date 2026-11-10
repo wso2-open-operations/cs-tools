@@ -140,6 +140,53 @@ func lastNoticeWindowForKey(raw json.RawMessage, key string) (*closure.NoticeWin
 	return &window, nil
 }
 
+// SuspensionCompleted reports whether based_on_subscription_end_date holds a
+// completed suspension: event_type "suspend" and no failed suspension action.
+// The legacy process re-ran an event only when its type changed or an action
+// had failed, so a project reopened by a person is left alone while the saved
+// event is still "suspend". ACP's own record has no action result and counts as
+// completed: it is written only after the suspension itself succeeded. A blob
+// that is empty, lacks the key, or holds another event_type reports false.
+func SuspensionCompleted(raw json.RawMessage) (bool, error) {
+	return suspensionCompletedForKey(raw, subscriptionEndDateKey)
+}
+
+// SuspensionCompletedForInvoices is SuspensionCompleted for
+// based_on_due_invoices.
+func SuspensionCompletedForInvoices(raw json.RawMessage) (bool, error) {
+	return suspensionCompletedForKey(raw, dueInvoicesKey)
+}
+
+func suspensionCompletedForKey(raw json.RawMessage, key string) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+
+	var blob map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &blob); err != nil {
+		return false, fmt.Errorf("suspensionstate: parse blob: %w", err)
+	}
+	section, ok := blob[key]
+	if !ok {
+		return false, nil
+	}
+
+	var state struct {
+		EventType            string          `json:"event_type"`
+		ActionSuspendProject json.RawMessage `json:"actionSuspendProject"`
+	}
+	if err := json.Unmarshal(section, &state); err != nil {
+		return false, fmt.Errorf("suspensionstate: parse %s: %w", key, err)
+	}
+	if state.EventType != SuspendEventType {
+		return false, nil
+	}
+	// actionSuspendProject is the legacy result of the suspension action. Absent
+	// (or null) counts as completed; a value must be "SUCCESSFUL".
+	result := string(state.ActionSuspendProject)
+	return result == "" || result == "null" || result == `"SUCCESSFUL"`, nil
+}
+
 // WithSubscriptionEndDateState returns a copy of raw with only the
 // based_on_subscription_end_date key replaced by the given window and
 // action results. based_on_due_invoices, based_on_compliance, and any other

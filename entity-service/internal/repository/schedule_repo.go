@@ -84,6 +84,9 @@ type ScheduleRepository interface {
 	// which rows to offer an edit control on; without it the page would have
 	// to show the control to everyone and let the 403 explain.
 	LeadTeamsFor(ctx context.Context, userEmail string) ([]string, error)
+	// LeadFamiliesFor is the families (CRE, SRE, SME) of the rota teams the
+	// caller leads: where a lead's new tag belongs.
+	LeadFamiliesFor(ctx context.Context, userEmail string) ([]string, error)
 
 	// AbsenceByID reads one absence, so the service can check who may remove
 	// it before anything is touched.
@@ -106,6 +109,9 @@ type ScheduleRepository interface {
 	// RotaAdminFamilies is the families of the rota admin roles the caller
 	// holds: CRE, SRE and/or SME. Empty for anyone who holds none.
 	RotaAdminFamilies(ctx context.Context, userEmail string) ([]string, error)
+	// IsPortalAdmin is whether the caller holds the database admin role as
+	// internal staff -- the portal admin the token's roles may not name.
+	IsPortalAdmin(ctx context.Context, userEmail string) (bool, error)
 	// RotaMarkerTeamsFor is every team this caller may mark as its rota
 	// marker (migration 0225): granted, still a member, and internal.
 	RotaMarkerTeamsFor(ctx context.Context, userEmail string) ([]string, error)
@@ -444,7 +450,8 @@ func (r *scheduleRepository) Catalogue(ctx context.Context) (domain.ScheduleCata
 	kindRows, err := r.db.Query(ctx, `
 		SELECT id, code, short_code, label, bucket, colour_token, sort_order,
 		       created_by IS DISTINCT FROM 'migration', family::text, NOT is_active,
-		       moves_to_team_key, works_rota_there, shows_as_shift_code
+		       moves_to_team_key, works_rota_there, shows_as_shift_code,
+		       excludes_from_timesheet, description
 		FROM team_schedule_absence_kind ORDER BY sort_order`)
 	if err != nil {
 		return cat, fmt.Errorf("query schedule absence kinds: %w", err)
@@ -452,7 +459,7 @@ func (r *scheduleRepository) Catalogue(ctx context.Context) (domain.ScheduleCata
 	defer kindRows.Close()
 	for kindRows.Next() {
 		var k domain.ScheduleAbsenceKind
-		if err := kindRows.Scan(&k.ID, &k.Code, &k.ShortCode, &k.Label, &k.Bucket, &k.ColourToken, &k.SortOrder, &k.Custom, &k.Family, &k.Retired, &k.MovesToTeamKey, &k.WorksRotaThere, &k.ShowsAsShiftCode); err != nil {
+		if err := kindRows.Scan(&k.ID, &k.Code, &k.ShortCode, &k.Label, &k.Bucket, &k.ColourToken, &k.SortOrder, &k.Custom, &k.Family, &k.Retired, &k.MovesToTeamKey, &k.WorksRotaThere, &k.ShowsAsShiftCode, &k.ExcludesFromTimesheet, &k.Description); err != nil {
 			return cat, fmt.Errorf("scan schedule absence kind: %w", err)
 		}
 		cat.AbsenceKinds = append(cat.AbsenceKinds, k)
@@ -1306,6 +1313,18 @@ func (r *scheduleRepository) ActivityForTeam(ctx context.Context, teamKey, from,
 	return out, rows.Err()
 }
 
+// LeadFamiliesFor implements ScheduleRepository.
+func (r *scheduleRepository) LeadFamiliesFor(ctx context.Context, userEmail string) ([]string, error) {
+	return r.distinctStrings(ctx, `
+		SELECT DISTINCT `+teamFamilyExpr+`
+		  FROM team_member tm
+		  JOIN "user" u ON u.id = tm.user_id
+		  JOIN team t    ON t.id = tm.team_id
+		 WHERE lower(u.email) = lower($1)
+		   AND tm.role IN ('lead', 'americas_team_lead')
+		   AND `+rosteredTeamWhere, userEmail)
+}
+
 // LeadTeamsFor returns the registry keys of every team this caller leads.
 //
 // team.name is the display name the registry maps a key onto, so it is
@@ -1448,6 +1467,25 @@ func (r *scheduleRepository) RotaAdminFamilies(ctx context.Context, userEmail st
 		 WHERE lower(u.email) = lower($1)
 		   AND u.user_type = 'INTERNAL'::user_type_enum
 		   AND `+headsCRE, userEmail)
+}
+
+// IsPortalAdmin implements ScheduleRepository. Only an internal holder counts,
+// as for the rota admin roles (RotaAdminTeamsFor admits the same people).
+func (r *scheduleRepository) IsPortalAdmin(ctx context.Context, userEmail string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM "user" u
+		    JOIN user_role ur ON ur.user_id = u.id
+		    JOIN role ro      ON ro.id = ur.role_id
+		   WHERE lower(u.email) = lower($1)
+		     AND u.user_type = 'INTERNAL'::user_type_enum
+		     AND ro.name = 'admin')`, userEmail).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("portal admin: %w", err)
+	}
+	return ok, nil
 }
 
 // RotaMarkerTeamsFor implements ScheduleRepository.
@@ -2232,7 +2270,7 @@ func (r *scheduleRepository) DeleteAbsenceKind(ctx context.Context, code, actorE
 		return &apierror.ForbiddenError{Msg: "a built-in tag cannot be deleted; only tags added from the portal can"}
 	}
 	if allowedFamilies != nil && (family == nil || !hasFold(allowedFamilies, *family)) {
-		return &apierror.ForbiddenError{Msg: "a rota admin can only delete their own family's tags; this tag is shared or another family's"}
+		return &apierror.ForbiddenError{Msg: "you can only delete your own family's tags; this tag is shared or another family's"}
 	}
 	var inUse int
 	if err := tx.QueryRow(ctx,
@@ -2283,17 +2321,24 @@ func (r *scheduleRepository) CreateAbsenceKind(ctx context.Context, code string,
 		}
 	}
 
-	k := domain.ScheduleAbsenceKind{Code: code, ShortCode: req.ShortCode, Label: req.Label, Bucket: req.Bucket, ColourToken: req.ColourToken, Custom: true, Family: family}
+	var description *string
+	if req.Description != "" {
+		description = &req.Description
+	}
+	k := domain.ScheduleAbsenceKind{Code: code, ShortCode: req.ShortCode, Label: req.Label, Bucket: req.Bucket, ColourToken: req.ColourToken, Custom: true, Family: family,
+		ExcludesFromTimesheet: req.ExcludesFromTimesheet, Description: description}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO team_schedule_absence_kind
-		  (code, short_code, label, bucket, colour_token, family, sort_order, created_by, updated_by)
+		  (code, short_code, label, bucket, colour_token, family, sort_order, created_by, updated_by,
+		   excludes_from_timesheet, description)
 		SELECT $1, $2, $3, $4::team_schedule_absence_bucket_enum, $5, $7::team_schedule_shift_family_enum,
-		       COALESCE(MAX(sort_order), 0) + 1, $6, $6
+		       COALESCE(MAX(sort_order), 0) + 1, $6, $6, $8, $9
 		  FROM team_schedule_absence_kind
 		 WHERE bucket = $4::team_schedule_absence_bucket_enum
 		ON CONFLICT (code) DO NOTHING
 		RETURNING id::text, sort_order`,
-		code, req.ShortCode, req.Label, req.Bucket, req.ColourToken, actorEmail, family).Scan(&k.ID, &k.SortOrder)
+		code, req.ShortCode, req.Label, req.Bucket, req.ColourToken, actorEmail, family,
+		req.ExcludesFromTimesheet, description).Scan(&k.ID, &k.SortOrder)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The clash is on code, which is derived from the label (normalised
 		// and cut to length), so two different labels can land on one code.

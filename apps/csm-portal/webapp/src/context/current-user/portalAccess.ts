@@ -141,6 +141,14 @@ export interface PortalAccess {
    */
   canUpdateProjectClosureState: boolean;
   /**
+   * Excluding a project from the automatic closure process via
+   * `PATCH /projects/{id}`'s `suspensionProcessOverridden` field. `admin`
+   * only, same shape as {@link canUpdateProjectClosureState} — mirrors the
+   * backend's in-handler `PermAdmin` narrowing on that field. Decides only
+   * whether the switch is editable; the backend's 403 is the real gate.
+   */
+  canUpdateProjectSuspensionOverride: boolean;
+  /**
    * Setting a project's onboarding status and onboarding owner via
    * `PATCH /projects/{id}`'s `onboardingStatus`/`onboardingOwner` fields.
    * `onboarding_lead` or `admin` -- `cs_engineer` alone does not hold it.
@@ -358,6 +366,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canAddWorkNotes: true,
       canCreateUser: true,
       canUpdateProjectClosureState: true,
+      canUpdateProjectSuspensionOverride: true,
       canEditProjectOnboarding: true,
       canUseSecurityCenter: true,
       canViewSecurityReportCases: true,
@@ -396,6 +405,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canAddWorkNotes: full || has(PORTAL_ROLE.worknoteCreator),
     canCreateUser: isAdmin,
     canUpdateProjectClosureState: isAdmin,
+    canUpdateProjectSuspensionOverride: isAdmin,
     canEditProjectOnboarding: isAdmin || has(PORTAL_ROLE.onboardingLead),
     canUseSecurityCenter: full || has(PORTAL_ROLE.securityTeam),
     canViewSecurityReportCases:

@@ -635,7 +635,7 @@ func TestProcessProject_Day0RetrySkipsNotifyWhenAlreadyRecorded(t *testing.T) {
 		Account:                &projectAccountRef{ID: "a1"},
 		EndDate:                &endDate,
 		ClosureState:           &open,
-		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend"}}`),
+		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend_notice"}}`),
 	}
 
 	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)

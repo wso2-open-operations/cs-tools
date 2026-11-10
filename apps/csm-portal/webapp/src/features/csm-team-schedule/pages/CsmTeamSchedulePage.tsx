@@ -104,6 +104,7 @@ import ScheduleSkeleton, { TabStripSkeleton } from "../components/ScheduleSkelet
 import { rotaIsLoading } from "../utils/rotaLoading";
 import "../teamSchedule.css";
 import { teamDisplayName } from "../utils/teamDisplayName";
+import { addKindRefusal } from "../utils/tagRefusal";
 /** What the banner says when an edit is refused: the server's own reason where
  *  it gave one a lead can act on -- the person is not on that team, or already
  *  holds an overlapping window -- and that nothing moved either way. */
@@ -1181,19 +1182,14 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     );
   };
 
-  /** Add a tag to the shared catalogue. The picker stays open so the lead can
-   *  use it straight away; the form shows why when it is refused. */
+  /** Add a tag for the family whose roster is being edited (a rota admin of
+   *  several families must say which). A refusal shows the server's own
+   *  reason, which is written for the lead who typed the tag. */
   const addKind = (kind: NewAbsenceKind): Promise<void> =>
-    createKind.mutateAsync(kind).then(
+    createKind.mutateAsync({ ...kind, family }).then(
       () => undefined,
       (err: unknown) => {
-        throw new Error(
-          err instanceof BackendApiError && err.status === 409
-            ? "A tag with that name or short code already exists."
-            : err instanceof BackendApiError && err.status === 403
-              ? "Only a team lead can add a tag."
-              : "The tag was not added. Try again.",
-        );
+        throw new Error(addKindRefusal(err));
       },
     );
 
@@ -1989,6 +1985,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
           // admin's to change; a reader who only marks a team is not offered
           // them (the server refuses them too).
           onCreateKind={fullTeams.length > 0 ? addKind : undefined}
+          tagFamily={family}
           onDeleteKind={fullTeams.length > 0 ? removeKind : undefined}
           onClear={clearCell}
           onClose={() => setPicker(null)}

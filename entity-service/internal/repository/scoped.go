@@ -341,18 +341,21 @@ func InTxReturning[T any](ctx context.Context, db *Scoped, fn func(tx pgx.Tx) (T
 	return result, nil
 }
 
-type includeDeletedAttachmentsKey struct{}
+type deletedOnlyAttachmentsKey struct{}
 
-// WithDeletedAttachments makes the work item attachment lists
-// (SearchCaseAttachments, SearchWorkItemAttachments) also return deleted rows,
-// after the others, with who deleted them and when. A context value rather than
-// a parameter so the list methods keep their signature; the service sets it
-// only for a caller that is allowed to see deleted attachments.
-func WithDeletedAttachments(ctx context.Context) context.Context {
-	return context.WithValue(ctx, includeDeletedAttachmentsKey{}, true)
+// WithDeletedAttachmentsOnly makes the work item attachment lists
+// (SearchCaseAttachments, SearchWorkItemAttachments) return ONLY the deleted
+// rows, most recently deleted first, with who deleted them and when (their total
+// and paging are of those rows alone). A context value rather than a parameter
+// so the list methods keep their signature; the service sets it only for a
+// caller that is allowed to see deleted attachments.
+func WithDeletedAttachmentsOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, deletedOnlyAttachmentsKey{}, true)
 }
 
-func includeDeletedAttachments(ctx context.Context) bool {
-	v, _ := ctx.Value(includeDeletedAttachmentsKey{}).(bool)
+// DeletedAttachmentsOnlyRequested reports whether WithDeletedAttachmentsOnly was applied
+// to ctx.
+func DeletedAttachmentsOnlyRequested(ctx context.Context) bool {
+	v, _ := ctx.Value(deletedOnlyAttachmentsKey{}).(bool)
 	return v
 }

@@ -758,14 +758,14 @@ func main() {
 		{
 			Name:     openCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "0 8 * * *"),
-			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
+			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
 			RunNowFlags: reportRunNowFlags,
 			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
-					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, worklogCaseLinkBase, alertsEnabled)
 				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
@@ -1036,17 +1036,18 @@ func main() {
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
-	// asked for (Colombo has no DST; TZ=UTC-dependent like every schedule
-	// here, see internal/schedule.PeriodKey):
-	//   - rota_weekday_reminder, 09:30 UTC = 15:00 Colombo, Mon-Fri: the next
-	//     working day's windows (Friday announces Monday), one email each with
-	//     its calendar invitation;
-	//   - rota_weekend_notice, 14:30 UTC = 20:00 Colombo, Sun-Thu: once the
-	//     coming weekend is fully marked, its summary and one invitation per
-	//     team per day, sent once; until then the rota admins are asked every
-	//     evening;
-	//   - rota_weekend_reminder, 09:30 UTC = 15:00 Colombo, Fri: the weekend
-	//     summary again, the invitations as updates, and cancellations.
+	// asked for, all at 03:30 UTC = 09:00 Colombo (Colombo has no DST;
+	// TZ=UTC-dependent like every schedule here, see
+	// internal/schedule.PeriodKey):
+	//   - rota_weekday_reminder, Sun-Thu: the next working day's windows, the
+	//     day before each (Sunday announces Monday), one email each with its
+	//     calendar invitation;
+	//   - rota_weekend_notice, Mon-Thu: once the coming weekend is fully
+	//     marked, its summary and one invitation per team per day, sent once
+	//     (on Monday when it is already marked); until then the rota admins
+	//     are asked every morning;
+	//   - rota_weekend_reminder, Fri: the weekend summary again, the
+	//     invitations as updates, and cancellations.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
 	if rotaRemindersAvailable {
@@ -1116,9 +1117,9 @@ func main() {
 			envString("ROTA_REMINDER_WEEKDAY_SHIFTS", "CRE_MORNING=Morning,CRE_MORNING_OC=On-call,CRE_EVENING=Evening"))
 		weekendRotations := parseRotations("ROTA_REMINDER_WEEKEND_SHIFTS",
 			envString("ROTA_REMINDER_WEEKEND_SHIFTS", "CRE_WEEKEND=LK Weekend,CRE_WEEKEND_NIGHT=Americas Weekend,CRE_WEEKEND_NIGHT_OC=Americas On-call"))
-		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 9 * * 1-5")
-		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 14 * * 0-4")
-		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 9 * * 5")
+		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 3 * * 0-4")
+		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 3 * * 1-4")
+		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 3 * * 5")
 		// "Send now" requests are picked up at every run: the schedule is finer
 		// than the driver, so it is due at each tick.
 		rotaManualSchedule := scheduleFor(scheduleOverrides, rotaManualTaskName, "*/5 * * * *")

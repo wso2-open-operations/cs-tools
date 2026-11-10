@@ -30,6 +30,7 @@ import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } fr
 import { escalationGrid } from "../utils/rota";
 import { INDIA_HOURS_CODE, REGULAR_HOURS_CODE } from "../utils/standingDay";
 import { useTeamName } from "../utils/teamColourContext";
+import { tagHoverText, tagSideText } from "../utils/tagHover";
 
 
 /** A customer engagement allocation (from the allocation app) covering the
@@ -111,6 +112,9 @@ interface CellPickerProps {
    *  exists; rejects with a message the form can show. Absent hides the
    *  "New tag" control. */
   onCreateKind?: (kind: NewAbsenceKind) => Promise<void>;
+  /** The family (CRE, SRE, SME) a new tag is added for: the roster being
+   *  edited. Only that family's rosters offer the tag. */
+  tagFamily?: string;
   /** Delete a tag a lead added. Resolves once gone; rejects with a message
    *  the picker can show (a tag still in use is refused). */
   onDeleteKind?: (code: string) => Promise<void>;
@@ -124,7 +128,19 @@ export interface NewAbsenceKind {
   label: string;
   bucket: "LEAVE" | "ALLOCATION";
   colourToken: string;
+  /** The tag's days take people off the timesheet (an SRE rotation); not
+   *  set, they stay on it (work from home). Allocation tags only: leave
+   *  shows on the timesheet as leave. */
+  excludesFromTimesheet: boolean;
+  /** Optional; shown when hovering the tag. */
+  description: string;
 }
+
+/** The longest name a new tag may have: it is the chip the roster draws. */
+export const TAG_NAME_MAX = 10;
+
+/** The longest description a tag may carry (the server's limit too). */
+export const TAG_DESCRIPTION_MAX = 300;
 
 /** The colours a new tag may take: the ones the stylesheet draws a leave or
  *  allocation chip for. The server holds the same list. */
@@ -248,6 +264,7 @@ export default function CellPicker({
   onRemoveAbsence,
   onDismissEngagement,
   onCreateKind,
+  tagFamily,
   onDeleteKind,
   onClose,
   busy,
@@ -261,6 +278,8 @@ export default function CellPicker({
     label: "",
     bucket: "ALLOCATION",
     colourToken: "INT",
+    excludesFromTimesheet: false,
+    description: "",
   });
   const [tagError, setTagError] = useState("");
   const [tagBusy, setTagBusy] = useState(false);
@@ -531,7 +550,7 @@ export default function CellPicker({
             // inside it is covered too -- somebody away Friday to Monday
             // is away for the weekend, and skipping it would say they
             // were back for two days in the middle of it.
-            title={blocked ? `${kind.label} — working days only: start on a weekday` : `${kind.label} — working days in the span`}
+            title={blocked ? `${tagHoverText(kind)} — working days only: start on a weekday` : `${tagHoverText(kind)} — working days in the span`}
             onClick={() =>
               onMarkAway(
                 kind.code,
@@ -542,7 +561,10 @@ export default function CellPicker({
             }
           >
             <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
-            <span className="pk-l">{kind.label}</span>
+            <span className="pk-l">
+              {tagSideText(kind)}
+              {kind.excludesFromTimesheet ? <span className="pk-off">Not on the timesheet</span> : null}
+            </span>
           </button>
         );
         if (!kind.custom || !onDeleteKind) return mark;
@@ -957,22 +979,46 @@ export default function CellPicker({
                   className="pk-newtag tf"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    const shortCode = tag.shortCode.trim();
-                    const label = tag.label.trim();
-                    if (!shortCode || !label) {
-                      setTagError("A short code and a name are both needed.");
+                    // A custom tag is its short name: what the roster cell
+                    // draws. Anything longer goes in the description.
+                    const name = tag.label.trim();
+                    if (!name) {
+                      setTagError("A tag name is needed.");
                       return;
                     }
-                    if (awayKinds.some((k) => k.shortCode.toLowerCase() === shortCode.toLowerCase())) {
-                      setTagError(`${shortCode} is already a tag — pick another short code.`);
+                    // Counted in characters (code points), as the server
+                    // counts runes, so an emoji counts once on both sides.
+                    if ([...name].length > TAG_NAME_MAX) {
+                      setTagError(`A tag name is at most ${TAG_NAME_MAX} characters; put the rest in the description.`);
                       return;
                     }
+                    const taken = (s: string) => s.trim().toLowerCase() === name.toLowerCase();
+                    if (awayKinds.some((k) => taken(k.shortCode) || taken(k.label))) {
+                      setTagError(`${name} is already a tag — pick another name.`);
+                      return;
+                    }
+                    const shortCode = name;
+                    const label = name;
                     setTagBusy(true);
                     setTagError("");
-                    onCreateKind({ ...tag, shortCode, label })
+                    onCreateKind({
+                      ...tag,
+                      shortCode,
+                      label,
+                      description: tag.description.trim(),
+                      // Leave shows on the timesheet as leave.
+                      excludesFromTimesheet: tag.bucket === "ALLOCATION" && tag.excludesFromTimesheet,
+                    })
                       .then(() => {
                         setTagOpen(false);
-                        setTag({ shortCode: "", label: "", bucket: tag.bucket, colourToken: tag.colourToken });
+                        setTag({
+                          shortCode: "",
+                          label: "",
+                          bucket: tag.bucket,
+                          colourToken: tag.colourToken,
+                          excludesFromTimesheet: false,
+                          description: "",
+                        });
                       })
                       .catch((err: unknown) =>
                         setTagError(err instanceof Error && err.message ? err.message : "The tag was not added."),
@@ -981,62 +1027,125 @@ export default function CellPicker({
                   }}
                 >
                   <div className="pk-sec">New tag</div>
-                  <label>
-                    <span>Short code</span>
-                    <input
-                      value={tag.shortCode}
-                      maxLength={12}
-                      placeholder="e.g. Trn"
-                      onChange={(e) => setTag({ ...tag, shortCode: e.target.value })}
-                      aria-label="Tag short code"
-                    />
-                  </label>
-                  <label>
-                    <span>Name</span>
-                    <input
-                      value={tag.label}
-                      maxLength={100}
-                      placeholder="e.g. External training"
-                      onChange={(e) => setTag({ ...tag, label: e.target.value })}
-                      aria-label="Tag name"
-                    />
-                  </label>
-                  <div className="pk-codes" role="radiogroup" aria-label="Tag type">
-                    {(["LEAVE", "ALLOCATION"] as const).map((b) => (
-                      <button
-                        key={b}
-                        type="button"
-                        role="radio"
-                        aria-checked={tag.bucket === b}
-                        className={tag.bucket === b ? "on" : ""}
-                        onClick={() => setTag({ ...tag, bucket: b })}
+                  <fieldset className="tf-group">
+                    <legend>What the roster shows</legend>
+                    <label>
+                      <span>Name</span>
+                      <input
+                        value={tag.label}
+                        placeholder={`e.g. SRE, WFH (up to ${TAG_NAME_MAX} characters)`}
+                        onChange={(e) => setTag({ ...tag, label: e.target.value })}
+                        aria-label="Tag name"
+                        aria-describedby="pk-name-help"
+                      />
+                    </label>
+                    <p className="pk-note tf-help" id="pk-name-help">
+                      What the roster shows on the day, up to {TAG_NAME_MAX} characters. Explain it in the description.
+                    </p>
+                    <label>
+                      <span>Description</span>
+                      <input
+                        value={tag.description}
+                        maxLength={TAG_DESCRIPTION_MAX}
+                        placeholder="Optional, e.g. Working the SRE rota"
+                        onChange={(e) => setTag({ ...tag, description: e.target.value })}
+                        aria-label="Tag description"
+                      />
+                    </label>
+                    <div className="tf-row">
+                      <span>Colour</span>
+                      <div className="tf-sw" role="radiogroup" aria-label="Tag colour">
+                        {TAG_COLOURS.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            role="radio"
+                            aria-checked={tag.colourToken === c}
+                            aria-label={`Colour ${c}`}
+                            className={`pk-sw${tag.colourToken === c ? " on" : ""}`}
+                            onClick={() => setTag({ ...tag, colourToken: c })}
+                          >
+                            <span className={`chip sm ${c}`}>Aa</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </fieldset>
+                  <fieldset className="tf-group">
+                    <legend>How it counts</legend>
+                    <label className="tf-pick">
+                      <span>Tag type</span>
+                      <select
+                        value={tag.bucket}
+                        aria-label="Tag type"
+                        aria-describedby="pk-type-help"
+                        onChange={(e) => {
+                          const bucket = e.target.value as NewAbsenceKind["bucket"];
+                          // Leave shows on the timesheet as leave.
+                          setTag({ ...tag, bucket, excludesFromTimesheet: bucket === "ALLOCATION" && tag.excludesFromTimesheet });
+                        }}
                       >
-                        {b === "LEAVE" ? "Leave" : "Allocation"}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="tf-sw" role="radiogroup" aria-label="Tag colour">
-                    {TAG_COLOURS.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        role="radio"
-                        aria-checked={tag.colourToken === c}
-                        aria-label={`Colour ${c}`}
-                        className={`pk-sw${tag.colourToken === c ? " on" : ""}`}
-                        onClick={() => setTag({ ...tag, colourToken: c })}
+                        <option value="ALLOCATION">Allocation</option>
+                        <option value="LEAVE">Leave</option>
+                      </select>
+                    </label>
+                    <p className="pk-note tf-help" id="pk-type-help">
+                      {tag.bucket === "LEAVE"
+                        ? "Leave: the person is away (e.g. a vacation). Listed under Leave in the picker and the legend."
+                        : "Allocation: the person is working on something else (e.g. an SRE rotation, work from home). Listed under Allocations."}
+                    </p>
+                    <label className="tf-pick">
+                      <span>Timesheet</span>
+                      <select
+                        value={tag.bucket === "LEAVE" ? "LEAVE" : tag.excludesFromTimesheet ? "EXCLUDE" : "INCLUDE"}
+                        aria-label="Timesheet"
+                        aria-describedby="pk-ts-help"
+                        disabled={tag.bucket === "LEAVE"}
+                        onChange={(e) => setTag({ ...tag, excludesFromTimesheet: e.target.value === "EXCLUDE" })}
                       >
-                        <span className={`chip sm ${c}`}>{tag.colourToken === c && tag.shortCode.trim() ? tag.shortCode.trim() : "Aa"}</span>
-                      </button>
-                    ))}
+                        {tag.bucket === "LEAVE" ? (
+                          <option value="LEAVE">Shown as leave</option>
+                        ) : (
+                          <>
+                            <option value="INCLUDE">Include in timesheet</option>
+                            <option value="EXCLUDE">Exclude from timesheet</option>
+                          </>
+                        )}
+                      </select>
+                    </label>
+                    <p className="pk-note tf-help" id="pk-ts-help">
+                      {tag.bucket === "LEAVE"
+                        ? "Leave days show on the timesheet as leave."
+                        : tag.excludesFromTimesheet
+                          ? "People with this tag are left off the timesheet on those days (e.g. an SRE rotation)."
+                          : "People with this tag stay on the timesheet as usual (e.g. work from home)."}
+                    </p>
+                  </fieldset>
+                  <div className="tf-preview" aria-label="Preview of the new tag">
+                    <span className="tf-preview-h">Preview</span>
+                    <span className={`chip sm ${tag.colourToken}`}>{tag.label.trim() || "Name"}</span>
+                    <span className="tf-preview-d">
+                      {tag.description.trim() || (tag.label.trim() ? "No description" : "Type a name to see the tag")}
+                    </span>
+                    <span className="tf-preview-t">
+                      {tag.bucket === "LEAVE"
+                        ? "Leave · shown as leave"
+                        : tag.excludesFromTimesheet
+                          ? "Allocation · not on the timesheet"
+                          : "Allocation · on the timesheet"}
+                    </span>
                   </div>
-                  <p className="pk-note">Shared with every team once added.</p>
+                  <p className="pk-note">
+                    {tagFamily
+                      ? `For the ${tagFamily} family only: only ${tagFamily} rosters will offer this tag.`
+                      : "Shared with every team once added."}
+                  </p>
                   <div className="tf-err" role="alert">{tagError}</div>
                   <div className="pk-tagact">
                     <button type="button" className="btn sm" onClick={() => setTagOpen(false)}>
                       Cancel
                     </button>
-                    <button type="submit" className="btn sm primary" disabled={tagBusy}>
+                    <button type="submit" className="btn sm primary" disabled={tagBusy || !tag.label.trim()}>
                       {tagBusy ? "Adding…" : "Add tag"}
                     </button>
                   </div>

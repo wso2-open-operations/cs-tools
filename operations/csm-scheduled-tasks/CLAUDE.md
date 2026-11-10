@@ -141,7 +141,7 @@ entity-service without it the task fails (404) and the engine alerts.
 
 A table that entity-service cut at its cap carries a "Showing only the oldest N of TOTAL" note, and an
 empty table shows "No cases." If both tables are empty the report omits itself: nothing is sent, a
-count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<internal id>` (plain text when it is unset).
+count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<case UUID>` (the `id` of each report row; the portal cannot open a case by number or internal ID), as plain text when the base is unset or a row has no `id`.
 
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
@@ -166,10 +166,18 @@ package's own doc comment for why case search isn't just another method on `ledg
 sibling of "Stale cases report" above: it flags a case nobody has even started working on yet,
 rather than any case that's merely been open a long time. Queries entity-service's
 `POST /cases/search` (via `internal/entitycases.Client.SearchCasesInStateCreatedBeforeYesterday`)
-for every case whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
-moved to `work_in_progress` or anything else no longer belongs here) and whose `createdOn` falls
-before the start of yesterday, then emails a report table of them (oldest first) via
-`notify.RenderOpenCasesReport`.
+for every item whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
+moved to `work_in_progress` or anything else no longer belongs here), whose `type` is one of `case`,
+`service_request` or `security_report_analysis` (`entitycases.OpenCaseTypes`; without the filter the
+search also returns announcements and engagements, tens of thousands of rows) and whose `createdOn`
+falls before the start of yesterday, then emails a report table of them (oldest first) via
+`notify.RenderOpenCasesReport`. The table has a Type column (Case, Service request, Security report
+analysis), and each row's number links to the item's CSM portal page, built from
+`CSM_PORTAL_WEB_BASE_URL` and the item's UUID: `/cases/<id>`, `/operations/service-requests/<id>` or
+`/security-center/security-reports/<id>`. The base is empty, the row has no id or the type has no
+known route: plain text. A result over the pagination cap is an error, never a partial list. With no
+matching rows no mail is sent: the handler logs a count-only line and succeeds (also for a
+`--run-now` with `--recipients`, which then sends nothing either), like "Stale cases report".
 
 "Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
 time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
@@ -203,9 +211,9 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 
 | Task | Default schedule | Announces |
 |---|---|---|
-| `rota_weekday_reminder` | `30 9 * * 1-5` (15:00 Colombo, Mon–Fri) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): tomorrow from Monday to Thursday, **Monday from Friday** |
-| `rota_weekend_notice` | `30 14 * * 0-4` (20:00 Colombo, Sun–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once; until then the rota admins are asked every evening |
-| `rota_weekend_reminder` | `30 9 * * 5` (15:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
+| `rota_weekday_reminder` | `30 3 * * 0-4` (09:00 Colombo, Sun–Thu) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): always tomorrow, so **Monday from Sunday** |
+| `rota_weekend_notice` | `30 3 * * 1-4` (09:00 Colombo, Mon–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once (on Monday when it is already marked); until then the rota admins are asked every morning |
+| `rota_weekend_reminder` | `30 3 * * 5` (09:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
 
 The schedule decides only *when* a task runs. Which days it announces comes from the day it runs
@@ -301,10 +309,10 @@ schedules assume `TZ=UTC` like every other here.
   `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) is how many people each shift needs on each day; the on-call
   variant does not count. Until that holds, `rota_weekend_notice` emails the family's rota admins
   (entity-service `GET /team-schedule/rota-admins/{family}`; the task's alert audience when there
-  are none) a table of what is missing, every evening, and sends nothing to the rota. Friday's
+  are none) a table of what is missing, every morning, and sends nothing to the rota. Friday's
   `rota_weekend_reminder` sends anyway, listing the gaps, and tells the admins.
 - **The weekend send is recorded in entity-service** (`team_schedule_reminder_sent`, migration
-  0241, `GET`/`PUT /team-schedule/reminders/{family}/weekend_notice/{saturday}`): an evening that
+  0241, `GET`/`PUT /team-schedule/reminders/{family}/weekend_notice/{saturday}`): a morning run that
   finds the record sends nothing, and Friday compares its invitations with the recorded ones and
   sends a cancellation (`METHOD:CANCEL`) to anybody taken off a window, or to everybody on a window
   that is gone. A failure to record is reported in the partial-failure alert; the emails are not
@@ -564,6 +572,22 @@ both places.
   again, the combination startup refuses); `--limit=N` needs `N` > 0 and at most `ACP_DAILY_LIMIT` when
   that is non-zero (refused otherwise), else it sets the cap for the run. Suggested first real run:
   `--run-now=acp_closure --dry-run --limit=20`, read the log, then `--limit=20` for real.
+- **Only an Open track acts.** A project is listed because its overall state is Open, but each track
+  (end date, invoice) has its own closure state, and a person's reopen can leave one at "Pending
+  Suspended", "Pending Closed", "Notified" and so on. A track whose own state is not Open does nothing:
+  no read, no probe, no notice, no record, no suspension, no reset to open (`buildSubscriptionCascade`,
+  `buildInvoiceCascade`, and `actSubscription` / `actInvoice` as a second guard). Before this, ACP sent the
+  day-0 notice ("your project has been suspended") and recorded `suspend_notice` while `suspend` then
+  skipped the track, so a customer was told of a suspension that never happened. The skipped track also
+  does not mark the project closed for the other one, so an Open invoice track still notifies before it
+  suspends.
+- **A completed suspension is not repeated.** The legacy process re-ran an event only when its type
+  changed or an action failed, so a project suspended and then reopened by a person was left alone until
+  its date or invoice moved the event. An Open track whose saved `event_type` is `suspend` (and whose
+  `actionSuspendProject`, if present, is `SUCCESSFUL`) does nothing when the decision is to suspend: no notice,
+  no suspension, no record, and it does not mark the project closed for the other track
+  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
+  still resets the event to `open`, which clears this.
 - **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
   (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
   - its `suspensionProcessOverridden` flag is true (`Result.ProjectsFilteredOverridden`): the legacy
@@ -929,7 +953,7 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
-| `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
+| `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its

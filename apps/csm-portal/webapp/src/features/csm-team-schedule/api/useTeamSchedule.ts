@@ -524,6 +524,13 @@ export interface CreateAbsenceKindPayload {
   label: string;
   bucket: "LEAVE" | "ALLOCATION";
   colourToken: string;
+  /** The tag's days take people off the timesheet. Allocation tags only. */
+  excludesFromTimesheet?: boolean;
+  /** Optional, at most 300 characters; shown when hovering the tag. */
+  description?: string;
+  /** The rota family the tag is for: the roster being edited. Needed by a
+   *  rota admin of more than one family; the server decides it otherwise. */
+  family?: string;
 }
 
 /**

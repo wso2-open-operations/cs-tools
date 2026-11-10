@@ -515,7 +515,7 @@ func TestOverrideRunsOfRealReportHandlers(t *testing.T) {
 			return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(nil, rec), nil, "", true)
 		},
 		"open": func(email notify.Sender) func(context.Context) error {
-			return opencases.SendReport(fakeOpen{}, email, orRecipients(nil, rec), nil, true)
+			return opencases.SendReport(fakeOpen{}, email, orRecipients(nil, rec), nil, "", true)
 		},
 		"migration": func(email notify.Sender) func(context.Context) error {
 			return migrationscan.SendReport(fakeMigration{}, email, 180, orRecipients(nil, rec), nil, "", true)
@@ -556,8 +556,10 @@ func (fakeStale) Report(context.Context, int) (longopenreport.Report, error) {
 
 type fakeOpen struct{}
 
+// fakeOpen returns one case so the report is not empty (an empty report is
+// not sent at all).
 func (fakeOpen) SearchCasesInStateCreatedBeforeYesterday(context.Context, string) ([]entitycases.Case, error) {
-	return nil, nil
+	return []entitycases.Case{{Number: "CS0000001", Type: "case"}}, nil
 }
 
 type fakeMigration struct{}

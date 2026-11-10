@@ -1673,7 +1673,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/{id}/sla/recalculate-pause:
+  /cases/{id}/sla/recalculate:
     post:
       summary: >-
         Recompute one case's currently IN_PROGRESS SLA clocks' pause history
@@ -8209,7 +8209,13 @@ paths:
         Search the attachments of a case, change request, incident, conversation
         or deployment, most recent first. Deployment attachments are listed from
         deployment_attachment, scoped to the caller's projects by row-level
-        security; a deleted, failed or still-uploading attachment is not listed.
+        security; a failed or still-uploading attachment is not listed. A deleted
+        attachment is not listed either, unless the caller is the CSM portal
+        backend and sets `deletedOnly` (it does, when a portal admin asks): the
+        list is then of the deleted attachments only, most recently deleted
+        first, with `status: deleted`, `deletedOn` and `deletedBy`, and its
+        total and paging count only those. `deletedOnly` is ignored from any
+        other caller and for a deployment.
       operationId: searchCaseAttachments
       requestBody:
         required: true
@@ -22385,6 +22391,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
         onboardingOwner:
           description: >
             The person assigned to run this project's onboarding. Null when
@@ -22509,6 +22518,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer. Always null on Postgres.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
 
     SearchProjectsResponse:
       type: object
@@ -22562,6 +22574,9 @@ components:
             recomputes the overall state from them again, silently overwriting
             a manual override — there is no column recording that one was ever
             set.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Sets whether the automatic Account Closure Process must skip this project (Postgres data sources only; a 400 on the legacy data source). Only true or false changes it; null and omitted leave it unchanged. Touches no closure state and combines freely with every other field. The response echoes the stored value. Admin-only enforcement lives in the BFF, not here."
         suspensionProcessState:
           type: object
           additionalProperties: true
@@ -22663,6 +22678,10 @@ components:
         verificationEnabled:
           type: boolean
           nullable: true
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Present on Postgres data sources only."
         onboardingStatus:
           type: string
           description: Present on Postgres data sources only.
@@ -25743,10 +25762,12 @@ components:
       type: string
       enum:
         - complete
+        - deleted
       description: >
-        Lifecycle state of a listed attachment. Only complete attachments are listed: a
-        pending (still uploading), failed or deleted one is not returned by
-        POST /attachments/search.
+        Lifecycle state of a listed attachment. Complete attachments are listed; a
+        pending (still uploading) or failed one is not returned by
+        POST /attachments/search. `deleted` appears only when the CSM portal backend
+        asked for the deleted attachments (`deletedOnly`); that list holds only them.
 
     Attachment:
       type: object
@@ -25787,6 +25808,12 @@ components:
             its own recorded. Entity-service never reads the file; the portal backends do.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
+        deletedOn:
+          type: string
+          format: date-time
+          description: When the attachment was deleted. Set only when `status` is `deleted`.
+        deletedBy:
+          $ref: '#/components/schemas/UserReference'
 
     ReferenceType:
       type: string
@@ -25809,6 +25836,13 @@ components:
           $ref: '#/components/schemas/ReferenceType'
         pagination:
           $ref: '#/components/schemas/Pagination'
+        deletedOnly:
+          type: boolean
+          description: >
+            List the deleted attachments instead of the available ones, most
+            recently deleted first (total and paging are of the deleted ones).
+            Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID);
+            ignored from any other caller and for referenceType `deployment`.
 
     SearchAttachmentsResponse:
       type: object
@@ -28634,6 +28668,23 @@ components:
         colourToken:
           type: string
           enum: [AL, LL, MAT, PAT, RND, EXT, INT, BR, MIG, ONB, EXC, IND]
+        family:
+          type: string
+          enum: [CRE, SRE, SME]
+          description: >-
+            The family the tag is for; only that family's rosters offer it. A rota admin's
+            or team lead's tag is always their own family's (this picks one when they run or
+            lead more than one; another family is a 403). A portal admin who runs no rota
+            may name one, else the tag is shared.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            Take people off the worklog timesheet on the tag's days (an SRE rotation, say).
+            Allocation tags only; a leave tag with it is a 400 (leave shows as leave).
+        description:
+          type: string
+          maxLength: 300
+          description: Optional; shown when hovering the tag.
     ScheduleAbsenceKind:
       type: object
       description: Why someone is out of the rota.
@@ -28657,6 +28708,14 @@ components:
           description: >-
             True for a kind no longer offered. Still served so the days already
             marked with it keep their label; a client must not offer it.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            True when the tag's days take a person off the worklog timesheet. The
+            built-in ENG, ALLO_EXT and ALLO_INT carry it; leave kinds never do.
+        description:
+          type: string
+          description: What the tag is for, shown on hover; absent when it has none.
     ScheduleCatalogue:
       type: object
       properties:
@@ -31472,13 +31531,17 @@ components:
     LongOpenCaseReportRow:
       type: object
       description: One long-open case.
-      required: [number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
+      required: [id, number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: The case UUID the portal routes on.
         number:
           type: string
         internalId:
           type: string
-          description: The case's internal identifier, or empty.
+          description: The case's internal identifier (a display reference, not the id the portal routes on), or empty.
         createdOn:
           type: string
           format: date-time
@@ -31716,7 +31779,7 @@ components:
                 description: The link the removed runbook had.
     CaseSLAPauseRecalcClock:
       type: object
-      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate.
       properties:
         target:
           type: string

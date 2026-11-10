@@ -42,8 +42,8 @@ const migrationCaseReportTimezone = "Asia/Colombo"
 // reports: an introduction naming the age threshold, then the three
 // tables with the columns the scan has always had. caseLinkBase is the
 // support portal's case page prefix; when set, each row's WSO2 ID links to
-// <caseLinkBase>/<case number>, the link the scan has always carried, else
-// it is plain text. [YEAR] is today's year, the footer-only detail every
+// <caseLinkBase>/<case id>, where the id is the case's UUID (the only
+// identifier the case page opens by), else it is plain text. [YEAR] is today's year, the footer-only detail every
 // template here has.
 func RenderMigrationCaseReport(r migrationreport.Report, caseLinkBase string) string {
 	loc, err := time.LoadLocation(migrationCaseReportTimezone)
@@ -105,18 +105,19 @@ func renderMigrationRows(rows []migrationreport.Row, caseLinkBase string, loc *t
 }
 
 // migrationCaseLink is the row's WSO2 ID, linked to the case page in the
-// support portal (<caseLinkBase>/<number>) when a base URL is configured.
-// The key falls back to the number so the cell is never blank; the number
-// is path-escaped because it is data.
+// support portal (<caseLinkBase>/<case id>) when a base URL is configured.
+// The case page opens by the case's UUID, not its number. The key falls
+// back to the number so the cell is never blank; the id is path-escaped
+// because it is data.
 func migrationCaseLink(caseLinkBase string, row migrationreport.Row) string {
 	text := row.IssueKey
 	if text == "" {
 		text = row.Number
 	}
-	if caseLinkBase == "" || row.Number == "" {
+	if caseLinkBase == "" || row.ID == "" {
 		return escapeHTML(text)
 	}
-	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.Number)
+	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.ID)
 	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
 

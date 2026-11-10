@@ -4,6 +4,32 @@ Repo-wide conventions. Component-specific guidance lives in that component's own
 `CLAUDE.md` (`entity-service/`, `apps/csm-portal/backend/`, `apps/csm-portal/webapp/`,
 each `integrations/*`, …) — this file is only for things that hold everywhere.
 
+## Read a component's specs before changing it, and keep them true to the code
+
+Each component's `docs/` folder holds specs (`entity-service/docs/`,
+`integrations/csm-notification-service/docs/`, …) that explain behavior and the
+reasons behind it, which the code alone does not. Read the ones relevant to the
+area you are touching before editing it, not just the code.
+
+The code is the source of truth. If a spec and the code disagree, the spec is
+stale: fix the spec to match the code in the same change, never the reverse, and
+never leave a known mismatch in place. Keep spec edits short.
+
+## Run the component's review.md against the diff before every commit
+
+Before committing a change to any component that has a `review.md`
+(`entity-service`, `apps/csm-portal/backend`, `apps/customer-portal/backend-v2`, …),
+read that component's `review.md`, check every item against the staged diff, and
+state what matched — and why — before running `git commit`. Do not silently fix and
+move on. Fixes go into the same commit.
+
+Do this on every commit, not only the one that opens the PR: the checklist comes
+from past reported bugs, and a later commit on the same branch can reintroduce one.
+If a review turns up a failure class that is not on the list, add it to that
+`review.md` in the same style (one line, grounded in what actually happened).
+
+Nothing enforces this — there is no hook — so it is a manual gate.
+
 ## Always pull and check for conflicts before pushing
 
 Never push a branch without first fetching the target and checking whether it
