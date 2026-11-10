@@ -32,6 +32,8 @@ func registerBlobAttachmentRoutes(mux *http.ServeMux, stored *handler.StoredAtta
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", blob.ListChunks)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", blob.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", blob.DeleteAttachment)
+	mux.HandleFunc("POST /attachments/upload/{id}/direct", blob.DirectUploadLinks)
 	mux.HandleFunc("GET /attachments/download/{id}/content", blob.Download)
+	mux.HandleFunc("GET /attachments/download/{id}/link", blob.DirectDownloadLink)
 	mux.HandleFunc("GET /attachments/inline/{id}/content", blob.InlineImage)
 }

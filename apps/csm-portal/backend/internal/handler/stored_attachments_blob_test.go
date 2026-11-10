@@ -44,6 +44,11 @@ type fakeBlobEntity struct {
 	}
 	chunks      string
 	confirmBody string
+	// directErr fails the two direct-link calls; directKind and directID record
+	// what was asked.
+	directErr   error
+	directKind  string
+	directID    string
 	deleteCalls int
 	deleteBody  string
 
@@ -62,6 +67,16 @@ func (f *fakeBlobEntity) PutStoredAttachmentChunk(_ context.Context, id, kind st
 
 func (f *fakeBlobEntity) ListStoredAttachmentChunks(context.Context, string, string) ([]byte, error) {
 	return []byte(f.chunks), f.listErr
+}
+
+func (f *fakeBlobEntity) DirectStoredAttachmentUploadLinks(_ context.Context, id, kind string) ([]byte, error) {
+	f.directID, f.directKind = id, kind
+	return []byte(`{"links":["https://blob.example/x?sig=s"],"chunkBytes":8388608}`), f.directErr
+}
+
+func (f *fakeBlobEntity) DirectStoredAttachmentDownloadLink(_ context.Context, id, kind string) ([]byte, error) {
+	f.directID, f.directKind = id, kind
+	return []byte(`{"url":"https://blob.example/x?sig=s","name":"a.pdf"}`), f.directErr
 }
 
 func (f *fakeBlobEntity) ConfirmStoredAttachmentUpload(_ context.Context, _ string, b []byte) ([]byte, error) {
@@ -101,7 +116,9 @@ func serveBlob(e *fakeBlobEntity, method, target string, body io.Reader, hdr map
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
+	mux.HandleFunc("POST /attachments/upload/{id}/direct", h.DirectUploadLinks)
 	mux.HandleFunc("GET /attachments/download/{id}/content", h.Download)
+	mux.HandleFunc("GET /attachments/download/{id}/link", h.DirectDownloadLink)
 	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImage)
 	r := httptest.NewRequest(method, target, body)
 	for k, v := range hdr {
@@ -390,5 +407,58 @@ func TestBlobListChunks(t *testing.T) {
 	}
 	if rec := serveBlob(&fakeBlobEntity{listErr: errors.New("down")}, http.MethodGet, "/attachments/upload/"+storedAttID+"/chunks?type=work_item", nil, nil, true); rec.Code != 500 {
 		t.Errorf("a failed list: %d", rec.Code)
+	}
+}
+
+// The direct links are relayed as entity-service made them. They are credentials,
+// so they are never cached.
+func TestBlobDirectLinks_AreRelayedAndNeverCached(t *testing.T) {
+	for name, tc := range map[string]struct {
+		method, path, want string
+	}{
+		"upload":   {http.MethodPost, "/attachments/upload/" + storedAttID + "/direct?type=work_item", `"links":["https://blob.example/x?sig=s"]`},
+		"download": {http.MethodGet, "/attachments/download/" + storedAttID + "/link?type=work_item", `"url":"https://blob.example/x?sig=s"`},
+	} {
+		e := &fakeBlobEntity{}
+		rec := serveBlob(e, tc.method, tc.path, nil, nil, true)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: Cache-Control = %q", name, rec.Header().Get("Cache-Control"))
+		}
+		if e.directID != storedAttID || e.directKind != "work_item" {
+			t.Errorf("%s: forwarded %q %q", name, e.directID, e.directKind)
+		}
+	}
+}
+
+func TestBlobDirectLinks_Refusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		method, path string
+		user         bool
+		want         int
+	}{
+		"upload, bad id":      {http.MethodPost, "/attachments/upload/not-a-uuid/direct?type=work_item", true, http.StatusBadRequest},
+		"upload, bad type":    {http.MethodPost, "/attachments/upload/" + storedAttID + "/direct?type=case", true, http.StatusBadRequest},
+		"upload, no caller":   {http.MethodPost, "/attachments/upload/" + storedAttID + "/direct?type=work_item", false, http.StatusUnauthorized},
+		"download, bad id":    {http.MethodGet, "/attachments/download/not-a-uuid/link?type=work_item", true, http.StatusBadRequest},
+		"download, bad type":  {http.MethodGet, "/attachments/download/" + storedAttID + "/link?type=case", true, http.StatusBadRequest},
+		"download, no caller": {http.MethodGet, "/attachments/download/" + storedAttID + "/link?type=work_item", false, http.StatusUnauthorized},
+	} {
+		e := &fakeBlobEntity{}
+		if rec := serveBlob(e, tc.method, tc.path, nil, nil, tc.user); rec.Code != tc.want {
+			t.Errorf("%s: %d, want %d", name, rec.Code, tc.want)
+		}
+		if e.directID != "" {
+			t.Errorf("%s: entity-service was called", name)
+		}
+	}
+	// Whatever entity-service refuses reaches the browser through the usual mapping,
+	// and never with a link in it.
+	e := &fakeBlobEntity{directErr: errors.New("down")}
+	rec := serveBlob(e, http.MethodGet, "/attachments/download/"+storedAttID+"/link?type=work_item", nil, nil, true)
+	if rec.Code < 500 || strings.Contains(rec.Body.String(), "blob.example") {
+		t.Errorf("a failed link: %d %s", rec.Code, rec.Body.String())
 	}
 }
