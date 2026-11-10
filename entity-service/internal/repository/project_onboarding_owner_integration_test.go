@@ -67,13 +67,17 @@ func TestProjectOnboardingOwnerIntegration(t *testing.T) {
 
 	insert := func(id, key string, owner *string) {
 		mustExec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, name, sf_id, onboarding_owner_id)
-			VALUES ($1, now(), now(), 'poo-test', 'poo-test', $2, $2, 'sf-'||$2, $3)`, id, key, owner)
+			VALUES ($1, now(), now(), 'poo-test', 'poo-test', $2::text, $2::text, 'sf-'||$2::text, $3)`, id, key, owner)
 	}
 	full, noMail, blank := pooUserFull, pooUserNoMail, pooUserBlank
 	insert(pooProjOwner, "POOWNER", &full)
 	insert(pooProjNone, "POONONE", nil)
 	insert(pooProjNoMail, "POONOMAIL", &noMail)
 	insert(pooProjBlank, "POOBLANK", &blank)
+
+	// suspension_process_overridden (migration 0281): FALSE by default, TRUE
+	// round-trips on both project reads.
+	mustExec(`UPDATE project SET suspension_process_overridden = TRUE WHERE id = $1`, pooProjOwner)
 
 	repo := repository.NewProjectRepository(repository.NewScoped(pool))
 	scope := repository.SearchScope{Unrestricted: true}
@@ -98,6 +102,10 @@ func TestProjectOnboardingOwnerIntegration(t *testing.T) {
 	}
 	if o := get(pooProjBlank).OnboardingOwner; o == nil || o.ID != pooUserBlank || o.Name != "" {
 		t.Errorf("detail blank-name owner = %+v", o)
+	}
+
+	if !get(pooProjOwner).SuspensionProcessOverridden || get(pooProjNone).SuspensionProcessOverridden {
+		t.Errorf("detail suspensionProcessOverridden: owner project must be true, ownerless project false")
 	}
 
 	projects, total, err := repo.SearchProjects(ctx, domain.SearchProjectsRequest{
@@ -125,5 +133,8 @@ func TestProjectOnboardingOwnerIntegration(t *testing.T) {
 	}
 	if o := byID[pooProjBlank].OnboardingOwner; o == nil || o.Name != "" {
 		t.Errorf("search blank-name owner = %+v", o)
+	}
+	if !byID[pooProjOwner].SuspensionProcessOverridden || byID[pooProjNone].SuspensionProcessOverridden {
+		t.Errorf("search suspensionProcessOverridden: owner project must be true, ownerless project false")
 	}
 }

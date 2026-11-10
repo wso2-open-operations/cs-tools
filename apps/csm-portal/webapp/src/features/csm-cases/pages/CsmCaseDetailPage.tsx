@@ -21,6 +21,7 @@ import {
   Button,
   Card,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -46,6 +47,7 @@ import {
   Paperclip,
   PauseCircle,
   Phone,
+  RefreshCw,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
@@ -90,6 +92,7 @@ import {
   useDeleteCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -172,6 +175,7 @@ import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
 import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import { useGetWorkItemSlas } from "@features/csm-sla/api/useGetWorkItemSlas";
+import { usePostCaseSlaRecalculation } from "@features/csm-sla/api/usePostCaseSlaRecalculation";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import {
@@ -731,6 +735,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const currentEscalationLevel =
     escalationHistory?.escalations[0]?.currentLevel ?? null;
   const postEscalation = usePostCsmCaseEscalation(caseId);
+  const recalcCaseSla = usePostCaseSlaRecalculation(caseId);
   const requestCaseUpdate = useRequestCaseUpdate();
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
@@ -1174,6 +1179,30 @@ export default function CsmCaseDetailPage(): JSX.Element {
       setIsAcknowledging(false);
     }
   }, [patchCase, showError, showSuccess]);
+
+  // Admin-only: recompute this case's currently active SLA clocks' pause
+  // totals from its real state-change history (see
+  // usePostCaseSlaRecalculation's own doc comment). The hook's own
+  // onSuccess already invalidates the SLA list query, so the table reflects
+  // any correction without a manual refresh.
+  const handleRecalculateSla = useCallback(async (): Promise<void> => {
+    try {
+      const result = await recalcCaseSla.mutateAsync();
+      if (!result.hasHistory) {
+        showSuccess(
+          "This case has no SLA activity history to replay — nothing to recalculate.",
+        );
+        return;
+      }
+      const updatedCount = result.clocks.filter((clock) => clock.updated).length;
+      const skippedCount = result.clocks.filter((clock) => clock.skipped).length;
+      showSuccess(
+        `Recalculated this case's SLA clocks — ${updatedCount} updated, ${skippedCount} skipped.`,
+      );
+    } catch (err) {
+      showError("Could not recalculate this case's SLA clocks. Please try again.", err);
+    }
+  }, [recalcCaseSla, showError, showSuccess]);
 
   // Starting work: enforce the single-active-case rule.
   // 1) look up the engineer's other ongoing cases (abort on failure — we
@@ -2189,10 +2218,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [removeTag, showError],
   );
 
-  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
-  // Deleted attachments (an admin's list carries them) are shown only at the
-  // bottom of the Attachments tab, never in the feed, the counts or Download all.
-  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(caseId, "case", isAdmin);
 
   // `postAttachment` is a single shared mutation object that stays mounted
   // across `caseId` changes (this page doesn't remount on navigation between
@@ -3239,6 +3267,30 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {activeTab === "sla" && canViewSlaTab && caseId && (
         <>
+          {isAdmin && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Tooltip title="Recompute this case's SLA pause totals from its real state-change history.">
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={
+                      recalcCaseSla.isPending ? (
+                        <CircularProgress size={14} color="inherit" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )
+                    }
+                    disabled={recalcCaseSla.isPending}
+                    onClick={() => void handleRecalculateSla()}
+                    sx={{ textTransform: "none" }}
+                  >
+                    Recalculate SLA
+                  </Button>
+                </span>
+              </Tooltip>
+            </Box>
+          )}
           <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
           <SlaImpactTimeline
             entries={activityAudit}
@@ -3255,7 +3307,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
             attachments={attachmentList}
-            deletedAttachments={deletedAttachmentList}
+            deletedAttachments={deletedAttachmentsTab}
             loading={isAttachmentsLoading}
             error={isAttachmentsError}
             onRetry={() => void refetchAttachments()}

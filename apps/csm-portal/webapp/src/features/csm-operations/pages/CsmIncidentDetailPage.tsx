@@ -97,6 +97,7 @@ import {
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
 import { useAttachmentDeletion } from "@features/csm-cases/hooks/useAttachmentDeletion";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import type {
   BeEntityRef,
@@ -328,7 +329,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const currentUserEmail = useIdTokenClaims()?.email;
   // UX only — the backend 403s attachment downloads the same regardless of
   // this flag, so hiding the control here is never the enforcement.
-  const { canDownloadAttachment } = usePortalAccess();
+  const { canDownloadAttachment, isAdmin } = usePortalAccess();
 
   const {
     data: comments,
@@ -387,10 +388,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // which surface opened it.
   const [previewTarget, setPreviewTarget] = useState<CaseAttachment | null>(null);
 
-  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
-  // Deleted attachments (an admin's list carries them) are shown only at the
-  // bottom of the Attachments tab, never in the feed, the counts or Download all.
-  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(id, "incident", isAdmin);
   // The read model's entries already carry the platform user UUID the write
   // side is keyed by, so the widget can compute a replacement list straight
   // from what is on screen.
@@ -1163,7 +1163,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
-            deletedAttachments={deletedAttachmentList}
+            deletedAttachments={deletedAttachmentsTab}
             uploading={postAttachment.isPending}
             uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
             onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}

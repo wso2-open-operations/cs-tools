@@ -73,7 +73,7 @@ import {
   replaceInlineImageSources,
   INLINE_COMMENT_HTML_PURIFY,
   hasDisplayableContent,
-  ACTION_TO_CASE_STATE_LABEL,
+  resolveActionStateKey,
   getAvailableCaseActions,
   toPresentContinuousActionLabel,
   toPresentTenseActionLabel,
@@ -287,7 +287,7 @@ export default function ServiceRequestDetailContent({
         </Button>
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
           <Stack spacing={1.5}>
-            {/* Header: WSO2 Case ID | Number | Status */}
+            {/* Header: Sequence ID | Number | Status */}
             <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: "wrap" }}>
               <Skeleton variant="text" width={80} height={18} />
               <Skeleton variant="rectangular" width={1} height={14} />
@@ -398,7 +398,7 @@ export default function ServiceRequestDetailContent({
             sx={{ flexWrap: "wrap" }}
           >
             <Typography variant="body2" color="text.secondary">
-              WSO2 Case ID: {data?.internalId ?? "--"}
+              Sequence ID: {data?.internalId ?? "--"}
             </Typography>
             <Divider orientation="vertical" flexItem />
             <Typography variant="body2" fontWeight={600} color="text.primary">
@@ -807,16 +807,7 @@ export default function ServiceRequestDetailContent({
                 </Typography>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   {displayableActions.map(({ label, Icon }) => {
-                    const stateLabel = ACTION_TO_CASE_STATE_LABEL[label];
-                    const stateKeyEntry = caseStates?.find(
-                      (s) =>
-                        s.label.toLowerCase() ===
-                        (stateLabel ?? "").toLowerCase(),
-                    );
-                    const stateKey =
-                      stateKeyEntry && !Number.isNaN(Number(stateKeyEntry.id))
-                        ? Number(stateKeyEntry.id)
-                        : undefined;
+                    const stateKey = resolveActionStateKey(label, caseStates);
                     const canPatch = stateKey != null && !!caseId;
                     const isThisPending =
                       patchCase.isPending && pendingActionLabel === label;

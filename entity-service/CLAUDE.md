@@ -1040,6 +1040,18 @@ reopen logs a WARN at every start as the reminder.
   not link the invoice to a project yet (the invoice, its opportunity or the link is missing), it falls
   back to "does any project have one", so the local tables can only narrow the check. A `Project__c` event costs one database read when the project
   is not ACP-suspended.
+- **Suspension process overridden (`project.suspension_process_overridden`, migration 0281).** A
+  CSM-owned `BOOLEAN NOT NULL DEFAULT FALSE`: when true, ACP must not evaluate the project. Exposed as
+  `suspensionProcessOverridden` (always present, `false` by default) on `GET /projects/{id}` and
+  `POST /projects/search` (carried by `domain.ProjectClosureFields`). **Writable** via `PATCH /projects/{id}`
+  (`suspensionProcessOverridden`, boolean; null or omitted leaves it unchanged). It is Postgres only: the
+  legacy data source rejects it with a 400, and in dual-write mode it is written to Postgres and never
+  forwarded to the legacy source (a request with only this field has nothing to mirror and succeeds).
+  Setting it touches no closure state or `suspension_process_state`; it stamps `updated_by`/`updated_on`
+  and the PATCH response echoes the stored value. Admin-only is enforced in the BFF, not here (this
+  service only authorises the caller against the project). The legacy data source's own ACP does not see
+  this flag, so until the legacy process is switched off, setting it in CSM does not exempt the project
+  there. The legacy data source reads `false` always. This reopen check does not read it yet.
 - **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
   its `suspension_process_state` section (`based_on_subscription_end_date` /
   `based_on_due_invoices`) has `event_type: "suspend"`, which ACP writes when it suspends. A project
@@ -1590,6 +1602,12 @@ link-related. `publishStatusChanged`/`publishCaseAssigned` additionally set
 `case.*` email's subject to follow one explicit standard format,
 `"[WSO2 Support] (<wso2 case id>/<case number>) <title>"` (see that
 service's own `CLAUDE.md`, `dispatch.subjectLine`).
+`publishStatusChangedEvent` also sets `PreviousStatus` (the display label of
+`before.State`, empty when the prior state is unknown) so a consumer can tell
+whether the change is visible to a given audience: customers see Work In
+Progress and Waiting On WSO2 as one "In Progress" state, so
+`csm-notification-service` skips the customer email for a move between the two.
+Entity-service itself never merges the states; it only supplies the previous one.
 - **`snCaseService.UpdateCase`** publishes `case.status_changed` via
   `publishStatusChanged`, called only when the PATCH's own `req.State` was
   set (a `nil` `State` — e.g. an `assigneeEmail`-only PATCH — never
@@ -3297,7 +3315,7 @@ the Query/SecReport Analysis family) on no severity at all.
   calling their own `publishCaseCreated`/`publishStatusChanged`/
   `publishSeverityChanged`.
 
-- **`POST /cases/{id}/sla/recalculate-pause` (CaseSLARecalcService, admin-only) corrects a case's stored pause_duration/business_pause_duration by replaying its real history, not by trusting what's currently on the row.** A single clock's own `start_on`/`pause_duration`/`business_pause_duration` are write-path state, accumulated incrementally at each live pause/resume event (`setPaused`) — if any one of those writes was ever wrong (the exact class of bug the business-day-elapsed-time fixes elsewhere in this file exist to close), nothing afterward self-corrects it; this action is the one place that does, by rebuilding the total from scratch. Decision order mirrors `applyCaseStateEffectsForPolicy` exactly (`decidePauseTransition`, `sla_case_recalc_service.go`) — stop/cancel/pause/resume, in that order, evaluated against the case's REAL state at each point in its own `work_item_activity` history, with every other fact (severity, product, etc.) pinned to today's current value. That's not an approximation: anything that would make a different fact change mid-clock (a severity revision, a case-type transfer) already cancels the clock outright and registers a fresh one (`ReviseCaseClocks`) rather than merely pausing the old one, so within one clock's own lifetime state is structurally the only fact that can ever matter to its own pause/resume decision.
+- **`POST /cases/{id}/sla/recalculate` (CaseSLARecalcService, admin-only) corrects a case's stored pause_duration/business_pause_duration by replaying its real history, not by trusting what's currently on the row.** A single clock's own `start_on`/`pause_duration`/`business_pause_duration` are write-path state, accumulated incrementally at each live pause/resume event (`setPaused`) — if any one of those writes was ever wrong (the exact class of bug the business-day-elapsed-time fixes elsewhere in this file exist to close), nothing afterward self-corrects it; this action is the one place that does, by rebuilding the total from scratch. Decision order mirrors `applyCaseStateEffectsForPolicy` exactly (`decidePauseTransition`, `sla_case_recalc_service.go`) — stop/cancel/pause/resume, in that order, evaluated against the case's REAL state at each point in its own `work_item_activity` history, with every other fact (severity, product, etc.) pinned to today's current value. That's not an approximation: anything that would make a different fact change mid-clock (a severity revision, a case-type transfer) already cancels the clock outright and registers a fresh one (`ReviseCaseClocks`) rather than merely pausing the old one, so within one clock's own lifetime state is structurally the only fact that can ever matter to its own pause/resume decision.
   - **The ServiceNow-backed case path writes none of this history at all.** `work_item_activity` (migration 0055) is only ever populated by `caseService`'s own Postgres-native write path — `snCaseService` (what this deployment's real `DATA_SOURCE` actually uses for real cases) never calls `RecordCaseFieldChangeActivity`. A case with zero state-activity rows has `HasHistory: false` in the response and every one of its clocks is left exactly as it is — never guessed at from an empty log. This is the common case for a real case today, not a rare edge case.
   - **A later severity/case-type-change activity row (after the clock's own `start_on`) disqualifies that clock from correction entirely**, reported with a reason rather than corrected: if one happened, the real engine would already have cancelled this clock and registered a different one in its place, so finding one here means this row is either stale or something else is inconsistent.
   - **Both `IN_PROGRESS` and `PAUSED` clocks are corrected — only a terminal one (`COMPLETED`/`ACHIEVED`/`CANCELLED`/`BREACHED`) is skipped.** A `PAUSED` clock's own `business_elapsed_percentage`/`business_duration`/`remaining_business_duration` were frozen using its pause total at the exact moment it was written (`setPausedFlat`/`setPausedBusinessDays`); correcting `pause_duration`/`business_pause_duration` underneath it without also recomputing that frozen snapshot would leave the two disagreeing, so this recomputes and overwrites all five columns together (`UpdateClockPausedSnapshot`), using the exact same freeze formula those two functions already use, anchored on the clock's own `paused_on` instant rather than `NOW()`. The replay's own still-open trailing segment (from the last known state change up to now) is never folded into a `PAUSED` clock's total — only completed pause spans are, the same way the live engine's own incremental accumulation only ever grows on resume.

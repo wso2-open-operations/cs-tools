@@ -89,3 +89,35 @@ func TestWithOpen_RejectsCorruptBlob(t *testing.T) {
 		t.Error("WithDueInvoicesOpen(corrupt) error = nil, want an error")
 	}
 }
+
+// TestSuspensionCompleted: only event_type "suspend" with no failed suspension
+// action is a completed suspension, in the legacy shape and ACP's own.
+func TestSuspensionCompleted(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"empty", ``, false},
+		{"no key", `{"based_on_compliance":{"event_type":"open"}}`, false},
+		{"open", `{"based_on_subscription_end_date":{"event_type":"open"}}`, false},
+		{"notice", `{"based_on_subscription_end_date":{"event_type":"suspend_notice"}}`, false},
+		{"acp record", `{"based_on_subscription_end_date":{"event_type":"suspend","suspended_on":"2026-05-01"}}`, true},
+		{"legacy successful", `{"based_on_subscription_end_date":{"event_type":"suspend","actionSendEmailNotification":"SUCCESSFUL","actionServicePortalAnnouncement":"SUCCESSFUL","actionSuspendProject":"SUCCESSFUL"}}`, true},
+		{"legacy failed", `{"based_on_subscription_end_date":{"event_type":"suspend","actionSuspendProject":"FAILED"}}`, false},
+		{"other track only", `{"based_on_due_invoices":{"event_type":"suspend"}}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SuspensionCompleted(json.RawMessage(tt.raw))
+			if err != nil || got != tt.want {
+				t.Errorf("SuspensionCompleted() = %v, %v, want %v", got, err, tt.want)
+			}
+		})
+	}
+
+	got, err := SuspensionCompletedForInvoices(json.RawMessage(`{"based_on_due_invoices":{"event_type":"suspend","actionSuspendProject":"SUCCESSFUL"}}`))
+	if err != nil || !got {
+		t.Errorf("SuspensionCompletedForInvoices() = %v, %v, want true", got, err)
+	}
+}

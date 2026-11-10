@@ -27,6 +27,7 @@ const NONE = {
   canAddWorkNotes: false,
   canCreateUser: false,
   canUpdateProjectClosureState: false,
+  canUpdateProjectSuspensionOverride: false,
   canEditProjectOnboarding: false,
   canUseSecurityCenter: false,
   canViewSecurityReportCases: false,
@@ -186,6 +187,7 @@ describe("getPortalAccess", () => {
       ...all,
       canCreateUser: false,
       canUpdateProjectClosureState: false,
+      canUpdateProjectSuspensionOverride: false,
       canEditProjectOnboarding: false,
       canEscalate: true,
       canManagePlaybooks: false,
@@ -197,6 +199,7 @@ describe("getPortalAccess", () => {
       ...all,
       canCreateUser: true,
       canUpdateProjectClosureState: true,
+      canUpdateProjectSuspensionOverride: true,
       canEditProjectOnboarding: true,
       canEscalate: true,
       canManagePlaybooks: true,
@@ -256,6 +259,21 @@ describe("getPortalAccess", () => {
       "dashboard_designer",
     ]) {
       expect(getPortalAccess([role]).canUpdateProjectClosureState).toBe(false);
+    }
+  });
+
+  it("only admin can exclude a project from automatic closure -- CS engineer does not share this one", () => {
+    expect(getPortalAccess(["admin"]).canUpdateProjectSuspensionOverride).toBe(true);
+    for (const role of [
+      "cs_engineer",
+      "viewer",
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "timecard_approver",
+      "dashboard_designer",
+    ]) {
+      expect(getPortalAccess([role]).canUpdateProjectSuspensionOverride).toBe(false);
     }
   });
 

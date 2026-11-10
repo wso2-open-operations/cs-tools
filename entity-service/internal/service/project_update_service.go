@@ -36,6 +36,8 @@ import (
 //   - EndDateClosureState/InvoiceDueDateClosureState/
 //     ComplianceViolationClosureState -- project table columns of the same
 //     name (migration 0014).
+//   - SuspensionProcessOverridden -- project.suspension_process_overridden
+//     (migration 0281); touches no closure state.
 //   - SuspensionProcessState -- project.suspension_process_state (migration
 //     0202), stored as sent and returned by GET/search.
 //   - HasAgent/HasKbReferences -- the linked account's
@@ -141,6 +143,7 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		// outright, which would otherwise drop the mirrorable fields of a
 		// mixed request (e.g. hasAgent together with an onboarding date).
 		mirrorReq := req
+		mirrorReq.SuspensionProcessOverridden = nil
 		mirrorReq.OnboardingStatus = nil
 		mirrorReq.OnboardingOwner = nil
 		mirrorReq.OnboardingStartDate = nil
@@ -193,7 +196,7 @@ func (s *pgProjectUpdateService) resolveUpdatedBy(ctx context.Context) (string, 
 // hasStoredProjectFields reports whether req sets a field Postgres stores.
 func hasStoredProjectFields(req domain.ProjectUpdateRequest) bool {
 	return hasSNMirrorableProjectFields(req) || req.ClosureState != nil || req.VerificationEnabled != nil ||
-		req.OnboardingStatus != nil || req.OnboardingOwner != nil || hasOnboardingDates(req)
+		req.SuspensionProcessOverridden != nil || req.OnboardingStatus != nil || req.OnboardingOwner != nil || hasOnboardingDates(req)
 }
 
 // hasOnboardingDates reports whether req sets any of the four onboarding dates.
@@ -204,7 +207,7 @@ func hasOnboardingDates(req domain.ProjectUpdateRequest) bool {
 
 // hasSNMirrorableProjectFields reports whether req sets a field the
 // ServiceNow dual-write mirror (snProjectUpdateService) knows how to carry.
-// ClosureState, VerificationEnabled, OnboardingStatus, OnboardingOwner and the
+// ClosureState, VerificationEnabled, SuspensionProcessOverridden, OnboardingStatus, OnboardingOwner and the
 // onboarding dates are deliberately excluded: they are direct, Postgres-only fields with no
 // ServiceNow equivalent (see
 // domain.ProjectUpdateRequest.ClosureState's own doc comment), so a request

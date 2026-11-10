@@ -377,6 +377,112 @@ func TestStoredAttachment_MarkDeletedAndTheLists(t *testing.T) {
 	}
 }
 
+// The deleted-only list: with WithDeletedAttachmentsOnly the case and the work
+// item (incident) searches return ONLY the deleted rows, most recently deleted
+// first, with who deleted them and when, and their total and paging count only
+// those; without it the deleted rows never appear and the total ignores them.
+func TestStoredAttachment_DeletedOnlyLists(t *testing.T) {
+	pool, _ := storedAttachmentFixture(t)
+	ctx := saSystemCtx()
+	scoped := repository.NewScoped(pool)
+	cases := repository.NewCaseRepository(scoped)
+
+	const incidentID = "5a000000-0000-0000-0000-0000000000a1"
+	if _, err := scoped.Exec(ctx, `
+		INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, wso2_id, subject, type, project_id)
+		VALUES ($1, now(), now(), 't', 't', 'SA-INC-1', 'WSO2-SAINC1', 'incident', 'INCIDENT', $2)`, incidentID, saProject1); err != nil {
+		t.Fatalf("seed incident: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = scoped.Exec(ctx, `DELETE FROM work_item_attachment WHERE work_item_id = $1`, incidentID)
+		_, _ = scoped.Exec(ctx, `DELETE FROM work_item WHERE id = $1`, incidentID)
+	})
+
+	base := time.Now().UTC().Add(-48 * time.Hour)
+	seed := func(workItemID, id, status string, deletedOn *time.Time, deletedBy string) {
+		t.Helper()
+		if _, err := scoped.Exec(ctx, `
+			INSERT INTO work_item_attachment (id, created_on, updated_on, created_by, updated_by, name, content_type, work_item_id, size_bytes, status, deleted_on, deleted_by)
+			VALUES ($1, $2, $2, 'sa-seed', 'sa-seed', 'seed.txt', 'text/plain', $3, 5, $4::attachment_status_enum, $5, NULLIF($6, ''))`,
+			id, base, workItemID, status, deletedOn, deletedBy); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	at := func(h int) *time.Time { v := base.Add(time.Duration(h) * time.Hour); return &v }
+
+	for _, wi := range []string{saWIOpen, incidentID} {
+		p := wi[len(wi)-2:] // keeps each work item's ids distinct
+		seed(wi, "5a0000d0-0000-0000-0000-0000000000"+p, "COMPLETE", nil, "")
+		seed(wi, "5a0000d1-0000-0000-0000-0000000000"+p, "COMPLETE", nil, "")
+		seed(wi, "5a0000d2-0000-0000-0000-0000000000"+p, "DELETED", at(1), "sa-del-1@example.com") // oldest deletion
+		seed(wi, "5a0000d3-0000-0000-0000-0000000000"+p, "DELETED", at(5), "sa-del-3@example.com") // newest deletion
+		seed(wi, "5a0000d4-0000-0000-0000-0000000000"+p, "DELETED", at(3), "sa-del-2@example.com")
+	}
+
+	search := func(name string, ctx context.Context, p domain.Pagination) ([]domain.Attachment, int) {
+		t.Helper()
+		var (
+			got   []domain.Attachment
+			total int
+			err   error
+		)
+		if name == "case" {
+			got, total, err = cases.SearchCaseAttachments(ctx, saWIOpen, p)
+		} else {
+			got, total, err = cases.SearchWorkItemAttachments(ctx, incidentID, domain.ReferenceTypeIncident, p)
+		}
+		if err != nil {
+			t.Fatalf("%s search: %v", name, err)
+		}
+		return got, total
+	}
+
+	for _, name := range []string{"case", "incident"} {
+		t.Run(name, func(t *testing.T) {
+			// Without the flag: the two available rows only, no deleted one, total 2.
+			got, total := search(name, ctx, domain.Pagination{Limit: 50})
+			if total != 2 || len(got) != 2 {
+				t.Fatalf("available list: total %d, %d rows; want 2 and 2", total, len(got))
+			}
+			for _, a := range got {
+				if a.Status == domain.AttachmentStatusDeleted || a.DeletedOn != nil {
+					t.Errorf("a deleted attachment %s leaked into the available list", a.ID)
+				}
+			}
+
+			// With the flag: only the three deleted rows, newest deletion first.
+			delCtx := repository.WithDeletedAttachmentsOnly(ctx)
+			got, total = search(name, delCtx, domain.Pagination{Limit: 50})
+			if total != 3 || len(got) != 3 {
+				t.Fatalf("deleted list: total %d, %d rows; want 3 and 3", total, len(got))
+			}
+			var by []string
+			for i, a := range got {
+				if a.Status != domain.AttachmentStatusDeleted || a.DeletedOn == nil || a.DeletedBy == nil {
+					t.Fatalf("row %d is not a fully described deleted attachment: %+v", i, a)
+				}
+				by = append(by, a.DeletedBy.Email)
+				if i > 0 && got[i-1].DeletedOn.Before(*a.DeletedOn) {
+					t.Errorf("deleted rows are not newest-first: %v before %v", got[i-1].DeletedOn, a.DeletedOn)
+				}
+			}
+			if want := []string{"sa-del-3@example.com", "sa-del-2@example.com", "sa-del-1@example.com"}; strings.Join(by, ",") != strings.Join(want, ",") {
+				t.Errorf("deleted by, in order = %v, want %v", by, want)
+			}
+
+			// Paging walks the deleted rows alone: the total stays 3 and the pages are in order.
+			first, total := search(name, delCtx, domain.Pagination{Limit: 2, Offset: 0})
+			second, _ := search(name, delCtx, domain.Pagination{Limit: 2, Offset: 2})
+			if total != 3 || len(first) != 2 || len(second) != 1 {
+				t.Fatalf("paged deleted list: total %d, pages of %d and %d; want 3, 2 and 1", total, len(first), len(second))
+			}
+			if first[0].DeletedBy.Email != "sa-del-3@example.com" || second[0].DeletedBy.Email != "sa-del-1@example.com" {
+				t.Errorf("paging order wrong: first page starts %s, second is %s", first[0].DeletedBy.Email, second[0].DeletedBy.Email)
+			}
+		})
+	}
+}
+
 // A draft description image: uploaded to a project before the record exists,
 // private to its uploader, then linked to the work item, after which every member
 // of the project sees it and the 24h cleanup never lists it.

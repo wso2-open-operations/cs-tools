@@ -4361,9 +4361,10 @@ func TestCreateCallRequest_StartsPendingOnCustomer(t *testing.T) {
 	}
 }
 
-// An admin's attachment list also carries the deleted attachments; nobody else's
-// does, and a flag the browser sends itself never reaches entity-service.
-func TestSearchCaseAttachments_IncludeDeletedOnlyForAdmin(t *testing.T) {
+// The deleted-only list is passed on only when an admin asks for it; for anyone
+// else the flag is dropped, and the browser's own spelling never reaches
+// entity-service as sent.
+func TestSearchCaseAttachments_DeletedOnlyHonouredOnlyForAdmin(t *testing.T) {
 	const testCaseID = "11111111-1111-1111-1111-111111111111"
 	cases := []struct {
 		name    string
@@ -4371,10 +4372,12 @@ func TestSearchCaseAttachments_IncludeDeletedOnlyForAdmin(t *testing.T) {
 		payload string
 		want    bool
 	}{
-		{"admin gets it", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `"}`, true},
-		{"cs engineer does not", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `"}`, false},
-		{"a forged flag is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","IncludeDeleted":true}`, false},
-		{"an admin's own spelling is replaced", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","includedeleted":false}`, true},
+		{"admin asks and gets it", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","deletedOnly":true}`, true},
+		{"admin's other spelling is normalised", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","DELETEDONLY":true}`, true},
+		{"admin who does not ask gets the ordinary list", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `"}`, false},
+		{"admin who asks for false gets the ordinary list", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","deletedOnly":false}`, false},
+		{"cs engineer's request is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","deletedOnly":true}`, false},
+		{"a forged spelling is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","DeletedOnly":true}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4395,12 +4398,12 @@ func TestSearchCaseAttachments_IncludeDeletedOnlyForAdmin(t *testing.T) {
 			w := httptest.NewRecorder()
 			h.SearchCaseAttachments(w, r)
 			assertStatus(t, w, http.StatusOK)
-			got, present := sent["includeDeleted"]
+			got, present := sent["deletedOnly"]
 			if tc.want && got != true {
-				t.Fatalf("includeDeleted = %v, want true", got)
+				t.Fatalf("deletedOnly = %v, want true", got)
 			}
 			if !tc.want && present {
-				t.Fatalf("includeDeleted = %v, want it absent", got)
+				t.Fatalf("deletedOnly = %v, want it absent", got)
 			}
 			if len(sent) != map[bool]int{true: 2, false: 1}[tc.want] {
 				t.Fatalf("unexpected keys sent: %v", sent)

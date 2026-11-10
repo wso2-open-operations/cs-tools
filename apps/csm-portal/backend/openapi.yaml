@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate-pause` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -3114,7 +3114,7 @@ paths:
         onboardingOwner and the four onboarding dates (onboardingStartDate,
         onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
         need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
-        alone gets 403); closureState needs admin. A body mixing fields needs
+        alone gets 403); closureState and suspensionProcessOverridden need admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
         read access to the project separately: onboarding_lead grants none.
       operationId: patchProjectsId
@@ -18220,7 +18220,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /cases/{id}/sla/recalculate-pause:
+  /cases/{id}/sla/recalculate:
     post:
       summary: Recalculate one case's SLA pause totals — the CSM admin action.
       description: >
@@ -19043,7 +19043,11 @@ components:
           $ref: '#/components/schemas/Dashboard'
         reply:
           type: string
-          description: The chat message to show for this turn.
+          description: >
+            The chat message to show for this turn. When the request could
+            not be built exactly and the model built the closest dashboard
+            instead, it starts with the model's one-sentence note saying what
+            differs from the request.
     SaveCustomDashboardRequest:
       type: object
       required:
@@ -23389,6 +23393,11 @@ components:
             state (event type + action results) written by an existing suspension
             flow in the backing data source. This is opaque JSON passed through
             as-is — its shape is not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: >
+            True when an admin has exempted the project from the automatic Account
+            Closure Process, which then never evaluates it. Always present.
 
     Project:
       description: >
@@ -23581,6 +23590,7 @@ components:
         simple toggles; the closure-state fields track sub-states of an
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
+        suspensionProcessOverridden requires the admin role;
         onboardingStatus, onboardingOwner and the four onboarding dates
         require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
@@ -23662,6 +23672,10 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Exempts the project from the automatic Account Closure Process when true; null or omitted leaves it unchanged. Admin only (403 otherwise, even for an explicit null). Postgres data source only."
 
     ProjectUpdateResponse:
       type: object
@@ -23697,6 +23711,9 @@ components:
               type: object
               additionalProperties: true
               nullable: true
+            suspensionProcessOverridden:
+              type: boolean
+              description: Present on Postgres data sources only.
             onboardingStatus:
               type: string
               nullable: true
@@ -30517,7 +30534,7 @@ components:
           items: {$ref: '#/components/schemas/SkillLevelType'}
     CaseSLAPauseRecalcClock:
       type: object
-      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate.
       properties:
         target: {type: string, example: RESOLUTION}
         schedule: {type: string, example: WSO2 Business days}

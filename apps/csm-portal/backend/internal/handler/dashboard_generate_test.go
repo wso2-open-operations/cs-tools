@@ -448,3 +448,38 @@ func TestGenerateDashboard_ThroughTheAIIntegrationService(t *testing.T) {
 		})
 	}
 }
+
+// End to end: a closest dashboard's note reaches the reply, and the dashboard
+// in the response (the draft the webapp saves) carries no "note" anywhere.
+func TestGenerateDashboard_TheNoteIsInTheReplyNotTheDashboard(t *testing.T) {
+	withNote := strings.Replace(validGenerated, `{"displayName"`, `{"note":"Shown by open cases instead.","displayName"`, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"access_token":"t","token_type":"Bearer","expires_in":3600}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"candidates":[`+withNote+`],"usage":{}}`)
+	}))
+	t.Cleanup(srv.Close)
+	client := csmai.NewClient(csmai.Config{BaseURL: srv.URL, TokenURL: srv.URL + "/token", ClientID: "id", ClientSecret: "s", Timeout: 5 * time.Second})
+	w := httptest.NewRecorder()
+	NewDashboardGenerateHandler(NewServiceDashboardGenerator(client, nil)).
+		GenerateDashboard(w, withUser(newGenerateRequest(`{"prompt":"Top 10 customers by revenue."}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Dashboard json.RawMessage `json:"dashboard"`
+		Reply     string          `json:"reply"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(body.Reply, "Shown by open cases instead. Here's ") {
+		t.Errorf("reply = %q, want it to start with the note", body.Reply)
+	}
+	if strings.Contains(string(body.Dashboard), `"note"`) {
+		t.Errorf("dashboard = %s, want no note in it", body.Dashboard)
+	}
+}
