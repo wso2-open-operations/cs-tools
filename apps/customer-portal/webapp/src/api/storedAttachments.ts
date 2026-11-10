@@ -36,12 +36,17 @@ export type DownloadProgress = (received: number, total: number) => void;
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
 
-/** Response of POST /attachments/upload: the file is then sent to the backend in chunks. */
+/**
+ * Response of POST /attachments/upload: the file is then sent to the backend in
+ * chunks, or, when `directUpload` is true (a large file, with direct transfers
+ * on), to Azure through signed links.
+ */
 export interface StoredAttachmentUploadStart {
   attachmentId: string;
   number?: string;
   expiresAt?: string;
   maxBytes: number;
+  directUpload?: boolean;
 }
 
 /** Response of POST /attachments/upload/{id}/confirm. */
@@ -393,7 +398,52 @@ export async function downloadStoredAttachment(
   authFetch: AuthFetch,
   input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
 ): Promise<void> {
+  if (input.size !== undefined && input.size > DIRECT_TRANSFER_MIN_BYTES) {
+    if (input.signal?.aborted) throw downloadCancelledError();
+    if (await startDirectDownload(authFetch, input)) {
+      input.onSaved?.("started");
+      return;
+    }
+  }
   await downloadFromBackend(authFetch, input);
+}
+
+/**
+ * Starts a large file's download straight from Azure through a signed link the
+ * backend makes after checking access, which the browser then shows and saves
+ * itself (outcome `started`, no in-page progress). Resolves `false` when there
+ * is no link (direct transfers are off, or the request failed): the caller then
+ * streams the file through the backend, which reports any real refusal (a
+ * removed file) itself.
+ */
+async function startDirectDownload(
+  authFetch: AuthFetch,
+  input: { type: StoredAttachmentType; id: string; name?: string; signal?: AbortSignal },
+): Promise<boolean> {
+  try {
+    const response = await authFetch(
+      `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(input.id)}/link?type=${encodeURIComponent(input.type)}`,
+      { method: "GET", ...(input.signal ? { signal: input.signal } : {}) },
+    );
+    if (!response.ok) return false;
+    const link = (await response.json()) as { url?: string; name?: string };
+    if (!link.url) return false;
+    startBrowserDownload(link.url, input.name || link.name || "attachment");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Hands a signed link to the browser as a download; the link itself says it is an attachment. */
+function startBrowserDownload(url: string, name: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 /** Step 1 of an upload: records the attachment and returns its id and the size limit. */
@@ -529,6 +579,44 @@ async function sendChunk(
 }
 
 /**
+ * Cuts `file` into `count` chunks of `chunkBytes` and sends them a few at a time
+ * with `send`. The first failure is kept so it is the one thrown, and so the
+ * other workers stop taking new chunks; a chunk already in flight is left to finish.
+ */
+async function sendChunksInParallel(input: {
+  file: File;
+  chunkBytes: number;
+  count: number;
+  send: (index: number, body: Blob) => Promise<void>;
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
+}): Promise<void> {
+  const { file, chunkBytes, count, send, onProgress } = input;
+  let next = 0;
+  let sent = 0;
+  let failure: { error: unknown } | undefined;
+  const worker = async () => {
+    while (!failure) {
+      const index = next++;
+      if (index >= count) return;
+      const from = index * chunkBytes;
+      const body = file.slice(from, Math.min(from + chunkBytes, file.size));
+      try {
+        await send(index, body);
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
+      sent += body.size;
+      onProgress?.(sent, file.size);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) }, worker),
+  );
+  if (failure) throw failure.error;
+}
+
+/**
  * Step 2: the file is cut into
  * {@link UPLOAD_CHUNK_BYTES} chunks, sent a few at a time (each one retried on
  * a passing failure), and its confirm step names how many there were. Returns
@@ -544,33 +632,95 @@ export async function sendFileInChunks(
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = input;
   const count = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
-  let next = 0;
-  let sent = 0;
-  // The first failure, kept so it is the one thrown, and so the other workers
-  // stop taking new chunks. A chunk already in flight is left to finish.
-  let failure: { error: unknown } | undefined;
-  const worker = async () => {
-    while (!failure) {
-      const index = next++;
-      if (index >= count) return;
-      const from = index * UPLOAD_CHUNK_BYTES;
-      const body = file.slice(from, Math.min(from + UPLOAD_CHUNK_BYTES, file.size));
-      try {
-        await sendChunk(authFetch, { type, attachmentId, index, body, signal });
-      } catch (error) {
-        failure ??= { error };
-        return;
+  await sendChunksInParallel({
+    file,
+    chunkBytes: UPLOAD_CHUNK_BYTES,
+    count,
+    onProgress,
+    send: (index, body) =>
+      sendChunk(authFetch, { type, attachmentId, index, body, signal }),
+  });
+  return count;
+}
+
+/**
+ * Files above this size go to and from Azure through signed links (when the
+ * backend says they may), so their bytes do not pass through the portal backend.
+ * It is one chunk: smaller files, and every inline image, keep the backend path.
+ */
+export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
+
+/** The links `POST /attachments/upload/{id}/direct` returns: one per chunk. */
+interface DirectUploadLinks {
+  links: string[];
+  chunkBytes: number;
+  expiresAt?: string;
+}
+
+/** Sends one chunk to its signed link, trying again with a short pause when it fails in passing. */
+async function sendChunkToLink(
+  link: string,
+  body: Blob,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    if (signal?.aborted) throw abortError();
+    try {
+      // No Authorization header: the link itself is the credential.
+      const response = await fetch(link, { method: "PUT", body, signal });
+      if (response.ok) return;
+      // Azure answers 500/503 when it is busy; any other refusal (a link that
+      // expired or was refused) will not change.
+      if (
+        attempt >= UPLOAD_CHUNK_ATTEMPTS ||
+        ![408, 429, 500, 503].includes(response.status)
+      ) {
+        throw new ApiError(0, "Upload failed", UPLOAD_INTERRUPTED_MESSAGE);
       }
-      sent += body.size;
-      onProgress?.(sent, file.size);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw abortError();
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || error instanceof ApiError) {
+        throw new ApiError(0, "Upload failed", UPLOAD_INTERRUPTED_MESSAGE);
+      }
     }
-  };
-  const workers = Array.from(
-    { length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) },
-    worker,
+    await pause(500 * 2 ** (attempt - 1), signal);
+  }
+}
+
+/**
+ * Sends `file` straight to Azure through signed links the backend makes (one per
+ * chunk), a few at a time. Returns the number of chunks, which the confirm step
+ * needs. Throws when the links cannot be had or a chunk cannot be sent (for
+ * example a storage account that does not allow this site); the caller then
+ * sends the file through the backend instead, which stages the same chunks.
+ */
+export async function sendFileDirect(
+  authFetch: AuthFetch,
+  input: {
+    type: StoredAttachmentType;
+    attachmentId: string;
+    file: File;
+  } & ChunkUploadOptions,
+): Promise<number> {
+  const { type, attachmentId, file, signal, onProgress } = input;
+  const response = await postJson(
+    authFetch,
+    `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`,
+    {},
+    signal,
   );
-  await Promise.all(workers);
-  if (failure) throw failure.error;
+  const direct = (await response.json()) as DirectUploadLinks;
+  const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
+  if (!Array.isArray(direct.links) || direct.links.length < count) {
+    throw new Error("The upload links do not cover the file.");
+  }
+  await sendChunksInParallel({
+    file,
+    chunkBytes: direct.chunkBytes,
+    count,
+    onProgress,
+    send: (index, body) => sendChunkToLink(direct.links[index], body, signal),
+  });
   return count;
 }
 
@@ -631,13 +781,19 @@ export async function uploadStoredAttachment(
   }
   if (signal?.aborted) throw abortError();
   onStep?.("uploading");
-  const chunks = await sendFileInChunks(authFetch, {
-    type,
-    attachmentId: start.attachmentId,
-    file,
-    signal,
-    onProgress,
-  });
+  const send = { type, attachmentId: start.attachmentId, file, signal, onProgress };
+  let chunks: number | undefined;
+  if (start.directUpload && file.size > DIRECT_TRANSFER_MIN_BYTES) {
+    // A large file goes straight to Azure. If that does not work for any reason,
+    // the same chunks go through the backend; only a cancel stops the upload.
+    try {
+      chunks = await sendFileDirect(authFetch, send);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw abortError();
+      onProgress?.(0, file.size);
+    }
+  }
+  chunks ??= await sendFileInChunks(authFetch, send);
   onStep?.("finishing");
   try {
     return await confirmStoredUpload(authFetch, {
