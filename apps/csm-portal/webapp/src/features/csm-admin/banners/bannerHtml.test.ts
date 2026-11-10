@@ -15,7 +15,12 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_BANNER_CONTENT, buildBannerHtml, parseBannerHtml } from "@features/csm-admin/banners/bannerHtml";
+import {
+  EMPTY_BANNER_CONTENT,
+  buildBannerHtml,
+  hasVisibleBannerHtml,
+  parseBannerHtml,
+} from "@features/csm-admin/banners/bannerHtml";
 
 describe("banner HTML", () => {
   it("builds a custom banner from the pasted HTML and reads it back as pasted", () => {
@@ -176,5 +181,29 @@ describe("banner HTML", () => {
     expect(html).not.toContain("javascript:");
     expect(parseBannerHtml(html).imageUrl).toBe("");
     expect(parseBannerHtml(html).linkUrl).toBe("");
+  });
+});
+
+describe("hasVisibleBannerHtml", () => {
+  it("counts text and pictures as something to show", () => {
+    expect(hasVisibleBannerHtml("Maintenance tonight")).toBe(true);
+    expect(hasVisibleBannerHtml('<div style="color:#fff"><b>Heads up</b></div>')).toBe(true);
+    expect(hasVisibleBannerHtml('<img src="https://cdn.example.com/banner.png" alt="">')).toBe(true);
+    expect(hasVisibleBannerHtml('<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>')).toBe(true);
+  });
+
+  it("does not count markup that shows nothing", () => {
+    expect(hasVisibleBannerHtml("")).toBe(false);
+    expect(hasVisibleBannerHtml("   ")).toBe(false);
+    expect(hasVisibleBannerHtml("<div></div>")).toBe(false);
+    expect(hasVisibleBannerHtml('<div style="background:red"><span> </span></div>')).toBe(false);
+    expect(hasVisibleBannerHtml("<p><br></p>")).toBe(false);
+    expect(hasVisibleBannerHtml("<p>&nbsp;</p>")).toBe(false);
+  });
+
+  it("does not count what the sanitiser removes", () => {
+    expect(hasVisibleBannerHtml("<script>alert(1)</script>")).toBe(false);
+    expect(hasVisibleBannerHtml("<style>body{display:none}</style>")).toBe(false);
+    expect(hasVisibleBannerHtml('<form action="/x"><input name="a"></form>')).toBe(false);
   });
 });

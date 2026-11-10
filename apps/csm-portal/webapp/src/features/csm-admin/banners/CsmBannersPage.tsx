@@ -48,6 +48,7 @@ import {
   buildBannerHtml,
   colorsForBannerType,
   cssColorToHex,
+  hasVisibleBannerHtml,
   messageKeepingTitle,
   parseBannerHtml,
   TEXT_BANNER_TYPES,
@@ -62,7 +63,7 @@ import { fromApiTimestamp, scheduleError, scheduleLocksStatus, statusOnSchedule,
 import { useCreatePortalBanner, usePortalBanners, useUpdatePortalBanner, type PortalBanner } from "@features/csm-admin/banners/usePortalBanners";
 import Editor from "@components/rich-text-editor/Editor";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
-import { isBlankHtml, sanitizeAnnouncementHtml, sanitizeCustomBannerHtml } from "@utils/sanitizeHtml";
+import { isBlankHtml, sanitizeBannerHtml } from "@utils/sanitizeHtml";
 
 type BannerStatus = "draft" | "published" | "unpublished";
 
@@ -125,11 +126,9 @@ function toPageBanner(row: PortalBanner): Banner {
   };
 }
 
-/** A custom banner needs HTML that still shows something once it is sanitised, not only markup that is stripped. */
+/** A custom banner needs HTML that shows something once it is sanitised (text or a picture), not only markup. */
 function isBlankBannerMessage(draft: BannerDraft): boolean {
-  return draft.type === "custom"
-    ? sanitizeCustomBannerHtml(draft.message).trim() === ""
-    : isBlankHtml(draft.message);
+  return draft.type === "custom" ? !hasVisibleBannerHtml(draft.message) : isBlankHtml(draft.message);
 }
 
 function emptyDraft(order: number): BannerDraft {
@@ -588,7 +587,7 @@ export default function CsmBannersPage(): JSX.Element {
                 "& [data-banner-type='success']": { backgroundColor: `${palette.success.backgroundColor} !important` },
                 "& [data-banner-text] p, & [data-banner-text] div": { margin: "0 !important" },
               }}
-              dangerouslySetInnerHTML={{ __html: sanitizeAnnouncementHtml(banner.html) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeBannerHtml(banner.html) }}
             />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1 }}>
               <Stack direction="row" spacing={0.75} useFlexGap sx={{ flex: "1 1 auto", flexWrap: "wrap" }}>
@@ -918,7 +917,7 @@ export default function CsmBannersPage(): JSX.Element {
                   },
                   "& [data-banner-text] p, & [data-banner-text] div": { margin: "0 !important" },
                 }}
-                dangerouslySetInnerHTML={{ __html: sanitizeAnnouncementHtml(previewHtml) }}
+                dangerouslySetInnerHTML={{ __html: sanitizeBannerHtml(previewHtml) }}
               />
               <Accordion disableGutters elevation={0} sx={{ mt: 1, "&:before": { display: "none" } }}>
                 <AccordionSummary expandIcon={<ChevronDown size={16} />}>

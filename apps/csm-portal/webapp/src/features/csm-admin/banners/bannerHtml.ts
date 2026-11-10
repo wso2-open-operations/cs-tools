@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { isBlankHtml, sanitizeCustomBannerHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { hasVisibleContent, isBlankHtml, sanitizeBannerHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 
 /**
  * An image banner is a picture. A text banner is a message in one of the four
@@ -236,7 +236,7 @@ export function buildBannerHtml(content: BannerContent, id = ""): string {
 function buildCustomBannerHtml(content: BannerContent, id: string): string {
   const closeable = content.closeable;
   const bannerId = id.trim();
-  const pasted = sanitizeCustomBannerHtml(content.message.trim());
+  const pasted = sanitizeBannerHtml(content.message.trim());
   const close = closeable
     ? `<button type="button" data-close-banner="true" aria-label="Close banner" style="position:absolute;top:50%;right:12px;transform:translateY(-50%);background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.6);color:#fff;width:24px;height:24px;cursor:pointer;border-radius:4px;z-index:1;">×</button>`
     : "";
@@ -245,6 +245,17 @@ function buildCustomBannerHtml(content: BannerContent, id: string): string {
     `style="box-sizing:border-box;position:relative;width:100%;height:3rem;overflow:hidden;">` +
     `<div data-banner-custom style="height:100%;width:100%">${pasted}</div>${close}</div>`
   );
+}
+
+/**
+ * True when pasted custom HTML would show something once it is sanitised: text,
+ * or a picture (an image, an SVG, a picture, a video or a canvas). Markup that
+ * shows nothing, such as an empty div, a lone script or only whitespace, would
+ * save as a blank strip, so it does not count.
+ */
+export function hasVisibleBannerHtml(html: string): boolean {
+  const clean = sanitizeBannerHtml(html.trim());
+  return hasVisibleContent(clean) || /<(svg|picture|video|canvas)\b/i.test(clean);
 }
 
 /**

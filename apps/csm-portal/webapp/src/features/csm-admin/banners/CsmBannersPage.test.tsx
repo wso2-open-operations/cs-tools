@@ -218,6 +218,21 @@ describe("CsmBannersPage", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
+  it("does not save a custom banner whose HTML shows nothing, but accepts a picture", async () => {
+    renderPage();
+    await screen.findByRole("tab", { name: "Published (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "New banner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Banner type Custom" }));
+    const box = screen.getByRole("textbox", { name: /Banner HTML/ });
+    fireEvent.change(box, { target: { value: '<div style="background:red"></div>' } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText(/Required\. Paste the HTML for the banner\./)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: '<img src="https://cdn.example.com/banner.png" alt="">' } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+  });
+
   it("marks a missing message as required when save is pressed", async () => {
     renderPage();
     await screen.findByRole("tab", { name: "Published (1)" });

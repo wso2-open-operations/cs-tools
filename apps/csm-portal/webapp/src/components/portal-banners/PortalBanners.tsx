@@ -17,7 +17,7 @@
 import { useAsgardeo } from "@asgardeo/react";
 import { useEffect, useMemo, useState, type JSX, type MouseEvent } from "react";
 import { useCsmPortalBanners, type PortalBannerView } from "@components/portal-banners/useCsmPortalBanners";
-import { sanitizeAnnouncementHtml } from "@utils/sanitizeHtml";
+import { sanitizeBannerHtml } from "@utils/sanitizeHtml";
 
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
@@ -45,10 +45,6 @@ function parseTimestamp(value: string | null): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
-}
-
-function sanitizeBannerHtml(html: string): string {
-  return sanitizeAnnouncementHtml(html);
 }
 
 // Saved HTML can carry a paragraph margin. The strip stays the same 3rem as an image banner.

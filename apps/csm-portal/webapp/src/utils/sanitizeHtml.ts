@@ -90,14 +90,14 @@ function htmlWithNewTabLinksOnly(fragment: DocumentFragment): string {
 }
 
 /**
- * Tags a pasted custom banner may not carry. A banner is one strip of markup an
+ * Tags a banner may not carry. A banner is one strip of markup an
  * admin pastes in and every signed-in person then sees, so it gets the
  * announcement policy minus what could restyle or take over the rest of the
  * page (`style`, `link`, `meta`, `base`) or collect input (a form and its
  * controls). Scripts, event handlers and `javascript:` URLs are already
  * stripped by DOMPurify's defaults.
  */
-const CUSTOM_BANNER_FORBID_TAGS = [
+const BANNER_FORBID_TAGS = [
   "style",
   "link",
   "meta",
@@ -112,12 +112,17 @@ const CUSTOM_BANNER_FORBID_TAGS = [
   "embed",
 ];
 
-/** Sanitize the HTML an admin pastes in to make a custom banner. */
-export function sanitizeCustomBannerHtml(html: string): string {
+/**
+ * Sanitize a banner's HTML, both when an admin pastes it in and every time a
+ * stored banner is shown. The display side matters because a banner can also
+ * be saved straight through the API, which stores it as sent, so the policy
+ * has to hold wherever the stored HTML is rendered, not only in the dialog.
+ */
+export function sanitizeBannerHtml(html: string): string {
   return htmlWithNewTabLinksOnly(
     DOMPurify.sanitize(html, {
       ADD_ATTR: ["target"],
-      FORBID_TAGS: CUSTOM_BANNER_FORBID_TAGS,
+      FORBID_TAGS: BANNER_FORBID_TAGS,
       RETURN_DOM_FRAGMENT: true,
     }),
   );
