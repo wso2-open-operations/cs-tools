@@ -405,6 +405,13 @@ type OrganizationSearchFilters struct {
 	// checks both.
 	CountryNames   []string `json:"countryNames"`
 	CountryUnknown *bool    `json:"countryUnknown"`
+	// PlaybookTask names a playbook task by its code; PlaybookAnswers matches
+	// the registrations that answered it with any of these option codes,
+	// PlaybookUnanswered true the ones with no answer. An organisation
+	// matches when any of its registrations does. entity-service checks them.
+	PlaybookTask       string   `json:"playbookTask"`
+	PlaybookAnswers    []string `json:"playbookAnswers"`
+	PlaybookUnanswered *bool    `json:"playbookUnanswered"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.
@@ -428,7 +435,8 @@ type AggregateOrganizationsRequest struct {
 // AggregateGroup is one group of an AggregateResponse. For the owner grouping,
 // Key is the owner's user id (or "unowned") and Label the owner's name; for
 // the country grouping, Key and Label are the country (or "unknown",
-// labelled "Unknown").
+// labelled "Unknown"); for the playbook answer grouping, Key is the option
+// code and Label its label (or "unanswered", labelled "Not answered").
 type AggregateGroup struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
@@ -437,9 +445,10 @@ type AggregateGroup struct {
 
 // AggregateRegistrationsRequest is the body of POST /registrations/aggregate:
 // the registrations the search's filters and UnacknowledgedOnly select,
-// counted per GroupBy ("country", the only grouping: the registration's
-// organisation's country), with MaxGroups as an organisation aggregate takes
-// it. entity-service checks the grouping and its limit.
+// counted per GroupBy ("country": the registration's organisation's country;
+// "playbookAnswer": its answer to Filters.PlaybookTask), with MaxGroups as an
+// organisation aggregate takes it. entity-service checks the grouping and its
+// limit.
 type AggregateRegistrationsRequest struct {
 	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
 	Filters            OrganizationSearchFilters `json:"filters"`

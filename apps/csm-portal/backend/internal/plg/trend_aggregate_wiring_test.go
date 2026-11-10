@@ -140,6 +140,18 @@ func TestTrendAndAggregateAreForwarded(t *testing.T) {
 			`{"unacknowledgedOnly":true,"filters":{"productCodes":["IAM"],"countryUnknown":true},"groupBy":"country","maxGroups":10}`,
 			`{"groups":[{"key":"unknown","label":"Unknown","count":2}],"othersCount":0,"totalRecords":2}`,
 			func(s string) any { return decodeAs[domain.AggregateRegistrationsRequest](t, s) }},
+		{"/plg/registrations/aggregate", "/plg/registrations/aggregate",
+			`{"filters":{"lifecycleStages":["REGISTRATION"],"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME"},"groupBy":"playbookAnswer","maxGroups":10}`,
+			`{"groups":[{"key":"unanswered","label":"Not answered","count":2},{"key":"MONITOR","label":"Monitor","count":1}],"othersCount":0,"totalRecords":3}`,
+			func(s string) any { return decodeAs[domain.AggregateRegistrationsRequest](t, s) }},
+		{"/plg/organizations/aggregate", "/plg/organizations/aggregate",
+			`{"filters":{"playbookTask":"REGISTERED_EMAIL_CLASSIFICATION","playbookAnswers":["DISPOSABLE"]},"groupBy":"country"}`,
+			`{"groups":[{"key":"India","label":"India","count":1}],"othersCount":0,"totalRecords":1}`,
+			func(s string) any { return decodeAs[domain.AggregateOrganizationsRequest](t, s) }},
+		{"/plg/registrations/volume-trend", "/plg/registrations/volume-trend",
+			`{"filters":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookUnanswered":true},"startDate":"2026-01-01","endDate":"2026-03-31","bucket":"month"}`,
+			`{"days":90,"startDate":"2026-01-01","endDate":"2026-03-31","bucket":"month","series":[{"label":"Registered","points":[]}]}`,
+			func(s string) any { return decodeAs[domain.RegistrationVolumeTrendRequest](t, s) }},
 	} {
 		entity := &fakeEntity{status: http.StatusOK, body: c.answer}
 		w := postAs(t, trendAggregateMux(t, entity), c.path, c.body)
@@ -205,6 +217,8 @@ func TestEntityServiceRefusalsComeBackAsTheirMessage(t *testing.T) {
 		{"/plg/organizations/aggregate", `{"groupBy":"tier"}`, `groupBy must be "owner" or "country", got "tier"`},
 		{"/plg/registrations/aggregate", `{"groupBy":"owner"}`, `groupBy must be "country", got "owner"`},
 		{"/plg/organizations/search", `{"filters":{"countryNames":["India"],"countryUnknown":true}}`, "filters.countryNames and filters.countryUnknown cannot be combined"},
+		{"/plg/registrations/aggregate", `{"groupBy":"playbookAnswer"}`, "groupBy playbookAnswer needs filters.playbookTask"},
+		{"/plg/registrations/search", `{"filters":{"playbookAnswers":["MONITOR"]}}`, "filters.playbookAnswers and filters.playbookUnanswered need filters.playbookTask"},
 	} {
 		answer, _ := json.Marshal(map[string]any{"code": 400, "message": c.message})
 		entity := &fakeEntity{status: http.StatusBadRequest, body: string(answer)}
