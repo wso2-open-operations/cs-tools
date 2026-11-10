@@ -101,6 +101,11 @@ type queryHourService struct {
 	// unprocessed every hour. Process-local: a restart starts from the top.
 	projectHoursMu     sync.Mutex
 	projectHoursCursor string
+	// projectHoursDone holds the projects whose hours this process has
+	// recomputed at least once (hourly loop or time card hook). Their stored
+	// figures are at most one rotation old, so skipping them in a run does
+	// not defer their opportunities' state comparison.
+	projectHoursDone map[string]bool
 }
 
 // projectHoursShare is the part of the request's remaining time the hourly
@@ -245,7 +250,16 @@ func (s *queryHourService) computeAll(ctx context.Context) ([]computed, error) {
 
 // RecomputeProjectHours implements QueryHourService.
 func (s *queryHourService) RecomputeProjectHours(ctx context.Context, projectID string) error {
-	return s.repo.RecomputeProjectHours(ctx, projectID)
+	if err := s.repo.RecomputeProjectHours(ctx, projectID); err != nil {
+		return err
+	}
+	s.projectHoursMu.Lock()
+	if s.projectHoursDone == nil {
+		s.projectHoursDone = map[string]bool{}
+	}
+	s.projectHoursDone[projectID] = true
+	s.projectHoursMu.Unlock()
+	return nil
 }
 
 // recomputeProjectHoursBy recomputes one project, cut off at stopAt (when
@@ -300,10 +314,13 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 	if deadline, ok := ctx.Deadline(); ok {
 		stopAt = started.Add(time.Duration(float64(deadline.Sub(started)) * projectHoursShare))
 	}
-	// skippedIDs are the projects this run did not recompute because its
-	// budget ran out. Their stored onboarding figures may be stale, so the
-	// opportunities they consume from keep their state until a later run
-	// reaches them (see the state comparison below).
+	// skippedIDs are the projects this run did not reach, because its budget
+	// ran out, and that this process has never recomputed. Their stored
+	// onboarding figures may be arbitrarily stale, so the opportunities they
+	// consume from keep their state until a later run reaches them (see the
+	// state comparison below). A skipped project recomputed before is not
+	// included: otherwise two projects of one opportunity that alternate
+	// between runs would defer it on every run.
 	skippedIDs := map[string]bool{}
 	budgetSpent := func() bool {
 		return ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt))
@@ -315,9 +332,13 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 		slog.WarnContext(ctx, "query hours: recompute project hours stopped, time budget spent",
 			"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
 		skipped = len(projectIDs) - i
+		s.projectHoursMu.Lock()
 		for _, id := range projectIDs[i:] {
-			skippedIDs[id] = true
+			if !s.projectHoursDone[id] {
+				skippedIDs[id] = true
+			}
 		}
+		s.projectHoursMu.Unlock()
 	}
 	for i, id := range projectIDs {
 		if budgetSpent() {

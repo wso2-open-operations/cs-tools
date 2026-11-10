@@ -297,6 +297,45 @@ func TestQueryHourRecomputeDefersOpportunityOfSkippedProject(t *testing.T) {
 	}
 }
 
+// Two projects of one opportunity that the budget lets through one per run
+// alternate between runs. Each has been recomputed before when it is next
+// skipped, so the opportunity is compared (and notifies) instead of being
+// deferred on every run.
+func TestQueryHourRecomputeAlternatingProjectsDoNotStarveOpportunity(t *testing.T) {
+	repo := &fakeQueryHourRepo{
+		projectIDs:     []string{"p1", "p2"},
+		recomputeDelay: 250 * time.Millisecond,
+		lines:          []repository.QueryHourLineRow{qhLine("Development Support - 100 hours", 1)},
+		projects: map[string][]repository.QueryHourProjectRow{
+			"opp-1": {
+				{ProjectID: "p1", ProjectKey: "ACME", BillableMinutes: 60 * 60},
+				{ProjectID: "p2", ProjectKey: "ACME2", BillableMinutes: 40 * 60},
+			},
+		},
+	}
+	svc := service.NewQueryHourService(repo, "@example.com")
+	run := func() []domain.QueryHourTransition {
+		ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+		defer cancel()
+		repo.recomputed = nil
+		tr, err := svc.Recompute(ctx)
+		if err != nil {
+			t.Fatalf("Recompute: %v", err)
+		}
+		return tr
+	}
+	if tr := run(); len(tr) != 0 || len(repo.wroteState) != 0 {
+		t.Fatalf("run 1: p2 never recomputed, want opp-1 deferred; got transitions=%d states=%v", len(tr), repo.wroteState)
+	}
+	tr := run()
+	if want := []string{"p2", "p1"}; !reflect.DeepEqual(repo.recomputed, want) {
+		t.Fatalf("run 2 recomputed %v, want %v (p1 cut off)", repo.recomputed, want)
+	}
+	if len(tr) == 0 || repo.wroteState["opp-1"] == nil {
+		t.Errorf("run 2: p1 was recomputed in run 1, want opp-1 compared; got transitions=%d states=%v", len(tr), repo.wroteState)
+	}
+}
+
 // A project cut off mid-recompute by the budget is skipped, not failed, and
 // the next run starts with it rather than putting it last.
 func TestQueryHourRecomputeCutOffProjectRunsFirstNextTime(t *testing.T) {
