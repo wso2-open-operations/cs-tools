@@ -353,6 +353,7 @@ func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 		{"declined", &generateDeclinedError{Reason: "Resolution time per engineer is not in the catalogue."}, http.StatusUnprocessableEntity, "Resolution time per engineer is not in the catalogue.", errCodeGenerateDeclined},
 		{"refused", errGenerateRefused, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused},
 		{"team filter", fmt.Errorf("%w: widgets[0]: unknown team %q (known teams: rigel, sirius)", errDashboardTeam, "orion"), http.StatusUnprocessableEntity, `Unknown team "orion" (known teams: rigel, sirius).`, errCodeGenerateTeam},
+		{"playbook answer filter", fmt.Errorf("%w: widgets[0] (\"w\"): unknown playbook task %q (known tasks: ELIGIBILITY_ASSESSMENT_OUTCOME)", errDashboardPlaybook, "OUTCOME"), http.StatusUnprocessableEntity, `Unknown playbook task "OUTCOME" (known tasks: ELIGIBILITY_ASSESSMENT_OUTCOME).`, errCodeGeneratePlaybook},
 		{"unusable", fmt.Errorf("%w: %w", errGenerateUnusable, dashboard.ErrGeneratedInvalid), http.StatusBadGateway, errMsgGenerateUnusable, errCodeGenerateUnusable},
 		{"truncated", errGenerateTruncated, http.StatusBadGateway, errMsgGenerateTruncated, errCodeGenerateTruncated},
 		{"usage limit", fmt.Errorf("%w: csmai: status 429 (usage_limit)", errGenerateUsageLimit), http.StatusServiceUnavailable, errMsgGenerateUsageLimit, errCodeGenerateUsageLimit},
