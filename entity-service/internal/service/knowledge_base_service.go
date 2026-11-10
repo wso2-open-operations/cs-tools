@@ -18,6 +18,10 @@ package service
 
 import (
 	"context"
+	"log/slog"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -47,7 +51,16 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context, req doma
 	if req.Name == "" {
 		return domain.KnowledgeBase{}, &apierror.ValidationError{Msg: "name is required"}
 	}
-	return s.repo.CreateKnowledgeBase(ctx, req)
+	kb, err := s.repo.CreateKnowledgeBase(ctx, req)
+	if err != nil {
+		return kb, err
+	}
+	slog.InfoContext(ctx, "kb.knowledge_base.created",
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"callerId", auth.IdentityFromContext(ctx).UserID,
+		"knowledgeBaseId", kb.ID,
+	)
+	return kb, nil
 }
 
 // UpdateKnowledgeBaseName implements KnowledgeBaseService.
@@ -58,7 +71,18 @@ func (s *knowledgeBaseService) UpdateKnowledgeBaseName(ctx context.Context, id s
 	if req.Name == "" {
 		return domain.KnowledgeBase{}, &apierror.ValidationError{Msg: "name is required"}
 	}
-	return s.repo.UpdateKnowledgeBaseName(ctx, id, req)
+	kb, err := s.repo.UpdateKnowledgeBaseName(ctx, id, req)
+	if err != nil {
+		return kb, err
+	}
+	// Change signal only; the before/after name is not logged (PII).
+	// A full audit record with values belongs in a persisted audit table.
+	slog.InfoContext(ctx, "kb.knowledge_base.renamed",
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"callerId", auth.IdentityFromContext(ctx).UserID,
+		"knowledgeBaseId", kb.ID,
+	)
+	return kb, nil
 }
 
 // SetKnowledgeBaseActive implements KnowledgeBaseService.
@@ -66,5 +90,15 @@ func (s *knowledgeBaseService) SetKnowledgeBaseActive(ctx context.Context, id st
 	if id == "" {
 		return domain.KnowledgeBase{}, &apierror.ValidationError{Msg: "id is required"}
 	}
-	return s.repo.SetKnowledgeBaseActive(ctx, id, req)
+	kb, err := s.repo.SetKnowledgeBaseActive(ctx, id, req)
+	if err != nil {
+		return kb, err
+	}
+	slog.InfoContext(ctx, "kb.knowledge_base.active_changed",
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"callerId", auth.IdentityFromContext(ctx).UserID,
+		"knowledgeBaseId", kb.ID,
+		"isActive", req.IsActive,
+	)
+	return kb, nil
 }
