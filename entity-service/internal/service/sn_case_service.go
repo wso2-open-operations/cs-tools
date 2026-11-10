@@ -4640,6 +4640,12 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		req.Parsed.EndUpdatedDate.Before(*req.Parsed.StartUpdatedDate) {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "updatedOn: lte value must not be before gte value"}
 	}
+	// stateEntered / stateEnteredOn read the case's logged state history
+	// (work_item_activity), which this data source does not keep: refused
+	// rather than dropped, which would widen the result.
+	if len(req.Parsed.EnteredStateLabels) > 0 || req.Parsed.EnteredStartDate != nil || req.Parsed.EnteredEndDate != nil {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `fields "stateEntered" and "stateEnteredOn" are not supported by this data source`}
+	}
 
 	for _, ws := range req.Parsed.WorkStates {
 		if ws != domain.CaseWorkStateOngoing && ws != domain.CaseWorkStatePaused {
@@ -4966,6 +4972,12 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if parsed.EndUpdatedDate != nil && parsed.StartUpdatedDate != nil &&
 		parsed.EndUpdatedDate.Before(*parsed.StartUpdatedDate) {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "updatedOn: lte value must not be before gte value"}
+	}
+	// stateEntered / stateEnteredOn read the case's logged state history
+	// (work_item_activity), which this data source does not keep: refused
+	// rather than dropped, which would widen the result.
+	if len(parsed.EnteredStateLabels) > 0 || parsed.EnteredStartDate != nil || parsed.EnteredEndDate != nil {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: `fields "stateEntered" and "stateEnteredOn" are not supported by this data source`}
 	}
 	for _, ws := range parsed.WorkStates {
 		if ws != domain.CaseWorkStateOngoing && ws != domain.CaseWorkStatePaused {

@@ -24295,6 +24295,8 @@ components:
             - internalId
             - slaBreached
             - accountEscalationActive
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -24376,6 +24378,18 @@ components:
           service requests, security report analyses and announcements do not
           match it. Cases that never reached a resolved or closed state never
           match.
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change into any of them, whatever
+          the case's state is now; a case that entered one several times
+          matches once. A change made before the history was kept, or on the
+          ServiceNow side without being logged, is not seen.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged,
+          in createdOn's forms (gte inclusive "on or after", a date-only lte
+          the whole day). Needs a stateEntered filter; a lte bound earlier than
+          its gte bound is rejected. E.g. "moved to Waiting on WSO2 today":
+          stateEntered in [waiting_on_wso2] with stateEnteredOn gte today.
+          Neither is supported inside an anyOf branch, or by the ServiceNow
+          data source (400).
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
           product. Only applied by the ServiceNow data source.

@@ -3381,6 +3381,17 @@ type ParsedCaseFilters struct {
 	// OrGroups: see SearchCasesFilters.AnyOf doc comment. Each entry is one
 	// parsed, ANDed branch; branches are OR'd together by the SN adapter.
 	OrGroups []CaseFilterGroup
+
+	// EnteredStateLabels (stateEntered in) keeps the cases whose logged state
+	// history (work_item_activity "state" rows) has a change INTO one of these
+	// states, whatever the case's state is now, and EnteredStartDate /
+	// EnteredEndDate (stateEnteredOn gte / lte) bound when that change was
+	// logged. Each value is the state's display label, lower-cased, as the
+	// history records it ("waiting on wso2"). A case that entered a state
+	// several times matches once.
+	EnteredStateLabels []string
+	EnteredStartDate   *time.Time
+	EnteredEndDate     *time.Time
 }
 
 // CaseFilterGroup is one ANDed branch of a SearchCasesFilters.AnyOf entry.

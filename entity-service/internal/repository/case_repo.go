@@ -3604,6 +3604,29 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		filterArgs = append(filterArgs, req.Parsed.EndUpdatedDate)
 		argIdx++
 	}
+	// stateEntered / stateEnteredOn: the case's logged state history (the
+	// append-only work_item_activity, one "state" row per change, written by
+	// caseService.UpdateCase under the state's display label) has a change
+	// INTO one of the states, logged in the window. Whatever the case's state
+	// is now, and once however many such changes it has (EXISTS). Probed per
+	// case through idx_work_item_activity_work_item_id. Top level only:
+	// rejectUnsupportedOrGroupFields refuses both inside an anyOf branch.
+	if len(req.Parsed.EnteredStateLabels) > 0 {
+		pred := fmt.Sprintf("EXISTS (SELECT 1 FROM work_item_activity sa WHERE sa.work_item_id = wi.id AND sa.field_name = 'state' AND LOWER(sa.new_value) = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.EnteredStateLabels)
+		argIdx++
+		if req.Parsed.EnteredStartDate != nil {
+			pred += fmt.Sprintf(" AND sa.created_on >= $%d", argIdx)
+			filterArgs = append(filterArgs, req.Parsed.EnteredStartDate)
+			argIdx++
+		}
+		if req.Parsed.EnteredEndDate != nil {
+			pred += fmt.Sprintf(" AND sa.created_on <= $%d", argIdx)
+			filterArgs = append(filterArgs, req.Parsed.EnteredEndDate)
+			argIdx++
+		}
+		where += " AND " + pred + ")"
+	}
 
 	// projectOnboardingStatus: the parent project's onboarding_status (p is
 	// the LEFT JOIN below). A case whose project has no status set (NULL)

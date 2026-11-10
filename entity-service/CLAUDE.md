@@ -10478,6 +10478,36 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   one endpoint reads Postgres directly (unlike `SearchCatalogs`, which still
   falls back to ServiceNow -- see `catalogService.snMirror`'s own doc comment).
 
+## Case search `stateEntered` / `stateEnteredOn`: cases that entered a state in a window
+
+"Cases moved to Waiting on WSO2 today" is not "cases in Waiting on WSO2 now": a case that moved there
+this morning may have left again, and one that has been there for a week did not move today. The
+case search's `stateEntered` (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, `createdOn`'s
+date forms and relative placeholders) answer the first: `buildCaseSearchWhere` adds `EXISTS` over
+`work_item_activity` (`field_name = 'state'`, `LOWER(new_value)` one of the states' display labels,
+`created_on` in the window), so the search, count, aggregate and volume trend all see it.
+
+- **Values:** the history records a state under its display label (`caseStateDisplayLabel`,
+  "Waiting on WSO2"), so `ParseCaseFieldFilters` turns each state into its label, lower-cased, in
+  `ParsedCaseFilters.EnteredStateLabels`, and the query compares lower-cased, in case a sync writes
+  another letter case. An unknown state is a 400.
+- **Meaning:** whatever the case's state is now, and once per case however many times it entered
+  (`EXISTS`). Add `state in` for "entered today and still there".
+- **Rules:** `stateEnteredOn` needs `stateEntered`; a `lte` before its `gte` is refused; both are top
+  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` refuses both (search and aggregate)
+  before any call: it keeps no history, and dropping them would widen the result.
+- **Coverage:** only what was logged. `caseService.UpdateCase` logs every state change made through
+  the portal, including the automatic moves to Waiting on WSO2 on a customer's reply or attachment.
+  Whether csm-sync-service copies changes made in ServiceNow into this table is not known here.
+- **Cost:** probed per case through `idx_work_item_activity_work_item_id`. There is no
+  `updated_on` pre-filter, because it is not confirmed that every writer bumps `updated_on` with the
+  state.
+
+Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the ServiceNow refusal) and
+`repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`: left again, entered twice,
+yesterday, an upper-case label, a non-state row and a change out of the state, window edges, the
+aggregate).
+
 ## Case search `countOnly`, and the projectOnboardingStatus `in` filter's exclusion-list rewrite
 
 Reported as a dashboard-performance finding, measured against a real load test and the perf
