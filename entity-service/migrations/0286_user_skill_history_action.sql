@@ -32,32 +32,41 @@ ALTER TABLE user_skill_history
     ADD COLUMN IF NOT EXISTS category_path_snapshot VARCHAR(1000),
     ADD COLUMN IF NOT EXISTS skill_request_id       UUID REFERENCES skill_request(id);
 
--- Backfill. An add with an earlier row for the same pair is a re-add.
-WITH h AS (
-    SELECT id, level_from_id, level_to_id,
-           row_number() OVER (PARTITION BY user_id, skill_id ORDER BY created_on, id) AS seq
-      FROM user_skill_history
-     WHERE action IS NULL
-)
-UPDATE user_skill_history u
-   SET action = CASE
-         WHEN h.level_from_id IS NULL AND h.level_to_id IS NULL THEN NULL
-         WHEN h.level_from_id IS NULL AND h.seq = 1           THEN 'ADDED'::skill_history_action_enum
-         WHEN h.level_from_id IS NULL                          THEN 'READDED'::skill_history_action_enum
-         WHEN h.level_to_id IS NULL                            THEN 'REMOVED'::skill_history_action_enum
-         ELSE 'LEVEL_CHANGED'::skill_history_action_enum END
-  FROM h
- WHERE u.id = h.id;
+-- Backfill, once: after the append-only trigger below exists every UPDATE of
+-- this table is refused, so a re-run skips it (the rows are already filled).
+-- Rows with neither level stay NULL and are not touched.
+DO $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                WHERE tgname = 'trg_user_skill_history_append_only'
+                  AND tgrelid = 'user_skill_history'::regclass) THEN
+    -- An add with an earlier row for the same pair is a re-add.
+    WITH h AS (
+        SELECT id, level_from_id, level_to_id,
+               row_number() OVER (PARTITION BY user_id, skill_id ORDER BY created_on, id) AS seq
+          FROM user_skill_history
+         WHERE action IS NULL
+    )
+    UPDATE user_skill_history u
+       SET action = CASE
+             WHEN h.level_from_id IS NULL AND h.seq = 1 THEN 'ADDED'::skill_history_action_enum
+             WHEN h.level_from_id IS NULL               THEN 'READDED'::skill_history_action_enum
+             WHEN h.level_to_id IS NULL                 THEN 'REMOVED'::skill_history_action_enum
+             ELSE 'LEVEL_CHANGED'::skill_history_action_enum END
+      FROM h
+     WHERE u.id = h.id
+       AND (h.level_from_id IS NOT NULL OR h.level_to_id IS NOT NULL);
 
--- Today's names are the best available for the old rows.
-UPDATE user_skill_history u
-   SET skill_name_snapshot = s.name,
-       category_path_snapshot = (
-         SELECT string_agg(COALESCE(c.category_path, c.name), '; ' ORDER BY COALESCE(c.category_path, c.name))
-           FROM skill_category_link l JOIN skill_category c ON c.id = l.category_id
-          WHERE l.skill_id = s.id)
-  FROM skill s
- WHERE s.id = u.skill_id AND u.skill_name_snapshot IS NULL;
+    -- Today's names are the best available for the old rows.
+    UPDATE user_skill_history u
+       SET skill_name_snapshot = s.name,
+           category_path_snapshot = (
+             SELECT string_agg(COALESCE(c.category_path, c.name), '; ' ORDER BY COALESCE(c.category_path, c.name))
+               FROM skill_category_link l JOIN skill_category c ON c.id = l.category_id
+              WHERE l.skill_id = s.id)
+      FROM skill s
+     WHERE s.id = u.skill_id AND u.skill_name_snapshot IS NULL;
+END IF;
+END $$;
 
 ALTER TABLE user_skill_history DROP CONSTRAINT IF EXISTS user_skill_history_skill_id_fkey;
 ALTER TABLE user_skill_history ADD CONSTRAINT user_skill_history_skill_id_fkey

@@ -22977,7 +22977,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /skills/directory/search:
     post:
-      summary: The skill directory: one row per person.
+      summary: "The skill directory: one row per person."
       description: >
         Needs skills.directory.view. Criteria are (skill, minimum level value) pairs; match ALL (default) keeps people who meet every criterion, ANY those who meet at least one, best matches first. Optional name search, team keys and categories (a category includes its descendants). Each person comes with all their active skills. Default limit 25, at most 100.
       operationId: searchSkillDirectory

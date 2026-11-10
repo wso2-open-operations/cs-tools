@@ -709,7 +709,7 @@ func (r *skillRepository) ListUserSkillHistory(ctx context.Context, userID, skil
 		return nil, 0, fmt.Errorf("count skill history: %w", err)
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT h.id::text, COALESCE(h.action::text, ''), h.skill_request_id::text, h.skill_id::text, s.name,
+		SELECT h.id::text, COALESCE(h.action::text, ''), h.skill_request_id::text, h.skill_id::text, COALESCE(h.skill_name_snapshot, s.name),
 		       lf.id::text, lf.name, lf.value, lf.description, lf.color,
 		       lt.id::text, lt.name, lt.value, lt.description, lt.color,
 		       h.created_by, h.created_on

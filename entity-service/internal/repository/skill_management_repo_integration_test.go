@@ -106,6 +106,13 @@ func TestSkillIntegration_RequestCreateApproveAddsToProfile(t *testing.T) {
 		skJane, newSkill, req.ID, skLeadEmail); n != 1 {
 		t.Fatalf("auto-add history rows = %d", n)
 	}
+	// History shows the name the skill had then, not after a later rename.
+	skExec(t, pool, `UPDATE skill SET name = 'sktest Ballerina Lang' WHERE id = $1`, newSkill)
+	hist, _, err := repo.ListUserSkillHistory(ctx, skJane, newSkill, 10, 0)
+	if err != nil || len(hist) != 1 || hist[0].SkillName != "sktest Ballerina" {
+		t.Fatalf("history after rename = %+v, %v", hist, err)
+	}
+	skExec(t, pool, `UPDATE skill SET name = 'sktest Ballerina' WHERE id = $1`, newSkill)
 	// Deciding it again is refused and changes nothing.
 	again, outcome, err := repo.RejectSkillRequest(ctx, req.ID, skLead, "late", skLeadEmail)
 	if err != nil || outcome != domain.SkillOutcomeRequestNotPending || again.Status != domain.SkillRequestApproved {
