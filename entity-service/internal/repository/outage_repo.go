@@ -163,7 +163,7 @@ SELECT o.id::text,
   LEFT JOIN LATERAL (
        SELECT c.slug AS cloud_slug
          FROM cloud_monitor m
-         JOIN cloud_status_cloud c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
+         JOIN cloud_registry c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
         WHERE m.service_offering_id = o.service_offering_id
         ORDER BY m.id
         LIMIT 1
@@ -751,7 +751,7 @@ func (r *outageRepo) PublicationFor(ctx context.Context, serviceOfferingID *stri
 	}
 	const q = `
 SELECT c.slug FROM cloud_monitor m
-  JOIN cloud_status_cloud c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
+  JOIN cloud_registry c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
  WHERE m.service_offering_id = $1::uuid
  ORDER BY m.id
  LIMIT 1`
@@ -856,7 +856,7 @@ func (r *outageRepo) MonitoredClouds(ctx context.Context) ([]string, error) {
 	const q = `
 SELECT DISTINCT c.slug
   FROM cloud_monitor m
-  JOIN cloud_status_cloud c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
+  JOIN cloud_registry c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
  ORDER BY 1`
 	rows, err := r.db.Query(ctx, q)
 	if err != nil {

@@ -29,18 +29,18 @@
 -- trigger scope, also configuration); the read-only dashboard endpoints do not.
 --
 -- TABLES
---   cloud_status_cloud            one row per cloud: slug (what the endpoints
---                                 take), display name, offering_key (the value
---                                 stored in cloud_monitor.cloud_offering),
---                                 incident_prefix, weighted flag, is_active.
---   cloud_status_cloud_region     one row per region: the dashboard's literal
---                                 key ("us - dp") and the parent service whose
---                                 offerings make the region up.
---   cloud_status_offering_weight  one row per weighted offering: its share of
---                                 its region as a percentage. The weights of a
---                                 region's offerings sum to exactly 100. A
---                                 cloud with weighted = FALSE takes a plain
---                                 mean and has no weight rows.
+--   cloud_registry                  one row per cloud: slug (what the endpoints
+--                                   take), display name, offering_key (the value
+--                                   stored in cloud_monitor.cloud_offering),
+--                                   incident_prefix, weighted flag, is_active.
+--   cloud_registry_region           one row per region: the dashboard's literal
+--                                   key ("us - dp") and the parent service whose
+--                                   offerings make the region up.
+--   cloud_registry_offering_weight  one row per weighted offering: its share of
+--                                   its region as a percentage. The weights of a
+--                                   region's offerings sum to exactly 100. A
+--                                   cloud with weighted = FALSE takes a plain
+--                                   mean and has no weight rows.
 --
 -- cloud_monitor.cloud_offering BECOMES VARCHAR(40), NOT A NEW ENUM, and the old
 -- enum TYPE IS KEPT. Reasons, in order of how much they matter:
@@ -67,10 +67,10 @@
 -- checked instead by the query below, which should return no rows after an
 -- onboarding:
 --
---   SELECT r.cloud_slug, r.parent_service_id FROM cloud_status_cloud_region r
+--   SELECT r.cloud_slug, r.parent_service_id FROM cloud_registry_region r
 --    LEFT JOIN service s ON s.id = r.parent_service_id WHERE s.id IS NULL
 --   UNION ALL
---   SELECT w.cloud_slug, w.service_offering_id FROM cloud_status_offering_weight w
+--   SELECT w.cloud_slug, w.service_offering_id FROM cloud_registry_offering_weight w
 --    LEFT JOIN service_offering so ON so.id = w.service_offering_id WHERE so.id IS NULL;
 --
 -- INCIDENT PREFIX. Incident history and detail match a cloud's incidents by the
@@ -93,11 +93,11 @@
 --
 -- ONBOARDING A CLOUD ("acme-cloud", one region "us", two offerings):
 --
---   INSERT INTO cloud_status_cloud (slug, display_name, offering_key, incident_prefix, weighted, sort_order)
+--   INSERT INTO cloud_registry (slug, display_name, offering_key, incident_prefix, weighted, sort_order)
 --   VALUES ('acme-cloud', 'Acme Cloud', 'ACME_CLOUD', 'acme-cloud', TRUE, 80);
---   INSERT INTO cloud_status_cloud_region (cloud_slug, region_key, parent_service_id, sort_order)
+--   INSERT INTO cloud_registry_region (cloud_slug, region_key, parent_service_id, sort_order)
 --   VALUES ('acme-cloud', 'us', '00000000-0000-0000-0000-0000000000a1', 10);
---   INSERT INTO cloud_status_offering_weight (cloud_slug, service_offering_id, weight)
+--   INSERT INTO cloud_registry_offering_weight (cloud_slug, service_offering_id, weight)
 --   VALUES ('acme-cloud', '00000000-0000-0000-0000-0000000000b1', 60),
 --          ('acme-cloud', '00000000-0000-0000-0000-0000000000b2', 40);
 --   -- then point cloud_monitor rows at it: cloud_offering = 'ACME_CLOUD'
@@ -125,7 +125,7 @@ DO $$ BEGIN
     END IF;
 END $$;
 
-CREATE TABLE IF NOT EXISTS cloud_status_cloud (
+CREATE TABLE IF NOT EXISTS cloud_registry (
     slug            VARCHAR(40)  PRIMARY KEY,
     display_name    VARCHAR(100) NOT NULL,
     offering_key    VARCHAR(40)  NOT NULL UNIQUE,
@@ -135,19 +135,19 @@ CREATE TABLE IF NOT EXISTS cloud_status_cloud (
     sort_order      INTEGER      NOT NULL DEFAULT 0,
     created_on      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_on      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    CONSTRAINT cloud_status_cloud_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$')
+    CONSTRAINT cloud_registry_slug_format CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$')
 );
 
-CREATE TABLE IF NOT EXISTS cloud_status_cloud_region (
-    cloud_slug        VARCHAR(40)  NOT NULL REFERENCES cloud_status_cloud(slug) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS cloud_registry_region (
+    cloud_slug        VARCHAR(40)  NOT NULL REFERENCES cloud_registry(slug) ON DELETE CASCADE,
     region_key        VARCHAR(100) NOT NULL,
     parent_service_id UUID         NOT NULL,
     sort_order        INTEGER      NOT NULL DEFAULT 0,
     PRIMARY KEY (cloud_slug, region_key)
 );
 
-CREATE TABLE IF NOT EXISTS cloud_status_offering_weight (
-    cloud_slug          VARCHAR(40)  NOT NULL REFERENCES cloud_status_cloud(slug) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS cloud_registry_offering_weight (
+    cloud_slug          VARCHAR(40)  NOT NULL REFERENCES cloud_registry(slug) ON DELETE CASCADE,
     service_offering_id UUID         NOT NULL,
     weight              NUMERIC(7,3) NOT NULL CHECK (weight >= 0 AND weight <= 100),
     PRIMARY KEY (cloud_slug, service_offering_id)

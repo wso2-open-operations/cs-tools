@@ -48,6 +48,105 @@ func (d csmDetails) forProject(_ context.Context, proj project) (project, entity
 	return proj, d.reader, nil
 }
 
+// AccountSearcher is the part of the CSM client that lists accounts
+// (POST /accounts/search). Satisfied by *entity.Client.
+type AccountSearcher interface {
+	SearchAccounts(ctx context.Context, body []byte) ([]byte, error)
+}
+
+// preparer is a DetailSource that needs one read before the first project,
+// whose failure stops the run before anything is sent or written.
+type preparer interface {
+	prepare(ctx context.Context) error
+}
+
+// customerAccountLifeCycle is the account life cycle ACP evaluates.
+const customerAccountLifeCycle = "Customer"
+
+// CSMOnlyDetails decides every project from CSM's copy through reader, with no
+// Salesforce read at all (ACP_SALES_ENTITY_READS=off). Everything it needs is
+// an existing entity-service read: the project's dates and account from the
+// project, the account's people, partner flag and primary-partner presence
+// from the account, the contacts, and the opportunities and invoices. Only
+// the account's life cycle is not returned by an account read; it is learned
+// once per run by listing the accounts whose life cycle is Customer
+// (accounts.SearchAccounts with the lifeCycle filter), so an account outside
+// that list is "not Customer" and a project with no account has no status
+// (both skipped, counted apart; see skipByAccount).
+func CSMOnlyDetails(reader entityReader, accounts AccountSearcher) DetailSource {
+	return &csmOnlyDetails{reader: reader, accounts: accounts}
+}
+
+type csmOnlyDetails struct {
+	reader    entityReader
+	accounts  AccountSearcher
+	customers map[string]bool
+}
+
+// prepare lists every Customer account once. A listing that cannot be shown
+// complete is an error, which stops the run: with no way to tell which
+// accounts are Customers, nothing may be evaluated (fail closed).
+func (d *csmOnlyDetails) prepare(ctx context.Context) error {
+	customers := map[string]bool{}
+	offset, pages, total := 0, 0, 0
+	for {
+		body, err := json.Marshal(map[string]any{
+			"pagination": pagination{Limit: pageSize, Offset: offset},
+			"filters":    map[string]string{"lifeCycle": customerAccountLifeCycle},
+		})
+		if err != nil {
+			return fmt.Errorf("build accounts request: %w", err)
+		}
+		raw, err := d.accounts.SearchAccounts(ctx, body)
+		if err != nil {
+			return fmt.Errorf("list Customer accounts at offset %d: %w", offset, err)
+		}
+		var page struct {
+			Accounts []struct {
+				ID string `json:"id"`
+			} `json:"accounts"`
+			Total   int  `json:"total"`
+			HasMore bool `json:"hasMore"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return fmt.Errorf("parse accounts at offset %d: %w", offset, err)
+		}
+		for _, a := range page.Accounts {
+			customers[a.ID] = true
+		}
+		total = page.Total
+		offset += len(page.Accounts)
+		if len(page.Accounts) == 0 || !page.HasMore {
+			break
+		}
+		if pages++; pages >= maxProjectPages {
+			return fmt.Errorf("customer account listing still reports more pages after %d pages", maxProjectPages)
+		}
+	}
+	if len(customers) < total {
+		return fmt.Errorf("customer account listing returned %d distinct accounts of a reported %d", len(customers), total)
+	}
+	d.customers = customers
+	return nil
+}
+
+func (d *csmOnlyDetails) forProject(_ context.Context, proj project) (project, entityReader, error) {
+	// The status is known from the list, not read per account; the marker is
+	// what makes skipByAccount apply its status rule.
+	proj.accountStatusRead = true
+	switch {
+	case proj.Account == nil || proj.Account.ID == "":
+		proj.accountStatus = nil
+	case d.customers[proj.Account.ID]:
+		status := customerAccountLifeCycle
+		proj.accountStatus = &status
+	default:
+		status := "Not " + customerAccountLifeCycle
+		proj.accountStatus = &status
+	}
+	return proj, d.reader, nil
+}
+
 // SalesforceReader is the part of the sales-entity-service client the sweep
 // uses. Satisfied by *salesentity.Client.
 type SalesforceReader interface {
@@ -155,6 +254,9 @@ type salesforceReader struct {
 	sf          SalesforceReader
 	projectSfID string
 	customer    *salesentity.Customer
+	// invoices are the Salesforce invoices this project's decision read, kept
+	// for the repair's comparison with CSM's copy (no extra Salesforce call).
+	invoices []salesentity.Invoice
 }
 
 func (r *salesforceReader) GetAccount(ctx context.Context, accountID string) ([]byte, error) {
@@ -299,6 +401,7 @@ func (r *salesforceReader) SearchInvoices(ctx context.Context, body []byte) ([]b
 	if err != nil {
 		return nil, err
 	}
+	r.invoices = append(r.invoices, invoices...)
 	out := make([]invoiceDTO, 0, len(invoices))
 	for _, inv := range invoices {
 		out = append(out, invoiceDTO{

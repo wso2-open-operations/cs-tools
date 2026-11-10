@@ -270,7 +270,7 @@ func (r *cloudStatusDashboardRepository) OngoingOutages(ctx context.Context, off
 // that reference across. It matters -- only 188 of 636 outages carry one, so
 // the filter removes two thirds of the table.
 //
-// The $1 prefix is the cloud's registered incident prefix (cloud_status_cloud),
+// The $1 prefix is the cloud's registered incident prefix (cloud_registry),
 // which is the slug for every cloud seeded today but is not assumed to be.
 //
 // The date window is passed in rather than computed here, so the caller owns

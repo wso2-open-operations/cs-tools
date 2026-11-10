@@ -245,6 +245,12 @@ type ApplyScheduleRangeRequest struct {
 	// ZoneCode narrows a clear (ShiftCode empty) to that zone's turn, leaving
 	// the rest of the person's day. Only meaningful when clearing.
 	ZoneCode *string `json:"zoneCode,omitempty"`
+	// MayReplaceOn says whether the caller may take somebody's regular hours
+	// off another team's rota, so that the regular hours being set replace
+	// them for the day (IST set on Vega replaces PDT held on Americas). Set
+	// by the service from the caller's rights; nil -- a rota import, or any
+	// other caller -- refuses a second set of regular hours instead.
+	MayReplaceOn func(teamKey string) bool `json:"-"`
 }
 
 // ApplyScheduleRangeResponse says what actually happened, because it is
@@ -419,8 +425,9 @@ type SearchScheduleAssignmentsRequest struct {
 	UserEmail        string `json:"userEmail,omitempty"`
 	IncludeOvernight bool   `json:"includeOvernight,omitempty"`
 	// ExcludeAbsent leaves out an assignment whose person is away on its rota
-	// day: the same rule /team-schedule/on-duty applies, asked of a day rather
-	// than an instant. The rota views leave it off because they draw leave over
+	// day: /team-schedule/on-duty's rule asked of a day rather than an instant,
+	// except that an allocation that moves nobody does not count (it does not
+	// hide a turn). The rota views leave it off because they draw leave over
 	// the rota; a reminder email sets it, or it tells somebody on leave that
 	// they are working.
 	ExcludeAbsent bool `json:"excludeAbsent,omitempty"`

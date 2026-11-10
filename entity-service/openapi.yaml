@@ -29490,11 +29490,14 @@ components:
         excludeAbsent:
           type: boolean
           description: >
-            Leave out an assignment whose person is away (leave, an
-            allocation, excluded from the rota) on its rota day, by the same
-            rule `/team-schedule/on-duty` applies. A span that moves somebody
-            to another team does not count against that team's shifts. Off by
-            default: the rota views draw leave over the rota instead.
+            Leave out an assignment whose person is away (leave, excluded
+            from the rota, or an allocation that moves them to another team)
+            on its rota day. An allocation that moves nobody (Allo-INT, ENG,
+            ...) does not count: it does not hide a turn on the same day.
+            `/team-schedule/on-duty` still counts every allocation. A span
+            that moves somebody to another team does not count against that
+            team's shifts. Off by default: the rota views draw leave over the
+            rota instead.
     SearchScheduleAbsencesRequest:
       type: object
       required: [from, to]

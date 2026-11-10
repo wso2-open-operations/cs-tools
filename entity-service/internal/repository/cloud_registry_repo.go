@@ -35,22 +35,22 @@ type cloudQuerier interface {
 const (
 	cloudsSQL = `
     SELECT slug, display_name, offering_key, incident_prefix, weighted
-      FROM cloud_status_cloud
+      FROM cloud_registry
      WHERE is_active IS TRUE
      ORDER BY sort_order, slug
 `
 	cloudRegionsSQL = `
     SELECT r.cloud_slug, r.region_key, r.parent_service_id::text
-      FROM cloud_status_cloud_region r
-      JOIN cloud_status_cloud c ON c.slug = r.cloud_slug
+      FROM cloud_registry_region r
+      JOIN cloud_registry c ON c.slug = r.cloud_slug
      WHERE c.is_active IS TRUE
      ORDER BY r.cloud_slug, r.sort_order, r.region_key
 `
 	// ::float8 so 13.75 reaches Go as the same double the literal 13.75 is.
 	cloudWeightsSQL = `
     SELECT w.cloud_slug, w.service_offering_id::text, w.weight::float8
-      FROM cloud_status_offering_weight w
-      JOIN cloud_status_cloud c ON c.slug = w.cloud_slug
+      FROM cloud_registry_offering_weight w
+      JOIN cloud_registry c ON c.slug = w.cloud_slug
      WHERE c.is_active IS TRUE
 `
 )
