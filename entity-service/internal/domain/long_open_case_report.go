@@ -88,6 +88,10 @@ type LongOpenCaseReportRow struct {
 	AssignedEngineer string `json:"assignedEngineer"`
 	// CsTeam is the name of the CS team that owns the case's account.
 	CsTeam string `json:"csTeam"`
+	// Type is the case's type (case, service_request or
+	// security_report_analysis). It is filled only by the open-before-yesterday
+	// variant, which lists all three, and left out of the default report.
+	Type string `json:"type,omitempty"`
 	// AccountName is the name of the case's account. It is filled only by
 	// the open-before-yesterday variant and left out of the default report.
 	AccountName string `json:"accountName,omitempty"`

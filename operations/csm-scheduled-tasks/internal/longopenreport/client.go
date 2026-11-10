@@ -87,6 +87,10 @@ type Row struct {
 	CsTeam string `json:"csTeam"`
 	// AccountName is the name of the case's account; empty when absent.
 	AccountName string `json:"accountName"`
+	// Type is the case's type (case, service_request or
+	// security_report_analysis). Only the open-before-yesterday variant sends
+	// it; empty otherwise.
+	Type string `json:"type"`
 }
 
 // Config is the entity-service connection: the same OAuth client credentials

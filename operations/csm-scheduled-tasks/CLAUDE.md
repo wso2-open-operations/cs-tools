@@ -164,11 +164,16 @@ rather than any case that's merely been open a long time. It mails entity-servic
 open-before-yesterday report: `internal/longopenreport.Client.OpenBeforeYesterday` calls
 `GET /reports/long-open-cases?variant=open-before-yesterday` (same client, base URL and OAuth client
 credentials as the stale cases report) and `notify.RenderOpenCasesReport` renders its `cases` (oldest
-first). Which cases count (state exactly `open`, created before the start of yesterday), the
+first). Which items count (a case, service request or security report analysis, as each row's `type`
+says; engagements and announcements are left out; state exactly `open`, created before the start of yesterday), the
 calendar-day boundary (computed by entity-service in Asia/Colombo, not by this task) and the row cap
-(5000) all live in entity-service; this task only fetches, renders and sends. Columns: Account,
-Assigned To, State, Severity, Days Open (whole days since creation, computed here at send time),
-Updated, Case. Subject: `[Immediate-Action-Required][Report] Opened before yesterday cases`.
+(5000) all live in entity-service; this task only fetches, renders and sends. Columns: Case, Type
+(Case, Service request, Security report analysis), Account, Assigned To, State, Severity, Days Open
+(whole days since creation, computed here at send time), Updated. Each row's number links to the item's
+CSM portal page, built from `CSM_PORTAL_WEB_BASE_URL` and the item's UUID (`/cases/<id>`,
+`/operations/service-requests/<id>` or `/security-center/security-reports/<id>`); plain text when the
+base is unset or the row has no id or a type with no known route. With no matching rows no mail is
+sent. Subject: `[Immediate-Action-Required][Report] Opened before yesterday cases`.
 
 If the report has no cases the task sends nothing (a count-only line is logged) and succeeds, as
 the original report does. If entity-service cut the list at its cap (`casesTruncated`), the mail

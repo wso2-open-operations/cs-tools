@@ -13414,8 +13414,9 @@ paths:
         With `variant=open-before-yesterday` the report is instead the cases
         still in exactly the open state that were created before the start of
         yesterday in Asia/Colombo (a calendar day, not 24 hours; a case
-        created at or after that instant is not listed). Only plain cases are
-        listed; tags and ETAs are ignored. A case is listed when its project
+        created at or after that instant is not listed). Cases, service requests
+        and security report analyses are listed (each row's `type` says which);
+        engagements and announcements are not. Tags and ETAs are ignored. A row is listed when its project
         type is one of the configured open-before-yesterday project types
         (default Subscription, Managed Cloud Subscription), or one of the
         configured product project types (default Cloud Support) and the case
@@ -34241,6 +34242,12 @@ components:
           description: >-
             Name of the case's account. Present only in the
             open-before-yesterday variant (and omitted when empty).
+        type:
+          type: string
+          enum: [case, service_request, security_report_analysis]
+          description: >-
+            The row's type. Present only in the open-before-yesterday variant,
+            which lists all three.
     WorklogReport:
       type: object
       description: >-

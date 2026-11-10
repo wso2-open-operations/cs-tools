@@ -25,6 +25,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -43,6 +45,8 @@ func obyCleanup(t *testing.T, pool *pgxpool.Pool) {
 	for _, s := range []string{
 		`DELETE FROM work_item_tag WHERE work_item_id::text LIKE '6d3%'`,
 		`DELETE FROM "case" WHERE id::text LIKE '6d3%'`,
+		`DELETE FROM service_request WHERE id::text LIKE '6d3%'`,
+		`DELETE FROM security_report_analysis WHERE id::text LIKE '6d3%'`,
 		`DELETE FROM work_item WHERE id::text LIKE '6d3%'`,
 		`DELETE FROM project WHERE id::text LIKE '6d3%'`,
 		`DELETE FROM tag WHERE id::text LIKE '6d3%'`,
@@ -104,7 +108,7 @@ func TestOpenBeforeYesterdayReportIntegration(t *testing.T) {
 		($3, now(), now(), 't', 't', 'OBY Other')`, typeSub, typeCS, typeOth)
 	exec(`INSERT INTO tag (id, created_on, updated_on, name) VALUES ($1, now(), now(), 'migration')`, tagMigr)
 	exec(`INSERT INTO product (id, created_on, updated_on, created_by, updated_by, manufacturer, category, name, code)
-		VALUES ($1, now(), now(), 't', 't', 'Example', 'SOFTWARE', 'OBY Product', 'obyprod')`, product)
+		VALUES ($1, now(), now(), 't', 't', 'WSO2', 'SOFTWARE', 'OBY Product', 'obyprod')`, product)
 
 	project := func(n int, typeID *string) string {
 		id := obyID("p", n)
@@ -130,7 +134,20 @@ func TestOpenBeforeYesterdayReportIntegration(t *testing.T) {
 				account_id, project_id, assigned_to_id, product_id)
 			VALUES ($1, $2, $2, 't', 't', $3, $4, 'subject', $5::work_item_type_enum, $6, $7, $8, $9)`,
 			id, createdOn, fmt.Sprintf("CASEOBY%02d", seq), fmt.Sprintf("OBY-WSO2-%02d", seq), wiType, account, projectID, assignee, prod)
-		exec(`INSERT INTO "case" (id, state, severity) VALUES ($1, $2::case_state_enum, $3::case_severity_enum)`, id, state, severity)
+		switch wiType {
+		case "SERVICE_REQUEST":
+			sev := "S4"
+			if severity != nil {
+				sev = *severity
+			}
+			exec(`INSERT INTO service_request (id, state, severity) VALUES ($1, $2::service_request_state_enum, $3::case_severity_enum)`, id, state, sev)
+		case "SECURITY_REPORT_ANALYSIS":
+			exec(`INSERT INTO security_report_analysis (id, state) VALUES ($1, $2::security_report_analysis_state_enum)`, id, state)
+		case "ENGAGEMENT", "ANNOUNCEMENT":
+			// No extension row: these types are never listed.
+		default:
+			exec(`INSERT INTO "case" (id, state, severity) VALUES ($1, $2::case_state_enum, $3::case_severity_enum)`, id, state, severity)
+		}
 		return id
 	}
 
@@ -139,18 +156,22 @@ func TestOpenBeforeYesterdayReportIntegration(t *testing.T) {
 	caseRow(age(9), "OPEN", "CASE", &pCS, true, str("S1"))             // branch 2 with a product, oldest
 	tagged := caseRow(age(7), "OPEN", "CASE", &pSub, false, nil)       // a migration tag does not exclude here
 	exec(`INSERT INTO work_item_tag (id, created_on, updated_on, work_item_id, tag_id) VALUES (gen_random_uuid(), now(), now(), $1, $2)`, tagged, tagMigr)
-	etaShared := caseRow(age(6), "OPEN", "CASE", &pSub, false, nil) // an ETA already shared does not exclude here
+	srRow := caseRow(age(8), "OPEN", "SERVICE_REQUEST", &pSub, false, str("S3"))      // a service request is listed, with its own severity
+	sraRow := caseRow(age(10), "OPEN", "SECURITY_REPORT_ANALYSIS", &pSub, false, nil) // so is a security report analysis, with no severity
+	etaShared := caseRow(age(6), "OPEN", "CASE", &pSub, false, nil)                   // an ETA already shared does not exclude here
 	exec(`UPDATE work_item SET eta_shared_on = now() WHERE id = $1`, etaShared)
 
 	// Excluded, one per condition.
-	caseRow(age(0), "OPEN", "CASE", &pSub, false, nil)             // created today
-	caseRow(age(9), "WORK_IN_PROGRESS", "CASE", &pSub, false, nil) // not exactly open
-	caseRow(age(9), "REOPENED", "CASE", &pSub, false, nil)         // not exactly open
-	caseRow(age(9), "OPEN", "CASE", &pCS, false, nil)              // branch 2 without a product
-	caseRow(age(9), "OPEN", "CASE", &pOth, true, nil)              // project type not configured
-	caseRow(age(9), "OPEN", "CASE", &pUntyped, true, nil)          // project has no type
-	caseRow(age(9), "OPEN", "CASE", nil, true, nil)                // no project
-	caseRow(age(9), "OPEN", "SERVICE_REQUEST", &pSub, false, nil)  // not a plain case
+	caseRow(age(0), "OPEN", "CASE", &pSub, false, nil)                        // created today
+	caseRow(age(9), "WORK_IN_PROGRESS", "CASE", &pSub, false, nil)            // not exactly open
+	caseRow(age(9), "REOPENED", "CASE", &pSub, false, nil)                    // not exactly open
+	caseRow(age(9), "OPEN", "CASE", &pCS, false, nil)                         // branch 2 without a product
+	caseRow(age(9), "OPEN", "CASE", &pOth, true, nil)                         // project type not configured
+	caseRow(age(9), "OPEN", "CASE", &pUntyped, true, nil)                     // project has no type
+	caseRow(age(9), "OPEN", "CASE", nil, true, nil)                           // no project
+	caseRow(age(9), "OPEN", "ENGAGEMENT", &pSub, false, nil)                  // not a case, service request or security report
+	caseRow(age(9), "OPEN", "ANNOUNCEMENT", &pSub, false, nil)                // not a case, service request or security report
+	caseRow(age(9), "WORK_IN_PROGRESS", "SERVICE_REQUEST", &pSub, false, nil) // a service request that is not open
 
 	repo := repository.NewLongOpenCaseReportRepository(repository.NewScoped(pool))
 	sysCtx := repository.WithSystemIdentity(ctx)
@@ -165,14 +186,29 @@ func TestOpenBeforeYesterdayReportIntegration(t *testing.T) {
 	for _, r := range got.Cases {
 		nums = append(nums, r.Number)
 	}
-	// age(9), age(7), age(6), age(5): oldest first.
-	if want := []string{"CASEOBY02", "CASEOBY03", "CASEOBY04", "CASEOBY01"}; fmt.Sprint(nums) != fmt.Sprint(want) {
+	// age(10), age(9), age(8), age(7), age(6), age(5): oldest first.
+	if want := []string{"CASEOBY05", "CASEOBY02", "CASEOBY04", "CASEOBY03", "CASEOBY06", "CASEOBY01"}; fmt.Sprint(nums) != fmt.Sprint(want) {
 		t.Errorf("cases = %v, want %v", nums, want)
 	}
-	if got.CasesTotal != 4 || len(got.OnboardingCases) != 0 || got.OnboardingCasesTotal != 0 {
-		t.Errorf("totals = %d/%d with %d onboarding rows, want 4/0/0", got.CasesTotal, got.OnboardingCasesTotal, len(got.OnboardingCases))
+	if got.CasesTotal != 6 || len(got.OnboardingCases) != 0 || got.OnboardingCasesTotal != 0 {
+		t.Errorf("totals = %d/%d with %d onboarding rows, want 6/0/0", got.CasesTotal, got.OnboardingCasesTotal, len(got.OnboardingCases))
 	}
-	first := got.Cases[0]
+	// Each listed type comes back with its UUID and type; a service request
+	// carries its own severity, a security report analysis has none.
+	byNumber := map[string]domain.LongOpenCaseReportRow{}
+	for _, r := range got.Cases {
+		byNumber[r.Number] = r
+	}
+	if r := byNumber["CASEOBY04"]; r.Type != "service_request" || r.ID != srRow || r.Severity != "medium" {
+		t.Errorf("service request row = %+v, want type service_request, id %s, severity medium", r, srRow)
+	}
+	if r := byNumber["CASEOBY05"]; r.Type != "security_report_analysis" || r.ID != sraRow || r.Severity != "" || r.State != "open" {
+		t.Errorf("security report analysis row = %+v, want type security_report_analysis, id %s, no severity", r, sraRow)
+	}
+	first := byNumber["CASEOBY02"]
+	if first.Type != "case" {
+		t.Errorf("case row type = %q, want case", first.Type)
+	}
 	if first.InternalID != "OBY-WSO2-02" || first.State != "open" || first.Severity != "critical" ||
 		first.AssignedEngineer != "Jane Doe" || first.CsTeam != "Team Alpha" || first.AccountName != "Example Corp" ||
 		first.CreatedOn.IsZero() || first.UpdatedOn.IsZero() {
@@ -181,18 +217,18 @@ func TestOpenBeforeYesterdayReportIntegration(t *testing.T) {
 
 	// Strictly before the cut-off: a case created exactly at it is out.
 	exec(`UPDATE work_item SET created_on = $1 WHERE id = $2`, cutoff, incNew)
-	if got, err = repo.ListOpenCasesBefore(sysCtx, cutoff, types, productTypes, 5000); err != nil || got.CasesTotal != 3 {
+	if got, err = repo.ListOpenCasesBefore(sysCtx, cutoff, types, productTypes, 5000); err != nil || got.CasesTotal != 5 {
 		t.Errorf("a case created exactly at the cut-off must not be listed: total=%d err=%v", got.CasesTotal, err)
 	}
 
 	// The cap cuts to the oldest rows; the total stays full.
 	got, err = repo.ListOpenCasesBefore(sysCtx, cutoff, types, productTypes, 1)
-	if err != nil || len(got.Cases) != 1 || got.Cases[0].Number != "CASEOBY02" || got.CasesTotal != 3 {
-		t.Errorf("capped = %d rows (total %d, err %v), want the oldest 1 of 3", len(got.Cases), got.CasesTotal, err)
+	if err != nil || len(got.Cases) != 1 || got.Cases[0].Number != "CASEOBY05" || got.CasesTotal != 5 {
+		t.Errorf("capped = %d rows (total %d, err %v), want the oldest 1 of 5", len(got.Cases), got.CasesTotal, err)
 	}
 
 	// With the second set empty, branch 2 contributes nothing.
-	if got, err = repo.ListOpenCasesBefore(sysCtx, cutoff, types, nil, 5000); err != nil || got.CasesTotal != 2 {
-		t.Errorf("without branch-2 types total = %d (err %v), want 2", got.CasesTotal, err)
+	if got, err = repo.ListOpenCasesBefore(sysCtx, cutoff, types, nil, 5000); err != nil || got.CasesTotal != 4 {
+		t.Errorf("without branch-2 types total = %d (err %v), want 4", got.CasesTotal, err)
 	}
 }
