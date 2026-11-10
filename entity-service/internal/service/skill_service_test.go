@@ -63,6 +63,16 @@ type fakeSkillRepo struct {
 	lastSearch     domain.SearchUserSkillsRequest
 	lastCreate     domain.CreateSkillRequest
 	lastUpdate     domain.UpdateSkillRequest
+
+	categoriesWithInactive bool
+	notLeaf                map[string]bool // categories that exist but no skill may be newly filed under
+	lastSkillSearch        domain.SearchSkillsRequest
+	lastDirectory          domain.SearchSkillDirectoryRequest
+	lastApproval           domain.SkillApproval
+	pendingCount           int
+
+	// unimplementedSkillManagement answers every other management call.
+	unimplementedSkillManagement
 }
 
 func newFakeSkillRepo() *fakeSkillRepo {
@@ -94,10 +104,20 @@ func (f *fakeSkillRepo) IsCRESRELead(context.Context, string) (bool, error) {
 func (f *fakeSkillRepo) ListLevelTypes(context.Context) ([]domain.SkillLevelType, error) {
 	return []domain.SkillLevelType{{ID: skScaleA}}, nil
 }
-func (f *fakeSkillRepo) ListCategories(context.Context) ([]domain.SkillCategory, error) {
+func (f *fakeSkillRepo) ListCategories(_ context.Context, includeInactive bool) ([]domain.SkillCategory, error) {
+	f.categoriesWithInactive = includeInactive
 	return []domain.SkillCategory{{ID: skCategory}}, nil
 }
-func (f *fakeSkillRepo) SearchSkills(context.Context, domain.SearchSkillsRequest) ([]domain.Skill, int, error) {
+func (f *fakeSkillRepo) CategoriesAreActiveLeaves(ctx context.Context, ids []string) (bool, error) {
+	for _, id := range ids {
+		if f.notLeaf[id] {
+			return false, nil
+		}
+	}
+	return f.CategoriesExist(ctx, ids)
+}
+func (f *fakeSkillRepo) SearchSkills(_ context.Context, req domain.SearchSkillsRequest) ([]domain.Skill, int, error) {
+	f.lastSkillSearch = req
 	return []domain.Skill{}, 0, nil
 }
 func (f *fakeSkillRepo) GetSkill(_ context.Context, id string) (*domain.Skill, error) {
@@ -159,7 +179,7 @@ func (f *fakeSkillRepo) UpdateSkill(_ context.Context, id string, req domain.Upd
 }
 
 func newSkillSvc(repo *fakeSkillRepo) SkillService {
-	return NewSkillService(repo, alwaysUnrestrictedAccess{}, []string{"cs_admin"})
+	return NewSkillService(repo, alwaysUnrestrictedAccess{}, []string{"cs_admin"}, testSkillCapRoles)
 }
 
 // asCaller is a validated user token. The identity provider's own user id is
@@ -295,7 +315,7 @@ func TestOwnProfileNeedsAnInternalUserWithAToken(t *testing.T) {
 	_, err = svc.GetMySkills(asCaller("nobody@example.com"))
 	wantForbidden(t, err, "unknown user")
 	// Somebody who is not internal at all.
-	denied := NewSkillService(repo, stubAccess{}, []string{"cs_admin"})
+	denied := NewSkillService(repo, stubAccess{}, []string{"cs_admin"}, testSkillCapRoles)
 	_, err = denied.GetMySkills(asCaller(skEmail))
 	wantForbidden(t, err, "not internal")
 	if len(repo.writes) != 0 {
@@ -303,7 +323,7 @@ func TestOwnProfileNeedsAnInternalUserWithAToken(t *testing.T) {
 	}
 }
 
-func TestManagerReadNeedsAnAdminOrACREorSRELead(t *testing.T) {
+func TestManagerReadNeedsTheDirectoryCapability(t *testing.T) {
 	req := domain.SearchUserSkillsRequest{TeamKeys: []string{" Vega ", ""}}
 
 	// Neither: refused, and the filters never reach the repository.
@@ -315,11 +335,18 @@ func TestManagerReadNeedsAnAdminOrACREorSRELead(t *testing.T) {
 	_, err = newSkillSvc(repo).SearchUserSkills(auth.WithIdentity(context.Background(), auth.Identity{Validated: true, Roles: []string{"cs_admin"}}), req)
 	wantForbidden(t, err, "a service credential")
 
-	// A team lead.
+	// A team lead is not enough on its own: access is by capability now.
 	repo = newFakeSkillRepo()
 	repo.lead = true
-	if _, err := newSkillSvc(repo).SearchUserSkills(asCaller(skEmail), req); err != nil {
-		t.Fatalf("a team lead: %v", err)
+	_, err = newSkillSvc(repo).SearchUserSkills(asCaller(skEmail), req)
+	wantForbidden(t, err, "a team lead without the role")
+	if repo.leadChecks != 0 {
+		t.Fatalf("lead status was consulted %d times", repo.leadChecks)
+	}
+
+	// A holder of the directory role.
+	if _, err := newSkillSvc(repo).SearchUserSkills(asCaller(skEmail, "skill_directory_viewer"), req); err != nil {
+		t.Fatalf("a directory viewer: %v", err)
 	}
 	if !slices.Equal(repo.lastSearch.TeamKeys, []string{"vega"}) {
 		t.Fatalf("team keys reached the repository as %v, want [vega]", repo.lastSearch.TeamKeys)
@@ -337,9 +364,8 @@ func TestManagerReadNeedsAnAdminOrACREorSRELead(t *testing.T) {
 
 func TestManagerSearchValidatesItsFilters(t *testing.T) {
 	repo := newFakeSkillRepo()
-	repo.lead = true
 	svc := newSkillSvc(repo)
-	ctx := asCaller(skEmail)
+	ctx := asCaller(skEmail, "skill_directory_viewer")
 	_, err := svc.SearchUserSkills(ctx, domain.SearchUserSkillsRequest{SkillIDs: []string{"nope"}})
 	wantInvalid(t, err, "a malformed skill id")
 	_, err = svc.SearchUserSkills(ctx, domain.SearchUserSkillsRequest{MinLevelValue: ptr(-1)})
@@ -431,7 +457,7 @@ func TestCatalogueWriteValidation(t *testing.T) {
 
 func TestCatalogueReadsAreForInternalCallersOnly(t *testing.T) {
 	repo := newFakeSkillRepo()
-	denied := NewSkillService(repo, stubAccess{}, []string{"cs_admin"})
+	denied := NewSkillService(repo, stubAccess{}, []string{"cs_admin"}, testSkillCapRoles)
 	ctx := asCaller(skEmail)
 	_, err := denied.ListLevelTypes(ctx)
 	wantForbidden(t, err, "levels")

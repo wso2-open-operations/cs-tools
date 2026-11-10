@@ -1347,7 +1347,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Skills exist only in Postgres. Reads are internal-staff-only; a CSM
 		// admin is a token role from AUTH_ADMIN_ROLES, as for rota access.
 		skillHandler = handler.NewSkillHandler(
-			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles),
+			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles, service.SkillCapabilityRoles{
+				domain.SkillCapDirectory:       cfg.AuthSkillDirectoryRoles,
+				domain.SkillCapReviewRequests:  cfg.AuthSkillRequestReviewerRoles,
+				domain.SkillCapManageCatalogue: cfg.AuthSkillCatalogueManagerRoles,
+			}),
 		)
 	}
 	// customer_call (migration 0073) backs call requests on the Postgres
@@ -2221,8 +2225,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /skills/me/history", skillHandler.GetMySkillHistory)
 		mux.HandleFunc("PUT /skills/me/{skillId}", skillHandler.SetMySkillLevel)
 		mux.HandleFunc("DELETE /skills/me/{skillId}", skillHandler.RemoveMySkill)
-		// Everybody's skills: a CSM admin or a CRE or SRE team lead.
+		mux.HandleFunc("GET /skills/me/capabilities", skillHandler.GetMySkillCapabilities)
+		// Categories: a catalogue manager.
+		mux.HandleFunc("POST /skills/categories", skillHandler.CreateSkillCategory)
+		mux.HandleFunc("PATCH /skills/categories/{id}", skillHandler.UpdateSkillCategory)
+		// Skill requests: anyone asks; a request reviewer decides.
+		mux.HandleFunc("POST /skills/requests/check", skillHandler.CheckSkillRequest)
+		mux.HandleFunc("POST /skills/requests", skillHandler.CreateSkillRequest)
+		mux.HandleFunc("GET /skills/requests/mine", skillHandler.ListMySkillRequests)
+		mux.HandleFunc("POST /skills/requests/{id}/withdraw", skillHandler.WithdrawSkillRequest)
+		mux.HandleFunc("POST /skills/requests/search", skillHandler.SearchSkillRequests)
+		mux.HandleFunc("POST /skills/requests/{id}/approve", skillHandler.ApproveSkillRequest)
+		mux.HandleFunc("POST /skills/requests/{id}/reject", skillHandler.RejectSkillRequest)
+		// Everybody's skills: the directory capability.
 		mux.HandleFunc("POST /skills/users/search", skillHandler.SearchUserSkills)
+		mux.HandleFunc("POST /skills/directory/search", skillHandler.SearchSkillDirectory)
+		mux.HandleFunc("GET /skills/users/{userId}", skillHandler.GetUserSkillProfile)
+		mux.HandleFunc("GET /skills/users/{userId}/history", skillHandler.GetUserSkillHistory)
 	}
 	if pagingChainHandler != nil {
 		// Who is on each tier of the CRE and SRE paging chains, what the caller

@@ -45,7 +45,9 @@ type SkillRepository interface {
 	IsCRESRELead(ctx context.Context, email string) (bool, error)
 
 	ListLevelTypes(ctx context.Context) ([]domain.SkillLevelType, error)
-	ListCategories(ctx context.Context) ([]domain.SkillCategory, error)
+	// ListCategories lists the category tree. Without includeInactive a
+	// deactivated category, and everything under it, is left out.
+	ListCategories(ctx context.Context, includeInactive bool) ([]domain.SkillCategory, error)
 	SearchSkills(ctx context.Context, req domain.SearchSkillsRequest) ([]domain.Skill, int, error)
 	// GetSkill is nil, nil when there is no such skill.
 	GetSkill(ctx context.Context, id string) (*domain.Skill, error)
@@ -65,6 +67,8 @@ type SkillRepository interface {
 
 	CreateSkill(ctx context.Context, req domain.CreateSkillRequest, actor string) (domain.SkillWriteResult, error)
 	UpdateSkill(ctx context.Context, id string, req domain.UpdateSkillRequest, actor string) (domain.SkillWriteResult, error)
+
+	SkillManagementRepository
 }
 
 type skillRepository struct{ db *pgxpool.Pool }
@@ -133,7 +137,7 @@ func (r *skillRepository) IsCRESRELead(ctx context.Context, email string) (bool,
 
 // ListLevelTypes implements SkillRepository.
 func (r *skillRepository) ListLevelTypes(ctx context.Context) ([]domain.SkillLevelType, error) {
-	rows, err := r.db.Query(ctx, `SELECT id::text, name, description FROM skill_level_type ORDER BY lower(name), id`)
+	rows, err := r.db.Query(ctx, `SELECT id::text, name, description, is_default FROM skill_level_type ORDER BY is_default DESC, lower(name), id`)
 	if err != nil {
 		return nil, fmt.Errorf("query skill level types: %w", err)
 	}
@@ -142,7 +146,7 @@ func (r *skillRepository) ListLevelTypes(ctx context.Context) ([]domain.SkillLev
 	index := map[string]int{}
 	for rows.Next() {
 		var t domain.SkillLevelType
-		if err := rows.Scan(&t.ID, &t.Name, &t.Description); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.IsDefault); err != nil {
 			return nil, fmt.Errorf("scan skill level type: %w", err)
 		}
 		t.Levels = []domain.SkillLevel{}
@@ -171,27 +175,6 @@ func (r *skillRepository) ListLevelTypes(ctx context.Context) ([]domain.SkillLev
 		}
 	}
 	return out, lrows.Err()
-}
-
-// ListCategories implements SkillRepository.
-func (r *skillRepository) ListCategories(ctx context.Context) ([]domain.SkillCategory, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT id::text, name, code, category_path, is_lowest_category, parent_id::text
-		  FROM skill_category
-		 ORDER BY lower(COALESCE(category_path, name)), id`)
-	if err != nil {
-		return nil, fmt.Errorf("query skill categories: %w", err)
-	}
-	defer rows.Close()
-	out := []domain.SkillCategory{}
-	for rows.Next() {
-		var c domain.SkillCategory
-		if err := rows.Scan(&c.ID, &c.Name, &c.Code, &c.CategoryPath, &c.IsLowestCategory, &c.ParentID); err != nil {
-			return nil, fmt.Errorf("scan skill category: %w", err)
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
 }
 
 const skillColumns = `s.id::text, s.name, s.description, s.keywords, s.active, s.level_type_id::text, s.created_on, s.updated_on`
@@ -309,6 +292,11 @@ func (r *skillRepository) SearchSkills(ctx context.Context, req domain.SearchSki
 	}
 	if err := attachSkillCategories(ctx, r.db, skills); err != nil {
 		return nil, 0, err
+	}
+	if req.WithHolderCounts {
+		if err := attachHolderCounts(ctx, r.db, skills); err != nil {
+			return nil, 0, err
+		}
 	}
 	return skills, total, nil
 }
@@ -459,16 +447,28 @@ type userSkillRow struct {
 
 // inUserSkillTx runs fn in a transaction that holds the lock for one person's
 // one skill, then hands it that pair's rows (own rows first). The lock is what
-// stops two adds from both finding nothing and both inserting: with no unique
-// key to refuse the second, the transaction itself has to.
+// stops two adds from both finding nothing and both inserting; the partial
+// unique index (migration 0284) is the database's own backstop.
 func (r *skillRepository) inUserSkillTx(ctx context.Context, userID, skillID string, fn func(tx pgx.Tx, rows []userSkillRow) error) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := lockUserSkill(ctx, tx, userID, skillID)
+	if err != nil {
+		return err
+	}
+	if err := fn(tx, rows); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// lockUserSkill takes the pair's lock inside tx and reads its rows.
+func lockUserSkill(ctx context.Context, tx pgx.Tx, userID, skillID string) ([]userSkillRow, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('user_skill:' || $1 || ':' || $2, 0))`, userID, skillID); err != nil {
-		return fmt.Errorf("lock user skill: %w", err)
+		return nil, fmt.Errorf("lock user skill: %w", err)
 	}
 	rs, err := tx.Query(ctx, `
 		SELECT id::text, active, inherited, skill_level_id::text
@@ -477,33 +477,39 @@ func (r *skillRepository) inUserSkillTx(ctx context.Context, userID, skillID str
 		 ORDER BY active DESC, inherited, updated_on DESC, id
 		   FOR UPDATE`, userID, skillID)
 	if err != nil {
-		return fmt.Errorf("read user skill: %w", err)
+		return nil, fmt.Errorf("read user skill: %w", err)
 	}
+	defer rs.Close()
 	var rows []userSkillRow
 	for rs.Next() {
 		var u userSkillRow
 		if err := rs.Scan(&u.id, &u.active, &u.inherited, &u.levelID); err != nil {
-			rs.Close()
-			return fmt.Errorf("scan user skill: %w", err)
+			return nil, fmt.Errorf("scan user skill: %w", err)
 		}
 		rows = append(rows, u)
 	}
-	rs.Close()
 	if err := rs.Err(); err != nil {
-		return fmt.Errorf("iterate user skill: %w", err)
+		return nil, fmt.Errorf("iterate user skill: %w", err)
 	}
-	if err := fn(tx, rows); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return rows, nil
 }
 
-// writeSkillHistory records one level change. from is nil the first time a
-// skill is set, to is nil when it is removed.
-func writeSkillHistory(ctx context.Context, tx pgx.Tx, userID, skillID string, from, to *string, actor string) error {
+// writeSkillHistory records one change. from is nil when the skill is
+// (re)added, to is nil when it is removed. The skill's name and category paths
+// are copied as they are now, so the row keeps reading true after a rename.
+// requestID is set when an approved skill request made the change.
+func writeSkillHistory(ctx context.Context, tx pgx.Tx, userID, skillID string, from, to *string,
+	action domain.SkillHistoryAction, actor string, requestID *string) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO user_skill_history (created_on, updated_on, created_by, updated_by, user_id, skill_id, level_from_id, level_to_id)
-		VALUES (NOW(), NOW(), $1, $1, $2::uuid, $3::uuid, $4::uuid, $5::uuid)`, actor, userID, skillID, from, to)
+		INSERT INTO user_skill_history (created_on, updated_on, created_by, updated_by, user_id, skill_id,
+		                                level_from_id, level_to_id, action, skill_name_snapshot,
+		                                category_path_snapshot, skill_request_id)
+		SELECT NOW(), NOW(), $1, $1, $2::uuid, s.id, $4::uuid, $5::uuid, $6::skill_history_action_enum, s.name,
+		       (SELECT string_agg(COALESCE(c.category_path, c.name), '; ' ORDER BY COALESCE(c.category_path, c.name))
+		          FROM skill_category_link l JOIN skill_category c ON c.id = l.category_id
+		         WHERE l.skill_id = s.id),
+		       $7::uuid
+		  FROM skill s WHERE s.id = $3::uuid`, actor, userID, skillID, from, to, string(action), requestID)
 	if err != nil {
 		return fmt.Errorf("write skill history: %w", err)
 	}
@@ -556,46 +562,69 @@ func levelOnSkillScale(ctx context.Context, tx pgx.Tx, skillID, levelID string, 
 	return domain.SkillOutcomeDone, nil
 }
 
-// AddUserSkill implements SkillRepository. An inactive row of the person's own
-// (a migrated one) is brought back rather than leaving a second row beside it.
+// AddUserSkill implements SkillRepository.
 func (r *skillRepository) AddUserSkill(ctx context.Context, userID, skillID, levelID, actor string) (domain.SkillWriteResult, error) {
 	var res domain.SkillWriteResult
 	err := r.inUserSkillTx(ctx, userID, skillID, func(tx pgx.Tx, rows []userSkillRow) error {
-		var revive *userSkillRow
-		for i := range rows {
-			switch {
-			case rows[i].active && rows[i].inherited:
-				res.Outcome = domain.SkillOutcomeInherited
-				return nil
-			case rows[i].active:
-				res.Outcome = domain.SkillOutcomeAlreadyHeld
-				return nil
-			case !rows[i].inherited && revive == nil:
-				revive = &rows[i]
-			}
-		}
-		if outcome, err := levelOnSkillScale(ctx, tx, skillID, levelID, true); err != nil || outcome != domain.SkillOutcomeDone {
-			res.Outcome = outcome
-			return err
-		}
-		if revive != nil {
-			if _, err := tx.Exec(ctx, `
-				UPDATE user_skill SET skill_level_id = $2::uuid, active = TRUE, updated_on = NOW(), updated_by = $3
-				 WHERE id = $1::uuid`, revive.id, levelID, actor); err != nil {
-				return fmt.Errorf("revive user skill: %w", err)
-			}
-		} else if _, err := tx.Exec(ctx, `
-			INSERT INTO user_skill (created_on, updated_on, created_by, updated_by, user_id, skill_id, skill_level_id, active, inherited)
-			VALUES (NOW(), NOW(), $1, $1, $2::uuid, $3::uuid, $4::uuid, TRUE, FALSE)`, actor, userID, skillID, levelID); err != nil {
-			return fmt.Errorf("add user skill: %w", err)
-		}
-		if err := writeSkillHistory(ctx, tx, userID, skillID, nil, &levelID, actor); err != nil {
-			return err
-		}
-		row, err := readBack(ctx, tx, userID, skillID)
-		res.Outcome, res.Row = domain.SkillOutcomeDone, row
+		var err error
+		res, err = addUserSkillLocked(ctx, tx, rows, userID, skillID, levelID, actor, nil)
 		return err
 	})
+	return res, err
+}
+
+// addUserSkillLocked adds a skill to a profile inside a transaction that
+// already holds the pair's lock (lockUserSkill). The person's own removed row
+// is brought back rather than leaving a second row beside it; adding a skill
+// the person held before is recorded as READDED.
+func addUserSkillLocked(ctx context.Context, tx pgx.Tx, rows []userSkillRow, userID, skillID, levelID, actor string,
+	requestID *string) (domain.SkillWriteResult, error) {
+	var res domain.SkillWriteResult
+	var revive *userSkillRow
+	for i := range rows {
+		switch {
+		case rows[i].active && rows[i].inherited:
+			res.Outcome = domain.SkillOutcomeInherited
+			return res, nil
+		case rows[i].active:
+			res.Outcome = domain.SkillOutcomeAlreadyHeld
+			return res, nil
+		case !rows[i].inherited && revive == nil:
+			revive = &rows[i]
+		}
+	}
+	if outcome, err := levelOnSkillScale(ctx, tx, skillID, levelID, true); err != nil || outcome != domain.SkillOutcomeDone {
+		res.Outcome = outcome
+		return res, err
+	}
+	action := domain.SkillHistoryAdded
+	if revive != nil {
+		action = domain.SkillHistoryReadded
+		if _, err := tx.Exec(ctx, `
+			UPDATE user_skill SET skill_level_id = $2::uuid, active = TRUE, updated_on = NOW(), updated_by = $3
+			 WHERE id = $1::uuid`, revive.id, levelID, actor); err != nil {
+			return res, fmt.Errorf("revive user skill: %w", err)
+		}
+	} else {
+		var heldBefore bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_skill_history WHERE user_id = $1::uuid AND skill_id = $2::uuid)`,
+			userID, skillID).Scan(&heldBefore); err != nil {
+			return res, fmt.Errorf("check skill history: %w", err)
+		}
+		if heldBefore {
+			action = domain.SkillHistoryReadded
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO user_skill (created_on, updated_on, created_by, updated_by, user_id, skill_id, skill_level_id, active, inherited)
+			VALUES (NOW(), NOW(), $1, $1, $2::uuid, $3::uuid, $4::uuid, TRUE, FALSE)`, actor, userID, skillID, levelID); err != nil {
+			return res, fmt.Errorf("add user skill: %w", err)
+		}
+	}
+	if err := writeSkillHistory(ctx, tx, userID, skillID, nil, &levelID, action, actor, requestID); err != nil {
+		return res, err
+	}
+	row, err := readBack(ctx, tx, userID, skillID)
+	res.Outcome, res.Row, res.Action = domain.SkillOutcomeDone, row, action
 	return res, err
 }
 
@@ -623,7 +652,7 @@ func (r *skillRepository) SetUserSkillLevel(ctx context.Context, userID, skillID
 			userID, skillID, levelID, actor); err != nil {
 			return fmt.Errorf("change user skill level: %w", err)
 		}
-		if err := writeSkillHistory(ctx, tx, userID, skillID, cur.levelID, &levelID, actor); err != nil {
+		if err := writeSkillHistory(ctx, tx, userID, skillID, cur.levelID, &levelID, domain.SkillHistoryLevelChanged, actor, nil); err != nil {
 			return err
 		}
 		row, err := readBack(ctx, tx, userID, skillID)
@@ -633,8 +662,8 @@ func (r *skillRepository) SetUserSkillLevel(ctx context.Context, userID, skillID
 	return res, err
 }
 
-// RemoveUserSkill implements SkillRepository. The row is deleted, not
-// deactivated: the history keeps what the person held and when.
+// RemoveUserSkill implements SkillRepository. The row is deactivated, not
+// deleted (migration 0284): adding the skill back revives the same row.
 func (r *skillRepository) RemoveUserSkill(ctx context.Context, userID, skillID, actor string) (domain.SkillWriteResult, error) {
 	var res domain.SkillWriteResult
 	err := r.inUserSkillTx(ctx, userID, skillID, func(tx pgx.Tx, rows []userSkillRow) error {
@@ -644,11 +673,12 @@ func (r *skillRepository) RemoveUserSkill(ctx context.Context, userID, skillID, 
 			return nil
 		}
 		if _, err := tx.Exec(ctx, `
-			DELETE FROM user_skill WHERE user_id = $1::uuid AND skill_id = $2::uuid AND NOT inherited`,
-			userID, skillID); err != nil {
+			UPDATE user_skill SET active = FALSE, updated_on = NOW(), updated_by = $3
+			 WHERE user_id = $1::uuid AND skill_id = $2::uuid AND active AND NOT inherited`,
+			userID, skillID, actor); err != nil {
 			return fmt.Errorf("remove user skill: %w", err)
 		}
-		if err := writeSkillHistory(ctx, tx, userID, skillID, cur.levelID, nil, actor); err != nil {
+		if err := writeSkillHistory(ctx, tx, userID, skillID, cur.levelID, nil, domain.SkillHistoryRemoved, actor, nil); err != nil {
 			return err
 		}
 		res.Outcome = domain.SkillOutcomeDone
@@ -679,7 +709,7 @@ func (r *skillRepository) ListUserSkillHistory(ctx context.Context, userID, skil
 		return nil, 0, fmt.Errorf("count skill history: %w", err)
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT h.id::text, h.skill_id::text, s.name,
+		SELECT h.id::text, COALESCE(h.action::text, ''), h.skill_request_id::text, h.skill_id::text, s.name,
 		       lf.id::text, lf.name, lf.value, lf.description, lf.color,
 		       lt.id::text, lt.name, lt.value, lt.description, lt.color,
 		       h.created_by, h.created_on
@@ -698,12 +728,14 @@ func (r *skillRepository) ListUserSkillHistory(ctx context.Context, userID, skil
 		var e domain.SkillHistoryEntry
 		var fID, fName, fDesc, fColor, tID, tName, tDesc, tColor *string
 		var fValue, tValue *int
-		if err := rows.Scan(&e.ID, &e.SkillID, &e.SkillName,
+		var action string
+		if err := rows.Scan(&e.ID, &action, &e.SkillRequestID, &e.SkillID, &e.SkillName,
 			&fID, &fName, &fValue, &fDesc, &fColor,
 			&tID, &tName, &tValue, &tDesc, &tColor,
 			&e.ChangedBy, &e.ChangedOn); err != nil {
 			return nil, 0, fmt.Errorf("scan skill history: %w", err)
 		}
+		e.Action = domain.SkillHistoryAction(action)
 		e.LevelFrom = scanLevel(fID, fName, fValue, fDesc, fColor)
 		e.LevelTo = scanLevel(tID, tName, tValue, tDesc, tColor)
 		out = append(out, e)
@@ -792,7 +824,7 @@ func (r *skillRepository) CreateSkill(ctx context.Context, req domain.CreateSkil
 	var res domain.SkillWriteResult
 	err := r.inSkillTx(ctx, req.Name, func(tx pgx.Tx) error {
 		var taken bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM skill WHERE lower(name) = lower($1))`, req.Name).Scan(&taken); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM skill WHERE lower(btrim(name)) = lower(btrim($1)))`, req.Name).Scan(&taken); err != nil {
 			return fmt.Errorf("check skill name: %w", err)
 		}
 		if taken {
@@ -806,6 +838,11 @@ func (r *skillRepository) CreateSkill(ctx context.Context, req domain.CreateSkil
 			VALUES (NOW(), NOW(), $1, $1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6::uuid)
 			RETURNING id::text`,
 			actor, req.Name, derefString(req.Description), derefString(req.Keywords), active, req.LevelTypeID).Scan(&id); err != nil {
+			// A name taken by a writer the check raced is the same 409.
+			if isSkillUniqueViolation(err, "ux_skill_name_lower") {
+				res.Outcome = domain.SkillOutcomeNameTaken
+				return nil
+			}
 			return fmt.Errorf("create skill: %w", err)
 		}
 		if err := replaceSkillCategories(ctx, tx, id, req.CategoryIDs, actor); err != nil {
@@ -837,7 +874,7 @@ func (r *skillRepository) UpdateSkill(ctx context.Context, id string, req domain
 		}
 		if req.Name != nil {
 			var taken bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM skill WHERE lower(name) = lower($1) AND id <> $2::uuid)`, *req.Name, id).Scan(&taken); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM skill WHERE lower(btrim(name)) = lower(btrim($1)) AND id <> $2::uuid)`, *req.Name, id).Scan(&taken); err != nil {
 				return fmt.Errorf("check skill name: %w", err)
 			}
 			if taken {
@@ -846,10 +883,12 @@ func (r *skillRepository) UpdateSkill(ctx context.Context, id string, req domain
 			}
 		}
 		// A person's level is a rung of the skill's scale, and the scale is
-		// what makes it meaningful: it cannot be swapped under them.
+		// what makes it meaningful: it cannot be swapped under them. Only
+		// current holders count: a removed (inactive) row is given a level of
+		// the new scale if it is ever added back.
 		if req.LevelTypeID != nil && (currentType == nil || *currentType != *req.LevelTypeID) {
 			var held bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_skill WHERE skill_id = $1::uuid AND skill_level_id IS NOT NULL)`, id).Scan(&held); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_skill WHERE skill_id = $1::uuid AND active AND skill_level_id IS NOT NULL)`, id).Scan(&held); err != nil {
 				return fmt.Errorf("check skill levels in use: %w", err)
 			}
 			if held {
@@ -868,6 +907,10 @@ func (r *skillRepository) UpdateSkill(ctx context.Context, id string, req domain
 			       updated_by    = $7
 			 WHERE id = $1::uuid`,
 			id, req.Name, req.Description, req.Keywords, req.Active, req.LevelTypeID, actor); err != nil {
+			if isSkillUniqueViolation(err, "ux_skill_name_lower") {
+				res.Outcome = domain.SkillOutcomeNameTaken
+				return nil
+			}
 			return fmt.Errorf("update skill: %w", err)
 		}
 		if req.CategoryIDs != nil {

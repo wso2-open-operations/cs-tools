@@ -12184,31 +12184,58 @@ lower-cased before returning), deliberately not reusing
 
 ## Skills (`/skills`, Postgres only)
 
-`SkillService` (`internal/service/skill_service.go`) serves the skill catalogue, each internal user's own
-skills profile, the manager's view of everybody's, and the admin's catalogue edits, over the tables of
-migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only with a database pool.
+`SkillService` (`internal/service/skill_service.go`, plus `skill_management_service.go`) serves the skill
+catalogue and its categories, each internal user's own skills profile and skill requests, the directory of
+everybody's skills, and the catalogue admin, over migration 0079's tables (`skill*`, `user_skill`,
+`user_skill_history`) as revised by 0282-0286 (`skill_request` among them). Registered only with a database pool.
 
-- **Who.** Catalogue reads: any internal caller. `/skills/me*`: the token's own user, found by the token's
-  email among active internal users; no route takes a person's id, and the identity provider's id is never
-  compared with a platform id. `POST /skills/users/search`: a CSM admin (a token role in `AUTH_ADMIN_ROLES`, as
-  for rota access) or a lead (`lead`, `americas_team_lead`) of a CRE or SRE team. `POST /skills` and
-  `PATCH /skills/{id}`: CSM admin only.
-- **No unique key on `user_skill(user_id, skill_id)`**, and migrated rows are not known to be free of repeats.
-  Every profile write holds `pg_advisory_xact_lock` for the pair and reads the pair's rows `FOR UPDATE`; every
-  read takes one canonical row per pair (`userSkillCanonical`: active, own before inherited, newest). An add
-  over an inactive own row revives it. Adding a held skill is a 409. A unique index needs the production data
-  checked for repeats first, so it is not added here. `skill.name` has no unique key either: create and rename
-  hold a per-name advisory lock and compare ignoring case.
+- **Who: capabilities, never role names in code.** Catalogue reads and `POST /skills/requests/check`: any
+  internal caller. `/skills/me*` and `/skills/requests` (create, mine, withdraw): the token's own user, found by
+  the token's email among active internal users; the identity provider's id is never compared with a platform
+  id. Every other task is a `domain.SkillCapability`, held by `AUTH_ADMIN_ROLES` plus that capability's own list:
+  `skills.directory.view` (`AUTH_SKILL_DIRECTORY_ROLES`: `POST /skills/users/search`,
+  `/skills/directory/search`, `GET /skills/users/{userId}[/history]`), `skills.requests.review`
+  (`AUTH_SKILL_REQUEST_REVIEWER_ROLES`: `/skills/requests/search`, `/approve`, `/reject`) and
+  `skills.catalogue.manage` (`AUTH_SKILL_CATALOGUE_MANAGER_ROLES`: `POST/PATCH /skills`, `POST/PATCH
+  /skills/categories`, and seeing inactive skills/categories and holder counts). Each list is empty by default,
+  so only admins hold them; assigning a task to more people is setting its variable. `requireCapability` is the
+  one gate; a service credential holds none. `GET /skills/me/capabilities` reports the caller's (and the pending
+  request count to a reviewer). Lead status by team is no longer a gate (`IsCRESRELead` is unused by the
+  service): give leads a role and list it.
+- **Uniqueness is in the database now.** `ux_user_skill_own_active` (one own active row per person and skill),
+  `ux_skill_name_lower` (skill names, ignoring case and outer spaces), `ux_skill_category_parent_name` (sibling
+  categories), `ux_skill_request_pending_name` (one pending request per normalised name). The advisory locks
+  stay: they turn a race into a clean outcome instead of a unique violation. Run `scripts/skill_data_checks.sh` (read-only;
+  it exits 1 on any BLOCKER: data a new unique index or the history backfill would fail on) before applying 0282-0286
+  to an environment.
 - **Levels.** A level must belong to the skill's `level_type_id` scale (checked in the service; no FK does it). The profile
   write re-checks it inside its transaction under `FOR SHARE` on the skill row, which an admin's scale change
   (`FOR UPDATE`) queues behind; a scale swapped in between is a 409. Ids are lower-cased once validated.
-  Inactive skills cannot be newly added (an add re-reads `active` in that same locked query, so a deactivation
-  racing the add is a 409 too; changing the level of an already-held skill is unaffected). Every set, change and removal writes a `user_skill_history` row
-  (`level_from_id` null on first set, `level_to_id` null on removal; `created_by` is the actor's email); setting
-  the level already held writes nothing. A removal deletes the `user_skill` row. Inherited rows are never
-  changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
-- **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
-  (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
+  Inactive skills cannot be newly added. One scale is `is_default` (0283): new skills from requests and the
+  request form use it. Inherited rows are never changed (409). A skill's scale cannot change while any
+  `user_skill` holds a level of it (409).
+- **Removal is a soft delete** (0284): `active = FALSE`; adding the skill back revives that row.
+- **History** (0286) records an `action` (ADDED, LEVEL_CHANGED, REMOVED, READDED: an add where the pair has
+  history before), the skill name and category path at the time, `created_by` = the actor's email, and
+  `skill_request_id` when an approval made it. It is append-only: a trigger refuses UPDATE and DELETE, except
+  the cascade from a deleted user; its skill and level FKs are RESTRICT. Test fixtures therefore delete the user
+  to remove history.
+- **Skill requests.** Create refuses a name an active skill has (409) and a second pending request for the same
+  normalised name (409); `levelId` is required and must be on the default scale. Approve (`mode` create /
+  reactivate / existing) runs in one transaction under the request row's lock: it creates, reactivates or points
+  at the skill, marks the request APPROVED, and adds the skill to the requester's profile through the same locked
+  add as `AddMySkill` (`addUserSkillLocked`), at the reviewer's `levelId`, else the requested level mapped onto
+  the skill's scale (same level, else the same value or the closest lower, else the lowest); `auto_add_note`
+  says what happened. Reject needs a reason. Every decision is conditional on the request still being PENDING,
+  so a second reviewer gets a 409 naming who decided. Deleting a user cascades their requests.
+- **Categories.** A sub-category goes only under an active parent with no skills filed directly under it, and
+  turns the parent into a non-leaf; a rename rewrites the stored `category_path` of the subtree; deactivation is
+  refused while an active child or skill is under it. Skills are filed only under active leaves.
+- **Directory** (`POST /skills/directory/search`): one row per active internal person holding at least one active
+  skill, with all their skills. `criteria` are (skill, minimum level value; 0 = any) pairs; `match` ALL needs
+  every one, ANY at least one (best matches first); name search, team keys and categories (with descendants)
+  narrow it, all in SQL. The older `POST /skills/users/search` (one row per person-skill) is kept, behind the
+  same capability.
 
 ## Product catalogue (products API, Postgres only)
 
