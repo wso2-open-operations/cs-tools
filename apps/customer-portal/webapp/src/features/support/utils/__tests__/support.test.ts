@@ -565,6 +565,26 @@ describe("plainTextCommentToHtml", () => {
     expect(plainTextCommentToHtml("Line one\r\nLine two")).toBe("Line one<br>Line two");
   });
 
+  it("inserts a blank line after a greeting and before a sign-off even with only a single Enter", () => {
+    expect(
+      plainTextCommentToHtml(
+        "Hello,\nPlease let us know whether you need further support for this case. Please note that if you are unable to respond, the case will be closed off after one week.\nThanks,\nWSO2 Team",
+      ),
+    ).toBe(
+      "Hello,<br><br>Please let us know whether you need further support for this case. Please note that if you are unable to respond, the case will be closed off after one week.<br><br>Thanks,<br>WSO2 Team",
+    );
+  });
+
+  it("does not add a second blank line when the author already left one", () => {
+    expect(plainTextCommentToHtml("Hello,\n\nBody\n\nThanks,")).toBe("Hello,<br><br>Body<br><br>Thanks,");
+  });
+
+  it("does not add spacing around a sentence that merely starts with thanks", () => {
+    expect(plainTextCommentToHtml("Line one\nThanks for your patience\nLine three")).toBe(
+      "Line one<br>Thanks for your patience<br>Line three",
+    );
+  });
+
   it("HTML-escapes a literal <, >, &, quote the author typed as plain text", () => {
     expect(plainTextCommentToHtml("Use < and > and & and \"quotes\" and it's")).toBe(
       "Use &lt; and &gt; and &amp; and &quot;quotes&quot; and it&#39;s",
