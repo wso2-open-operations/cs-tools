@@ -1,0 +1,435 @@
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Git Internals Dashboard Security Scans
+
+on:
+  pull_request:
+    paths:
+      - apps/git-internals-dashboard/**
+      - .github/workflows/git-internals-dashboard-security.yml
+      - .github/workflows/git-internals-dashboard-dast.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/git-internals-dashboard/**
+      - .github/workflows/git-internals-dashboard-security.yml
+      - .github/workflows/git-internals-dashboard-dast.yml
+  schedule:
+    # Dependency advisories change even when the code does not.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.26.0"
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10"
+  GOSEC_VERSION: "v2.29.0"
+  GOVULNCHECK_VERSION: "v1.8.0"
+  GITLEAKS_VERSION: "8.30.1"
+  ACTIONLINT_VERSION: "1.7.12"
+  ZIZMOR_VERSION: "1.30.1"
+  TRIVY_VERSION: "v0.74.0"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # gosec over the hand-written pgx SQL, path handling, and GitHub client code.
+  # Gated on HIGH confidence + HIGH severity so noisy low-confidence heuristics
+  # (e.g. identifier names that merely contain "token") don't block CI; anything
+  # below that bar still shows up in the uploaded SARIF for manual triage.
+  sast-go:
+    name: SAST (Go / gosec)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: apps/git-internals-dashboard/backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: apps/git-internals-dashboard/backend/go.sum
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+
+      - name: gosec (SARIF, full findings for triage)
+        if: always()
+        run: gosec -no-fail -fmt sarif -out gosec-results.sarif ./...
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: apps/git-internals-dashboard/backend/gosec-results.sarif
+          category: gosec
+
+      - name: gosec (enforce HIGH confidence + HIGH severity)
+        run: gosec -confidence high -severity high ./...
+
+  # CodeQL: free on this public repo, results land in the Security tab as
+  # standing evidence independent of any local triage step below.
+  sast-codeql:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # autobuild is unsafe here: this monorepo has a dozen other go.mod
+          # files, so autobuild run from the checkout root can't tell which
+          # module to build. A manual build scoped to this app's own
+          # backend/ is the only way to get just this app analyzed.
+          - language: go
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: apps/git-internals-dashboard/backend/go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          source-root: apps/git-internals-dashboard
+
+      - name: Build backend (manual build-mode, scoped to this app)
+        if: matrix.language == 'go'
+        working-directory: apps/git-internals-dashboard/backend
+        run: go build ./...
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:${{ matrix.language }}
+
+  # ESLint with a security-oriented ruleset, layered onto the app's existing
+  # flat config rather than a parallel lint setup.
+  sast-web:
+    name: SAST (Web / ESLint)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/git-internals-dashboard/webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: apps/git-internals-dashboard/webapp/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (includes eslint-plugin-security rules)
+        run: pnpm run lint
+
+  # gitleaks over the app path's full history on every trigger. This repo is
+  # small enough (under 100 commits) that a shallow fetch buys nothing worth
+  # the gap it opens: a fetch-depth: 1 checkout only has the tip commit, so a
+  # secret introduced earlier in the same PR would never be seen.
+  secrets:
+    name: Secrets (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${{ env.GITLEAKS_VERSION }}/gitleaks_${{ env.GITLEAKS_VERSION }}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: gitleaks detect
+        run: gitleaks detect --source . --log-opts="--all -- apps/git-internals-dashboard" -v
+
+  # There is no Terraform, Kubernetes, or Dockerfile here — Choreo owns the
+  # infrastructure. The IaC surface is genuinely thin: .choreo/component.yaml,
+  # project.toml, the local-dev docker-compose.yml, and these workflow files.
+  # Kept as its own job so a finding here never masks a code-scanning failure.
+  iac-config:
+    name: IaC Config (trivy config)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: trivy config — app (SARIF, full findings for triage)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: config
+          scan-ref: apps/git-internals-dashboard
+          format: sarif
+          output: trivy-config-app.sarif
+          exit-code: "0"
+
+      - name: Upload app SARIF to code scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: trivy-config-app.sarif
+          category: trivy-config-app
+
+      # Informational only: .github/workflows/ is repo-wide, so this also
+      # surfaces pre-existing findings in other apps' workflow files that
+      # this task has no mandate to fix. The enforced gate below stays
+      # scoped to this app's own two workflow files.
+      - name: trivy config — all workflow files (SARIF, informational)
+        if: always()
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: config
+          scan-ref: .github/workflows
+          format: sarif
+          output: trivy-config-workflows.sarif
+          exit-code: "0"
+
+      - name: Upload workflow SARIF to code scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: trivy-config-workflows.sarif
+          category: trivy-config-workflows
+
+      - name: trivy config — app (enforce HIGH,CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: config
+          scan-ref: apps/git-internals-dashboard
+          exit-code: "1"
+          severity: "HIGH,CRITICAL"
+
+      - name: trivy config — this app's own workflow files (enforce HIGH,CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: config
+          scan-ref: .github/workflows/git-internals-dashboard-security.yml
+          exit-code: "1"
+          severity: "HIGH,CRITICAL"
+
+      - name: trivy config — DAST workflow file (enforce HIGH,CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: config
+          scan-ref: .github/workflows/git-internals-dashboard-dast.yml
+          exit-code: "1"
+          severity: "HIGH,CRITICAL"
+
+  # Reachability-aware over the hand-written pgx SQL and GitHub client code,
+  # far less noisy than raw go.sum CVE matching.
+  sca-go:
+    name: SCA (Go / govulncheck)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/git-internals-dashboard/backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: apps/git-internals-dashboard/backend/go.sum
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+
+      - name: govulncheck
+        run: govulncheck ./...
+
+  sca-web:
+    name: SCA (Web / pnpm audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/git-internals-dashboard/webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: apps/git-internals-dashboard/webapp/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit (HIGH and above)
+        run: pnpm audit --audit-level=high
+
+  sca-fs:
+    name: SCA (trivy fs + SBOM)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: trivy fs (SARIF, full findings for triage)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: fs
+          scan-ref: apps/git-internals-dashboard
+          format: sarif
+          output: trivy-fs-results.sarif
+          exit-code: "0"
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: trivy-fs
+
+      - name: trivy fs (enforce HIGH,CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: fs
+          scan-ref: apps/git-internals-dashboard
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+
+      - name: Generate CycloneDX SBOM
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: fs
+          scan-ref: apps/git-internals-dashboard
+          format: cyclonedx
+          output: git-internals-dashboard-sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: git-internals-dashboard-sbom
+          path: git-internals-dashboard-sbom.cdx.json
+          retention-days: 90
+
+  workflow-lint:
+    name: Workflow Lint (actionlint + zizmor)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Install actionlint
+        run: |
+          curl -sSL "https://raw.githubusercontent.com/rhysd/actionlint/v${{ env.ACTIONLINT_VERSION }}/scripts/download-actionlint.bash" | bash -s -- "${{ env.ACTIONLINT_VERSION }}"
+          sudo mv actionlint /usr/local/bin/actionlint
+
+      - name: actionlint
+        run: actionlint .github/workflows/git-internals-dashboard-security.yml .github/workflows/git-internals-dashboard-dast.yml
+
+      - name: Install zizmor
+        run: pip install "zizmor==${{ env.ZIZMOR_VERSION }}"
+
+      - name: zizmor
+        run: zizmor .github/workflows/git-internals-dashboard-security.yml .github/workflows/git-internals-dashboard-dast.yml
