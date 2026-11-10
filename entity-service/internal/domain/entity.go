@@ -1496,6 +1496,13 @@ type ProjectClosureFields struct {
 	// does not interpret, validate, or impose any schema on its contents — it is
 	// passed through opaquely as written by that SN flow (ServiceNow data source only).
 	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
+	// SuspensionProcessOverridden is the CSM-owned "suspension process
+	// overridden" flag (project.suspension_process_overridden, migration 0281).
+	// When true the automatic Account Closure Process must not evaluate the
+	// project. Always present, false by default. Read-only: there is no write
+	// path yet, it is set directly in the database or by the data sync. The
+	// legacy data source carries no such field, so it is always false there.
+	SuspensionProcessOverridden bool `json:"suspensionProcessOverridden"`
 }
 
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
@@ -1576,6 +1583,13 @@ type ProjectDetailsView struct {
 // VerificationEnabled is likewise Postgres data source only — no ServiceNow
 // equivalent — and combines freely with every other field here (no
 // exclusivity rule), the same as ClosureState.
+//
+// SuspensionProcessOverridden is Postgres data source only as well (rejected
+// on the legacy data source, which has no such field) and combines freely with
+// every other field. Setting it touches no closure state, no
+// suspension_process_state and recomputes nothing; it only stamps
+// updated_by/updated_on like every other field. As for closureState,
+// fine-grained "admin only" enforcement lives in the BFF, not here.
 type ProjectUpdateRequest struct {
 	HasAgent                        *bool           `json:"hasAgent,omitempty"`
 	HasKbReferences                 *bool           `json:"hasKbReferences,omitempty"`
@@ -1590,6 +1604,12 @@ type ProjectUpdateRequest struct {
 	// and tolerant of spaces (normalized the same way the three sub-state
 	// fields above already are).
 	ClosureState *string `json:"closureState,omitempty"`
+	// SuspensionProcessOverridden sets project.suspension_process_overridden
+	// (Postgres data sources only; rejected on the legacy data source). Only a
+	// boolean true or false changes it; null and omitted both leave it
+	// unchanged. When true, the automatic Account Closure Process never
+	// evaluates the project.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden,omitempty"`
 	// OnboardingStatus sets the project's onboarding status (Postgres data
 	// sources only; rejected on the ServiceNow data source). Accepts the labels
 	// reads return ("Not-Started", "In-Progress", "On-Hold", "Completed",
@@ -1632,6 +1652,8 @@ type ProjectUpdateResult struct {
 	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
 	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 	VerificationEnabled             *bool           `json:"verificationEnabled,omitempty"`
+	// SuspensionProcessOverridden is populated on Postgres data sources only.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden,omitempty"`
 	// OnboardingStatus, OnboardingOwner and the onboarding dates are populated
 	// on Postgres data sources only.
 	OnboardingStatus *string    `json:"onboardingStatus,omitempty"`
@@ -3490,31 +3512,45 @@ type AggregateResponse struct {
 	TotalMinutes  *int              `json:"totalMinutes,omitempty"`
 }
 
-// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a
-// day-bucketed count of cases opened and closed per day, for dashboard
-// widgets. Deliberately narrow (no bucket-unit/series config, unlike
-// AggregateCasesRequest's open-ended groupBy): this backs exactly one chart,
-// not a platform, so the two series (opened, closed) are fixed.
+// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a count
+// of cases opened and closed per day (or per week or month of a fixed
+// window), for dashboard widgets. Deliberately narrow (unlike
+// AggregateCasesRequest's open-ended groupBy): this backs one chart, not a
+// platform, so the two series (opened, closed) are fixed.
 type CaseVolumeTrendRequest struct {
 	Filters SearchCasesFilters `json:"filters"`
 	// Days is the size of the trailing window, ending today (UTC). Optional;
 	// the service applies a default (30) when omitted and rejects a value
-	// outside 1-90.
+	// outside 1-90. Not allowed together with StartDate/EndDate.
 	Days int `json:"days,omitempty"`
+	// StartDate and EndDate are a fixed window instead of the trailing one:
+	// both inclusive UTC calendar days, each a plain YYYY-MM-DD or a relative
+	// date placeholder (__today__, __startOfMonth:-1__, ...). Optional, but
+	// one needs the other.
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+	// Bucket is how a fixed window's days are grouped into points: "day"
+	// (the default, at most 90 days), "week" (Monday to Sunday, at most 54
+	// weeks: a whole leap year that starts on a Sunday) or "month" (at most 24 months). Only with StartDate/EndDate.
+	Bucket string `json:"bucket,omitempty"`
 }
 
-// CaseVolumeTrendPoint is one day's count in a CaseVolumeTrendSeries. Date is
-// a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
-// date-only wire fields.
+// CaseVolumeTrendPoint is one point's count in a CaseVolumeTrendSeries. Date
+// is a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
+// date-only wire fields. For a "week" or "month" bucket, Date is the bucket's
+// first day and EndDate its last, both clipped to the requested window, so
+// the two are exactly the days the count covers; EndDate is absent for a
+// day point.
 type CaseVolumeTrendPoint struct {
-	Date  string `json:"date"`
-	Count int    `json:"count"`
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Count   int    `json:"count"`
 }
 
 // CaseVolumeTrendSeries is one named line in a CaseVolumeTrendResponse
-// ("Opened" or "Closed"), with one point per day in the requested window,
-// in chronological order. A day with no matching cases is still present,
-// with Count 0 -- the chart draws a continuous line.
+// ("Opened" or "Closed"), with one point per day (or bucket) in the
+// requested window, in chronological order. A day with no matching cases is
+// still present, with Count 0 -- the chart draws a continuous line.
 type CaseVolumeTrendSeries struct {
 	Label  string                 `json:"label"`
 	Points []CaseVolumeTrendPoint `json:"points"`
@@ -3524,8 +3560,14 @@ type CaseVolumeTrendSeries struct {
 // exactly two series, "Opened" (by created date) and "Closed" (by closed
 // date, own-type only -- see caseLikeOwnClosedOnColumn's doc comment).
 type CaseVolumeTrendResponse struct {
-	Days   int                     `json:"days"`
-	Series []CaseVolumeTrendSeries `json:"series"`
+	// Days is the number of days the window covers.
+	Days int `json:"days"`
+	// StartDate, EndDate and Bucket echo a fixed window's resolved bounds
+	// and grouping; all absent for the trailing window.
+	StartDate string                  `json:"startDate,omitempty"`
+	EndDate   string                  `json:"endDate,omitempty"`
+	Bucket    string                  `json:"bucket,omitempty"`
+	Series    []CaseVolumeTrendSeries `json:"series"`
 }
 
 // CaseVolumeDayCount is the opened/closed count for one UTC calendar day --
@@ -4361,6 +4403,10 @@ const (
 	// AttachmentStatusComplete marks a row whose file is confirmed present in
 	// Azure Blob Storage (or was migrated there).
 	AttachmentStatusComplete AttachmentStatus = "complete"
+	// AttachmentStatusDeleted marks a row a person deleted. It is listed only
+	// when the CSM portal backend asks for deleted rows (see
+	// SearchAttachmentsRequest.DeletedOnly); it has no file and no link.
+	AttachmentStatusDeleted AttachmentStatus = "deleted"
 )
 
 // Attachment represents a file attachment linked to a reference entity.
@@ -4384,6 +4430,10 @@ type Attachment struct {
 	StorageKey *string `json:"storageKey,omitempty"`
 	// Status is the lifecycle state -- see AttachmentStatus.
 	Status AttachmentStatus `json:"status,omitempty"`
+	// DeletedOn and DeletedBy say when and by whom a deleted attachment was
+	// deleted. Set only on a row whose Status is AttachmentStatusDeleted.
+	DeletedOn *time.Time     `json:"deletedOn,omitempty"`
+	DeletedBy *UserReference `json:"deletedBy,omitempty"`
 }
 
 // ReferenceType identifies the entity type an attachment is associated with.
@@ -4402,6 +4452,12 @@ type SearchAttachmentsRequest struct {
 	ReferenceID   string        `json:"referenceId"`
 	ReferenceType ReferenceType `json:"referenceType"`
 	Pagination    Pagination    `json:"pagination"`
+	// DeletedOnly lists the deleted attachments of the reference INSTEAD of the
+	// available ones (total and paging are of the deleted rows), most recently
+	// deleted first. Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID),
+	// which sets it for a portal admin; from any other caller it is ignored.
+	// Not read for "deployment".
+	DeletedOnly bool `json:"deletedOnly,omitempty"`
 }
 
 // SearchAttachmentsResponse is the paginated result of an attachment search.

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -47,6 +48,10 @@ var (
 	// ErrCall: the call itself failed (the gateway answered an error, the
 	// connection failed, or it timed out). Wraps the SDK error.
 	ErrCall = errors.New("model call failed")
+	// ErrUsageLimit: the gateway answered 429, a request, token or spend
+	// limit on the AI side, also after the SDK's one retry. Wrapped together
+	// with ErrCall, so it is a call failure too.
+	ErrUsageLimit = errors.New("model usage limit reached")
 	// ErrRefused: the model refused (stop reason "refusal").
 	ErrRefused = errors.New("model refused the request")
 	// ErrTruncated: the reply hit maxTokens before finishing.
@@ -122,10 +127,14 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 		// request may come before this breakpoint; the prompt and the draft
 		// are in the user message after it.
 		System:   []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
-		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
+		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft, now())))},
 	})
 	took := time.Since(start)
 	if err != nil {
+		if isUsageLimit(err) {
+			logUsage(ctx, g.model, outcomeUsageLimit, "", anthropic.Usage{}, took)
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrCall, ErrUsageLimit, err)
+		}
 		logUsage(ctx, g.model, outcomeFailed, "", anthropic.Usage{}, took)
 		return Result{}, fmt.Errorf("%w: %w", ErrCall, err)
 	}
@@ -142,7 +151,17 @@ const (
 	outcomeTruncated = "truncated"
 	outcomeUnusable  = "unusable"
 	outcomeFailed    = "failed" // no reply: the gateway answered an error, the connection failed, or it timed out
+	// outcomeUsageLimit: no reply, the gateway answered 429 (ErrUsageLimit).
+	outcomeUsageLimit = "usage_limit"
 )
+
+// isUsageLimit reports whether err is the gateway answering 429 Too Many
+// Requests. An overloaded gateway (529 or 503) is not a usage limit: it stays
+// an ordinary call failure.
+func isUsageLimit(err error) bool {
+	var apiErr *anthropic.Error
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
+}
 
 // readReply reads the model's reply into a result, and names its outcome.
 func readReply(msg *anthropic.Message) (Result, string, error) {
@@ -197,14 +216,22 @@ func messageText(msg *anthropic.Message) string {
 	return text.String()
 }
 
+// now is the clock userMessage reads today's date from; a test sets it.
+var now = time.Now
+
 // userMessage is the prompt alone on a first message, or the draft followed
-// by the prompt as the change to make.
-func userMessage(prompt string, draft json.RawMessage) string {
+// by the prompt as the change to make, and then today's date (UTC). The
+// catalogue resolves a month or quarter named without a year against it
+// ("December" is the most recent December that has begun). It is in the user
+// message, after the cached system prompt, so the cache still hits on every
+// day.
+func userMessage(prompt string, draft json.RawMessage, today time.Time) string {
+	date := "\n\nToday's date: " + today.UTC().Format("2006-01-02")
 	if draft == nil {
-		return prompt
+		return prompt + date
 	}
 	return "This is the dashboard I am editing:\n\n```json\n" + string(draft) +
-		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\n" + prompt
+		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\n" + prompt + date
 }
 
 // jsonObjects returns the top-level JSON objects in text, in order. A reply

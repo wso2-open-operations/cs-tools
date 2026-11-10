@@ -63,6 +63,7 @@ let mockIsSplAudience = false;
 let mockCanViewWorkItemsStaffView = true;
 let mockCanUpdateProjectClosureState = false;
 let mockCanEditProjectOnboarding = false;
+let mockCanUpdateProjectSuspensionOverride = false;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
     hasAnyRole: true,
@@ -74,6 +75,7 @@ vi.mock("@context/current-user/usePortalAccess", () => ({
     isSplAudience: mockIsSplAudience,
     canViewWorkItemsStaffView: mockCanViewWorkItemsStaffView,
     canUpdateProjectClosureState: mockCanUpdateProjectClosureState,
+    canUpdateProjectSuspensionOverride: mockCanUpdateProjectSuspensionOverride,
     canEditProjectOnboarding: mockCanEditProjectOnboarding,
   }),
 }));
@@ -96,6 +98,17 @@ vi.mock("@features/csm-projects/api/usePatchProjectClosureState", async () => {
     }),
   };
 });
+
+const mockPatchSuspensionOverrideMutate = vi.fn();
+vi.mock("@features/csm-projects/api/usePatchProjectSuspensionOverride", () => ({
+  usePatchProjectSuspensionOverride: () => ({
+    mutate: mockPatchSuspensionOverrideMutate,
+    reset: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+}));
 
 const mockPatchOnboardingMutate = vi.fn();
 let mockPatchOnboardingIsError = false;
@@ -580,6 +593,18 @@ describe("CsmProjectDetailPage — Onboarding tab", () => {
     expect(names.slice(0, 2)).toEqual(["Overview", "Onboarding"]);
   });
 
+  it("lists the full tab strip in order, with Closure right after Onboarding", () => {
+    renderPage();
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Overview",
+      "Onboarding",
+      "Closure",
+      "Deployments",
+      "Project contacts",
+      "Work items",
+    ]);
+  });
+
   it("selects the tab from ?tab=onboarding and renders its fields read-only", () => {
     renderPage("/customers/projects/proj-1?tab=onboarding");
     expect(screen.queryByText("Project key")).not.toBeInTheDocument();
@@ -616,5 +641,56 @@ describe("CsmProjectDetailPage — Onboarding tab", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Edit onboarding" }));
     expect(screen.getByRole("group", { name: "Onboarding expiry date" })).toBeInTheDocument();
+  });
+});
+
+describe("CsmProjectDetailPage — Closure tab", () => {
+  beforeEach(() => {
+    mockCanUpdateProjectSuspensionOverride = false;
+    mockPatchSuspensionOverrideMutate.mockReset();
+    mockUseGetProject.mockReturnValue({
+      data: {
+        ...PROJECT,
+        closureState: "open",
+        endDateClosureState: "notify",
+        invoiceDueDateClosureState: "open",
+        complianceViolationClosureState: "open",
+        suspensionProcessOverridden: false,
+        suspensionProcessState: null,
+      },
+      isLoading: false,
+      isError: false,
+    });
+  });
+
+  it("selects the tab from ?tab=closure and renders it from the loaded project", () => {
+    renderPage("/customers/projects/proj-1?tab=closure");
+    expect(screen.getByRole("tab", { name: "Closure", selected: true })).toBeInTheDocument();
+    expect(screen.getByText("Closure tracks")).toBeInTheDocument();
+    expect(screen.getByText("No closure process record yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Project key")).not.toBeInTheDocument();
+  });
+
+  it("clicking the tab updates ?tab=closure", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "Closure" }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/customers/projects/proj-1?tab=closure",
+    );
+  });
+
+  it("is read-only for a caller without canUpdateProjectSuspensionOverride", () => {
+    renderPage("/customers/projects/proj-1?tab=closure");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Included in automatic closure")).toBeInTheDocument();
+  });
+
+  it("passes the capability through so an admin gets the editable switch", () => {
+    mockCanUpdateProjectSuspensionOverride = true;
+    renderPage("/customers/projects/proj-1?tab=closure");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Exclude this project from automatic closure" }),
+    );
+    expect(mockPatchSuspensionOverrideMutate).toHaveBeenCalledWith(true, expect.anything());
   });
 });

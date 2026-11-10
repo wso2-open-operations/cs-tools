@@ -18,6 +18,7 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -126,5 +127,87 @@ func TestNewClient_TimeoutBoundsTheCall(t *testing.T) {
 	}
 	if took := time.Since(start); took > 3*time.Second {
 		t.Errorf("took %v, want about (1+%d) x 100ms", took, maxRetries)
+	}
+}
+
+// limitGateway answers every call with status and the given header, and counts
+// the calls.
+func limitGateway(t *testing.T, status int, header, value string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(header, value)
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"rate_limit_error","message":"limit reached"}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+// TestNewClient_ALongRetryAfterIsNotWaitedFor: a failed answer asking for a
+// wait longer than maxRetryWait (in seconds, milliseconds or as a date) is
+// returned at once, after one call, whatever its status.
+func TestNewClient_ALongRetryAfterIsNotWaitedFor(t *testing.T) {
+	for _, tc := range []struct {
+		name, header, value string
+		status              int
+	}{
+		{"429, seconds", "Retry-After", "120", http.StatusTooManyRequests},
+		{"429, over the cap but within the deadline", "Retry-After", "10", http.StatusTooManyRequests},
+		{"429, milliseconds", "Retry-After-Ms", "60000", http.StatusTooManyRequests},
+		{"429, a date", "Retry-After", time.Now().Add(2 * time.Minute).UTC().Format(http.TimeFormat), http.StatusTooManyRequests},
+		{"529, overloaded", "Retry-After", "120", 529},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, calls := limitGateway(t, tc.status, tc.header, tc.value)
+			start := time.Now()
+			_, err := sendOne(t, NewClient(Config{APIKey: "k", BaseURL: srv.URL, Timeout: 30 * time.Second}))
+			var apiErr *anthropic.Error
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tc.status {
+				t.Fatalf("err = %v, want the gateway's %d", err, tc.status)
+			}
+			if n := calls.Load(); n != 1 {
+				t.Errorf("calls = %d, want 1 (no retry)", n)
+			}
+			if took := time.Since(start); took > 2*time.Second {
+				t.Errorf("took %v, want the failure at once", took)
+			}
+		})
+	}
+}
+
+// TestNewClient_AShortRetryAfterKeepsTheRetry: a wait within maxRetryWait
+// keeps the SDK's one retry.
+func TestNewClient_AShortRetryAfterKeepsTheRetry(t *testing.T) {
+	srv, calls := limitGateway(t, http.StatusTooManyRequests, "Retry-After", "0")
+	if _, err := sendOne(t, NewClient(Config{APIKey: "k", BaseURL: srv.URL, Timeout: 5 * time.Second})); err == nil {
+		t.Fatal("want the 429")
+	}
+	if n := calls.Load(); n != 1+maxRetries {
+		t.Errorf("calls = %d, want %d", n, 1+maxRetries)
+	}
+}
+
+// TestNewClient_ARetryAfterPastTheDeadlineIsNotWaitedFor: a wait within
+// maxRetryWait that would end after the call's deadline returns the 429 at
+// once, not the deadline running out during the wait.
+func TestNewClient_ARetryAfterPastTheDeadlineIsNotWaitedFor(t *testing.T) {
+	srv, calls := limitGateway(t, http.StatusTooManyRequests, "Retry-After-Ms", "2000")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	client := NewClient(Config{APIKey: "k", BaseURL: srv.URL, Timeout: 5 * time.Second})
+	_, err := client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     "claude-sonnet-5-5",
+		MaxTokens: 20,
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Say hi"))},
+	})
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the 429, not the deadline", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("calls = %d, want 1", n)
 	}
 }

@@ -901,7 +901,12 @@ func (h *CaseHandler) AggregateCases(w http.ResponseWriter, r *http.Request) {
 // Day-bucketed case-volume trend (opened vs. closed, one point per day over
 // a trailing window), for the Case Summary dashboard's trend chart. Window
 // size and value validation are upstream by the entity service; this layer
-// only forwards the request and passes the response through as-is.
+// only forwards the request and passes the response through as-is, with one
+// check: a fixed window asked for (startDate) must come back echoed
+// (windowEchoed). An entity service older than the fixed window ignores
+// startDate/endDate/bucket and answers its default trailing 30 days, which a
+// line widget would show as its window without any error, so that answer is
+// a 502 instead.
 func (h *CaseHandler) VolumeTrend(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -931,8 +936,30 @@ func (h *CaseHandler) VolumeTrend(w http.ResponseWriter, r *http.Request) {
 		mapUpstreamErrorGeneric(w, err, "Failed to load case volume trend.")
 		return
 	}
+	if !windowEchoed(body, result) {
+		slog.ErrorContext(r.Context(), "entity VolumeTrend ignored the fixed window (entity service older than startDate/endDate/bucket?)", "userID", user.UserID)
+		writeError(w, http.StatusBadGateway, "Failed to load case volume trend.")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// windowEchoed reports whether a volume trend answer is for the window asked
+// for: true when the request has no fixed window (no "startDate"), or the
+// answer echoes one. False only for a fixed window answered without its echo,
+// as an entity service older than the fixed window does.
+func windowEchoed(request, response []byte) bool {
+	var asked struct {
+		StartDate string `json:"startDate"`
+	}
+	if json.Unmarshal(request, &asked) != nil || asked.StartDate == "" {
+		return true
+	}
+	var answered struct {
+		StartDate string `json:"startDate"`
+	}
+	return json.Unmarshal(response, &answered) == nil && answered.StartDate != ""
 }
 
 // SearchFeedback handles POST /cases/feedback/search.
@@ -1012,6 +1039,32 @@ func (h *CaseHandler) AggregateFeedback(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
+// withDeletedAttachments returns body with entity-service's `deletedOnly` kept
+// only when the browser asked for it (the admin's Deleted tab) AND the caller
+// holds PermAdmin, taken from their token roles; for anyone else the key is
+// dropped, so they get the ordinary list. Whatever the browser sent under any
+// spelling of that key is removed first, so only this decision reaches
+// entity-service, which honours it only from this backend. A nil guard means
+// nobody is an admin here.
+func (h *CaseHandler) withDeletedAttachments(body []byte, roles []string) ([]byte, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	asked := false
+	for key, raw := range fields {
+		if strings.EqualFold(key, "deletedOnly") {
+			var v bool
+			asked = asked || (json.Unmarshal(raw, &v) == nil && v)
+			delete(fields, key)
+		}
+	}
+	if asked && h.access != nil && h.access.Permits(PermAdmin, roles) {
+		fields["deletedOnly"] = json.RawMessage("true")
+	}
+	return json.Marshal(fields)
+}
+
 // SearchCaseAttachments handles POST /attachments/search.
 func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -1032,6 +1085,12 @@ func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Reque
 	}
 
 	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	body, err = h.withDeletedAttachments(body, user.Roles)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}

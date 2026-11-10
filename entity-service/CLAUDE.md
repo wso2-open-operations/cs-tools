@@ -331,14 +331,29 @@ other success; `SearchUsers` and `GetUsersByIDs` are not cached. The client is
 a plain `redis.NewClient`, so the target must not use the "OSS Cluster"
 clustering policy.
 
-## POST /cases/volume-trend: day-bucketed opened/closed counts for a dashboard chart
+## POST /cases/volume-trend: opened/closed counts for a dashboard chart
 
-Backs the CSM portal's "Case Summary" dashboard trend widget (`apps/csm-portal/webapp`'s
-new `"line"` shape): exactly two fixed series, "Opened" (by `work_item.created_on`) and
-"Closed" (by `caseLikeOwnClosedOnColumn`, the per-type closure timestamp), one point per
-UTC calendar day over a trailing window (`days`, default 30, 1-90). Deliberately narrow,
-unlike `AggregateCasesRequest`'s open-ended `groupBy` -- this backs exactly one chart, not
-a platform, so there's no generic series/bucket-unit config.
+Backs the CSM portal's dashboard `"line"` widget (`apps/csm-portal/webapp`): exactly two
+fixed series, "Opened" (by `work_item.created_on`) and "Closed" (by
+`caseLikeOwnClosedOnColumn`, the per-type closure timestamp), one point per UTC calendar day
+over a trailing window (`days`, default 30, 1-90). Deliberately narrow, unlike
+`AggregateCasesRequest`'s open-ended `groupBy` -- this backs one chart, not a platform, so
+there's no generic series config.
+
+**A fixed window: `startDate`/`endDate` + `bucket`.** Instead of `days` (never both), a
+request can name a fixed window -- plain `YYYY-MM-DD` dates or the relative placeholders
+`resolveRelativeDate` knows, both inclusive UTC days -- for a past period such as "December
+2025" that a trailing window can't reach. `testdata/relative_date_parity.json` holds the
+tokens and the dates they resolve to that `resolveRelativeDate`, the CSM backend's
+`relativeDate` and the webapp's resolver must agree on; all three run it, so a change to the
+grammar goes there first. `bucket` groups its points: `day` (default, at most 90 days),
+`week` (Monday to Sunday, at most 54 weeks, a whole leap year that starts on a Sunday) or
+`month` (at most 24 months);
+a week or month point carries `date` and `endDate`, the bucket's first and last day clipped
+to the window. Counting doesn't change: every day is still computed and cached on its own
+(below), and a week or month point is the sum of its days. A day after today counts 0 and is
+never queried or cached -- caching it would pin a 0 under the stable TTL. A request without
+these fields gets exactly the trailing-window response it always did.
 
 **A naive `to_char(timestamp, 'YYYY-MM-DD') = ANY(days)` predicate is non-sargable --
 confirmed against a real staging database (505k `work_item` rows), not assumed.** Wrapping
@@ -1025,6 +1040,18 @@ reopen logs a WARN at every start as the reminder.
   not link the invoice to a project yet (the invoice, its opportunity or the link is missing), it falls
   back to "does any project have one", so the local tables can only narrow the check. A `Project__c` event costs one database read when the project
   is not ACP-suspended.
+- **Suspension process overridden (`project.suspension_process_overridden`, migration 0281).** A
+  CSM-owned `BOOLEAN NOT NULL DEFAULT FALSE`: when true, ACP must not evaluate the project. Exposed as
+  `suspensionProcessOverridden` (always present, `false` by default) on `GET /projects/{id}` and
+  `POST /projects/search` (carried by `domain.ProjectClosureFields`). **Writable** via `PATCH /projects/{id}`
+  (`suspensionProcessOverridden`, boolean; null or omitted leaves it unchanged). It is Postgres only: the
+  legacy data source rejects it with a 400, and in dual-write mode it is written to Postgres and never
+  forwarded to the legacy source (a request with only this field has nothing to mirror and succeeds).
+  Setting it touches no closure state or `suspension_process_state`; it stamps `updated_by`/`updated_on`
+  and the PATCH response echoes the stored value. Admin-only is enforced in the BFF, not here (this
+  service only authorises the caller against the project). The legacy data source's own ACP does not see
+  this flag, so until the legacy process is switched off, setting it in CSM does not exempt the project
+  there. The legacy data source reads `false` always. This reopen check does not read it yet.
 - **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
   its `suspension_process_state` section (`based_on_subscription_end_date` /
   `based_on_due_invoices`) has `event_type: "suspend"`, which ACP writes when it suspends. A project
@@ -3287,6 +3314,15 @@ the Query/SecReport Analysis family) on no severity at all.
   or revise clocks (and, for a state change, apply SLA effects) before
   calling their own `publishCaseCreated`/`publishStatusChanged`/
   `publishSeverityChanged`.
+
+- **`POST /cases/{id}/sla/recalculate-pause` (CaseSLARecalcService, admin-only) corrects a case's stored pause_duration/business_pause_duration by replaying its real history, not by trusting what's currently on the row.** A single clock's own `start_on`/`pause_duration`/`business_pause_duration` are write-path state, accumulated incrementally at each live pause/resume event (`setPaused`) — if any one of those writes was ever wrong (the exact class of bug the business-day-elapsed-time fixes elsewhere in this file exist to close), nothing afterward self-corrects it; this action is the one place that does, by rebuilding the total from scratch. Decision order mirrors `applyCaseStateEffectsForPolicy` exactly (`decidePauseTransition`, `sla_case_recalc_service.go`) — stop/cancel/pause/resume, in that order, evaluated against the case's REAL state at each point in its own `work_item_activity` history, with every other fact (severity, product, etc.) pinned to today's current value. That's not an approximation: anything that would make a different fact change mid-clock (a severity revision, a case-type transfer) already cancels the clock outright and registers a fresh one (`ReviseCaseClocks`) rather than merely pausing the old one, so within one clock's own lifetime state is structurally the only fact that can ever matter to its own pause/resume decision.
+  - **The ServiceNow-backed case path writes none of this history at all.** `work_item_activity` (migration 0055) is only ever populated by `caseService`'s own Postgres-native write path — `snCaseService` (what this deployment's real `DATA_SOURCE` actually uses for real cases) never calls `RecordCaseFieldChangeActivity`. A case with zero state-activity rows has `HasHistory: false` in the response and every one of its clocks is left exactly as it is — never guessed at from an empty log. This is the common case for a real case today, not a rare edge case.
+  - **A later severity/case-type-change activity row (after the clock's own `start_on`) disqualifies that clock from correction entirely**, reported with a reason rather than corrected: if one happened, the real engine would already have cancelled this clock and registered a different one in its place, so finding one here means this row is either stale or something else is inconsistent.
+  - **Both `IN_PROGRESS` and `PAUSED` clocks are corrected — only a terminal one (`COMPLETED`/`ACHIEVED`/`CANCELLED`/`BREACHED`) is skipped.** A `PAUSED` clock's own `business_elapsed_percentage`/`business_duration`/`remaining_business_duration` were frozen using its pause total at the exact moment it was written (`setPausedFlat`/`setPausedBusinessDays`); correcting `pause_duration`/`business_pause_duration` underneath it without also recomputing that frozen snapshot would leave the two disagreeing, so this recomputes and overwrites all five columns together (`UpdateClockPausedSnapshot`), using the exact same freeze formula those two functions already use, anchored on the clock's own `paused_on` instant rather than `NOW()`. The replay's own still-open trailing segment (from the last known state change up to now) is never folded into a `PAUSED` clock's total — only completed pause spans are, the same way the live engine's own incremental accumulation only ever grows on resume.
+  - **If the replay itself concludes something the live engine disagrees with** (the clock should already have stopped/been cancelled partway through its own history, or its paused/running state at the end of the replay doesn't match what the live row says), that clock is reported and skipped, never force-corrected — a genuine disagreement needs a person, not a guess.
+  - **A clock whose own pause_condition/resume_condition references anything other than `state` is skipped entirely, never replayed** (`clockPauseResumeReferencesOnlyState`). A real WORKAROUND-target policy's own `pause_condition` can reference `u_workaround_provided` instead of state — replaying that against `currentFacts`' today's-value snapshot rather than that fact's own history would misjudge the clock's past pause/resume state wherever that fact's value differed from today's, so such a clock is reported and skipped up front rather than silently mis-corrected.
+  - **`work_item_activity`'s own "state" rows are recorded under their ServiceNow-style display label** (`"Awaiting Info"`, the same vocabulary `caseStateDisplayLabel` writes), **never the raw `case_state_enum` value** (`AWAITING_INFO`) every `pause_condition`/`resume_condition` is actually authored against — `normalizeActivityState` converts every recorded label back into that enum vocabulary (via `snCaseLikeStateLabels`) before it's ever compared against a condition. An activity row whose own state value this table doesn't recognize skips that clock rather than silently matching nothing.
+  - **Admin-gated the same way `POST /sla-engine/recalculate` already is**: `CaseSLARecalcService` wraps `SLAEngineService` with its own `requireCSMPortalBackendCaller` check (trusting csm-portal-backend's own `PermAdmin` route gate, confirming only that the caller really is csm-portal-backend — see that method's own doc comment for why this doesn't *also* independently re-check an `AUTH_ADMIN_ROLES` list). Deliberately a separate wrapper type rather than adding `access`/`csmPortalBackendClientID` fields onto `SLAEngineService` itself: that interface's other dozen-plus methods are purely internal (called from case/incident handling code, never directly from an HTTP request) and are already constructed with no access dependency in several existing test files.
 
 ### CSM-native SLA clock engine (historical — the resolution mechanism below no longer exists)
 

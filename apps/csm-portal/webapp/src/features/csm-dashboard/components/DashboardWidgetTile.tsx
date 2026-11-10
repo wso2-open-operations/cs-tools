@@ -28,6 +28,9 @@ import type {
   BeDashboardGroupByConfig,
   BeDashboardPieSlice,
   BeDashboardWidgetColumn,
+  BeLineBucket,
+  BeLineChart,
+  BeLineSeries,
   BeWidgetResourceType,
   BeWidgetShape,
 } from "@api/backend/types";
@@ -45,6 +48,7 @@ import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetList
 import GenericColumnList from "@features/csm-dashboard/components/GenericColumnList";
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
+import { linePointFilters } from "@features/csm-dashboard/utils/linePointQuery";
 import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
@@ -127,6 +131,23 @@ interface DashboardWidgetTileProps {
    * many trailing days the Opened/Closed trend covers. `undefined` lets
    * `useCaseVolumeTrendData` apply the backend's own default. */
   days?: number;
+  /** Only meaningful for shape "line" (see `BeDashboardWidget.series`):
+   * the lines to draw; `undefined` draws both. */
+  series?: BeLineSeries[];
+  /** Only meaningful for shape "line" (see `BeDashboardWidget.startDate`):
+   * a fixed window instead of `days`, grouped by `bucket`. Both dates or
+   * neither; `undefined` keeps the trailing `days` window. */
+  startDate?: string;
+  endDate?: string;
+  bucket?: BeLineBucket;
+  /** Only meaningful for shape "line" (see `BeDashboardWidget.chart`): "bar"
+   * draws the points as bars; `undefined` or "line" draws lines. */
+  chart?: BeLineChart;
+  /** Only meaningful for shape "line": a click on a point opens that day's
+   * opened or closed cases, as a pie slice opens its own. Off unless the
+   * page turns it on (saved and shared dashboards do; system dashboards and
+   * the generate preview do not). */
+  linePointClickThrough?: boolean;
   /** The currently selected team's own `creGroupId` (see
    * `BeTeam.creGroupId`), or an array of every team's `creGroupId` in the
    * current dashboard's family when the "All ABTs" option is selected (see
@@ -263,6 +284,12 @@ function DashboardWidgetTile({
   columns,
   sortBy,
   days,
+  series,
+  startDate,
+  endDate,
+  bucket,
+  chart,
+  linePointClickThrough = false,
   selectedTeamCreGroupId,
   selectedTeamSreGroupId,
   selectedTeamLabel,
@@ -530,6 +557,7 @@ function DashboardWidgetTile({
     selectedTeamSreGroupId,
     currentUserId,
     shape === "line" && isVisible,
+    startDate && endDate ? { startDate, endDate, bucket } : undefined,
   );
   // True while this widget carries a `__current_user__` filter and the
   // signed-in user's profile hasn't loaded yet. `useWidgetData`/
@@ -942,14 +970,23 @@ function DashboardWidgetTile({
   }
 
   if (shape === "line") {
-    // Unlike shape "pie"/"bar", a day's Opened/Closed point is not a single
-    // filterable selector the case list's own search can scope to — there is
-    // no tile-level click-through target here (see `DashboardLineChart`'s own
-    // doc comment), so this Card is plain, non-link chrome, same posture as
-    // the shape "list" branch above for the same underlying reason. No
-    // per-widget refresh button either — the trend's own cache already keeps
-    // today's point fresh server-side (entity-service's case-volume-trend
-    // cache), so a manual refresh here has nothing to accomplish.
+    // The Card itself is plain, non-link chrome: the chart as a whole is not
+    // one selector. A point is (one day, one line), so with
+    // `linePointClickThrough` a click on it opens that day's cases the way a
+    // pie slice opens its own (`linePointFilters`: the point over the
+    // widget's filters, the same `buildHref` and Back state). No per-widget refresh button —
+    // the trend's own cache already keeps today's point fresh server-side
+    // (entity-service's case-volume-trend cache), so a manual refresh here
+    // has nothing to accomplish.
+    const handlePointClick = (date: string, lineSeries: BeLineSeries, pointEndDate?: string): void => {
+      navigate(
+        config.buildHref(
+          resolvePlaceholders(linePointFilters(filters, date, lineSeries, pointEndDate)),
+          { widgetId, displayName: resolvedDisplayName },
+        ),
+        { state: dashboardReturnState },
+      );
+    };
     return (
       <Card ref={tileRef} variant="outlined" sx={{ position: "relative", p: 1.75, height: "100%" }}>
         <Box sx={{ pb: resolvedDescription ? 1 : 2.5 }}>{renderHeader()}</Box>
@@ -962,6 +999,10 @@ function DashboardWidgetTile({
           points={volumeTrendData.points}
           isLoading={volumeTrendData.isLoading}
           isError={volumeTrendData.isError}
+          series={series}
+          bucket={startDate && endDate ? bucket : undefined}
+          chart={chart}
+          onPointClick={linePointClickThrough ? handlePointClick : undefined}
         />
       </Card>
     );

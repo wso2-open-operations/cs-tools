@@ -64,7 +64,8 @@ func NewLongOpenCaseReportRepository(db *Scoped) LongOpenCaseReportRepository {
 //     the cap is applied, so the totals stay true when a table is cut.
 var listLongOpenCasesSQL = `
 WITH matched AS (
-  SELECT wi.number,
+  SELECT wi.id::text AS id,
+         wi.number,
          COALESCE(wi.wso2_id, '') AS internal_id,
          wi.created_on,
          wi.updated_on,
@@ -94,7 +95,7 @@ WITH matched AS (
          COUNT(*) OVER (PARTITION BY onboarding) AS table_total
     FROM matched
 )
-SELECT number, internal_id, created_on, updated_on, state, severity,
+SELECT id, number, internal_id, created_on, updated_on, state, severity,
        assigned_engineer, cs_team, onboarding, table_total
   FROM numbered
  WHERE rn <= $5
@@ -133,7 +134,7 @@ func (r *longOpenCaseReportRepository) ListLongOpenCases(ctx context.Context, cr
 			onboarding bool
 			total      int
 		)
-		if err := rows.Scan(&row.Number, &row.InternalID, &row.CreatedOn, &row.UpdatedOn, &state, &severity,
+		if err := rows.Scan(&row.ID, &row.Number, &row.InternalID, &row.CreatedOn, &row.UpdatedOn, &state, &severity,
 			&row.AssignedEngineer, &row.CsTeam, &onboarding, &total); err != nil {
 			return domain.LongOpenCaseReportData{}, fmt.Errorf("scan long-open case: %w", err)
 		}

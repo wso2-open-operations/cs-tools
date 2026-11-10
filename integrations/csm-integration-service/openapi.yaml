@@ -2487,6 +2487,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only here: it is set in the entity service database or by the data sync."
 
     ProjectSearchPayload:
       type: object

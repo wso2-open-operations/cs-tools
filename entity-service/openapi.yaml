@@ -1673,6 +1673,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/sla/recalculate-pause:
+    post:
+      summary: >-
+        Recompute one case's currently IN_PROGRESS SLA clocks' pause history
+        from the case's own state-change activity log, correcting
+        pause_duration/business_pause_duration when they disagree. A CSM
+        admin-only action, trusted via the CSM Portal's own PermAdmin gate;
+        no request body. Returns an empty clock list with hasHistory=false
+        for a case with no activity history at all to replay (the
+        ServiceNow-backed case path never writes it) -- existing clocks are
+        left untouched, never guessed at.
+      operationId: recalculateCasePauseTotals
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      responses:
+        "200":
+          description: The recalculation ran; see each clock's own outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseSLAPauseRecalcResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a CSM admin, or not called through the CSM Portal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sla-duration-policy:
     get:
       summary: >-
@@ -7232,13 +7277,14 @@ paths:
 
   /cases/volume-trend:
     post:
-      summary: Day-bucketed case-volume trend (opened vs. closed), for a dashboard chart.
+      summary: Case-volume trend (opened vs. closed), for a dashboard chart.
       description: >-
         Returns exactly two series, "Opened" (by created date) and "Closed"
         (by closed date), one point per UTC calendar day over a trailing
-        window (30 days by default). Deliberately narrow compared to the
-        aggregate operation's open-ended groupBy: this backs exactly one
-        chart, not a platform.
+        window (30 days by default), or over a fixed startDate/endDate
+        window one point per day, week (Monday to Sunday) or month.
+        Deliberately narrow compared to the aggregate operation's open-ended
+        groupBy: this backs one chart, not a platform.
       operationId: caseVolumeTrend
       requestBody:
         required: false
@@ -7248,7 +7294,7 @@ paths:
               $ref: '#/components/schemas/CaseVolumeTrendRequest'
       responses:
         "200":
-          description: Daily opened/closed case counts for the requested window.
+          description: Opened/closed case counts for the requested window.
           content:
             application/json:
               schema:
@@ -8163,7 +8209,13 @@ paths:
         Search the attachments of a case, change request, incident, conversation
         or deployment, most recent first. Deployment attachments are listed from
         deployment_attachment, scoped to the caller's projects by row-level
-        security; a deleted, failed or still-uploading attachment is not listed.
+        security; a failed or still-uploading attachment is not listed. A deleted
+        attachment is not listed either, unless the caller is the CSM portal
+        backend and sets `deletedOnly` (it does, when a portal admin asks): the
+        list is then of the deleted attachments only, most recently deleted
+        first, with `status: deleted`, `deletedOn` and `deletedBy`, and its
+        total and paging count only those. `deletedOnly` is ignored from any
+        other caller and for a deployment.
       operationId: searchCaseAttachments
       requestBody:
         required: true
@@ -22339,6 +22391,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
         onboardingOwner:
           description: >
             The person assigned to run this project's onboarding. Null when
@@ -22463,6 +22518,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer. Always null on Postgres.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
 
     SearchProjectsResponse:
       type: object
@@ -22516,6 +22574,9 @@ components:
             recomputes the overall state from them again, silently overwriting
             a manual override — there is no column recording that one was ever
             set.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Sets whether the automatic Account Closure Process must skip this project (Postgres data sources only; a 400 on the legacy data source). Only true or false changes it; null and omitted leave it unchanged. Touches no closure state and combines freely with every other field. The response echoes the stored value. Admin-only enforcement lives in the BFF, not here."
         suspensionProcessState:
           type: object
           additionalProperties: true
@@ -22617,6 +22678,10 @@ components:
         verificationEnabled:
           type: boolean
           nullable: true
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Present on Postgres data sources only."
         onboardingStatus:
           type: string
           description: Present on Postgres data sources only.
@@ -24503,7 +24568,29 @@ components:
           type: integer
           description: >-
             Size of the trailing window, ending today (UTC). Optional;
-            defaults to 30 when omitted. Must be between 1 and 90.
+            defaults to 30 when omitted. Must be between 1 and 90. Not
+            allowed together with startDate/endDate.
+        startDate:
+          type: string
+          description: >-
+            First day of a fixed window (inclusive, UTC): a YYYY-MM-DD date or
+            a relative date placeholder (__today__, __startOfMonth:-1__, ...).
+            Needs endDate.
+          example: "2025-12-01"
+        endDate:
+          type: string
+          description: >-
+            Last day of a fixed window (inclusive, UTC), in the same forms as
+            startDate. Needs startDate. A day after today counts 0.
+          example: "2025-12-31"
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >-
+            How a fixed window's days are grouped into points. Optional;
+            defaults to day. day covers at most 90 days, week (Monday to
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months. Only with startDate/endDate.
 
     CaseVolumeTrendPoint:
       type: object
@@ -24512,7 +24599,15 @@ components:
         date:
           type: string
           format: date
-          description: UTC calendar day (YYYY-MM-DD).
+          description: >-
+            UTC calendar day (YYYY-MM-DD); for a week or month point, the
+            bucket's first day within the window.
+        endDate:
+          type: string
+          format: date
+          description: >-
+            For a week or month point only: the bucket's last day within the
+            window, so date to endDate are exactly the days counted.
         count:
           type: integer
 
@@ -24528,8 +24623,9 @@ components:
           items:
             $ref: '#/components/schemas/CaseVolumeTrendPoint'
           description: >-
-            One point per day in the requested window, oldest first. A day
-            with no matching cases is still present, with count 0.
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no matching cases is still present,
+            with count 0.
 
     CaseVolumeTrendResponse:
       type: object
@@ -24540,7 +24636,19 @@ components:
       properties:
         days:
           type: integer
-          description: The size of the window actually returned.
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
         series:
           type: array
           items:
@@ -25654,10 +25762,12 @@ components:
       type: string
       enum:
         - complete
+        - deleted
       description: >
-        Lifecycle state of a listed attachment. Only complete attachments are listed: a
-        pending (still uploading), failed or deleted one is not returned by
-        POST /attachments/search.
+        Lifecycle state of a listed attachment. Complete attachments are listed; a
+        pending (still uploading) or failed one is not returned by
+        POST /attachments/search. `deleted` appears only when the CSM portal backend
+        asked for the deleted attachments (`deletedOnly`); that list holds only them.
 
     Attachment:
       type: object
@@ -25698,6 +25808,12 @@ components:
             its own recorded. Entity-service never reads the file; the portal backends do.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
+        deletedOn:
+          type: string
+          format: date-time
+          description: When the attachment was deleted. Set only when `status` is `deleted`.
+        deletedBy:
+          $ref: '#/components/schemas/UserReference'
 
     ReferenceType:
       type: string
@@ -25720,6 +25836,13 @@ components:
           $ref: '#/components/schemas/ReferenceType'
         pagination:
           $ref: '#/components/schemas/Pagination'
+        deletedOnly:
+          type: boolean
+          description: >
+            List the deleted attachments instead of the available ones, most
+            recently deleted first (total and paging are of the deleted ones).
+            Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID);
+            ignored from any other caller and for referenceType `deployment`.
 
     SearchAttachmentsResponse:
       type: object
@@ -31383,13 +31506,17 @@ components:
     LongOpenCaseReportRow:
       type: object
       description: One long-open case.
-      required: [number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
+      required: [id, number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: The case UUID the portal routes on.
         number:
           type: string
         internalId:
           type: string
-          description: The case's internal identifier, or empty.
+          description: The case's internal identifier (a display reference, not the id the portal routes on), or empty.
         createdOn:
           type: string
           format: date-time
@@ -31625,6 +31752,50 @@ components:
                 type: string
                 nullable: true
                 description: The link the removed runbook had.
+    CaseSLAPauseRecalcClock:
+      type: object
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      properties:
+        target:
+          type: string
+          example: RESOLUTION
+        schedule:
+          type: string
+          example: WSO2 Business days
+        skipped:
+          type: boolean
+        skipReason:
+          type: string
+          description: Empty when skipped is false.
+        oldPauseSeconds:
+          type: integer
+          format: int64
+        newPauseSeconds:
+          type: integer
+          format: int64
+        oldBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        newBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        updated:
+          type: boolean
+    CaseSLAPauseRecalcResponse:
+      type: object
+      properties:
+        hasHistory:
+          type: boolean
+          description: >-
+            False (clocks always empty) when the case has no state-change
+            activity history at all to replay -- its clocks are left exactly
+            as they are, never guessed at.
+        clocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
     ErrorResponse:
       type: object
       description: >-

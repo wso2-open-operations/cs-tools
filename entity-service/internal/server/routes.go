@@ -1106,11 +1106,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))
 	}
 
+	// Admin-only (see CaseSLARecalcService's own doc comment); nil the same
+	// way slaEngineSvc itself is when the engine is off, so the route below
+	// is simply never registered rather than registered against a nil
+	// engine.
+	var caseSLARecalcHandler *handler.CaseSLARecalcHandler
+	if slaEngineSvc != nil {
+		caseSLARecalcHandler = handler.NewCaseSLARecalcHandler(service.NewCaseSLARecalcService(slaEngineSvc, accessSvc, cfg.CSMPortalBackendClientID))
+	}
+
 	caseRepo := repository.NewCaseRepository(repository.NewScoped(db), crVisibility)
 	var activeCaseSvc service.CaseService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
 		pgCaseFallbackSvc := service.NewCaseService(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo)
+		pgCaseFallbackSvc = service.WithDeletedAttachmentsForCSMPortal(pgCaseFallbackSvc, cfg.CSMPortalBackendClientID)
 		pgCaseFallbackSvc = service.WithInlineImageLinker(pgCaseFallbackSvc, inlineImageLinker)
 		activeCaseSvc = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, pgCaseFallbackSvc, eventPublisher, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, slaEngineSvc)
 	case config.DataSourcePostgresServiceNowDualWrite:
@@ -1171,6 +1181,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// registration with a foreign-key violation).
 		snCaseMirrorSvc := service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
 		activeCaseSvc = service.NewCaseServiceWithSNWriteback(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo, snWritebackDispatcher, snCaseMirrorSvc, slaEngineSvc, cfg.CSEngineerRole)
+		activeCaseSvc = service.WithDeletedAttachmentsForCSMPortal(activeCaseSvc, cfg.CSMPortalBackendClientID)
 		activeCaseSvc = service.WithInlineImageLinker(activeCaseSvc, inlineImageLinker)
 		// CreateCase rejects a case/SR whose deployed product's category
 		// doesn't satisfy its project type's own Default Case/SR Creation
@@ -1194,6 +1205,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeCaseSvc = service.WithCaseTypeTransfer(activeCaseSvc, caseRepo)
 	default:
 		activeCaseSvc = service.NewCaseService(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo)
+		activeCaseSvc = service.WithDeletedAttachmentsForCSMPortal(activeCaseSvc, cfg.CSMPortalBackendClientID)
 		activeCaseSvc = service.WithInlineImageLinker(activeCaseSvc, inlineImageLinker)
 		// See the matching comment in the DataSourcePostgresServiceNowDualWrite
 		// case above.
@@ -2064,6 +2076,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /sla-status", slaStatusHandler.SearchActiveSLAStatuses)
 		mux.HandleFunc("GET /sla-status/clock-state", slaStatusHandler.GetClockState)
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
+	}
+	if caseSLARecalcHandler != nil {
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate-pause", caseSLARecalcHandler.RecalculatePauseTotals)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)

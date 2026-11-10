@@ -3978,6 +3978,38 @@ func TestVolumeTrend(t *testing.T) {
 		}
 	})
 
+	// An entity service older than the fixed window ignores startDate /
+	// endDate / bucket and answers its trailing 30 days: refused, so a line
+	// widget does not show those as its window.
+	t.Run("a fixed window answered without its echo is a 502", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			volumeTrendFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(`{"days":30,"series":[]}`), nil
+			},
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/volume-trend",
+			strings.NewReader(`{"filters":{},"startDate":"2025-12-01","endDate":"2025-12-31","bucket":"week"}`)))
+		w := httptest.NewRecorder()
+		NewCaseHandler(client).VolumeTrend(w, r)
+		assertStatus(t, w, http.StatusBadGateway)
+		assertErrorMessage(t, w, "Failed to load case volume trend.")
+	})
+
+	t.Run("a fixed window answered with its echo is passed through", func(t *testing.T) {
+		const answer = `{"days":31,"startDate":"2025-12-01","endDate":"2025-12-31","bucket":"week","series":[]}`
+		client := &mockEntityCaseClient{
+			volumeTrendFn: func(_ context.Context, _ []byte) ([]byte, error) { return []byte(answer), nil },
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/volume-trend",
+			strings.NewReader(`{"filters":{},"startDate":"2025-12-01","endDate":"2025-12-31","bucket":"week"}`)))
+		w := httptest.NewRecorder()
+		NewCaseHandler(client).VolumeTrend(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if w.Body.String() != answer {
+			t.Errorf("body = %s, want the answer as it is", w.Body.String())
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrorsGeneric("Failed to load case volume trend.") {
 			t.Run(tc.name, func(t *testing.T) {
@@ -4326,5 +4358,56 @@ func TestCreateCallRequest_StartsPendingOnCustomer(t *testing.T) {
 	}
 	if sent["state"] != "pending_on_customer" {
 		t.Errorf("state = %v, want pending_on_customer (client-supplied state must not win)", sent["state"])
+	}
+}
+
+// The deleted-only list is passed on only when an admin asks for it; for anyone
+// else the flag is dropped, and the browser's own spelling never reaches
+// entity-service as sent.
+func TestSearchCaseAttachments_DeletedOnlyHonouredOnlyForAdmin(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name    string
+		roles   []string
+		payload string
+		want    bool
+	}{
+		{"admin asks and gets it", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","deletedOnly":true}`, true},
+		{"admin's other spelling is normalised", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","DELETEDONLY":true}`, true},
+		{"admin who does not ask gets the ordinary list", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `"}`, false},
+		{"admin who asks for false gets the ordinary list", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","deletedOnly":false}`, false},
+		{"cs engineer's request is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","deletedOnly":true}`, false},
+		{"a forged spelling is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","DeletedOnly":true}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent map[string]any
+			client := &mockEntityCaseClient{
+				searchCaseAttachmentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+					if err := json.Unmarshal(body, &sent); err != nil {
+						t.Fatalf("body is not JSON: %v", err)
+					}
+					return []byte(`{}`), nil
+				},
+			}
+			h := NewCaseHandler(client).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+			user := *testUser
+			user.Roles = tc.roles
+			r := httptest.NewRequest(http.MethodPost, "/attachments/search", strings.NewReader(tc.payload))
+			r = r.WithContext(middleware.WithUserInfo(r.Context(), &user))
+			w := httptest.NewRecorder()
+			h.SearchCaseAttachments(w, r)
+			assertStatus(t, w, http.StatusOK)
+			got, present := sent["deletedOnly"]
+			if tc.want && got != true {
+				t.Fatalf("deletedOnly = %v, want true", got)
+			}
+			if !tc.want && present {
+				t.Fatalf("deletedOnly = %v, want it absent", got)
+			}
+			if len(sent) != map[bool]int{true: 2, false: 1}[tc.want] {
+				t.Fatalf("unexpected keys sent: %v", sent)
+			}
+		})
 	}
 }

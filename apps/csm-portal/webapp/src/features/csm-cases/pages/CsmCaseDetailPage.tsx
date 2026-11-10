@@ -90,6 +90,7 @@ import {
   useDeleteCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -2190,6 +2191,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   );
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(caseId, "case", isAdmin);
 
   // `postAttachment` is a single shared mutation object that stays mounted
   // across `caseId` changes (this page doesn't remount on navigation between
@@ -3252,6 +3255,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentsTab}
             loading={isAttachmentsLoading}
             error={isAttachmentsError}
             onRetry={() => void refetchAttachments()}

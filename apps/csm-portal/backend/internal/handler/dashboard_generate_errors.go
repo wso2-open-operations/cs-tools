@@ -32,6 +32,9 @@ var (
 	// errGenerateCall: the call failed (the service or its model gateway
 	// answered an error, the connection failed, or it timed out).
 	errGenerateCall = errors.New("model call failed")
+	// errGenerateUsageLimit: the AI side's usage limit was reached (the
+	// model gateway answered 429), not this backend's per-user limit.
+	errGenerateUsageLimit = errors.New("model usage limit reached")
 	// errGenerateRefused: the model refused.
 	errGenerateRefused = errors.New("model refused the request")
 	// errGenerateTruncated: the model's reply was cut off before finishing.

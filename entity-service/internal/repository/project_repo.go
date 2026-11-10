@@ -81,7 +81,8 @@ type ProjectRepository interface {
 	// updatedBy is the caller's email or internal client id, always written to
 	// project.updated_by (and, when HasAgent/HasKbReferences is set,
 	// account.updated_by too). Also sets verification_enabled when
-	// req.VerificationEnabled is set. Returns a
+	// req.VerificationEnabled is set, and suspension_process_overridden when
+	// req.SuspensionProcessOverridden is set (no closure state is touched). Returns a
 	// NotFoundError if no such project exists, a ConflictError if
 	// HasAgent/HasKbReferences is requested on a project with no linked
 	// account (project.account_id IS NULL), or a ValidationError if a closure
@@ -291,7 +292,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 	dataQuery := fmt.Sprintf(
 		`SELECT p.id, p.account_id, p.sf_id, p.name, p.key, pt.name,
 		        p.start_date, p.end_date, p.created_on, p.updated_on,
-		        `+projectClosureColumns+`,
+		        `+projectClosureColumns+`, p.suspension_process_overridden,
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        p.onboarding_go_live_date, p.verification_enabled,
 		        a.id, a.name, a.region, a.sub_region, `+accountIsPartnerColumn+`,
@@ -378,6 +379,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 				&p.StartDate, &p.EndDate, &p.CreatedOn, &p.UpdatedOn,
 				&p.ClosureState, &p.EndDateClosureState, &p.InvoiceDueDateClosureState,
 				&p.ComplianceViolationClosureState, &p.ComplianceViolationDate, &p.SuspensionProcessState,
+				&p.SuspensionProcessOverridden,
 				&p.OnboardingStatus, &p.GoLiveDate, &verificationEnabled,
 				&aID, &aName, &acct.Region, &acct.SubRegion, &acct.IsPartner,
 				&ownerID, &ownerName, &ownerEmail,
@@ -503,7 +505,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		        -- confirmed against a real ServiceNow payload and Postgres's own INITCAP
 		        -- behavior for both before picking these. A bare ::TEXT cast leaves both
 		        -- uppercase, matching neither.
-		        `+projectClosureColumns+`,
+		        `+projectClosureColumns+`, p.suspension_process_overridden,
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        `+accountIsPartnerColumn+`,
 		        p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date,
@@ -554,6 +556,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		&projectTypeName, &hasSr, &verificationEnabled,
 		&v.ClosureState, &v.EndDateClosureState, &v.InvoiceDueDateClosureState,
 		&v.ComplianceViolationClosureState, &v.ComplianceViolationDate, &v.SuspensionProcessState,
+		&v.SuspensionProcessOverridden,
 		&v.OnboardingStatus, &v.Account.IsPartner,
 		&v.GoLivePlanDate, &v.GoLiveDate, &v.OnboardingExpiryDate,
 		&v.OnboardingStartDate,
@@ -739,6 +742,7 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		    invoice_due_date_closure_state = COALESCE($3::invoice_due_date_closure_state_enum, invoice_due_date_closure_state),
 		    compliance_violation_closure_state = COALESCE($4::compliance_violation_closure_state_enum, compliance_violation_closure_state),
 		    verification_enabled = COALESCE($6::boolean, verification_enabled),
+		    suspension_process_overridden = COALESCE($14::boolean, suspension_process_overridden),
 		    suspension_process_state = COALESCE($7::jsonb, suspension_process_state),
 		    onboarding_status = COALESCE($8::text::onboarding_status_enum, onboarding_status),
 		    onboarding_owner_id = COALESCE($9::uuid, onboarding_owner_id),
@@ -749,12 +753,13 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		    updated_on = NOW(),
 		    updated_by = $5
 		WHERE id = $1
-		RETURNING id, updated_on, updated_by, verification_enabled`,
+		RETURNING id, updated_on, updated_by, verification_enabled, suspension_process_overridden`,
 		id, closureEnumLabel(req.EndDateClosureState), closureEnumLabel(req.InvoiceDueDateClosureState),
 		closureEnumLabel(req.ComplianceViolationClosureState), updatedBy, req.VerificationEnabled, suspensionStateArg(req.SuspensionProcessState),
 		onboardingStatus, onboardingOwner,
 		dates.Start, dates.GoLivePlan, dates.GoLive, dates.Expiry,
-	).Scan(&res.ID, &res.UpdatedOn, &res.UpdatedBy, &res.VerificationEnabled)
+		req.SuspensionProcessOverridden,
+	).Scan(&res.ID, &res.UpdatedOn, &res.UpdatedBy, &res.VerificationEnabled, &res.SuspensionProcessOverridden)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 			// The enum type name in pgErr.Message is logged, never returned.
