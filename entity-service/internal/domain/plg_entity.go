@@ -408,6 +408,11 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// OwnerEmails matches the organisation's PLG CS owner by email address,
+	// any of them, trimmed and ignoring case, so a dashboard can name an
+	// owner without their user id. A registration matches by its
+	// organisation's owner. Never with Unowned.
+	OwnerEmails []string `json:"ownerEmails"`
 	// CountryNames matches the organisation's country (as plg_organization_v
 	// resolves it, inherited from a sibling when the row has none), any of
 	// them, trimmed and ignoring case. CountryUnknown true matches the

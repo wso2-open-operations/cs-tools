@@ -1085,6 +1085,7 @@ func buildRegistrationConditions(f *domain.OrganizationSearchFilters, b *argBuil
 	if f.Unowned != nil && *f.Unowned {
 		conds = append(conds, `v.plg_cs_owner IS NULL`)
 	}
+	conds = append(conds, ownerEmailConditions(f, b, `v.plg_cs_owner_email`)...)
 	if f.RegisteredFrom != nil {
 		conds = append(conds, `v.registered_on >= `+b.add(*f.RegisteredFrom))
 	}

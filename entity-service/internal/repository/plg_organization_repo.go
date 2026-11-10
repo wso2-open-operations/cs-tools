@@ -76,6 +76,7 @@ func buildConditions(f *domain.OrganizationSearchFilters, b *argBuilder) []strin
 	if f.Unowned != nil && *f.Unowned {
 		conds = append(conds, `v.plg_cs_owner IS NULL`)
 	}
+	conds = append(conds, ownerEmailConditions(f, b, `v.plg_cs_owner_email`)...)
 	if f.RegisteredFrom != nil {
 		conds = append(conds, `v.created_on >= `+b.add(*f.RegisteredFrom))
 	}
@@ -121,6 +122,19 @@ func playbookConditions(f *domain.OrganizationSearchFilters, b *argBuilder, pair
 		conds = append(conds, `NOT `+answered(``))
 	}
 	return conds
+}
+
+// ownerEmailConditions is the ownerEmails filter on column, the owner's email
+// address: any of them, trimmed and ignoring case.
+func ownerEmailConditions(f *domain.OrganizationSearchFilters, b *argBuilder, column string) []string {
+	if len(f.OwnerEmails) == 0 {
+		return nil
+	}
+	emails := make([]string, len(f.OwnerEmails))
+	for i, e := range f.OwnerEmails {
+		emails[i] = strings.ToLower(strings.TrimSpace(e))
+	}
+	return []string{`LOWER(` + column + `) = ANY(` + b.add(emails) + `::TEXT[])`}
 }
 
 // countryConditions are the country filters on column, the organisation's

@@ -33,7 +33,9 @@ func NewOrganizationService(repo repository.OrganizationRepository) Organization
 // The owner filter carries ids, so it is checked as UUIDs rather than passed
 // through as free text. Country names are free text, each one non-blank and
 // at most maxPlgCountryNameLength characters, and never with countryUnknown
-// (no organisation has both a country and none). The playbook task and answer
+// (no organisation has both a country and none). Owner emails each have
+// text on both sides of an @ and are at most maxPlgOwnerEmailLength
+// characters, and never come with unowned. The playbook task and answer
 // codes are 1 to maxPlgPlaybookCodeLength characters; playbookAnswers and
 // playbookUnanswered each need playbookTask and never come together.
 func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
@@ -56,6 +58,15 @@ func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
 	}
 	if len(f.CountryNames) > 0 && f.CountryUnknown != nil && *f.CountryUnknown {
 		return &apierror.ValidationError{Msg: "filters.countryNames and filters.countryUnknown cannot be combined"}
+	}
+	for _, e := range f.OwnerEmails {
+		e = strings.TrimSpace(e)
+		if local, host, ok := strings.Cut(e, "@"); !ok || local == "" || host == "" || utf8.RuneCountInString(e) > maxPlgOwnerEmailLength {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("filters.ownerEmails entries must be email addresses of at most %d characters", maxPlgOwnerEmailLength)}
+		}
+	}
+	if len(f.OwnerEmails) > 0 && f.Unowned != nil && *f.Unowned {
+		return &apierror.ValidationError{Msg: "filters.ownerEmails and filters.unowned cannot be combined"}
 	}
 	return validatePlaybookFilters(f)
 }
@@ -83,6 +94,10 @@ func validatePlaybookFilters(f *domain.OrganizationSearchFilters) error {
 
 // maxPlgCountryNameLength is the longest country name a filter takes.
 const maxPlgCountryNameLength = 100
+
+// maxPlgOwnerEmailLength is the longest owner email address a filter takes,
+// the longest an email address can be.
+const maxPlgOwnerEmailLength = 254
 
 // maxPlgPlaybookCodeLength is the longest playbook task or answer code a
 // filter takes.
