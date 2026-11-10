@@ -20,9 +20,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -349,5 +351,98 @@ func TestStore_UncommittedBlocksOfUnknownBlobIsEmpty(t *testing.T) {
 	blocks, err := s.UncommittedBlocks(context.Background(), "nothing/here.bin")
 	if err != nil || len(blocks) != 0 {
 		t.Fatalf("UncommittedBlocks = %+v, %v; want an empty list", blocks, err)
+	}
+}
+
+// Copy makes a second blob with the same bytes and type, replaces one that is
+// there, and reports a missing source as ErrNotFound.
+func TestStore_CopyDuplicatesABlobInsideAzure(t *testing.T) {
+	s := integrationStore(t)
+	ctx := context.Background()
+	src, dst := "stage/file.bin.upload", "final/file.bin"
+
+	data := randomBytes(t, 1024*1024+7)
+	if err := s.PutBlock(ctx, src, 0, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Commit(ctx, src, 1, "application/pdf"); err != nil {
+		t.Fatal(err)
+	}
+	// Something else already sits at the destination: the copy replaces it.
+	if err := s.PutBlock(ctx, dst, 0, strings.NewReader("old"), 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Commit(ctx, dst, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Copy(ctx, src, dst); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	info, err := s.Stat(ctx, dst)
+	if err != nil || info.Size != int64(len(data)) || info.ContentType != "application/pdf" {
+		t.Fatalf("Stat of the copy = %+v, %v", info, err)
+	}
+	obj, err := s.Open(ctx, dst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer obj.Body.Close()
+	got, _ := io.ReadAll(obj.Body)
+	if !bytes.Equal(got, data) {
+		t.Fatal("the copy is not the same bytes")
+	}
+
+	if err := s.Copy(ctx, "no/such/blob", "final/other.bin"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Copy of a missing source = %v, want ErrNotFound", err)
+	}
+}
+
+// The whole direct path against a blob service: a file goes up through the
+// upload links, is committed, is read back through a download link, and the
+// bytes are the same (checked by SHA-256).
+func TestStore_DirectRoundTripThroughLinks(t *testing.T) {
+	s := integrationStore(t)
+	ctx := context.Background()
+	key := "direct/file.bin.upload"
+	data := randomBytes(t, 3*1024*1024+11)
+	const blockSize = 1024 * 1024
+	count := (len(data) + blockSize - 1) / blockSize
+
+	links, _, err := s.UploadLinks(key, count, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("UploadLinks: %v", err)
+	}
+	for i, link := range links {
+		part := data[i*blockSize : min((i+1)*blockSize, len(data))]
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, link, bytes.NewReader(part))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT block %d: %v", i, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("PUT block %d: status %d", i, resp.StatusCode)
+		}
+	}
+	if err := s.Commit(ctx, key, count, "application/octet-stream"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	link, _, err := s.DownloadLink(key, "report.bin", "application/octet-stream", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("DownloadLink: %v", err)
+	}
+	resp, err := http.Get(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || sha256.Sum256(got) != sha256.Sum256(data) {
+		t.Fatalf("download: status %d, %d bytes, checksum equal: %v", resp.StatusCode, len(got), sha256.Sum256(got) == sha256.Sum256(data))
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
+		t.Errorf("Content-Disposition = %q, want an attachment", cd)
 	}
 }
