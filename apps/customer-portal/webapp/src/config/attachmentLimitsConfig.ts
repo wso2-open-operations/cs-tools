@@ -20,7 +20,7 @@ const MIB = 1024 * 1024;
 /** Entity-service's own defaults (`ATTACHMENT_MAX_MB`, `INLINE_IMAGES_TOTAL_MAX_MB`). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 /** Ceilings: a configured value above one is ignored and the default is used. */
-export const MAX_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const MAX_ENTITY_ATTACHMENT_MAX_MB = 1024;
 export const MAX_INLINE_IMAGES_TOTAL_MAX_MB = 25;
 /** Total size of the inline images in one comment or description. */
 export const DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB = 1;
