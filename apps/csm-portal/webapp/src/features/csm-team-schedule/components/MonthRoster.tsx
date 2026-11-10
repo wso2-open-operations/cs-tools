@@ -44,6 +44,16 @@ import {
 } from "../utils/engagementAllocations";
 import { ordinaryDayCode, REGULAR_HOURS_CODE } from "../utils/standingDay";
 import { useTeamColour, useTeamName } from "../utils/teamColourContext";
+import { OFF_TIMESHEET_NOTE, tagHoverText, tagSideText } from "../utils/tagHover";
+
+/** A tag's legend line: its name, and when its days take people off the
+ *  timesheet, that too, so it reads without hovering. */
+const legendTagLabel = (kind: ScheduleAbsenceKind): string => {
+  const side = tagSideText(kind);
+  if (!kind.excludesFromTimesheet) return side;
+  const note = OFF_TIMESHEET_NOTE.toLowerCase();
+  return side ? `${side} (${note})` : note.charAt(0).toUpperCase() + note.slice(1);
+};
 
 export type { RosterSpan };
 const SPANS: readonly RosterSpan[] = [1, 3, 6];
@@ -710,7 +720,7 @@ export default function MonthRoster({
               },
               code: "",
               token: "",
-              title: kind.label,
+              title: tagHoverText(kind),
               isRotation: false,
               quiet: true,
             });
@@ -743,7 +753,7 @@ export default function MonthRoster({
             // Clipped to what a day column holds; the title has it in full.
             code: ab.allocatedTo ? ab.allocatedTo.slice(0, 6) : (kind?.shortCode ?? ab.kindCode),
             token: kind?.colourToken ?? "",
-            title: [kind?.label ?? ab.kindCode, ab.allocatedTo].filter(Boolean).join(" · "),
+            title: [kind ? tagHoverText(kind) : ab.kindCode, ab.allocatedTo].filter(Boolean).join(" · "),
             isRotation: false,
           });
         }
@@ -920,7 +930,7 @@ export default function MonthRoster({
           group: kind.bucket === "LEAVE" ? "Leave" : "Allocations",
           code: kind.shortCode,
           token: kind.colourToken,
-          label: kind.label,
+          label: legendTagLabel(kind),
         });
         return;
       }
@@ -981,7 +991,7 @@ export default function MonthRoster({
         group: kind.bucket === "LEAVE" ? "Leave" : "Allocations",
         code: kind.shortCode,
         token: kind.colourToken,
-        label: kind.label,
+        label: legendTagLabel(kind),
       });
     }
     // A move worked as that team's hours (the Brazil rotation, picked as
