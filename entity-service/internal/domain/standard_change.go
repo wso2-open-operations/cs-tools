@@ -315,6 +315,11 @@ type StandardChangeEvidence struct {
 	ClosedOn *time.Time `json:"closedOn"`
 	// Customer is the change request's customer (its project's account) now.
 	Customer *EntityRef `json:"customer"`
+	// HasDeviation: it deviated from its implementation plan. CABRejected: the
+	// CAB rejected it at least once before it was done (see the proposal's
+	// cabHistory).
+	HasDeviation bool `json:"hasDeviation"`
+	CABRejected  bool `json:"cabRejected"`
 }
 
 // StandardChangeProposalStage is one approval stage of a proposal: the CAB's
@@ -400,6 +405,13 @@ type StandardChangeProposal struct {
 	// cancelled. ChangeRequestsInNewTotal counts them all.
 	ChangeRequestsInNew      []EntityRef `json:"changeRequestsInNew"`
 	ChangeRequestsInNewTotal int         `json:"changeRequestsInNewTotal"`
+	// CABHistory is what the CAB said about changes like this one, read when the
+	// proposal is (never stored): its rejections and comments on the source and
+	// evidence change requests, and the same customer's change requests the CAB
+	// rejected within the suggestion window whose normalised subject is that of
+	// the source or of an evidence change request. Shown to the approvers; it
+	// decides nothing. Null only where no CAB history is wired.
+	CABHistory *StandardChangeCABHistory `json:"cabHistory"`
 	// What the caller may do now (advisory; every action re-checks).
 	CanEdit     bool `json:"canEdit"`
 	CanSubmit   bool `json:"canSubmit"`

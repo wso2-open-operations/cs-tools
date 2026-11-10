@@ -35,6 +35,9 @@ import (
 // dismissals. The clustering is the service's (standard_change_suggestion.go);
 // nothing here decides.
 type StandardChangeSuggestionRepository interface {
+	// CABDecisionReader: the CAB's rejections and comments, the pushback a
+	// suggestion shows (standard_change_cab_history.go).
+	CABDecisionReader
 	// NextCustomers lists, in id order after the cursor (exclusive; "" is the
 	// start), at most limit of the customers a run listed when it started.
 	NextCustomers(ctx context.Context, runID, after string, limit int) ([]string, error)

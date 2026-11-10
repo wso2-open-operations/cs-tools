@@ -172,6 +172,13 @@ func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, a
 	for _, row := range rows {
 		sg := row.Suggestion
 		sg.Dismissal, sg.OpenProposals = nil, []domain.EntityRef{}
+		// A snapshot computed before the CAB's pushback was recorded has none.
+		if sg.CABRejections == nil {
+			sg.CABRejections = []domain.StandardChangeCABRejection{}
+		}
+		if sg.CABComments == nil {
+			sg.CABComments = []domain.StandardChangeCABComment{}
+		}
 		seen := map[string]bool{}
 		for _, id := range row.MemberIDs {
 			for _, p := range proposals[id] {
@@ -369,9 +376,20 @@ func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, a
 	if err != nil {
 		return nil, len(cands), err
 	}
+	// The CAB's pushback: the members' own decisions, and the change requests
+	// the CAB rejected that look like a cluster (attachCABLookalikes).
+	cab, err := s.repo.CABDecisionsOf(ctx, memberIDs)
+	if err != nil {
+		return nil, len(cands), err
+	}
+	lookalikes, err := s.repo.CABRejectedLookalikes(ctx, account, since)
+	if err != nil {
+		return nil, len(cands), err
+	}
+	attached := attachCABLookalikes(clusters, lookalikes)
 	rows := make([]repository.SuggestionSnapshotRow, 0, len(clusters))
-	for _, cl := range clusters {
-		sg := judgeSuggestionCluster(cl, crit, incidents, nil)
+	for i, cl := range clusters {
+		sg := judgeSuggestionCluster(cl, crit, incidents, nil, cab, attached[i])
 		ids := make([]string, len(cl.nodes))
 		for i, n := range cl.nodes {
 			ids[i] = n.c.ID

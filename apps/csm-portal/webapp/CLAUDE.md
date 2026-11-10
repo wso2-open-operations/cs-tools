@@ -762,7 +762,19 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     left out on purpose with the similar-templates check (2026-11-06); whether a template already covers a
     suggestion is for the reader to judge. The chevron opens the details: what it misses, risk and impact
     counts (unknown included), incidents, open proposals, the dismissal, and the change requests (newest 100),
-    each marked when it joined as a clone or deviated from its plan.
+    each marked when it joined as a clone, deviated from its plan or was rejected by the CAB (" · rejected by
+    the CAB").
+    **The CAB's pushback** (entity-service CLAUDE.md, "The CAB's pushback"; helpers in `utils/cabHistory.ts`,
+    the list in `components/StandardChangeCabPushback.tsx`) is shown like the incidents, never as a reason a
+    suggestion cannot be proposed: on the row, outlined chips "2 CAB rejections" (error), "3 CAB comments"
+    (warning) and, for consistency, "1 deviated from plan" (warning; `suggestionDeviationCount`: the
+    `deviationCount` sent, else the listed members that deviated); in the details a "CAB pushback" line lists
+    each rejected change request (latest rejection: when, by whom, the comment; a look-alike, one of the
+    customer's rejected change requests with the same subject that is not a member, says so) and the CAB's
+    comments (approver, decision, date, the comment as plain text), each change request linked to
+    `/operations/change-requests/<id>`, newest 20 of each with "The newest N are listed." A snapshot computed
+    before these fields existed has none (`cabHistoryOf` reads absent and null as none). Tests:
+    `StandardChangeSuggestions.test.tsx` ("the CAB's pushback and the deviations"), `utils/__tests__/cabHistory.test.ts`.
   - **"Propose a standard change"** opens `ProposeStandardChangeDialog` (mounted only while open): the name and the
     customer, both required, and only then "Start the draft" creates it (`kind: "new"`, `name`, `accountId`), so
     leaving creates nothing: no empty "Untitled standard change" drafts. Once the customer is chosen it lists their
@@ -902,6 +914,17 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   (409, the page reloads). Only the latest stage can read as open, "Withdrawn" or "Cancelled"; an earlier stage left
   undecided reads "Not decided", never as waiting. The read-only view shows the Summary above what the template specifies. A rejection needs a comment.
   `canCancel` (a CAB member, someone else's open proposal) offers **Cancel proposal** with a required reason.
+  **CAB history** (`CabHistorySection`, a named region placed directly above the Approval section, so it is read
+  before Authorise / Reject): the proposal's `cabHistory` (entity-service reads it live: the CAB's rejections and
+  comments on the source and evidence change requests, and the customer's CAB-rejected look-alikes). With a rejection
+  it has a warning edge and a warning `Alert` headline ("The CAB rejected 2 change requests like this one",
+  `cabHistoryHeadline`), then the same list as a suggestion's details (links through `openChangeRequest`, so Back
+  returns here); with comments only an info one; "No CAB rejections or comments" when empty; not rendered when the
+  answer carries no `cabHistory`. The decision dialog (Authorise and Reject) repeats it in one line
+  (`cabHistorySummary`, a `role="note"` named "CAB history summary", `ReasonDialog`'s `notice`), so it is in front of
+  the approver as they decide. Evidence rows carry "Rejected by the CAB" (error) and "Deviated from plan" (warning)
+  chips (`cabRejected`, `hasDeviation`). It decides nothing. Tests: `StandardChangeProposalPage.test.tsx` ("the
+  CAB's history, in front of the approvers").
   The decision banner names who ended it (`decisionHeadline` / `settledBy`: "Approved by" / "Rejected by the CAB" for
   the two-approval "CAB Approval" stage; "... by the Standard Change Authority" for that older stage; an older
   proposal settled at its one-approval CAB stage, "Approved at the CAB Approval stage", told apart by

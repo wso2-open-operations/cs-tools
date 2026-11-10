@@ -68,6 +68,15 @@ import {
   SUGGESTIONS_NOT_COMPUTED_YET,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import { standardChangeProposalPath } from "@features/csm-operations/utils/standardChanges";
+import {
+  cabCommentsLabel,
+  cabHistoryOf,
+  cabRejectionsLabel,
+  deviationLabel,
+  hasCabPushback,
+  suggestionDeviationCount,
+} from "@features/csm-operations/utils/cabHistory";
+import StandardChangeCabPushback from "@features/csm-operations/components/StandardChangeCabPushback";
 import type { BeEntityRef, BeStandardChangeSuggestion } from "@api/backend/types";
 
 const COLUMNS = 6;
@@ -152,6 +161,11 @@ function SuggestionDetails({ s }: { s: BeStandardChangeSuggestion }): JSX.Elemen
           </Typography>
         </DetailLine>
       )}
+      {hasCabPushback(s) && (
+        <DetailLine label="CAB pushback">
+          <StandardChangeCabPushback history={s} />
+        </DetailLine>
+      )}
       {suggestionSampleText(s) && (
         <DetailLine label="Based on">
           <Typography variant="body2">{suggestionSampleText(s)}</Typography>
@@ -168,6 +182,7 @@ function SuggestionDetails({ s }: { s: BeStandardChangeSuggestion }): JSX.Elemen
                 {` · ${m.subject} · ${m.state === "rollback" ? "rolled back" : "closed"} ${formatDate(m.completedOn)}`}
                 {m.joinedBy === "clone" ? " · a clone" : ""}
                 {m.hasDeviation ? " · deviated from its plan" : ""}
+                {m.cabRejected ? " · rejected by the CAB" : ""}
               </Typography>
             </li>
           ))}
@@ -233,7 +248,9 @@ function DismissDialog({
  * judges them once a day and `GET /standard-change-suggestions` returns the
  * last snapshot (`computedOn`, shown as "Updated …"); nothing is computed or
  * decided here. Each row offers Propose (a new standard change from its newest
- * clean change request, citing the others) and Dismiss with a reason. It is not
+ * clean change request, citing the others) and Dismiss with a reason. The CAB's
+ * pushback (its rejections and comments) and the deviations from plan are shown
+ * as chips and in the details, like the incidents; they decide nothing. It is not
  * related to the customer's existing templates, on purpose (see
  * suggestionActions).
  */
@@ -423,6 +440,15 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                             )}
                             {s.incidents.length > 0 && (
                               <Chip size="small" variant="outlined" color="error" label={`${s.incidents.length} incident${s.incidents.length === 1 ? "" : "s"}`} />
+                            )}
+                            {cabRejectionsLabel(cabHistoryOf(s).rejectionCount) && (
+                              <Chip size="small" variant="outlined" color="error" label={cabRejectionsLabel(cabHistoryOf(s).rejectionCount)} />
+                            )}
+                            {cabCommentsLabel(cabHistoryOf(s).commentCount) && (
+                              <Chip size="small" variant="outlined" color="warning" label={cabCommentsLabel(cabHistoryOf(s).commentCount)} />
+                            )}
+                            {deviationLabel(suggestionDeviationCount(s)) && (
+                              <Chip size="small" variant="outlined" color="warning" label={deviationLabel(suggestionDeviationCount(s))} />
                             )}
                           </Box>
                         </TableCell>

@@ -34202,7 +34202,10 @@ components:
         proposeFrom:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
-          description: The newest closed member with no deviation from its plan, what a NEW proposal starts from (null when there is none).
+          description: >-
+            What a NEW proposal starts from: the newest closed member that neither deviated from its
+            plan nor was ever rejected by the CAB, else the newest closed one with no deviation (null
+            when there is none).
         evidence: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Every other closed member, newest first, at most 99 (a proposal cites at most 100)."}
         openProposals: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Open proposals already started from or citing a member."}
         members:
@@ -34220,10 +34223,17 @@ components:
               impact: {type: string, nullable: true}
               clonedFromId: {type: string, format: uuid, nullable: true}
               hasDeviation: {type: boolean}
+              cabRejected: {type: boolean, description: "The CAB rejected it at least once (it was then resubmitted and completed)."}
+              cabCommentCount: {type: integer, description: "Comments CAB approvers wrote on it, with any decision."}
               joinedBy: {type: string, enum: [subject, clone]}
         dismissal:
           allOf: [{$ref: '#/components/schemas/StandardChangeSuggestionDismissal'}]
           nullable: true
+        deviationCount: {type: integer, description: "Members that deviated from their implementation plan (all of them, not only those listed)."}
+        cabRejectionCount: {type: integer, description: "See StandardChangeCABHistory. Shown only: the CAB's pushback is never a criterion, and changes no count, key or cluster."}
+        cabRejections: {type: array, items: {$ref: '#/components/schemas/StandardChangeCABRejection'}}
+        cabCommentCount: {type: integer}
+        cabComments: {type: array, items: {$ref: '#/components/schemas/StandardChangeCABComment'}}
         sample:
           type: object
           description: >-
@@ -34232,6 +34242,55 @@ components:
           properties:
             compared: {type: integer}
             total: {type: integer}
+    StandardChangeCABHistory:
+      type: object
+      description: >-
+        What the CAB said about a set of change requests: a suggestion's members and the look-alikes
+        attached to it, or a proposal's source and evidence and theirs. A CAB decision is an approver's
+        row on a change request's CAB stage, the stage the change request approvals view names as the
+        CAB's (a "CAB Approval", "Authorize" or "ECAB Approval" stage, an unlabelled second stage, or an
+        unlabelled stage of the "CAB Approval" group). A look-alike is one of the same customer's change
+        requests that the CAB rejected within the suggestion window, in any state but Closed and
+        Rollback and not raised from a template, whose normalised subject is the suggestion's (or that
+        of the proposal's source or an evidence change request). For a suggestion, a look-alike whose
+        subject several clusters share joins the one whose plans are most like its own (word-set
+        Jaccard), else the largest. A suggestion computed before these fields existed has zero counts
+        and empty lists until the next refresh.
+      properties:
+        cabRejectionCount: {type: integer, description: "Change requests the CAB rejected, each once."}
+        cabRejections:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeCABRejection'}
+          description: Their latest CAB rejection each, newest first, at most 20.
+        cabCommentCount: {type: integer, description: "Comments CAB approvers wrote, with any decision (an approval that asks for more is pushback too)."}
+        cabComments:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeCABComment'}
+          description: Newest first, at most 20.
+    StandardChangeCABChangeRequest:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        state: {type: string, description: "Its state now, lower case (canceled, closed, ...)."}
+    StandardChangeCABRejection:
+      type: object
+      properties:
+        changeRequest: {$ref: '#/components/schemas/StandardChangeCABChangeRequest'}
+        member: {type: boolean, description: "A member of the suggestion (a proposal's source or evidence); false for a look-alike."}
+        rejectedOn: {type: string, format: date-time}
+        rejectedBy: {type: string, description: "The CAB member's name; empty when unknown."}
+        comment: {type: string, description: "The rejection's comment as plain text; empty when none."}
+    StandardChangeCABComment:
+      type: object
+      properties:
+        changeRequest: {$ref: '#/components/schemas/StandardChangeCABChangeRequest'}
+        member: {type: boolean}
+        approverName: {type: string}
+        state: {type: string, description: "The approver's decision: APPROVED, REJECTED, REQUESTED, CANCELLED, ..."}
+        comment: {type: string, description: "Plain text (markup removed; ServiceNow comments can be rich text), at most 2000 characters."}
+        decidedOn: {type: string, format: date-time}
     StandardChangeSuggestionBreakdown:
       type: object
       properties:
@@ -34306,6 +34365,8 @@ components:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
           description: "The change request's customer now (its project's account); null when it has none."
+        hasDeviation: {type: boolean, description: "It deviated from its implementation plan."}
+        cabRejected: {type: boolean, description: "The CAB rejected it at least once before it was done (see the proposal's cabHistory)."}
     StandardChangeProposalApprover:
       type: object
       properties:
@@ -34383,6 +34444,15 @@ components:
                 template that are still New, newest 100 (id and number). Once the template is retired
                 they cannot request approval and can only be cancelled.
             changeRequestsInNewTotal: {type: integer, description: 'How many change requests changeRequestsInNew stands for (it lists at most 100).'}
+            cabHistory:
+              allOf: [{$ref: '#/components/schemas/StandardChangeCABHistory'}]
+              nullable: true
+              description: >
+                What the CAB said about changes like this one, read whenever the proposal is (never
+                stored): its rejections and comments on the source and evidence change requests, and the
+                same customer's change requests the CAB rejected in the last STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS
+                whose normalised subject is that of the source or of an evidence change request. Shown to
+                the approvers; it decides nothing.
             createdOn: {type: string, format: date-time}
             updatedOn: {type: string, format: date-time}
             canEdit: {type: boolean}

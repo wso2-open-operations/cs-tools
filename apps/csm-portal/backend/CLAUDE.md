@@ -522,6 +522,11 @@ overrides it once forwarded are configuration now); `POST
 (204) are `PermWrite`, through the same `forward`, so a refusal keeps its message and code.
 `TestStandardChangeHandler_SuggestionsQuery`.
 
+**The CAB's pushback passes through untouched**: a suggestion's `cabRejectionCount` / `cabRejections` /
+`cabCommentCount` / `cabComments` / `deviationCount` (and a member's `cabRejected` / `cabCommentCount`),
+and a proposal's `cabHistory` and its evidence rows' `hasDeviation` / `cabRejected`, are entity-service's
+(its CLAUDE.md, "The CAB's pushback"); this proxy decodes none of them.
+
 ## Change request tags go through the case tag routes
 
 `GET /change-requests/{id}` is a raw pass-through, so the `tags` array the

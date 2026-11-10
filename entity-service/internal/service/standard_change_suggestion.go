@@ -49,6 +49,19 @@ import (
 //     confirmed cluster rather than bridging two of them.
 //  3. Clone lineage joins members directly: a member cloned from another joins
 //     that member's cluster whatever its subject or plan says.
+//
+// Then, after the clusters are built and keyed, the CAB's pushback is attached
+// (standard_change_cab_history.go). It never changes a cluster, a count, a
+// criterion or a key; it is shown, like a deviation:
+//   - a member's own CAB rejections and comments (a member the CAB rejected was
+//     resubmitted and completed);
+//   - look-alikes: the customer's change requests the CAB rejected within the
+//     window that are not candidates (any state but Closed and Rollback, so
+//     usually Canceled; not raised from a template). One joins the cluster whose
+//     core key is its suggestionKey(subject); when several clusters share that
+//     key, the one whose core members' plans are most like its plan (word-set
+//     Jaccard), else the largest. A look-alike whose key no cluster has is shown
+//     nowhere.
 // No embeddings and no model are used: the rules are deterministic and
 // explainable, and only self-hosted models would be allowed anyway.
 //
@@ -455,11 +468,14 @@ func plural(n int, one, many string) string {
 }
 
 // judgeSuggestionCluster turns a cluster into a suggestion: its counts, the
-// criteria it misses, what a proposal would start from and cite. incidents and
-// openProposals are keyed by change request id. The dismissal is left to the
-// caller.
+// criteria it misses, what a proposal would start from and cite, and the CAB's
+// pushback. incidents, openProposals and cab (the members' CAB decisions) are
+// keyed by change request id; lookalikes are the CAB-rejected change requests
+// attached to this cluster (attachCABLookalikes). The CAB's pushback never
+// changes a count or a criterion. The dismissal is left to the caller.
 func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSuggestionCriteria,
-	incidents, openProposals map[string][]domain.EntityRef) domain.StandardChangeSuggestion {
+	incidents, openProposals map[string][]domain.EntityRef,
+	cab map[string]repository.CABChangeRequest, lookalikes []repository.CABChangeRequest) domain.StandardChangeSuggestion {
 	id := cl.id
 	if id == "" {
 		id = cl.key
@@ -482,6 +498,19 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 	}
 	s.LastCompletedOn = cl.nodes[0].c.CompletedOn
 	s.FirstCompletedOn = cl.nodes[len(cl.nodes)-1].c.CompletedOn
+	// What a proposal starts from: the newest closed member that neither
+	// deviated from its plan nor was ever rejected by the CAB; failing that, the
+	// newest closed one with no deviation.
+	source := -1
+	for pass := 0; pass < 2 && source == -1; pass++ {
+		for i, n := range cl.nodes {
+			if n.c.State == "CLOSED" && !n.c.HasDeviation && (pass == 1 || !cab[n.c.ID].Rejected()) {
+				source = i
+				break
+			}
+		}
+	}
+	cabSubjects := make([]cabSubject, 0, len(cl.nodes)+len(lookalikes))
 	for i, n := range cl.nodes {
 		c := n.c
 		if c.State == "CLOSED" {
@@ -504,12 +533,17 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 			}
 		}
 		ref := domain.EntityRef{ID: c.ID, Name: c.Number}
-		if c.State == "CLOSED" {
-			if s.ProposeFrom == nil && !c.HasDeviation {
-				s.ProposeFrom = &ref
-			} else if len(s.Evidence) < suggestionMaxEvidence {
-				s.Evidence = append(s.Evidence, ref)
-			}
+		if i == source {
+			s.ProposeFrom = &ref
+		} else if c.State == "CLOSED" && len(s.Evidence) < suggestionMaxEvidence {
+			s.Evidence = append(s.Evidence, ref)
+		}
+		if c.HasDeviation {
+			s.DeviationCount++
+		}
+		decisions, hasCAB := cab[c.ID]
+		if hasCAB {
+			cabSubjects = append(cabSubjects, cabSubject{cr: decisions, member: true})
 		}
 		if len(s.Members) < suggestionMaxListed {
 			joined := "subject"
@@ -520,12 +554,18 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 				ID: c.ID, Number: c.Number, Subject: c.Subject, State: strings.ToLower(c.State),
 				CompletedOn: c.CompletedOn, Risk: lowerPtr(c.Risk), Impact: lowerPtr(c.Impact),
 				ClonedFrom: c.ClonedFrom, HasDeviation: c.HasDeviation, JoinedBy: joined,
+				CABRejected: decisions.Rejected(), CABCommentCount: cabCommentCount(decisions),
 			})
 		}
 	}
+	for _, la := range lookalikes {
+		cabSubjects = append(cabSubjects, cabSubject{cr: la})
+	}
+	s.StandardChangeCABHistory = buildCABHistory(cabSubjects)
 	// ProposeFrom stays nil when no closed member is clean (each deviated from its
 	// plan, or none closed): there is nothing to start a proposal from, which the
-	// page says; the closed ones stay evidence. Not a criterion of its own.
+	// page says; the closed ones stay evidence. Not a criterion of its own. A CAB
+	// rejection only moves the choice to another clean member, never empties it.
 	if done := s.ClosedCount + s.RollbackCount; done > 0 {
 		s.SuccessRate = float64(s.ClosedCount) / float64(done)
 	}

@@ -201,7 +201,7 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 		e := sgCand(5, "Deploy CApps", "CLOSED", sgPlan) // five closed: the default minimum
 		b.Risk, c.Risk = sp("LOW"), sp("MODERATE")
 		d.Impact = sp("MEDIUM")
-		s := judgeSuggestionCluster(mk(a, b, c, d, e), sgCriteria, nil, nil)
+		s := judgeSuggestionCluster(mk(a, b, c, d, e), sgCriteria, nil, nil, nil, nil)
 		if !s.Eligible || len(s.Unmet) != 0 {
 			t.Fatalf("eligible = %v, unmet = %v", s.Eligible, s.Unmet)
 		}
@@ -229,7 +229,7 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 		a, b := sgCand(1, "Deploy CApps", "CLOSED", sgPlan), sgCand(2, "Deploy CApps", "ROLLBACK", sgPlan)
 		a.Risk, b.Impact = sp("HIGH"), sp("HIGH")
 		incidents := map[string][]domain.EntityRef{a.ID: {{ID: "i1", Name: "INC1"}}, b.ID: {{ID: "i1", Name: "INC1"}}}
-		s := judgeSuggestionCluster(mk(a, b), sgCriteria, incidents, nil)
+		s := judgeSuggestionCluster(mk(a, b), sgCriteria, incidents, nil, nil, nil)
 		want := []string{
 			"closed 1 time in 12 months (needs 5)",
 			"success rate 50% (needs 90%)",
@@ -247,7 +247,7 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 	t.Run("no clean member to start from", func(t *testing.T) {
 		a, b := sgCand(1, "Deploy CApps", "CLOSED", sgPlan), sgCand(2, "Deploy CApps", "ROLLBACK", sgPlan)
 		a.HasDeviation = true
-		if s := judgeSuggestionCluster(mk(a, b), sgCriteria, nil, nil); s.ProposeFrom != nil || len(s.Evidence) != 1 {
+		if s := judgeSuggestionCluster(mk(a, b), sgCriteria, nil, nil, nil, nil); s.ProposeFrom != nil || len(s.Evidence) != 1 {
 			t.Errorf("proposeFrom = %+v, evidence = %v", s.ProposeFrom, s.Evidence)
 		}
 	})
@@ -256,7 +256,7 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 		for i := 1; i <= 150; i++ {
 			cands = append(cands, sgCand(i, "Deploy CApps", "CLOSED", sgPlan))
 		}
-		s := judgeSuggestionCluster(mk(cands...), sgCriteria, nil, nil)
+		s := judgeSuggestionCluster(mk(cands...), sgCriteria, nil, nil, nil, nil)
 		if len(s.Evidence) != 99 || s.MemberCount != 150 || len(s.Members) != 100 || s.ClosedCount != 150 {
 			t.Errorf("evidence %d, members %d listed of %d, closed %d", len(s.Evidence), len(s.Members), s.MemberCount, s.ClosedCount)
 		}
@@ -269,6 +269,8 @@ type fakeSuggestionRepo struct {
 	cands       []repository.SuggestionCandidate
 	sinces      []time.Time
 	incidents   map[string][]domain.EntityRef
+	cab         map[string]repository.CABChangeRequest   // change request id -> its CAB decisions
+	lookalikes  map[string][]repository.CABChangeRequest // account -> its CAB-rejected look-alikes
 	proposals   map[string][]domain.EntityRef
 	dismissals  map[string]map[string]domain.StandardChangeSuggestionDismissal
 	dismissed   []string
@@ -306,6 +308,18 @@ func (f *fakeSuggestionRepo) Candidates(ctx context.Context, account string, sin
 		}
 	}
 	return out, nil
+}
+func (f *fakeSuggestionRepo) CABDecisionsOf(_ context.Context, ids []string) (map[string]repository.CABChangeRequest, error) {
+	out := map[string]repository.CABChangeRequest{}
+	for _, id := range ids {
+		if c, ok := f.cab[id]; ok {
+			out[id] = c
+		}
+	}
+	return out, nil
+}
+func (f *fakeSuggestionRepo) CABRejectedLookalikes(_ context.Context, account string, _ time.Time) ([]repository.CABChangeRequest, error) {
+	return f.lookalikes[account], nil
 }
 func (f *fakeSuggestionRepo) IncidentsOf(context.Context, []string) (map[string][]domain.EntityRef, error) {
 	return f.incidents, nil

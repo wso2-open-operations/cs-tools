@@ -70,6 +70,8 @@ import {
   useWithdrawStandardChangeProposal,
 } from "@features/csm-operations/api/useStandardChanges";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
+import StandardChangeCabPushback from "@features/csm-operations/components/StandardChangeCabPushback";
+import { cabHistoryHeadline, cabHistoryOf, cabHistorySummary, NO_CAB_PUSHBACK } from "@features/csm-operations/utils/cabHistory";
 import StandardChangeContentView, {
   Field,
   StandardChangeParametersTable,
@@ -130,6 +132,7 @@ import type {
   BeChangeRequestSearchView,
   BeDeploymentType,
   BeEntityRef,
+  BeStandardChangeCabHistory,
   BeStandardChangeContent,
   BeStandardChangeEvidence,
   BeStandardChangeParameter,
@@ -355,7 +358,9 @@ function EvidenceTable({
   disabled,
   customerId,
 }: {
-  evidence: Array<ProposalForm["evidence"][number] & Pick<Partial<BeStandardChangeEvidence>, "customer">>;
+  evidence: Array<
+    ProposalForm["evidence"][number] & Pick<Partial<BeStandardChangeEvidence>, "customer" | "hasDeviation" | "cabRejected">
+  >;
   onOpen: (id: string) => void;
   onRemove?: (id: string) => void;
   disabled?: boolean;
@@ -401,6 +406,12 @@ function EvidenceTable({
                         ? `Now a change request of another customer (${e.customer.name})`
                         : "Now a change request of no customer"}
                     </Typography>
+                  )}
+                  {(e.cabRejected || e.hasDeviation) && (
+                    <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>
+                      {e.cabRejected && <Chip size="small" variant="outlined" color="error" label="Rejected by the CAB" />}
+                      {e.hasDeviation && <Chip size="small" variant="outlined" color="warning" label="Deviated from plan" />}
+                    </Box>
                   )}
                 </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(e.closedOn)}</TableCell>
@@ -1008,6 +1019,7 @@ function ReasonDialog({
   label,
   required,
   helperText,
+  notice,
   confirmLabel,
   confirmColor,
   pending,
@@ -1022,6 +1034,8 @@ function ReasonDialog({
   label: string;
   required: boolean;
   helperText?: string;
+  /** Shown under the text, before the field (e.g. the CAB history's summary). */
+  notice?: ReactNode;
   confirmLabel: string;
   confirmColor: "error" | "success";
   pending: boolean;
@@ -1042,6 +1056,7 @@ function ReasonDialog({
       <DialogTitle id={titleId}>{title}</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <DialogContentText>{text}</DialogContentText>
+        {notice}
         {error && <Alert severity="error">{error}</Alert>}
         <TextField
           label={label}
@@ -1076,6 +1091,7 @@ function ReasonDialog({
 function DecisionDialog({
   decision,
   stage,
+  cabHistory,
   pending,
   error,
   onClose,
@@ -1084,6 +1100,8 @@ function DecisionDialog({
   decision: "approved" | "rejected" | null;
   /** The stage the caller decides on. */
   stage: BeStandardChangeProposalStage | null;
+  /** The proposal's CAB history, summed up in front of the approver as they decide (absent: not shown). */
+  cabHistory?: BeStandardChangeCabHistory | null;
   pending: boolean;
   error: string | null;
   onClose: () => void;
@@ -1111,6 +1129,13 @@ function DecisionDialog({
       label={reject ? "Comment (required)" : "Comment (optional)"}
       required={reject}
       helperText={reject ? "Say why, so the proposer can act on it." : undefined}
+      notice={
+        cabHistory ? (
+          <Alert severity={cabHistoryOf(cabHistory).rejectionCount > 0 ? "warning" : "info"} role="note" aria-label="CAB history summary">
+            {cabHistorySummary(cabHistory)}
+          </Alert>
+        ) : undefined
+      }
       confirmLabel={reject ? "Reject" : "Authorise"}
       confirmColor={reject ? "error" : "success"}
       pending={pending}
@@ -1334,6 +1359,55 @@ function decisionHeadline(proposal: BeStandardChangeProposal): string {
  * rejected or withdrawn new-template proposal stays as the record and can be
  * copied into a new one.
  */
+/**
+ * What the CAB said about changes like this one (the proposal's `cabHistory`,
+ * read live by entity-service: its rejections and comments on the source and
+ * evidence change requests, and the customer's CAB-rejected look-alikes). Put
+ * directly above the Approval section, so an approver reads it before the
+ * Authorise / Reject buttons; coloured by what it holds (a rejection is a
+ * warning). It decides nothing.
+ */
+function CabHistorySection({ history, onOpen }: { history: BeStandardChangeCabHistory; onOpen: (id: string) => void }): JSX.Element {
+  const { rejectionCount, commentCount } = cabHistoryOf(history);
+  const empty = rejectionCount === 0 && commentCount === 0;
+  return (
+    <Card
+      component="section"
+      aria-label="CAB history"
+      sx={{
+        p: 2.5,
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        borderLeft: 4,
+        borderColor: rejectionCount > 0 ? "warning.main" : empty ? "divider" : "info.main",
+      }}
+    >
+      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+        CAB history
+      </Typography>
+      {empty ? (
+        <Typography variant="body2" color="text.secondary">
+          {NO_CAB_PUSHBACK}
+        </Typography>
+      ) : (
+        <>
+          <Alert severity={rejectionCount > 0 ? "warning" : "info"}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {cabHistoryHeadline(history)}
+            </Typography>
+            <Typography variant="body2">
+              Read what the CAB said before you decide. A look-alike is one of the customer&apos;s change requests with
+              the same subject that the CAB rejected.
+            </Typography>
+          </Alert>
+          <StandardChangeCabPushback history={history} onOpen={onOpen} memberWord="source or evidence change request" />
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function StandardChangeProposalPage(): JSX.Element {
   const id = useNormalizedIdParam("id");
   const navigate = useNavTransition();
@@ -1619,6 +1693,8 @@ export default function StandardChangeProposalPage(): JSX.Element {
         </>
       )}
 
+      {proposal.cabHistory && <CabHistorySection history={proposal.cabHistory} onOpen={openChangeRequest} />}
+
       {approvers.length > 0 && (
         <Section
           title="Approval"
@@ -1657,6 +1733,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
       <DecisionDialog
         decision={decision}
         stage={myStage}
+        cabHistory={proposal.cabHistory}
         pending={decide.isPending}
         error={decide.isError ? errorText(decide.error, "Could not record the decision.") : null}
         onClose={() => {

@@ -291,4 +291,90 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.getByText(/Promote to DR · closed .* · a clone/)).toBeInTheDocument();
     expect(screen.getByText("4 low, 1 unknown")).toBeInTheDocument();
   });
+
+  describe("the CAB's pushback and the deviations", () => {
+    const pushback = {
+      cabRejectionCount: 2,
+      cabRejections: [
+        {
+          changeRequest: { id: "cr-20", number: "CHG0000020", subject: "Deploy CApps to Pekin prod", state: "canceled" },
+          member: false,
+          rejectedOn: "2026-10-25T00:00:00Z",
+          rejectedBy: "Alice CAB",
+          comment: "Not during the freeze",
+        },
+        {
+          changeRequest: { id: "cr-1", number: "CHG0000001", subject: "Deploy CApps to Pekin prod", state: "closed" },
+          member: true,
+          rejectedOn: "2026-10-01T00:00:00Z",
+          rejectedBy: "Bob CAB",
+          comment: "",
+        },
+      ],
+      cabCommentCount: 3,
+      cabComments: [
+        {
+          changeRequest: { id: "cr-1", number: "CHG0000001", subject: "Deploy CApps to Pekin prod", state: "closed" },
+          member: true,
+          approverName: "Carol CAB",
+          state: "APPROVED",
+          comment: "Add the verification steps",
+          decidedOn: "2026-10-10T00:00:00Z",
+        },
+      ],
+      deviationCount: 1,
+    };
+
+    it("shows the counts as chips on the row: rejections in the error colour, comments and deviations as warnings", () => {
+      serve([suggestion(pushback), suggestion({ key: "k2", subject: "Rotate keys" })]);
+      renderIt();
+      const deploy = row("Deploy CApps to Pekin prod");
+      const rejected = within(deploy).getByText("2 CAB rejections").closest(".MuiChip-root");
+      expect(rejected).toHaveClass("MuiChip-colorError");
+      expect(within(deploy).getByText("3 CAB comments").closest(".MuiChip-root")).toHaveClass("MuiChip-colorWarning");
+      expect(within(deploy).getByText("1 deviated from plan").closest(".MuiChip-root")).toHaveClass("MuiChip-colorWarning");
+      const rotate = row("Rotate keys");
+      expect(within(rotate).queryByText(/CAB rejection|CAB comment|deviated from plan/)).not.toBeInTheDocument();
+      // Shown only: the suggestion can still be proposed.
+      expect(within(deploy).getByRole("button", { name: "Propose" })).toBeEnabled();
+    });
+
+    it("counts the listed members' deviations for a snapshot that sends no count", () => {
+      const members = suggestion().members.map((m, i) => ({ ...m, hasDeviation: i === 0 }));
+      serve([suggestion({ members })]);
+      renderIt();
+      expect(within(row("Deploy CApps to Pekin prod")).getByText("1 deviated from plan")).toBeInTheDocument();
+    });
+
+    it("lists the rejections and comments in the details, each linked, and marks a member the CAB rejected", () => {
+      const members = suggestion().members.map((m, i) => ({ ...m, cabRejected: i === 0 }));
+      serve([suggestion({ ...pushback, members })]);
+      renderIt();
+      fireEvent.click(screen.getByRole("button", { name: "Show the details of Deploy CApps to Pekin prod" }));
+      const rejections = screen.getByRole("list", { name: "CAB rejections" });
+      const [look, own] = within(rejections).getAllByRole("listitem");
+      expect(look).toHaveTextContent("by Alice CAB");
+      expect(look).toHaveTextContent("a look-alike, not a member");
+      expect(look).toHaveTextContent('"Not during the freeze"');
+      expect(within(look).getByRole("link", { name: "CHG0000020" })).toHaveAttribute("href", "/operations/change-requests/cr-20");
+      expect(own).not.toHaveTextContent("look-alike");
+      const comments = screen.getByRole("list", { name: "CAB comments" });
+      expect(comments).toHaveTextContent("Carol CAB approved");
+      expect(comments).toHaveTextContent('"Add the verification steps"');
+      expect(comments.parentElement).toHaveTextContent("The newest 1 are listed.");
+      // The member list (CHG0000009 is in no CAB list).
+      const membersList = screen.getByRole("link", { name: "CHG0000009" }).closest("ul") as HTMLElement;
+      const [first, clone] = within(membersList).getAllByRole("listitem");
+      expect(first).toHaveTextContent("· rejected by the CAB");
+      expect(clone).not.toHaveTextContent("rejected by the CAB");
+    });
+
+    it("shows no CAB pushback block for a suggestion (or an older snapshot) without any", () => {
+      serve([suggestion()]);
+      renderIt();
+      fireEvent.click(screen.getByRole("button", { name: "Show the details of Deploy CApps to Pekin prod" }));
+      expect(screen.queryByText("CAB pushback")).not.toBeInTheDocument();
+      expect(screen.queryByText(/rejected by the CAB/)).not.toBeInTheDocument();
+    });
+  });
 });

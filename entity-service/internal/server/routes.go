@@ -1771,10 +1771,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Standard change templates and the proposals that create, modify or
 		// retire them: internal callers only.
 		standardChangeRepo = repository.NewStandardChangeRepository(repository.NewScoped(db))
-		standardChangeHandler = handler.NewStandardChangeHandler(service.NewStandardChangeService(standardChangeRepo, accessSvc))
+		standardChangeSuggestionRepo := repository.NewStandardChangeSuggestionRepository(repository.NewScoped(db))
+		// A proposal shows its approvers the CAB's rejections and comments on
+		// changes like it, looked for within the suggestion window.
+		standardChangeHandler = handler.NewStandardChangeHandler(service.WithCABHistory(
+			service.NewStandardChangeService(standardChangeRepo, accessSvc),
+			standardChangeSuggestionRepo, cfg.StandardChangeSuggestionWindowMonths))
 		// What a customer's completed change requests suggest as standard changes.
 		standardChangeSuggestionHandler = handler.NewStandardChangeSuggestionHandler(service.NewStandardChangeSuggestionService(
-			repository.NewStandardChangeSuggestionRepository(repository.NewScoped(db)), accessSvc,
+			standardChangeSuggestionRepo, accessSvc,
 			domain.StandardChangeSuggestionCriteria{
 				WindowMonths:          cfg.StandardChangeSuggestionWindowMonths,
 				MinClosed:             cfg.StandardChangeSuggestionMinClosed,

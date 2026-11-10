@@ -260,7 +260,7 @@ func TestAssignSuggestionIdentities_KeyKeptWhenTheSubjectChanges(t *testing.T) {
 	if cls[0].id != "deploy capps pekin prod#0a1b2c3d4e5f" || cls[0].key != "promote pekin release dr" {
 		t.Fatalf("id = %q, subject key = %q; want the previous key kept and the new subject reported", cls[0].id, cls[0].key)
 	}
-	if s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil); s.Key != cls[0].id || s.SubjectKey != "promote pekin release dr" {
+	if s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil, nil, nil); s.Key != cls[0].id || s.SubjectKey != "promote pekin release dr" {
 		t.Errorf("suggestion key %q, subjectKey %q", s.Key, s.SubjectKey)
 	}
 }

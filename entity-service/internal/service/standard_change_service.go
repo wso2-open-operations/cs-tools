@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -38,11 +39,77 @@ import (
 type standardChangeService struct {
 	repo   repository.StandardChangeRepository
 	access AccessService
+	// cab reads the CAB history a proposal shows (WithCABHistory); nil: none.
+	cab             repository.CABDecisionReader
+	cabWindowMonths int
+	now             func() time.Time
 }
 
 // NewStandardChangeService constructs a StandardChangeService.
 func NewStandardChangeService(repo repository.StandardChangeRepository, access AccessService) StandardChangeService {
-	return &standardChangeService{repo: repo, access: access}
+	return &standardChangeService{repo: repo, access: access, now: time.Now}
+}
+
+// WithCABHistory makes every proposal the service returns carry its CAB history
+// (domain.StandardChangeProposal.CABHistory), its look-alikes read from the last
+// windowMonths (the suggestion window). svc must be what NewStandardChangeService
+// returned; any other value is returned unchanged.
+func WithCABHistory(svc StandardChangeService, reader repository.CABDecisionReader, windowMonths int) StandardChangeService {
+	if s, ok := svc.(*standardChangeService); ok && reader != nil {
+		if windowMonths <= 0 {
+			windowMonths = DefaultStandardChangeSuggestionCriteria.WindowMonths
+		}
+		s.cab, s.cabWindowMonths = reader, windowMonths
+	}
+	return svc
+}
+
+// proposalCABHistory is a proposal's CAB history (see
+// domain.StandardChangeProposal.CABHistory) and the ids (lower case) of the
+// change requests the CAB rejected.
+func (s *standardChangeService) proposalCABHistory(ctx context.Context, p *domain.StandardChangeProposal) (domain.StandardChangeCABHistory, map[string]bool, error) {
+	var ids []string
+	if p.SourceChangeRequest != nil && p.SourceChangeRequest.ID != "" {
+		ids = append(ids, strings.ToLower(p.SourceChangeRequest.ID))
+	}
+	for _, e := range p.Evidence {
+		ids = append(ids, strings.ToLower(e.ID))
+	}
+	own, err := s.cab.CABDecisionsOf(ctx, ids)
+	if err != nil {
+		return domain.StandardChangeCABHistory{}, nil, err
+	}
+	rejected := map[string]bool{}
+	keys := map[string]bool{}
+	var subjects []cabSubject
+	seen := map[string]bool{}
+	for _, id := range ids {
+		c, ok := own[id]
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if k := suggestionKey(c.Subject); k != "" {
+			keys[k] = true
+		}
+		if c.Rejected() {
+			rejected[id] = true
+		}
+		subjects = append(subjects, cabSubject{cr: c, member: true})
+	}
+	if p.Customer != nil && p.Customer.ID != "" && len(keys) > 0 {
+		since := suggestionWindowStart(s.now(), s.cabWindowMonths)
+		lookalikes, err := s.cab.CABRejectedLookalikes(ctx, strings.ToLower(p.Customer.ID), since)
+		if err != nil {
+			return domain.StandardChangeCABHistory{}, nil, err
+		}
+		for _, la := range lookalikes {
+			if keys[suggestionKey(la.Subject)] {
+				subjects = append(subjects, cabSubject{cr: la})
+			}
+		}
+	}
+	return buildCABHistory(subjects), rejected, nil
 }
 
 const standardChangeForbidden = "standard change templates are available to WSO2 staff only"
@@ -397,6 +464,16 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 			return domain.StandardChangeProposal{}, err
 		}
 		p.CanCancel = cab
+	}
+	if s.cab != nil {
+		h, rejected, err := s.proposalCABHistory(ctx, p)
+		if err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		p.CABHistory = &h
+		for i := range p.Evidence {
+			p.Evidence[i].CABRejected = rejected[strings.ToLower(p.Evidence[i].ID)]
+		}
 	}
 	// Only the stage the proposal waits on (its latest) has REQUESTED rows.
 	for i := range p.Approvers {

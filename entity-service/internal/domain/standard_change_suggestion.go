@@ -139,7 +139,8 @@ type StandardChangeSuggestion struct {
 	Eligible bool     `json:"eligible"`
 	Unmet    []string `json:"unmet"`
 	// ProposeFrom is the newest clean member (closed, no deviation from its
-	// implementation plan): what a proposal starts from. Evidence is every other
+	// implementation plan, and never rejected by the CAB; failing that, the
+	// newest closed one with no deviation): what a proposal starts from. Evidence is every other
 	// closed member, newest first, so that ProposeFrom plus Evidence is at most
 	// the 100 a proposal can cite.
 	ProposeFrom *EntityRef  `json:"proposeFrom"`
@@ -154,6 +155,65 @@ type StandardChangeSuggestion struct {
 	// Members, newest completion first.
 	Members   []StandardChangeSuggestionMember   `json:"members"`
 	Dismissal *StandardChangeSuggestionDismissal `json:"dismissal"`
+	// DeviationCount: members that deviated from their implementation plan (all
+	// of them, not only those listed).
+	DeviationCount int `json:"deviationCount"`
+	// The CAB's pushback on this change: its rejections of members and of
+	// look-alikes, and its comments (StandardChangeCABHistory). Shown, never a
+	// criterion. A snapshot computed before these existed reads them as zero.
+	StandardChangeCABHistory
+}
+
+// StandardChangeCABHistory is what the CAB said about a set of change requests:
+// a suggestion's members and the look-alikes attached to it, or a proposal's
+// source and evidence and their look-alikes. A look-alike is one of the same
+// customer's change requests that the CAB rejected (so it never completed and
+// is no candidate) whose normalised subject is the suggestion's.
+type StandardChangeCABHistory struct {
+	// CABRejectionCount: change requests the CAB rejected (each once).
+	// CABRejections lists them, newest rejection first, at most 20.
+	CABRejectionCount int                          `json:"cabRejectionCount"`
+	CABRejections     []StandardChangeCABRejection `json:"cabRejections"`
+	// CABCommentCount: comments CAB approvers wrote on these change requests,
+	// with any decision (an approval that asks for more is pushback too).
+	// CABComments lists them, newest first, at most 20.
+	CABCommentCount int                        `json:"cabCommentCount"`
+	CABComments     []StandardChangeCABComment `json:"cabComments"`
+}
+
+// StandardChangeCABChangeRequest is the change request a CAB decision is on.
+type StandardChangeCABChangeRequest struct {
+	ID      string `json:"id"`
+	Number  string `json:"number"`
+	Subject string `json:"subject"`
+	// State is its state now, lower case ("canceled", "closed", ...).
+	State string `json:"state"`
+}
+
+// StandardChangeCABRejection is a change request the CAB rejected: its latest
+// CAB rejection.
+type StandardChangeCABRejection struct {
+	ChangeRequest StandardChangeCABChangeRequest `json:"changeRequest"`
+	// Member: a member of the suggestion (a proposal's source or evidence); false
+	// for a look-alike.
+	Member     bool      `json:"member"`
+	RejectedOn time.Time `json:"rejectedOn"`
+	// RejectedBy is the CAB member's name ("" when unknown).
+	RejectedBy string `json:"rejectedBy"`
+	// Comment is the rejection's comment as plain text ("" when none).
+	Comment string `json:"comment"`
+}
+
+// StandardChangeCABComment is one comment a CAB approver wrote on a change request.
+type StandardChangeCABComment struct {
+	ChangeRequest StandardChangeCABChangeRequest `json:"changeRequest"`
+	Member        bool                           `json:"member"`
+	ApproverName  string                         `json:"approverName"`
+	// State is the approver's decision: APPROVED, REJECTED, REQUESTED, CANCELLED, ...
+	State string `json:"state"`
+	// Comment as plain text (markup removed), at most 2000 characters.
+	Comment   string    `json:"comment"`
+	DecidedOn time.Time `json:"decidedOn"`
 }
 
 // StandardChangeSuggestionSample says a suggestion was computed from the newest
@@ -184,6 +244,10 @@ type StandardChangeSuggestionMember struct {
 	// ClonedFrom is the member's clone source, when it was recorded.
 	ClonedFrom   *string `json:"clonedFromId"`
 	HasDeviation bool    `json:"hasDeviation"`
+	// CABRejected: the CAB rejected it at least once (it was then resubmitted
+	// and completed); CABCommentCount: the comments CAB approvers wrote on it.
+	CABRejected     bool `json:"cabRejected"`
+	CABCommentCount int  `json:"cabCommentCount"`
 	// Why the member is in the cluster: "subject" (same normalised subject and a
 	// similar or no implementation plan) or "clone" (cloned from a member).
 	JoinedBy string `json:"joinedBy"`

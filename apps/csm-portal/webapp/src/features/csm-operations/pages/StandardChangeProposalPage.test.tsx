@@ -971,3 +971,119 @@ describe("StandardChangeProposalPage — part of Change requests", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-1");
   });
 });
+
+describe("StandardChangeProposalPage — the CAB's history, in front of the approvers", () => {
+  const REVIEW: BeStandardChangeProposal = {
+    ...DRAFT,
+    state: "authority_review",
+    canEdit: false,
+    canSubmit: false,
+    canWithdraw: false,
+    submittedOn: "2026-10-02T00:00:00Z",
+    stages: [{ id: "st-1", label: "CAB Approval", requiredApprovals: 2, approvals: 0, decision: null }],
+    approvers: [
+      { id: "a-1", stageId: "st-1", approver: { id: "u-2", name: "Hana Head", email: "hana@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: true },
+    ],
+    evidence: [
+      { id: "chg-1", number: "CHG0000001", subject: "Rotated the certificate on gw-1", state: "closed", closedOn: "2026-09-01T00:00:00Z", cabRejected: true, hasDeviation: false },
+      { id: "chg-2", number: "CHG0000002", subject: "Rotated the certificate on gw-2", state: "closed", closedOn: "2026-08-01T00:00:00Z", cabRejected: false, hasDeviation: true },
+    ],
+    cabHistory: {
+      cabRejectionCount: 2,
+      cabRejections: [
+        {
+          changeRequest: { id: "chg-9", number: "CHG0000009", subject: "Rotate the certificate on gw-9", state: "canceled" },
+          member: false,
+          rejectedOn: "2026-10-01T00:00:00Z",
+          rejectedBy: "Alice CAB",
+          comment: "Not during the freeze",
+        },
+        {
+          changeRequest: { id: "chg-1", number: "CHG0000001", subject: "Rotated the certificate on gw-1", state: "closed" },
+          member: true,
+          rejectedOn: "2026-08-20T00:00:00Z",
+          rejectedBy: "Bob CAB",
+          comment: "",
+        },
+      ],
+      cabCommentCount: 1,
+      cabComments: [
+        {
+          changeRequest: { id: "chg-2", number: "CHG0000002", subject: "Rotated the certificate on gw-2", state: "closed" },
+          member: true,
+          approverName: "Carol CAB",
+          state: "APPROVED",
+          comment: "Add the verification steps",
+          decidedOn: "2026-07-25T00:00:00Z",
+        },
+      ],
+    },
+  };
+
+  it("puts a CAB history section with a warning headline directly above the Approval section", () => {
+    mocks.proposal = REVIEW;
+    renderPage();
+    const history = screen.getByRole("region", { name: "CAB history" });
+    const approval = screen.getByRole("region", { name: "Approval" });
+    expect(history.compareDocumentPosition(approval) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(history.nextElementSibling).toBe(approval);
+    expect(within(history).getByRole("alert")).toHaveTextContent("The CAB rejected 2 change requests like this one");
+    const rejections = within(history).getByRole("list", { name: "CAB rejections" });
+    const items = within(rejections).getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("CHG0000009");
+    expect(items[0]).toHaveTextContent("rejected");
+    expect(items[0]).toHaveTextContent("by Alice CAB");
+    expect(items[0]).toHaveTextContent("a look-alike");
+    expect(items[0]).toHaveTextContent('"Not during the freeze"');
+    expect(items[1]).not.toHaveTextContent("look-alike");
+    const comments = within(history).getByRole("list", { name: "CAB comments" });
+    expect(comments).toHaveTextContent("Carol CAB approved");
+    expect(comments).toHaveTextContent('"Add the verification steps"');
+    fireEvent.click(within(rejections).getByRole("button", { name: "CHG0000009" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-9", {
+      state: { from: "/operations/standard-change-proposals/scp-1" },
+    });
+  });
+
+  it("says when the CAB has said nothing", () => {
+    mocks.proposal = { ...REVIEW, cabHistory: { cabRejectionCount: 0, cabRejections: [], cabCommentCount: 0, cabComments: [] } };
+    renderPage();
+    const history = screen.getByRole("region", { name: "CAB history" });
+    expect(history).toHaveTextContent("No CAB rejections or comments");
+    expect(within(history).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows no CAB history section where the backend sends none", () => {
+    mocks.proposal = { ...REVIEW, cabHistory: undefined };
+    renderPage();
+    expect(screen.queryByRole("region", { name: "CAB history" })).not.toBeInTheDocument();
+  });
+
+  it("marks the evidence the CAB rejected and the evidence that deviated from its plan", () => {
+    mocks.proposal = REVIEW;
+    renderPage();
+    const rows = within(screen.getByRole("table", { name: "Evidence" })).getAllByRole("row");
+    expect(rows[1]).toHaveTextContent("Rejected by the CAB");
+    expect(rows[1]).not.toHaveTextContent("Deviated from plan");
+    expect(rows[2]).toHaveTextContent("Deviated from plan");
+    expect(rows[2]).not.toHaveTextContent("Rejected by the CAB");
+  });
+
+  it("sums the history up in the decision dialog, as the approver decides", () => {
+    mocks.proposal = REVIEW;
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+    const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
+    expect(within(dialog).getByRole("note", { name: "CAB history summary" })).toHaveTextContent(
+      'The CAB rejected 2 change requests like this one and left 1 comment. Latest: "Not during the freeze"',
+    );
+  });
+
+  it("sums it up when rejecting too", () => {
+    mocks.proposal = REVIEW;
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    const dialog = screen.getByRole("dialog", { name: /reject the proposal/i });
+    expect(within(dialog).getByRole("note", { name: "CAB history summary" })).toHaveTextContent("The CAB rejected 2 change requests");
+  });
+});

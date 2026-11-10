@@ -1255,7 +1255,8 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 
 	p.Evidence = []domain.StandardChangeEvidence{}
 	rows, err := q.Query(ctx, `
-		SELECT cr.id::text, wi.number, wi.subject, LOWER(cr.state::text), cr.closed_on, ea.id::text, ea.name
+		SELECT cr.id::text, wi.number, wi.subject, LOWER(cr.state::text), cr.closed_on, ea.id::text, ea.name,
+		       cr.implementation_deviation IS NOT NULL AND btrim(cr.implementation_deviation) <> ''
 		  FROM standard_change_proposal_evidence e
 		  JOIN change_request cr ON cr.id = e.change_request_id
 		  JOIN work_item wi ON wi.id = cr.id
@@ -1269,7 +1270,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	for rows.Next() {
 		var e domain.StandardChangeEvidence
 		var eaID, eaName *string
-		if err := rows.Scan(&e.ID, &e.Number, &e.Subject, &e.State, &e.ClosedOn, &eaID, &eaName); err != nil {
+		if err := rows.Scan(&e.ID, &e.Number, &e.Subject, &e.State, &e.ClosedOn, &eaID, &eaName, &e.HasDeviation); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("get standard change proposal: evidence: scan: %w", err)
 		}

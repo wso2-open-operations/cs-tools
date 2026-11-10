@@ -5755,6 +5755,57 @@ export interface BeStandardChangeEvidence {
   closedOn: string | null;
   /** The change request's customer now (its project's account); null when it has none. */
   customer?: BeEntityRef | null;
+  /** It deviated from its implementation plan. */
+  hasDeviation?: boolean;
+  /** The CAB rejected it at least once before it was done (see the proposal's `cabHistory`). */
+  cabRejected?: boolean;
+}
+
+/** The change request a CAB decision is on. */
+export interface BeStandardChangeCabChangeRequest {
+  id: string;
+  number: string;
+  subject: string;
+  /** Its state now, lower case ("canceled", "closed", ...). */
+  state: string;
+}
+
+/** A change request the CAB rejected: its latest CAB rejection. */
+export interface BeStandardChangeCabRejection {
+  changeRequest: BeStandardChangeCabChangeRequest;
+  /** One of the suggestion's members (a proposal's source or evidence); false for a look-alike. */
+  member: boolean;
+  rejectedOn: string;
+  /** The CAB member's name; empty when unknown. */
+  rejectedBy: string;
+  /** The rejection's comment as plain text; empty when none. */
+  comment: string;
+}
+
+/** A comment a CAB approver wrote on a change request, with any decision. */
+export interface BeStandardChangeCabComment {
+  changeRequest: BeStandardChangeCabChangeRequest;
+  member: boolean;
+  approverName: string;
+  /** APPROVED, REJECTED, REQUESTED, CANCELLED, ... */
+  state: string;
+  /** Plain text. */
+  comment: string;
+  decidedOn: string;
+}
+
+/**
+ * What the CAB said about a set of change requests (entity-service, "The CAB's
+ * pushback"): its rejections (each change request once) and its comments, newest
+ * first, at most 20 each, with the true counts. A look-alike is one of the same
+ * customer's change requests the CAB rejected, with the same normalised subject.
+ * Shown only: it decides nothing.
+ */
+export interface BeStandardChangeCabHistory {
+  cabRejectionCount: number;
+  cabRejections: BeStandardChangeCabRejection[] | null;
+  cabCommentCount: number;
+  cabComments: BeStandardChangeCabComment[] | null;
 }
 
 /**
@@ -5839,6 +5890,12 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
   changeRequestsInNew?: BeEntityRef[] | null;
   /** How many change requests `changeRequestsInNew` stands for. */
   changeRequestsInNewTotal?: number;
+  /**
+   * The CAB's rejections and comments on the source and evidence change requests
+   * and on the customer's CAB-rejected look-alikes, read live; shown to the
+   * approvers. Null or absent where entity-service does not provide it.
+   */
+  cabHistory?: BeStandardChangeCabHistory | null;
   /** What the caller may do now (advisory: every action re-checks). */
   canEdit: boolean;
   canSubmit: boolean;
@@ -6016,6 +6073,10 @@ export interface BeStandardChangeSuggestionMember {
   impact?: string | null;
   clonedFromId?: string | null;
   hasDeviation: boolean;
+  /** The CAB rejected it at least once (it was then resubmitted and completed). */
+  cabRejected?: boolean;
+  /** Comments CAB approvers wrote on it. */
+  cabCommentCount?: number;
   /** "subject": same normalised subject and a similar (or no) plan; "clone": cloned from a member. */
   joinedBy: "subject" | "clone";
 }
@@ -6027,7 +6088,12 @@ export interface BeStandardChangeSuggestionDismissal {
   dismissedOn: string;
 }
 
-export interface BeStandardChangeSuggestion {
+/**
+ * A suggestion also carries the CAB's pushback (`BeStandardChangeCabHistory`, its
+ * members and attached look-alikes); a snapshot computed before it existed has
+ * zero counts and empty lists, an older entity-service none at all.
+ */
+export interface BeStandardChangeSuggestion extends Partial<BeStandardChangeCabHistory> {
   /**
    * The cluster's own key: unique within its customer, kept across refreshes,
    * what it is dismissed by. Several clusters can share a subject (`subjectKey`),
@@ -6052,7 +6118,7 @@ export interface BeStandardChangeSuggestion {
   eligible: boolean;
   /** Each criterion it misses, in words. */
   unmet: string[];
-  /** The newest closed member with no deviation: what a new proposal starts from. */
+  /** The newest closed member with no deviation and no CAB rejection (else no deviation): what a new proposal starts from. */
   proposeFrom?: BeEntityRef | null;
   /** Every other closed member, newest first, at most 99. */
   evidence: BeEntityRef[];
@@ -6060,6 +6126,8 @@ export interface BeStandardChangeSuggestion {
   openProposals: BeEntityRef[];
   members: BeStandardChangeSuggestionMember[];
   dismissal?: BeStandardChangeSuggestionDismissal | null;
+  /** Members that deviated from their plan (all of them, not only those listed). */
+  deviationCount?: number;
   /**
    * Present when the subject had more change requests than entity-service
    * compares (500): the cluster was built from the newest `compared` of `total`.

@@ -48,7 +48,7 @@ func TestClusterSuggestionCandidates_CapsASubjectGroup(t *testing.T) {
 	if first, last := cls[0].nodes[0].c.Number, cls[0].nodes[len(cls[0].nodes)-1].c.Number; first != "CHG0000001" || last != "CHG0000500" {
 		t.Errorf("kept %s..%s, want the newest CHG0000001..CHG0000500", first, last)
 	}
-	s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil)
+	s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil, nil, nil)
 	if s.Sample == nil || *s.Sample != (domain.StandardChangeSuggestionSample{Compared: suggestionMaxCompared, Total: suggestionMaxCompared + 100}) {
 		t.Fatalf("sample = %+v, want 500 of 600", s.Sample)
 	}
@@ -58,7 +58,7 @@ func TestClusterSuggestionCandidates_CapsASubjectGroup(t *testing.T) {
 
 	t.Run("a group within the cap has no sample", func(t *testing.T) {
 		cls := mustCluster(t, sgGroup(suggestionMaxCompared, "Monthly OS patching"), 0.5)
-		if s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil); s.Sample != nil || s.MemberCount != suggestionMaxCompared {
+		if s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil, nil, nil); s.Sample != nil || s.MemberCount != suggestionMaxCompared {
 			t.Errorf("sample = %+v, members = %d", s.Sample, s.MemberCount)
 		}
 	})

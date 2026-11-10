@@ -8854,10 +8854,57 @@ incident form labels them "Caused by" and "Change request", and the second may n
 fix the incident rather than one that caused it, which then blocks its cluster too: check this against
 production data); no member with high risk; no member with high impact. An unknown
 risk or impact is counted (`unknown`) and does not block. `unmet` says, in words, each one it misses.
-`proposeFrom` is the newest closed member with no deviation from its plan (none: nothing to propose
-from), `evidence` the other closed members newest first, at most 99, so the source plus the evidence fit
+`proposeFrom` is the newest closed member that neither deviated from its plan nor was ever rejected by
+the CAB, else the newest closed one with no deviation (none: nothing to propose from), `evidence` the other
+closed members newest first, at most 99, so the source plus the evidence fit
 the 100 a proposal may cite. `openProposals` are the open proposals (draft or awaiting CAB approval)
 already started from or citing a member.
+
+**The CAB's pushback** (added 2026-11-10; `standard_change_cab_history.go` in `service` and in
+`repository`). Shown like a deviation from the plan, never a criterion: no cluster, count, key or `unmet`
+depends on it. Computed in the refresh and stored in the snapshot JSON (no migration; a snapshot computed
+before reads zero counts and empty lists until the next refresh, and GET returns `[]`, never null):
+- **Which stage is the CAB's** is decided in Go, by the change request approvals view's own functions
+  (`isCABStageInHistory`): the stage the view names as the CAB's (`changeRequestApprovalStageLabel`
+  classified by `classifyApprovalStage`: "CAB Approval", the legacy "Authorize", the historic "ECAB
+  Approval", or an unlabelled stage at position 1), and also an unlabelled stage of the "CAB Approval"
+  group wherever it sits (runtimeApprovalStageKind's first, provable, rule). The rest of
+  `runtimeApprovalStageKind` is not used: it judges a stage by the state the change is in now, which says
+  nothing about a finished change. `TestIsCABStageInHistory_AgreesWithTheApprovalsView` pins the two
+  together. The SQL (`cabDecisionRowsQuery`) only reads each stage's label, group and position (ordered as
+  the view orders them) and the approver rows that are REJECTED or carry a comment.
+- **A member's own**: `members[].cabRejected` (the CAB rejected it at least once, then it was resubmitted
+  and completed) and `cabCommentCount`.
+- **Look-alikes** (`CABRejectedLookalikes`): a change request the CAB rejects stays in Authorize and is
+  usually cancelled, so it is never a member. The customer's change requests the CAB rejected within the
+  window (the rejection's `updated_on`), in any state but Closed and Rollback, not raised from a template,
+  newest 1,000, are attached by subject (`attachCABLookalikes`): to the cluster whose core key is their
+  `suggestionKey(subject)`; when several clusters share the key, to the one whose core members' plans are
+  most like theirs (best word-set Jaccard), else the largest, then the smaller key. No cluster with the key:
+  shown nowhere.
+- **The lists**: `cabRejectionCount` / `cabRejections` (each change request once, its latest CAB rejection:
+  number, subject, state, when, by whom, the comment; `member` false for a look-alike) and `cabCommentCount`
+  / `cabComments` (every non-blank comment on a CAB stage of a member or an attached look-alike, with any
+  decision: an approval that says "add the verification steps" is pushback too). Newest first, at most 20
+  each, the counts true. Comments copied from ServiceNow can be rich text, so they are sent as plain text
+  (`cabPlainText`: tags removed, entities decoded, white space collapsed, at most 2,000 characters). The
+  portal's own CR decision path writes no comment yet, so today only ServiceNow-era rows have them.
+- `deviationCount` counts every member that deviated (the listed `members` stop at 100).
+- **On a proposal** (`GetProposal` and every proposal an action returns, `WithCABHistory` in `routes.go`):
+  `cabHistory`, the same shape, read live (not from the snapshot) over the source and evidence change
+  requests and the same customer's CAB-rejected look-alikes whose subject key is the source's or an evidence
+  change request's, in the last `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS`. Each evidence row also says
+  `hasDeviation` and `cabRejected`. The proposal page shows it to the approvers above the Approval section
+  and in the decision dialog. Null only on a service built without `WithCABHistory`.
+- Cost: two more reads per customer in the refresh (the members' CAB rows by id, and the look-alikes by
+  account through `approval_stage_approver.work_item_id`), two per proposal read. No index was added: both
+  are keyed by work item id or by the customer's projects.
+
+Tests: `standard_change_cab_history_test.go` in `repository` (the stage rule against the view's and the
+flow's) and in `service` (plain text, the lists and caps, the attachment rule, `proposeFrom`, the refresh
+over the in-memory repository, an older snapshot), `standard_change_cab_history_integration_test.go`
+(real PostgreSQL: labelled and unlabelled stages, peer rejections ignored, the window, another customer's
+look-alikes; a proposal's `cabHistory` and evidence marks).
 
 **Not related to the customer's templates, on purpose.** An earlier version labelled each cluster
 "covered by STD…", "close to STD…: revise it" or "new" by the word overlap of its subject and plan with the
