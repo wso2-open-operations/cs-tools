@@ -17,6 +17,7 @@
 package azblobstore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -84,6 +85,66 @@ func (s *Store) DownloadLink(key, fileName, contentType string, ttl time.Duratio
 		return "", time.Time{}, err
 	}
 	return s.container.NewBlobClient(key).URL() + "?" + query, expires, nil
+}
+
+// copySourceTTL is how long the link Copy reads its source through lasts. Azure
+// reads the source while it handles the request, so a short time is enough.
+const copySourceTTL = 2 * time.Minute
+
+// copyPollEvery is how often Copy asks whether a copy Azure answered "pending" to
+// has finished. A copy inside one account normally finishes in the first answer.
+const copyPollEvery = 200 * time.Millisecond
+
+// Copy makes the blob at dstKey a copy of the committed blob at srcKey, content
+// and content type, inside Azure: no byte passes through the caller. An existing
+// blob at dstKey is replaced. It needs what links need (an account key), because
+// Azure reads the source through a short-lived read link. It returns ErrNotFound
+// when there is no blob at srcKey, and waits (until ctx ends) for a copy Azure
+// has not finished yet.
+func (s *Store) Copy(ctx context.Context, srcKey, dstKey string) error {
+	if err := validateKey(srcKey); err != nil {
+		return err
+	}
+	if err := validateKey(dstKey); err != nil {
+		return err
+	}
+	query, _, err := s.sign(srcKey, copySourceTTL, sas.BlobPermissions{Read: true}, "", "")
+	if err != nil {
+		return err
+	}
+	source := s.container.NewBlobClient(srcKey).URL() + "?" + query
+	dst := s.container.NewBlobClient(dstKey)
+	resp, err := dst.StartCopyFromURL(ctx, source, nil)
+	if isNotFound(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("azblobstore: copy %s to %s: %w", srcKey, dstKey, err)
+	}
+	for status := derefStatus(resp.CopyStatus); status != blob.CopyStatusTypeSuccess; {
+		if status != blob.CopyStatusTypePending {
+			return fmt.Errorf("azblobstore: copy %s to %s ended %s", srcKey, dstKey, status)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("azblobstore: copy %s to %s: %w", srcKey, dstKey, ctx.Err())
+		case <-time.After(copyPollEvery):
+		}
+		props, err := dst.GetProperties(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("azblobstore: copy %s to %s: %w", srcKey, dstKey, err)
+		}
+		status = derefStatus(props.CopyStatus)
+	}
+	return nil
+}
+
+// derefStatus reads a copy status that Azure may not have sent.
+func derefStatus(s *blob.CopyStatusType) blob.CopyStatusType {
+	if s == nil {
+		return blob.CopyStatusTypeSuccess
+	}
+	return *s
 }
 
 // sign makes the query string of a link for one blob. disposition and
