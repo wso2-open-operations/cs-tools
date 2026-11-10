@@ -289,6 +289,10 @@ func TestAutoclosureIntegration_AwaitingInfoFullLifecycle(t *testing.T) {
 	}
 }
 
+// TestAutoclosureIntegration_SolutionProposedWithoutResolutionClosesWithTheAutoClosureCode
+// runs the close stage against a real database for a Solution Proposed ticket
+// that has no resolution code, and checks the stored row ends CLOSED carrying
+// the auto-closure code rather than an empty resolution.
 func TestAutoclosureIntegration_SolutionProposedWithoutResolutionClosesWithTheAutoClosureCode(t *testing.T) {
 	e := newACEnv(t)
 	id := e.ticket(2, "SOLUTION_PROPOSED", 20, nil, nil)

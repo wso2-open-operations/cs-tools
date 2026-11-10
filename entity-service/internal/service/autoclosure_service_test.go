@@ -260,6 +260,10 @@ func TestAutoclosureAdvance_SolutionProposedCloseKeepsItsOwnResolution(t *testin
 	}
 }
 
+// TestAutoclosureAdvance_SolutionProposedCloseWithoutResolutionGetsTheDefaultCode
+// pins the fallback in closeCase: a Solution Proposed ticket normally keeps its
+// own resolution, but one proposed without any would have its close refused by
+// UpdateCase, so the auto-closure code is applied instead.
 func TestAutoclosureAdvance_SolutionProposedCloseWithoutResolutionGetsTheDefaultCode(t *testing.T) {
 	repo := &fakeAutoclosureRepo{claimWins: true, candidates: []repository.AutoclosureCandidateRow{dueCandidate(domain.CaseStateSolutionProposed, strp("SECOND_COMMENT"))}}
 	cases := &fakeAutoclosureCases{}
