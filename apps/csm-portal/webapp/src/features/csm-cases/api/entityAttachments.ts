@@ -659,6 +659,17 @@ interface DirectUploadLinks {
   expiresAt: string;
 }
 
+/** True when `links` is a usable answer: a positive whole chunk size and a link for every chunk of `fileSize`. */
+function linksCoverFile(links: DirectUploadLinks | null | undefined, fileSize: number): links is DirectUploadLinks {
+  return (
+    !!links &&
+    Number.isSafeInteger(links.chunkBytes) &&
+    links.chunkBytes > 0 &&
+    Array.isArray(links.links) &&
+    links.links.length >= Math.max(1, Math.ceil(fileSize / links.chunkBytes))
+  );
+}
+
 /** Sends one chunk to its signed link, trying again with a short pause when it fails in passing. */
 async function sendChunkToLink(link: string, body: Blob, signal?: AbortSignal): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
@@ -706,7 +717,7 @@ export async function sendFileDirect(
     `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`,
   );
   const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
-  if (!Array.isArray(direct.links) || direct.links.length < count) {
+  if (!linksCoverFile(direct, file.size)) {
     throw new Error("The upload links do not cover the file.");
   }
   await sendChunksInParallel({
