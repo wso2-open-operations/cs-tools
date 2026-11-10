@@ -209,7 +209,7 @@ bridges read the identical config; they just project it onto two different, non-
 ## Time card totals (POST /time-cards/aggregate)
 
 `TimeCardHandler.AggregateTimeCards` forwards the body to entity-service's `POST /time-cards/aggregate`
-(counts and summed minutes per `state`, `user`, `project` or `day`; the rules are in entity-service's
+(counts and summed minutes per `state`, `user`, `project`, `day` or `team`; the rules are in entity-service's
 `CLAUDE.md`) and passes the response through unchanged. It needs `PermViewTimeCardTotals`, held by the CS engineer
 and admin only. That is narrower on purpose than `PermTimeCardsAndUpdates`, which every other time card
 route uses and which the time card approver also holds. Who may see totals per user is still to be
@@ -902,6 +902,16 @@ could not group before this, so no saved dashboard changes. The AI integration s
 (section 5a) teaches the model these widgets, and
 `TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` runs every grouped time card example
 there through `ParseGenerated`, so the catalogue cannot teach a widget the save would refuse.
+
+**Time cards by team.** A generated time card widget may hold `query.teamIds`: 1 to 20 team keys or names
+(`valuesTeamNames`), or `["__current_team__"]`, the cards of those teams' current members. `groupBy.field`
+`team` (one bar per team) needs the widget's own `query.teamIds`. Right after generation `WithDashboardTeams`
+(`resolveTimeCardTeams` in `internal/handler/dashboard_teams.go`) swaps each key or name for the team's
+group id (a CRE team's CRE group id, an SRE team's SRE group id), which is the Team Schedule's team id
+that entity-service's `teamIds` matches; a group id already there is kept and `__current_team__` is left
+for the webapp. An unknown team, or a team with no group configured, is an `errDashboardTeam` (422 with
+the reason), as for a case's team filter. Only the generator checks these keys, so no saved dashboard
+changes.
 
 **Line widgets: `series`.** A `line` widget may set `series` to `["opened"]` or `["closed"]` to draw only
 that line ("new cases per day", "cases closed per day", or an Edit with AI request such as "remove the closed
