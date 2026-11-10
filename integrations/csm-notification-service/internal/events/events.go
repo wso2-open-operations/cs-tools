@@ -393,9 +393,14 @@ type StatusChangedPayload struct {
 	// CaseTitle is used only for the email subject line (dispatch's
 	// subjectLine) — optional, same as CaseNumber, so an older publisher
 	// still produces a valid (just less descriptive) subject.
-	CaseTitle  string   `json:"caseTitle,omitempty"`
-	NewStatus  string   `json:"newStatus"`
-	Recipients []string `json:"recipients"`
+	CaseTitle string `json:"caseTitle,omitempty"`
+	NewStatus string `json:"newStatus"`
+	// PreviousStatus is the state before this change, as a display label.
+	// Optional: an older publisher omits it, and the customer email is then
+	// always sent, since there is nothing to compare against. See
+	// dispatch.handleStatusChanged.
+	PreviousStatus string   `json:"previousStatus,omitempty"`
+	Recipients     []string `json:"recipients"`
 }
 
 // CaseAssignedPayload is TypeCaseAssigned's payload. See CaseCreatedPayload's
