@@ -82,40 +82,6 @@ func (e CloudStatusEvent) Valid() bool {
 	return ok
 }
 
-// cloudOfferingWireValues maps cloud_monitor.cloud_offering -- a Postgres
-// enum, so SCREAMING_SNAKE -- to the slug the status dashboard is addressed
-// by. The dashboard routes on this string, and CHOREO_EU -> "choreo-eu" is
-// exactly the kind of transformation that silently produces "choreo_eu" and a
-// webhook nobody receives.
-//
-// ALL SEVEN OFFERINGS ARE HANDLED HERE, and that is a deliberate divergence.
-// ServiceNow's step-14 script had a five-way lookup -- asgardeo, bijira,
-// choreo, devant, moesif -- and returned undefined for choreo-eu and
-// agent-manager, posting to a URL of "undefined" with no error raised.
-//
-// That defect is latent rather than live in ServiceNow: all 31 monitors on
-// those two offerings sit outside the 14 services the trigger filters to, so
-// the flow never reaches them. It goes live the moment anyone adds a
-// choreo-eu or agent-manager service to that filter -- a config change, made
-// by someone who has no reason to suspect a hardcoded list exists. Covering
-// all seven costs nothing and removes the trap rather than porting it.
-var cloudOfferingWireValues = map[string]string{
-	"ASGARDEO":      "asgardeo",
-	"BIJIRA":        "bijira",
-	"CHOREO":        "choreo",
-	"DEVANT":        "devant",
-	"MOESIF":        "moesif",
-	"CHOREO_EU":     "choreo-eu",     // ServiceNow had no URL for this one.
-	"AGENT_MANAGER": "agent-manager", // nor this one.
-}
-
-// CloudOfferingSlug converts a stored cloud_offering enum value to the
-// dashboard's slug. It returns "" for an unknown value, which callers must
-// treat as unroutable rather than posting an empty cloud.
-func CloudOfferingSlug(offering string) string {
-	return cloudOfferingWireValues[offering]
-}
-
 // CloudMonitorStatus is a value of cloud_monitor_status_enum -- what the
 // public status dashboard renders for one monitored component.
 type CloudMonitorStatus string

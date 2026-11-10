@@ -329,6 +329,7 @@ export default function RotaReminderSettings(): JSX.Element {
               <legend>Automatic reminders</legend>
               <p className="cp-help" id={id("automatic-help")}>
                 The only on/off for the automatic reminders in this environment. A change applies from the next run.
+                Times are when the reminders run; an email can arrive up to an hour later.
               </p>
               <div className="rrs-checks">
                 <div>
@@ -343,7 +344,8 @@ export default function RotaReminderSettings(): JSX.Element {
                     Send weekday reminders
                   </label>
                   <p className="cp-help" id={id("weekday-help")}>
-                    Morning and Evening, emailed the working day before at 15:00 IST.
+                    Morning and Evening rotations. Each person gets one email at 09:00 IST the day before (Sunday to
+                    Thursday; on Sunday for Monday), with a calendar invitation unless invitations are turned off below.
                   </p>
                 </div>
                 <div>
@@ -358,8 +360,11 @@ export default function RotaReminderSettings(): JSX.Element {
                     Send weekend reminders
                   </label>
                   <p className="cp-help" id={id("weekend-help")}>
-                    Sunday to Thursday at 20:00 IST once the weekend is fully marked, and again on Friday at 15:00
-                    IST.
+                    Sent at 09:00 IST on Monday once the weekend is fully marked (or on the first morning from Tuesday to
+                    Thursday that it is): a summary to everyone on the weekend and, unless invitations are turned off
+                    below, one invitation per day. Until then only the CRE rota admins hear about it: a 09:00 IST email
+                    each morning, Monday to Thursday, listing what is missing. On Friday at 09:00 IST a final reminder
+                    with any changes goes to everyone on the weekend, even if gaps remain, listing them.
                   </p>
                 </div>
                 <div>

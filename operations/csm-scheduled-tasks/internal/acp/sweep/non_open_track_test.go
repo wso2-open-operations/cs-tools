@@ -40,7 +40,7 @@ func TestProcessProject_NonOpenTrackDoesNothing(t *testing.T) {
 				EndDateClosureState: strPtr(state),
 			}
 			updater, ntf := &mockProjectUpdater{}, &mockNotifier{}
-			err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
+			_, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
 			if err != nil {
 				t.Fatalf("processProject() error = %v", err)
 			}
@@ -55,7 +55,7 @@ func TestProcessProject_NonOpenTrackDoesNothing(t *testing.T) {
 				ClosureState: strPtr("Open"), InvoiceDueDateClosureState: strPtr(state),
 			}
 			updater, ntf := &mockProjectUpdater{}, &mockNotifier{}
-			err := processProject(context.Background(), reader, updater, ntf, now, proj)
+			_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 			if err != nil {
 				t.Fatalf("processProject() error = %v", err)
 			}
@@ -101,7 +101,7 @@ func TestProcessProject_NonOpenEndDateTrackDoesNotSilenceInvoiceNotice(t *testin
 		EndDateClosureState: strPtr("Pending Suspended"), InvoiceDueDateClosureState: strPtr("Open"),
 	}
 	updater, ntf := &mockProjectUpdater{}, delivering()
-	if err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v", err)
 	}
 	if len(ntf.sent) == 0 {
@@ -127,7 +127,7 @@ func TestProcessProject_OpenTrackUnchanged(t *testing.T) {
 			EndDate: &end, ClosureState: strPtr("Open"), EndDateClosureState: state,
 		}
 		updater, ntf := &mockProjectUpdater{}, delivering()
-		err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
+		_, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
 		if err != nil {
 			t.Fatalf("processProject() error = %v", err)
 		}

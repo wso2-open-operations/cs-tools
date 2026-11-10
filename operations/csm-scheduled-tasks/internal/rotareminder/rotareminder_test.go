@@ -242,6 +242,22 @@ func TestWeekdayReminder_MidWeekSaysTomorrow(t *testing.T) {
 	}
 }
 
+// The weekday task runs Sunday to Thursday at 09:00 IST: Sunday's run
+// announces Monday, the day after, and the email says tomorrow.
+func TestWeekdayReminder_SundayAnnouncesMonday(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, config("2026-10-18 09:00", weekdayRotations))(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rota.from != "2026-10-19" || len(mail.sent) != 1 ||
+		!strings.Contains(mail.sent[0].body, "rostered for the Morning rotation tomorrow, Monday, 19 October 2026") {
+		t.Fatalf("read %s, sent %+v", rota.from, mail.sent)
+	}
+}
+
 // "Today" is the day in the rota's own zone, not the server's: Thursday 20:00
 // UTC is already Friday in Colombo, so the next working day is Monday.
 func TestWeekdayReminder_CountsDaysInTheRotaZone(t *testing.T) {

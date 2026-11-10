@@ -111,6 +111,36 @@ func LastNoticeWindowForInvoices(raw json.RawMessage) (*closure.NoticeWindow, er
 // and LastNoticeWindowForInvoices — both sections use the identical
 // {event_type: "..."} shape and the identical eventTypeToWindow vocabulary,
 // only the key differs.
+// HasRecordedEvent reports whether raw records any event_type other than
+// "open" (or none) for either track: a notice, a suspension, or an event type
+// this package does not know. An unparseable state counts as recorded, so a
+// caller screening on it errs toward looking at the project.
+func HasRecordedEvent(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var blob map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &blob); err != nil {
+		return true
+	}
+	for _, key := range []string{subscriptionEndDateKey, dueInvoicesKey} {
+		section, ok := blob[key]
+		if !ok {
+			continue
+		}
+		var state struct {
+			EventType string `json:"event_type"`
+		}
+		if err := json.Unmarshal(section, &state); err != nil {
+			return true
+		}
+		if state.EventType != "" && state.EventType != "open" {
+			return true
+		}
+	}
+	return false
+}
+
 func lastNoticeWindowForKey(raw json.RawMessage, key string) (*closure.NoticeWindow, error) {
 	if len(raw) == 0 {
 		return nil, nil

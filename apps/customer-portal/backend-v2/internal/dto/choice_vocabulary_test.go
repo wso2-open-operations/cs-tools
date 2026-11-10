@@ -98,8 +98,7 @@ func TestNormalizeCaseStateChoices_PostgresEnumLabels(t *testing.T) {
 	}
 	want := []ReferenceItem{
 		{ID: "1", Label: "Open"},
-		{ID: "10", Label: "Work In Progress"},
-		{ID: "1003", Label: "Waiting On WSO2"},
+		{ID: "10", Label: "In Progress"},
 		{ID: "18", Label: "Awaiting Info"},
 		{ID: "1006", Label: "Reopened"},
 		{ID: "6", Label: "Solution Proposed"},
@@ -107,6 +106,9 @@ func TestNormalizeCaseStateChoices_PostgresEnumLabels(t *testing.T) {
 	}
 
 	got := normalizeCaseStateChoices(in)
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d (Work In Progress and Waiting On WSO2 fold into one): %+v", len(got), len(want), got)
+	}
 	for i := range want {
 		if got[i].ID != want[i].ID || got[i].Label != want[i].Label {
 			t.Errorf("[%d] = {%s, %s}, want {%s, %s}", i, got[i].ID, got[i].Label, want[i].ID, want[i].Label)
@@ -315,5 +317,29 @@ func TestNormalizeDeploymentTypeChoices_ServiceNowIDsPassThrough(t *testing.T) {
 	got := normalizeDeploymentTypeChoices(in)
 	if got[0].ID != in[0].ID || got[0].Label != in[0].Label {
 		t.Errorf("got {%s, %s}, want it unchanged {%s, %s}", got[0].ID, got[0].Label, in[0].ID, in[0].Label)
+	}
+}
+
+// Work In Progress and Waiting On WSO2 show as one In Progress entry whose
+// count is the sum, so a stat grid never shows the two separately.
+func TestNormalizeCaseStateChoices_InProgressCountsAreMerged(t *testing.T) {
+	five, three := 5, 3
+	got := normalizeCaseStateChoices([]ReferenceItem{
+		{ID: "WORK_IN_PROGRESS", Label: "WORK_IN_PROGRESS", Count: &five},
+		{ID: "WAITING_ON_WSO2", Label: "WAITING_ON_WSO2", Count: &three},
+	})
+	if len(got) != 1 || got[0].ID != "10" || got[0].Label != "In Progress" {
+		t.Fatalf("got %+v, want one {10, In Progress}", got)
+	}
+	if got[0].Count == nil || *got[0].Count != 8 {
+		t.Fatalf("count = %v, want 8", got[0].Count)
+	}
+}
+
+// A list holding only Waiting On WSO2 still shows it as In Progress.
+func TestNormalizeCaseStateChoices_WaitingAloneShowsAsInProgress(t *testing.T) {
+	got := normalizeCaseStateChoices([]ReferenceItem{{ID: "WAITING_ON_WSO2", Label: "WAITING_ON_WSO2"}})
+	if len(got) != 1 || got[0].ID != "10" || got[0].Label != "In Progress" {
+		t.Fatalf("got %+v, want one {10, In Progress}", got)
 	}
 }

@@ -1890,7 +1890,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/{id}/sla/recalculate-pause:
+  /cases/{id}/sla/recalculate:
     post:
       summary: >-
         Recompute one case's currently IN_PROGRESS SLA clocks' pause history
@@ -2653,12 +2653,10 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
           description: >-
-            Seven clouds, where the ServiceNow script accepted five. choreo-eu
-            and agent-manager have monitors and a dashboard but have never
-            been reachable, because the notification flow's URL script has no
-            branch for them.
+            Every registered cloud is served, so a cloud added to the registry
+            needs no API change.
       responses:
         "200":
           description: >-
@@ -2697,7 +2695,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: Six month keys, newest first in the dashboard's rendering.
@@ -2735,7 +2733,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: >-
@@ -2775,7 +2773,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: >-
@@ -2841,7 +2839,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: The outage's detail, or an attachments-only object.
@@ -30947,6 +30945,23 @@ components:
         colourToken:
           type: string
           enum: [AL, LL, MAT, PAT, RND, EXT, INT, BR, MIG, ONB, EXC, IND]
+        family:
+          type: string
+          enum: [CRE, SRE, SME]
+          description: >-
+            The family the tag is for; only that family's rosters offer it. A rota admin's
+            or team lead's tag is always their own family's (this picks one when they run or
+            lead more than one; another family is a 403). A portal admin who runs no rota
+            may name one, else the tag is shared.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            Take people off the worklog timesheet on the tag's days (an SRE rotation, say).
+            Allocation tags only; a leave tag with it is a 400 (leave shows as leave).
+        description:
+          type: string
+          maxLength: 300
+          description: Optional; shown when hovering the tag.
     ScheduleAbsenceKind:
       type: object
       description: Why someone is out of the rota.
@@ -30970,6 +30985,14 @@ components:
           description: >-
             True for a kind no longer offered. Still served so the days already
             marked with it keep their label; a client must not offer it.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            True when the tag's days take a person off the worklog timesheet. The
+            built-in ENG, ALLO_EXT and ALLO_INT carry it; leave kinds never do.
+        description:
+          type: string
+          description: What the tag is for, shown on hover; absent when it has none.
     ScheduleCatalogue:
       type: object
       properties:
@@ -34845,7 +34868,7 @@ components:
 
     CaseSLAPauseRecalcClock:
       type: object
-      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate.
       properties:
         target:
           type: string

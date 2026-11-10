@@ -402,8 +402,8 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if p.WebhookID == "" || p.ClaimToken == "" || p.OutageID == "" || p.Cloud == "" || p.Timestamp == "" {
 			return fmt.Errorf("events: missing required field for %s", t)
 		}
-		if !validStatusPageCloud[p.Cloud] {
-			return fmt.Errorf("events: %s has unknown cloud %q", t, p.Cloud)
+		if !validStatusPageCloud(p.Cloud) {
+			return fmt.Errorf("events: %s has a malformed cloud slug %q", t, p.Cloud)
 		}
 		if _, err := time.Parse(statusPageTimestampLayout, p.Timestamp); err != nil {
 			return fmt.Errorf("events: %s timestamp %q is not ISO-8601 UTC with milliseconds", t, p.Timestamp)

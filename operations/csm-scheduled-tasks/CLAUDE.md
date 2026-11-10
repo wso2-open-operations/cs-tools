@@ -205,9 +205,9 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 
 | Task | Default schedule | Announces |
 |---|---|---|
-| `rota_weekday_reminder` | `30 9 * * 1-5` (15:00 Colombo, Mon–Fri) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): tomorrow from Monday to Thursday, **Monday from Friday** |
-| `rota_weekend_notice` | `30 14 * * 0-4` (20:00 Colombo, Sun–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once; until then the rota admins are asked every evening |
-| `rota_weekend_reminder` | `30 9 * * 5` (15:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
+| `rota_weekday_reminder` | `30 3 * * 0-4` (09:00 Colombo, Sun–Thu) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): always tomorrow, so **Monday from Sunday** |
+| `rota_weekend_notice` | `30 3 * * 1-4` (09:00 Colombo, Mon–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once (on Monday when it is already marked); until then the rota admins are asked every morning |
+| `rota_weekend_reminder` | `30 3 * * 5` (09:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
 
 The schedule decides only *when* a task runs. Which days it announces comes from the day it runs
@@ -303,10 +303,10 @@ schedules assume `TZ=UTC` like every other here.
   `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) is how many people each shift needs on each day; the on-call
   variant does not count. Until that holds, `rota_weekend_notice` emails the family's rota admins
   (entity-service `GET /team-schedule/rota-admins/{family}`; the task's alert audience when there
-  are none) a table of what is missing, every evening, and sends nothing to the rota. Friday's
+  are none) a table of what is missing, every morning, and sends nothing to the rota. Friday's
   `rota_weekend_reminder` sends anyway, listing the gaps, and tells the admins.
 - **The weekend send is recorded in entity-service** (`team_schedule_reminder_sent`, migration
-  0241, `GET`/`PUT /team-schedule/reminders/{family}/weekend_notice/{saturday}`): an evening that
+  0241, `GET`/`PUT /team-schedule/reminders/{family}/weekend_notice/{saturday}`): a morning run that
   finds the record sends nothing, and Friday compares its invitations with the recorded ones and
   sends a cancellation (`METHOD:CANCEL`) to anybody taken off a window, or to everybody on a window
   that is gone. A failure to record is reported in the partial-failure alert; the emails are not
@@ -621,7 +621,26 @@ both places.
   scopes a run to one CSM project. A `TRYOUT_TASK=acp_closure` is forced to a dry run unless
   `ACP_TEST_PROJECT_ID` is set, since a tryout talks to the real CSM and Salesforce, and it runs
   on weekends too (it emails only its debug list). A `--run-now=acp_closure` is a real run with
-  the configured settings, the same as a scheduled one.
+  the configured settings, the same as a scheduled one, unless narrowed with `--dry-run` or
+  `--limit=N` (below).
+- **Daily limit (`ACP_DAILY_LIMIT`).** A plain integer, default `0` = no cap; malformed or negative stops
+  startup (`parseACPDailyLimit`). It caps the projects one run **acts on**: at least one notice sent or
+  recorded, or a suspension attempted (decided from the cascades before they run, so a project whose
+  action then fails still counts; a reset to open and a skipped project do not). Projects are walked
+  most overdue first (the list is sorted by end date ascending), so the cap takes those; once it is
+  reached the rest are not evaluated, one INFO line logs the counts (never names or addresses), and
+  the run is **not** a failure. A dry run counts the same way, so a dry run with the limit shows what a
+  capped real run would do. Projects excluded or filtered out do not consume it. The `acp: finished`
+  line carries `projectsActed` and `projectsNotEvaluatedByLimit`. Unlike `AUTOCLOSURE_DAILY_LIMIT`
+  there is no per-day ledger: the cap is per run, so a retry the same day acts on up to the cap again
+  (the projects already handled are no longer due, so it takes the next ones).
+- **Run-now narrowing.** `--run-now=acp_closure` takes `--dry-run`, `--limit=N` and `--full-sweep` (`RunNowFlags`
+  `--dry-run`, `--limit`, `--full-sweep`; `--states` and the report flags are refused). They only tighten: `--dry-run`
+  forces a dry run and cannot turn a configured one off; because a dry run records nothing, forcing it
+  also turns emails off unless a `debug` list is set (otherwise the next run would send the same notices
+  again, the combination startup refuses); `--limit=N` needs `N` > 0 and at most `ACP_DAILY_LIMIT` when
+  that is non-zero (refused otherwise), else it sets the cap for the run. Suggested first real run:
+  `--run-now=acp_closure --dry-run --limit=20`, read the log, then `--limit=20` for real.
 - **Only an Open track acts.** A project is listed because its overall state is Open, but each track
   (end date, invoice) has its own closure state, and a person's reopen can leave one at "Pending
   Suspended", "Pending Closed", "Notified" and so on. A track whose own state is not Open does nothing:
@@ -638,6 +657,114 @@ both places.
   no suspension, no record, and it does not mark the project closed for the other track
   (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
   still resets the event to `open`, which clears this.
+- **Hybrid evaluation (screening, `ACP_SCREENING`, default ON).** Today every open project costs about six
+  sequential Salesforce-backed calls, so a run takes tens of minutes. With screening on, a run first decides
+  from **CSM's own copy** of the Salesforce data (entity-service's `/invoices/search` and
+  `/project-opportunity-links/search`, Postgres `sf_invoice` / `sf_opportunity_link`, kept fresh by Salesforce
+  events; M2M callers are internal callers there, `access_service.go` `M2MClientIDs` is `Unrestricted`) which
+  projects the live path could act on, and skips the rest **before** the re-read and every live call
+  (`Result.ProjectsScreenedOut`, one INFO with counts: listed, screened out, candidates by reason). The copy
+  only decides **who to look at**; every notice, probe, record and suspension still runs on the live read,
+  unchanged, so a lagging copy can delay an action but never cause a wrong one. **Because the default is on,
+  the first run after deploy screens from the CSM copy; the weekly full sweep is the safety net.**
+  - *Superset rule.* A project is a candidate if any of: (date) its CSM end date is missing or on or before
+    today + 91 days (the widest window plus a day of margin; past dates included); (state) its
+    `suspensionProcessState` records anything but "open" for either track, or cannot be parsed
+    (`suspensionstate.HasRecordedEvent`; the renewal reset still runs for a project far from its end date);
+    (invoice) it owns, through a link, an unpaid invoice with a due date on or before today + 91 days. The
+    invoice test is safe because the suspend date is the due date, or invoice date + 60 days when the grace
+    period applies and the credit period is at most 60 days, which is never earlier than the due date: a
+    suspend date within the horizon implies a due date within it. The opportunity's stage and EULA version
+    and the invoice's classification are not tested in the screen (the live path does that), so the two copies
+    of the rules cannot drift. An invoice with no opportunity is ignored: the live path reaches invoices only
+    through project, link and opportunity.
+  - *How it reads.* The routes have no unpaid or due-date filter and a page is at most 50 rows, so all
+    invoices are listed once (at most 1,000 pages, 50,000 invoices) and filtered in memory, then the links of
+    the opportunities that own a relevant invoice are read by opportunity.
+  - *Fail open.* Any read error, a page cap reached, a listing with fewer distinct invoices than it reported
+    (offset paging over a changing table can skip a row), or an invoice whose due date does not parse sends
+    **every** project through the live path for that run, with one WARN (candidates by reason `failOpen`).
+    It never fails closed.
+  - *Full sweep.* On `ACP_SCREENING_FULL_SWEEP_WEEKDAY` (Mon to Sun, Colombo time, default Mon) a run
+    evaluates every project live, exactly as with screening off; this bounds a missed event to about a week.
+    `--run-now=acp_closure --full-sweep` does the same for one run (it only widens the live scope; it
+    leaves `--dry-run` and `--limit` alone). A run scoped to `ACP_TEST_PROJECT_ID` is always live.
+  - *What a miss costs.* A late action by up to a week at worst (an event that never reached the copy, or a
+    CSM end date that lags Salesforce's), never a wrong one. Known limit: the screen cannot see an invoice
+    that never reached the CSM copy, nor a Salesforce end date that is earlier than CSM's; the full sweep
+    catches both. `ACP_SCREENING=off` restores evaluating every project live on every run. Screened-out
+    projects are not evaluated and never count against `ACP_DAILY_LIMIT`.
+- **Repairing the CSM copy (`ACP_REPAIR`, default ON; `ACP_REPAIR_MAX_EVENTS`, default 200, 0 = off).** In the
+  pass ACP already makes over Salesforce for a project (a candidate, or every project on a full-sweep day),
+  it compares what it read with the CSM copy it has, with **no extra Salesforce call**, and posts one
+  synthetic event `{eventType: "UPDATED", entity, referenceId}` per drifted record to entity-service's
+  existing `POST /salesforce/events` (`entity.Client.PostSalesforceEvent`), whose ingest re-fetches the
+  record and upserts it behind its stale-version guard. Compared: the project's start and end dates
+  (`Project__c`, the project's Salesforce id), the account's partner flag (`Account`, the Salesforce account
+  id), and each invoice's due, paid and invoice date by Salesforce id, an invoice missing from the copy
+  counting as drifted (`Invoice__c`; entity-service ingests its opportunity inline). Anything else is
+  ignored. It runs after the decision (the invoice part) and never changes it; a failed post is logged
+  once (WARN) and ignored, never a project failure, never against the cap; a dry run posts nothing and only
+  counts; a project the filters skip or screening leaves out is never compared; one event per record per
+  run, at most `ACP_REPAIR_MAX_EVENTS` a run (over the bound: counted, not posted); one INFO per run with
+  counts by entity (`compared`, `drifted`, `posted`, `failed`, `overCap`), no names or ids. The copy of
+  invoices is the same one-off listing screening reads (`copySnapshot`), read lazily on a full-sweep day.
+  entity-service acts on the events only for the families it has ingest enabled for
+  (`CSM_MIGRATION_SALESFORCE_{ACCOUNT,PROJECT,OPPORTUNITY}_INGEST_ENABLED`); otherwise it acknowledges and
+  ignores them (204). The route has no per-route check, so an M2M client works (`routes.go`
+  `POST /salesforce/events`, `HandleEvent` never calls `ResolveScope`). Not repaired, because the copy
+  cannot be matched or read: the opportunity's stage and EULA and link existence (CSM's rows carry no
+  Salesforce id), the account's status and primary partner (CSM's account read does not return them).
+- **Running without sales-entity-service reads (`ACP_SALES_ENTITY_READS`, `on` default, `off`).** With `off`
+  ACP makes **no** sales-entity-service read (project, customer, contacts, linked opportunities, opportunities,
+  invoices) and decides only from CSM's copy through entity-service (`sweep.CSMOnlyDetails`, the CSM client's
+  existing reads: project dates and account, `GET /accounts/{id}` for the people and `hasPrimaryPartner`,
+  project and account contacts, links, opportunities, invoices). The account life cycle is not in any
+  account read, so the Customer accounts are listed once per run (`POST /accounts/search`,
+  `filters.lifeCycle=Customer`, exact match; `csmOnlyDetails.prepare`): an account outside the list is "not
+  Customer" (`ProjectsFilteredStatus`), a project with no account has no status (`ProjectsFilteredNoStatus`),
+  and a list that cannot be read in full (error, page cap, fewer distinct accounts than reported) stops the
+  run before anything is evaluated, fail closed. Primary-partner presence is entity-service's approximation
+  (any partner link in `account_relationship`; no "primary" marker), which can only make a suspend date
+  later, never earlier. **There is no live confirmation: the decision is only as good as the CSM copy**, so a
+  stale invoice, end date or partner flag can cause a wrong notice or suspension. Screening, the weekly
+  full sweep and the repair are off in this mode (nothing live to compare), logged at startup. The filters
+  keep working from the CSM data. The `State__c` write of a suspension is a write and stays: the
+  `ACP_SALES_ENTITY_*` settings are required for a real run (startup error if missing) and not for a dry
+  run, where no sales-entity-service client is built at all. `acp.Clients.SalesEntity` is an interface so a
+  test can prove a whole run makes zero reads and exactly one `State__c` write.
+- **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
+  (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
+  - its `suspensionProcessOverridden` flag is true (`Result.ProjectsFilteredOverridden`): the legacy
+    selection never evaluated such a project. The flag is on the CSM project record (set by the data sync or
+    directly in the database) and entity-service returns it on `GET /projects/{id}` and
+    `POST /projects/search`, always present, default false. ACP reads it from the fresh re-read, the
+    record it decides from. **A response without the flag is skipped too** (fail closed, counted in
+    `ProjectsFilteredOverrideUnknown`, with a WARN saying entity-service did not return it), because an
+    entity-service that predates the field would otherwise put every exempted project back into the run.
+    **Deploy order: entity-service with the field (and its migration) before this task runs**, else every
+    project is skipped as unknown: safe, and visible in the count and the WARN;
+  - its `subscriptionType` is `evaluation_subscription`, `cloud_support`, `cloud_evaluation_support` or
+    `internal` (`skipIneligible`, `Result.ProjectsFiltered`; decided from the project read, before the
+    Salesforce read);
+  - its account's status is not `Customer`, trimmed and case-insensitive (`Result.ProjectsFilteredStatus`).
+    The status is the sales-entity `/customer-search` row's `status` (`salesentity.Customer.Status`; the
+    live `isRealTime` query ACP uses selects the account status field), which is what CSM's account life
+    cycle mirrors. **A missing or empty status is skipped too** (fail closed, counted separately in
+    `ProjectsFilteredNoStatus`), since the legacy selection required Customer; a project with no linked
+    account is the same case. Applies only when the details come from Salesforce, as they do in a real run;
+  - its account is itself a partner (`accountClassification == "Partner"`, `Result.ProjectsFilteredPartner`):
+    both cascades are skipped. This is not `hasPrimaryPartner` (a customer that has a partner), which the
+    invoice cascade still handles with its grace-period rule. The invoice cascade's own
+    `isPartner && !hasPrimaryPartner` rule is kept and tested but a partner account is now skipped before
+    the cascades, so Run no longer reaches it.
+
+  The account filters run after the details are read (`skipByAccount`, in `evaluate`), so they apply to a
+  scoped `ACP_TEST_PROJECT_ID` run as well, and an `ACP_TEST_PROJECT_ID` project that is a Prospect or a
+  partner is skipped, not tested. The flag and project-type checks run on the re-read project, before the
+  Salesforce read. `ACP_EXCLUDED_PROJECT_IDS` stays as the manual per-project exclusion (no flag needed).
+  One difference remains: the legacy process evaluated Open and Restricted projects; the list here asks
+  for Open only.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
@@ -722,8 +849,9 @@ task", and the message lists the registered names.
 | Argument | Meaning |
 |---|---|
 | `--run-now=<task>` | Run that registered task once now |
-| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure` and `incident_autoclose`) |
+| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure`, `incident_autoclose` and `acp_closure`) |
 | `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
+| `--full-sweep` | Evaluate every project live, no screening, for this run. `acp_closure` only |
 | `--states=a,b` | Work only these states, each among the configured ones. `case_autoclosure` only |
 | `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
 | `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's whole audience for this one run (To and Cc both; see "Recipient override" below). Every report task takes it. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
@@ -962,6 +1090,10 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the Americas On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
+| `ACP_SCREENING` / `ACP_SCREENING_FULL_SWEEP_WEEKDAY` | No (defaults `on` / `Mon`) | Hybrid evaluation of `acp_closure` (on unless `off`) and the weekday it evaluates every project live; anything malformed refuses to start — see "ACP closure" above |
+| `ACP_SALES_ENTITY_READS` | No (default `on`) | `off` makes `acp_closure` read nothing from sales-entity-service and decide only from CSM's copy (no live confirmation; screening, full sweep and repair off); anything but `on`/`off` refuses to start. `ACP_SALES_ENTITY_*` are then needed only for a real run (the suspension write) — see "ACP closure" above |
+| `ACP_REPAIR` / `ACP_REPAIR_MAX_EVENTS` | No (defaults `on` / `200`) | Repair of CSM's copy by synthetic Salesforce events during a live pass; `off` or `0` posts nothing; malformed refuses to start — see "ACP closure" above |
+| `ACP_DAILY_LIMIT` | No (default `0` = no cap) | Most projects one `acp_closure` run acts on, most overdue first; malformed or negative refuses to start — see "ACP closure" above |
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |

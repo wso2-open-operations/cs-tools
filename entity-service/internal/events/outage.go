@@ -70,8 +70,8 @@ type OutageStatusPageDuePayload struct {
 	ClaimToken string `json:"claimToken"`
 	OutageID   string `json:"outageId"`
 	Number     string `json:"number,omitempty"`
-	// Cloud is the dashboard's slug: asgardeo, choreo, bijira, devant,
-	// moesif, choreo-eu or agent-manager.
+	// Cloud is the dashboard's slug, a registered cloud's slug in the cloud
+	// registry (asgardeo, choreo, choreo-eu, ...).
 	Cloud string `json:"cloud"`
 	// Event is the wire value: outage_begin or outage_end.
 	Event string `json:"event"`
