@@ -198,7 +198,13 @@ export default function ProblemsTab(): JSX.Element {
               ) : (
                 problems.map((problem) => {
                   const detailPath = `/operations/problems/${problem.id}`;
-                  const detailState = { from: `${location.pathname}${location.search}` };
+                  // `parentState` nests this tab's OWN inherited state (e.g.
+                  // `{ from: <dashboard> }`) so the detail page's Back can
+                  // restore it — otherwise Operations loses its own Back.
+                  const detailState = {
+                    from: `${location.pathname}${location.search}`,
+                    parentState: location.state ?? null,
+                  };
                   return (
                   <TableRow
                     key={problem.id}

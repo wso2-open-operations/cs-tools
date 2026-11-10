@@ -101,8 +101,10 @@ export default function IncidentTaskDetailPage(): JSX.Element {
   const [closeAs, setCloseAs] = useState<ClosedTaskState | null>(null);
   const closeOpen = closeAs !== null;
   // Prefer the page the row link captured; else the parent incident's
-  // Related tab once the task is loaded; else Operations.
-  const backState = useLocation().state as { from?: string } | undefined;
+  // Related tab once the task is loaded; else Operations. `parentState` is
+  // the state that page was itself carrying, handed back so it keeps its own
+  // Back.
+  const backState = useLocation().state as { from?: string; parentState?: unknown } | undefined;
   const parentIncidentId = data?.incident?.id;
   const backTarget =
     backState?.from ??
@@ -114,7 +116,7 @@ export default function IncidentTaskDetailPage(): JSX.Element {
       size="small"
       className="csm-print-hide"
       startIcon={<ArrowLeft size={16} />}
-      onClick={() => navigate(backTarget)}
+      onClick={() => navigate(backTarget, { state: backState?.parentState ?? undefined })}
       sx={{ alignSelf: "flex-start" }}
     >
       Back

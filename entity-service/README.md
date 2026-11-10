@@ -108,9 +108,9 @@ from configuration:
 | `servicenow`                       | Reads and writes for the migrated entities go to an external ticketing system through an integration service. PostgreSQL is optional and only backs the side tables that have no external equivalent. |
 | `postgres-servicenow-dual-write`   | PostgreSQL stays authoritative for every read and write. Selected writes are mirrored afterwards to the external system on a best-effort basis, and failures are recorded rather than surfaced. |
 
-`SLA_DATA_SOURCE` and `ATTACHMENT_DATA_SOURCE` (each `postgres` or `servicenow`) override the
-choice for SLA reads and for case attachment and activity-feed reads independently, so a
-deployment can move one resource at a time. The `servicenow` values are the literal configuration
+`SLA_DATA_SOURCE` (`postgres` or `servicenow`) overrides the choice for SLA reads, so a
+deployment can move that one resource at a time. Attachments have no setting: their files are in
+Azure Blob Storage and their metadata is always read from PostgreSQL. The `servicenow` values are the literal configuration
 spellings of "use the external ticketing system adapter"; the credentials for that adapter are
 the `SERVICENOW_INTEGRATION_SERVICE_*` variables in the [configuration reference](#configuration-reference).
 
@@ -448,7 +448,6 @@ does not read.
 | -------- | -------- | ------- | ----------- | ------- |
 | `DATA_SOURCE` | No | `postgres` | `postgres`, `servicenow` or `postgres-servicenow-dual-write`. See [Pluggable data sources](#pluggable-data-sources). | `postgres` |
 | `SLA_DATA_SOURCE` | No | `postgres` | `postgres` or `servicenow`; overrides the source for SLA reads. | `postgres` |
-| `ATTACHMENT_DATA_SOURCE` | No | `postgres` | `postgres` or `servicenow`; overrides the source for attachment reads and the case activity feed. | `postgres` |
 | `SERVICENOW_INTEGRATION_SERVICE_BASE_URL` | Conditional | none | Base URL of the adapter's integration service. Required when any of the three data-source variables above selects the external system (including dual-write). | `https://adapter.example.com` |
 | `SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL` | Conditional | none | OAuth2 token endpoint for the adapter. Required under the same condition. | `https://idp.example.com/oauth2/token` |
 | `SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID` | Conditional | none | OAuth2 client id. Required under the same condition. | `<adapter-client-id>` |

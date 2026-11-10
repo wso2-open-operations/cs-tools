@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import {
   Box,
   Button,
@@ -33,18 +34,20 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { BackendApiError } from "@api/backend/client";
 import Editor from "@components/rich-text-editor/Editor";
+import {
+  preCreateImagesErrorMessage,
+  usePreCreateInlineImages,
+} from "@features/csm-cases/api/usePreCreateInlineImages";
 import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  totalEncodedBytes,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
+import { useReportDraftUploads } from "@features/csm-cases/api/useReportDraftUploads";
+import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgress";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
@@ -87,14 +90,18 @@ export default function CreateSecurityReportPage(): JSX.Element {
   // product reselect doesn't clobber their text.
   const [subjectEdited, setSubjectEdited] = useState(false);
   const [description, setDescription] = useState("");
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+
+  const descriptionImages = usePreCreateInlineImages(projectId || undefined);
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
+  // The report's files are uploaded BEFORE the case is created (as drafts of the
+  // project), so a security report never exists without its report: a cancel or a
+  // refresh while they upload leaves nothing behind.
+  const reportDrafts = useReportDraftUploads(projectId || undefined);
   const [submitting, setSubmitting] = useState(false);
-
-  const overLimit = totalEncodedBytes(attachments) > POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES;
 
   // Auto-generate the report title as "{Deployment} - {Product} - {date}" when
   // the product is chosen (both names are loaded by then), matching the customer
@@ -129,9 +136,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
     if (deployedProducts.isError) void deployedProducts.refetch();
   };
 
-  // At least one attachment is required here: the backing service validates
-  // the create request atomically for this case type, so an attachment added
-  // only after creation would never satisfy it.
+  // At least one file must be chosen. The files are uploaded before the report is
+  // created and the backend refuses a report without one; the form says so first.
   const canSubmit = useMemo(
     () =>
       !!projectId &&
@@ -140,7 +146,6 @@ export default function CreateSecurityReportPage(): JSX.Element {
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
       attachments.length > 0 &&
-      !overLimit &&
       !submitting,
     [
       projectId,
@@ -149,7 +154,6 @@ export default function CreateSecurityReportPage(): JSX.Element {
       subject,
       description,
       attachments,
-      overLimit,
       submitting,
     ],
   );
@@ -157,6 +161,28 @@ export default function CreateSecurityReportPage(): JSX.Element {
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
+    // The description's images are stored first, under the project, so the
+    // create request carries `/<attachment id>` references. If one cannot be
+    // stored nothing is created and the form stays as it is.
+    let descriptionHtml: string;
+    try {
+      descriptionHtml = await descriptionImages.uploadImages(description);
+    } catch (err) {
+      setSubmitting(false);
+      showError(preCreateImagesErrorMessage(err));
+      return;
+    }
+    // The report's files go before the case, and the case is created only once they
+    // are stored: it names them, and the backend refuses a security report without.
+    const report = await reportDrafts.upload(attachments);
+    if (!report.ok) {
+      setSubmitting(false);
+      // Stopped by the person: nothing was created and there is nothing to report.
+      if (!report.cancelled) {
+        showError(`${report.message} The security report was not submitted; try again.`);
+      }
+      return;
+    }
     try {
       const created = await postCase.mutateAsync({
         type: "security_report_analysis",
@@ -164,9 +190,10 @@ export default function CreateSecurityReportPage(): JSX.Element {
         deploymentId,
         deployedProductId,
         subject: subject.trim(),
-        description,
-        attachments: attachments.map((a) => ({ name: a.name, file: a.file })),
+        description: descriptionHtml,
+        attachmentIds: report.ids,
       });
+      descriptionImages.release(description);
       navigate(`/security-center/security-reports/${created.id}`, {
         state: { from: backTarget },
       });
@@ -330,6 +357,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
                 maxHeight="300px"
                 toolbarVariant="full"
                 disabled={submitting}
+                onImageUpload={descriptionImages.onImageUpload}
                 ariaRequired
               />
             </Box>
@@ -348,10 +376,23 @@ export default function CreateSecurityReportPage(): JSX.Element {
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
-              maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
               required
+              maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
               disabled={submitting}
             />
+            {/* The files going up before the report is created, with a Cancel. */}
+            {reportDrafts.progress && (
+              <EditorUploadProgress
+                uploads={[
+                  {
+                    name: reportDrafts.progress.name,
+                    percent: reportDrafts.progress.percent,
+                    onCancel: reportDrafts.cancel,
+                  },
+                ]}
+                waiting={reportDrafts.progress.waiting}
+              />
+            )}
           </Grid>
         </Grid>
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/claude"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/teams"
 )
@@ -43,18 +45,23 @@ type fixedCatalogue struct {
 func (c fixedCatalogue) Text() string { return c.text }
 
 // fakeGateway answers every Messages call with one text block and the given
-// stop reason (or with status/body when status is set), and records the last
-// request body.
+// stop reason (or with status/body/header when status is set), and records
+// the last request body.
 type fakeGateway struct {
 	text       string
 	stopReason string
 	status     int
 	body       string
+	header     map[string]string
 	delay      time.Duration
 	calls      atomic.Int32
 	lastBody   atomic.Value
 }
 
+// ServeHTTP records the request body, waits out delay (unless the caller
+// gives up first), then answers with status/body when status is set, or with
+// one text block and fixed usage: input 5000, cache write 700, cache read 9000,
+// output 400.
 func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.calls.Add(1)
 	raw, _ := io.ReadAll(r.Body)
@@ -68,6 +75,9 @@ func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if f.status != 0 {
+		for k, v := range f.header {
+			w.Header().Set(k, v)
+		}
 		w.WriteHeader(f.status)
 		_, _ = io.WriteString(w, f.body)
 		return
@@ -80,7 +90,8 @@ func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
 		"content":     []any{map[string]any{"type": "text", "text": f.text}},
 		"stop_reason": stop, "stop_sequence": nil,
-		"usage": map[string]any{"input_tokens": 5000, "output_tokens": 400},
+		"usage": map[string]any{"input_tokens": 5000, "output_tokens": 400,
+			"cache_creation_input_tokens": 700, "cache_read_input_tokens": 9000},
 	})
 	_, _ = w.Write(reply)
 }
@@ -119,7 +130,26 @@ func newTestGenerator(t *testing.T, gw *fakeGateway, cat Catalogue, timeout time
 	return NewGenerator(client, "claude-sonnet-5-5", timeout, cat)
 }
 
+// fixedToday is the date every test's user message carries (see useFixedToday).
+const fixedToday = "2026-11-06"
+
+// useFixedToday sets the clock userMessage reads to fixedToday for one test.
+func useFixedToday(t *testing.T) {
+	t.Helper()
+	day, err := time.Parse("2006-01-02", fixedToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := now
+	now = func() time.Time { return day.Add(15 * time.Hour) }
+	t.Cleanup(func() { now = prev })
+}
+
+// TestGenerateSendsTheCatalogueWithTeamsAndThePrompt: the system prompt is the
+// catalogue with the Teams section, the user message is the prompt, and the
+// result carries the candidate and all four token counts.
 func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
+	useFixedToday(t)
 	gw := &fakeGateway{text: validGenerated}
 	team := []teams.Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}}
 	res, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second).
@@ -130,15 +160,50 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	if len(res.Candidates) != 1 || string(res.Candidates[0]) != validGenerated || res.Declined != "" {
 		t.Errorf("result = %+v, want the one object", res)
 	}
-	if res.InputTokens != 5000 || res.OutputTokens != 400 {
-		t.Errorf("usage = %d/%d, want 5000/400", res.InputTokens, res.OutputTokens)
+	if res.InputTokens != 5000 || res.OutputTokens != 400 || res.CacheCreationInputTokens != 700 || res.CacheReadInputTokens != 9000 {
+		t.Errorf("usage = %+v, want input 5000, cache write 700, cache read 9000, output 400", res)
 	}
 	system, user, maxTok, model := gw.request(t)
 	if system != teams.WithTeams("CATALOGUE\n", team) || !strings.Contains(system, "| Rigel | `rigel` | CRE ABT | `creTeam` |") {
 		t.Errorf("system = %q, want the catalogue with the Teams section", system)
 	}
-	if user != "Top 10 customers by open cases." || maxTok != maxTokens || model != "claude-sonnet-5-5" {
+	if user != "Top 10 customers by open cases.\n\nToday's date: "+fixedToday || maxTok != maxTokens || model != "claude-sonnet-5-5" {
 		t.Errorf("user, max_tokens, model = %q, %d, %q", user, maxTok, model)
+	}
+}
+
+// The system prompt (catalogue and teams) is the same on every call, so it
+// carries the one cache breakpoint; the user message, which changes per
+// request, carries none.
+func TestGenerateCachesTheSystemPromptOnly(t *testing.T) {
+	gw := &fakeGateway{text: validGenerated}
+	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second).
+		Generate(context.Background(), Request{Prompt: "My open cases.", Draft: json.RawMessage(`{"displayName":"x"}`)}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var req struct {
+		System []struct {
+			CacheControl map[string]any `json:"cache_control"`
+		} `json:"system"`
+		Messages []struct {
+			Content []struct {
+				CacheControl map[string]any `json:"cache_control"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	body, _ := gw.lastBody.Load().(string)
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(req.System) != 1 || len(req.System[0].CacheControl) != 1 || req.System[0].CacheControl["type"] != "ephemeral" {
+		t.Errorf("system cache_control = %+v, want exactly {type: ephemeral} (the default 5-minute lifetime)", req.System)
+	}
+	for _, m := range req.Messages {
+		for _, c := range m.Content {
+			if c.CacheControl != nil {
+				t.Errorf("user message cache_control = %v, want none", c.CacheControl)
+			}
+		}
 	}
 }
 
@@ -154,6 +219,7 @@ func TestGenerateWithNoTeamsSendsTheCatalogueAsIs(t *testing.T) {
 }
 
 func TestGenerateFollowUpSendsTheDraftBeforeThePrompt(t *testing.T) {
+	useFixedToday(t)
 	gw := &fakeGateway{text: validGenerated}
 	draft := json.RawMessage(`{"displayName":"Old","widgets":[]}`)
 	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 5*time.Second).
@@ -162,9 +228,46 @@ func TestGenerateFollowUpSendsTheDraftBeforeThePrompt(t *testing.T) {
 	}
 	_, user, _, _ := gw.request(t)
 	want := "This is the dashboard I am editing:\n\n```json\n" + string(draft) +
-		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\nAdd a pie."
+		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\nAdd a pie." +
+		"\n\nToday's date: " + fixedToday
 	if user != want {
 		t.Errorf("user message =\n%q\nwant\n%q", user, want)
+	}
+}
+
+// Today's date is in the user message, never the system prompt: the system
+// prompt is the same on two different days, so the cache still hits, and the
+// date the model sees is the UTC day, also late in a Colombo evening.
+func TestGenerateSendsTodaysDateInTheUserMessageOnly(t *testing.T) {
+	gw := &fakeGateway{text: validGenerated}
+	gen := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second)
+	prev := now
+	t.Cleanup(func() { now = prev })
+
+	var systems []string
+	for _, c := range []struct{ at, date string }{
+		{"2026-11-06T23:30:00+05:30", "2026-11-06"}, // 23:30 in Colombo is still 6 November in UTC
+		{"2026-11-07T09:00:00Z", "2026-11-07"},
+	} {
+		at, err := time.Parse(time.RFC3339, c.at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now = func() time.Time { return at }
+		if _, err := gen.Generate(context.Background(), Request{Prompt: "Cases created in December."}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		system, user, _, _ := gw.request(t)
+		systems = append(systems, system)
+		if want := "Cases created in December.\n\nToday's date: " + c.date; user != want {
+			t.Errorf("at %s, user message = %q, want %q", c.at, user, want)
+		}
+		if strings.Contains(system, "Today's date") {
+			t.Errorf("at %s, the system prompt carries the date: %q", c.at, system)
+		}
+	}
+	if systems[0] != systems[1] {
+		t.Errorf("the system prompt changed between days:\n%q\n%q", systems[0], systems[1])
 	}
 }
 
@@ -193,6 +296,9 @@ func TestGenerateDeclined(t *testing.T) {
 	}
 }
 
+// TestGenerateErrors: each way a call gives no candidates is its own error: a
+// refusal, a reply cut off, a reply with no JSON, a gateway error, a timeout
+// (also a deadline), and a gateway 429 (the usage limit).
 func TestGenerateErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -204,6 +310,7 @@ func TestGenerateErrors(t *testing.T) {
 		{"no JSON", &fakeGateway{text: "I cannot help with that."}, ErrUnusable},
 		{"gateway error", &fakeGateway{status: http.StatusUnauthorized, body: `{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`}, ErrCall},
 		{"timeout", &fakeGateway{text: validGenerated, delay: 2 * time.Second}, ErrCall},
+		{"usage limit", usageLimitGateway(), ErrUsageLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := newTestGenerator(t, tc.gw, fixedCatalogue{text: "C"}, 300*time.Millisecond).
@@ -215,6 +322,72 @@ func TestGenerateErrors(t *testing.T) {
 				t.Errorf("timeout err = %v, want a deadline", err)
 			}
 		})
+	}
+}
+
+// usageLimitGateway answers every call 429, as the gateway does over a
+// request, token or spend limit; retry-after-ms 0 keeps the SDK's one retry
+// quick.
+func usageLimitGateway() *fakeGateway {
+	return &fakeGateway{status: http.StatusTooManyRequests, header: map[string]string{"retry-after-ms": "0"},
+		body: `{"type":"error","error":{"type":"rate_limit_error","message":"limit reached"}}`}
+}
+
+// TestGenerateUsageLimitIsOnlyA429: a 429 is ErrUsageLimit (and still
+// ErrCall), after the SDK's one retry; an overloaded gateway (529, 503) and
+// an auth failure are ordinary call failures, not a usage limit.
+func TestGenerateUsageLimitIsOnlyA429(t *testing.T) {
+	gw := usageLimitGateway()
+	_, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 5*time.Second).
+		Generate(context.Background(), Request{Prompt: "p"})
+	if !errors.Is(err, ErrUsageLimit) || !errors.Is(err, ErrCall) {
+		t.Errorf("429: err = %v, want ErrUsageLimit and ErrCall", err)
+	}
+	if n := gw.calls.Load(); n != 2 {
+		t.Errorf("429: %d gateway calls, want 2 (the SDK retries once)", n)
+	}
+	for _, status := range []int{529, http.StatusServiceUnavailable, http.StatusUnauthorized} {
+		gw := &fakeGateway{status: status, header: map[string]string{"retry-after-ms": "0"},
+			body: `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`}
+		_, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 5*time.Second).
+			Generate(context.Background(), Request{Prompt: "p"})
+		if !errors.Is(err, ErrCall) || errors.Is(err, ErrUsageLimit) {
+			t.Errorf("%d: err = %v, want ErrCall and not ErrUsageLimit", status, err)
+		}
+	}
+}
+
+// TestGenerateALongRetryAfterIsTheUsageLimit: a 429 asking for a wait past
+// the call's deadline is the usage limit at once, not a timeout after the
+// wait.
+func TestGenerateALongRetryAfterIsTheUsageLimit(t *testing.T) {
+	gw := &fakeGateway{status: http.StatusTooManyRequests, header: map[string]string{"retry-after": "60"},
+		body: `{"type":"error","error":{"type":"rate_limit_error","message":"limit reached"}}`}
+	start := time.Now()
+	_, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 2*time.Second).
+		Generate(context.Background(), Request{Prompt: "p"})
+	if !errors.Is(err, ErrUsageLimit) || errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want ErrUsageLimit and not the deadline", err)
+	}
+	if n := gw.calls.Load(); n != 1 {
+		t.Errorf("%d gateway calls, want 1", n)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("took %v, want the usage limit at once", took)
+	}
+}
+
+// TestIsUsageLimitNeedsTheSDKError: a 429 wrapped with %w is still the usage
+// limit; an error that only says 429 in its text is not.
+func TestIsUsageLimitNeedsTheSDKError(t *testing.T) {
+	apiErr := &anthropic.Error{StatusCode: http.StatusTooManyRequests}
+	if !isUsageLimit(fmt.Errorf("call: %w", apiErr)) {
+		t.Error("a wrapped 429: want the usage limit")
+	}
+	for _, err := range []error{errors.New("429 Too Many Requests"), fmt.Errorf("call: %v", apiErr), &anthropic.Error{StatusCode: 529}} {
+		if isUsageLimit(err) {
+			t.Errorf("%v: want not the usage limit", err)
+		}
 	}
 }
 
@@ -283,6 +456,7 @@ func TestGenerateLogsTokenUsageForEveryOutcome(t *testing.T) {
 		{"cut off", &fakeGateway{text: `{"displayName":`, stopReason: "max_tokens"}, "truncated", 5000},
 		{"no JSON", &fakeGateway{text: "I cannot help with that."}, "unusable", 5000},
 		{"gateway error", &fakeGateway{status: http.StatusUnauthorized, body: `{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`}, "failed", 0},
+		{"usage limit", usageLimitGateway(), "usage_limit", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := captureLog(t)
@@ -299,6 +473,14 @@ func TestGenerateLogsTokenUsageForEveryOutcome(t *testing.T) {
 			}
 			if tc.tokens > 0 && l["outputTokens"] != float64(400) {
 				t.Errorf("output tokens = %v, want 400", l["outputTokens"])
+			}
+			// The cache counts, 0 when the call failed.
+			wantWrite, wantRead := float64(700), float64(9000)
+			if tc.tokens == 0 {
+				wantWrite, wantRead = 0, 0
+			}
+			if l["cacheCreationInputTokens"] != wantWrite || l["cacheReadInputTokens"] != wantRead {
+				t.Errorf("cache tokens = %v / %v, want %v / %v", l["cacheCreationInputTokens"], l["cacheReadInputTokens"], wantWrite, wantRead)
 			}
 			if ms, ok := l["durationMs"].(float64); !ok || (tc.name == "ok" && ms < 50) {
 				t.Errorf("durationMs = %v, want the call's time (at least the gateway's 50ms on ok)", l["durationMs"])

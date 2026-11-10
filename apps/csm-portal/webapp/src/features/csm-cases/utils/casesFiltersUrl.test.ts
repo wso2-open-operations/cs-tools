@@ -178,6 +178,17 @@ describe("op-awareness (regression: the widgetPreviewUrl field~op bug)", () => {
   // into this same field's complement at the translation boundary
   // (`translateCaseDashboardFilters`, see its own doc comment) rather than a
   // second field/param this codec would need to keep distinct.
+  it("`salesRegions` round-trips through the `salesRegions` param and counts as one active filter", () => {
+    const filters: CasesFilters = {
+      ...DEFAULT_CASES_FILTERS,
+      salesRegions: ["EMEA", "LATAM"],
+    };
+    const params = writeCasesFiltersToUrl(filters);
+    expect(params.get("salesRegions")).toBe("EMEA,LATAM");
+    expect(readCasesFiltersFromUrl(params).salesRegions).toEqual(["EMEA", "LATAM"]);
+    expect(countActiveFilters(filters)).toBe(1);
+  });
+
   it("`onboardingStatuses` round-trips losslessly through the URL", () => {
     const filters: CasesFilters = {
       ...DEFAULT_CASES_FILTERS,

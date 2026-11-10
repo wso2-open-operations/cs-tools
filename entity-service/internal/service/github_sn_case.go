@@ -235,9 +235,10 @@ var snPriorityLabels = map[string]string{
 	"Critical": "1 - Critical", "High": "2 - High", "Moderate": "3 - Moderate", "Low": "4 - Low",
 }
 
-// extractSNIssueFields ports extractFields.js's extractAllFields.
-func extractSNIssueFields(body string) *snIssueFields {
+// extractSNIssueFields ports extractFields.js's extractAllFields, splitting only on the template's own headings when h is set.
+func extractSNIssueFields(body string, h issueHeadings) *snIssueFields {
 	f := &snIssueFields{}
+	seen := map[string]bool{}
 	var label string
 	var value []string
 	flush := func() {
@@ -262,7 +263,13 @@ func extractSNIssueFields(body string) *snIssueFields {
 		f.set(key, snLinkify(v))
 	}
 	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
-		if rest, ok := strings.CutPrefix(line, "###"); ok && len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+		if h != nil {
+			if l, ok := h.fieldHeading(line, seen); ok {
+				flush()
+				label = l
+				continue
+			}
+		} else if rest, ok := strings.CutPrefix(line, "###"); ok && len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
 			flush()
 			label = rest
 			continue
@@ -305,6 +312,8 @@ type snGithubIssue struct {
 	User     string
 	Labels   []string
 	RepoFull string // owner/repository
+	// Headings are the repository's template field labels; nil splits on every ### heading.
+	Headings issueHeadings
 }
 
 // snGithubCaseDescription is the workflows' FORMATTED_DESCRIPTION: the
@@ -353,7 +362,7 @@ func snGithubCasePayloadBase(f *snIssueFields, issue snGithubIssue) map[string]a
 // snGithubCaseCreate is servicenow_create_case.yml's payload. account and
 // project go as sys_ids, whichever form the repository's file used.
 func snGithubCaseCreate(issue snGithubIssue, accountID, projectID, category, announcementType, catalog, catalogPrefix string) map[string]any {
-	f := extractSNIssueFields(issue.Body)
+	f := extractSNIssueFields(issue.Body, issue.Headings)
 	p := snGithubCasePayloadBase(f, issue)
 	p["project"] = uuidToSysid(projectID)
 	p["account"] = uuidToSysid(accountID)
@@ -369,7 +378,7 @@ func snGithubCaseCreate(issue snGithubIssue, accountID, projectID, category, ann
 
 // snGithubCaseUpdate is servicenow_update_case.yml's payload.
 func snGithubCaseUpdate(issue snGithubIssue) map[string]any {
-	return snGithubCasePayloadBase(extractSNIssueFields(issue.Body), issue)
+	return snGithubCasePayloadBase(extractSNIssueFields(issue.Body, issue.Headings), issue)
 }
 
 // snGithubCommentText is github_comment_to_sn.yml's journal note: images

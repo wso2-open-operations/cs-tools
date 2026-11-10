@@ -38,8 +38,11 @@ import (
 )
 
 type caseService struct {
-	repo     repository.CaseRepository
-	userRepo repository.UserRepository
+	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
+	// ask for deleted attachments in a list (SearchAttachmentsRequest.DeletedOnly).
+	csmPortalClientID string
+	repo              repository.CaseRepository
+	userRepo          repository.UserRepository
 	// projectContactRepo backs updateCaseWatchList's project-membership
 	// validation (see that method's own doc comment) — never nil for a
 	// Postgres-backed caseService (routes.go always constructs and passes
@@ -130,6 +133,9 @@ type caseService struct {
 	// nil before use anyway, same posture as every other optional
 	// dependency on this struct.
 	volumeTrendCache CaseVolumeTrendCache
+
+	// imageLinker attaches the comment images a new comment shows (nil: none).
+	imageLinker InlineImageLinker
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -199,6 +205,16 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 	return svc
 }
 
+// WithInlineImageLinker attaches the linker that, when a comment is saved,
+// attaches the comment images it shows to it. Same post-construction wiring shape
+// as WithCSEngineerRole; a no-op if svc is not a *caseService or l is nil.
+func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
+	if cs, ok := svc.(*caseService); ok && l != nil {
+		cs.imageLinker = l
+	}
+	return svc
+}
+
 // WithSLAEngine attaches the CSM-native SLA clock engine to an
 // already-constructed CaseService built via the plain NewCaseService (which
 // has no slaEngine parameter at all -- unlike NewCaseServiceWithSNWriteback,
@@ -214,6 +230,25 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 // in routes.go) keeps working completely unchanged. slaEngine may itself be
 // nil (config.CSMSLAEngineEnabled == false, or no database configured at
 // all) -- that's the normal "engine turned off" case, not an error.
+func WithDeletedAttachmentsForCSMPortal(svc CaseService, csmPortalClientID string) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.csmPortalClientID = csmPortalClientID
+	}
+	return svc
+}
+
+// mayListDeletedAttachments is whether this search may list the deleted
+// attachments (only those): the request asks AND the caller is the CSM portal
+// backend, which passes the flag on only for a portal admin who asked (decided
+// from the person's token roles there, the same trust the admin delete uses).
+// Any other caller's request for it is ignored.
+func (s *caseService) mayListDeletedAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) bool {
+	if !req.DeletedOnly || s.csmPortalClientID == "" {
+		return false
+	}
+	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
+}
+
 func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
 	if cs, ok := svc.(*caseService); ok {
 		cs.slaEngine = slaEngine
@@ -567,18 +602,6 @@ func validateCreateCaseRequest(req *domain.CreateCaseRequest) error {
 		if req.Description == "" {
 			return &apierror.ValidationError{Msg: "description is required for security_report_analysis"}
 		}
-		// Attachments are optional here (not backend-enforced by ServiceNow either):
-		// the FE creates the case first, then uploads attachments in a separate
-		// request per file, so a failed attachment upload never masks a
-		// successful case creation.
-		for i, a := range req.Attachments {
-			if a.Name == "" {
-				return &apierror.ValidationError{Msg: fmt.Sprintf("attachments[%d].name is required", i)}
-			}
-			if a.File == "" {
-				return &apierror.ValidationError{Msg: fmt.Sprintf("attachments[%d].file is required", i)}
-			}
-		}
 	case "engagement":
 		if req.Subject == "" {
 			return &apierror.ValidationError{Msg: "subject is required for engagement"}
@@ -732,8 +755,36 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// Postgres.
 	s.fillServiceRequestText(ctx, &req)
 
+	// The description's inline images were uploaded as drafts before this record
+	// existed. Checked BEFORE anything is created, so a bad request leaves nothing
+	// half-created. Nothing runs for a description with no image in it.
+	descImageEmail := ""
+	if descriptionImagesApply(ctx, req) {
+		var err error
+		descImageEmail, err = validateDescriptionImages(ctx, s.imageLinker, req.ProjectID, req.Description)
+		if err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+	}
+
+	// The files uploaded before this record (a security report's report) are checked
+	// the same way, and a security report must have one.
+	var linker any
+	if s.imageLinker != nil {
+		linker = s.imageLinker
+	}
+	reportEmail, err := validateReportDrafts(ctx, linker, req)
+	if err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
 	if s.snMirror != nil {
-		return s.createCaseSNFirst(ctx, req)
+		resp, err := s.createCaseSNFirst(ctx, req)
+		if err == nil {
+			linkDescriptionImages(ctx, s.imageLinker, resp.Case.ID, req.ProjectID, descImageEmail, req.Description)
+			linkReportDrafts(ctx, linker, resp.Case.ID, req, reportEmail)
+		}
+		return resp, err
 	}
 
 	// The pure-Postgres path below (no ServiceNow mirror at all) now writes
@@ -764,10 +815,15 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	// The repository links the report files inside the create transaction (as the
+	// uploader they were checked against), so a file taken by another create in between
+	// fails this one instead of leaving a case without it.
+	req.ReportDraftOwnerEmail = reportEmail
 	c, err := s.repo.CreateCase(ctx, req)
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered
@@ -1441,6 +1497,18 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// comment.created_by (migration 0040) is a free-text VARCHAR, not a
 	// UUID FK -- see CaseRepository.CreateCaseComment's own doc comment.
 	req.CreatedBy = actorEmail
+	// At most MaxInlineImagesPerContent images and the total size limit, checked
+	// before the comment is saved.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		if err := s.imageLinker.ValidateCommentImages(ctx, "", req.CaseID, actorEmail, req.Content); err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+	}
+	if s.imageLinker != nil {
+		if err := s.imageLinker.ValidateEmbeddedImages(ctx, actorEmail, req.Content); err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {
@@ -1453,6 +1521,10 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	}
 
 	s.subscribeCommenterToWatchList(ctx, req.CaseID, actorEmail)
+
+	if s.imageLinker != nil {
+		s.imageLinker.LinkFromContent(ctx, c.ID, req.CaseID, actorEmail, req.Content)
+	}
 
 	// Computed once, used by both the SLA-engine hook and the published
 	// event's own IsSupportEngineerResponse flag below -- see
@@ -1716,6 +1788,12 @@ func (s *caseService) applyCustomerAttachmentStateTransition(ctx context.Context
 		return
 	}
 	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, caseID, "customer attachment")
+}
+
+// ApplyCustomerAttachmentStateTransition applies the customer-attachment rule to a case a stored attachment
+// (the work_item_attachment flow) has just been completed on. The caller has checked the attachment's kind.
+func (s *caseService) ApplyCustomerAttachmentStateTransition(ctx context.Context, caseID string) {
+	s.applyCustomerAttachmentStateTransition(ctx, domain.ReferenceTypeCase, caseID)
 }
 
 // moveToWaitingOnWSO2OnCustomerActivity is the rule shared by a customer's
@@ -3665,17 +3743,33 @@ func (s *caseService) AggregateCases(ctx context.Context, req domain.AggregateCa
 }
 
 // defaultCaseVolumeTrendDays/maxCaseVolumeTrendDays bound
-// CaseVolumeTrendRequest.Days.
+// CaseVolumeTrendRequest.Days and a fixed window's day bucket;
+// maxCaseVolumeTrendWeeks/maxCaseVolumeTrendMonths bound its week and month
+// buckets (a year of weeks, two years of months). A year spans 54 week
+// starts when it is a leap year that starts on a Sunday (2012, 2040): its
+// 1 January is the last day of one week and its 31 December the first of
+// another.
 const (
 	defaultCaseVolumeTrendDays = 30
 	maxCaseVolumeTrendDays     = 90
+	maxCaseVolumeTrendWeeks    = 54
+	maxCaseVolumeTrendMonths   = 24
+)
+
+// CaseVolumeTrendRequest.Bucket's values.
+const (
+	caseVolumeTrendBucketDay   = "day"
+	caseVolumeTrendBucketWeek  = "week"
+	caseVolumeTrendBucketMonth = "month"
 )
 
 // caseVolumeTrendStableTTL is CaseVolumeTrend's cache lifetime for a day
 // that has fully elapsed (UTC) and can never change again -- comfortably
-// longer than the widest window this endpoint allows (maxCaseVolumeTrendDays)
-// rather than needing an explicit invalidation path, since it simply never
-// needs recomputing again while it stays within any request's window.
+// longer than the widest trailing window (maxCaseVolumeTrendDays) rather
+// than needing an explicit invalidation path, since it simply never needs
+// recomputing again while it stays within any request's window. A fixed
+// window can reach further back (up to maxCaseVolumeTrendMonths); a day
+// older than this TTL is just recomputed once more after it expires.
 // "Today" has no fixed constant of its own -- see ttlUntilNextUTCMidnight.
 const caseVolumeTrendStableTTL = 120 * 24 * time.Hour
 
@@ -3701,9 +3795,12 @@ func ttlUntilNextUTCMidnight(now time.Time) time.Duration {
 
 // CaseVolumeTrend implements CaseService. It returns exactly two series --
 // "Opened" (by created date) and "Closed" (by closed date) -- one point per
-// UTC calendar day over the trailing window, oldest first; see
+// UTC calendar day over the trailing window, oldest first, or over a fixed
+// StartDate/EndDate window, one point per day, week or month (Bucket); see
 // domain.CaseVolumeTrendResponse's own doc comment for why this is fixed
-// rather than an open-ended series config.
+// rather than an open-ended series config. Either way the counts are
+// computed and cached per day, so a week or month point is the sum of its
+// days and shares their cache entries.
 //
 // Caching (volumeTrendCache -- see that field's own doc comment; routes.go
 // always wires a per-pod in-memory cache, so this is never nil): a day that
@@ -3735,12 +3832,10 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 	if err := RequireInternalCaller(ctx, s.access, "case volume trend is only available to internal users"); err != nil {
 		return domain.CaseVolumeTrendResponse{}, err
 	}
-	days := req.Days
-	if days == 0 {
-		days = defaultCaseVolumeTrendDays
-	}
-	if days < 1 || days > maxCaseVolumeTrendDays {
-		return domain.CaseVolumeTrendResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("days must be between 1 and %d", maxCaseVolumeTrendDays)}
+	today := time.Now().UTC()
+	window, err := resolveCaseVolumeTrendWindow(req, today)
+	if err != nil {
+		return domain.CaseVolumeTrendResponse{}, err
 	}
 	search, err := s.prepareCaseSearch(ctx, domain.SearchCasesRequest{Filters: req.Filters})
 	if err != nil {
@@ -3751,25 +3846,34 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 		return domain.CaseVolumeTrendResponse{}, err
 	}
 
-	today := time.Now().UTC()
+	days := int(window.end.Sub(window.start).Hours()/24) + 1
 	allDays := make([]string, days)
 	for i := 0; i < days; i++ {
-		allDays[i] = today.AddDate(0, 0, -(days - 1 - i)).Format("2006-01-02")
+		allDays[i] = window.start.AddDate(0, 0, i).Format("2006-01-02")
 	}
 	todayKey := today.Format("2006-01-02")
+	// A day after today has no cases yet: it counts 0 and is neither queried
+	// nor cached, so it is never cached as 0 under the stable TTL either.
+	countedDays := allDays
+	for i, d := range allDays {
+		if d > todayKey {
+			countedDays = allDays[:i]
+			break
+		}
+	}
 
 	cacheEnabled := s.volumeTrendCache != nil
 	var filtersKey string
 	counts := make(map[string]domain.CaseVolumeDayCount, days)
 	if cacheEnabled {
 		filtersKey = caseVolumeFiltersKey(req.Filters)
-		for day, dc := range s.volumeTrendCache.GetMany(ctx, filtersKey, allDays) {
+		for day, dc := range s.volumeTrendCache.GetMany(ctx, filtersKey, countedDays) {
 			counts[day] = dc
 		}
 	}
 
-	missing := make([]string, 0, days)
-	for _, d := range allDays {
+	missing := make([]string, 0, len(countedDays))
+	for _, d := range countedDays {
 		if _, ok := counts[d]; !ok {
 			missing = append(missing, d)
 		}
@@ -3791,20 +3895,134 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 		}
 	}
 
-	opened := make([]domain.CaseVolumeTrendPoint, days)
-	closed := make([]domain.CaseVolumeTrendPoint, days)
-	for i, d := range allDays {
+	// A day point per day; a week or month point sums its days, from the
+	// bucket's first day in the window (Date) to its last (EndDate).
+	grouped := window.bucket == caseVolumeTrendBucketWeek || window.bucket == caseVolumeTrendBucketMonth
+	var opened, closed []domain.CaseVolumeTrendPoint
+	for _, d := range allDays {
 		dc := counts[d]
-		opened[i] = domain.CaseVolumeTrendPoint{Date: d, Count: dc.Opened}
-		closed[i] = domain.CaseVolumeTrendPoint{Date: d, Count: dc.Closed}
+		if n := len(opened); grouped && n > 0 && caseVolumeTrendSameBucket(opened[n-1].Date, d, window.bucket) {
+			opened[n-1].Count += dc.Opened
+			opened[n-1].EndDate = d
+			closed[n-1].Count += dc.Closed
+			closed[n-1].EndDate = d
+			continue
+		}
+		var endDate string
+		if grouped {
+			endDate = d
+		}
+		opened = append(opened, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: dc.Opened})
+		closed = append(closed, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: dc.Closed})
 	}
-	return domain.CaseVolumeTrendResponse{
+	resp := domain.CaseVolumeTrendResponse{
 		Days: days,
 		Series: []domain.CaseVolumeTrendSeries{
 			{Label: "Opened", Points: opened},
 			{Label: "Closed", Points: closed},
 		},
-	}, nil
+	}
+	if window.fixed {
+		resp.StartDate = window.start.Format("2006-01-02")
+		resp.EndDate = window.end.Format("2006-01-02")
+		resp.Bucket = window.bucket
+	}
+	return resp, nil
+}
+
+// caseVolumeTrendWindow is the inclusive span of UTC days a
+// CaseVolumeTrendRequest covers and how its points are grouped. fixed is
+// false for the trailing window (Days), whose response carries no
+// startDate/endDate/bucket.
+type caseVolumeTrendWindow struct {
+	start, end time.Time
+	bucket     string
+	fixed      bool
+}
+
+// resolveCaseVolumeTrendWindow validates req's window fields against today
+// (UTC): either the trailing Days window, or StartDate/EndDate with an
+// optional Bucket, never both, and within the bucket's limit.
+func resolveCaseVolumeTrendWindow(req domain.CaseVolumeTrendRequest, today time.Time) (caseVolumeTrendWindow, error) {
+	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if req.StartDate == "" && req.EndDate == "" {
+		if req.Bucket != "" {
+			return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: "bucket needs startDate and endDate"}
+		}
+		days := req.Days
+		if days == 0 {
+			days = defaultCaseVolumeTrendDays
+		}
+		if days < 1 || days > maxCaseVolumeTrendDays {
+			return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: fmt.Sprintf("days must be between 1 and %d", maxCaseVolumeTrendDays)}
+		}
+		return caseVolumeTrendWindow{start: today.AddDate(0, 0, -(days - 1)), end: today}, nil
+	}
+	if req.Days != 0 {
+		return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: "days cannot be combined with startDate and endDate"}
+	}
+	if req.StartDate == "" || req.EndDate == "" {
+		return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: "startDate and endDate are both required"}
+	}
+	start, err := parseCaseVolumeTrendDate("startDate", req.StartDate, today)
+	if err != nil {
+		return caseVolumeTrendWindow{}, err
+	}
+	end, err := parseCaseVolumeTrendDate("endDate", req.EndDate, today)
+	if err != nil {
+		return caseVolumeTrendWindow{}, err
+	}
+	if end.Before(start) {
+		return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: "endDate must not be before startDate"}
+	}
+	bucket := req.Bucket
+	if bucket == "" {
+		bucket = caseVolumeTrendBucketDay
+	}
+	switch bucket {
+	case caseVolumeTrendBucketDay:
+		if days := int(end.Sub(start).Hours()/24) + 1; days > maxCaseVolumeTrendDays {
+			return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: fmt.Sprintf("a day bucket covers at most %d days", maxCaseVolumeTrendDays)}
+		}
+	case caseVolumeTrendBucketWeek:
+		if weeks := int(startOfRelativeWeek(end, 0).Sub(startOfRelativeWeek(start, 0)).Hours()/(24*7)) + 1; weeks > maxCaseVolumeTrendWeeks {
+			return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: fmt.Sprintf("a week bucket covers at most %d weeks", maxCaseVolumeTrendWeeks)}
+		}
+	case caseVolumeTrendBucketMonth:
+		if months := (end.Year()-start.Year())*12 + int(end.Month()) - int(start.Month()) + 1; months > maxCaseVolumeTrendMonths {
+			return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: fmt.Sprintf("a month bucket covers at most %d months", maxCaseVolumeTrendMonths)}
+		}
+	default:
+		return caseVolumeTrendWindow{}, &apierror.ValidationError{Msg: fmt.Sprintf("bucket must be %q, %q or %q", caseVolumeTrendBucketDay, caseVolumeTrendBucketWeek, caseVolumeTrendBucketMonth)}
+	}
+	return caseVolumeTrendWindow{start: start, end: end, bucket: bucket, fixed: true}, nil
+}
+
+// parseCaseVolumeTrendDate parses a window bound: a relative date
+// placeholder (resolved against today, the same as a filter value's) or a
+// plain YYYY-MM-DD, as a UTC day.
+func parseCaseVolumeTrendDate(name, value string, today time.Time) (time.Time, error) {
+	if resolved, matched, err := resolveRelativeDate(value, today); err != nil {
+		return time.Time{}, err
+	} else if matched {
+		value = resolved
+	}
+	t, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}, &apierror.ValidationError{Msg: fmt.Sprintf("%s must be a YYYY-MM-DD date or a relative date, got %q", name, value)}
+	}
+	return t, nil
+}
+
+// caseVolumeTrendSameBucket reports whether the UTC days a and b (both
+// YYYY-MM-DD) fall in the same week (Monday to Sunday) or month.
+func caseVolumeTrendSameBucket(a, b, bucket string) bool {
+	if bucket == caseVolumeTrendBucketMonth {
+		return a[:7] == b[:7]
+	}
+	ta, errA := time.Parse("2006-01-02", a)
+	tb, errB := time.Parse("2006-01-02", b)
+	return errA == nil && errB == nil && startOfRelativeWeek(ta, 0).Equal(startOfRelativeWeek(tb, 0))
 }
 
 // caseVolumeFiltersKey encodes req.Filters into a stable string for
@@ -3917,188 +4135,47 @@ func humanizeSnakeCase(value string) string {
 	return strings.Join(words, " ")
 }
 
-// CreateCaseAttachment implements CaseService for the CSM-native (Postgres)
-// data source. Unlike ServiceNow, this data source never receives file bytes
-// directly: the caller must have already uploaded the file to SFTPGo and
-// supplies its storage_key plus the size/name/type metadata. Only
-// ReferenceTypeCase is supported -- the other ReferenceType values
-// (conversation, change_request, deployment, incident) have no Postgres
-// schema backing on this data source.
-func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-	if req.ReferenceType != domain.ReferenceTypeCase {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "referenceType must be 'case' for this data source"}
-	}
-	if req.Name == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "name is required"}
-	}
-	if req.Type == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "type is required"}
-	}
-	if req.StorageKey == nil || *req.StorageKey == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "storageKey is required: this data source has no base64 payload alternative, the file must already be uploaded to SFTPGo"}
-	}
-	if req.SizeBytes <= 0 {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than zero"}
-	}
-	// Empty defaults to complete: every caller before this change (and every
-	// existing Postgres-path caller that doesn't know about the pending
-	// state) gets exactly today's behavior. Only a caller that explicitly
-	// wants the two-step upload flow passes "pending".
-	switch req.Status {
-	case "":
-		req.Status = domain.AttachmentStatusComplete
-	case domain.AttachmentStatusPending, domain.AttachmentStatusComplete:
-		// valid
-	default:
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid status %q: must be 'pending' or 'complete'", req.Status)}
-	}
-
-	user, err := s.resolveActor(ctx)
-	if err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-	req.CreatedBy = user.ID
-
-	a, err := s.repo.CreateCaseAttachment(ctx, req)
-	if err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-
-	// A pending row is a placeholder for an upload that may never finish; the
-	// customer's file only truly exists once ConfirmCaseAttachment runs, which
-	// is where the state transition fires for that flow.
-	if a.Status == domain.AttachmentStatusComplete {
-		s.applyCustomerAttachmentStateTransition(ctx, req.ReferenceType, req.ReferenceID)
-	}
-
-	return domain.CreateAttachmentResponse{
-		Message: "Attachment created successfully",
-		Attachment: domain.AttachmentDetail{
-			ID:         a.ID,
-			SizeBytes:  a.SizeBytes,
-			CreatedOn:  a.CreatedOn,
-			CreatedBy:  user.Email,
-			StorageKey: a.StorageKey,
-			Status:     a.Status,
-			// No DownloadURL: this service holds no bytes for a Postgres-sourced
-			// attachment, only its storage_key. Resolving storage_key to an
-			// actual download location is the downstream CSM backend's job.
-		},
-	}, nil
-}
-
-// ConfirmCaseAttachment implements CaseService for the CSM-native (Postgres)
-// data source. It is the second half of the two-step upload flow: the caller
-// (the CSM backend) registers a 'pending' row via CreateCaseAttachment
-// *before* minting an SFTPGo upload credential, then calls this once the
-// browser reports the upload succeeded, transitioning the row to 'complete'.
+// SearchCaseAttachments implements CaseService. It lists attachment metadata
+// from PostgreSQL only; the files are in Azure Blob Storage and are read by the
+// portal backends.
 //
-// Ownership: unlike UpdateAttachment/DeleteCaseAttachment (which any
-// authenticated user may perform on any case attachment -- there is no
-// per-resource ACL in this data source beyond authentication, see
-// resolveActor's doc comment), confirming is restricted to the same actor
-// who created the pending row. A pending row represents an upload a specific
-// user initiated; there is no legitimate case yet for a different user to
-// confirm it on their behalf, and allowing it would let any authenticated
-// user "complete" an attachment they never uploaded.
-func (s *caseService) ConfirmCaseAttachment(ctx context.Context, id string) (domain.ConfirmAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-
-	user, err := s.resolveActor(ctx)
-	if err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-
-	existing, err := s.repo.GetCaseAttachmentByID(ctx, id)
-	if err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-	if existing.CreatedBy == nil || existing.CreatedBy.ID == nil || *existing.CreatedBy.ID != user.ID {
-		return domain.ConfirmAttachmentResponse{}, &apierror.ForbiddenError{Msg: "attachment was not created by the current user"}
-	}
-	if existing.Status != domain.AttachmentStatusPending {
-		return domain.ConfirmAttachmentResponse{}, &apierror.ConflictError{Msg: fmt.Sprintf("attachment is not pending (current status: %q)", existing.Status)}
-	}
-
-	a, err := s.repo.ConfirmCaseAttachment(ctx, id)
-	if err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-
-	s.applyCustomerAttachmentStateTransition(ctx, existing.ReferenceType, existing.ReferenceID)
-
-	return domain.ConfirmAttachmentResponse{
-		Message: "Attachment confirmed successfully",
-		Attachment: domain.AttachmentDetail{
-			ID:         a.ID,
-			SizeBytes:  a.SizeBytes,
-			CreatedOn:  a.CreatedOn,
-			CreatedBy:  user.Email,
-			StorageKey: a.StorageKey,
-			Status:     a.Status,
-		},
-	}, nil
-}
-
-// SearchCaseAttachments implements CaseService for the CSM-native (Postgres)
-// data source.
+// referenceType "case" reads the case's work_item_attachment rows (see
+// caseRepo.SearchCaseAttachments). "change_request", "incident" and
+// "conversation" are work_item subtypes and read work_item_attachment through
+// CaseRepository.SearchWorkItemAttachments; "deployment" reads
+// deployment_attachment through SearchDeploymentAttachments. Metadata only: a
+// parent with no attachments is a successful empty result.
 //
-// referenceType "case" reads case_attachment (native uploads) and the synced
-// work_item_attachment rows of the same case as one deduplicated list (see
-// caseRepo.SearchCaseAttachments). "change_request",
-// "incident" and "conversation" are work_item subtypes and read the generic
-// work_item_attachment table via CaseRepository.SearchWorkItemAttachments;
-// "deployment" is not a work_item subtype and has no attachment table on
-// plain Postgres, where it is rejected with a validation error. Metadata
-// only: a work item with no attachments is a successful empty result.
-//
-// Stopgap: under DATA_SOURCE=postgres-servicenow-dual-write (s.snMirror !=
-// nil) a "deployment", "incident", "change_request" or "conversation" search
-// (see isMirrorOnlyAttachmentRef) is delegated to the mirrored data source and its
-// response or error is returned as-is, until a Postgres-native deployment
-// attachment store exists. Likewise a "case" search that returns zero rows
-// from Postgres at offset 0 falls back to the mirrored data source, because
-// attachments of migrated cases were synced into work_item_attachment, which
-// the case read path does not consult. A Postgres error is returned as-is
-// (no fallback), and a non-zero offset never falls back so paging past the
-// end of a non-empty Postgres list is not masked. Remove this fallback once
-// the case read path reads work_item_attachment. Every other reference type
-// is unaffected.
-//
-// Read-path status decision: the underlying repository query filters out
-// 'pending' rows entirely (see caseRepo.SearchCaseAttachments), so a case's
-// attachment list never shows a still-uploading placeholder to other users.
-// This is a deliberate product-behavior choice, not an oversight: a pending
-// row may never complete (the upload could fail, or the tab could just
-// close), and showing it in a shared list before that's known risks other
-// team members seeing and trying to act on a file that doesn't exist yet. A
-// specific-id lookup (GetAttachmentByID) is not filtered this way -- it
-// still returns a pending row -- which is what the confirm step relies on,
-// and is also how an uploader could be shown their own in-flight upload if
-// the FE chooses to poll it directly rather than via this list.
+// Rows still uploading (pending), failed or deleted are not listed, so nobody
+// sees a placeholder for a file that may never exist.
 func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
 	}
-	if isMirrorOnlyAttachmentRef(req.ReferenceType) && s.snMirror != nil {
-		// No Postgres attachment store for these types yet (deployment,
-		// incident, change_request, conversation): serve from the mirrored
-		// data source in dual-write mode. Plain Postgres mode
-		// (snMirror == nil) falls through to the existing handling below.
-		return s.snMirror.SearchCaseAttachments(ctx, req)
+	if req.ReferenceType == domain.ReferenceTypeDeployment {
+		// Deployment attachments are files in Azure Blob Storage with a row in
+		// deployment_attachment: list them from Postgres.
+		if err := normalizePagination(&req.Pagination); err != nil {
+			return domain.SearchAttachmentsResponse{}, err
+		}
+		attachments, total, err := s.repo.SearchDeploymentAttachments(ctx, req.ReferenceID, req.Pagination)
+		if err != nil {
+			return domain.SearchAttachmentsResponse{}, err
+		}
+		return domain.SearchAttachmentsResponse{
+			Attachments: attachments,
+			Total:       total,
+			Limit:       req.Pagination.Limit,
+			Offset:      req.Pagination.Offset,
+			HasMore:     req.Pagination.Offset+len(attachments) < total,
+		}, nil
 	}
 	isCase := req.ReferenceType == domain.ReferenceTypeCase
 	if !isCase {
 		// Non-case work items (change_request, incident, conversation) are
-		// backed by work_item_attachment; "deployment" is not a work_item
-		// subtype and has no attachment table on this data source.
+		// backed by work_item_attachment.
 		if _, ok := repository.ReferenceTypeToWorkItemType[req.ReferenceType]; !ok {
-			return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("referenceType %q is not supported for this data source: must be one of 'case', 'change_request', 'conversation', 'incident'", req.ReferenceType)}
+			return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("referenceType %q is not supported for this data source: must be one of 'case', 'change_request', 'conversation', 'incident' or 'deployment'", req.ReferenceType)}
 		}
 	}
 	if err := normalizePagination(&req.Pagination); err != nil {
@@ -4110,6 +4187,9 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 		total       int
 		err         error
 	)
+	if s.mayListDeletedAttachments(ctx, req) {
+		ctx = repository.WithDeletedAttachmentsOnly(ctx)
+	}
 	if isCase {
 		attachments, total, err = s.repo.SearchCaseAttachments(ctx, req.ReferenceID, req.Pagination)
 	} else {
@@ -4118,12 +4198,6 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 	if err != nil {
 		return domain.SearchAttachmentsResponse{}, err
 	}
-	if isCase && s.snMirror != nil && total == 0 && req.Pagination.Offset == 0 {
-		// Stopgap (see doc comment): Postgres has nothing for this case in
-		// dual-write mode, so serve the list from the mirrored data source.
-		return s.snMirror.SearchCaseAttachments(ctx, req)
-	}
-
 	return domain.SearchAttachmentsResponse{
 		Attachments: attachments,
 		Total:       total,
@@ -4159,49 +4233,6 @@ func (s *caseService) SearchCaseActivities(ctx context.Context, req domain.Searc
 		Offset:   req.Pagination.Offset,
 		HasMore:  req.Pagination.Offset+len(activity) < total,
 	}, nil
-}
-
-// GetCaseAttachmentContent implements CaseService for the CSM-native
-// (Postgres) data source. This service never holds the file bytes for a
-// Postgres-sourced attachment -- they live in SFTPGo, addressed by the
-// attachment's storage_key (see GetAttachmentByID / SearchCaseAttachments).
-// Callers must resolve content externally via that storage_key rather than
-// through this endpoint.
-func (s *caseService) GetCaseAttachmentContent(_ context.Context, _ string) ([]byte, string, error) {
-	return nil, "", &apierror.ServiceUnavailableError{Msg: "this data source does not serve attachment bytes directly; resolve content via the attachment's storageKey"}
-}
-
-// DeleteCaseAttachment implements CaseService for the CSM-native (Postgres)
-// data source. This only removes the metadata row -- it does not delete the
-// backing SFTPGo file, which is the downstream CSM backend's responsibility
-// when it also calls SFTPGo's own delete API.
-func (s *caseService) DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
-	if err := validateUUIDs("attachmentId", []string{req.AttachmentID}); err != nil {
-		return domain.DeleteAttachmentResponse{}, err
-	}
-	if _, err := s.resolveActor(ctx); err != nil {
-		return domain.DeleteAttachmentResponse{}, err
-	}
-	if err := s.repo.DeleteCaseAttachment(ctx, req.AttachmentID); err != nil {
-		// No Postgres case_attachment row for this id -- same "no Postgres
-		// deployment attachment table yet" gap SearchCaseAttachments already
-		// falls back to ServiceNow for (see that method's own doc comment):
-		// a deployment-referenced attachment has no case_attachment row at
-		// all in dual-write mode (its id never satisfies case_attachment's
-		// hard FK into "case"), so a bare NotFoundError here is just as
-		// likely "this is a deployment attachment, not a missing one" as a
-		// genuinely absent attachment. Try ServiceNow before giving up.
-		var notFound *apierror.NotFoundError
-		if s.snMirror != nil && errors.As(err, &notFound) {
-			return s.snMirror.DeleteCaseAttachment(ctx, req)
-		}
-		return domain.DeleteAttachmentResponse{}, err
-	}
-	return domain.DeleteAttachmentResponse{Message: "Attachment deleted successfully"}, nil
-}
-
-func (s *caseService) GetAttachment(_ context.Context, _ string) (domain.Attachment, error) {
-	return domain.Attachment{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
 }
 
 // AddCaseTag implements CaseService.
@@ -4519,107 +4550,14 @@ func (s *caseService) SubmitCaseFeedback(ctx context.Context, id string, req dom
 	}, nil
 }
 
-// GetAttachmentByID implements CaseService for the CSM-native (Postgres) data
-// source. Content is always nil: this service holds no bytes for a
-// Postgres-sourced attachment, only its storage_key -- see
-// GetCaseAttachmentContent's doc comment for why content must be resolved
-// externally via StorageKey instead.
-//
-// Falls back to ServiceNow on a Postgres NotFoundError when s.snMirror != nil
-// (DATA_SOURCE=postgres-servicenow-dual-write) -- the same "no Postgres
-// deployment attachment table yet" gap SearchCaseAttachments already handles
-// by checking req.ReferenceType up front. This method takes only a bare id,
-// with no reference type to branch on ahead of time, so the Postgres lookup
-// is tried first regardless, and a miss there is resolved against ServiceNow
-// instead of reported as a genuine 404 -- it's at least as likely to be a
-// deployment-referenced attachment (which can only ever live in ServiceNow
-// under this data source) as an actually-missing one.
-func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.AttachmentDetails{}, err
-	}
-
-	a, err := s.repo.GetCaseAttachmentByID(ctx, id)
-	if err != nil {
-		var notFound *apierror.NotFoundError
-		if s.snMirror != nil && errors.As(err, &notFound) {
-			return s.snMirror.GetAttachmentByID(ctx, id)
-		}
-		return domain.AttachmentDetails{}, err
-	}
-
-	var createdBy string
-	if a.CreatedBy != nil {
-		createdBy = a.CreatedBy.Email
-	}
-
-	return domain.AttachmentDetails{
-		ID:            a.ID,
-		ReferenceID:   a.ReferenceID,
-		ReferenceType: &a.ReferenceType,
-		Name:          a.Name,
-		Type:          a.Type,
-		SizeBytes:     a.SizeBytes,
-		Description:   a.Description,
-		CreatedBy:     createdBy,
-		CreatedOn:     a.CreatedOn,
-		DownloadURL:   a.DownloadURL,
-		PreviewURL:    a.PreviewURL,
-		Content:       nil,
-		StorageKey:    a.StorageKey,
-		Status:        a.Status,
-	}, nil
-}
-
-// validatePGAttachmentUpdate mirrors the ServiceNow path's
-// validateAttachmentUpdate, narrowed to the one reference type this data
-// source's attachments table actually models: deployment attachments have no
-// Postgres schema backing here, so that branch is rejected outright rather
-// than silently accepted.
-func validatePGAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
-	if req.ReferenceType != domain.ReferenceTypeCase {
-		return &apierror.ValidationError{Msg: fmt.Sprintf("invalid reference type %q: only 'case' is supported for this data source", req.ReferenceType)}
-	}
-	if req.Description != nil {
-		return &apierror.ValidationError{Msg: "description field is not allowed for case reference type"}
-	}
-	if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
-		return &apierror.ValidationError{Msg: "name field is required for case reference type"}
-	}
-	return nil
-}
-
-// UpdateAttachment implements CaseService for the CSM-native (Postgres) data
-// source. Only renaming is supported, mirroring the one mutation the
-// ServiceNow path allows for reference type "case" (name required,
-// description forbidden).
-func (s *caseService) UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{req.AttachmentID}); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-	if err := validatePGAttachmentUpdate(req); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	user, err := s.resolveActor(ctx)
-	if err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	updatedOn, err := s.repo.UpdateCaseAttachmentName(ctx, req.AttachmentID, strings.TrimSpace(*req.Name), user.ID)
-	if err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	return domain.UpdateAttachmentResponse{
-		Message: "Attachment updated successfully",
-		Attachment: domain.UpdatedAttachment{
-			ID:        req.AttachmentID,
-			UpdatedOn: updatedOn,
-			UpdatedBy: user.Email,
-		},
-	}, nil
+// descriptionImagesApply reports whether a create request's description images
+// are checked and linked. Everyone is checked, with one exception: an
+// announcement created with no user behind it (the scheduled auto-publish, which
+// copies an announcement request's description to one case per project). There is
+// no author to own a draft, so its image references could never pass, and refusing
+// them would stop the announcement from being published at all. They are left as
+// written (nothing is linked, as before description images existed). A caller with
+// a token, and every other case type, is always checked.
+func descriptionImagesApply(ctx context.Context, req domain.CreateCaseRequest) bool {
+	return !(req.Type == "announcement" && callerEmailBestEffort(ctx) == "")
 }

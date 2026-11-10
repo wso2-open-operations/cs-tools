@@ -141,7 +141,7 @@ entity-service without it the task fails (404) and the engine alerts.
 
 A table that entity-service cut at its cap carries a "Showing only the oldest N of TOTAL" note, and an
 empty table shows "No cases." If both tables are empty the report omits itself: nothing is sent, a
-count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<internal id>` (plain text when it is unset).
+count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<case UUID>` (the `id` of each report row; the portal cannot open a case by number or internal ID), as plain text when the base is unset or a row has no `id`.
 
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
@@ -156,38 +156,40 @@ returns an error. `--run-now=stale_cases_report --recipients=... [--cc=...]` wor
 `reportRunNow` like every report: it mails the override list only, even for a task with no `to` of its
 own.
 
-`internal/entitycases.Client` remains a separate entity-service client, used by `open_cases_report`,
-even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials; see that
-package's own doc comment for why case search isn't just another method on `ledger.Client`.
-
 ## Open cases report
 
 `internal/opencases.SendReport`, registered as `"open_cases_report"`, is a narrower, more urgent
 sibling of "Stale cases report" above: it flags a case nobody has even started working on yet,
-rather than any case that's merely been open a long time. Queries entity-service's
-`POST /cases/search` (via `internal/entitycases.Client.SearchCasesInStateCreatedBeforeYesterday`)
-for every case whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
-moved to `work_in_progress` or anything else no longer belongs here) and whose `createdOn` falls
-before the start of yesterday, then emails a report table of them (oldest first) via
-`notify.RenderOpenCasesReport`.
+rather than any case that's merely been open a long time. It mails entity-service's
+open-before-yesterday report: `internal/longopenreport.Client.OpenBeforeYesterday` calls
+`GET /reports/long-open-cases?variant=open-before-yesterday` (same client, base URL and OAuth client
+credentials as the stale cases report) and `notify.RenderOpenCasesReport` renders its `cases` (oldest
+first). Which items count (a case, service request or security report analysis, as each row's `type`
+says; engagements and announcements are left out; state exactly `open`, created before the start of yesterday), the
+calendar-day boundary (computed by entity-service in Asia/Colombo, not by this task) and the row cap
+(5000) all live in entity-service; this task only fetches, renders and sends. Columns: Case, Type
+(Case, Service request, Security report analysis), Account, Assigned To, State, Severity, Days Open
+(whole days since creation, computed here at send time), Updated. Each row's number links to the item's
+CSM portal page, built from `CSM_PORTAL_WEB_BASE_URL` and the item's UUID (`/cases/<id>`,
+`/operations/service-requests/<id>` or `/security-center/security-reports/<id>`); plain text when the
+base is unset or the row has no id or a type with no known route. With no matching rows no mail is
+sent. Subject: `[Immediate-Action-Required][Report] Opened before yesterday cases`.
 
-"Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
-time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
-rolling duration: a case created at 23:59 yesterday (UTC) is
-excluded, one created at 00:01 the day before is included, regardless of what time of day the task
-itself runs. The "Housekeeping" section's `TZ=UTC` caveat is about something different — when the
-*cron schedule itself* fires (`internal/schedule.PeriodKey`'s own local-time interpretation) — and
-doesn't apply here: this cutoff is UTC-anchored no matter what `TZ` the process runs with.
+If the report has no cases the task sends nothing (a count-only line is logged) and succeeds, as
+the original report does. If entity-service cut the list at its cap (`casesTruncated`), the mail
+is still sent and says "This list is cut: showing only the oldest N of TOTAL".
 
-Default schedule `0 8 * * *` (daily at 08:00, after "Stale cases report"'s 07:00 slot — this time
-itself *is* subject to the same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule);
-override via
-`SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
+This depends on the entity-service `variant` parameter: deploy entity-service first. Against an
+entity-service without it the parameter is ignored and the default age-based report would come
+back, so deploy order matters.
+
+Default schedule `30 3 * * *` (daily at 03:30 UTC, which is 09:00 Asia/Colombo, when the original
+report sends; same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule); override
+via `SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
 `SUB_CRON_RECIPIENTS` entry, unrelated to `ALERT_RECIPIENTS`, no report sent (and no entity-service
-query run) if empty. Shares `internal/entitycases.Client` and the row-rendering helpers in
-`internal/notify` with "Stale cases report", but has its own template
-(`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
-emails" below.
+query run) if empty. Has its own template (`internal/notify/templates/open_cases_report.html`) per
+this component's own "Per-task report emails" below. `--run-now=open_cases_report
+--recipients=... [--cc=...]` works as for the other report tasks.
 
 ## Rota reminders
 
@@ -224,14 +226,14 @@ schedules assume `TZ=UTC` like every other here.
   a shift and its on-call variant (`<CODE>_OC`), which share hours: Morning (with its on-call
   person) and Evening. The email lists its window's people.
 - **Weekend: one summary email plus one invitation email per team per day.** The summary goes
-  to everybody on the weekend, LK and Americas (with the LK on-call person) alike, in the layout the
+  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike, in the layout the
   CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
   ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
   the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
   window longer than 10 hours that has 2+ people every day asking them to split it into morning
   and evening shifts), the zone
   legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
-  The Americas Weekend's hours, and the LK On-call's that cover it, are 08:00-18:00
+  The Americas Weekend's hours, and the Americas On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
   invitations use the same hours. Then each window (LK
   Saturday, Americas Saturday, LK Sunday, Americas Sunday) gets its own email to its own people,
@@ -689,6 +691,22 @@ both places.
   `ACP_TEST_PROJECT_ID` is set, since a tryout talks to the real CSM and Salesforce, and it runs
   on weekends too (it emails only its debug list). A `--run-now=acp_closure` is a real run with
   the configured settings, the same as a scheduled one.
+- **Only an Open track acts.** A project is listed because its overall state is Open, but each track
+  (end date, invoice) has its own closure state, and a person's reopen can leave one at "Pending
+  Suspended", "Pending Closed", "Notified" and so on. A track whose own state is not Open does nothing:
+  no read, no probe, no notice, no record, no suspension, no reset to open (`buildSubscriptionCascade`,
+  `buildInvoiceCascade`, and `actSubscription` / `actInvoice` as a second guard). Before this, ACP sent the
+  day-0 notice ("your project has been suspended") and recorded `suspend_notice` while `suspend` then
+  skipped the track, so a customer was told of a suspension that never happened. The skipped track also
+  does not mark the project closed for the other one, so an Open invoice track still notifies before it
+  suspends.
+- **A completed suspension is not repeated.** The legacy process re-ran an event only when its type
+  changed or an action failed, so a project suspended and then reopened by a person was left alone until
+  its date or invoice moved the event. An Open track whose saved `event_type` is `suspend` (and whose
+  `actionSuspendProject`, if present, is `SUCCESSFUL`) does nothing when the decision is to suspend: no notice,
+  no suspension, no record, and it does not mark the project closed for the other track
+  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
+  still resets the event to `open`, which clears this.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
@@ -778,6 +796,7 @@ task", and the message lists the registered names.
 | `--states=a,b` | Work only these states, each among the configured ones. `case_autoclosure` only |
 | `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
 | `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's whole audience for this one run (To and Cc both; see "Recipient override" below). Every report task takes it. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
+| `--project-key=KEY` `--to=a@x,b@y` `--cc=c@x` | **Only `time_card_report`** (see "Monthly time card report" below). `--project-key` runs one project, configured or not; `--to` replaces the project's derived contacts with your list (one mail, all in To); `--cc` adds copies. Same address rules as `--recipients`, at most 50 addresses per list, one bare key. `--to` and `--recipients` cannot be combined; every other task refuses `--to` and `--project-key` |
 
 `--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and only for a task that
 implements the optional `registry.Task.RunNowNarrow` hook; any other task exits non-zero with `<flag> is not
@@ -844,7 +863,8 @@ reading the handlers' code and doc comments (a judgement, not a test):
   `rota_manual_reminder` (claims waiting requests, each reported once).
 - **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
   `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
-  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports.
+  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports,
+  `time_card_report` (customer-facing: a repeat mails every contact of the project again).
   `unresolved_products_digest` also mails every run it finds anything.
 - **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
   confirmed), `query_hours_usage_notifications` (mails crossings it derives in process; whether a repeat re-sends
@@ -1009,7 +1029,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
-| `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
+| `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the Americas On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
@@ -1021,7 +1041,8 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
-| `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
+| `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
+| `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
@@ -1066,6 +1087,69 @@ unit mail groups, and a failed period is retried on every tick, so failure alert
 `PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
 (`<prefix>/<case number>`); unset keeps the plain text the PDF had.
 
+## Monthly time card report
+
+`internal/timecardreport.SendReports`, registered as `"time_card_report"`, emails each project's contacts the
+previous calendar month's approved effort, per case. It is **customer-facing**: the recipients are the project's
+own contacts, not an internal list. Layering is the usual one: `internal/timecards` (entity-service client and wire
+types), `internal/timecardreport` (the task), `internal/notify` (`RenderTimeCardReport`, `TimeCardReportSubject`,
+`FormatMinutes`, template `templates/time_card_report.html`: table layout, inline styles, no vendor name or logo).
+
+- **Projects.** `TIME_CARD_REPORT_PROJECT_KEYS`, comma-separated keys. Empty or unset is a logged no-op, never an
+  error. Each key is resolved to a project id with `POST /projects/search` (a substring match on name, key and
+  subscription type), keeping only the result whose `key` equals the configured one ignoring case; none, or more than
+  one, fails that project.
+- **Window.** The calendar month before the **period key's** month, in UTC (`PreviousMonth`): the first through the
+  last day, so January reaches back to December of the previous year and February is 28 or 29 days. It derives
+  from the period key (the cron firing), never the clock, so every retry of a period asks for the same window.
+  Default schedule `30 5 2 * *` (05:30 UTC on the 2nd), overridable in `SUB_CRON_SCHEDULES`. Consequence for
+  `--run-now`: it uses the period the schedule is in *now*, so run on the 1st before the 05:30 firing of the 2nd and
+  it reports the month before last. The run-now log line has the exact from and to.
+- **Report data.** `GET /projects/{id}/time-cards/report?from=&to=` (approved cards only, durations in whole minutes).
+  A month with no approved time is **still sent**, with a "No time card data found for the selected period." card in
+  place of the summary cards and table. Durations are formatted once, from integer minutes, as `<h>h <m>m`
+  (`FormatMinutes`: 119 is `1h 59m`, 60 is `1h 0m`, never `60m`). Case type is humanised (`service_request` is
+  `Service request`). Subject: `Time Card Report - <project name> - <Month YYYY>` (the key stands in for a missing name).
+- **Recipients.** `POST /projects/{id}/contacts/search` (all pages): every contact with a non-empty email,
+  de-duplicated ignoring case. One filter beyond legacy's none: integration users (`isCsIntegrationUser`, machine
+  accounts that never read mail) are left out. Deactivated memberships are already excluded by entity-service.
+  Invited-but-unregistered contacts ARE included, as legacy did. A project with no recipients is skipped with a
+  WARN (project key and counts, never addresses) and does not fail the run.
+- **Privacy.** The mail client has no Bcc, so a derived audience gets **one mail per address**: no customer ever sees
+  another's address. Any Cc (manual runs only) is on every one of those mails.
+- **Failures and retries.** Projects are independent: one failing never stops the rest, and the handler returns a
+  single error naming every failed project key (`N of M projects failed (PRJ-2, PRJ-4)`), with each project's reason
+  (status codes only, never addresses). A project whose mails partly failed counts as failed. **The handler has no
+  memory of what it sent**, so when any project fails the engine retries the whole run on a later tick and the
+  projects that already succeeded are mailed again. The only brake is `MaxAttempts: 2` on the task (one retry; the
+  failure alert says no retry is coming), the same device `acp_closure` uses; there is no per-project ledger.
+  To re-send one project after that, use `--run-now=time_card_report --project-key=KEY`.
+- **Failure alerts.** `SUB_CRON_RECIPIENTS` `to`/`cc` for this task are the failure-alert audience, as for every
+  task (the customers' addresses are never configured anywhere). A `debug` list redirects every mail to it (so one
+  copy per would-be recipient), with `[Test copy]` in the subject.
+- **`ALERTS_ENABLED=false`** silences it like every report.
+
+**On-demand run (`--run-now=time_card_report`).** The one task whose run-now flags can **widen** a run, which is why
+it is the deliberate exception to the "narrowing only" rule of `registry.Task.RunNowNarrow`: an operator has to be
+able to send one customer's report (a missed month, a retry) or send a test to themselves, and neither is a subset of
+the configured projects and contacts.
+
+| Flags | Projects | Mailed to |
+|---|---|---|
+| none | `TIME_CARD_REPORT_PROJECT_KEYS` | each project's derived contacts (as scheduled) |
+| `--project-key=KEY` | only `KEY`, whether configured or not | its derived contacts |
+| `--project-key=KEY --to=a@x,b@y` | only `KEY` | the list, one mail, all in To |
+| `--to=a@x,b@y` | every configured project | the list, one mail per project |
+| any of the above plus `--cc=c@x` | unchanged | unchanged, plus Cc on every mail |
+
+`--to` goes out with the **raw mail client**: no `[Test copy]` rewrite and it wins over a `debug` list (the operator
+chose the audience, and may be re-sending to a customer on purpose). Without `--to` the task's normal sender
+(debug mode included) is used. Each address is validated with `net/mail` (bare address, no display name, any invalid
+one is refused, at most 50 per list); contacts are not fetched when `--to` is given. Like every run-now it writes **no
+ledger row**, so it can mail a period the schedule already sent, and the start-of-run WARN says so. The window,
+project count and recipient counts are logged (counts only, never addresses). The other tasks refuse `--to` and
+`--project-key` as `not supported by task <name>`.
+
 ## Per-task report emails
 
 `engine.recordSuccess` still only ever updates the ledger — it never sends anything, and
@@ -1087,8 +1171,8 @@ alerts reach `ALERT_RECIPIENTS` only, never the team mail groups. Each sub-cron'
 (`internal/notify/templates/{stale,open}_cases_report.html`, following `alert.html`'s pattern) and
 its own recipients (its own `SUB_CRON_RECIPIENTS` entry, passed in as plain `to`/`cc` slices) — the
 report is sent from inside the `Handler` closure itself, entirely outside `engine.Engine`'s own
-success/failure path. What they *do* share is the case-search client (`internal/entitycases.Client`)
-and the row-rendering helpers in `internal/notify` (`renderCaseRows`/`humanizeState`/etc.) — real,
+success/failure path. What they *do* share is the long-open report client (`internal/longopenreport.Client`)
+and the row-rendering helpers in `internal/notify` (`humanizeState`/`severityLabel`/etc.) — real,
 already-duplicated logic worth sharing, as distinct from the report's own template/copy, which
 stays owned per task on purpose. A future report-sending sub-cron follows the same split: reuse
 whatever's genuinely identical (a case-search method, a rendering helper), but keep its own

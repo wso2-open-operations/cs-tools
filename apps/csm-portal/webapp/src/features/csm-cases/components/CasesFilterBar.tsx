@@ -72,6 +72,7 @@ import {
 import { isCompleteAnyOfBranch, type AnyOfBranch } from "@features/csm-cases/utils/anyOfFilters";
 import {
   ENGAGEMENT_TYPE_OPTIONS,
+  SALES_REGION_OPTIONS,
   ONBOARDING_STATUS_OPTIONS,
   SEVERITY_OPTIONS,
   STATE_OPTIONS,
@@ -84,6 +85,7 @@ import {
   updateUnifiedRow,
   type UnifiedFilterRow,
 } from "@features/csm-cases/utils/filterFieldAdapters";
+import { describeRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
 
 
 /**
@@ -117,6 +119,9 @@ export interface CasesFilters {
   projects: string[];
   /** Engagement sub-type filter; only meaningful when `caseTypes` is locked to `engagement`. */
   engagementTypes: BeEngagementType[];
+  /** Account sales-region filter (`salesRegion` op:in); empty = all regions.
+   * Only surfaced by views that pass `showSalesRegionFilter`. */
+  salesRegions: string[];
   /** Product family names (e.g. "API Manager"); matches all versions of each. */
   productNames: string[];
   /** CS team group ids (`creTeam` op:in) the case's project is scoped to. */
@@ -242,6 +247,8 @@ interface CasesFilterBarProps {
   hideProjectFilter?: boolean;
   /** Show the engagement-type multi-select (only relevant when type is locked to engagement). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in, like the engagement-type one). */
+  showSalesRegionFilter?: boolean;
   /**
    * Hide the "Onboarding status" Simple-mode control. `onboardingStatuses` is
    * a per-project attribute, not a per-case one — on a view already scoped to
@@ -275,9 +282,12 @@ const WORK_STATE_LABEL: Record<BeCaseWorkState, string> = {
 };
 
 /** Formats a `createdOn`/`updatedOn`/`closedOn` bound for a chip label — a
- * locale date when parseable, the raw string otherwise (never throws on a
- * malformed value; this is a display fallback, not validation). */
+ * relative-date placeholder in words ("30 days ago"), a locale date when
+ * parseable, the raw string otherwise (never throws on a malformed value;
+ * this is a display fallback, not validation). */
 function formatDateBound(raw: string): string {
+  const relative = describeRelativeDatePlaceholder(raw);
+  if (relative) return relative;
   // A bare `YYYY-MM-DD` is parsed as UTC midnight by `Date`, which renders as
   // the previous day for any locale behind UTC — pin it to local midnight.
   const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
@@ -335,6 +345,21 @@ interface ActiveFilterChip {
 // mode now. Simple mode has no row list at all, so a chip stays the only
 // way to see/clear an Advanced-only value that arrived via URL/dashboard
 // click-through while looking at the Simple grid -- that part is unchanged.
+// Sales Region has a Simple-mode select only, and is deliberately absent from
+// the Advanced builder. With the Advanced panel open the regular chips are
+// suppressed, so these keep a selected region visible and individually
+// removable there.
+function buildSalesRegionChips(filters: CasesFilters): ActiveFilterChip[] {
+  return filters.salesRegions.map((region) => ({
+    key: `salesRegion-${region}`,
+    label: `Sales Region: ${region}`,
+    onRemove: (f) => ({
+      ...f,
+      salesRegions: f.salesRegions.filter((r) => r !== region),
+    }),
+  }));
+}
+
 function buildActiveFilterChips(
   filters: CasesFilters,
 ): ActiveFilterChip[] {
@@ -459,7 +484,13 @@ function buildActiveFilterChips(
     if (!isCompleteAdvancedFilterRow(row)) return;
     const fieldMeta = getAdvancedFilterFieldMeta(row.field);
     const opMeta = getAdvancedFilterOpMeta(row.field, row.op);
-    const valueText = row.values.length > 0 ? ` ${row.values.join(", ")}` : "";
+    // A date bound's relative date in words ("30 days ago"), as on the typed
+    // date chips above; every other value as it is.
+    const shownValues =
+      row.op === "gte" || row.op === "lte"
+        ? row.values.map((v) => describeRelativeDatePlaceholder(v) ?? v)
+        : row.values;
+    const valueText = shownValues.length > 0 ? ` ${shownValues.join(", ")}` : "";
     chips.push({
       key: `advanced-${row.field}-${row.op}-${index}`,
       label: `${fieldMeta?.label ?? row.field} ${opMeta?.label ?? row.op}${valueText}`,
@@ -509,6 +540,7 @@ export default function CasesFilterBar({
   typeFilterLabel = "Case type",
   hideProjectFilter = false,
   showEngagementTypeFilter = false,
+  showSalesRegionFilter = false,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -635,13 +667,12 @@ export default function CasesFilterBar({
   // value that arrives without a remount (e.g. an applied saved view)
   // doesn't sit chip-less behind a Simple grid that no longer matches
   // reality.
-  const activeFilterChips = useMemo(
-    () =>
-      effectiveMode === "simple" || !isFiltersOpen
-        ? buildActiveFilterChips(filters)
-        : [],
-    [filters, effectiveMode, isFiltersOpen],
-  );
+  const activeFilterChips = useMemo(() => {
+    if (effectiveMode === "simple" || !isFiltersOpen) {
+      return buildActiveFilterChips(filters);
+    }
+    return showSalesRegionFilter ? buildSalesRegionChips(filters) : [];
+  }, [filters, effectiveMode, isFiltersOpen, showSalesRegionFilter]);
 
   // A saved view is a name pointing at a serialized filter query string.
   // Applying one feeds the parsed filters back through onChange (which the
@@ -898,6 +929,17 @@ export default function CasesFilterBar({
                   values={filters.engagementTypes}
                   options={engagementTypeOptions}
                   onChange={(next) => handleSimpleFieldChange({ ...filters, engagementTypes: next })}
+                />
+              </Grid>
+            )}
+            {showSalesRegionFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-sales-region"
+                  label="Sales Region"
+                  values={filters.salesRegions}
+                  options={SALES_REGION_OPTIONS}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, salesRegions: next })}
                 />
               </Grid>
             )}

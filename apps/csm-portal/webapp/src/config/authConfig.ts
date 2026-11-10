@@ -61,6 +61,25 @@ declare global {
       CSM_PORTAL_THEME: string;
       CSM_PORTAL_LOG_LEVEL: string;
       /**
+       * Optional. Product name shown beside the logo in the header and in the
+       * browser tab. Defaults to "CSM Portal" when unset — see
+       * `appearanceConfig.ts`'s `appName`.
+       */
+      CSM_PORTAL_APP_NAME?: string;
+      /**
+       * Optional. Header and tab-icon logo for the light colour scheme — a
+       * path under `public/` or an absolute URL. Also used for dark mode when
+       * `CSM_PORTAL_LOGO_DARK_MODE_URL` is unset. Defaults to "/logo-dark.svg"
+       * — see `appearanceConfig.ts`'s `logoLightModeUrl`.
+       */
+      CSM_PORTAL_LOGO_LIGHT_MODE_URL?: string;
+      /**
+       * Optional. Header and tab-icon logo for the dark colour scheme.
+       * Defaults to "/logo-white.svg" — see `appearanceConfig.ts`'s
+       * `logoDarkModeUrl`.
+       */
+      CSM_PORTAL_LOGO_DARK_MODE_URL?: string;
+      /**
        * Per-page visibility overrides keyed by nav-node id (see
        * `csmNavItems.ts`). Object literal, or the same object as a JSON string
        * for platforms that inject config as strings. Pages left out are
@@ -118,6 +137,30 @@ declare global {
        * `onboardingStatusConfig.ts`.
        */
       CSM_MIGRATION_ONBOARDING_STATUS_ENABLED?: boolean | string;
+      /**
+       * Largest file, in megabytes, offered for upload (default 10, the
+       * entity-service default). A number or numeric
+       * string. See `attachmentLimitsConfig.ts`.
+       */
+      CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
+      /**
+       * Most image megabytes one comment or description may hold in total, and
+       * so the largest single image (default 1). A number or numeric
+       * string. See `attachmentLimitsConfig.ts`.
+       */
+      CSM_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
+      /**
+       * How many 8 MiB ranges of one attachment download are fetched at the
+       * same time (default 4, kept between 1 and 8; 1 fetches one at a time).
+       * A number or numeric string. See `attachmentLimitsConfig.ts`.
+       */
+      CSM_PORTAL_DOWNLOAD_PARALLELISM?: number | string;
+      /**
+       * Optional. Save a download straight to a file the person picks, where the
+       * browser supports it. On unless `false` (boolean or "false"). See
+       * `attachmentLimitsConfig.ts`.
+       */
+      CSM_PORTAL_DOWNLOAD_TO_DISK?: boolean | string;
     };
   }
 }

@@ -175,64 +175,6 @@ func TestCaseCommentUserReferenceUpstreamVariants(t *testing.T) {
 	}
 }
 
-// TestAttachmentUserReference covers the attachment row, the second site where
-// the data source supplies a user id, plus the absent-field fallback.
-func TestAttachmentUserReference(t *testing.T) {
-	t.Parallel()
-
-	const caseSysid = "cccccccccccccccccccccccccccccccc"
-
-	attachment := func(extra string) string {
-		return `{"attachments":[{
-			"id": "dddddddddddddddddddddddddddddddd",
-			"referenceId": "` + caseSysid + `",
-			"name": "log.txt",
-			"type": "text/plain",
-			"sizeBytes": 12,
-			"createdBy": "jane.doe@example.com",
-			"createdByFullName": "Jane Doe",
-			"createdOn": "2026-01-01 10:00:00"` + extra + `
-		}],"totalRecords":1}`
-	}
-
-	for _, tc := range []struct {
-		name   string
-		body   string
-		wantID string
-	}{
-		{"user object supplied", attachment(`,"createdByUser": {"id": "` + testAuthorSysid + `", "email": "jane.doe@example.com", "name": "Jane Doe"}`), testAuthorUUID},
-		{"user object absent", attachment(``), ""},
-		{"user object with empty id", attachment(`,"createdByUser": {"id": "", "email": "jane.doe@example.com", "name": "Jane Doe"}`), ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tc.body))
-			})
-			svc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
-
-			resp, err := svc.SearchCaseAttachments(contextWithUserIDToken("token"), domain.SearchAttachmentsRequest{
-				ReferenceID:   sysidToUUID(caseSysid),
-				ReferenceType: domain.ReferenceTypeCase,
-				Pagination:    domain.Pagination{Limit: 10},
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(resp.Attachments) != 1 {
-				t.Fatalf("got %d attachments, want 1", len(resp.Attachments))
-			}
-			got := resp.Attachments[0].CreatedBy
-			if id := userRefID(t, got); id != tc.wantID {
-				t.Errorf("createdBy.id = %q, want %q", id, tc.wantID)
-			}
-			if got.Email != "jane.doe@example.com" || got.Name != "Jane Doe" {
-				t.Errorf("createdBy = %+v, want the uploader's email and name", got)
-			}
-		})
-	}
-}
-
 // TestCaseViewUserReferences covers the sites with no upstream user id (case
 // creator, watchers) alongside the assignee, whose id already arrives with the
 // response, and asserts the wire format: an id must serialize as an explicit

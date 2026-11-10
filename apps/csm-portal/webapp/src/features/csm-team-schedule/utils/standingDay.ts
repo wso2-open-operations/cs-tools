@@ -283,7 +283,12 @@ export function atTeamOrdinaryHours(
  *  - a stint worked on another team's rota (the Brazil rotation on the
  *    Americas rota) -- its rows on that team are the stint itself;
  *  - a retired kind, which no longer marks anybody away (the off-rota column
- *    leaves it out too), and Excluded from rota, which is not a day's absence.
+ *    leaves it out too), and Excluded from rota, which is not a day's absence;
+ *  - a rotation turn on a day with an allocation (customer or internal work):
+ *    the allocation takes their ordinary hours, not the turn they hold around
+ *    them, so the Evening card still lists whoever the roster shows on it.
+ *    A move to a team that works no rota (Migration) is different: they take
+ *    no turns there, so it drops every row.
  *
  * Display only, as Case Alerts already leaves out whoever is away when it
  * reads who is on duty.
@@ -292,6 +297,7 @@ export function atWorkOnTheDay(
   rows: readonly ScheduleAssignment[],
   absences: readonly ScheduleAbsence[],
   kinds: readonly ScheduleAbsenceKind[],
+  shifts?: ReadonlyMap<string, ScheduleShift>,
 ): ScheduleAssignment[] {
   const kindByCode = new Map(kinds.map((k) => [k.code, k]));
   const awayAll = absences.filter((ab) => {
@@ -304,9 +310,12 @@ export function atWorkOnTheDay(
   for (const ab of awayAll) byPerson.set(ab.engineer.userId, [...(byPerson.get(ab.engineer.userId) ?? []), ab]);
   return rows.filter((row) => {
     const spans = byPerson.get(row.engineer.userId)?.filter((ab) => covers(ab, row.rotaDate)) ?? [];
-    return spans.every(
-      (ab) => kindByCode.get(ab.kindCode)?.worksRotaThere && ab.teamKey.toLowerCase() === row.teamKey.toLowerCase(),
-    );
+    const turn = shifts?.get(row.shiftCode)?.isRotation === true;
+    return spans.every((ab) => {
+      const kind = kindByCode.get(ab.kindCode);
+      if (kind?.worksRotaThere && ab.teamKey.toLowerCase() === row.teamKey.toLowerCase()) return true;
+      return turn && kind?.bucket === "ALLOCATION" && !kind.movesToTeamKey;
+    });
   });
 }
 
@@ -355,7 +364,7 @@ export function creRowsAtWork({
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const standing = standingDayRows({ rotaDates, teams: creTeams, shifts, assignments, absences });
   return [
-    ...atTeamOrdinaryHours(atWorkOnTheDay(assignments, absences, absenceKinds), shifts, allCreTeams),
+    ...atTeamOrdinaryHours(atWorkOnTheDay(assignments, absences, absenceKinds, shifts), shifts, allCreTeams),
     ...standing,
   ].filter((a) => onItsStandingCard(a, shifts, allCreTeams));
 }

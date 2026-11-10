@@ -44,6 +44,9 @@ type ScheduleService interface {
 	SearchAssignments(ctx context.Context, req domain.SearchScheduleAssignmentsRequest) (domain.ScheduleAssignmentsResponse, error)
 	SearchAbsences(ctx context.Context, req domain.SearchScheduleAbsencesRequest) (domain.ScheduleAbsencesResponse, error)
 	SearchEngagementAllocations(ctx context.Context, req domain.SearchScheduleEngagementAllocationsRequest) (domain.ScheduleEngagementAllocationsResponse, error)
+	// DismissEngagementAllocation takes a synced allocation off a person's
+	// roster over a span of weekdays, or puts those days back.
+	DismissEngagementAllocation(ctx context.Context, req domain.DismissScheduleEngagementAllocationRequest) (domain.DismissScheduleEngagementAllocationResponse, error)
 	OnDuty(ctx context.Context, at *time.Time, includeOnLeave bool) (domain.ScheduleAssignmentsResponse, error)
 
 	// The lead edit path. Each checks that the caller leads the team the slot

@@ -106,9 +106,21 @@ func applyWindows(cfg Config, rostered []teamschedule.Assignment) {
 	}
 }
 
-// clockOf is the zone a rotation is described in: its own, when it has one,
-// else the rota's.
+// americasClock lists the rotations worked on the Americas clock: the
+// Americas Weekend and the Americas On-call beside it. Their hours are told
+// on Los Angeles time whatever zone their window is saved in, so a window
+// entered in IST still reads as the Americas team's hours.
+var americasClock = map[string]bool{"CRE_WEEKEND_NIGHT": true, "CRE_WEEKEND_NIGHT_OC": true}
+
+// losAngeles is America/Los_Angeles, or nil when the zone database lacks it.
+var losAngeles, _ = time.LoadLocation("America/Los_Angeles")
+
+// clockOf is the zone a rotation is described in: Los Angeles for the
+// Americas rotations, else its own window's, when it has one, else the rota's.
 func clockOf(cfg Config, code string) *time.Location {
+	if americasClock[code] && losAngeles != nil {
+		return losAngeles
+	}
 	if lw, ok := cfg.Windows[code]; ok && lw.Zone != nil {
 		return lw.Zone
 	}

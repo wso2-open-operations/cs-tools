@@ -135,6 +135,40 @@ window.config = {
   //   false – feature hidden. Ratings already stored are unaffected.
   CUSTOMER_PORTAL_NOVERA_FEEDBACK_ENABLED: false,
 
+  // ── Entity-service attachments ──────────────────────────────────────────────
+  //
+  // Attachments are stored in Azure Blob Storage by the portal backend: uploads
+  // are sent in 8 MiB chunks and downloads stream from the backend, so no
+  // storage address is exposed to the browser.
+  //
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
+  //   Largest case or deployment file offered for upload, in MB. Set it to match
+  //   entity-service's ATTACHMENT_MAX_MB; the service stays authoritative and
+  //   this only refuses a file early. A number or numeric string; anything else
+  //   (zero, negative, text) or above 100 uses the default.
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
+
+  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB  (optional — default: 1)
+  //   Most the images pasted or inserted into one comment or description may add
+  //   up to, in MB (at most 5 images each). Same value rules as above. The older
+  //   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB still works when this is not set, but
+  //   now means the same total, not a per-image limit. Above 25 uses the default.
+  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
+
+  // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM  (optional — default: 4)
+  //   How many 8 MiB ranges of one attachment download are fetched at the same
+  //   time. 1 fetches one range at a time. A number or numeric string; a whole
+  //   number is kept between 1 and 8, anything else (text) uses the default.
+  // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM: 4,
+
+  // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK  (optional — default: true)
+  //   Save a download straight to a file the person picks (the browser's save
+  //   dialog), so a large attachment is not held whole in memory. Works in Chrome
+  //   and Edge; other browsers keep the in-memory download. Files of 15 MiB or
+  //   less skip the dialog. Only the boolean false or the string "false" turns it
+  //   off; true (or leaving it unset) keeps it on.
+  // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,
+
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
   // CUSTOMER_PORTAL_TOP_BANNERS  (optional — default: [])

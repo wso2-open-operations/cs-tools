@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import {
   Alert,
   Box,
@@ -26,6 +27,7 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
@@ -38,10 +40,7 @@ import type { BeProject } from "@api/backend/types";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useNewServiceRequestDraft } from "@context/new-service-request-draft/NewServiceRequestDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
@@ -51,7 +50,7 @@ import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadat
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
-import { uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
+import { failedUploadsMessage, uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useSearchCatalogs } from "@features/csm-operations/api/useSearchCatalogs";
 import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalogItemVariables";
@@ -81,6 +80,23 @@ const SERVICE_REQUEST_SEVERITIES: ServiceRequestSeverity[] = ["S1", "S2", "S3", 
 // across re-renders.
 function isOfferedProject(project: BeProject): boolean {
   return canRaiseServiceRequests(project.subscriptionType);
+}
+
+/**
+ * Why a deployed product can't be used for a service request, or `null` when
+ * it can. Only called when the project restricts service requests to a set of
+ * product categories.
+ */
+function getIneligibleReason(
+  category: string | null | undefined,
+  allowed: string[],
+): string | null {
+  const allowedLabel = allowed.map((c) => c.toUpperCase()).join(", ");
+  if (category == null || category === "") {
+    return "This product has no category set. Set a category on the deployed product to raise a service request.";
+  }
+  if (allowed.includes(category)) return null;
+  return `Service requests can only be raised against products in these categories: ${allowedLabel}. This product's category is ${category.toUpperCase()}.`;
 }
 
 export default function CreateServiceRequestPage(): JSX.Element {
@@ -140,7 +156,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [deploymentId, setDeploymentId] = useState(
     restored?.deploymentId ?? relatedCaseState?.deploymentId ?? "",
   );
-  const [deployedProductId, setDeployedProductId] = useState(
+  // Raw selection (possibly prefilled from the related case or a restored
+  // draft). The effective `deployedProductId` below drops it when that product
+  // turns out to be ineligible for service requests.
+  const [selectedDeployedProductId, setDeployedProductId] = useState(
     restored?.deployedProductId ?? relatedCaseState?.deployedProductId ?? "",
   );
   const [catalogId, setCatalogId] = useState(restored?.catalogId ?? "");
@@ -150,9 +169,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [severity, setSeverity] = useState<ServiceRequestSeverity | "">(restored?.severity ?? "");
   // Variable answers, keyed by variable id.
   const [answers, setAnswers] = useState<Record<string, string>>(restored?.answers ?? {});
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>(
-    restored?.attachments ?? [],
-  );
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   // `hasSr` is precomputed by the backing data source, so an ineligible
   // project is caught before the engineer fills out the rest of the form
@@ -175,12 +193,13 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // Service requests are only raisable against a subset of a project's
   // deployed products, keyed by category — mirrors CP's
   // CreateServiceRequestPage, which restricts its deployed-product picker the
-  // same way. Fetched independently of deployedProducts and applied both
-  // server-side (below, via useDeployedProductOptions' productCategories
-  // param — the entity service narrows the search itself) and client-side
-  // (the memo below) as a defensive backstop. A missing/empty/failed-to-load
-  // srProductCategories must never narrow the list to zero when it would
-  // otherwise show options — fail open, not closed.
+  // same way. Ineligible products are still listed (disabled, with a reason
+  // tooltip) so the engineer can see why a product can't be used, rather than
+  // wondering where it went. The backend remains the authority and rejects
+  // creation against them; this is a display of data eligibility only.
+  // The full, unnarrowed product list is therefore fetched and classified
+  // client-side. A missing/empty/failed-to-load srProductCategories never
+  // disables anything: fail open, not closed.
   const projectMetadata = useProjectMetadata(projectId || undefined);
   const srProductCategories = projectMetadata.data?.features?.srProductCategories;
   // `hasServiceRequestReadAccess` gates the SR feature itself (viewer
@@ -193,17 +212,32 @@ export default function CreateServiceRequestPage(): JSX.Element {
     projectMetadata.data?.features?.hasServiceRequestReadAccess === false;
 
   const deployments = useSearchDeployments(projectId || undefined);
-  const deployedProducts = useDeployedProductOptions(
-    deploymentId || undefined,
-    srProductCategories ?? undefined,
-  );
+  const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const deployedProductOptions = useMemo(() => {
     const options = deployedProducts.data ?? [];
-    if (!srProductCategories || srProductCategories.length === 0) return options;
-    return options.filter(
-      (o) => o.category != null && srProductCategories.includes(o.category),
-    );
+    const restricted = !!srProductCategories && srProductCategories.length > 0;
+    return options.map((o) => ({
+      ...o,
+      ineligibleReason: restricted
+        ? getIneligibleReason(o.category, srProductCategories)
+        : null,
+    }));
   }, [deployedProducts.data, srProductCategories]);
+  const eligibleProductCount = deployedProductOptions.filter(
+    (o) => o.ineligibleReason === null,
+  ).length;
+  // A prefilled (or otherwise stale) selection that resolves to an ineligible
+  // product is treated as unselected, so the form can't submit a doomed
+  // request. A product not (yet) in the list is left alone.
+  const deployedProductId = deployedProductOptions.some(
+    (o) => o.id === selectedDeployedProductId && o.ineligibleReason !== null,
+  )
+    ? ""
+    : selectedDeployedProductId;
+  // Reason tooltips open on pointer hover and on keyboard focus of a disabled
+  // option, so keyboard users can read why it can't be chosen.
+  const [hoveredProductId, setHoveredProductId] = useState<string | null>(null);
+  const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
   const catalogs = useSearchCatalogs(deployedProductId || undefined);
   const variables = useCatalogItemVariables(
     catalogId || undefined,
@@ -233,7 +267,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
       catalogItemId,
       severity,
       answers,
-      attachments,
     });
   }, [
     draftStore,
@@ -246,7 +279,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
     catalogItemId,
     severity,
     answers,
-    attachments,
     submitting,
   ]);
 
@@ -322,6 +354,14 @@ export default function CreateServiceRequestPage(): JSX.Element {
     setAnswers({});
   };
   const onDeployedProductChange = (next: string): void => {
+    // Disabled options are keyboard-focusable (so their reason is
+    // discoverable), and the Select still routes Enter/Space on one through
+    // its change handler. Ineligible products must never become the value.
+    if (
+      deployedProductOptions.some((o) => o.id === next && o.ineligibleReason !== null)
+    ) {
+      return;
+    }
     setDeployedProductId(next);
     setCatalogId("");
     setCatalogItemId("");
@@ -365,6 +405,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
       !noVariableAnswered &&
       !isIneligibleForSr &&
       !hasNoSrReadAccess &&
+      // A prefilled product is kept until classification can run, so don't
+      // allow submit while the product list or the project's category
+      // restriction is still loading (it might turn out to be ineligible).
+      !deployedProducts.isLoading &&
+      !projectMetadata.isLoading &&
       // Fail closed while a selected project's eligibility is still loading
       // or couldn't be confirmed at all — see projectLoadFailed above.
       (!projectId || (!selectedProject.isLoading && !projectLoadFailed)) &&
@@ -382,6 +427,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
       noVariableAnswered,
       isIneligibleForSr,
       hasNoSrReadAccess,
+      deployedProducts.isLoading,
+      projectMetadata.isLoading,
       selectedProject.isLoading,
       projectLoadFailed,
       submitting,
@@ -410,19 +457,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
       // submission is left to clear. Clearing again here would discard a draft
       // that a form reopened mid-create has started since.
       submitted.current = true;
-      // The create endpoint doesn't attach files for service requests, so upload
-      // them to the new case afterwards. A partial failure still lands the case.
+      // Files are uploaded to the new case afterwards. A partial failure still
+      // lands the case.
       const failed = await uploadAttachmentsToCase(
         postAttachment.mutateAsync,
         created.id,
         attachments,
         uploadedBy,
       );
-      if (failed > 0) {
-        showError(
-          `The service request was created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload. You can add ${failed === 1 ? "it" : "them"} from the case page.`,
-        );
-      }
+      if (failed.length > 0) showError(failedUploadsMessage("service request", failed));
       navigate(`/cases/${created.id}`, { state: { from: backTarget } });
     } catch (err) {
       setSubmitting(false);
@@ -559,10 +602,49 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 onChange={(e) => onDeployedProductChange(String(e.target.value))}
                 disabled={!deploymentId || deployedProducts.isLoading}
                 notched={deployedProductId !== ""}
+                // Let keyboard users reach disabled options (the reason is
+                // exposed on them); selection is still refused in
+                // onDeployedProductChange.
+                MenuProps={{ MenuListProps: { disabledItemsFocusable: true } }}
               >
                 {deployedProductOptions.map((dp) => (
-                  <MenuItem key={dp.id} value={dp.id}>
-                    {dp.label}
+                  <MenuItem
+                    key={dp.id}
+                    value={dp.id}
+                    disabled={dp.ineligibleReason !== null}
+                    aria-description={dp.ineligibleReason ?? undefined}
+                    onFocus={() => setFocusedProductId(dp.id)}
+                    onBlur={() =>
+                      setFocusedProductId((cur) => (cur === dp.id ? null : cur))
+                    }
+                  >
+                    {dp.ineligibleReason !== null ? (
+                      // A disabled MenuItem has `pointer-events: none`, so the
+                      // Tooltip target re-enables pointer events on its own
+                      // span. The item itself stays a direct Select child, so
+                      // it remains skipped by keyboard navigation and
+                      // unselectable. `describeChild` keeps the option's
+                      // accessible name as the product label and exposes the
+                      // reason as its description.
+                      <Tooltip
+                        title={dp.ineligibleReason}
+                        describeChild
+                        open={hoveredProductId === dp.id || focusedProductId === dp.id}
+                        onOpen={() => setHoveredProductId(dp.id)}
+                        onClose={() =>
+                          setHoveredProductId((cur) => (cur === dp.id ? null : cur))
+                        }
+                      >
+                        <Box
+                          component="span"
+                          sx={{ display: "block", width: "100%", pointerEvents: "auto" }}
+                        >
+                          {dp.label}
+                        </Box>
+                      </Tooltip>
+                    ) : (
+                      dp.label
+                    )}
                   </MenuItem>
                 ))}
               </Select>
@@ -574,6 +656,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText>Loading products…</FormHelperText>
               ) : deployedProductOptions.length === 0 ? (
                 <FormHelperText>No deployed products found for this deployment.</FormHelperText>
+              ) : eligibleProductCount === 0 ? (
+                <FormHelperText>
+                  No products in this deployment can be used for a service request.
+                </FormHelperText>
               ) : null}
             </FormControl>
           </Grid>
@@ -719,7 +805,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 attachments={attachments}
                 onChange={setAttachments}
                 onError={showError}
-                maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
+                maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
               />
             </Grid>
           )}

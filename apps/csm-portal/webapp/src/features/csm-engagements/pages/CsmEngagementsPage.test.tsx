@@ -114,3 +114,17 @@ describe("CsmEngagementsPage — title override from a dashboard widget click-th
     expect(props.title).toBe("Total Outstanding");
   });
 });
+
+describe("CsmEngagementsPage — Sales Region filter", () => {
+  it("opts in to the Sales Region filter", () => {
+    issuesViewSpy.mockClear();
+    render(
+      <MemoryRouter>
+        <CsmEngagementsPage />
+      </MemoryRouter>,
+    );
+
+    const props = issuesViewSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(props.showSalesRegionFilter).toBe(true);
+  });
+});

@@ -29,8 +29,9 @@ import {
 const RECHECK_MS = 60_000;
 
 /**
- * A notice not to edit the roster while the daily timesheet report is being
- * generated from it, shown only from 09:15 to 09:30 IST whatever the reader's
+ * A notice that the daily timesheet report is being generated from the roster,
+ * and that a change made now to yesterday's (IST) or today's (PDT) days may
+ * change that report. Shown only from 09:15 to 09:30 IST whatever the reader's
  * own time zone. It appears and disappears on its own: a timer wakes the
  * component at the next edge of the window (and at least once a minute). It
  * only asks; editing still works.
@@ -56,11 +57,10 @@ export default function RosterFreezeBanner(): JSX.Element | null {
   const until = fmtIstMinute(ROSTER_FREEZE_END_MINUTE);
   return (
     <div className="freezebar" role="status">
-      <b>Don&rsquo;t edit the roster until {until} IST.</b>{" "}
-      <span>
-        The daily timesheet report is being generated from the roster ({from} &ndash; {until} IST). Changes made now
-        may be missing from it.
-      </span>
+      <b>
+        Please be aware that the daily timesheet report is generated from the roster ({from} &ndash; {until} IST).
+      </b>{" "}
+      <span>Changes made now for yesterday (IST) / today (PDT) may impact the time report.</span>
     </div>
   );
 }

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -23,6 +23,11 @@ import CasesFilterBar, {
   type CasesFilters,
 } from "@features/csm-cases/components/CasesFilterBar";
 import { DEFAULT_CASES_FILTERS } from "@features/csm-cases/utils/casesFiltersUrl";
+import {
+  getAdvancedFilterFieldMeta,
+  getAdvancedFilterOpMeta,
+  type AdvancedFilterRow,
+} from "@features/csm-cases/utils/advancedFilters";
 import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
 const postMock = vi.fn();
@@ -301,6 +306,95 @@ describe("CasesFilterBar — chips stay visible while the panel is collapsed", (
     );
     expect(screen.getByText("Escalation level: 2")).toBeInTheDocument();
   });
+
+  // A dashboard click-through carries relative dates (`createdFrom=__daysAgo:30__`),
+  // so the collapsed summary must word them, not show the placeholder.
+  it("words a relative date bound on its chip, and still shows a literal date as a date", () => {
+    renderBar(
+      {
+        ...DEFAULT_CASES_FILTERS,
+        createdOnGte: "__daysAgo:30__",
+        createdOnLte: "__today__",
+        closedOnGte: "2026-07-27",
+      },
+      undefined,
+      { isFiltersOpen: false },
+    );
+    expect(screen.getByText("Created after 30 days ago")).toBeInTheDocument();
+    expect(screen.getByText("Created before Today")).toBeInTheDocument();
+    expect(
+      screen.getByText(`Closed after ${new Date(2026, 6, 27).toLocaleDateString()}`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/__/)).not.toBeInTheDocument();
+  });
+
+  // An Advanced-only date row (`resolvedOn` has no typed slot) from a
+  // dashboard link keeps its relative date too.
+  it("words a relative date on an Advanced row's chip", () => {
+    renderBar(
+      {
+        ...DEFAULT_CASES_FILTERS,
+        advancedFilters: [{ field: "resolvedOn", op: "gte", values: ["__daysAgo:30__"] }],
+      },
+      undefined,
+      { isFiltersOpen: false },
+    );
+    const label = `${getAdvancedFilterFieldMeta("resolvedOn")!.label} ${getAdvancedFilterOpMeta("resolvedOn", "gte")!.label}`;
+    expect(screen.getByText(`${label} 30 days ago`)).toBeInTheDocument();
+    expect(screen.queryByText(/__/)).not.toBeInTheDocument();
+  });
+
+  it("chips every other Advanced row value as before", () => {
+    const rows: AdvancedFilterRow[] = [
+      { field: "resolvedOn", op: "lte", values: ["2026-07-27"] },
+      { field: "resolvedOn", op: "gte", values: ["__daysAgo:-1__"] },
+      { field: "taskSLABusinessElapsedPercent", op: "gte", values: ["80"] },
+      { field: "slaBreached", op: "eq", values: ["true"] },
+      // Only a date bound is worded: the same text as a case number is not.
+      { field: "number", op: "eq", values: ["__today__"] },
+    ];
+    for (const row of rows) {
+      renderBar({ ...DEFAULT_CASES_FILTERS, advancedFilters: [row] }, undefined, {
+        isFiltersOpen: false,
+      });
+      const before = `${getAdvancedFilterFieldMeta(row.field)?.label ?? row.field} ${getAdvancedFilterOpMeta(row.field, row.op)?.label ?? row.op} ${row.values.join(", ")}`;
+      expect(screen.getByText(before)).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  // Saved views and old links hold whatever the bar accepted before, so every
+  // value that is not a relative date the resolver accepts must chip exactly
+  // as the formatter did before relative dates were worded (copied here as
+  // the reference).
+  it("chips every other date value exactly as before, including values it cannot parse", () => {
+    const before = (raw: string): string => {
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(raw);
+      return Number.isNaN(d.getTime()) ? raw : d.toLocaleDateString();
+    };
+    const values = [
+      "2026-07-27",
+      "2026-07-27T00:00:00Z",
+      "2026-07-27T18:30:00.000Z",
+      "2026-07-27T10:30:00+05:30",
+      "not a date",
+      "",
+      "__unknown__",
+      "__today:5__",
+      "__daysAgo__",
+      "__daysAgo:-1__",
+      "__startOfMonth__",
+      "__daysAgo:x__",
+    ];
+    for (const value of values) {
+      renderBar({ ...DEFAULT_CASES_FILTERS, createdOnGte: value }, undefined, {
+        isFiltersOpen: false,
+      });
+      // The default text normalizer trims, so an empty value's chip reads "Created after".
+      expect(screen.getByText(`Created after ${before(value)}`.trim())).toBeInTheDocument();
+      cleanup();
+    }
+  });
 });
 
 describe("CasesFilterBar — removed bar controls fall back to chips", () => {
@@ -431,6 +525,46 @@ describe("CasesFilterBar — 'SRE Team' control (mirrors 'CRE Team')", () => {
     fireEvent.click(await screen.findByRole("option", { name: "SRE One" }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ sreTeams: ["s-1"] }));
+  });
+});
+
+describe("CasesFilterBar — 'Sales Region' control (opt-in)", () => {
+  it("is not rendered unless showSalesRegionFilter is passed", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+    expect(screen.queryByRole("combobox", { name: "Sales Region" })).not.toBeInTheDocument();
+  });
+
+  it("renders the static region options and writes the selection to salesRegions", async () => {
+    const { onChange } = renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      showSalesRegionFilter: true,
+    });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Sales Region" }));
+    expect(await screen.findByRole("option", { name: "APAC" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "LATAM" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "EMEA" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ salesRegions: ["EMEA"] }));
+  });
+
+  // The region is not an Advanced-builder row, and the open Advanced panel
+  // suppresses the regular chips, so without these a selected region would
+  // filter results with nothing on screen showing it.
+  it("keeps a selected region visible as a chip while the Advanced panel is open", () => {
+    renderBar(
+      { ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] },
+      vi.fn(),
+      { showSalesRegionFilter: true },
+    );
+
+    expect(screen.getByText("Advanced filters")).toBeInTheDocument();
+    expect(screen.getByText("Sales Region: EMEA")).toBeInTheDocument();
+  });
+
+  it("shows no region chip in Advanced mode on views without the control", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] });
+
+    expect(screen.queryByText("Sales Region: EMEA")).not.toBeInTheDocument();
   });
 });
 

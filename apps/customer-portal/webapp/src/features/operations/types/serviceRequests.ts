@@ -82,12 +82,6 @@ export type ServiceRequestVariable = {
   value: string;
 };
 
-/** Item type for a service request attachment. */
-export type ServiceRequestAttachment = {
-  name: string;
-  file: string;
-};
-
 /** Request type for creating a service request. */
 export type CreateServiceRequestPayload = {
   type: "service_request";
@@ -97,6 +91,5 @@ export type CreateServiceRequestPayload = {
   catalogId: string;
   catalogItemId: string;
   variables: ServiceRequestVariable[];
-  attachments?: ServiceRequestAttachment[];
   watchList?: string[];
 };

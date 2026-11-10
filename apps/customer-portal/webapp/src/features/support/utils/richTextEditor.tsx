@@ -73,10 +73,13 @@ export function escapeHtml(text: string): string {
 /**
  * Sanitizes a URL by allowing only safe protocols.
  * Rejects protocol-relative URLs (e.g. //evil.com); allows single leading slash for relative paths.
- * Also allows data:image/* base64 URLs for inline images in the rich text editor.
+ * Also allows data:image/* base64 URLs for inline images in the rich text editor,
+ * and blob: URLs: the local preview of an image that is being uploaded. A blob:
+ * URL only exists in this page and is always replaced by the uploaded image's
+ * reference before a comment is sent (see inlineCommentImages.ts).
  */
 const SAFE_URL_PATTERN =
-  /^(https?:\/\/|mailto:|tel:|\/(?!\/)|#|data:image\/[a-zA-Z0-9.+-]+;base64,)/i;
+  /^(https?:\/\/|mailto:|tel:|\/(?!\/)|#|blob:|data:image\/[a-zA-Z0-9.+-]+;base64,)/i;
 export function sanitizeUrl(url: string): string {
   const decoded = url.replace(/&amp;/g, "&").trim();
   return SAFE_URL_PATTERN.test(decoded) ? decoded : "";

@@ -165,6 +165,18 @@ type CustomDashboardTeamShareService interface {
 	RemoveTeamShare(ctx context.Context, dashboardID, teamID string) error
 }
 
+// CustomDashboardLinkService lets anyone with a saved dashboard's link view
+// it, view only, internal staff only. Postgres-only; the caller is resolved
+// from x-user-id-token. Only the owner reads or changes the link; whoever
+// opens it then sees the dashboard through CustomDashboardShareService's
+// ListSharedWithMe / GetSharedWithMe.
+type CustomDashboardLinkService interface {
+	GetLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	EnableLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	DisableLink(ctx context.Context, dashboardID string) error
+	OpenLink(ctx context.Context, req domain.OpenCustomDashboardLinkRequest) (domain.OpenedCustomDashboardLink, error)
+}
+
 // RunbookService manages the alert-name to runbook catalog (Operations > Runbooks).
 // PortalBannerService is the HTML banners both portals show. Customer and CSM
 // reads each return only published rows for that portal. Writes require a
@@ -730,6 +742,10 @@ type ProjectStatsService interface {
 	// GetProjectTimeCardStats returns the project's time-card statistics,
 	// optionally filtered by a startDate/endDate range (each yyyy-MM-dd).
 	GetProjectTimeCardStats(ctx context.Context, projectID, startDate, endDate string) (domain.ProjectTimeCardStatsResponse, error)
+	// GetProjectTimeCardReport returns the project's APPROVED time cards
+	// aggregated per case for a required from/to work-date range (each
+	// yyyy-MM-dd, inclusive). Postgres only.
+	GetProjectTimeCardReport(ctx context.Context, projectID, from, to string) (domain.ProjectTimeCardReportResponse, error)
 	// GetProjectChangeRequestStats returns the project's change-request statistics.
 	GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error)
 }
@@ -981,23 +997,10 @@ type CaseService interface {
 	// Transitioning State to closed is rejected with a ValidationError if the case has any
 	// open task that is visible to the customer (the authoritative case-close gate).
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
-	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
-	// A ValidationError is returned for invalid input. For the CSM-native (Postgres) data
-	// source, req.Status controls the initial lifecycle state (see domain.AttachmentStatus):
-	// empty/omitted and "complete" behave exactly as before this field existed; "pending"
-	// registers the row before the caller has uploaded the file to SFTPGo, to be finished off
-	// later via ConfirmCaseAttachment. ServiceNow ignores this field.
-	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)
-	// ConfirmCaseAttachment transitions the CSM-native (Postgres) data source attachment
-	// identified by id from status "pending" to "complete", once its file has finished
-	// uploading to SFTPGo. A NotFoundError is returned if it does not exist; a
-	// ForbiddenError if the caller did not create it; a ConflictError if it is not
-	// currently "pending" (including if it was already confirmed). Supported by the
-	// CSM-native (Postgres) data source only -- ServiceNow attachments have no such
-	// lifecycle, since SN's /attachments API only ever returns fully-uploaded files.
-	ConfirmCaseAttachment(ctx context.Context, id string) (domain.ConfirmAttachmentResponse, error)
-	// SearchCaseAttachments returns a paginated list of attachments for the case identified
-	// by req.CaseID. A ValidationError is returned for invalid input.
+	// SearchCaseAttachments returns a paginated list of attachments for the work item,
+	// case or deployment identified by req.ReferenceID, from PostgreSQL only: the file
+	// bytes are in Azure Blob Storage and are read through the portal backends.
+	// A ValidationError is returned for invalid input.
 	SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error)
 	// SearchCaseActivities returns a paginated activity feed (comments, attachments, and
 	// optionally field changes) for the case identified by req.CaseID. Field-change entries
@@ -1006,18 +1009,6 @@ type CaseService interface {
 	// attachments only -- there is no field-change audit table in this schema, so
 	// req.IncludeFieldChanges has no effect there.
 	SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) (domain.SearchCaseActivitiesResponse, error)
-	// GetCaseAttachmentContent returns the raw binary content and its Content-Type
-	// for the attachment identified by attachmentID.
-	// A NotFoundError is returned if absent.
-	GetCaseAttachmentContent(ctx context.Context, attachmentID string) (content []byte, contentType string, err error)
-	// DeleteCaseAttachment removes the attachment identified by req.AttachmentID from the case.
-	// A NotFoundError is returned if the attachment does not exist.
-	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
-	// UpdateAttachment updates the name and/or description of the attachment identified by
-	// req.AttachmentID, regardless of which reference type it is linked to. At least one of
-	// Name or Description must be provided. A NotFoundError is returned if the attachment
-	// does not exist.
-	UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error)
 	// AddCaseTag attaches a free-text label to the case identified by caseID.
 	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty label).
 	AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error)
@@ -1042,11 +1033,6 @@ type CaseService interface {
 	// SubmitCaseFeedback records feedback for the case identified by id. A ValidationError
 	// is returned for invalid input. Supported by the ServiceNow data source only.
 	SubmitCaseFeedback(ctx context.Context, id string, req domain.SubmitCaseFeedbackRequest) (domain.SubmitCaseFeedbackResponse, error)
-	// GetAttachmentByID returns the metadata and base64-encoded content of the attachment
-	// identified by id. A NotFoundError is returned if it does not exist. For the CSM-native
-	// (Postgres) data source, Content is always "" and StorageKey is populated instead: that
-	// data source holds no bytes, only a reference into external (SFTPGo) storage.
-	GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error)
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
@@ -1202,6 +1188,10 @@ type TimeCardService interface {
 	// SearchCaseTimeCards returns a paginated list of time cards grouped and
 	// rolled up by case, using the same filters as SearchTimeCards.
 	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest) (domain.SearchCaseTimeCardsResponse, error)
+	// AggregateTimeCards counts the time cards SearchTimeCards would match,
+	// and sums their logged minutes, per state, user, project or day (see
+	// domain.AggregateTimeCardsRequest).
+	AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error)
 	// DeleteTimeCard permanently deletes a time card. Matches UpdateTimeCard's
 	// trust model exactly: this only validates the ID's shape and forwards the
 	// caller's token to SN, which enforces that only the submitter may delete
@@ -1718,4 +1708,105 @@ type OutageCommunicationService interface {
 	Sweep(ctx context.Context, limit int) (domain.OutageCommunicationSweepResponse, error)
 	// Log returns one outage's communication history, newest first.
 	Log(ctx context.Context, number string) ([]domain.OutageCommunicationLogEntry, error)
+}
+
+// StoredAttachmentService records and authorizes the attachment files (work
+// item, comment-image and deployment attachments) that the portal backends hold
+// in Azure Blob Storage. It never touches a file: it keeps the access checks,
+// the rows, the size and type rules and the storage key, and hands the key to the
+// backend that asked. A storage key must never reach a browser.
+//
+// Access is the caller's own: row-level security on the attachment tables
+// decides which rows they can see and whether they can add one, so a caller
+// outside the parent's project gets "not found". Adding a file to a closed work
+// item is refused for every caller, internal ones included.
+type StoredAttachmentService interface {
+	// InitiateUpload starts an upload: it checks the caller may add a file to
+	// the parent (a ConflictError when the work item is closed), checks the size
+	// and type, and records a PENDING attachment. The browser then sends the file
+	// to the portal backend in chunks.
+	InitiateUpload(ctx context.Context, req domain.InitiateAttachmentUploadRequest) (domain.InitiateAttachmentUploadResponse, error)
+	// ConfirmUpload finishes an upload the backend has stored: it checks the size
+	// the backend reports against the declaration and the limits (and, for a comment
+	// image, the type) and marks the attachment COMPLETE. Only the person who
+	// started the upload can confirm it. Repeating a confirm that already
+	// succeeded answers the same.
+	ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error)
+	// DeleteAttachment soft-deletes an attachment: the row is marked DELETED and
+	// the portal backend removes the file. Only the person who uploaded it may
+	// do so (a ForbiddenError otherwise), and not once the work item is closed (a
+	// ConflictError). Repeating a delete that already succeeded answers the same.
+	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
+
+	// The three calls below each return an internal storage key for the backend
+	// that asked.
+
+	// AuthorizeUpload checks, as the caller, that a started upload may still receive
+	// data (theirs, still PENDING, parent still open) and returns where the backend
+	// writes it. The backend calls it for every chunk.
+	AuthorizeUpload(ctx context.Context, req domain.AuthorizeAttachmentUploadRequest) (domain.AttachmentUploadTarget, error)
+	// LocateAttachment checks, as the caller, that they may see an attachment and
+	// returns where its file is, or why it has none (the AttachmentUnavailable*
+	// reasons). An attachment the caller cannot see is a NotFoundError.
+	LocateAttachment(ctx context.Context, req domain.LocateAttachmentRequest) (domain.AttachmentLocation, error)
+	// LocateInlineImage finds a comment's inline image for a caller who may see it
+	// (a removed image is a GoneError) and returns the key to stream from.
+	LocateInlineImage(ctx context.Context, id string) (domain.AttachmentLocation, error)
+	// InlineImageRelocated records that the backend moved an inline image's file
+	// to storageKey (the RelocateTo of LocateInlineImage). Any other key is refused.
+	InlineImageRelocated(ctx context.Context, id string, req domain.InlineImageRelocatedRequest) error
+}
+
+// AttachmentUploadCleanupService clears out uploads that were started and never
+// confirmed.
+type AttachmentUploadCleanupService interface {
+	// CleanupUploads marks each upload still PENDING after a day FAILED and lists
+	// the comment images that were never linked to a comment, at most a bounded
+	// number per run. Internal callers only (a ForbiddenError otherwise).
+	CleanupUploads(ctx context.Context) (domain.UploadCleanupResult, error)
+	// AcknowledgeOrphans marks DELETED the orphaned comment images (see
+	// UploadCleanupResult.Orphans) whose files the caller has removed from
+	// storage. Internal callers only. An id that is no longer an orphan is
+	// skipped, so repeating a call is safe.
+	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
+}
+
+// ReportDraftLinker attaches the files a record's creator uploaded BEFORE the record
+// existed (draft work item attachments, migration 0280) to the record being created.
+// storedAttachmentService implements it beside InlineImageLinker; the case service
+// finds it by type assertion on its linker, so a nil or older linker means "none".
+type ReportDraftLinker interface {
+	// ValidateReportDrafts checks, BEFORE the record is created, that every id is a
+	// COMPLETE draft uploaded to projectID by authorEmail and not linked yet
+	// (*apierror.ValidationError otherwise), so a bad request creates nothing.
+	ValidateReportDrafts(ctx context.Context, projectID, authorEmail string, ids []string) error
+	// LinkReportDrafts, right after the record exists, links the drafts to it. An
+	// error means the record exists but a file was not linked.
+	LinkReportDrafts(ctx context.Context, workItemID, projectID, authorEmail string, ids []string) error
+}
+
+// InlineImageLinker attaches the comment images a saved comment shows to that
+// comment. Best effort: it never returns an error, and a nil linker is a no-op.
+type InlineImageLinker interface {
+	LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string)
+	// ValidateCommentImages refuses (a *apierror.ValidationError) a comment that
+	// shows more than MaxInlineImagesPerContent of its author's own images, or
+	// more than the total size limit together. Call it BEFORE saving. commentID is
+	// the comment being edited ("" for a new one): its images already stored are
+	// not counted against the size limit, only what the edit adds.
+	ValidateCommentImages(ctx context.Context, commentID, workItemID, authorEmail, content string) error
+	// ValidateEmbeddedImages refuses (a *apierror.ValidationError) content typed by
+	// a user (authorEmail not empty) that embeds more than MaxInlineImagesPerContent
+	// base64 images, or more than the total size limit together. Call it BEFORE
+	// saving a NEW comment or creating a record. Machine callers (no author) and
+	// edits of existing content are not checked.
+	ValidateEmbeddedImages(ctx context.Context, authorEmail, html string) error
+	// ValidateDescriptionImages checks, BEFORE a record is created, the images its
+	// rich-text description shows: at most MaxInlineImagesPerContent, within the
+	// total size limit, each a COMPLETE draft uploaded to projectID by authorEmail,
+	// and none still a blob: URL. A *apierror.ValidationError otherwise.
+	ValidateDescriptionImages(ctx context.Context, projectID, authorEmail, html string) error
+	// LinkDescriptionImages, right after the record exists, links the drafts its
+	// description shows to it. Best effort: it never returns an error.
+	LinkDescriptionImages(ctx context.Context, workItemID, projectID, authorEmail, html string)
 }

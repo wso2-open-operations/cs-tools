@@ -64,6 +64,22 @@ function startOfRelativeQuarter(now: Date, n: number): Date {
   return base;
 }
 
+/** The Monday of the week `n` weeks from `now`'s own week (local), e.g. n=0
+ * this week, n=-1 last week. Weeks run Monday to Sunday (ISO) — mirrors
+ * `case_filters.go`'s `startOfRelativeWeek`. */
+function startOfRelativeWeek(now: Date, n: number): Date {
+  const refToday = today(now);
+  // getDay(): 0 = Sunday ... 6 = Saturday, so Sunday is 6 days after Monday.
+  const sinceMonday = (refToday.getDay() + 6) % 7;
+  return addDays(refToday, -sinceMonday + n * 7);
+}
+
+/** 1 January of the year `n` years from `now`'s own year (local) — mirrors
+ * `case_filters.go`'s `startOfRelativeYear`. */
+function startOfRelativeYear(now: Date, n: number): Date {
+  return localMidnight(now.getFullYear() + n, 0, 1);
+}
+
 /**
  * Converts a resolved calendar day (local midnight) into the concrete RFC3339
  * instant this filter entry's own `op` means: for `lte`, the day is inclusive
@@ -127,11 +143,84 @@ export function resolveRelativeDatePlaceholderToDate(value: string, now: Date): 
   return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
 }
 
+/**
+ * Resolves a relative-date placeholder to a plain UTC calendar date,
+ * `YYYY-MM-DD`: the same as {@link resolveRelativeDatePlaceholderToDate}, but
+ * "today" is `now`'s UTC date, not the viewer's local one. For a value read
+ * as a UTC day: a line widget's window, which `POST /cases/volume-trend`
+ * counts by UTC day, so the window is the same for every viewer and "today"
+ * is never a day the service has not reached yet.
+ */
+export function resolveRelativeDatePlaceholderToUtcDate(value: string, now: Date): string | undefined {
+  // The UTC date's own numbers as a local midnight: every step after this is
+  // whole-day calendar arithmetic on those numbers.
+  return resolveRelativeDatePlaceholderToDate(
+    value,
+    localMidnight(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+/** "this month", "last month", "next month", "the month 3 months ago". */
+function periodPhrase(unit: "week" | "month" | "quarter" | "year", n: number): string {
+  if (n === 0) return `this ${unit}`;
+  if (n === -1) return `last ${unit}`;
+  if (n === 1) return `next ${unit}`;
+  return n < 0 ? `the ${unit} ${-n} ${unit}s ago` : `the ${unit} ${n} ${unit}s ahead`;
+}
+
+/**
+ * A relative-date placeholder in words, for showing a filter to a person:
+ * "Today", "30 days ago", "Start of this week", "Start of last month", "End of
+ * this quarter", "End of last year". The
+ * same wording as the Cases list's `RELATIVE_DATE_PRESETS`, so a widget's
+ * placeholder reads the same wherever it is shown. `undefined` for anything
+ * {@link resolveRelativeDatePlaceholder} would not resolve.
+ */
+export function describeRelativeDatePlaceholder(value: string): string | undefined {
+  // Validity is the resolver's: anything it rejects is not described either.
+  if (relativeDay(value, new Date()) === undefined) return undefined;
+  const [, name, argStr] = RELATIVE_DATE_PLACEHOLDER_PATTERN.exec(value) ?? [];
+  const n = Number(argStr);
+  switch (name) {
+    case "today":
+      return "Today";
+    case "daysAgo":
+      return n === 0 ? "Today" : `${n} ${n === 1 ? "day" : "days"} ago`;
+    case "startOfMonth":
+      return `Start of ${periodPhrase("month", n)}`;
+    case "endOfMonth":
+      return `End of ${periodPhrase("month", n)}`;
+    case "startOfQuarter":
+      return `Start of ${periodPhrase("quarter", n)}`;
+    case "endOfQuarter":
+      return `End of ${periodPhrase("quarter", n)}`;
+    case "startOfWeek":
+      return `Start of ${periodPhrase("week", n)}`;
+    case "endOfWeek":
+      return `End of ${periodPhrase("week", n)}`;
+    case "startOfYear":
+      return `Start of ${periodPhrase("year", n)}`;
+    case "endOfYear":
+      return `End of ${periodPhrase("year", n)}`;
+    default:
+      return undefined;
+  }
+}
+
+/** The largest offset (`:N`, either sign) a placeholder may carry, as in
+ * entity-service's `resolveRelativeDate` and the CSM backend's
+ * `relativeDate`. Past it the backends' date arithmetic would overflow;
+ * every offset beyond it lands outside the years 0000-9999, which
+ * entity-service rejects, so the bound leaves nothing unresolved that used to
+ * give a usable date. */
+const MAX_RELATIVE_DATE_OFFSET = 4_000_000;
+
 /** The local calendar day a placeholder names, or `undefined` when `value` is not one. */
 function relativeDay(value: string, now: Date): Date | undefined {
   const match = RELATIVE_DATE_PLACEHOLDER_PATTERN.exec(value);
   if (!match) return undefined;
   const [, name, argStr] = match;
+  if (argStr !== undefined && Math.abs(Number(argStr)) > MAX_RELATIVE_DATE_OFFSET) return undefined;
   const refToday = today(now);
 
   switch (name) {
@@ -166,6 +255,27 @@ function relativeDay(value: string, now: Date): Date | undefined {
     case "endOfQuarter": {
       if (argStr === undefined) return undefined;
       return addDays(startOfRelativeQuarter(now, Number(argStr) + 1), -1);
+    }
+
+    case "startOfWeek": {
+      if (argStr === undefined) return undefined;
+      return startOfRelativeWeek(now, Number(argStr));
+    }
+
+    case "endOfWeek": {
+      if (argStr === undefined) return undefined;
+      // The Sunday: six days after that week's Monday.
+      return addDays(startOfRelativeWeek(now, Number(argStr)), 6);
+    }
+
+    case "startOfYear": {
+      if (argStr === undefined) return undefined;
+      return startOfRelativeYear(now, Number(argStr));
+    }
+
+    case "endOfYear": {
+      if (argStr === undefined) return undefined;
+      return addDays(startOfRelativeYear(now, Number(argStr) + 1), -1);
     }
 
     default:

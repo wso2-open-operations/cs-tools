@@ -14,10 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// This is an integration test: SearchCaseAttachments reads case_attachment
-// UNIONed with the synced work_item_attachment table, and whether its total and
-// its pages agree (no fan-out, no duplicate, no PENDING) can only be shown by
-// real SQL against the real schema. Same DSN and skip-when-unset pattern as
+// This is an integration test: SearchCaseAttachments reads work_item_attachment
+// only (the older case_attachment table is not listed), and whether its total
+// and its pages agree (no fan-out, no PENDING) can only be shown by real SQL
+// against the real schema. Same DSN and skip-when-unset pattern as
 // case_activity_synced_attachments_integration_test.go (same package):
 //
 //	CASE_STATS_TEST_DSN=postgres://... go test ./internal/repository/ -run CaseAttachmentsSynced
@@ -112,7 +112,8 @@ func TestCaseAttachmentsSyncedUnionIntegration(t *testing.T) {
 	native(nativeOne, at(1), "native.txt", "complete")
 	native(nativePending, at(2), "uploading.txt", "pending")
 	synced(syncedOne, at(3), "synced-1.pdf", attUnionUploader, "AVAILABLE")
-	// The same file as a dual-write upload: one row in each table, one id.
+	// An old upload left in case_attachment under the same id as a stored
+	// attachment: only the work_item_attachment row is listed.
 	native(inBothTables, at(4), "both.txt", "complete")
 	synced(inBothTables, at(4), "both.txt", attUnionUploader, "AVAILABLE")
 	synced(syncedPending, at(5), "pending.pdf", attUnionUploader, "PENDING")
@@ -132,9 +133,9 @@ func TestCaseAttachmentsSyncedUnionIntegration(t *testing.T) {
 		return got, total
 	}
 
-	// Newest first, id ascending on a tie. The pending native row and the
-	// PENDING synced row are absent and the both-tables file shows once.
-	wantIDs := []string{syncedSameTs1, syncedSameTs2, syncedTwo, syncedGhost, inBothTables, syncedOne, nativeOne}
+	// Newest first, id ascending on a tie. The case_attachment rows (complete
+	// or pending) and the PENDING stored row are absent.
+	wantIDs := []string{syncedSameTs1, syncedSameTs2, syncedTwo, syncedGhost, inBothTables, syncedOne}
 
 	all, total := search(attUnionCaseID, 50, 0)
 	if total != len(wantIDs) {
@@ -153,18 +154,15 @@ func TestCaseAttachmentsSyncedUnionIntegration(t *testing.T) {
 	for _, a := range all {
 		byID[a.ID] = a
 	}
-	// Native row keeps its storage key and its user-row uploader.
-	n := byID[nativeOne]
-	if n.StorageKey == nil || *n.StorageKey != "cases/"+nativeOne+"/native.txt" || n.Name != "native.txt" || n.SizeBytes != 7 ||
-		n.Status != domain.AttachmentStatusComplete || n.ReferenceType != domain.ReferenceTypeCase || n.ReferenceID != attUnionCaseID ||
-		n.CreatedBy == nil || n.CreatedBy.ID == nil || *n.CreatedBy.ID != attUnionUserID1 {
-		t.Errorf("native attachment = %+v", n)
+	// A case_attachment row is never listed, and the stored row that shares an
+	// id with one is the one that shows.
+	if _, ok := byID[nativeOne]; ok {
+		t.Errorf("case_attachment row %s should not be listed", nativeOne)
 	}
-	// The both-tables id resolves to the native row (storage key present).
-	if b := byID[inBothTables]; b.StorageKey == nil {
-		t.Errorf("both-tables attachment should be the native row: %+v", b)
+	if b := byID[inBothTables]; b.StorageKey != nil || b.Name != "both.txt" || b.Type != "application/pdf" {
+		t.Errorf("same-id attachment should be the work_item_attachment row: %+v", b)
 	}
-	// Synced row: no storage key, complete, shaped like the work-item search.
+	// Stored row: no storage key, complete, shaped like the work-item search.
 	s := byID[syncedOne]
 	if s.StorageKey != nil || s.Name != "synced-1.pdf" || s.Type != "application/pdf" || s.SizeBytes != 42 ||
 		s.Status != domain.AttachmentStatusComplete || s.ReferenceType != domain.ReferenceTypeCase || s.ReferenceID != attUnionCaseID ||
@@ -200,8 +198,7 @@ func TestCaseAttachmentsSyncedUnionIntegration(t *testing.T) {
 		}
 	}
 
-	// A case with no attachments at all is an empty list, which is what the
-	// service's mirrored-data-source fallback keys off.
+	// A case with no attachments at all is an empty list.
 	empty, emptyTotal := search(attUnionEmptyCase, 50, 0)
 	if emptyTotal != 0 || len(empty) != 0 {
 		t.Errorf("empty case: total=%d rows=%d", emptyTotal, len(empty))

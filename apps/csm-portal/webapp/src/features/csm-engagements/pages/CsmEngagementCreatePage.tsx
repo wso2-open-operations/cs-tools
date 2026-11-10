@@ -31,6 +31,10 @@ import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import Editor from "@components/rich-text-editor/Editor";
+import {
+  preCreateImagesErrorMessage,
+  usePreCreateInlineImages,
+} from "@features/csm-cases/api/usePreCreateInlineImages";
 import RequiredMark from "@components/RequiredMark";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
@@ -84,6 +88,8 @@ export default function CsmEngagementCreatePage(): JSX.Element {
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
 
+  const descriptionImages = usePreCreateInlineImages(projectId || undefined);
+
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
@@ -130,6 +136,17 @@ export default function CsmEngagementCreatePage(): JSX.Element {
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit || !engagementType || !engagementPaymentType) return;
     setSubmitting(true);
+    // The description's images are stored first, under the project, so the
+    // create request carries `/<attachment id>` references. If one cannot be
+    // stored nothing is created and the form stays as it is.
+    let descriptionHtml: string;
+    try {
+      descriptionHtml = await descriptionImages.uploadImages(description);
+    } catch (err) {
+      setSubmitting(false);
+      showError(preCreateImagesErrorMessage(err));
+      return;
+    }
     try {
       const created = await postCase.mutateAsync({
         type: "engagement",
@@ -137,10 +154,11 @@ export default function CsmEngagementCreatePage(): JSX.Element {
         deploymentId,
         deployedProductId,
         subject: subject.trim(),
-        description,
+        description: descriptionHtml,
         engagementType,
         engagementPaymentType,
       });
+      descriptionImages.release(description);
       navigate(`/engagements/${created.id}`, { state: { from: backTarget } });
     } catch (err) {
       setSubmitting(false);
@@ -342,6 +360,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
                 maxHeight={420}
                 toolbarVariant="full"
                 disabled={submitting}
+                onImageUpload={descriptionImages.onImageUpload}
                 ariaRequired
               />
             </Box>

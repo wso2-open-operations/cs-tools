@@ -254,29 +254,22 @@ export const CaseType = {
 
 export type CaseType = (typeof CaseType)[keyof typeof CaseType];
 
-// Maximum allowed attachment file size in bytes.
-export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-
-// Whole-request cap for POST /cases bodies that carry base64 attachments. The
-// BE accepts up to 15 MiB; a 10 MB raw file encodes to ~13.4 MB, so the cap
-// must sit well above 10 MiB. The margin keeps the FE check from ever passing
-// a body the BE would reject.
+// Whole-request cap for POST /cases bodies. The margin below the BE's own cap
+// keeps the FE check from ever passing a body the BE would reject. Case files
+// are not part of this body: they are uploaded after the case is created.
 export const MAX_CASE_REQUEST_BODY_BYTES = 15 * 1024 * 1024 - 16 * 1024;
 
 // Deliberately stricter than the BE's own request-body cap for
 // POST /cases/{id}/comments (backend-v2's generic `readJSONBody` helper,
 // capped at the blanket `maxRequestBodyBytes = 1 << 20`, i.e. 1 MiB — this was
-// NOT raised for comments). Comments carry inline images as base64 data URIs,
-// so the body can get large fast; this FE-only ceiling nudges users toward
-// attachments well before they'd hit the BE's 413, and matches the same 1 MiB
-// guard applied to the CSM portal webapp for consistency across both portals.
+// NOT raised for comments). Images pasted into a comment are uploaded and
+// referenced by id, so a comment body stays small; this FE-only ceiling blocks a
+// body the BE would reject with a 413, and matches the same 1 MiB guard applied
+// to the CSM portal webapp for consistency across both portals.
 export const MAX_COMMENT_BODY_BYTES = 1 * 1024 * 1024;
 // Reserve headroom for the JSON envelope ({ type, content }) + string escaping
 // so the FE blocks before the BE rejects with 413.
 export const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
-
-// Maximum allowed embedded image size in bytes (10MB for base64 images in rich text).
-export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 
 // Allowed MIME types for inline image uploads in the rich text editor.
 export const ALLOWED_INLINE_IMAGE_TYPES = [
@@ -310,10 +303,6 @@ export const ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER =
 // Tooltip for deployment documents when delete is disabled for non-owners.
 export const DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this document can delete it.";
-
-// Tooltip for deployment documents when edit is disabled for non-owners.
-export const DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER =
-  "Only the person who uploaded this document can edit it.";
 
 /**
  * Valid keys for all cases statistics.

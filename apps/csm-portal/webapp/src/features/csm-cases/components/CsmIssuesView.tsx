@@ -58,6 +58,7 @@ import {
   buildCaseSearchFilters,
   mapCaseSearchViewToRow,
   resolveAssignedUserIds,
+  resolveCaseFilterDates,
 } from "@features/csm-cases/utils/caseSearchPayload";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
@@ -143,6 +144,7 @@ const FILTER_PARAM_KEYS = [
   "workStates",
   "projects",
   "engagementTypes",
+  "salesRegions",
   "products",
   "csTeams",
   "sreTeams",
@@ -213,6 +215,8 @@ interface CsmIssuesViewProps {
   hideSreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in; only the Engagements page passes it). */
+  showSalesRegionFilter?: boolean;
   /**
    * Force the Severity filter/column on or off, overriding the default
    * "only when `lockedFilters.caseTypes` is locked to `case`" rule below.
@@ -277,6 +281,7 @@ export default function CsmIssuesView({
   hideCreTeamFilter,
   hideSreTeamFilter,
   showEngagementTypeFilter,
+  showSalesRegionFilter,
   showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
   hideSeverityColumn,
@@ -285,10 +290,14 @@ export default function CsmIssuesView({
   columnsViewId,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = useMemo<CasesFilters>(
-    () => readCasesFiltersFromUrl(searchParams),
-    [searchParams],
-  );
+  const filters = useMemo<CasesFilters>(() => {
+    const parsed = readCasesFiltersFromUrl(searchParams);
+    // Sales Region only has a control on views that opt in. A value arriving
+    // through a shared URL or a saved view on any other list would filter
+    // results the user cannot see or clear, and the other data source rejects
+    // the filter outright, so it is dropped here for query and display alike.
+    return showSalesRegionFilter ? parsed : { ...parsed, salesRegions: [] };
+  }, [searchParams, showSalesRegionFilter]);
 
   // Writes `defaultCaseTypes` into the URL at most once per mount, the first
   // time it finds no `types` param at all. Done as a real URL write (in an
@@ -460,10 +469,7 @@ export default function CsmIssuesView({
     writePaginationToUrl(clampedPage.page, rowsPerPage);
   }, [clampedPage, rowsPerPage, writePaginationToUrl]);
 
-  const { canWrite, canUseSecurityCenter, canUpdateDeleteAnyComment } = usePortalAccess();
-  // See visibleCaseTypes's own doc comment: must mirror PermViewSecurityCenter
-  // exactly, which comment_updater also holds.
-  const canSeeSecurityReports = canUseSecurityCenter || canUpdateDeleteAnyComment;
+  const { canWrite, canViewSecurityReportCases } = usePortalAccess();
 
   // Severity (S1-S4) is a support-case and service-request concept, so the
   // severity filter is by default only shown on those lists — i.e. when the
@@ -517,7 +523,7 @@ export default function CsmIssuesView({
       // so a caller without security-report access doesn't get the whole
       // search 403'd by asking for a type they can't see.
       if (merged.caseTypes.length === 0) {
-        merged.caseTypes = visibleCaseTypes(canSeeSecurityReports);
+        merged.caseTypes = visibleCaseTypes(canViewSecurityReportCases);
       }
       return merged;
     },
@@ -527,7 +533,7 @@ export default function CsmIssuesView({
       showSeverityFilter,
       lockedFilters,
       hideTypeFilter,
-      canSeeSecurityReports,
+      canViewSecurityReportCases,
     ],
   );
 
@@ -605,8 +611,17 @@ export default function CsmIssuesView({
     defaultVisibleIds: defaultVisibleOptionalColumns,
   });
   const exportSearch = queryFilters.search.trim();
+  // Relative dates resolved once per export, on its first page (offset 0;
+  // pages are fetched one after another), so an export running over the
+  // viewer's local midnight keeps one date window for every page instead of
+  // skipping or repeating cases at the page boundaries.
+  const exportDateFiltersRef = useRef<CasesFilters | null>(null);
   const fetchCasesExportPage = useCallback(
     async (offset: number, limit: number) => {
+      if (offset === 0 || exportDateFiltersRef.current === null) {
+        exportDateFiltersRef.current = resolveCaseFilterDates(queryFilters, new Date());
+      }
+      const exportDateFilters = exportDateFiltersRef.current;
       // Re-resolved per page when an assignee filter is active — a small,
       // deterministic, targeted `/users/search` by email, not a directory
       // scan — rather than caching it across pages, so the export can never
@@ -630,7 +645,11 @@ export default function CsmIssuesView({
         {
           pagination: { offset, limit },
           sortBy: { field: sortField, order: sortOrder },
-          filters: buildCaseSearchFilters(queryFilters, exportSearch, assignedUserIds),
+          filters: buildCaseSearchFilters(
+            exportDateFilters,
+            exportSearch,
+            assignedUserIds,
+          ),
         },
       );
       const items = (res.cases ?? []).map((c) => mapCaseSearchViewToRow(c, currentUserEmail));
@@ -835,6 +854,7 @@ export default function CsmIssuesView({
         hideCreTeamFilter={hideCreTeamFilter}
         hideSreTeamFilter={hideSreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
+        showSalesRegionFilter={showSalesRegionFilter}
       />
 
       {canWrite && selectedRows.size > 0 && (

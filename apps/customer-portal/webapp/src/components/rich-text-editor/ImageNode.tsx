@@ -20,6 +20,7 @@ import {
   type DOMConversionMap,
   type EditorConfig,
   type LexicalEditor,
+  type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
   type Spread,
@@ -115,6 +116,10 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     this.__altText = altText;
   }
 
+  getSrc(): string {
+    return this.getLatest().__src;
+  }
+
   exportJSON(): SerializedImageNode {
     return {
       type: "image",
@@ -175,4 +180,8 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
 
 export function $createImageNode(src: string, altText: string): ImageNode {
   return new ImageNode(sanitizeUrl(src), altText);
+}
+
+export function $isImageNode(node: LexicalNode | null | undefined): node is ImageNode {
+  return node instanceof ImageNode;
 }

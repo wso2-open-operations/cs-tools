@@ -19,6 +19,7 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
   BeDashboardGroupByConfig,
+  BeGroupByBucket,
   BeGroupByResponse,
   BeWidgetResourceType,
 } from "@api/backend/types";
@@ -36,6 +37,7 @@ import {
   shouldRetryWidgetFetch,
   withWidgetFetchSlot,
 } from "@features/csm-dashboard/utils/widgetFetchConcurrency";
+import { formatDayLabel } from "@features/csm-dashboard/utils/timeCardTotals";
 import { usesCaseFieldFilterDsl } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
 import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/useWidgetPieData";
 
@@ -96,6 +98,21 @@ function bucketQuery(
   if (resourceType === "change_request" && field === "state") {
     return { states: [key] };
   }
+  // A time card bucket opens the time card list filtered the way the time
+  // card search takes it: plural id / state lists, and a day as a one-day
+  // date range (which wins over the widget's own window when merged).
+  if (resourceType === "time_card") {
+    switch (field) {
+      case "state":
+        return { states: [key] };
+      case "user":
+        return { userIds: [key] };
+      case "project":
+        return { projectIds: [key] };
+      case "day":
+        return { startDate: key, endDate: key };
+    }
+  }
   return { [field]: key };
 }
 
@@ -154,6 +171,11 @@ export function useWidgetGroupByData(
       resolvedFilters,
       groupBy,
     ],
+    /**
+     * Posts the widget's filters and `groupBy.field` to its resource's group-by
+     * endpoint (with the measure for a time card widget). No `groupBy` returns no
+     * buckets; an unsupported resource or a bucket-only `groupBy` throws.
+     */
     queryFn: async (): Promise<BeGroupByResponse> => {
       if (!groupBy) {
         return { groups: [], othersCount: 0, totalRecords: 0 };
@@ -177,12 +199,16 @@ export function useWidgetGroupByData(
         );
       }
       const field = groupBy.field;
+      // Only a time card widget carries a measure (backend-enforced); the
+      // aggregate names hours "minutes". Left out otherwise, so every other
+      // widget's request is unchanged.
+      const measure = groupBy.measure ? { measure: groupBy.measure === "hours" ? "minutes" : "count" } : {};
       // Same shared concurrency slot (and timeout) useWidgetPieData's own
       // slice fetches use — a groupBy widget fires one call on top of every
       // other widget's own call, so it needs both at least as much.
       return withWidgetFetchSlot(async (signal) => {
         return api.post<
-          { filters: Record<string, unknown>; groupBy: string; maxGroups?: number },
+          { filters: Record<string, unknown>; groupBy: string; maxGroups?: number; measure?: string },
           BeGroupByResponse
         >(
           config.groupByEndpoint as string,
@@ -190,6 +216,7 @@ export function useWidgetGroupByData(
             filters: resolvedFilters,
             groupBy: field,
             maxGroups: groupBy.maxGroups,
+            ...measure,
           },
           { signal },
         );
@@ -210,18 +237,28 @@ export function useWidgetGroupByData(
   // query (which is `false`).
   const isLoading = !enabled || (!!groupBy && awaitingCurrentUser) || (!!groupBy && query.isLoading);
   const isError = !!groupBy && query.isError;
+  // Read from the status, not `instanceof BackendApiError`: a 403 is the
+  // caller's role, not a failure, and the tile says so instead of an error.
+  const isForbidden = isError && (query.error as { status?: unknown } | null)?.status === 403;
 
   const buckets = query.data?.groups ?? [];
-  const othersCount = query.data?.othersCount ?? 0;
+  // A time card widget measuring hours shows each bucket's logged time, in
+  // hours, instead of its card count ("day" buckets keep the aggregate's own
+  // date order, as every bucket list keeps the response's order).
+  const hours = groupBy?.measure === "hours";
+  /** A bucket's value: its hours (from the aggregate's minutes) for an hours widget, else its count. */
+  const bucketValue = (b: BeGroupByBucket): number => (hours ? (b.totalMinutes ?? 0) / 60 : b.count);
+  const othersCount = hours ? (query.data?.othersMinutes ?? 0) / 60 : (query.data?.othersCount ?? 0);
 
+  const dayLabels = resourceType === "time_card" && groupBy?.field === "day";
   const slices: PieSliceResult[] = buckets.map((bucket) => ({
-    label: bucket.label,
+    label: dayLabels ? formatDayLabel(bucket.label) : bucket.label,
     // Scopes this slice's own click-through to exactly this bucket (see
     // `bucketQuery`'s own doc comment) — an empty `query` here would merge
     // to the widget's unfiltered base result set instead of this bucket's,
     // since `mergeWidgetFilters({...}, {})` is a no-op.
     query: groupBy?.field ? bucketQuery(resourceType, groupBy.field, bucket.key) : {},
-    value: bucket.count,
+    value: bucketValue(bucket),
     // Only meaningful when `groupBy.linkResourceType` is set — see
     // `PieSliceResult.linkId`'s own doc comment.
     linkId: bucket.key,
@@ -250,5 +287,5 @@ export function useWidgetGroupByData(
   // `totalRecords` and (groups + othersCount) could ever disagree upstream.
   const total = slices.reduce((sum, s) => sum + s.value, 0);
 
-  return { slices, total, isLoading, isError };
+  return { slices, total, isLoading, isError, isForbidden };
 }
