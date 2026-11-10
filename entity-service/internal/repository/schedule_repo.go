@@ -606,11 +606,19 @@ func absenceOn(exists, day string) string {
 // reminder. Leave and "excluded from rota" still count, and so does an
 // allocation that moves its person to another team (Brazil rotation,
 // Migration), with absenceOn's same exception for the team it moved them to.
+// A moving tag whose destination is not set (no team matched when 0202 set
+// it, or the team was deleted: ON DELETE SET NULL) still counts as away: it is
+// told apart by works_rota_there, shows_as_shift_code or its built-in code,
+// never by a NULL moves_to_team_key alone.
 // The on-duty lookup keeps absenceOn for now, so the two differ for a person
 // with such an allocation on a turn day.
 func reminderAbsenceOn(day string) string {
 	return awayOn("NOT EXISTS", day,
-		`AND NOT (k.bucket = 'ALLOCATION' AND k.moves_to_team_key IS NULL)`)
+		`AND NOT (k.bucket = 'ALLOCATION'
+		          AND k.moves_to_team_key IS NULL
+		          AND NOT k.works_rota_there
+		          AND k.shows_as_shift_code IS NULL
+		          AND k.code NOT IN ('ALLO_BR', 'MIGRATION'))`)
 }
 
 // awayOn is the shared body of absenceOn and reminderAbsenceOn; also is a
