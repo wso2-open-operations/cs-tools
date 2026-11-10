@@ -17,6 +17,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -107,7 +108,7 @@ func TestDirectUploadLinks(t *testing.T) {
 		if len(got.Links) != 3 || got.ChunkBytes != UploadChunkBytes {
 			t.Errorf("got %d links, chunkBytes %d", len(got.Links), got.ChunkBytes)
 		}
-		if links.uploadKey != workItemKey || links.uploadCount != 3 || links.uploadTTL != directUploadTTL {
+		if links.uploadKey != workItemKey+stagingSuffix || links.uploadCount != 3 || links.uploadTTL != directUploadTTL {
 			t.Errorf("signed %q x%d for %v", links.uploadKey, links.uploadCount, links.uploadTTL)
 		}
 		if !got.ExpiresAt.Equal(saNow.Add(directUploadTTL)) {
@@ -171,7 +172,7 @@ func TestDirectDownloadLink(t *testing.T) {
 		repo := newFakeStoredRepo()
 		repo.rows[saAttID] = completeRow("COMPLETE", &key)
 		links := &fakeLinks{}
-		got, err := newDirectSvcWith(repo, links, storedFile(key, 500)).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
+		got, err := newDirectSvc(repo, links).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		if err != nil {
 			t.Fatalf("DirectDownloadLink: %v", err)
 		}
@@ -181,27 +182,6 @@ func TestDirectDownloadLink(t *testing.T) {
 		// Whatever type the row declares, the link answers as an opaque download.
 		if links.downloadKey != key || links.downloadName != "report.pdf" || links.downloadType != "application/octet-stream" || links.downloadTTL != directDownloadTTL {
 			t.Errorf("signed %q %q %q %v", links.downloadKey, links.downloadName, links.downloadType, links.downloadTTL)
-		}
-	})
-	t.Run("a stored file that is not the size on record gets no link", func(t *testing.T) {
-		repo := newFakeStoredRepo()
-		repo.rows[saAttID] = completeRow("COMPLETE", &key)
-		links := &fakeLinks{}
-		// The row says 500 bytes; the file was overwritten with another size.
-		_, err := newDirectSvcWith(repo, links, storedFile(key, 900)).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
-		wantErr[*apierror.ServiceUnavailableError](t, err, "a file of another size")
-		if links.downloadKey != "" {
-			t.Error("a link was signed for a file that is not the size on record")
-		}
-	})
-	t.Run("a stored file that is missing gets no link", func(t *testing.T) {
-		repo := newFakeStoredRepo()
-		repo.rows[saAttID] = completeRow("COMPLETE", &key)
-		links := &fakeLinks{}
-		_, err := newDirectSvc(repo, links).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
-		wantErr[*apierror.NotFoundError](t, err, "a file that is not in storage")
-		if links.downloadKey != "" {
-			t.Error("a link was signed for a missing file")
 		}
 	})
 	t.Run("a deleted attachment is gone", func(t *testing.T) {
@@ -227,7 +207,7 @@ func TestDirectDownloadLink(t *testing.T) {
 		repo := newFakeStoredRepo()
 		repo.rows[saAttID] = completeRow("COMPLETE", &key)
 		_, err := newDirectSvc(repo, nil).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
-		wantErr[*apierror.ValidationError](t, err, "direct transfers off")
+		wantErr[*apierror.NotFoundError](t, err, "direct transfers off")
 	})
 }
 
@@ -236,4 +216,99 @@ func storedFile(key string, size int) *fakeBlob {
 	blob := newFakeBlob()
 	blob.committed[key] = make([]byte, size)
 	return blob
+}
+
+// TestStagedUploads: an upload that may be sent direct is put together under a
+// staging key and copied to its own key at confirm, so an upload link still valid
+// after the confirm cannot change the confirmed file.
+func TestStagedUploads(t *testing.T) {
+	staging := workItemKey + stagingSuffix
+	ctx := func() context.Context { return saCtx(t, saEmail) }
+	work := domain.StoredAttachmentWorkItem
+
+	t.Run("a chunk sent through the service lands under the staging key", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 20*mib)
+		blob := newFakeBlob()
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		if err := svc.PutChunk(ctx(), work, saAttID, 0, 5, strings.NewReader("hello")); err != nil {
+			t.Fatalf("PutChunk: %v", err)
+		}
+		if string(blob.staged[staging][0]) != "hello" || blob.staged[workItemKey] != nil {
+			t.Errorf("staged = %v: want the chunk under %q only", blob.staged, staging)
+		}
+		list, err := svc.ListChunks(ctx(), work, saAttID)
+		if err != nil || len(list.Chunks) != 1 {
+			t.Errorf("ListChunks = %+v, %v: a resumed upload must see the staged chunk", list, err)
+		}
+	})
+	t.Run("a confirmed staged upload ends with the file at its key and no staging file", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 9*mib) // direct-sized
+		blob := newFakeBlob()
+		big := strings.Repeat("x", 9*mib)
+		blob.staged[staging] = map[int][]byte{0: []byte(big[:8*mib]), 1: []byte(big[8*mib:])}
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		if _, err := svc.CompleteUpload(ctx(), domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 2}); err != nil {
+			t.Fatalf("CompleteUpload: %v", err)
+		}
+		if len(blob.committed[workItemKey]) != 9*mib {
+			t.Errorf("the file at its key has %d bytes, want %d", len(blob.committed[workItemKey]), 9*mib)
+		}
+		if _, still := blob.committed[staging]; still {
+			t.Error("the staging file was not removed")
+		}
+		if len(blob.copied) != 1 || blob.copied[0] != [2]string{staging, workItemKey} {
+			t.Errorf("copied = %v", blob.copied)
+		}
+	})
+	t.Run("a refused upload leaves neither file", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 9*mib)
+		blob := newFakeBlob()
+		// Bigger than declared: the real size does not match, so confirm refuses it.
+		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", 2*mib))}
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		_, err := svc.CompleteUpload(ctx(), domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 2})
+		wantErr[*apierror.ValidationError](t, err, "a size that does not match")
+		if _, ok := blob.committed[workItemKey]; ok {
+			t.Error("a refused upload has a file at its key")
+		}
+		if _, ok := blob.committed[staging]; ok {
+			t.Error("a refused upload left its staging file")
+		}
+	})
+	t.Run("a copy that fails can be confirmed again", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 9*mib)
+		blob := newFakeBlob()
+		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", mib))}
+		blob.copyErr = errors.New("storage down")
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		req := domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 2}
+		_, err := svc.CompleteUpload(ctx(), req)
+		wantErr[*apierror.ServiceUnavailableError](t, err, "a failed copy")
+		if _, ok := blob.committed[workItemKey]; ok {
+			t.Error("a failed copy left a file at the key")
+		}
+		blob.copyErr = nil
+		if _, err := svc.CompleteUpload(ctx(), req); err != nil {
+			t.Fatalf("second confirm: %v", err)
+		}
+	})
+	t.Run("a small upload is put and confirmed at its own key, as before", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 5)
+		blob := newFakeBlob()
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		if err := svc.PutChunk(ctx(), work, saAttID, 0, 5, strings.NewReader("hello")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.CompleteUpload(ctx(), domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 1}); err != nil {
+			t.Fatalf("CompleteUpload: %v", err)
+		}
+		if string(blob.committed[workItemKey]) != "hello" || len(blob.copied) != 0 {
+			t.Errorf("committed = %v, copied = %v", blob.committed, blob.copied)
+		}
+	})
 }
