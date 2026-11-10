@@ -1,3 +1,19 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
 -- Public holidays on the Team Schedule (Sri Lanka, India, and any other
 -- country a member is located in).
 --
@@ -16,7 +32,7 @@ CREATE TABLE IF NOT EXISTS team_schedule_public_holiday (
     country      VARCHAR(100) NOT NULL,
     holiday_date DATE         NOT NULL,
     title        TEXT         NOT NULL,
-    fetched_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    fetched_on   TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT team_schedule_public_holiday_country_day_unique
         UNIQUE (country, holiday_date)
 );
@@ -27,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_team_schedule_public_holiday_day
 CREATE TABLE IF NOT EXISTS team_schedule_person_location (
     user_id    UUID         PRIMARY KEY REFERENCES "user" (id) ON DELETE CASCADE,
     location   VARCHAR(100) NOT NULL,
-    fetched_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+    fetched_on TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
 -- Working on a public holiday (CRE only).

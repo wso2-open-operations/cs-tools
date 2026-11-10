@@ -31,6 +31,11 @@ type fakeClient struct {
 	asked    string
 	recorded []string
 	admins   []teamschedule.RotaAdmin
+	// recordErr fails RecordHolidayReminder; adminsErr fails RotaAdmins and
+	// adminCalls counts its calls.
+	recordErr  error
+	adminsErr  error
+	adminCalls int
 }
 
 func (f *fakeClient) DueHolidayReminders(_ context.Context, today string) ([]teamschedule.DueHolidayReminder, error) {
@@ -39,11 +44,18 @@ func (f *fakeClient) DueHolidayReminders(_ context.Context, today string) ([]tea
 }
 
 func (f *fakeClient) RecordHolidayReminder(_ context.Context, team, date, stage string) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
 	f.recorded = append(f.recorded, team+" "+date+" "+stage)
 	return nil
 }
 
 func (f *fakeClient) RotaAdmins(context.Context, string) ([]teamschedule.RotaAdmin, error) {
+	f.adminCalls++
+	if f.adminsErr != nil {
+		return nil, f.adminsErr
+	}
 	return f.admins, nil
 }
 
@@ -141,5 +153,37 @@ func TestRun_NoLeadGoesToRotaAdmins_RedirectAndFailures(t *testing.T) {
 	off := &fakeClient{due: []teamschedule.DueHolidayReminder{reminder("week")}}
 	if err := Run(off, &fakeSender{}, Config{EmailsEnabled: false})(context.Background()); err != nil || off.asked != "" {
 		t.Error("ALERTS_ENABLED=false still asked or sent")
+	}
+}
+
+func TestRun_SentButNotRecordedFailsTheRun(t *testing.T) {
+	c := &fakeClient{due: []teamschedule.DueHolidayReminder{reminder("week", teamschedule.HolidayRecipient{Email: "l@example.com"})},
+		recordErr: errors.New("entity service down")}
+	s := &fakeSender{}
+	err := Run(c, s, Config{EmailsEnabled: true})(context.Background())
+	if err == nil {
+		t.Fatal("a reminder sent but not recorded did not fail the run")
+	}
+	if !strings.Contains(err.Error(), "sent but not recorded") {
+		t.Errorf("error %q does not say it was sent but not recorded", err)
+	}
+	if len(s.mails) != 1 {
+		t.Errorf("mails %d, want 1 (the send happened)", len(s.mails))
+	}
+}
+
+func TestRun_UnreadableRotaAdminsIsNamedAndTriedAgain(t *testing.T) {
+	second := reminder("week")
+	second.Availability.TeamKey, second.Availability.TeamName = "nova", "Nova"
+	c := &fakeClient{due: []teamschedule.DueHolidayReminder{reminder("week"), second}, adminsErr: errors.New("timeout")}
+	err := Run(c, &fakeSender{}, Config{EmailsEnabled: true})(context.Background())
+	if err == nil {
+		t.Fatal("unreadable rota admins did not fail the run")
+	}
+	if !strings.Contains(err.Error(), "CRE rota admins unreadable: timeout") || strings.Contains(err.Error(), "nobody to send to") {
+		t.Errorf("error %q hides the read failure", err)
+	}
+	if c.adminCalls != 2 {
+		t.Errorf("RotaAdmins called %d times, want 2 (a failed read is not cached)", c.adminCalls)
 	}
 }

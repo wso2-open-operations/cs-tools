@@ -1005,6 +1005,28 @@ func TestHolidayAvailability(t *testing.T) {
 		}
 	})
 
+	t.Run("refuses a blank team or a malformed day before calling upstream", func(t *testing.T) {
+		called := false
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			called = true
+			return nil, nil
+		}})
+		for _, tc := range []struct{ team, date string }{{"", "2026-11-16"}, {"  ", "2026-11-16"}, {"atlas", "16-11-2026"}, {"atlas", ""}} {
+			r := confirmReq(http.MethodPut)
+			r.SetPathValue("teamKey", tc.team)
+			r.SetPathValue("date", tc.date)
+			w := httptest.NewRecorder()
+			h.ConfirmHolidayAvailability(w, withUser(r))
+			assertStatus(t, w, http.StatusBadRequest)
+			w = httptest.NewRecorder()
+			h.WithdrawHolidayAvailability(w, withUser(r))
+			assertStatus(t, w, http.StatusBadRequest)
+		}
+		if called {
+			t.Fatal("a bad path value reached entity-service")
+		}
+	})
+
 	t.Run("requires an authenticated user", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		NewScheduleHandler(&mockEntityScheduleClient{}).ConfirmHolidayAvailability(w, confirmReq(http.MethodPut))

@@ -89,6 +89,7 @@ func Run(client Client, email EmailSender, cfg Config) func(ctx context.Context)
 		}
 		var admins []teamschedule.RotaAdmin
 		adminsRead := false
+		var adminsErr error
 		var failed []string
 		sent := 0
 		for _, r := range due {
@@ -96,12 +97,16 @@ func Run(client Client, email EmailSender, cfg Config) func(ctx context.Context)
 			greeting := namesOf(r.Recipients)
 			if len(to) == 0 {
 				// A team with no lead or rota manager: its CRE rota admins.
+				// Read once per run; a failed read is tried again for the next
+				// such team and named in the failure, not taken as "no admins".
+				adminsErr = nil
 				if !adminsRead {
-					admins, err = client.RotaAdmins(ctx, "CRE")
-					if err != nil {
-						slog.WarnContext(ctx, "holiday availability: rota admins unreadable", "err", err)
+					admins, adminsErr = client.RotaAdmins(ctx, "CRE")
+					if adminsErr != nil {
+						slog.WarnContext(ctx, "holiday availability: rota admins unreadable", "err", adminsErr)
+					} else {
+						adminsRead = true
 					}
-					adminsRead = true
 				}
 				for _, a := range admins {
 					if strings.TrimSpace(a.Email) != "" {
@@ -113,7 +118,11 @@ func Run(client Client, email EmailSender, cfg Config) func(ctx context.Context)
 			label := r.Availability.TeamName + " " + r.Availability.Date
 			if len(to) == 0 {
 				slog.WarnContext(ctx, "holiday availability: nobody to remind", "team", r.Availability.TeamKey, "date", r.Availability.Date)
-				failed = append(failed, label+" (nobody to send to)")
+				if adminsErr != nil {
+					failed = append(failed, label+" (CRE rota admins unreadable: "+adminsErr.Error()+")")
+				} else {
+					failed = append(failed, label+" (nobody to send to)")
+				}
 				continue
 			}
 			subject := Subject(r)

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -256,7 +257,15 @@ func (h *ScheduleHandler) holidayConfirmation(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	teamKey, date := r.PathValue("teamKey"), r.PathValue("date")
+	teamKey, date := strings.TrimSpace(r.PathValue("teamKey")), r.PathValue("date")
+	if teamKey == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if _, err := time.Parse(time.DateOnly, date); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
 	var (
 		result []byte
 		err    error

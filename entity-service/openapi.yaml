@@ -9599,6 +9599,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/holiday-availability/search:
     post:
       summary: Each CRE team's availability on each public holiday in a window.
@@ -9640,6 +9652,18 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not internal staff, or may not change this team's rota.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
           content:
             application/json:
               schema:
@@ -9695,6 +9719,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Withdraw a team's confirmation.
       operationId: withdrawHolidayAvailability
@@ -9725,6 +9755,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: The team's availability that day is not confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
           content:
             application/json:
               schema:
@@ -9777,6 +9813,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/holiday-availability/reminders/{teamKey}/{date}/{stage}:
     put:
       summary: Record that a holiday availability reminder was sent (service credential only).
@@ -9802,6 +9850,18 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: A user token, or not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
           content:
             application/json:
               schema:

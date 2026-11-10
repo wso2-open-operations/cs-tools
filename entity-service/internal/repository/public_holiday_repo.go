@@ -106,9 +106,9 @@ func (r *publicHolidayRepository) IndiaTeamKey(ctx context.Context) (string, err
 
 func (r *publicHolidayRepository) UpsertPersonLocation(ctx context.Context, userID, location string, at time.Time) error {
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO team_schedule_person_location (user_id, location, fetched_at)
+		INSERT INTO team_schedule_person_location (user_id, location, fetched_on)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id) DO UPDATE SET location = EXCLUDED.location, fetched_at = EXCLUDED.fetched_at`,
+		ON CONFLICT (user_id) DO UPDATE SET location = EXCLUDED.location, fetched_on = EXCLUDED.fetched_on`,
 		userID, location, at)
 	if err != nil {
 		return fmt.Errorf("upsert person location: %w", err)
@@ -161,12 +161,12 @@ func (r *publicHolidayRepository) ReplaceCountryRange(ctx context.Context, count
 		return 0, fmt.Errorf("delete stale holidays: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO team_schedule_public_holiday (country, holiday_date, title, fetched_at)
+		INSERT INTO team_schedule_public_holiday (country, holiday_date, title, fetched_on)
 		SELECT $1, d, t, $4
 		  FROM unnest($2::date[], $3::text[]) AS x(d, t)
 		 WHERE d BETWEEN $5::date AND $6::date
 		ON CONFLICT (country, holiday_date) DO UPDATE
-		   SET title = EXCLUDED.title, fetched_at = EXCLUDED.fetched_at`,
+		   SET title = EXCLUDED.title, fetched_on = EXCLUDED.fetched_on`,
 		country, dates, titles, at, from.Format("2006-01-02"), to.Format("2006-01-02")); err != nil {
 		return 0, fmt.Errorf("upsert holidays: %w", err)
 	}
