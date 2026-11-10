@@ -71,7 +71,8 @@ describe("PortalBannerList", () => {
     };
     const { container } = render(<PortalBannerList banners={[sneaky]} />);
     expect(screen.getByText(/Hello engineers/)).toBeInTheDocument();
-    expect(container.querySelector("style")?.textContent ?? "").not.toContain("display:none");
+    // The list renders its own style element first, so look inside the strip, where a stored one would be.
+    expect(container.querySelector(".portal-banner-strip style")).toBeNull();
     expect(container.querySelector("form")).toBeNull();
     expect(container.querySelector("input")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
