@@ -553,6 +553,22 @@ both places.
   `ACP_TEST_PROJECT_ID` is set, since a tryout talks to the real CSM and Salesforce, and it runs
   on weekends too (it emails only its debug list). A `--run-now=acp_closure` is a real run with
   the configured settings, the same as a scheduled one.
+- **Only an Open track acts.** A project is listed because its overall state is Open, but each track
+  (end date, invoice) has its own closure state, and a person's reopen can leave one at "Pending
+  Suspended", "Pending Closed", "Notified" and so on. A track whose own state is not Open does nothing:
+  no read, no probe, no notice, no record, no suspension, no reset to open (`buildSubscriptionCascade`,
+  `buildInvoiceCascade`, and `actSubscription` / `actInvoice` as a second guard). Before this, ACP sent the
+  day-0 notice ("your project has been suspended") and recorded `suspend_notice` while `suspend` then
+  skipped the track, so a customer was told of a suspension that never happened. The skipped track also
+  does not mark the project closed for the other one, so an Open invoice track still notifies before it
+  suspends.
+- **A completed suspension is not repeated.** The legacy process re-ran an event only when its type
+  changed or an action failed, so a project suspended and then reopened by a person was left alone until
+  its date or invoice moved the event. An Open track whose saved `event_type` is `suspend` (and whose
+  `actionSuspendProject`, if present, is `SUCCESSFUL`) does nothing when the decision is to suspend: no notice,
+  no suspension, no record, and it does not mark the project closed for the other track
+  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
+  still resets the event to `open`, which clears this.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
