@@ -1090,7 +1090,8 @@ func buildRegistrationConditions(f *domain.OrganizationSearchFilters, b *argBuil
 	if f.RegisteredTo != nil {
 		conds = append(conds, `v.registered_on <= `+b.add(*f.RegisteredTo))
 	}
-	return append(conds, countryConditions(f, b, registrationCountry)...)
+	conds = append(conds, countryConditions(f, b, registrationCountry)...)
+	return append(conds, playbookConditions(f, b, `v.org_platform_id`)...)
 }
 
 // registrationCountry is a registration's country: its organisation's, as

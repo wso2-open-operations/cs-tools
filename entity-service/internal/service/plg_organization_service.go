@@ -33,7 +33,9 @@ func NewOrganizationService(repo repository.OrganizationRepository) Organization
 // The owner filter carries ids, so it is checked as UUIDs rather than passed
 // through as free text. Country names are free text, each one non-blank and
 // at most maxPlgCountryNameLength characters, and never with countryUnknown
-// (no organisation has both a country and none).
+// (no organisation has both a country and none). The playbook task and answer
+// codes are 1 to maxPlgPlaybookCodeLength characters; playbookAnswers and
+// playbookUnanswered each need playbookTask and never come together.
 func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
 	if err := validateEnums("lifecycleStage", f.LifecycleStages, domain.ValidLifecycleStage); err != nil {
 		return err
@@ -55,11 +57,36 @@ func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
 	if len(f.CountryNames) > 0 && f.CountryUnknown != nil && *f.CountryUnknown {
 		return &apierror.ValidationError{Msg: "filters.countryNames and filters.countryUnknown cannot be combined"}
 	}
+	return validatePlaybookFilters(f)
+}
+
+// validatePlaybookFilters checks the playbook answer filters.
+func validatePlaybookFilters(f *domain.OrganizationSearchFilters) error {
+	unanswered := f.PlaybookUnanswered != nil && *f.PlaybookUnanswered
+	task := strings.TrimSpace(f.PlaybookTask)
+	if f.PlaybookTask != "" && (task == "" || utf8.RuneCountInString(task) > maxPlgPlaybookCodeLength) {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("filters.playbookTask must be 1 to %d characters", maxPlgPlaybookCodeLength)}
+	}
+	for _, c := range f.PlaybookAnswers {
+		if c = strings.TrimSpace(c); c == "" || utf8.RuneCountInString(c) > maxPlgPlaybookCodeLength {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("filters.playbookAnswers entries must be 1 to %d characters", maxPlgPlaybookCodeLength)}
+		}
+	}
+	if task == "" && (len(f.PlaybookAnswers) > 0 || unanswered) {
+		return &apierror.ValidationError{Msg: "filters.playbookAnswers and filters.playbookUnanswered need filters.playbookTask"}
+	}
+	if len(f.PlaybookAnswers) > 0 && unanswered {
+		return &apierror.ValidationError{Msg: "filters.playbookAnswers and filters.playbookUnanswered cannot be combined"}
+	}
 	return nil
 }
 
 // maxPlgCountryNameLength is the longest country name a filter takes.
 const maxPlgCountryNameLength = 100
+
+// maxPlgPlaybookCodeLength is the longest playbook task or answer code a
+// filter takes.
+const maxPlgPlaybookCodeLength = 100
 
 // maxPlgAggregateGroups is the most groups an organisation aggregate returns
 // on its own; a larger maxGroups is refused.

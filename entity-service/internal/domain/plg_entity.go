@@ -415,6 +415,16 @@ type OrganizationSearchFilters struct {
 	// organisation's country.
 	CountryNames   []string `json:"countryNames"`
 	CountryUnknown *bool    `json:"countryUnknown"`
+	// PlaybookTask names a playbook task by its code, the task whose answers
+	// (plg_run_task_reason_v, on the registration's attached runs)
+	// PlaybookAnswers and PlaybookUnanswered match: PlaybookAnswers any of
+	// these option codes (a checklist: any of them ticked), PlaybookUnanswered
+	// true no answer at all, including a registration the playbook was never
+	// run on. PlaybookTask on its own filters nothing. An organisation matches
+	// when any of its registrations does.
+	PlaybookTask       string   `json:"playbookTask"`
+	PlaybookAnswers    []string `json:"playbookAnswers"`
+	PlaybookUnanswered *bool    `json:"playbookUnanswered"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.

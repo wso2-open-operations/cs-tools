@@ -82,7 +82,45 @@ func buildConditions(f *domain.OrganizationSearchFilters, b *argBuilder) []strin
 	if f.RegisteredTo != nil {
 		conds = append(conds, `v.created_on <= `+b.add(*f.RegisteredTo))
 	}
-	return append(conds, countryConditions(f, b, `v.country_name`)...)
+	conds = append(conds, countryConditions(f, b, `v.country_name`)...)
+	for _, c := range playbookConditions(f, b, `op.id`) {
+		conds = append(conds, `EXISTS (SELECT 1 FROM plg_org_platform op
+		                              WHERE op.organization_id = v.organization_id
+		                                AND `+c+`)`)
+	}
+	return conds
+}
+
+// playbookConditions are the playbook answer filters on pairing, a
+// registration's id column: with playbookAnswers the task named by
+// playbookTask has one of those answers on one of the registration's attached
+// runs, with playbookUnanswered it has none on any of them. A detached run is
+// history, not an answer. Codes match as written, trimmed.
+func playbookConditions(f *domain.OrganizationSearchFilters, b *argBuilder, pairing string) []string {
+	task := strings.TrimSpace(f.PlaybookTask)
+	unanswered := f.PlaybookUnanswered != nil && *f.PlaybookUnanswered
+	if task == "" || (len(f.PlaybookAnswers) == 0 && !unanswered) {
+		return nil
+	}
+	answered := func(codes string) string {
+		return `EXISTS (SELECT 1 FROM plg_run_task_reason_v a
+		               JOIN plg_playbook_run r ON r.id = a.playbook_run_id
+		               WHERE r.org_platform_id = ` + pairing + `
+		                 AND r.detached_on IS NULL
+		                 AND a.task_code = ` + b.add(task) + codes + `)`
+	}
+	var conds []string
+	if len(f.PlaybookAnswers) > 0 {
+		codes := make([]string, len(f.PlaybookAnswers))
+		for i, c := range f.PlaybookAnswers {
+			codes[i] = strings.TrimSpace(c)
+		}
+		conds = append(conds, answered(` AND a.reason_code = ANY(`+b.add(codes)+`::TEXT[])`))
+	}
+	if unanswered {
+		conds = append(conds, `NOT `+answered(``))
+	}
+	return conds
 }
 
 // countryConditions are the country filters on column, the organisation's
