@@ -25,6 +25,7 @@ export const BE_MAX_PAGE_LIMIT = 50;
 
 // Constants for API-related query keys.
 export const ApiQueryKeys = {
+  APP_CONFIG: "app-config",
   PROJECTS: "projects",
   BACKEND_PROJECT_CASES_SEARCH: "backend-project-cases-search",
   PROJECT_DETAILS: "project-details",

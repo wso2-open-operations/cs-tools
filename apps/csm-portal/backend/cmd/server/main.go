@@ -167,6 +167,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	appConfigHandler := handler.NewAppConfigHandler(loadReportIssueURL())
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -545,6 +546,10 @@ func main() {
 	route("PATCH /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.SaveSavedFilterView)
 	route("DELETE /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.DeleteSavedFilterView)
 	route("POST /users/me/saved-filter-views/reorder", handler.PermAuthenticated, usersHandler.ReorderSavedFilterView)
+	// PermAuthenticated like /users/me above: app-config carries chrome (e.g.
+	// the header's "Report an issue" link) shown even to a signed-in caller
+	// with no portal role yet.
+	route("GET /app-config", handler.PermAuthenticated, appConfigHandler.GetAppConfig)
 	route("POST /users/search", handler.PermView, usersHandler.SearchUsers)
 	// Batch id-to-name lookup for the KB article lists (author and
 	// reviewer columns). Not /users/search with an id filter: that filter
@@ -1277,6 +1282,15 @@ func loadAnnouncementExcludedProjectKeys() []string {
 	keys := splitComma(os.Getenv("CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS"))
 	slog.Info("resolved announcement excluded-project-key list", "count", len(keys))
 	return keys
+}
+
+// loadReportIssueURL resolves CSM_PORTAL_REPORT_ISSUE_URL, the destination
+// for the header's "Report an issue" control. Empty (the default when the
+// env var is unset) means no destination is configured yet — AppConfigHandler
+// serves it as-is and the webapp hides the control rather than offering a
+// link that goes nowhere; there is deliberately no committed default URL.
+func loadReportIssueURL() string {
+	return os.Getenv("CSM_PORTAL_REPORT_ISSUE_URL")
 }
 
 // customerEntityDataSourcePostgres and customerEntityDataSourceServiceNow

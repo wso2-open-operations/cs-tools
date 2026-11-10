@@ -73,6 +73,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /app-config:
+    get:
+      summary: Small, static, env-var-configured values the webapp needs for chrome with no page/resource of its own.
+      description: >
+        Today carries just reportIssueUrl (CSM_PORTAL_REPORT_ISSUE_URL, empty
+        when unset — the webapp hides its "Report an issue" control in that
+        case). A future second value is a new field on this same response,
+        not a new route. Registered on PermAuthenticated (no portal role
+        required), like GET /users/me, since the chrome it backs is shown
+        even to a signed-in caller not yet granted a portal role.
+      operationId: getAppConfig
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reportIssueUrl:
+                    type: string
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases:
     post:
       summary: Create a new case.
