@@ -114,6 +114,14 @@ func writeSfOpportunityLineItem(ctx context.Context, q querier, opportunitySfID,
 	if err := deriveMovedLineItemOpportunities(ctx, q, previous, opportunityID); err != nil {
 		return false, err
 	}
+	// Allocated hours follow the line just written. Durations only, and
+	// best-effort: a failure here must not fail the ingest.
+	bestEffortProjectHours(ctx, q, "line item", func(q querier) error {
+		if err := recomputeOpportunityProjectHours(ctx, q, opportunityID); err != nil {
+			return err
+		}
+		return recomputeMovedOpportunityProjectHours(ctx, q, previous, opportunityID)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, err
 	}
@@ -151,10 +159,19 @@ func deleteSfOpportunityLineItem(ctx context.Context, q querier, lineItemSfID st
 			return 0, fmt.Errorf("delete line item by sf id: lock: %w", err)
 		}
 	}
+	ownerOpps, err := previousIDs(ctx, q, previousLineItemOpportunitiesQuery, lineItemSfID)
+	if err != nil {
+		return 0, fmt.Errorf("delete line item by sf id: %w", err)
+	}
 	tag, err := q.Exec(ctx, deleteSfOpportunityProductQuery, lineItemSfID)
 	if err != nil {
 		return 0, fmt.Errorf("delete line item by sf id: %w", err)
 	}
+	// The projects on the opportunity the line belonged to lose its allocation.
+	// Best-effort, durations only.
+	bestEffortProjectHours(ctx, q, "line item delete", func(q querier) error {
+		return recomputeMovedOpportunityProjectHours(ctx, q, ownerOpps, "")
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return 0, err
 	}
