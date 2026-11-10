@@ -11635,9 +11635,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CaseVolumeTrendResponse"
+                $ref: "#/components/schemas/PlgRegistrationVolumeTrendResponse"
         "400":
-          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country filter) with its message."
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (the window, a date, or an owner email, country or playbook answer filter) with its message."
           content:
             application/json:
               schema:
@@ -29631,6 +29631,45 @@ components:
           type: string
           enum: [day, week, month]
           description: How a fixed window's days are grouped (day at most 90 days, week 54 weeks, month 24 months).
+    PlgRegistrationVolumeTrendResponse:
+      type: object
+      description: >-
+        Registrations per day, week or month: the case trend's window fields
+        and always exactly one series, "Registered" (by registration date).
+      properties:
+        days:
+          type: integer
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlgRegistrationVolumeTrendSeries"
+    PlgRegistrationVolumeTrendSeries:
+      type: object
+      properties:
+        label:
+          type: string
+          description: '"Registered".'
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseVolumeTrendPoint"
+          description: >-
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no registrations is still present,
+            with count 0.
     PlgPatchOrganizationRequest:
       type: object
       required:
