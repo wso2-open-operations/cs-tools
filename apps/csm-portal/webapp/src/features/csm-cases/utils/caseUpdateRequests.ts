@@ -44,21 +44,11 @@ export function canRequestCaseUpdate(caseDetail: CsmCaseDetail): boolean {
 export function deriveCaseUpdateRequestCategory(
   caseDetail: Pick<CsmCaseDetail, "caseType" | "engagementType">,
 ): CaseUpdateRequestCategory {
-  return isMigrationEngagement(caseDetail) ? "migration" : "generic";
-}
-
-/**
- * True for a migration engagement. Case-insensitive, because `engagementType`
- * is carried through unmodified from the data source's raw display label.
- */
-export function isMigrationEngagement(
-  caseDetail: Pick<CsmCaseDetail, "caseType" | "engagementType">,
-): boolean {
-  return (
-    caseDetail.caseType === "engagement" &&
+  return caseDetail.caseType === "engagement" &&
     !!caseDetail.engagementType &&
     caseDetail.engagementType.toLowerCase() === "migration"
-  );
+    ? "migration"
+    : "generic";
 }
 
 /** Display labels for the fixed reminder stages, in menu/selector order. */

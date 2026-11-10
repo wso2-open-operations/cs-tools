@@ -18,7 +18,6 @@ import { describe, expect, it } from "vitest";
 import {
   canRequestCaseUpdate,
   deriveCaseUpdateRequestCategory,
-  isMigrationEngagement,
 } from "@features/csm-cases/utils/caseUpdateRequests";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
@@ -84,15 +83,5 @@ describe("deriveCaseUpdateRequestCategory", () => {
 
   it("is generic when caseType/engagementType are both absent", () => {
     expect(deriveCaseUpdateRequestCategory({})).toBe("generic");
-  });
-});
-
-describe("isMigrationEngagement", () => {
-  it("is true only for an engagement whose engagementType is migration, in any case", () => {
-    expect(isMigrationEngagement({ caseType: "engagement", engagementType: "Migration" })).toBe(true);
-    expect(isMigrationEngagement({ caseType: "engagement", engagementType: "migration" })).toBe(true);
-    expect(isMigrationEngagement({ caseType: "engagement", engagementType: "Consultancy" })).toBe(false);
-    expect(isMigrationEngagement({ caseType: "engagement" })).toBe(false);
-    expect(isMigrationEngagement({ caseType: "case", engagementType: "Migration" })).toBe(false);
   });
 });
