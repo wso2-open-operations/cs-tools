@@ -415,6 +415,24 @@ async function readAndStore(
   return true;
 }
 
+/**
+ * Asks Azure for the first byte of a download link before the browser is handed
+ * it. A link Azure would refuse (expired, a storage firewall, a clock that is off,
+ * a site the storage does not allow) makes the browser show or save Azure's error
+ * page as the file, and a download it started cannot be taken back, so the stream
+ * through the backend is used instead. A cross-origin check Azure's CORS rules do
+ * not allow fails here too, which is the same answer.
+ */
+async function linkWorks(url: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" }, ...(signal ? { signal } : {}) });
+    void response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Hands a signed link to the browser as a download; the link itself says it is an attachment. */
 function startBrowserDownload(url: string, name: string): void {
   const anchor = document.createElement("a");
@@ -434,13 +452,13 @@ function startBrowserDownload(url: string, name: string): void {
  */
 async function startDirectDownload(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; name?: string },
+  args: { type: EntityAttachmentType; id: string; name?: string; signal?: AbortSignal },
 ): Promise<boolean> {
   try {
     const link = await api.get<{ url?: string; name?: string }>(
       `/attachments/download/${encodeURIComponent(args.id)}/link?type=${encodeURIComponent(args.type)}`,
     );
-    if (!link?.url) return false;
+    if (!link?.url || !(await linkWorks(link.url, args.signal))) return false;
     startBrowserDownload(link.url, args.name || link.name || "attachment");
     return true;
   } catch {
@@ -451,7 +469,7 @@ async function startDirectDownload(
 /**
  * Downloads an attachment under its own name through the portal backend, which
  * streams it. A file above {@link DIRECT_TRANSFER_MIN_BYTES} is first tried as a
- * direct download from Azure, which the browser then shows and saves itself
+ * direct download from Azure (after a first-byte check of the link, so a link Azure refuses falls back to the stream), which the browser then shows and saves itself
  * (outcome `started`, no in-page progress). Resolves `false` on a 404.
  */
 export async function downloadEntityAttachment(
