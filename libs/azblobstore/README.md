@@ -4,9 +4,9 @@ The small slice of Azure Blob Storage the portal backends use for attachments.
 Files are written as numbered blocks and become visible in one commit, and are
 read back whole or by byte range.
 
-Used by `apps/customer-portal/backend-v2` and `apps/csm-portal/backend`.
-Entity-service does not use it: it decides who may touch which key, and never
-talks to Azure.
+Used by entity-service only. It is the one service that talks to Azure Blob
+Storage: it decides who may touch which key, and the portal backends and the
+notification service send and read files through it.
 
 ## How an upload uses it
 
@@ -76,19 +76,27 @@ instead of passing them through the service:
 ```go
 if store.CanSignLinks() {
     // One PUT URL per block index; the client sends block i to links[i].
-    links, expires, err := store.UploadLinks(key, blocks, 30*time.Minute)
+    links, expires, err := store.UploadLinks(key, blocks, 5*time.Minute)
     // ... then, after the client has sent every block:
     err = store.Commit(ctx, key, blocks, contentType)
 
     // A GET URL that answers as a download of fileName.
-    link, expires, err := store.DownloadLink(key, fileName, contentType, 10*time.Minute)
+    link, expires, err := store.DownloadLink(key, fileName, contentType, 5*time.Minute)
 }
 ```
 
 A link is signed for one blob, for writing only (upload) or reading only
 (download). Azure checks it when a request starts, so a request that started
-before the expiry finishes after it. A link cannot limit how much is sent, so
-check the real size with `Stat` after an upload. A store that signs in as an
+before the expiry finishes after it. Choose the shortest lifetime that covers the
+start of the last chunk (entity-service uses 5 minutes up to 50 MiB, up to 20
+minutes for a file of 1 GiB, the largest it allows).
+
+A link cannot limit how much is sent, and the write permission is for the whole
+blob, so until it expires the holder can overwrite that blob, even after the
+upload was confirmed. Check the real size with `Stat` after an upload, and again
+before handing out a download link (entity-service does both). That catches a file
+whose size changed; it does not catch a swap to a file of the same size, which only
+staging the upload under another key and copying it after the check would. A store that signs in as an
 Entra app cannot sign a link and returns `ErrLinksUnavailable`; the storage
 account also needs CORS for the browsers that use the links.
 
@@ -96,6 +104,8 @@ account also needs CORS for the browsers that use the links.
 
 - `PutBlock` reads the whole chunk into memory before sending it, so memory use
   is one chunk per request. `MaxBlockSize` is 100 MiB; the portals send 8 MiB.
+  A client sending through a link has no such limit from this package; entity-service
+  holds the whole file to the cap of its upload (up to 1 GiB for a direct one).
 - A blob has at most `MaxBlocks` (50,000) blocks.
 - Every block id in a blob must be the same length; the package handles this.
 
@@ -113,17 +123,20 @@ AZBLOBSTORE_TEST_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 go test ./...
 `AZBLOBSTORE_TEST_ACCOUNT` and `AZBLOBSTORE_TEST_KEY` override Azurite's
 well-known development account to run the same tests against a real one.
 
-## Using it from a backend
+## Using it from entity-service
 
-The module is imported by version, not by path, so Choreo can build a backend
+The module is imported by version, not by path, so Choreo can build the service
 from its own folder:
 
 ```
 require github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0
 ```
 
-For local work across the repo, use an uncommitted `go.work` that lists the
-backend and this module. Never commit `go.work`.
+The links (`CanSignLinks`, `UploadLinks`, `DownloadLink`) are in the next version,
+`v0.2.0`: move the pin to it once that tag exists (see "Releasing a new version").
+
+For local work across the repo, use an uncommitted `go.work` that lists
+entity-service and this module. Never commit `go.work`.
 
 ## Releasing a new version
 
