@@ -32,7 +32,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 const (
@@ -40,7 +40,7 @@ const (
 	cloudStatusSpec = "../../cloud-status.openapi.yaml"
 )
 
-// readYAML decodes file into out; yaml.v3 also rejects a key given twice.
+// readYAML decodes file into out; the decoder also rejects a key given twice.
 func readYAML(t *testing.T, file string, out any) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Clean(file))
@@ -122,8 +122,8 @@ func TestCloudStatusSpecCopiesTheMainSpec(t *testing.T) {
 	}
 }
 
-// collectRefs appends every $ref value found anywhere in v. yaml.v3 decodes
-// a mapping with any non-string key (an unquoted 200:, say) as map[any]any.
+// collectRefs appends every $ref value found anywhere in v. The decoder turns
+// a mapping with any non-string key (an unquoted 200:, say) into map[any]any.
 func collectRefs(v any, out *[]string) {
 	switch x := v.(type) {
 	case map[string]any:
