@@ -1035,16 +1035,22 @@ function DashboardWidgetTile({
             {resolvedDescription}
           </Typography>
         )}
-        <DashboardLineChart
-          points={volumeTrendData.points}
-          isLoading={volumeTrendData.isLoading}
-          isError={volumeTrendData.isError}
-          series={isPlgRegistrationLine ? ["opened"] : series}
-          seriesLabels={isPlgRegistrationLine ? { opened: "Registered" } : undefined}
-          bucket={startDate && endDate ? bucket : undefined}
-          chart={chart}
-          onPointClick={linePointClickThrough ? handlePointClick : undefined}
-        />
+        {volumeTrendData.isForbidden ? (
+          <Typography variant="body2" color="text.secondary">
+            {noAccessMessage(resourceType)}
+          </Typography>
+        ) : (
+          <DashboardLineChart
+            points={volumeTrendData.points}
+            isLoading={volumeTrendData.isLoading}
+            isError={volumeTrendData.isError}
+            series={isPlgRegistrationLine ? ["opened"] : series}
+            seriesLabels={isPlgRegistrationLine ? { opened: "Registered" } : undefined}
+            bucket={startDate && endDate ? bucket : undefined}
+            chart={chart}
+            onPointClick={linePointClickThrough ? handlePointClick : undefined}
+          />
+        )}
       </Card>
     );
   }

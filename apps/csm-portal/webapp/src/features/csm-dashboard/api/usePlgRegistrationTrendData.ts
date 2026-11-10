@@ -104,5 +104,8 @@ export function usePlgRegistrationTrendData(
     })),
     isLoading: !enabled || awaitingCurrentUser || query.isLoading,
     isError: query.isError,
+    // A viewer without PLG access gets a 403; the tile says so instead of
+    // an error, as for every other PLG widget.
+    isForbidden: query.isError && (query.error as { status?: unknown } | null)?.status === 403,
   };
 }

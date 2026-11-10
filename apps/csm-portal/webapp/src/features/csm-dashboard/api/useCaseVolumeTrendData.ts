@@ -69,6 +69,9 @@ export interface CaseVolumeTrendData {
   points: CaseVolumeTrendChartPoint[];
   isLoading: boolean;
   isError: boolean;
+  /** The backend refused the user's role (403). Set only by
+   * `usePlgRegistrationTrendData`; the case trend leaves it unset. */
+  isForbidden?: boolean;
 }
 
 /**

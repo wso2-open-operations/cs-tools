@@ -881,9 +881,10 @@ organisation tile opens `/plg/organizations`, a registration tile counting exact
 opens `/plg/new-registrations`, and any other opens the preview page (lossless-or-preview, above). A list
 row opens the organisation's PLG page (a registration row, that product's tab) with the dashboard's
 return state, so its Back goes back to the dashboard. **No access:** the PLG routes are CS engineers and
-admins only; a PLG count, list or grouped chart whose fetch answers 403 says "You don't have access to
-PLG data." (`noAccessMessage` in `DashboardWidgetTile.tsx`) instead of "Could not load this widget.",
-and its count links nowhere.
+admins only; a PLG count, list, grouped chart or registration line whose fetch answers 403 says "You
+don't have access to PLG data." (`noAccessMessage` in `DashboardWidgetTile.tsx`; for the line,
+`usePlgRegistrationTrendData`'s `isForbidden`) instead of "Could not load this widget.", and its count
+links nowhere.
 
 ### Current-user placeholder
 

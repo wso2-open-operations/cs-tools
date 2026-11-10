@@ -177,5 +177,15 @@ describe("usePlgRegistrationTrendData", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5000 });
     expect(result.current.points).toEqual([]);
+    expect(result.current.isForbidden).toBe(false);
+  });
+
+  it("reports a 403 as forbidden", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    const { result } = renderHook(() => usePlgRegistrationTrendData("signups", {}, 30), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5000 });
+    expect(result.current.isForbidden).toBe(true);
   });
 });
