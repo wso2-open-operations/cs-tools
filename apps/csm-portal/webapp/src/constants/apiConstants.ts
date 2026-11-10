@@ -89,6 +89,7 @@ export const ApiQueryKeys = {
   OUTAGE_DETAILS: "outage-details",
   OUTAGE_METADATA: "outage-metadata",
   OUTAGE_COMMUNICATIONS: "outage-communications",
+  ALERT_MUTE_RULES: "alert-mute-rules",
   GROUPS_SEARCH: "groups-search",
   GROUP_DETAILS: "group-details",
   IT_SERVICES_SEARCH: "it-services-search",
