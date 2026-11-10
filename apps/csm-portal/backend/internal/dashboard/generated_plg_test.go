@@ -154,6 +154,37 @@ func TestParseGenerated_AcceptsPlgOrganisationsByOwner(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsPlgCountries checks "by country" on either PLG
+// type (a pie or bar grouped on the server), "in <country>" (countryNames,
+// written as the prompt names them), "no country" (countryUnknown), and
+// countries as slices.
+func TestParseGenerated_AcceptsPlgCountries(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"orgs-by-country","displayName":"PLG Organisations by Country","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{"productCodes":["IAM"]},"groupBy":{"field":"country","maxGroups":10}}`,
+		`{"id":"new-by-country","displayName":"New Registrations by Country","resourceType":"plg_registration","shape":"pie","gridWidth":6,
+		  "query":{"unacknowledgedOnly":true},"groupBy":{"field":"country","maxGroups":8}}`,
+		`{"id":"in-sri-lanka","displayName":"Cloud Organisations in Sri Lanka or India","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"countryNames":["Sri Lanka","India"],"countryUnknown":false}}`,
+		`{"id":"no-country","displayName":"Registrations with No Country","resourceType":"plg_registration","shape":"list","gridWidth":6,"listLimit":5,
+		  "query":{"countryUnknown":true}}`,
+		`{"id":"sl-vs-in","displayName":"Sri Lanka and India","resourceType":"plg_registration","shape":"bar","gridWidth":6,"query":{},
+		  "slices":[{"label":"Sri Lanka","query":{"countryNames":["Sri Lanka"]}},{"label":"India","query":{"countryNames":["India"]}}]}`,
+		`{"id":"sl-signups","displayName":"Sri Lanka Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"countryNames":["Sri Lanka"]},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[1].GroupBy; g == nil || g.Field != "country" || g.MaxGroups != 8 {
+		t.Errorf("new-by-country groupBy = %+v, want country with maxGroups 8", g)
+	}
+	if got := d.Widgets[2].Query["countryNames"]; !reflect.DeepEqual(got, []any{"Sri Lanka", "India"}) {
+		t.Errorf("in-sri-lanka countryNames = %#v, want the names as written", got)
+	}
+}
+
 // TestParseGenerated_RejectsPlgWidgetsItCannotRun checks that a PLG widget
 // holds only what the PLG searches take and a prompt can name.
 func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
@@ -168,12 +199,24 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 	}{
 		{"line", org("line", `,"query":{},"days":30`), "shape must be count, list, pie or bar"},
 		{"pie without slices", org("pie", `,"query":{}`), "needs either"},
-		{"pie grouped by product on the server", org("pie", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "groups by owner only"},
-		{"bar grouped by an owner bucket", org("bar", `,"query":{},"groupBy":{"bucket":"month"}`), "groups by owner only"},
+		{"pie grouped by product on the server", org("pie", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "groups by owner or country only"},
+		{"bar grouped by an owner bucket", org("bar", `,"query":{},"groupBy":{"bucket":"month"}`), "groups by owner or country only"},
 		{"owner grouping and slices", org("pie", `,"query":{},"groupBy":{"field":"owner"},"slices":[{"label":"Unowned","query":{"unowned":true}}]`), `carries both "slices" and "groupBy"`},
 		{"owner grouping in hours", org("bar", `,"query":{},"groupBy":{"field":"owner","measure":"hours"}`), `"groupBy.measure"`},
-		{"registrations by owner", reg("pie", `,"query":{},"groupBy":{"field":"owner","maxGroups":5}`), "cannot use groupBy; group with slices"},
-		{"a registration line by owner", reg("line", `,"query":{},"days":30,"groupBy":{"field":"owner"}`), "cannot use groupBy"},
+		{"registrations by owner", reg("pie", `,"query":{},"groupBy":{"field":"owner","maxGroups":5}`), "a PLG registration widget groups by country only"},
+		{"a registration line by owner", reg("line", `,"query":{},"days":30,"groupBy":{"field":"owner"}`), "groups by country only"},
+		{"a registration line by country", reg("line", `,"query":{},"days":30,"groupBy":{"field":"country"}`), `groups only as a pie or bar, not a "line"`},
+		{"an organisation count by country", org("count", `,"query":{},"groupBy":{"field":"country"}`), `groups only as a pie or bar, not a "count"`},
+		{"a registration list by country", reg("list", `,"query":{},"listLimit":5,"groupBy":{"field":"country"}`), `groups only as a pie or bar, not a "list"`},
+		{"countries as a string", org("count", `,"query":{"countryNames":"India"}`), "countryNames must be a list of strings"},
+		{"no countries", org("count", `,"query":{"countryNames":[]}`), "countryNames must be a list of 1 to 20 values"},
+		{"21 countries", reg("count", `,"query":{"countryNames":["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U"]}`), "countryNames must be a list of 1 to 20"},
+		{"a blank country", org("count", `,"query":{"countryNames":["India"," "]}`), "each value must be 1 to 100 characters"},
+		{"a 101-character country", org("count", `,"query":{"countryNames":["`+strings.Repeat("a", 101)+`"]}`), "each value must be 1 to 100 characters"},
+		{"countryUnknown as a string", reg("count", `,"query":{"countryUnknown":"true"}`), "countryUnknown must be true or false"},
+		{"a country and none", org("count", `,"query":{"countryNames":["India"],"countryUnknown":true}`), `query: "countryNames" and "countryUnknown" cannot be combined`},
+		{"no country, and a slice's country", reg("pie", `,"query":{"countryUnknown":true},"slices":[{"label":"India","query":{"countryNames":["India"]}}]`), `slices[0].query: "countryNames" and "countryUnknown" cannot be combined`},
+		{"a country, and a slice with none", org("bar", `,"query":{"countryNames":["India"]},"slices":[{"label":"None","query":{"countryUnknown":true}}]`), `slices[0].query: "countryNames" and "countryUnknown" cannot be combined`},
 		{"slice with owner ids", org("bar", `,"query":{},"slices":[{"label":"Mine","query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}}]`), `slices[0].query.ownerIds can only be ["__current_user__"]`},
 		{"slice with an unknown stage", reg("pie", `,"query":{},"slices":[{"label":"Won","query":{"lifecycleStages":["WON"]}}]`), `"WON" is not a PLG registration lifecycle stage`},
 		{"slice unacknowledged on organisations", org("pie", `,"query":{},"slices":[{"label":"New","query":{"unacknowledgedOnly":true}}]`), `slices[0].query: "unacknowledgedOnly" is not a PLG organisation filter`},
@@ -190,7 +233,7 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 		{"organisation sort", org("list", `,"query":{},"listLimit":5,"sortBy":{"field":"owner","order":"asc"}`), "sorts by name or registeredOn"},
 		{"unacknowledged on organisations", org("count", `,"query":{"unacknowledgedOnly":true}`), `"unacknowledgedOnly" is not a PLG organisation filter`},
 		{"registration sort", reg("list", `,"query":{},"listLimit":5,"sortBy":{"field":"name","order":"asc"}`), "a PLG registration list takes no sortBy"},
-		{"registration groupBy", reg("count", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "cannot use groupBy"},
+		{"registration groupBy", reg("count", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "groups by country only"},
 		{"registration table", reg("table", `,"query":{}`), "shape must be count, list, pie, bar or line"},
 		{"registration line with a series", reg("line", `,"query":{},"days":30,"series":["opened"]`), `"series" is only meaningful for resourceType "case"`},
 		{"registration line over 90 days", reg("line", `,"query":{},"days":91`), `"days" is 91`},
