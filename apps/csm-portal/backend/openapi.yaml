@@ -10376,6 +10376,407 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /alert-mute-rules:
+    post:
+      summary: Create an alert mute rule.
+      description: >
+        An alert mute rule mutes SRE alerts matching every condition between
+        startOn and endOn. Proxied to entity-service, which validates the body
+        and answers 400 with the reason (e.g. endOn more than 72h after
+        startOn, a missing service or environment condition).
+      operationId: postAlertMuteRules
+      requestBody:
+        description: Alert mute rule create payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/search:
+    post:
+      summary: Search alert mute rules, newest created first.
+      operationId: postAlertMuteRulesSearch
+      requestBody:
+        description: Alert mute rule search payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAlertMuteRulesPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAlertMuteRulesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}:
+    get:
+      summary: Get an alert mute rule by ID.
+      operationId: getAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    patch:
+      summary: Edit a scheduled alert mute rule.
+      description: Same body as create. Only a scheduled alert mute rule can be edited; otherwise 409.
+      operationId: patchAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Alert mute rule save payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is no longer scheduled). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    delete:
+      summary: Delete a scheduled alert mute rule.
+      operationId: deleteAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is no longer scheduled). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}/extend:
+    post:
+      summary: Move a scheduled or active alert mute rule's end later.
+      description: The new endOn must be after the current one and at most 72h after startOn.
+      operationId: postAlertMuteRuleExtend
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: New end time.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendAlertMuteRulePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is not scheduled or active). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}/end:
+    post:
+      summary: End an active alert mute rule now.
+      description: Sets endedOn to now and endedBy to the caller. Takes no body.
+      operationId: postAlertMuteRuleEnd
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is not active). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+
   /outages:
     post:
       summary: Create a new outage (ServiceNow data source only).
@@ -21190,6 +21591,125 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SalesforceResyncApplyComponent'
+    AlertMuteRuleCondition:
+      type: object
+      required: [field, value]
+      properties:
+        field:
+          type: string
+          enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        value:
+          type: string
+          maxLength: 255
+    AlertMuteRuleSavePayload:
+      type: object
+      required: [name, timeZone, startOn, endOn, conditions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+          description: IANA zone the times were entered in, e.g. Asia/Colombo.
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+          description: After startOn, at most 72h after it, and in the future.
+        conditions:
+          type: array
+          description: Each field at most once; must include service and environment.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    ExtendAlertMuteRulePayload:
+      type: object
+      required: [endOn]
+      properties:
+        endOn:
+          type: string
+          format: date-time
+    AlertMuteRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: AMR0000001
+        name:
+          type: string
+        description:
+          type: string
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        endedBy:
+          type: string
+          nullable: true
+        endedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SearchAlertMuteRulesPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            states:
+              type: array
+              description: Omitted means all. expired also returns alert mute rules ended early.
+              items:
+                type: string
+                enum: [active, scheduled, expired]
+            searchQuery:
+              type: string
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+            limit:
+              type: integer
+    SearchAlertMuteRulesResponse:
+      type: object
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
     ErrorPayload:
       type: object
       description: >-

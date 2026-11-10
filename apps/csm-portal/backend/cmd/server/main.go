@@ -200,6 +200,7 @@ func main() {
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
+	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
 	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
@@ -907,6 +908,15 @@ func main() {
 	route("PATCH /outages/{id}", handler.PermWrite, outageHandler.PatchOutage)
 	route("POST /outages/{id}/communications", handler.PermWrite, outageHandler.AddOutageCommunication)
 	route("POST /outages/{id}/communications/search", handler.PermViewOperations, outageHandler.SearchOutageCommunications)
+	// Alert mute rules: 1:1 proxies to entity-service. GET /alert-mute-rules/active is
+	// deliberately not exposed here; alert-core reads it via csm-integration-service.
+	route("POST /alert-mute-rules/search", handler.PermViewOperations, alertMuteRuleHandler.SearchAlertMuteRules)
+	route("GET /alert-mute-rules/{id}", handler.PermViewOperations, alertMuteRuleHandler.GetAlertMuteRule)
+	route("POST /alert-mute-rules", handler.PermWrite, alertMuteRuleHandler.CreateAlertMuteRule)
+	route("PATCH /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.PatchAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/extend", handler.PermWrite, alertMuteRuleHandler.ExtendAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/end", handler.PermWrite, alertMuteRuleHandler.EndAlertMuteRule)
+	route("DELETE /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.DeleteAlertMuteRule)
 	// Called manually today; not yet wired into real incident/case creation.
 	route("POST /notifications/google-chat/alerts", handler.PermWrite, notificationHandler.PostGoogleChatAlert)
 
@@ -923,7 +933,7 @@ func main() {
 	// PermViewSharedEntity's own doc comment) -- unlike GET /teams/{id}/members
 	// above, which is a genuinely unconditional CS Portal route (see
 	// teamHandler's own construction) and so is registered outside this
-	// block. The account-scoped escalation list stays here only because CS
+	// rule. The account-scoped escalation list stays here only because CS
 	// Portal's own /cases/{id}/escalations is per-case, not per-account.
 	//
 	// Every route below is registered with PermViewerAccess (Viewer only),
