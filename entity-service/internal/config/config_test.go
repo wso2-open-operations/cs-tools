@@ -1611,3 +1611,21 @@ func TestLoad_AttachmentDirectTransfers(t *testing.T) {
 		t.Errorf("bad values = %v, %d; want off and the 8 MiB default", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
 	}
 }
+
+// TestLoad_AttachmentDirectMax: a file sent straight to Azure may be up to 1 GiB
+// by default, which is also the ceiling.
+func TestLoad_AttachmentDirectMax(t *testing.T) {
+	if got := Load().AttachmentDirectMaxBytes; got != 1<<30 {
+		t.Errorf("default = %d, want 1 GiB", got)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_MAX_MB", "512")
+	if got := Load().AttachmentDirectMaxBytes; got != 512<<20 {
+		t.Errorf("512 = %d", got)
+	}
+	for _, bad := range []string{"2048", "0", "-5", "lots"} {
+		t.Setenv("ATTACHMENT_DIRECT_MAX_MB", bad)
+		if got := Load().AttachmentDirectMaxBytes; got != 1<<30 {
+			t.Errorf("%q = %d, want the 1 GiB default", bad, got)
+		}
+	}
+}

@@ -762,23 +762,27 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var inlineImageLinker service.InlineImageLinker
 	if db != nil {
 		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
-		storedAttachmentSvc = service.NewStoredAttachmentService(
-			storedAttachmentRepo,
-			service.StoredAttachmentLimits{
-				MaxBytes:            cfg.AttachmentMaxBytes,
-				InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
-			},
-		)
+		// This service is the only one that talks to Azure Blob Storage: the portal
+		// backends and the notification service send and read files through it.
+		attachmentStore := newAttachmentFileStore(cfg)
+		directTransfers := directTransferOptions(cfg, attachmentStore)
+		limits := service.StoredAttachmentLimits{
+			MaxBytes:            cfg.AttachmentMaxBytes,
+			InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
+		}
+		if len(directTransfers) > 0 {
+			// A file sent straight to Azure may be larger than one sent through here.
+			limits.DirectMinBytes = cfg.AttachmentDirectMinBytes
+			limits.DirectMaxBytes = cfg.AttachmentDirectMaxBytes
+		}
+		storedAttachmentSvc = service.NewStoredAttachmentService(storedAttachmentRepo, limits)
 		// A portal admin may delete an attachment they did not upload, asked
 		// for by the CSM portal backend alone.
 		storedAttachmentSvc = service.WithStoredAttachmentAdminDelete(storedAttachmentSvc, cfg.CSMPortalBackendClientID)
 		// Comments created or edited from here on attach the images they show.
 		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
-		// This service is the only one that talks to Azure Blob Storage: the portal
-		// backends and the notification service send and read files through it.
-		attachmentStore := newAttachmentFileStore(cfg)
 		attachmentFiles := service.NewStoredAttachmentFileService(storedAttachmentSvc, attachmentStore, cfg.AttachmentMaxConcurrentTransfers,
-			directTransferOptions(cfg, attachmentStore)...)
+			directTransfers...)
 		// With the file store the cleanup removes unlinked files itself.
 		uploadCleanup := service.WithFileStore(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc), attachmentStore)
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
