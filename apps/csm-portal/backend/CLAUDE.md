@@ -716,11 +716,9 @@ total}` untouched.
 
 The first — and, as of this writing, only — generic "serve a small static
 value the webapp needs for chrome with no page/resource of its own" route.
-Before this, the closest precedent was single-purpose
-(`GET /announcements/audience/excluded-project-keys`, its own route per
-value); this one is deliberately a growable response struct instead, so a
-second static value later is a new field on `appConfigResponse`
-(`internal/handler/app_config.go`), not a new route.
+It is deliberately a growable response struct, so a second static value
+later is a new field on `appConfigResponse` (`internal/handler/app_config.go`),
+not a new route.
 
 - **Registered on `PermAuthenticated`, not a portal-role permission** — like
   `GET /users/me` — because the webapp's header control this backs
