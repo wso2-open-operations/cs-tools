@@ -160,6 +160,8 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `tag` | `in`, `notIn` | tag names, **only if the request gives them** |
 | `product` | `in` | exact product names, **only if the request gives them** |
 | `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date (below) |
+| `stateEntered` | `in` | states a case **moved to**, values as for `state` (see "Moved to a state" below) |
+| `stateEnteredOn` | `gte`, `lte` | one date (below): when it moved there; only with a `stateEntered` |
 | `creTeam`, `sreTeam` | `in` | team **keys** from the Teams section (the last section), each in its team's field: e.g. `creTeam in ["rigel"]`, `creTeam in ["sirius", "draco"]`, `sreTeam in ["apollo"]` |
 | `creTeam`, `sreTeam` | `in` | `["__current_team__"]` ("my team"), **only on a `"cre"` dashboard**, never together with a team key |
 
@@ -199,12 +201,36 @@ is December 2025 and "October" is October 2026). Today's date is given after the
                           { "field": "createdOn", "op": "lte", "values": ["2025-12-31"] } ] } }
 ```
 
+**Moved to a state.** `state` is where a case is **now**. `stateEntered` is a state the case **moved
+to**, read from its state history: with `stateEnteredOn` it counts the cases that moved to one of those
+states in that period (dates as above), whether they are still there or have moved on since; a case
+that moved there several times counts once. Without `stateEnteredOn` it means at any time. "... and
+still there" adds `state in` the same state(s). A slice may carry only the `stateEnteredOn` window when
+the widget's own `query` has the `stateEntered`.
+
+```json
+{ "id": "moved-to-wow-today", "displayName": "Moved to Waiting on WSO2 Today", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "stateEntered", "op": "in", "values": ["waiting_on_wso2"] },
+                          { "field": "stateEnteredOn", "op": "gte", "values": ["__today__"] } ] } }
+```
+
+```json
+{ "id": "moved-to-wow-by-period", "displayName": "Moved to Waiting on WSO2", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "stateEntered", "op": "in", "values": ["waiting_on_wso2"] } ] },
+  "slices": [
+    { "label": "Today", "query": { "filters": [ { "field": "stateEnteredOn", "op": "gte", "values": ["__today__"] } ] } },
+    { "label": "This Week", "query": { "filters": [ { "field": "stateEnteredOn", "op": "gte", "values": ["__startOfWeek:0__"] } ] } },
+    { "label": "This Month", "query": { "filters": [ { "field": "stateEnteredOn", "op": "gte", "values": ["__startOfMonth:0__"] } ] } } ] }
+```
+
 **OR across fields** (use sparingly): add `"anyOf": [{"filters": [...]}, {"filters": [...]}]`
 beside `filters`. Each branch is ANDed inside; branches are ORed; the result is ANDed with
 `filters`. **Inside an `anyOf` branch only these fields are allowed:** `state`, `severity`,
 `issueType`, `workState`, `engagementType`, `assignedUserId`, `escalation`, `escalationLevel`,
-`slaBreached`, `taskSLABusinessElapsedPercent`, `tag`. Dates, `createdBy`, `product`, `creTeam`
-and `sreTeam` must go in the top-level `filters`, never in a branch.
+`slaBreached`, `taskSLABusinessElapsedPercent`, `tag`. Dates, `createdBy`, `product`, `creTeam`,
+`sreTeam`, `stateEntered` and `stateEnteredOn` must go in the top-level `filters`, never in a branch.
 
 Never use: ids of projects, accounts, deployments or users; `number`; `internalId`; `parentId`;
 `projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`; or any
@@ -532,6 +558,11 @@ Never set both `slices` and `groupBy`.
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
 | "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn` with that period's dates (section 5) |
+| "moved to", "went to", "changed to", "put in", "entered" a state, in a period ("moved to WOW today", "went to Awaiting Info this week") | `stateEntered in` that state plus `stateEnteredOn` with the period's dates (section 5), **not** `state in`; no period: `stateEntered` alone ("closed" in a period stays `closedOn`, above) |
+| "reopened today / this week / in March" | `stateEntered in ["reopened"]` plus `stateEnteredOn` with the period's dates |
+| "... and still there", "moved to WOW today and still waiting on WSO2" | the `stateEntered` filters plus `state in` the same state(s) |
+| "in WOW", "WOW cases", "currently waiting on WSO2" (no word for moving) | `state in ["waiting_on_wso2"]`: where cases are now |
+| "moved out of" / "left" a state, the state a case came from ("from WOW to In Progress"), how many times cases changed state | not expressible: only the state a case moved to is known, and each case counts once; the closest is `stateEntered` with the new state, with a `note` |
 | "unassigned", "no assignee" | `assignedUserId isEmpty` (case family only) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
@@ -584,7 +615,10 @@ If two readings are plausible and the table does not settle it, pick the one abo
    dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
    absent (both lines) or exactly `["opened"]` or `["closed"]`; `chart` absent or `"bar"`. An edit keeps
    a line widget's `series`, window and `chart` unless the request changes them.
-6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
+6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`. `stateEntered`
+   (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, one date) only in the top-level `filters` of
+   a case-family widget or its slices, never an `anyOf` branch; `stateEnteredOn` only with a
+   `stateEntered` in the widget.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),
    op `in`, in the top-level `filters` (never an `anyOf` branch), never a team id; `__current_team__`

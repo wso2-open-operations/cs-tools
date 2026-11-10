@@ -19,6 +19,8 @@ package dashboard
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -82,6 +84,45 @@ func TestParseGenerated_RefusesStateEnteredItCannotRun(t *testing.T) {
 		_, err := ParseGenerated([]byte(tc.raw))
 		if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want ErrGeneratedInvalid mentioning %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+// TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid: every
+// "moved to a state" widget the catalogue shows the model (section 5) passes
+// this backend's own check, so the catalogue cannot teach a widget the save
+// would refuse.
+func TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "## 5. Filters")
+	if !ok {
+		t.Fatal("catalogue has no section 5")
+	}
+	section, _, _ = strings.Cut(section, "### 5a.")
+	var widgets []string
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		if strings.Contains(block, `"stateEntered"`) {
+			widgets = append(widgets, block)
+		}
+		rest = next
+	}
+	if len(widgets) < 2 {
+		t.Fatalf("found %d stateEntered examples in section 5, want at least 2 (a count and slices per period)", len(widgets))
+	}
+	for i, w := range widgets {
+		if _, err := ParseGenerated([]byte(stateEnteredDashboard(w))); err != nil {
+			t.Errorf("section 5 stateEntered example %d is rejected: %v\n%s", i+1, err, w)
 		}
 	}
 }
