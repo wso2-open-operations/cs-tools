@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -81,6 +82,52 @@ func TestPlaybookAnswerFields_TheActiveChoiceTasksOncePerCode(t *testing.T) {
 	}
 	if got := playbookAnswerFields(nil); len(got) != 0 {
 		t.Errorf("playbookAnswerFields(nil) = %+v, want none", got)
+	}
+}
+
+// TestPlaybookAnswerFields_StopAtTheAIServicesCaps: 201 tasks of 101
+// answers each send the first 200 codes with their first 100 answers, and a
+// filter on a code or an answer left out is refused here (a 422), not by the
+// AI service.
+func TestPlaybookAnswerFields_StopAtTheAIServicesCaps(t *testing.T) {
+	var tasks []plgdomain.PlaybookTask
+	for i := 0; i < 201; i++ {
+		var options []string
+		for j := 0; j < 101; j++ {
+			options = append(options, fmt.Sprintf("A%03d", j), fmt.Sprintf("Answer %d", j))
+		}
+		tasks = append(tasks, answerTask(fmt.Sprintf("T%03d", i), fmt.Sprintf("Task %d", i), plgdomain.ValueSingleSelect, options...))
+	}
+	fields := playbookAnswerFields([]plgdomain.Playbook{{Name: "Big", Active: true, Tasks: tasks}})
+	if len(fields) != 200 || fields[0].Code != "T000" || fields[199].Code != "T199" {
+		t.Fatalf("got %d fields (%s to %s), want T000 to T199", len(fields), fields[0].Code, fields[len(fields)-1].Code)
+	}
+	for _, f := range fields {
+		if len(f.Options) != 100 || f.Options[99].Code != "A099" {
+			t.Fatalf("%s: %d answers, want A000 to A099", f.Code, len(f.Options))
+		}
+	}
+
+	for _, c := range []struct{ name, query string }{
+		{"the 201st task", `{"playbookTask":"T200","playbookAnswers":["A000"]}`},
+		{"the 101st answer", `{"playbookTask":"T000","playbookAnswers":["A100"]}`},
+	} {
+		d, err := dashboard.ParseGenerated([]byte(plgGenerated(
+			`{"id":"w","displayName":"W","resourceType":"plg_registration","shape":"count","gridWidth":6,"query":` + c.query + `}`)))
+		if err != nil {
+			t.Fatalf("%s: ParseGenerated: %v", c.name, err)
+		}
+		if err := checkPlaybookAnswers(d, fields); !errors.Is(err, errDashboardPlaybook) {
+			t.Errorf("%s: checkPlaybookAnswers = %v, want errDashboardPlaybook", c.name, err)
+		}
+	}
+	d, err := dashboard.ParseGenerated([]byte(plgGenerated(
+		`{"id":"w","displayName":"W","resourceType":"plg_registration","shape":"count","gridWidth":6,"query":{"playbookTask":"T199","playbookAnswers":["A099"]}}`)))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if err := checkPlaybookAnswers(d, fields); err != nil {
+		t.Errorf("the last task and answer kept: %v", err)
 	}
 }
 

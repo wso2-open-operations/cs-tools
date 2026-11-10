@@ -971,7 +971,8 @@ playbooks, not by `ParseGenerated`: `handler.WithPlaybooks` (`dashboard_playbook
 service generator read every PLG playbook on each message (`plg.NewPlaybookLister`, PLG's own
 entity-service configuration, which `cmd/server/main.go` shares with `plg.Mount`), send the AI service
 `playbookAnswers` (`playbookAnswerFields`: the active playbooks' active, non-bookend single choice and
-checklist tasks with options, one per code, sorted, table characters cleaned; left out when none), and
+checklist tasks with options, one per code, sorted, table characters cleaned, at most the AI service's
+200 codes of 100 answers each; left out when none), and
 refuse a dashboard naming a task or an answer they do not have (`errDashboardPlaybook`: 422,
 `generate_playbook`, the reason and the known codes); when the playbooks cannot be read, none are sent
 and any playbook answer filter is refused. **Deploy the AI integration service first**: it refuses a

@@ -39,7 +39,11 @@ var errDashboardPlaybook = errors.New("invalid playbook answer filter")
 // (in the list's order); its answers every playbook's, first seen first. A
 // code holding a character the AI service's table cannot hold is left out,
 // and one in a name or label becomes a space, so an admin's wording never
-// fails a generate request.
+// fails a generate request. For the same reason the list stops at the AI
+// service's caps: the first maxPlaybookAnswerFields codes, each with its
+// first maxPlaybookAnswerOptions answers; a filter on one left out is then
+// refused by checkPlaybookAnswers (a 422 naming the known ones), not by the
+// AI service.
 func playbookAnswerFields(playbooks []plgdomain.Playbook) []csmai.PlaybookAnswerField {
 	byCode := map[string]*csmai.PlaybookAnswerField{}
 	var codes []string
@@ -63,7 +67,7 @@ func playbookAnswerFields(playbooks []plgdomain.Playbook) []csmai.PlaybookAnswer
 			}
 			for _, o := range t.Options {
 				oc := strings.TrimSpace(o.Code)
-				if oc == "" || strings.ContainsAny(oc, tableBreakers) || hasOption(*f, oc) {
+				if oc == "" || strings.ContainsAny(oc, tableBreakers) || hasOption(*f, oc) || len(f.Options) >= maxPlaybookAnswerOptions {
 					continue
 				}
 				f.Options = append(f.Options, csmai.PlaybookAnswerOption{Code: oc, Label: tableText(o.Label, oc)})
@@ -73,12 +77,20 @@ func playbookAnswerFields(playbooks []plgdomain.Playbook) []csmai.PlaybookAnswer
 	sort.Strings(codes)
 	fields := make([]csmai.PlaybookAnswerField, 0, len(codes))
 	for _, c := range codes {
-		if len(byCode[c].Options) > 0 {
+		if len(byCode[c].Options) > 0 && len(fields) < maxPlaybookAnswerFields {
 			fields = append(fields, *byCode[c])
 		}
 	}
 	return fields
 }
+
+// maxPlaybookAnswerFields and maxPlaybookAnswerOptions are the AI service's
+// caps on the playbook answers of one request (maxPlaybookAnswers and
+// maxPlaybookOptions in its handler); it refuses a request over either.
+const (
+	maxPlaybookAnswerFields  = 200
+	maxPlaybookAnswerOptions = 100
+)
 
 // tableBreakers are the characters the AI service refuses in a playbook
 // answer field (they would break its markdown table).
