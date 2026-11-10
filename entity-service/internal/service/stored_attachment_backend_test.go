@@ -538,9 +538,10 @@ func TestBackend_DeleteKeepsItsRules(t *testing.T) {
 }
 
 const (
-	orphanA = "22222222-2222-4222-8222-222222222222"
-	orphanB = "33333333-3333-4333-8333-333333333333"
-	keyless = "44444444-4444-4444-8444-444444444444"
+	orphanA      = "22222222-2222-4222-8222-222222222222"
+	orphanB      = "33333333-3333-4333-8333-333333333333"
+	keyless      = "44444444-4444-4444-8444-444444444444"
+	reportDraftA = "66666666-6666-4666-8666-666666666666"
 )
 
 // backendCleanup builds the cleanup service as backend mode does: a nil store, so
@@ -664,4 +665,168 @@ func TestBackend_AcknowledgeValidationAndAccess(t *testing.T) {
 	restricted := NewAttachmentUploadCleanupService(orphanRepo(), stubAccess{})
 	_, err = restricted.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{IDs: []string{orphanA}})
 	wantErr[*apierror.ForbiddenError](t, err, "a restricted caller")
+}
+
+func TestBackend_DescriptionImageRelocation(t *testing.T) {
+	png := "image/png"
+	drafts := "csm/projects/prj_9/workitems/drafts/inline_attachments/cia1_pic.png"
+	canonical := "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
+	setup := func() *fakeStoredRepo {
+		repo := newFakeStoredRepo()
+		repo.parent = domain.StoredAttachmentParent{ID: saParentID, Number: "CS0001", ProjectNumber: "PRJ-9"}
+		repo.rows[saAttID] = domain.StoredAttachmentRow{
+			ID: saAttID, Number: "CIA1", Name: "pic.png", ContentType: &png, Status: "COMPLETE",
+			StorageKey: &drafts, ParentID: saParentID,
+		}
+		return repo
+	}
+
+	t.Run("a linked description image still in drafts is told where it belongs", func(t *testing.T) {
+		loc, err := newBackendSvc(setup()).LocateInlineImage(saCtx(t, saEmail), saAttID)
+		if err != nil {
+			t.Fatalf("LocateInlineImage: %v", err)
+		}
+		if loc.StorageKey != drafts || loc.RelocateTo != canonical {
+			t.Errorf("location = %+v, want key %q and relocateTo %q", loc, drafts, canonical)
+		}
+	})
+
+	t.Run("a failed lookup of where it belongs still shows the image where it is", func(t *testing.T) {
+		repo := setup()
+		repo.parentErr = errors.New("database down")
+		loc, err := newBackendSvc(repo).LocateInlineImage(saCtx(t, saEmail), saAttID)
+		if err != nil {
+			t.Fatalf("LocateInlineImage: %v, want the location without relocateTo", err)
+		}
+		if !loc.Available || loc.StorageKey != drafts || loc.RelocateTo != "" {
+			t.Errorf("location = %+v", loc)
+		}
+		// Recording a move still reports the failure.
+		err = newBackendSvc(repo).InlineImageRelocated(saCtx(t, saEmail), saAttID, domain.InlineImageRelocatedRequest{StorageKey: canonical})
+		if err == nil {
+			t.Error("InlineImageRelocated hid the lookup failure")
+		}
+	})
+
+	t.Run("an image already under its work item is not moved", func(t *testing.T) {
+		repo := setup()
+		repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "CIA1", Name: "pic.png", ContentType: &png, Status: "COMPLETE", StorageKey: &canonical, ParentID: saParentID}
+		loc, err := newBackendSvc(repo).LocateInlineImage(saCtx(t, saEmail), saAttID)
+		if err != nil || loc.RelocateTo != "" {
+			t.Errorf("loc = %+v, err = %v, want no relocation", loc, err)
+		}
+	})
+
+	t.Run("a draft that is not linked yet is not moved", func(t *testing.T) {
+		repo := setup()
+		row := repo.rows[saAttID]
+		row.Draft = true
+		repo.rows[saAttID] = row
+		loc, err := newBackendSvc(repo).LocateInlineImage(saCtx(t, saEmail), saAttID)
+		if err != nil || loc.RelocateTo != "" {
+			t.Errorf("loc = %+v, err = %v, want no relocation", loc, err)
+		}
+	})
+
+	t.Run("relocated points the row at the computed key, as the system", func(t *testing.T) {
+		repo := setup()
+		err := newBackendSvc(repo).InlineImageRelocated(saCtx(t, saEmail), saAttID, domain.InlineImageRelocatedRequest{StorageKey: canonical})
+		if err != nil {
+			t.Fatalf("InlineImageRelocated: %v", err)
+		}
+		if len(repo.keyUpdates) != 1 || repo.keyUpdates[0].from != drafts || repo.keyUpdates[0].to != canonical || !repo.keyUpdates[0].sys {
+			t.Errorf("key updates = %+v", repo.keyUpdates)
+		}
+	})
+
+	t.Run("relocated refuses any other key", func(t *testing.T) {
+		repo := setup()
+		err := newBackendSvc(repo).InlineImageRelocated(saCtx(t, saEmail), saAttID, domain.InlineImageRelocatedRequest{StorageKey: "csm/projects/other/secret.bin"})
+		wantErr[*apierror.ValidationError](t, err, "a key this service did not name")
+		if len(repo.keyUpdates) != 0 {
+			t.Errorf("key was changed: %+v", repo.keyUpdates)
+		}
+	})
+
+	t.Run("a repeated relocated call answers the same", func(t *testing.T) {
+		repo := setup()
+		repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "CIA1", Name: "pic.png", ContentType: &png, Status: "COMPLETE", StorageKey: &canonical, ParentID: saParentID}
+		err := newBackendSvc(repo).InlineImageRelocated(saCtx(t, saEmail), saAttID, domain.InlineImageRelocatedRequest{StorageKey: canonical})
+		if err != nil || len(repo.keyUpdates) != 0 {
+			t.Errorf("err = %v, updates = %+v", err, repo.keyUpdates)
+		}
+	})
+}
+
+// An inline image's location names the record it belongs to, so a caller that
+// reads files as an internal caller can check it against the case it is about.
+func TestBackend_InlineImageLocationNamesItsParent(t *testing.T) {
+	png := "image/png"
+	key := "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
+	repo := newFakeStoredRepo()
+	repo.parent = domain.StoredAttachmentParent{ID: saParentID, Number: "CS0001", ProjectNumber: "PRJ-9"}
+	repo.rows[saAttID] = domain.StoredAttachmentRow{
+		ID: saAttID, Number: "CIA1", Name: "pic.png", ContentType: &png, Status: "COMPLETE",
+		StorageKey: &key, ParentID: saParentID,
+	}
+	loc, err := newBackendSvc(repo).LocateInlineImage(saCtx(t, saEmail), saAttID)
+	if err != nil {
+		t.Fatalf("LocateInlineImage: %v", err)
+	}
+	if loc.ParentID != saParentID || loc.Draft {
+		t.Errorf("parent = %q draft = %v, want %q and false", loc.ParentID, loc.Draft, saParentID)
+	}
+}
+
+func TestBackend_CleanupHandsOverUnlinkedReportDrafts(t *testing.T) {
+	repo := orphanRepo()
+	k := "csm/projects/p/workitems/drafts/attachments/r_1.pdf"
+	repo.unlinkedReports = []domain.StoredAttachmentRow{{ID: reportDraftA, StorageKey: &k}}
+	svc := backendCleanup(repo)
+
+	res, err := svc.CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	var got *domain.OrphanedImage
+	for i := range res.Orphans {
+		if res.Orphans[i].ID == reportDraftA {
+			got = &res.Orphans[i]
+		}
+	}
+	if got == nil || got.Type != domain.StoredAttachmentWorkItem || got.StorageKey != k {
+		t.Fatalf("orphans = %+v, want the report draft handed over as a work_item file", res.Orphans)
+	}
+	if repo.deleted[reportDraftA] != "" {
+		t.Error("a draft with a file must not be marked DELETED before the caller removed the file")
+	}
+	for _, o := range res.Orphans {
+		if o.ID == orphanA && o.Type != domain.StoredAttachmentComment {
+			t.Errorf("a comment image must be typed comment, got %q", o.Type)
+		}
+	}
+}
+
+func TestBackend_CleanupUsesTheGraceAfterTheDraftsUsableAge(t *testing.T) {
+	if reportDraftCleanupAge <= reportDraftUsableAge {
+		t.Fatalf("cleanup age %v must be longer than the usable age %v, or a draft could be linked after its file was handed over", reportDraftCleanupAge, reportDraftUsableAge)
+	}
+}
+
+func TestBackend_AcknowledgeMarksAReportDraftDeletedAsAWorkItemFile(t *testing.T) {
+	repo := orphanRepo()
+	k := "csm/projects/p/workitems/drafts/attachments/r_1.pdf"
+	repo.unlinkedReports = []domain.StoredAttachmentRow{{ID: reportDraftA, StorageKey: &k}}
+	svc := backendCleanup(repo)
+
+	ack, err := svc.AcknowledgeOrphans(context.Background(), domain.AcknowledgeOrphansRequest{IDs: []string{reportDraftA, orphanA}})
+	if err != nil {
+		t.Fatalf("AcknowledgeOrphans: %v", err)
+	}
+	if ack.Acknowledged != 2 || ack.Skipped != 0 {
+		t.Errorf("ack = %+v", ack)
+	}
+	if repo.deleted[reportDraftA] != "report-draft-cleanup" || repo.deleted[orphanA] != "inline-image-cleanup" {
+		t.Errorf("deleted = %v, want each marked by its own cleanup", repo.deleted)
+	}
 }

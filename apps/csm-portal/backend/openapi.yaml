@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate-pause` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -1112,24 +1112,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/search:
+  /attachments/delete:
     post:
-      summary: Search attachments linked to a case.
-      operationId: postAttachmentsSearch
+      summary: >-
+        Delete a stored attachment (soft delete; the file is removed from storage). Only
+        the person who uploaded it may, or a portal admin, and not once the work item
+        is closed.
+      operationId: postStoredAttachmentsDelete
       requestBody:
-        description: Attachment search payload.
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AttachmentSearchPayload'
+              type: object
+              additionalProperties: false
+              required: [type, id]
+              properties:
+                type:
+                  type: string
+                  enum: [work_item, comment, deployment]
+                  description: Which kind of attachment (the table it lives in).
+                id:
+                  type: string
+                  format: uuid
       responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentSearchResponse'
+        "204":
+          description: Deleted (also when it already was).
         "400":
           description: BadRequest
           content:
@@ -1148,14 +1156,182 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /attachments/download/{id}/content:
+    get:
+      summary: Download an attachment.
+      description: >
+        Streams the file as an attachment of an opaque type: always sent with
+        `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
+        and `X-Content-Type-Options: nosniff`. Supports a single `Range: bytes=a-b`
+        so an interrupted download can resume (206, 416 when past the end). Access
+        is checked by entity-service on every request.
+      operationId: getAttachmentsDownloadIdContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: The file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: A range of the file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "416":
+          description: RangeNotSatisfiable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/inline/{id}/content:
+    get:
+      summary: >-
+        Show a comment's inline image. Streamed through this backend from the entity
+        service, which checks access on every request, so the browser never talks to
+        the file store and no link exists that could be forwarded. The type is one of
+        image/png, image/jpeg, image/gif, image/webp (anything else is sent as
+        application/octet-stream), with X-Content-Type-Options nosniff,
+        Content-Security-Policy "default-src 'none'; sandbox", Content-Disposition
+        inline and Cache-Control private, max-age=300.
+      operationId: getStoredInlineImageContent
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the inline image attachment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The image bytes.
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/gif:
+              schema: {type: string, format: binary}
+            image/webp:
+              schema: {type: string, format: binary}
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
           content:
             application/json:
               schema:
@@ -1186,15 +1362,16 @@ paths:
                   format: uuid
                   description: >-
                     The work item (work_item, comment) or deployment the file belongs to.
-                    Required for work_item and deployment. For a comment image give exactly
-                    one of parentId and projectId.
+                    Required for deployment. For a comment image or a work_item attachment
+                    give exactly one of parentId and projectId.
                 projectId:
                   type: string
                   format: uuid
                   description: >-
-                    Comment images only: the project of a draft description image that is
-                    uploaded before the case exists and linked to it when it is created.
-                    Give exactly one of parentId and projectId.
+                    Comment images and work_item attachments: the project of a draft that is
+                    uploaded before the case exists and linked to it when it is created (a
+                    description image through its src, a security report's file through the
+                    attachmentIds of POST /cases). Give exactly one of parentId and projectId.
                 name:
                   type: string
                 contentType:
@@ -1260,92 +1437,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/upload/{id}/chunks/{index}:
-    put:
-      summary: Send one chunk of an upload.
-      description: >
-        The body is the raw bytes of chunk `index` (0-based), at most 8 MiB; every
-        chunk but the last should be exactly 8 MiB. A chunk may be sent again and
-        in any order. Nothing is visible until the upload is confirmed. Only the
-        person who started the upload may send chunks; entity-service checks that.
-      operationId: putAttachmentsUploadIdChunksIndex
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: index
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-        - name: type
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [work_item, comment, deployment]
-      requestBody:
-        required: true
-        content:
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
-      responses:
-        "204":
-          description: Stored
-        "411":
-          description: LengthRequired
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: PayloadTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
   /attachments/upload/{id}/chunks:
     get:
       summary: List the chunks already stored for an upload.
@@ -1419,16 +1510,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /attachments/download/{id}/content:
-    get:
-      summary: Download an attachment.
+  /attachments/upload/{id}/chunks/{index}:
+    put:
+      summary: Send one chunk of an upload.
       description: >
-        Streams the file as an attachment of an opaque type: always sent with
-        `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
-        and `X-Content-Type-Options: nosniff`. Supports a single `Range: bytes=a-b`
-        so an interrupted download can resume (206, 416 when past the end). Access
-        is checked by entity-service on every request.
-      operationId: getAttachmentsDownloadIdContent
+        The body is the raw bytes of chunk `index` (0-based), at most 8 MiB; every
+        chunk but the last should be exactly 8 MiB. A chunk may be sent again and
+        in any order. Nothing is visible until the upload is confirmed. Only the
+        person who started the upload may send chunks; entity-service checks that.
+      operationId: putAttachmentsUploadIdChunksIndex
       parameters:
         - name: id
           in: path
@@ -1436,35 +1526,36 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
         - name: type
           in: query
           required: true
           schema:
             type: string
             enum: [work_item, comment, deployment]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
       responses:
-        "200":
-          description: The file
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "206":
-          description: A range of the file
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "410":
-          description: Gone
+        "204":
+          description: Stored
+        "411":
+          description: LengthRequired
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "416":
-          description: RangeNotSatisfiable
+        "413":
+          description: PayloadTooLarge
           content:
             application/json:
               schema:
@@ -1589,107 +1680,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/delete:
+  /attachments/search:
     post:
-      summary: >-
-        Delete a stored attachment (soft delete; the file is removed from storage). Only
-        the person who uploaded it may, and not once the work item is closed.
-      operationId: postStoredAttachmentsDelete
+      summary: Search attachments linked to a case.
+      operationId: postAttachmentsSearch
       requestBody:
+        description: Attachment search payload.
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [type, id]
-              properties:
-                type:
-                  type: string
-                  enum: [work_item, comment, deployment]
-                  description: Which kind of attachment (the table it lives in).
-                id:
-                  type: string
-                  format: uuid
-      responses:
-        "204":
-          description: Deleted (also when it already was).
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "409":
-          description: Conflict
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/inline/{id}/content:
-    get:
-      summary: >-
-        Show a comment's inline image. Streamed through this backend from the entity
-        service, which checks access on every request, so the browser never talks to
-        the file store and no link exists that could be forwarded. The type is one of
-        image/png, image/jpeg, image/gif, image/webp (anything else is sent as
-        application/octet-stream), with X-Content-Type-Options nosniff,
-        Content-Security-Policy "default-src 'none'; sandbox", Content-Disposition
-        inline and Cache-Control private, max-age=300.
-      operationId: getStoredInlineImageContent
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the inline image attachment.
-          required: true
-          schema:
-            type: string
-            format: uuid
+              $ref: '#/components/schemas/AttachmentSearchPayload'
       responses:
         "200":
-          description: The image bytes.
+          description: Ok
           content:
-            image/png:
-              schema: {type: string, format: binary}
-            image/jpeg:
-              schema: {type: string, format: binary}
-            image/gif:
-              schema: {type: string, format: binary}
-            image/webp:
-              schema: {type: string, format: binary}
-            application/octet-stream:
-              schema: {type: string, format: binary}
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -1708,20 +1716,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
+        "413":
+          description: RequestEntityTooLarge
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
           content:
             application/json:
               schema:
@@ -3251,7 +3253,7 @@ paths:
         onboardingOwner and the four onboarding dates (onboardingStartDate,
         onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
         need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
-        alone gets 403); closureState needs admin. A body mixing fields needs
+        alone gets 403); closureState and suspensionProcessOverridden need admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
         read access to the project separately: onboarding_lead grants none.
       operationId: patchProjectsId
@@ -4604,13 +4606,13 @@ paths:
   /cases/volume-trend:
     post:
       summary: >-
-        Day-bucketed case-volume trend (opened vs. closed), for the Case
-        Summary dashboard's trend chart.
+        Case-volume trend (opened vs. closed), for a dashboard line widget.
       description: >-
         Plain forward-and-return proxy to the entity service's own POST
         /cases/volume-trend: exactly two series, "Opened" (by created date)
         and "Closed" (by closed date), one point per UTC calendar day over a
-        trailing window (30 days by default).
+        trailing window (30 days by default), or over a fixed
+        startDate/endDate window one point per day, week or month.
       operationId: postCasesVolumeTrend
       requestBody:
         description: Case volume-trend payload
@@ -4652,6 +4654,15 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: >-
+            BadGateway. Also when a fixed window (startDate) was asked for and
+            the entity service answered without echoing it, as one older than
+            the fixed window does (it answers its trailing 30 days instead).
           content:
             application/json:
               schema:
@@ -5037,14 +5048,21 @@ paths:
         message says why), refuses, or names a team that cannot be filtered
         (unknown, in the wrong field, or with no group configured; the message
         says which); 502 when its answer is not
-        a usable dashboard or the model cannot be reached; 504 when it takes
-        too long; 503 when generation is unavailable (no sample loaded, or the
-        AI integration service has no model key). 413 when the dashboard being edited is over
+        a usable dashboard, was cut off (its own message), or the model cannot
+        be reached; 504 when it takes too long; 503 when generation is
+        unavailable (no sample loaded, or the AI integration service has no
+        model key), or when the AI side's usage limit is reached (the model
+        gateway's 429; its own message, unlike the caller's limit below). 413 when the dashboard being edited is over
         64 KiB as a definition (the size a saved one may be), checked before
         any model call. 429, with Retry-After in seconds, when the caller has
         started more than DASHBOARD_GENERATE_LIMIT_PER_MINUTE (default 10)
         generations in the last minute or DASHBOARD_GENERATE_LIMIT_PER_DAY
         (default 100) in the last 24 hours; a refused prompt does not count.
+        Every 400, 413, 422, 429, 502, 503 and 504 this endpoint words itself
+        carries an `errorCode` starting with `generate_` (e.g.
+        `generate_usage_limit`, `generate_timeout`); the webapp shows the
+        message only when it does, so a proxy's own JSON error is not taken
+        for this backend's.
       operationId: generateDashboard
       requestBody:
         required: true
@@ -5865,6 +5883,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/link:
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved dashboards.
+      description: >
+        Off for every dashboard until its owner turns it on. While on, the
+        response carries the link id (the webapp builds the link from it) and
+        how many people have opened the link; who they are is not listed.
+        Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only.
+      operationId: getCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Turn on the link to one of the caller's saved dashboards.
+      description: >
+        No request body. Any internal user who opens the link
+        (POST /dashboards/shared/link) can then view the dashboard, view only,
+        under Shared Dashboards, while the link stays on. Turning on a link
+        that is already on keeps the same link. Owner only; CS engineers and
+        admins only.
+      operationId: enableCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Turn off the link to one of the caller's saved dashboards.
+      description: >
+        The link stops working, and everyone who had the dashboard only
+        through it loses it; turning it on again makes a new link. Turning off
+        a link that is off is not an error. Owner only; CS engineers and
+        admins only.
+      operationId: disableCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /dashboards/shared:
     get:
       summary: List the dashboards other users shared with the caller.
@@ -5914,6 +6105,69 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "422":
           description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/link:
+    post:
+      summary: Open a saved dashboard's link.
+      description: >
+        The link id is in the body, not the path, so it stays out of access
+        logs. From then on the dashboard is listed under GET /dashboards/shared
+        while the link stays on, unless the caller owns it (own true: open it
+        under My Dashboards): through the link (sharedViaLink true), or
+        through a person or team share while the caller has one, and through
+        the link again if that share goes. Opening it again changes nothing.
+        400 when linkId is not a UUID; 404 when the link is unknown or turned
+        off.
+        Every portal role that can view dashboards.
+      operationId: openDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenDashboardLinkRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
           content:
             application/json:
               schema:
@@ -9156,6 +9410,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /time-cards/aggregate:
+    post:
+      summary: >-
+        Time card counts and summed minutes per state, user, project or day,
+        for dashboard charts (Postgres data sources only).
+      description: >-
+        Counts the cards POST /time-cards/search matches for the same filters.
+        "day" needs filters.startDate and filters.endDate, a window of at most
+        31 days (both inclusive), and returns every day of that window in date
+        order. CS engineers and admins only (narrower than the search, which
+        time card approvers can also use).
+      operationId: aggregateTimeCards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateTimeCardsPayload'
+      responses:
+        "200":
+          description: >-
+            Counts and summed minutes per value of groupBy
+            (groups[].totalMinutes, othersMinutes and totalMinutes are set).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /time-cards:
     post:
       summary: Create a time card in the submitted state (ServiceNow data source only).
@@ -12363,6 +12677,12 @@ paths:
   /generate-timelogs-breakdown-report:
     get:
       summary: Generate a project's time-log breakdown report.
+      description: >-
+        Time card durations are summed in minutes and shown as "1h 30m". By
+        default the report covers the project's subscription period (start
+        and end date); cases listed are those with a time card whose work date
+        falls in the period or that were created in it, and per-case totals
+        count only in-period time cards.
       operationId: generateTimelogsBreakdownReport
       parameters:
         - name: projectId
@@ -12370,6 +12690,26 @@ paths:
           required: true
           schema:
             type: string
+        - name: from
+          in: query
+          required: false
+          description: Inclusive period start (YYYY-MM-DD). Defaults to the project's start date, or unbounded when it has none.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Inclusive period end (YYYY-MM-DD). Defaults to the project's end date, or unbounded when it has none.
+          schema:
+            type: string
+            format: date
+        - name: allTime
+          in: query
+          required: false
+          description: When true, an absent from/to is left unbounded instead of defaulting to the project's dates.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Ok
@@ -14338,7 +14678,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: The person has upcoming turns on the team or holds its Case Alerts tier (the entity service's reason is kept).
+          description: The person holds the team's Case Alerts tier (the entity service's reason is kept). Their upcoming turns on the team are removed with the membership.
           content:
             application/json:
               schema:
@@ -14437,9 +14777,9 @@ paths:
       description: >
         CSM admin only; the entity service decides and its reason is kept on every refusal. `teamKey`
         is the team the person leaves and `toTeamKey` the team they join. Their role is kept and their
-        alert tier is empty on the new team. Refused with nothing written (409) while they have
-        upcoming turns or an alert tier on the source team, hold a lead-type role, or are on both
-        teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
+        alert tier is empty on the new team, and their upcoming turns on the source team are removed
+        with the move. Refused with nothing written (409) while they hold an alert tier on the source
+        team, hold a lead-type role, or are on both teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
         source only.
       parameters:
         - name: teamKey
@@ -14497,7 +14837,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Refused with nothing written (upcoming turns or an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
+          description: Refused with nothing written (an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
           content:
             application/json:
               schema:
@@ -16894,6 +17234,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/engagement-allocations/search:
     post:
       summary: Search confirmed customer engagement allocations.
@@ -16946,6 +17342,13 @@ paths:
                         engagementType: { type: string, description: "Raw enum value, for example CONSULTANCY." }
                         modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
                         utilization: { type: number }
+                        dismissedDates:
+                          type: array
+                          items: { type: string, format: date }
+                          description: >
+                            The days in the window the allocation was taken off this person's
+                            roster (`POST /team-schedule/engagement-allocations/dismiss`); absent
+                            when there are none.
                   count: { type: integer }
         "400":
           description: Bad request.
@@ -19637,6 +20040,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/sla/recalculate-pause:
+    post:
+      summary: Recalculate one case's SLA pause totals — the CSM admin action.
+      description: >
+        A CSM admin. Recomputes the case's currently IN_PROGRESS SLA clocks' pause
+        history from the case's own state-change activity log, correcting
+        pause_duration/business_pause_duration when they disagree with what's stored.
+        No request body. A case with no activity history to replay (e.g. one only
+        ever handled through the ServiceNow-backed path) leaves every clock untouched
+        and reports hasHistory: false — never guessed at. Responses are Cache-Control
+        no-store.
+      operationId: recalculateCasePauseTotals
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The recalculation ran; see each clock's own outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseSLAPauseRecalcResponse'
+        "400":
+          description: Invalid case id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /skills/levels:
     get:
       summary: The skill level scales and their levels.
@@ -20269,6 +20724,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     PagingPhone:
       type: object
       description: A person's paging-only phone number. `phone` is present only for a caller who may edit it.
@@ -20389,7 +20863,11 @@ components:
           $ref: '#/components/schemas/Dashboard'
         reply:
           type: string
-          description: The chat message to show for this turn.
+          description: >
+            The chat message to show for this turn. When the request could
+            not be built exactly and the model built the closest dashboard
+            instead, it starts with the model's one-sentence note saying what
+            differs from the request.
     SaveCustomDashboardRequest:
       type: object
       required:
@@ -20512,7 +20990,7 @@ components:
     SharedViaTeam:
       type: object
       nullable: true
-      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name).
+      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name).
       required:
         - id
         - name
@@ -20526,6 +21004,37 @@ components:
         type:
           type: string
           description: The team's type, e.g. cre-abt, sre-abt.
+    CustomDashboardLink:
+      type: object
+      required: [enabled, openedBy]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether anyone internal with the link may view the dashboard.
+        linkId:
+          type: string
+          format: uuid
+          description: The id in the link; absent while the link is off. A new one each time the link is turned on.
+        openedBy:
+          type: integer
+          description: How many people have opened the link since it was turned on.
+    OpenDashboardLinkRequest:
+      type: object
+      required: [linkId]
+      properties:
+        linkId:
+          type: string
+          format: uuid
+    OpenedDashboardLink:
+      type: object
+      required: [dashboardId, own]
+      properties:
+        dashboardId:
+          type: string
+          format: uuid
+        own:
+          type: boolean
+          description: True when the caller owns the dashboard (open it with GET /dashboards/custom/{id}); otherwise GET /dashboards/shared/{id}.
     SharedDashboardSummary:
       type: object
       required:
@@ -20533,6 +21042,7 @@ components:
         - name
         - owner
         - sharedViaTeam
+        - sharedViaLink
         - sharedOn
         - updatedOn
       properties:
@@ -20548,6 +21058,9 @@ components:
           description: Who shared the dashboard (its owner); null once that user has been deleted.
         sharedViaTeam:
           $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -20570,6 +21083,7 @@ components:
         - dashboard
         - owner
         - sharedViaTeam
+        - sharedViaLink
         - sharedOn
         - updatedOn
       properties:
@@ -20582,6 +21096,9 @@ components:
           description: Who shared the dashboard (its owner); null once that user has been deleted.
         sharedViaTeam:
           $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -21664,6 +22181,34 @@ components:
           items:
             $ref: '#/components/schemas/TimeCardState'
 
+    AggregateTimeCardsPayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchTimeCardsFilters'
+        groupBy:
+          type: string
+          enum: [state, user, project, day]
+          description: >-
+            "day" groups by work date and needs filters.startDate and
+            filters.endDate (at most 31 days, both inclusive). A card with no
+            project has no "project" bucket.
+        measure:
+          type: string
+          enum: [count, minutes]
+          default: count
+          description: >-
+            What the buckets are ranked by, and so which survive maxGroups.
+            Ignored for "day".
+        maxGroups:
+          type: integer
+          minimum: 0
+          default: 10
+          description: >-
+            How many buckets to return; the rest fold into othersCount and
+            othersMinutes. Ignored for "day".
+
     SearchTimeCardsPayload:
       type: object
       properties:
@@ -22270,7 +22815,7 @@ components:
             Case type.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report; requires `subject` and `description`. Its files are uploaded after the case exists, with `POST /attachments/upload`.
+            - `security_report_analysis`: security report; requires `subject`, `description`, and at least one id in `attachmentIds` (files uploaded first as drafts).
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -22310,6 +22855,17 @@ components:
           items:
             $ref: '#/components/schemas/CaseVariable'
           description: Required for `service_request` type.
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: |
+            Required for `security_report_analysis` type (at least one, at most 10). Ids of files
+            already uploaded as drafts to this project by the caller (`POST /attachments/upload`
+            with `type: work_item` and `projectId`). The case links them when it is created;
+            an id that is not a complete, unlinked draft of this project by the caller is a 400.
         relatedCaseId:
           type: string
           format: uuid
@@ -22576,7 +23132,28 @@ components:
           type: integer
           description: >-
             Size of the trailing window, ending today (UTC). Optional;
-            defaults to 30 when omitted. Must be between 1 and 90.
+            defaults to 30 when omitted. Must be between 1 and 90. Not
+            allowed together with startDate/endDate.
+        startDate:
+          type: string
+          description: >-
+            First day of a fixed window (inclusive, UTC): YYYY-MM-DD or a
+            relative date placeholder. Needs endDate.
+          example: "2025-12-01"
+        endDate:
+          type: string
+          description: >-
+            Last day of a fixed window (inclusive, UTC), in the same forms as
+            startDate. Needs startDate. A day after today counts 0.
+          example: "2025-12-31"
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >-
+            How a fixed window's days are grouped into points. Optional;
+            defaults to day. day covers at most 90 days, week (Monday to
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months.
 
     CaseVolumeTrendPoint:
       type: object
@@ -22584,7 +23161,15 @@ components:
         date:
           type: string
           format: date
-          description: UTC calendar day (YYYY-MM-DD).
+          description: >-
+            UTC calendar day (YYYY-MM-DD); for a week or month point, the
+            bucket's first day within the window.
+        endDate:
+          type: string
+          format: date
+          description: >-
+            For a week or month point only: the bucket's last day within the
+            window.
         count:
           type: integer
 
@@ -22599,18 +23184,31 @@ components:
           items:
             $ref: '#/components/schemas/CaseVolumeTrendPoint'
           description: >-
-            One point per day in the requested window, oldest first. A day
-            with no matching cases is still present, with count 0.
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no matching cases is still present,
+            with count 0.
 
     CaseVolumeTrendResponse:
       type: object
       description: >-
-        Day-bucketed case-volume trend: always exactly two series, "Opened"
-        (by created date) and "Closed" (by closed date).
+        Case-volume trend: always exactly two series, "Opened" (by created
+        date) and "Closed" (by closed date).
       properties:
         days:
           type: integer
-          description: The size of the window actually returned.
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
         series:
           type: array
           items:
@@ -22634,6 +23232,11 @@ components:
         count:
           type: integer
           description: Number of matching records whose grouped field falls in this bucket.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on this bucket's time cards, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     AggregateResponse:
       type: object
@@ -22654,6 +23257,16 @@ components:
           type: integer
         totalRecords:
           type: integer
+        othersMinutes:
+          type: integer
+          description: >-
+            The minutes counterpart of othersCount. Set only by
+            POST /time-cards/aggregate.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on every matching time card, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     CaseFeedback:
       type: object
@@ -23108,6 +23721,54 @@ components:
             instead of a donut plus separate legend list. Omitted/false is a
             no-op — this backend only forwards it, exactly like
             inlineDrilldown.
+        days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: >
+            Only meaningful for shape "line": the trailing window, in days
+            ending today, of the Opened/Closed trend. Omitted means 30.
+        series:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [opened, closed]
+          description: >
+            Only meaningful for shape "line": which of its two lines to draw.
+            Omitted draws both, as every line widget did before this field.
+            An empty list, an unknown or repeated value, and the field on any
+            other shape are refused when the definition is loaded.
+        startDate:
+          type: string
+          description: >
+            Only meaningful for shape "line": the first day of a fixed window
+            instead of days's trailing one, e.g. "2025-12-01" for December
+            2025. A plain YYYY-MM-DD date, or a relative date placeholder when
+            endDate is one too. Needs endDate; not with days.
+        endDate:
+          type: string
+          description: >
+            Only meaningful for shape "line": the last day of the fixed
+            window (inclusive), in the same form as startDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >
+            Only meaningful for shape "line" with startDate/endDate: one point
+            per day (the default, at most 90 days), per week (Monday to
+            Sunday, at most 54 weeks) or per month (at most 24 months). Two
+            relative dates must stay within the limit on every day.
+        chart:
+          type: string
+          enum: [line, bar]
+          description: >
+            Only meaningful for shape "line": how its points are drawn. bar
+            draws them as bars (two side by side when both series are
+            shown); line, or the field left out, draws lines. The data and
+            the window are the same either way.
 
     DashboardListItem:
       type: object
@@ -25103,6 +25764,11 @@ components:
             state (event type + action results) written by an existing suspension
             flow in the backing data source. This is opaque JSON passed through
             as-is — its shape is not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: >
+            True when an admin has exempted the project from the automatic Account
+            Closure Process, which then never evaluates it. Always present.
 
     Project:
       description: >
@@ -25295,6 +25961,7 @@ components:
         simple toggles; the closure-state fields track sub-states of an
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
+        suspensionProcessOverridden requires the admin role;
         onboardingStatus, onboardingOwner and the four onboarding dates
         require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
@@ -25376,6 +26043,10 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Exempts the project from the automatic Account Closure Process when true; null or omitted leaves it unchanged. Admin only (403 otherwise, even for an explicit null). Postgres data source only."
 
     ProjectUpdateResponse:
       type: object
@@ -25411,6 +26082,9 @@ components:
               type: object
               additionalProperties: true
               nullable: true
+            suspensionProcessOverridden:
+              type: boolean
+              description: Present on Postgres data sources only.
             onboardingStatus:
               type: string
               nullable: true
@@ -31636,8 +32310,16 @@ components:
           type: string
         remainingQueryHours:
           type: string
+          description: Remaining query hours as "1h 30m"; empty when unknown.
         totalQueryHours:
           type: string
+          description: Total query hours as "1h 30m"; empty when unknown.
+        periodStart:
+          type: string
+          description: Inclusive start (YYYY-MM-DD) of the period used; empty when unbounded.
+        periodEnd:
+          type: string
+          description: Inclusive end (YYYY-MM-DD) of the period used; empty when unbounded.
         cases:
           type: array
           items:
@@ -32409,6 +33091,39 @@ components:
         levelTypes:
           type: array
           items: {$ref: '#/components/schemas/SkillLevelType'}
+    CaseSLAPauseRecalcClock:
+      type: object
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      properties:
+        target: {type: string, example: RESOLUTION}
+        schedule: {type: string, example: WSO2 Business days}
+        skipped: {type: boolean}
+        skipReason:
+          type: string
+          description: Empty when skipped is false.
+        oldPauseSeconds: {type: integer, format: int64}
+        newPauseSeconds: {type: integer, format: int64}
+        oldBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        newBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        updated: {type: boolean}
+    CaseSLAPauseRecalcResponse:
+      type: object
+      properties:
+        hasHistory:
+          type: boolean
+          description: >-
+            False (clocks always empty) when the case has no state-change
+            activity history at all to replay -- its clocks are left exactly
+            as they are, never guessed at.
+        clocks:
+          type: array
+          items: {$ref: '#/components/schemas/CaseSLAPauseRecalcClock'}
     SkillCategory:
       type: object
       required: [id, name, isLowestCategory]

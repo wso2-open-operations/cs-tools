@@ -145,11 +145,11 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	for _, want := range []string{
 		"<p>Hello team,</p>",
 		"allocated for weekend support the coming weekend (2026-10-24 and 2026-10-25)",
-		"<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (LK On-call)</p>",
+		"<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (Americas On-call)</p>",
 		"<b>Sunday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)</p>",
 		"<tr><td>LK Weekend<br/><span style=\"color:#666666; font-size:12px;\">3 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>IST General support<br/><span style=\"color:#666666; font-size:12px;\">The 15-hour window is shared: the 3 members can divide the 15 hours into morning and evening shifts, so support is covered from start to end.</span></td></tr>",
 		"<tr><td>Americas Weekend<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>PDT General support</td></tr>",
-		"<tr><td>LK On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
+		"<tr><td>Americas On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
 		"IST = Asia/Colombo (UTC+5:30) &#8226; PDT = America/Los_Angeles (UTC&#8722;7)<br/>Local times are fixed. The Americas Weekend Rotation UTC window moves by one hour on 01 Nov 2026, when daylight saving ends.",
 		"<b>Handover</b>",
 		"This is an auto-generated email.",
@@ -477,7 +477,8 @@ func TestValidInviteAddressAndScheduleURL(t *testing.T) {
 }
 
 // A weekend after the US clock change has no daylight saving note, and the
-// Americas Weekend is then 08:00-18:00 PST, an hour later in UTC.
+// Americas Weekend is then 08:00-18:00 Los Angeles time, an hour later in
+// UTC. It is still labelled PDT, as the roster's chip is, all year.
 func TestWeekendNotice_AmericasHoursFollowLosAngeles(t *testing.T) {
 	rota := &fakeRota{}
 	for _, d := range []string{"2026-11-07", "2026-11-08"} {
@@ -492,11 +493,11 @@ func TestWeekendNotice_AmericasHoursFollowLosAngeles(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 7 and Sunday, 8 November 2026")
-	if !strings.Contains(summary.body, "<td>08:00 AM &#8211; 06:00 PM PST</td><td>16:00 &#8211; 02:00</td><td>PST General support</td>") ||
+	if !strings.Contains(summary.body, "<td>08:00 AM &#8211; 06:00 PM PDT</td><td>16:00 &#8211; 02:00</td><td>PDT General support</td>") ||
 		strings.Contains(summary.body, "daylight saving") {
 		t.Errorf("summary:\n%s", summary.body)
 	}
-	invite := emailWith(t, mail.sent, "Calendar invitation: Americas Weekend Rotation – Saturday, 7 November 2026 (08:00–18:00 PST)")
+	invite := emailWith(t, mail.sent, "Calendar invitation: Americas Weekend Rotation – Saturday, 7 November 2026 (08:00–18:00 PDT)")
 	ics := unfolded(invite.attachments[0].Content)
 	if !strings.Contains(ics, "DTSTART:20261107T160000Z") || !strings.Contains(ics, "DTEND:20261108T020000Z") {
 		t.Errorf("invite:\n%s", ics)
@@ -736,7 +737,7 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 		}
 	}
 	// The CRE days are listed as before: the SRE turns are not in them.
-	if !strings.Contains(summary.body, "<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (LK On-call)</p>") {
+	if !strings.Contains(summary.body, "<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (Americas On-call)</p>") {
 		t.Errorf("the Saturday Team changed:\n%s", summary.body)
 	}
 }
@@ -772,5 +773,71 @@ func TestWeekendNotice_SRETurnsAreInformationOnly(t *testing.T) {
 	}
 	if rota.reads != 2 { // the catalogue and the CRE rota
 		t.Errorf("read the rota %d times, want 2", rota.reads)
+	}
+}
+
+// The Americas Weekend and the Americas On-call are told on the Americas
+// clock, labelled PDT, even when their window was saved in IST: the summary
+// once read "08:30 PM – 06:30 AM IST" for them.
+func TestWeekendNotice_AmericasRotationsReadPDTWhateverTheSavedZone(t *testing.T) {
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	windows, err := ParseWindows("CRE_WEEKEND_NIGHT=20:30-06:30 Asia/Colombo,CRE_WEEKEND_NIGHT_OC=20:30-06:30 Asia/Colombo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Windows = windows
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	for _, want := range []string{
+		"<tr><td>Americas Weekend<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>PDT General support</td></tr>",
+		"<tr><td>Americas On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
+	} {
+		if !strings.Contains(summary.body, want) {
+			t.Errorf("summary does not hold %q:\n%s", want, summary.body)
+		}
+	}
+	if strings.Contains(summary.body, "PM IST</td><td>15:00") {
+		t.Errorf("an Americas rotation still reads in IST:\n%s", summary.body)
+	}
+}
+
+// A window kept in IST reads on the Los Angeles clock an hour earlier after
+// US daylight saving ends, so the summary tells each day's hours on the
+// weekend of the change (31 Oct and 1 Nov 2026).
+func TestWeekendNotice_AmericasHoursPerDayAcrossTheClockChange(t *testing.T) {
+	cfg := weekendConfig("2026-10-25 20:00", "rota_weekend_notice")
+	windows, err := ParseWindows("CRE_WEEKEND_NIGHT=20:30-06:30 Asia/Colombo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Windows = windows
+	rota := &fakeRota{}
+	for _, d := range []string{"2026-10-31", "2026-11-01"} {
+		for _, p := range []string{"ann", "ben", "cid"} {
+			rota.assignments = append(rota.assignments, assignment(p, p+"@example.com", "vega", "CRE_WEEKEND", d, d+" 06:00", d+" 21:00"))
+		}
+		rota.assignments = append(rota.assignments, assignment("Ivy", "ivy@example.com", "americas", "CRE_WEEKEND_NIGHT", d, d+" 21:00", d+" 23:59"))
+	}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 31 October and Sunday, 1 November 2026")
+	if want := "Saturday: 08:00 AM &#8211; 06:00 PM PDT; Sunday: 07:00 AM &#8211; 05:00 PM PDT"; !strings.Contains(summary.body, want) {
+		t.Errorf("summary does not hold %q:\n%s", want, summary.body)
+	}
+}
+
+func TestWindowTextNamesBothDaysAcrossMidnight(t *testing.T) {
+	colombo, _ := time.LoadLocation("Asia/Colombo")
+	start := time.Date(2026, 10, 24, 8, 0, 0, 0, colombo)
+	if got, want := windowText(start, start.Add(10*time.Hour), losAngeles), "Friday 19:30 PDT to Saturday 05:30 PDT"; got != want {
+		t.Errorf("windowText = %q, want %q", got, want)
+	}
+	if got, want := windowText(start, start.Add(3*time.Hour), colombo), "08:00–11:00 IST"; got != want {
+		t.Errorf("same-day windowText = %q, want %q", got, want)
 	}
 }

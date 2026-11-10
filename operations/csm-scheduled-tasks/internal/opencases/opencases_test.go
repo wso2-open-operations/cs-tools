@@ -69,7 +69,7 @@ func TestSendReportSendsToRecipients(t *testing.T) {
 	email := &fakeEmail{}
 	to, cc := []string{"team@example.com"}, []string{"lead@example.com"}
 
-	if err := opencases.SendReport(reports, email, to, cc, true)(context.Background()); err != nil {
+	if err := opencases.SendReport(reports, email, to, cc, "", true)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if email.calls != 1 || !reflect.DeepEqual(email.to, to) || !reflect.DeepEqual(email.cc, cc) {
@@ -91,7 +91,7 @@ func TestSendReportSendsToRecipients(t *testing.T) {
 func TestSendReportZeroRowsSendsNothing(t *testing.T) {
 	reports := &fakeReports{report: longopenreport.Report{Cases: []longopenreport.Row{}}}
 	email := &fakeEmail{}
-	if err := opencases.SendReport(reports, email, []string{"team@example.com"}, nil, true)(context.Background()); err != nil {
+	if err := opencases.SendReport(reports, email, []string{"team@example.com"}, nil, "", true)(context.Background()); err != nil {
 		t.Fatalf("an empty report must succeed: %v", err)
 	}
 	if reports.calls != 1 || email.calls != 0 {
@@ -103,7 +103,7 @@ func TestSendReportTruncatedSaysSoWithTotal(t *testing.T) {
 	r := oneCase()
 	r.CasesTotal, r.CasesTruncated = 5321, true
 	email := &fakeEmail{}
-	if err := opencases.SendReport(&fakeReports{report: r}, email, []string{"team@example.com"}, nil, true)(context.Background()); err != nil {
+	if err := opencases.SendReport(&fakeReports{report: r}, email, []string{"team@example.com"}, nil, "", true)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if email.calls != 1 {
@@ -125,7 +125,7 @@ func TestSendReportShortCircuits(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			reports, email := &fakeReports{report: oneCase()}, &fakeEmail{}
-			if err := opencases.SendReport(reports, email, tc.to, nil, tc.enabled)(context.Background()); err != nil {
+			if err := opencases.SendReport(reports, email, tc.to, nil, "", tc.enabled)(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if reports.calls != 0 || email.calls != 0 {
@@ -137,12 +137,34 @@ func TestSendReportShortCircuits(t *testing.T) {
 
 func TestSendReportErrors(t *testing.T) {
 	boom := errors.New("boom")
-	err := opencases.SendReport(&fakeReports{err: boom}, &fakeEmail{}, []string{"a@example.com"}, nil, true)(context.Background())
+	err := opencases.SendReport(&fakeReports{err: boom}, &fakeEmail{}, []string{"a@example.com"}, nil, "", true)(context.Background())
 	if !errors.Is(err, boom) {
 		t.Errorf("fetch error = %v", err)
 	}
-	err = opencases.SendReport(&fakeReports{report: oneCase()}, &fakeEmail{err: boom}, []string{"a@example.com"}, nil, true)(context.Background())
+	err = opencases.SendReport(&fakeReports{report: oneCase()}, &fakeEmail{err: boom}, []string{"a@example.com"}, nil, "", true)(context.Background())
 	if !errors.Is(err, boom) {
 		t.Errorf("send error = %v", err)
+	}
+}
+
+func TestSendReportLinksRowsByTypeAndShowsTypeColumn(t *testing.T) {
+	r := longopenreport.Report{Cases: []longopenreport.Row{
+		{ID: "00000000-0000-0000-0000-000000000001", Number: "CS0000001", Type: "case", State: "open", CreatedOn: time.Now().Add(-72 * time.Hour), UpdatedOn: time.Now()},
+		{ID: "00000000-0000-0000-0000-000000000002", Number: "CS0000002", Type: "service_request", State: "open", CreatedOn: time.Now().Add(-72 * time.Hour), UpdatedOn: time.Now()},
+		{ID: "00000000-0000-0000-0000-000000000003", Number: "CS0000003", Type: "security_report_analysis", State: "open", CreatedOn: time.Now().Add(-72 * time.Hour), UpdatedOn: time.Now()},
+	}, CasesTotal: 3}
+	email := &fakeEmail{}
+	if err := opencases.SendReport(&fakeReports{report: r}, email, []string{"team@example.com"}, nil, "https://portal.example.com/", true)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`href="https://portal.example.com/cases/00000000-0000-0000-0000-000000000001"`,
+		`href="https://portal.example.com/operations/service-requests/00000000-0000-0000-0000-000000000002"`,
+		`href="https://portal.example.com/security-center/security-reports/00000000-0000-0000-0000-000000000003"`,
+		">Service request</td>", ">Security report analysis</td>",
+	} {
+		if !strings.Contains(email.body, want) {
+			t.Errorf("body lacks %q", want)
+		}
 	}
 }

@@ -22,6 +22,7 @@ import {
   parseWidgetPreviewFilters,
   readWidgetTitleParam,
   resolveCurrentUserSentinels,
+  widgetFilterChipLabel,
   WIDGET_TITLE_PARAM,
 } from "./widgetPreviewUrl";
 
@@ -365,6 +366,26 @@ describe("widget preview URL — anyOf round-trip", () => {
   });
 });
 
+describe("widgetFilterChipLabel", () => {
+  it("reads the default op as field: value and the others in words", () => {
+    expect(widgetFilterChipLabel({ field: "severity", value: "critical" })).toBe("severity: critical");
+    expect(widgetFilterChipLabel({ field: "createdOn", op: "gte", value: "Oct 4, 2026" })).toBe(
+      "createdOn on or after Oct 4, 2026",
+    );
+    expect(widgetFilterChipLabel({ field: "createdOn", op: "lte", value: "Nov 3, 2026" })).toBe(
+      "createdOn on or before Nov 3, 2026",
+    );
+    expect(widgetFilterChipLabel({ field: "tag", op: "notIn", value: "s_dip" })).toBe("tag not in s_dip");
+    expect(widgetFilterChipLabel({ field: "escalation", op: "isNotEmpty", value: "(no value)" })).toBe(
+      "escalation is not empty",
+    );
+  });
+
+  it("keeps an op it has no words for", () => {
+    expect(widgetFilterChipLabel({ field: "x", op: "contains", value: "y" })).toBe("x (contains): y");
+  });
+});
+
 describe("describeWidgetFilters", () => {
   it("flattens the flat resourceType filter shape into readable field: value entries", () => {
     expect(
@@ -386,6 +407,41 @@ describe("describeWidgetFilters", () => {
     ).toEqual([
       { field: "state", op: undefined, value: "open" },
       { field: "tag", op: "notIn", value: "s_dip" },
+    ]);
+  });
+
+  it("shows a date bound as the local date it falls on, not the raw UTC instant", () => {
+    // Local midnight on 4 Oct: west of UTC its instant is still 3 Oct in
+    // UTC terms, east of it (Colombo) it is "2026-10-03T18:30:00.000Z".
+    const start = new Date(2026, 9, 4).toISOString();
+    const end = new Date(2026, 10, 3, 23, 59, 59, 999).toISOString();
+    expect(
+      describeWidgetFilters({
+        filters: [
+          { field: "createdOn", op: "gte", values: [start] },
+          { field: "createdOn", op: "lte", values: [end] },
+          { field: "number", op: "in", values: ["2026-10-04T00:00"] },
+        ],
+      }),
+    ).toEqual([
+      { field: "createdOn", op: "gte", value: "Oct 4, 2026" },
+      { field: "createdOn", op: "lte", value: "Nov 3, 2026" },
+      // Only a date-range op's values are dates.
+      { field: "number", op: undefined, value: "2026-10-04T00:00" },
+    ]);
+  });
+
+  it("shows a relative date placeholder in words", () => {
+    expect(
+      describeWidgetFilters({
+        filters: [
+          { field: "createdOn", op: "gte", values: ["__daysAgo:30__"] },
+          { field: "createdOn", op: "lte", values: ["__today__"] },
+        ],
+      }),
+    ).toEqual([
+      { field: "createdOn", op: "gte", value: "30 days ago" },
+      { field: "createdOn", op: "lte", value: "Today" },
     ]);
   });
 

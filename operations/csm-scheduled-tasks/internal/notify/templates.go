@@ -20,6 +20,7 @@ import (
 	_ "embed"
 	"fmt"
 	"html"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -119,6 +120,9 @@ type OpenCasesReportData struct {
 	// Report is entity-service's open-before-yesterday report; its Cases are
 	// the table, CasesTotal and CasesTruncated say whether it was cut.
 	Report longopenreport.Report
+	// CaseLinkBase is the CSM portal's base URL; when set, each row's number
+	// links to the item's page in the portal. Empty renders plain text.
+	CaseLinkBase string
 }
 
 // RenderOpenCasesReport fills in the "cases still in Open state" HTML email
@@ -137,7 +141,7 @@ func RenderOpenCasesReport(data OpenCasesReportData) string {
 	replacer := strings.NewReplacer(
 		"<!-- [CASE_COUNT] -->", count,
 		"<!-- [CASES_NOTE] -->", note,
-		"<!-- [CASE_ROWS] -->", renderCaseRows(r.Cases, time.Now()),
+		"<!-- [CASE_ROWS] -->", renderCaseRows(r.Cases, data.CaseLinkBase, time.Now()),
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
 	)
 	return replacer.Replace(openCasesReportTemplate)
@@ -358,9 +362,9 @@ func RenderRotaReminderFailure(data RotaReminderFailureData) string {
 // with no account or no assignee shows an em dash rather than a blank cell, so
 // the report never reads as broken/missing data versus genuinely unset. Days
 // Open is whole days from the case's creation to now.
-func renderCaseRows(cases []longopenreport.Row, now time.Time) string {
+func renderCaseRows(cases []longopenreport.Row, caseLinkBase string, now time.Time) string {
 	if len(cases) == 0 {
-		return `<tr><td colspan="7" style="padding:16px 10px; text-align:center; color:#8a8f98;">No matching cases.</td></tr>`
+		return `<tr><td colspan="8" style="padding:16px 10px; text-align:center; color:#8a8f98;">No matching cases.</td></tr>`
 	}
 
 	var b strings.Builder
@@ -373,10 +377,12 @@ func renderCaseRows(cases []longopenreport.Row, now time.Time) string {
 				`<td style="padding:8px 10px; border-bottom:1px solid #e8eaed;">%s</td>`+
 				`<td style="padding:8px 10px; border-bottom:1px solid #e8eaed;">%s</td>`+
 				`<td style="padding:8px 10px; border-bottom:1px solid #e8eaed;">%s</td>`+
+				`<td style="padding:8px 10px; border-bottom:1px solid #e8eaed;">%s</td>`+
 				`<td align="right" style="padding:8px 10px; border-bottom:1px solid #e8eaed;">%d</td>`+
 				`<td style="padding:8px 10px; border-bottom:1px solid #e8eaed;">%s</td>`+
 				`</tr>`,
-			orDash(escapeHTML(c.Number)), escapeHTML(c.InternalID),
+			openCaseNumberCell(caseLinkBase, c), escapeHTML(c.InternalID),
+			orDash(escapeHTML(caseTypeLabel(c.Type))),
 			orDash(escapeHTML(c.AccountName)),
 			orDash(escapeHTML(c.AssignedEngineer)),
 			escapeHTML(humanizeState(c.State)),
@@ -386,6 +392,49 @@ func renderCaseRows(cases []longopenreport.Row, now time.Time) string {
 		)
 	}
 	return b.String()
+}
+
+// caseTypeLabel is the label the report's Type column shows for an
+// entity-service case type value; an unknown value is humanized as it came.
+func caseTypeLabel(caseType string) string {
+	switch caseType {
+	case "case":
+		return "Case"
+	case "service_request":
+		return "Service request"
+	case "security_report_analysis":
+		return "Security report analysis"
+	}
+	return humanizeState(caseType)
+}
+
+// caseTypePortalPath is the CSM portal's detail route prefix for a case
+// type. Each of the three types the report covers has its own route, and
+// every one opens by the item's UUID. "" for a type with no known route.
+func caseTypePortalPath(caseType string) string {
+	switch caseType {
+	case "case":
+		return "/cases"
+	case "service_request":
+		return "/operations/service-requests"
+	case "security_report_analysis":
+		return "/security-center/security-reports"
+	}
+	return ""
+}
+
+// openCaseNumberCell is the row's number, linked to its page in the CSM
+// portal (<base><type route>/<case id>) when a base URL is configured, the
+// row has an id and its type has a known route; plain text (or a dash for a
+// missing number) otherwise. The id is path-escaped because it is data.
+func openCaseNumberCell(caseLinkBase string, c longopenreport.Row) string {
+	text := orDash(escapeHTML(c.Number))
+	path := caseTypePortalPath(c.Type)
+	if caseLinkBase == "" || c.ID == "" || path == "" || c.Number == "" {
+		return text
+	}
+	href := strings.TrimRight(caseLinkBase, "/") + path + "/" + url.PathEscape(c.ID)
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), text)
 }
 
 // orDash returns s, or an em dash if s is empty — see renderCaseRows' own

@@ -72,7 +72,7 @@ function ensureExtension(fileName: string, extension: string): string {
  * Modal for uploading a case attachment or deployment document: drag-and-drop or file picker.
  * Supports caseId (case attachments) or deploymentId (deployment documents). The file is sent to
  * the portal backend in chunks (start, chunks, confirm); the size limit is the configured
- * attachment limit (100 MB by default).
+ * attachment limit (10 MB by default).
  *
  * @param {UploadAttachmentModalProps} props - open, caseId/deploymentId, onClose, optional onSuccess.
  * @returns {JSX.Element} The upload attachment modal.

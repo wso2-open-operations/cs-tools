@@ -31,6 +31,7 @@ import {
   Tooltip,
 } from "@wso2/oxygen-ui";
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import EditorUploadProgress, { type EditorUpload } from "@components/rich-text-editor/EditorUploadProgress";
 import {
   getFileIcon,
   scrollElement,
@@ -70,7 +71,7 @@ import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
-import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -356,6 +357,13 @@ const ClipboardImagePlugin = ({
  *   (clipboard has `text/plain` but no `text/html`) is unaffected and always
  *   goes straight to the plain-text path with no prompt.
  */
+/** True when `html` holds at least one `<img>` and no text at all. */
+function isImageOnlyHtml(html: string): boolean {
+  if (!html.trim()) return false;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
+}
+
 const PasteNormalizationPlugin = (): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
   const [pendingPaste, setPendingPaste] = useState<{
@@ -373,6 +381,20 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
         const html = clipboardData.getData("text/html");
         const text = clipboardData.getData("text/plain");
+
+        // A picture copied from a web page carries the image itself AND an
+        // `<img src="https://...">` as its HTML. The image is stored by
+        // ClipboardImagePlugin (or refused with its own message); pasting the
+        // HTML as well would add a second, hot-linked copy of the same picture.
+        // Only when the HTML is nothing but images: Word/Docs content with
+        // text keeps going through the format prompt.
+        const hasImageFile = Array.from(clipboardData.items ?? []).some((item) =>
+          item.type.startsWith("image/"),
+        );
+        if (hasImageFile && isImageOnlyHtml(html)) {
+          event.preventDefault();
+          return true;
+        }
 
         if (html.trim()) {
           event.preventDefault();
@@ -519,6 +541,9 @@ const DEFAULT_EDITOR_CONFIG = {
 const Editor = ({
   onAttachmentClick,
   attachments = [],
+  maxAttachments,
+  uploads = [],
+  uploadsWaiting = 0,
   onAttachmentRemove,
   disabled = false,
   value,
@@ -543,6 +568,12 @@ const Editor = ({
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
+  /** The most attachments the editor takes; the attach button is off once it holds that many. */
+  maxAttachments?: number;
+  /** Files a sent comment is still uploading; shown inside the editor with their progress. */
+  uploads?: EditorUpload[];
+  /** Files queued behind the running uploads. */
+  uploadsWaiting?: number;
   onAttachmentRemove?: (index: number) => void;
   disabled?: boolean;
   value?: string;
@@ -672,6 +703,11 @@ const Editor = ({
           <>
             <Toolbar
               onAttachmentClick={onAttachmentClick}
+              attachDisabledReason={
+                maxAttachments !== undefined && attachments.length >= maxAttachments
+                  ? attachmentLimitMessage(maxAttachments)
+                  : undefined
+              }
               disabled={disabled}
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
@@ -846,6 +882,7 @@ const Editor = ({
             {overlayElement}
           </Box>
         )}
+        <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
         {attachments.length > 0 && (
           <>
             <Divider sx={{ my: 1.5 }} />

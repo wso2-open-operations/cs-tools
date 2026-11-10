@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -69,6 +70,14 @@ type resourceRules struct {
 	sortBy     []string             // allowed list sortBy fields; none means a list sets no sortBy
 	slicesVia  string               // the grouping to suggest when groupBy is not allowed
 	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
+	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
+}
+
+// dayWindowRule is a "day" grouping's window: both keys must be set, and the
+// window at most maxDays long, on every day (see checkDayWindow).
+type dayWindowRule struct {
+	startKey, endKey string
+	maxDays          int
 }
 
 var (
@@ -87,9 +96,14 @@ var (
 // assignmentGroup is refused on the Postgres data source. Problems take no
 // sortBy at all.
 var generatedResourceRules = map[ResourceType]resourceRules{
+	// Time cards group on the server (POST /time-cards/aggregate) by state,
+	// user, project or day, counting cards or summing hours (groupBy.measure).
+	// A "day" grouping returns one bucket per day of its startDate..endDate
+	// window, which entity-service caps at 31 days.
 	ResourceTimeCard: {
-		noun:   "time card",
-		shapes: opsShapes,
+		noun:    "time card",
+		shapes:  opsShapes,
+		groupBy: []string{"state", "user", "project", "day"},
 		flat: map[string]valueRule{
 			"states":    {kind: valuesEnum, values: []string{"pending", "submitted", "approved", "rejected", "processed", "recalled"}},
 			"userIds":   onlyMe,
@@ -98,7 +112,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		},
 		dateKeys:  map[string]bool{"startDate": true, "endDate": true},
 		sortBy:    []string{"workDate", "updatedOn"},
-		slicesVia: "group by state with slices",
+		dayWindow: &dayWindowRule{startKey: "startDate", endKey: "endDate", maxDays: 31},
 	},
 	ResourceIncident: {
 		noun:    "incident",
@@ -192,7 +206,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 
 // generatedRelativeDate is a relative date placeholder the webapp turns into
 // a date before the request (resolveRelativeDateFilters).
-var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter)(:-?\d+)?__$`)
+var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfWeek|endOfWeek|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter|startOfYear|endOfYear)(:-?\d+)?__$`)
 
 // checkGeneratedResourceWidget checks a generated widget whose resourceType
 // is in generatedResourceRules: its shape, groupBy, query, every slice's
@@ -212,6 +226,11 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 			return fmt.Errorf("%w: %s: a %s widget cannot use groupBy; %s", ErrGeneratedInvalid, at, rules.noun, rules.slicesVia)
 		case w.GroupBy.Bucket != "" || !contains(rules.groupBy, w.GroupBy.Field):
 			return fmt.Errorf("%w: %s.groupBy: a %s widget groups by %s only", ErrGeneratedInvalid, at, rules.noun, orList(rules.groupBy))
+		}
+		if w.GroupBy.Field == "day" && rules.dayWindow != nil {
+			if err := checkDayWindow(at, w.Query, *rules.dayWindow); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -418,6 +437,171 @@ func generatedDate(s string) bool {
 	_, err := time.Parse(time.RFC3339, s)
 	return err == nil
 }
+
+// checkDayWindow checks a "day" grouping's window: both date keys set, and
+// either two plain dates at most rule.maxDays apart (both days counted), or
+// two relative dates at most that long on every day. A saved dashboard is
+// checked again each time it is read, so "on every day" is what keeps one
+// that passes today from failing next month: __startOfQuarter:0__ to
+// __today__ is short at a quarter's start and too long by its end. A plain
+// date with a relative one grows (or shrinks below zero) day by day, so that
+// pair is refused outright. The query's other keys are already checked.
+func checkDayWindow(at string, query map[string]any, rule dayWindowRule) error {
+	start, _ := query[rule.startKey].(string)
+	end, _ := query[rule.endKey].(string)
+	if start == "" || end == "" {
+		return fmt.Errorf("%w: %s: a time card widget grouped by day needs query.%s and query.%s (at most %d days)",
+			ErrGeneratedInvalid, at, rule.startKey, rule.endKey, rule.maxDays)
+	}
+	tooLong := fmt.Errorf("%w: %s: a time card widget grouped by day covers at most %d days, from query.%s to query.%s",
+		ErrGeneratedInvalid, at, rule.maxDays, rule.startKey, rule.endKey)
+	startRel, endRel := generatedRelativeDate.MatchString(start), generatedRelativeDate.MatchString(end)
+	if startRel != endRel {
+		return fmt.Errorf("%w: %s: a time card widget grouped by day takes two plain dates or two relative dates for query.%s and query.%s, not one of each",
+			ErrGeneratedInvalid, at, rule.startKey, rule.endKey)
+	}
+	if !startRel {
+		s, errS := time.Parse("2006-01-02", start)
+		e, errE := time.Parse("2006-01-02", end)
+		if errS != nil || errE != nil {
+			return fmt.Errorf("%w: %s: a time card widget grouped by day takes plain dates (YYYY-MM-DD) for query.%s and query.%s",
+				ErrGeneratedInvalid, at, rule.startKey, rule.endKey)
+		}
+		if days := windowDays(s, e); days < 1 || days > rule.maxDays {
+			return tooLong
+		}
+		return nil
+	}
+	// The years are a sample of calendar shapes, not a limit: every day of
+	// 2024-2027 (a leap year and three others) meets every month length,
+	// quarter length and weekday a relative date can, and a window's length
+	// depends only on those, so a pass holds for any later year too. Walking
+	// every day (about 1,460 date steps, under a millisecond per widget) is
+	// simpler to trust than a hand-picked list of dates.
+	for day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC); day.Year() < 2028; day = day.AddDate(0, 0, 1) {
+		s, okS := relativeDate(start, day)
+		e, okE := relativeDate(end, day)
+		if !okS || !okE {
+			return fmt.Errorf("%w: %s: query.%s or query.%s is not a relative date the dashboard can resolve",
+				ErrGeneratedInvalid, at, rule.startKey, rule.endKey)
+		}
+		if days := windowDays(s, e); days < 1 || days > rule.maxDays {
+			return tooLong
+		}
+	}
+	return nil
+}
+
+// windowDays is how many days start..end covers, both counted; 0 or less when
+// end is before start.
+func windowDays(start, end time.Time) int {
+	return int(end.Sub(start).Hours()/24) + 1
+}
+
+// relativeDate resolves a relative date token on the given day, as the
+// webapp's resolveRelativeDatePlaceholderToDate does: __today__ (no
+// argument), __daysAgo:N__ (N >= 0), and __startOfWeek:N__, __endOfWeek:N__,
+// __startOfMonth:N__, __endOfMonth:N__, __startOfQuarter:N__,
+// __endOfQuarter:N__, __startOfYear:N__, __endOfYear:N__ (N weeks / months /
+// quarters / years from the current one; the argument is required). A week
+// runs Monday to Sunday. false for a token the webapp leaves unresolved,
+// and for an argument beyond maxRelativeDateOffset.
+func relativeDate(token string, today time.Time) (time.Time, bool) {
+	r, ok := parseRelativeDate(token)
+	if !ok {
+		return time.Time{}, false
+	}
+	return r.on(today), true
+}
+
+// relativeDateToken is a relative date token parsed once, so it can be
+// resolved on many days (relativeLinePoints) without parsing it again.
+type relativeDateToken struct {
+	name string
+	arg  int
+}
+
+// parseRelativeDate parses a token relativeDate resolves; false for one it
+// does not.
+func parseRelativeDate(token string) (relativeDateToken, bool) {
+	m := relativeDateParts.FindStringSubmatch(token)
+	if m == nil {
+		return relativeDateToken{}, false
+	}
+	name, arg, hasArg := m[1], 0, m[2] != ""
+	if hasArg {
+		n, err := strconv.Atoi(m[2])
+		if err != nil || n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
+			return relativeDateToken{}, false
+		}
+		arg = n
+	}
+	switch name {
+	case "today":
+		if hasArg {
+			return relativeDateToken{}, false
+		}
+	case "daysAgo":
+		if !hasArg || arg < 0 {
+			return relativeDateToken{}, false
+		}
+	case "startOfMonth", "endOfMonth", "startOfQuarter", "endOfQuarter",
+		"startOfWeek", "endOfWeek", "startOfYear", "endOfYear":
+		if !hasArg {
+			return relativeDateToken{}, false
+		}
+	default:
+		return relativeDateToken{}, false
+	}
+	return relativeDateToken{name: name, arg: arg}, true
+}
+
+// on is the day the token names, counted from today.
+func (r relativeDateToken) on(today time.Time) time.Time {
+	arg := r.arg
+	switch r.name {
+	case "daysAgo":
+		return today.AddDate(0, 0, -arg)
+	case "startOfMonth", "endOfMonth":
+		monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfMonth" {
+			return monthStart.AddDate(0, arg, 0)
+		}
+		return monthStart.AddDate(0, arg+1, -1)
+	case "startOfQuarter", "endOfQuarter":
+		quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfQuarter" {
+			return quarterStart.AddDate(0, 3*arg, 0)
+		}
+		return quarterStart.AddDate(0, 3*(arg+1), -1)
+	case "startOfWeek", "endOfWeek":
+		// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+		weekStart := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
+		if r.name == "startOfWeek" {
+			return weekStart.AddDate(0, 0, 7*arg)
+		}
+		return weekStart.AddDate(0, 0, 7*arg+6)
+	case "startOfYear", "endOfYear":
+		yearStart := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfYear" {
+			return yearStart.AddDate(arg, 0, 0)
+		}
+		return yearStart.AddDate(arg+1, 0, -1)
+	}
+	return today // "today"
+}
+
+// maxRelativeDateOffset bounds a relative date token's argument, as
+// entity-service's resolveRelativeDate and the webapp's resolver do. Without
+// it a huge argument overflows the date arithmetic and wraps to a date that
+// looks valid (__startOfYear:9223372036854775807__ gave 2024-12-31). Every
+// argument beyond it lands outside the years 0000-9999, which entity-service
+// rejects, so the bound refuses nothing that used to resolve there.
+const maxRelativeDateOffset = 4_000_000
+
+// relativeDateParts splits a generatedRelativeDate token into its name and
+// optional argument.
+var relativeDateParts = regexp.MustCompile(`^__([a-zA-Z]+)(?::(-?\d+))?__$`)
 
 // stringList is v as a list of strings; false when it is not one.
 func stringList(v any) ([]string, bool) {

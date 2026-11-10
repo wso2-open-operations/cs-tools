@@ -36,6 +36,7 @@ import {
   uiCommentFromBe,
 } from "@api/backend/mappers";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
+import { CASE_QUERY_STALE_TIME_MS } from "@features/csm-cases/api/caseStreamShared";
 
 /** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const COMMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
@@ -84,7 +85,7 @@ export function useGetCsmCaseComments(
       );
     },
     enabled: !!caseId,
-    staleTime: 10_000,
+    staleTime: CASE_QUERY_STALE_TIME_MS,
   });
 }
 

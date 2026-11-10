@@ -16,6 +16,7 @@
 
 import type { BeWidgetResourceType } from "@api/backend/types";
 import { usesCaseFieldFilterDsl } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
+import { describeRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
 
 /** Marker param set only when the filters object being encoded/decoded uses
  * the case-search generic field/op/values DSL (see
@@ -400,6 +401,48 @@ function summariseFilterValues(values: string[]): string {
     : values.join(", ");
 }
 
+/** The date-range ops, whose values are instants: a relative date such as
+ * `__daysAgo:30__` resolves to the UTC instant of local midnight
+ * (`resolveRelativeDateFilters`), e.g. `2026-10-03T18:30:00.000Z` for
+ * 4 October in Sri Lanka. */
+const DATE_RANGE_OPS = new Set(["gte", "lte"]);
+
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/** An ISO instant as the local calendar date it falls on ("Oct 4, 2026"),
+ * never sliced from the string: west or east of UTC its date part is a
+ * different day. A relative placeholder in words ("30 days ago"): a
+ * case-family "View more" link keeps the widget's own placeholders. Anything
+ * else is returned unchanged. */
+function formatFilterDateValue(value: string): string {
+  const relative = describeRelativeDatePlaceholder(value);
+  if (relative !== undefined) return relative;
+  if (!ISO_INSTANT.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Words for a non-default op on a filter chip. */
+const FILTER_OP_WORDS: Record<string, string> = {
+  eq: "is",
+  notIn: "not in",
+  gte: "on or after",
+  lte: "on or before",
+  isEmpty: "is empty",
+  isNotEmpty: "is not empty",
+};
+
+/** The chip text for one summary entry: `severity: critical` for the default
+ * op, `createdOn on or after Oct 4, 2026` or `escalation is not empty`
+ * otherwise. An op without words keeps the old `field (op): value` form. */
+export function widgetFilterChipLabel(entry: WidgetFilterSummaryEntry): string {
+  if (!entry.op) return `${entry.field}: ${entry.value}`;
+  const words = FILTER_OP_WORDS[entry.op];
+  if (!words) return `${entry.field} (${entry.op}): ${entry.value}`;
+  return VALUELESS_OPS.has(entry.op) ? `${entry.field} ${words}` : `${entry.field} ${words} ${entry.value}`;
+}
+
 /**
  * Flattens a widget's (already fully-resolved — no `__current_team__`/`@me`
  * placeholders left in it) filters object into a readable list of active
@@ -423,8 +466,9 @@ export function describeWidgetFilters(
   if (isCaseFieldFilterArray(fieldFilters)) {
     for (const entry of fieldFilters) {
       const op = entry.op || "in";
-      const values = entry.values ?? [];
-      if (values.length === 0 && !VALUELESS_OPS.has(op)) continue;
+      const raw = entry.values ?? [];
+      if (raw.length === 0 && !VALUELESS_OPS.has(op)) continue;
+      const values = DATE_RANGE_OPS.has(op) ? raw.map(formatFilterDateValue) : raw;
       entries.push({
         field: entry.field,
         op: op === "in" ? undefined : op,

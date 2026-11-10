@@ -17,7 +17,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 
 // Recharts' ResponsiveContainer measures a real layout size, which jsdom
 // always reports as 0 — nothing would render. Stubbed to plain clickable
@@ -27,7 +27,26 @@ import type { ReactNode } from "react";
 // how real recharts calls a custom pie label with the wedge's own geometry
 // — needed to exercise `DashboardPieChart`'s `inlineLabels` mode.
 vi.mock("@wso2/oxygen-ui-charts-react", () => ({
-  PieChart: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  // The tooltip's formatter, when one is passed, applied to the first slice
+  // (the Pie child's data), as `DashboardWidgetTile.test.tsx` does for bars.
+  PieChart: ({
+    children,
+    tooltip,
+  }: {
+    children: ReactNode;
+    tooltip?: { formatter?: (value: unknown) => string };
+  }) => {
+    const pie = Children.toArray(children).find(isValidElement) as
+      | ReactElement<{ data?: { value: number }[] }>
+      | undefined;
+    const first = pie?.props.data?.[0];
+    return (
+      <div>
+        {tooltip?.formatter && first && <span>tooltip:{tooltip.formatter(first.value)}</span>}
+        {children}
+      </div>
+    );
+  },
   Pie: ({
     data,
     onClick,
@@ -64,6 +83,7 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
 
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import type { PieSliceResult } from "@features/csm-dashboard/api/useWidgetPieData";
+import { formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
 
 const SLICES: PieSliceResult[] = [
   { label: "Critical", value: 1, query: null, color: "error" },
@@ -233,5 +253,32 @@ describe("DashboardPieChart", () => {
     );
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getByText("Total")).toBeInTheDocument();
+  });
+
+  it("formats the tooltip's value like its legend when the widget formats values (hours)", () => {
+    render(
+      <DashboardPieChart
+        slices={[{ label: "Ann", value: 100 / 60, query: null, color: "primary" }]}
+        total={100 / 60}
+        isLoading={false}
+        isError={false}
+        onSliceClick={vi.fn()}
+        formatValue={formatHours}
+      />,
+    );
+    expect(screen.getByText("tooltip:1.7 h")).toBeInTheDocument();
+  });
+
+  it("passes no tooltip formatter when the widget does not format values", () => {
+    render(
+      <DashboardPieChart
+        slices={SLICES}
+        total={4}
+        isLoading={false}
+        isError={false}
+        onSliceClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/tooltip:/)).not.toBeInTheDocument();
   });
 });

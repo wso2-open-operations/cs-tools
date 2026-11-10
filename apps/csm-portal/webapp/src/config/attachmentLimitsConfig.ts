@@ -17,33 +17,41 @@
 
 const BYTES_PER_MB = 1024 * 1024;
 
-/** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 100 MiB). */
-export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
+/** Largest stored attachment (entity-service `ATTACHMENT_MAX_MB` default, 10 MiB). */
+export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 
-/** Most inline-image bytes in one comment or description (25 MiB). */
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 25;
+/** Most inline-image bytes in one comment or description (1 MiB). */
+export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
 
-/** A positive number of megabytes from a number or numeric string, else `fallback`. */
-function megabytes(raw: unknown, fallback: number): number {
+/** Ceilings: a configured value above one is ignored and the default is used. */
+export const MAX_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const MAX_INLINE_IMAGE_MAX_MB = 25;
+
+/** A positive number of megabytes, at most `max`, from a number or numeric string, else `fallback`. */
+function megabytes(raw: unknown, fallback: number, max: number): number {
   const value =
     typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+  return Number.isFinite(value) && value > 0 && value <= max ? value : fallback;
 }
 
 /**
  * Largest file, in bytes, the portal offers to upload as an attachment.
  *
  * Read from the runtime `window.config.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB`
- * key (a number of megabytes, or a numeric string). A missing, unparseable, zero
- * or negative value gives {@link DEFAULT_ENTITY_ATTACHMENT_MAX_MB}. Keep it equal
- * to the entity-service's `ATTACHMENT_MAX_BYTES`: the server stays the authority,
+ * key (a number of megabytes, or a numeric string). A missing, unparseable, zero,
+ * negative or above-100 value gives {@link DEFAULT_ENTITY_ATTACHMENT_MAX_MB}. Keep it equal
+ * to the entity-service's `ATTACHMENT_MAX_MB`: the server stays the authority,
  * this only refuses an oversized file before the upload starts.
  *
  * Read at call time (not module load) so a test can set `window.config` per case.
  */
 export function entityAttachmentMaxBytes(): number {
   return (
-    megabytes(window.config?.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB, DEFAULT_ENTITY_ATTACHMENT_MAX_MB) *
+    megabytes(
+      window.config?.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB,
+      DEFAULT_ENTITY_ATTACHMENT_MAX_MB,
+      MAX_ENTITY_ATTACHMENT_MAX_MB,
+    ) *
     BYTES_PER_MB
   );
 }
@@ -57,7 +65,11 @@ export function entityAttachmentMaxBytes(): number {
  */
 export function inlineImageMaxBytes(): number {
   return (
-    megabytes(window.config?.CSM_PORTAL_INLINE_IMAGE_MAX_MB, DEFAULT_INLINE_IMAGE_MAX_MB) *
+    megabytes(
+      window.config?.CSM_PORTAL_INLINE_IMAGE_MAX_MB,
+      DEFAULT_INLINE_IMAGE_MAX_MB,
+      MAX_INLINE_IMAGE_MAX_MB,
+    ) *
     BYTES_PER_MB
   );
 }
@@ -109,4 +121,19 @@ export function formatSizeLimit(bytes: number): string {
     return `${Number((bytes / (1024 * BYTES_PER_MB)).toFixed(2))} GB`;
   }
   return formatMegabytes(bytes);
+}
+
+/** How many attachments a create form (case, service request, security report) takes. */
+export const CREATE_FORM_MAX_ATTACHMENTS = 1;
+
+/** How many attachments one comment or reply takes. */
+export const COMMENT_MAX_ATTACHMENTS = 1;
+
+/**
+ * The message shown when a form, comment or editor already holds the most
+ * attachments it takes: "Only one file allowed." for a limit of one,
+ * "Only 3 files allowed." above it.
+ */
+export function attachmentLimitMessage(limit: number): string {
+  return limit === 1 ? "Only one file allowed." : `Only ${limit} files allowed.`;
 }

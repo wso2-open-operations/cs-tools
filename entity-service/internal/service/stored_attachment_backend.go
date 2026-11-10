@@ -173,6 +173,14 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
 		"attachmentId", row.ID, "path", key, "sizeBytes", size)
 
+	// Only here, on the confirm that completed the upload: a repeated confirm
+	// ("already COMPLETE") returns earlier and must not replay the move, which
+	// could undo a later staff move back to Awaiting Info. Best-effort: the
+	// attachment is committed, so a failure is logged by the rule, never returned.
+	if req.Kind == domain.StoredAttachmentWorkItem && s.caseStates != nil {
+		s.caseStates.ApplyCustomerAttachmentStateTransition(ctx, row.ParentID)
+	}
+
 	row.Status = "COMPLETE"
 	return confirmResponse(row, size), nil
 }
@@ -244,9 +252,83 @@ func (s *storedAttachmentService) LocateInlineImage(ctx context.Context, id stri
 		"audit", true, "action", "view", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(img.kind),
 		"attachmentId", row.ID, "path", *row.StorageKey)
+	// Moving the file is an extra: a failed lookup of where it belongs must not
+	// stop the image being shown from where it is, so it is logged and left out.
+	relocateTo, err := s.relocationFor(ctx, img)
+	if err != nil {
+		slog.WarnContext(ctx, "could not work out where an inline image should move to; serving it where it is",
+			"attachmentId", row.ID, "correlationId", middleware.CorrelationIDFromContext(ctx), "error", err)
+		relocateTo = ""
+	}
 	return domain.AttachmentLocation{
 		ID: row.ID, Number: row.Number, Name: row.Name,
 		ContentType: &contentType, SizeBytes: row.SizeBytes,
-		Available: true, StorageKey: *row.StorageKey,
+		Available: true, StorageKey: *row.StorageKey, RelocateTo: relocateTo,
+		ParentID: row.ParentID, Draft: row.Draft,
 	}, nil
+}
+
+// draftKeyMarker is what a description image's key contains while its file is
+// still where it was uploaded, before its record existed.
+var draftKeyMarker = "/" + "workitems" + "/" + draftFolder + "/"
+
+// relocationFor returns the key a linked description image's file belongs under,
+// or "" when it is already there (or is not such an image). A description image is
+// uploaded to the project's drafts folder because its record has no number yet;
+// once it is linked to a work item it belongs with that work item's files.
+func (s *storedAttachmentService) relocationFor(ctx context.Context, img inlineImage) (string, error) {
+	row := img.row
+	if img.kind != domain.StoredAttachmentComment || row.Draft || row.StorageKey == nil ||
+		!strings.Contains(*row.StorageKey, draftKeyMarker) {
+		return "", nil
+	}
+	parent, err := s.repo.GetParent(ctx, img.kind, row.ParentID)
+	if err != nil {
+		return "", err
+	}
+	key := storageKeyFor(img.kind, row, parent)
+	if key == *row.StorageKey {
+		return "", nil
+	}
+	return key, nil
+}
+
+// InlineImageRelocated implements StoredAttachmentService.
+//
+// The backend has copied the file to the key LocateInlineImage named and removed
+// the old one; this makes the row point at it. Only the key this service itself
+// computes is accepted, so a caller cannot point an image at some other file. It
+// runs as the system after the checks (UPDATE is internal-only), and a repeated
+// call answers the same.
+func (s *storedAttachmentService) InlineImageRelocated(ctx context.Context, id string, req domain.InlineImageRelocatedRequest) error {
+	img, err := s.findInlineImage(ctx, id)
+	if err != nil {
+		return err
+	}
+	want, err := s.relocationFor(ctx, img)
+	if err != nil {
+		return err
+	}
+	if want == "" {
+		// Already moved (a repeated call), or not an image that moves.
+		if img.row.StorageKey != nil && *img.row.StorageKey == req.StorageKey {
+			return nil
+		}
+		return &apierror.ConflictError{Msg: "this image does not need to be moved"}
+	}
+	if req.StorageKey != want {
+		return &apierror.ValidationError{Msg: "storageKey is not where this image belongs"}
+	}
+	from := *img.row.StorageKey
+	ok, err := s.repo.UpdateStorageKey(repository.WithSystemIdentity(ctx), img.kind, img.row.ID, from, want)
+	if err != nil {
+		return err
+	}
+	if ok {
+		slog.InfoContext(ctx, "inline image relocated",
+			"audit", true, "action", "relocate", "callerId", auditCaller(ctx),
+			"correlationId", middleware.CorrelationIDFromContext(ctx),
+			"attachmentId", img.row.ID, "from", from, "path", want)
+	}
+	return nil
 }

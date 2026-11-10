@@ -31,6 +31,7 @@ import {
   Tooltip,
 } from "@wso2/oxygen-ui";
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import EditorUploadProgress, { type EditorUpload } from "@components/rich-text-editor/EditorUploadProgress";
 import {
   getFileIcon,
   scrollElement,
@@ -337,6 +338,9 @@ const DEFAULT_EDITOR_CONFIG = {
 const Editor = ({
   onAttachmentClick,
   attachments = [],
+  maxAttachments,
+  uploads = [],
+  uploadsWaiting = 0,
   onAttachmentRemove,
   disabled = false,
   value,
@@ -359,6 +363,12 @@ const Editor = ({
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
+  /** The most attachments the editor takes; the attach button is off once it holds that many. */
+  maxAttachments?: number;
+  /** Files a sent comment is still uploading; shown inside the editor with their progress. */
+  uploads?: EditorUpload[];
+  /** Files queued behind the running uploads. */
+  uploadsWaiting?: number;
   onAttachmentRemove?: (index: number) => void;
   disabled?: boolean;
   value?: string;
@@ -465,6 +475,13 @@ const Editor = ({
           <>
             <Toolbar
               onAttachmentClick={onAttachmentClick}
+              attachDisabledReason={
+                maxAttachments !== undefined && attachments.length >= maxAttachments
+                  ? maxAttachments === 1
+                    ? "Only one file allowed."
+                    : `Only ${maxAttachments} files allowed.`
+                  : undefined
+              }
               disabled={disabled}
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
@@ -590,6 +607,7 @@ const Editor = ({
             {overlayElement}
           </Box>
         )}
+        <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
         {attachments.length > 0 && (
           <>
             <Divider sx={{ my: 1.5 }} />

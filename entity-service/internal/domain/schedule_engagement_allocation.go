@@ -45,6 +45,38 @@ type ScheduleEngagementAllocation struct {
 	Utilization         *float64 `json:"utilization,omitempty"`
 	StartDate           string   `json:"startDate"`
 	EndDate             string   `json:"endDate"`
+	// DismissedDates are the days in the window someone took this allocation
+	// off the person's roster (YYYY-MM-DD, ascending). The roster leaves them
+	// out and offers to restore them.
+	DismissedDates []string `json:"dismissedDates,omitempty"`
+}
+
+// DismissScheduleEngagementAllocationRequest takes a synced allocation off a
+// person's roster over From..To (weekdays only, cut to the allocation's own
+// dates), or, with Restore, puts those days back. ID is the allocation's id as
+// the search returns it (ScheduleEngagementAllocation.ID). TeamKey is the team
+// whose roster the change is made on, which decides who may make it.
+type DismissScheduleEngagementAllocationRequest struct {
+	ID      string `json:"id"`
+	TeamKey string `json:"teamKey"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Restore bool   `json:"restore,omitempty"`
+}
+
+// DismissScheduleEngagementAllocationResponse says how many days changed.
+type DismissScheduleEngagementAllocationResponse struct {
+	Days int `json:"days"`
+}
+
+// EngagementAllocationOnRoster is what a removal needs to know about the
+// allocation: whose it is, its dates and its chip code.
+type EngagementAllocationOnRoster struct {
+	UserID    string
+	StartDate string
+	EndDate   string
+	// Code is the engagement's display id, or "" when it has none.
+	Code string
 }
 
 // ScheduleEngagementAllocationsResponse is the allocations over the window asked for.

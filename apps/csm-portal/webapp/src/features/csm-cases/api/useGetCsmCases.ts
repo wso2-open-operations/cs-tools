@@ -24,9 +24,8 @@ import {
   buildCaseSearchFilters,
   mapCaseSearchViewToRow,
   resolveAssignedUserIds,
+  resolveCaseFilterDates,
 } from "@features/csm-cases/utils/caseSearchPayload";
-import { resolveRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
-import { resolveAdvancedFilterDateValues } from "@features/csm-cases/utils/advancedFilters";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { classifyCaseQuery } from "@features/csm-cases/utils/caseQueryScope";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -185,34 +184,9 @@ export function useGetCsmCases(
         assignedUserIds = resolved;
       }
 
-      // Resolve `createdOnGte`/`createdOnLte`/`updatedOnGte`/`updatedOnLte`/
-      // `closedOnGte`/`closedOnLte` relative-date placeholders (`__today__`,
-      // `__daysAgo:N__`, ... -- same grammar and resolver as the dashboard
-      // widgets' own `resolveRelativeDateFilters`) against the viewer's own
-      // browser-local "now", right here at query-build time -- no backend
-      // change, and "today" correctly means whatever moment the link is
-      // opened, not a moment baked into the URL. Anything that isn't a
-      // recognized placeholder (a literal `YYYY-MM-DD`, or garbage) passes
-      // through unchanged.
-      const now = new Date();
-      const resolveBound = (
-        raw: string | null,
-        op: "gte" | "lte",
-      ): string | null =>
-        raw === null ? null : (resolveRelativeDatePlaceholder(raw, op, now) ?? raw);
-      const resolvedFilters: CasesFilters = {
-        ...filters,
-        createdOnGte: resolveBound(filters.createdOnGte, "gte"),
-        createdOnLte: resolveBound(filters.createdOnLte, "lte"),
-        updatedOnGte: resolveBound(filters.updatedOnGte, "gte"),
-        updatedOnLte: resolveBound(filters.updatedOnLte, "lte"),
-        closedOnGte: resolveBound(filters.closedOnGte, "gte"),
-        closedOnLte: resolveBound(filters.closedOnLte, "lte"),
-        // Same relative-date resolution, extended to any `createdOn`/
-        // `updatedOn`/`closedOn` row from the "Advanced filters" builder —
-        // see `resolveAdvancedFilterDateValues`.
-        advancedFilters: resolveAdvancedFilterDateValues(filters.advancedFilters, now),
-      };
+      // Relative-date placeholders resolve against the viewer's local "now"
+      // -- see `resolveCaseFilterDates`.
+      const resolvedFilters = resolveCaseFilterDates(filters, new Date());
 
       // One cross-project case search. No separate account/project directory
       // scan needed: the search response already embeds `account`, which

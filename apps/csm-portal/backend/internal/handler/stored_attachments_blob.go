@@ -65,6 +65,7 @@ type blobEntityClient interface {
 	AuthorizeStoredAttachmentUpload(ctx context.Context, id string, body []byte) ([]byte, error)
 	LocateStoredAttachment(ctx context.Context, body []byte) ([]byte, error)
 	LocateInlineImage(ctx context.Context, id string) ([]byte, error)
+	InlineImageRelocated(ctx context.Context, id string, body []byte) error
 	ConfirmStoredAttachmentUpload(ctx context.Context, id string, body []byte) ([]byte, error)
 	DeleteStoredAttachment(ctx context.Context, body []byte) error
 }
@@ -89,6 +90,8 @@ type attachmentLocation struct {
 	Available   bool    `json:"available"`
 	Reason      string  `json:"reason"`
 	StorageKey  string  `json:"storageKey"`
+	// RelocateTo is set for a description image still in the drafts folder.
+	RelocateTo string `json:"relocateTo"`
 }
 
 // BlobAttachmentHandler serves attachment files held in Azure Blob Storage.
@@ -100,6 +103,15 @@ type attachmentLocation struct {
 type BlobAttachmentHandler struct {
 	entity blobEntityClient
 	store  attachmentBlobStore
+	// access decides whether the caller is an admin, who may delete an
+	// attachment someone else uploaded. Nil means nobody is.
+	access *AccessGuard
+}
+
+// WithAccessGuard lets a portal admin delete an attachment they did not upload.
+func (h *BlobAttachmentHandler) WithAccessGuard(g *AccessGuard) *BlobAttachmentHandler {
+	h.access = g
+	return h
 }
 
 // NewBlobAttachmentHandler creates a BlobAttachmentHandler.
@@ -392,6 +404,12 @@ func (h *BlobAttachmentHandler) InlineImage(w http.ResponseWriter, r *http.Reque
 	if !h.available(w, loc) {
 		return
 	}
+	// A description image is uploaded before its case exists, so its file starts
+	// in a drafts folder. The first read after it is linked moves it to the work
+	// item's own folder; if that fails the old file is read, so nothing breaks.
+	if loc.RelocateTo != "" && h.relocateInlineImage(r.Context(), id, loc) {
+		loc.StorageKey = loc.RelocateTo
+	}
 	h.stream(w, r, loc, true)
 }
 
@@ -531,15 +549,43 @@ func downloadName(name string) string {
 	return name
 }
 
+// withAdminDelete returns body with entity-service's `asAdmin` set to whether
+// the caller holds PermAdmin, taken from their token roles. Whatever the browser
+// sent under any spelling of that key is dropped first (entity-service's decoder
+// matches keys without regard to case), so only this decision reaches it, and
+// entity-service honours it only from this backend.
+func (h *BlobAttachmentHandler) withAdminDelete(body []byte, roles []string) ([]byte, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	for key := range fields {
+		if strings.EqualFold(key, "asAdmin") {
+			delete(fields, key)
+		}
+	}
+	if h.access != nil && h.access.Permits(PermAdmin, roles) {
+		fields["asAdmin"] = json.RawMessage("true")
+	}
+	return json.Marshal(fields)
+}
+
 // DeleteAttachment handles POST /attachments/delete: entity-service removes the
-// attachment if the caller may (only whoever uploaded it), then its file goes.
+// attachment if the caller may (whoever uploaded it, or a portal admin), then
+// its file goes.
 func (h *BlobAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	user, body, ok := readStoredAttachmentBody(w, r)
 	if !ok {
 		return
 	}
+	deleteBody, err := h.withAdminDelete(body, user.Roles)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
 	ctx := r.Context()
-	// Where the file is has to be read before the row is deleted.
+	// Where the file is has to be read before the row is deleted. (Locate takes
+	// the browser's body as it is: its decoder knows no asAdmin.)
 	var key string
 	if out, err := h.entity.LocateStoredAttachment(ctx, body); err == nil {
 		var loc attachmentLocation
@@ -547,7 +593,7 @@ func (h *BlobAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.
 			key = loc.StorageKey
 		}
 	}
-	if err := h.entity.DeleteStoredAttachment(ctx, body); err != nil {
+	if err := h.entity.DeleteStoredAttachment(ctx, deleteBody); err != nil {
 		slog.ErrorContext(ctx, "entity DeleteStoredAttachment failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapStoredAttachmentError(w, err, "Failed to delete the attachment.")
 		return

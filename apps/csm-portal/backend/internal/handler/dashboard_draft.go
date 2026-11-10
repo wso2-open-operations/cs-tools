@@ -115,6 +115,11 @@ func widgetTemplates(views []dashboardWidgetView) []dashboard.WidgetTemplate {
 			InlineDrilldown: v.InlineDrilldown,
 			InlineLabels:    v.InlineLabels,
 			Days:            v.Days,
+			Series:          v.Series,
+			StartDate:       v.StartDate,
+			EndDate:         v.EndDate,
+			Bucket:          v.Bucket,
+			Chart:           v.Chart,
 			DistinctBy:      v.DistinctBy,
 		})
 	}

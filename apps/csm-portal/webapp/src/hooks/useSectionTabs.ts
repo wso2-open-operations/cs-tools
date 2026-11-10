@@ -303,6 +303,10 @@ export function useQueryParamTabs<TId extends string>(
   // override check; their values are simply unused when an override is
   // present.
   const [routedSearchParams, setRoutedSearchParams] = useSearchParams();
+  // A tab switch keeps the page's state (e.g. `{ from, parentState }` from the
+  // row that opened it), as the case-tab branch does with `routeOverride.state`;
+  // without it the page's Back fell back to its default list after any switch.
+  const routedState: unknown = useLocation().state;
 
   const activeSearchParams = routeOverride
     ? new URLSearchParams(routeOverride.search)
@@ -335,7 +339,7 @@ export function useQueryParamTabs<TId extends string>(
           for (const dropped of clearParamsOnChange) params.delete(dropped);
           return params;
         },
-        { replace: setOptions?.replace ?? true },
+        { replace: setOptions?.replace ?? true, state: routedState },
       );
     },
     // clearParamsOnChange is passed fresh by most callers (an inline array
@@ -346,7 +350,7 @@ export function useQueryParamTabs<TId extends string>(
     // practice; a caller with a genuinely dynamic clear list should build one
     // itself rather than relying on this hook to react to it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [routeOverride, setRoutedSearchParams, paramName],
+    [routeOverride, setRoutedSearchParams, routedState, paramName],
   );
 
   return { activeTab, setActiveTab };

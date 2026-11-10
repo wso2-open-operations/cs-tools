@@ -97,7 +97,7 @@ func TestSettings_ReplaceTheConfiguration(t *testing.T) {
 		t.Fatalf("sent %d emails, want the summary alone", len(mail.sent))
 	}
 	summary := mail.sent[0]
-	if strings.Join(summary.cc, ",") != "lead@example.com" || !strings.Contains(summary.body, "09:00 AM &#8211; 05:00 PM EDT") {
+	if strings.Join(summary.cc, ",") != "lead@example.com" || !strings.Contains(summary.body, "06:00 AM &#8211; 02:00 PM PDT") {
 		t.Errorf("summary cc %v:\n%s", summary.cc, summary.body)
 	}
 }
@@ -193,7 +193,7 @@ func TestSettings_OverrideCodeByCodeAndNeverTurnInvitesOn(t *testing.T) {
 		t.Errorf("Americas window %+v, want the saved one", w)
 	}
 	if w := got.Windows["CRE_WEEKEND_NIGHT_OC"]; w.Zone == nil || w.Zone.String() != "America/Los_Angeles" {
-		t.Errorf("LK On-call window %+v, want the configured one", w)
+		t.Errorf("Americas On-call window %+v, want the configured one", w)
 	}
 	if cfg.Required["CRE_WEEKEND"] != 3 {
 		t.Error("the configured minimums were changed in place")

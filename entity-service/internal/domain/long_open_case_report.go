@@ -71,8 +71,12 @@ type LongOpenCaseReport struct {
 
 // LongOpenCaseReportRow is one long-open case.
 type LongOpenCaseReportRow struct {
+	// ID is the case's UUID, the identifier the case page and the case
+	// detail endpoint route on. It is not InternalID.
+	ID     string `json:"id"`
 	Number string `json:"number"`
-	// InternalID is the case's internal identifier; empty when it has none.
+	// InternalID is the case's internal identifier (a display reference, not
+	// the routing id); empty when it has none.
 	InternalID string    `json:"internalId"`
 	CreatedOn  time.Time `json:"createdOn"`
 	UpdatedOn  time.Time `json:"updatedOn"`
@@ -84,6 +88,10 @@ type LongOpenCaseReportRow struct {
 	AssignedEngineer string `json:"assignedEngineer"`
 	// CsTeam is the name of the CS team that owns the case's account.
 	CsTeam string `json:"csTeam"`
+	// Type is the case's type (case, service_request or
+	// security_report_analysis). It is filled only by the open-before-yesterday
+	// variant, which lists all three, and left out of the default report.
+	Type string `json:"type,omitempty"`
 	// AccountName is the name of the case's account. It is filled only by
 	// the open-before-yesterday variant and left out of the default report.
 	AccountName string `json:"accountName,omitempty"`

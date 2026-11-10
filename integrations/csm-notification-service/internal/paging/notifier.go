@@ -180,7 +180,13 @@ func (v voiceNotifier) Deliver(ctx context.Context, plan Plan, call PlannedCall)
 		// the chat half of the rung still has somewhere to go, so record the
 		// miss and let it. Dialling "" would be a provider error about a
 		// malformed number, which says nothing true about what happened.
-		return Delivery{Channel: ChannelCall, Status: "no number for this recipient"}, nil
+		// The note reports it as a problem, not a call: the reason is NO_NUMBER,
+		// or why the number on file was dropped. Permanent, so it is recorded
+		// once and not retried; the chat half is unaffected.
+		reason := call.Recipient.phoneProblem()
+		return Delivery{Channel: ChannelCall}, &undeliverable{
+			reason: reason, detail: "no number to call for this recipient: " + reason,
+		}
 	}
 	var placed notifications.Call
 	var err error
@@ -191,6 +197,19 @@ func (v voiceNotifier) Deliver(ctx context.Context, plan Plan, call PlannedCall)
 	}
 	if err != nil {
 		return Delivery{Channel: ChannelCall}, err
+	}
+	// A 2xx with no status, or one that says the call already failed, is not a
+	// placed call; report it rather than count it as dialled. Not retried: the
+	// provider did answer.
+	switch strings.ToLower(strings.TrimSpace(placed.Status)) {
+	case "":
+		return Delivery{Channel: ChannelCall, Ref: placed.SID}, &undeliverable{
+			reason: "CALL_UNCONFIRMED", detail: "provider returned no call status",
+		}
+	case "failed", "canceled":
+		return Delivery{Channel: ChannelCall, Ref: placed.SID, Status: placed.Status}, &undeliverable{
+			reason: "CALL_STATUS_" + strings.ToUpper(strings.TrimSpace(placed.Status)), detail: "provider reported the call as " + placed.Status,
+		}
 	}
 	return Delivery{Channel: ChannelCall, Ref: placed.SID, Status: placed.Status}, nil
 }

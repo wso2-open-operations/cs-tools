@@ -110,6 +110,10 @@ interface DashboardBarChartProps {
   isLoading: boolean;
   isError: boolean;
   onSliceClick: (slice: PieSliceResult) => void;
+  /** How a value reads on its bar and in the tooltip (e.g. `formatHours`
+   * for a time card totals widget). Absent shows the plain number, as
+   * before this prop existed. */
+  formatValue?: (value: number) => string;
 }
 
 /**
@@ -126,6 +130,7 @@ export default function DashboardBarChart({
   isLoading,
   isError,
   onSliceClick,
+  formatValue,
 }: DashboardBarChartProps): JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
@@ -255,7 +260,12 @@ export default function DashboardBarChart({
           // cursor: false drops the library's default full-height highlight
           // box behind the hovered bar — the bar's own hover color/border is
           // enough of a highlight on its own.
-          tooltip={{ show: true, wrapperStyle: { zIndex: 1000 }, cursor: false }}
+          tooltip={{
+            show: true,
+            wrapperStyle: { zIndex: 1000 },
+            cursor: false,
+            ...(formatValue ? { formatter: (value: unknown) => formatValue(Number(value)) } : {}),
+          }}
         >
           <XAxis dataKey="name" interval={0} tickLine={false} axisLine={{ stroke: axisTickColor }} tick={renderAxisTick} />
           <Bar
@@ -267,6 +277,7 @@ export default function DashboardBarChart({
               fill: isDarkMode ? theme.palette.common.white : theme.palette.text.primary,
               fontSize: 13,
               fontWeight: 600,
+              ...(formatValue ? { formatter: (value: unknown) => formatValue(Number(value)) } : {}),
             }}
             onMouseEnter={(_data: unknown, i: number) => setActiveIndex(i)}
             onMouseLeave={() => setActiveIndex(undefined)}

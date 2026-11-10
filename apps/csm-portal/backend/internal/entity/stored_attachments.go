@@ -59,3 +59,10 @@ func (c *CustomerEntityClient) LocateStoredAttachment(ctx context.Context, body 
 func (c *CustomerEntityClient) LocateInlineImage(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/inline/%s/location", url.PathEscape(id)), nil)
 }
+
+// InlineImageRelocated calls POST /attachments/inline/{id}/relocated (204, no body):
+// the file of a description image was moved to the key entity-service named.
+func (c *CustomerEntityClient) InlineImageRelocated(ctx context.Context, id string, body []byte) error {
+	_, err := c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/inline/%s/relocated", url.PathEscape(id)), body)
+	return err
+}
