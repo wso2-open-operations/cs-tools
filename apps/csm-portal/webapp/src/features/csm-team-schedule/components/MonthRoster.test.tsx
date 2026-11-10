@@ -1010,15 +1010,23 @@ describe("MonthRoster: a cell is editable exactly when the server would accept t
     expect(editableDays(container)).toHaveLength(30);
   });
 
-  it("gives nobody a leaver's days, who is on no team's member list", () => {
+  it("gives a leaver's past days to nobody, and the days from today on to the team's lead to clear", () => {
+    // Somebody on no team's member list with days still filed under Alpha:
+    // the past is the record of what they worked; what is still ahead is
+    // left on Alpha's rota, and Alpha's lead may only take it off.
+    const onEditCell = vi.fn();
     const { container } = renderRoster({
       assignments: [assignment({ name: "Lee Left", rotaDate: "2026-09-01", shiftCode: EVENING.code, teamKey: "alpha" })],
       teamMembers: { alpha: [] },
       leadTeams: ["alpha"],
       editing: true,
-      onEditCell: vi.fn(),
+      onEditCell,
     });
-    expect(editableDays(container)).toEqual([]);
+    const today = new Date().getDate();
+    expect(editableDays(container).every((d) => d >= today)).toBe(true);
+    const cell = container.querySelector("tbody tr td.editable") as HTMLElement;
+    fireEvent.click(cell);
+    expect(onEditCell.mock.calls[0][0]).toMatchObject({ clearOnly: true });
   });
 });
 
@@ -1624,5 +1632,76 @@ describe("MonthRoster: the legend across 1 Nov 2026 from blank weekdays alone", 
     const legend = [...container.querySelectorAll(".rlegend .chip")].map((c) => c.textContent);
     expect(legend).toContain("LK");
     expect(legend).toContain("IST");
+  });
+});
+
+describe("MonthRoster: days left on a team the person is not on", () => {
+  const member = (userId: string, name: string) => ({ userId, name, email: `${userId}@example.com`, isLead: false, role: "engineer" });
+  // Somebody whose Brazil rotation ended, with Bravo days still filed for
+  // them: their own team's lead clears only Alpha's rows, so Bravo's lead or
+  // rota admin has to be able to take these off -- and only take them off.
+  const leftOnBravo = () =>
+    renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["bravo"],
+      editing: true,
+      onEditCell: vi.fn(),
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-01T00:00:00"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("lets the team's lead open such a day, for a clear only", () => {
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["bravo"],
+      editing: true,
+      onEditCell,
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+    });
+    const turn = within(container.querySelector("tbody tr") as HTMLElement).getByText(EVENING.shortCode).closest("td")!;
+    fireEvent.click(turn);
+    expect(onEditCell).toHaveBeenCalledTimes(1);
+    expect(onEditCell.mock.calls[0][0]).toMatchObject({ teamKey: "bravo", clearOnly: true });
+  });
+
+  it("keeps a member's own day a full edit", () => {
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["bravo"],
+      editing: true,
+      onEditCell,
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [member("u-Asela", "Asela")] },
+    });
+    fireEvent.click(within(container.querySelector("tbody tr") as HTMLElement).getByText(EVENING.shortCode).closest("td")!);
+    expect(onEditCell.mock.calls[0][0].clearOnly).toBeUndefined();
+  });
+
+  it("leaves their past days alone: those are history", () => {
+    vi.setSystemTime(new Date("2026-10-01T00:00:00"));
+    const { container } = leftOnBravo();
+    const turn = within(container.querySelector("tbody tr") as HTMLElement).getByText(EVENING.shortCode).closest("td")!;
+    expect(turn.classList.contains("editable")).toBe(false);
+  });
+
+  it("gives another team's lead nothing to click", () => {
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["alpha"],
+      editing: true,
+      onEditCell: vi.fn(),
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+    });
+    expect(container.querySelectorAll("td.editable")).toHaveLength(0);
   });
 });

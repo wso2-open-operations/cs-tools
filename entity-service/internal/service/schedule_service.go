@@ -595,9 +595,38 @@ func (s *scheduleService) ApplyRange(ctx context.Context, req domain.ApplySchedu
 		}
 	}
 	if _, err := s.requireRotaWriterOverSpan(ctx, req.TeamKey, req.UserID, req.From, req.To, false); err != nil {
-		return domain.ApplyScheduleRangeResponse{}, err
+		// A clear may still go ahead on rows filed under a team the person is
+		// not on, with no span putting them there -- what is left on the
+		// Americas team after a Brazil rotation ended, say. Nobody else can
+		// reach those rows: their own team's lead clears only their own
+		// team's rows. So the team's lead, or a rota admin for it, may take
+		// them off. Only a clear: nothing new is put on a non-member.
+		if req.ShiftCode != "" || !s.mayClearRowsFiledUnder(ctx, req.TeamKey, req.UserID, req.From) {
+			return domain.ApplyScheduleRangeResponse{}, err
+		}
 	}
+	// Regular hours being set replace the person's regular hours for the day
+	// on another team the caller may also change (see regularHoursConflict).
+	req.MayReplaceOn = func(teamKey string) bool { return s.requireRotaWriter(ctx, teamKey) == nil }
 	return s.repo.ApplyRange(ctx, req, auth.IdentityFromContext(ctx).UserEmail)
+}
+
+// mayClearRowsFiledUnder reports whether the caller may clear what is filed
+// under teamKey for somebody who is not a member of it: the caller may change
+// that team's rota, and the person really is not on the team (a member is
+// requireRotaWriterOverSpan's business, and was refused there for a reason).
+//
+// From today on only: a former member's past days are the record of what they
+// worked, and stay as they are.
+func (s *scheduleService) mayClearRowsFiledUnder(ctx context.Context, teamKey, userID, from string) bool {
+	if from < time.Now().UTC().Format("2006-01-02") {
+		return false
+	}
+	if s.requireRotaWriter(ctx, teamKey) != nil {
+		return false
+	}
+	member, err := s.repo.UserInTeam(ctx, userID, teamKey)
+	return err == nil && !member
 }
 
 // maxAllocatedToLength is team_schedule_absence.allocated_to's width.

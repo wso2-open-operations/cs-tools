@@ -188,6 +188,8 @@ interface MonthRosterProps {
      *  taken off the roster, for the picker's Remove / Restore. */
     engagements?: CellEngagement[];
     anchor: { top: number; left: number; bottom: number; right: number };
+    /** The person is not on this team: the picker offers only a clear. */
+    clearOnly?: boolean;
   }) => void;
 }
 
@@ -890,7 +892,11 @@ export default function MonthRoster({
    *   - a day a span moved them to another team (the Brazil rotation): that
    *     team's lead, or their own team's lead, who still owns the span;
    *   - any other day on such a row: their own team's lead, for their own
-   *     team's day. */
+   *     team's day;
+   *   - a day filed under a team somebody is not on, with no span putting
+   *     them there (left on the Americas rota after a Brazil rotation ended):
+   *     that team's lead or rota admin, to clear it only (the picker opens
+   *     with Clear and nothing else). */
   const canEdit = useMemo(() => {
     const own = new Set((leadTeams ?? []).map((t) => t.toLowerCase()));
     return (
@@ -902,7 +908,8 @@ export default function MonthRoster({
       if (row.movedDays.size > 0) {
         return row.movedDays.has(iso) ? own.has(row.teamKey.toLowerCase()) || homeLed : homeLed && row.homeMember;
       }
-      return own.has(row.teamKey.toLowerCase()) && row.isMember;
+      // A non-member's days from today on only: their past days are history.
+      return own.has(row.teamKey.toLowerCase()) && (row.isMember || iso >= toIsoDate(new Date()));
     };
   }, [leadTeams, onEditCell, editing]);
 
@@ -1033,7 +1040,7 @@ export default function MonthRoster({
    *  when leave covers the whole day -- and had none of them before. */
   const openCell = (
     e: { currentTarget: HTMLElement },
-    row: { userId: string; name: string; teamKey: string; homeTeam?: string; movedDays?: ReadonlySet<string> },
+    row: { userId: string; name: string; teamKey: string; homeTeam?: string; movedDays?: ReadonlySet<string>; isMember?: boolean },
     iso: string,
     cell: Cell | undefined,
     zoneCode?: string,
@@ -1056,6 +1063,8 @@ export default function MonthRoster({
       absence: cell?.absence,
       engagements: engagementsOn(row.userId, iso),
       zoneCode,
+      // Not on the team and no span putting them there: only a clear is theirs.
+      clearOnly: row.isMember === false && !(row.movedDays && row.movedDays.size > 0) ? true : undefined,
       anchor: { top: r.top, left: r.left, bottom: r.bottom, right: r.right },
     });
   };

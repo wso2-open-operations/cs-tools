@@ -783,6 +783,103 @@ func slotConflict(err error, isoDate string) error {
 	}
 }
 
+// lockPersonDay serialises the writes to one person's rota day. Under READ
+// COMMITTED two writes for the same person and day -- IST from one lead, PDT
+// from another -- would each read the other's row as absent and both commit,
+// leaving two sets of regular hours that regularHoursConflict exists to stop.
+// Taken before the day's rows are displaced or checked and held to the commit,
+// so the second write waits and then reads what the first left. A span locks
+// its days in date order and holds one person, so two spans never wait on each
+// other in a cycle; a rota import locks each assignment's days in turn.
+func lockPersonDay(ctx context.Context, tx pgx.Tx, userID, isoDate string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`,
+		"team-schedule-person-day:"+userID+":"+isoDate); err != nil {
+		return fmt.Errorf("lock the rota day %s: %w", isoDate, err)
+	}
+	return nil
+}
+
+// regularHoursConflict refuses a second set of regular hours for one person on
+// one day. The caller holds lockPersonDay for that day.
+//
+// Regular hours (a window that is neither a rotation turn nor an escalation
+// window: Regular hours IST, Americas regular hours PDT, AEST, an SRE zone's
+// regular hours) say where somebody works that day, so a person has one set.
+// The no-overlap constraint does not catch two that do not overlap in time --
+// IST 09:00-18:00 and PDT 21:00-06:00 IST -- and replacing a day clears only
+// the lead's own team's rows, so a lead of the Americas team could put PDT on
+// an ABT engineer who already worked IST on their own team, and the roster
+// then showed both chips every day.
+//
+// Called before the insert, after the day's own rows were displaced, so what
+// is left is on another team (or, from CreateAssignment, anywhere). A turn or
+// an escalation window is never refused here: those go on top of regular
+// hours.
+//
+// From the roster (ApplyRange) the new regular hours replace the old ones
+// when the caller may change the team that holds them (mayReplaceOn): each
+// row taken off is recorded in that team's history, as a lead's own change
+// would be, with a note saying what replaced it. Where the caller may not,
+// they are told whose rota it is. A span's own shifts (source MOVE, the
+// Brazil rotation) are never replaced: they follow the span, so the span has
+// to end first. A nil mayReplaceOn (CreateAssignment, a rota import) refuses.
+func regularHoursConflict(ctx context.Context, tx pgx.Tx, userID, shiftCode, teamKey, isoDate string,
+	mayReplaceOn func(string) bool, actorEmail string) error {
+	rows, err := tx.Query(ctx, `SELECT `+assignmentColumns+assignmentFrom+`
+		  JOIN team_schedule_shift n ON n.code = $2
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $3::date
+		   AND NOT n.is_rotation AND NOT n.is_escalation
+		   AND NOT s.is_rotation AND NOT s.is_escalation
+		 ORDER BY a.created_on, a.id`,
+		userID, shiftCode, isoDate)
+	if err != nil {
+		return fmt.Errorf("read the regular hours held on %s: %w", isoDate, err)
+	}
+	held, err := scanAssignments(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	var newCode string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(short_code, code) FROM team_schedule_shift WHERE code = $1`,
+		shiftCode).Scan(&newCode); err != nil {
+		return fmt.Errorf("read the window being set: %w", err)
+	}
+	ids := make([]string, 0, len(held))
+	for _, a := range held {
+		heldCode, team := a.ShiftCode, a.TeamKey
+		_ = tx.QueryRow(ctx, `SELECT COALESCE(s.short_code, s.code), COALESCE(t.name, $2)
+			  FROM team_schedule_shift s LEFT JOIN team t ON lower(t.key) = lower($2)
+			 WHERE s.code = $1`, a.ShiftCode, a.TeamKey).Scan(&heldCode, &team)
+		switch {
+		case a.Source == "MOVE":
+			return &apierror.ConflictError{Msg: fmt.Sprintf(
+				"this person works %s regular hours on %s (%s) because of a span that moves them there; end or shorten the span first",
+				heldCode, isoDate, team)}
+		case mayReplaceOn == nil:
+			return &apierror.ConflictError{Msg: fmt.Sprintf(
+				"this person already works %s regular hours on %s (%s); one person works one set of regular hours a day, so clear that one first",
+				heldCode, isoDate, team)}
+		case !mayReplaceOn(a.TeamKey):
+			return &apierror.ConflictError{Msg: fmt.Sprintf(
+				"this person already works %s regular hours on %s (%s), and that is %s's rota; ask its lead or a rota admin to take them off it first",
+				heldCode, isoDate, team, team)}
+		}
+		note := fmt.Sprintf("replaced by %s on %s", newCode, teamKey)
+		if err := recordActivity(ctx, tx, a, "DELETED", actorEmail, nil, nil, nil, &note); err != nil {
+			return err
+		}
+		ids = append(ids, a.ID)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_assignment WHERE id = ANY($1::uuid[])`, ids); err != nil {
+		return fmt.Errorf("replace the regular hours held on %s: %w", isoDate, err)
+	}
+	return nil
+}
+
 // tierHolderConflict refuses a turn whose tier somebody else already holds.
 //
 // A rung of the SRE pager's ladder is one person. ApplyRange used to put the
@@ -1107,6 +1204,13 @@ func (r *scheduleRepository) CreateAssignment(ctx context.Context, req domain.Cr
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := nameTheActor(ctx, tx, actorEmail); err != nil {
+		return domain.ScheduleAssignment{}, err
+	}
+
+	if err := lockPersonDay(ctx, tx, req.UserID, req.RotaDate); err != nil {
+		return domain.ScheduleAssignment{}, err
+	}
+	if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.TeamKey, req.RotaDate, nil, actorEmail); err != nil {
 		return domain.ScheduleAssignment{}, err
 	}
 
@@ -1744,6 +1848,12 @@ func applyRangeTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleRangeR
 		}
 		iso := d.Format("2006-01-02")
 
+		// The person's day is locked before anything of it is read, displaced
+		// or checked, so a concurrent write for the same day sees this one.
+		if err := lockPersonDay(ctx, tx, req.UserID, iso); err != nil {
+			return out, err
+		}
+
 		// Refused before anything of the day is touched, though the rollback
 		// would undo it anyway: the whole span is one transaction, so a clash
 		// on its last day leaves its first days as they were too.
@@ -1815,6 +1925,10 @@ func applyRangeTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleRangeR
 			// does not count towards what the caller is told was applied.
 			out.Applied += len(displaced)
 			continue
+		}
+
+		if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.TeamKey, iso, req.MayReplaceOn, actorEmail); err != nil {
+			return out, err
 		}
 
 		var id string
