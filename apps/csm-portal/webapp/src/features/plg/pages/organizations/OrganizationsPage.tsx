@@ -21,15 +21,9 @@ import { useNavigate } from "react-router";
 
 
 import { useOrganizations, useProducts } from "@features/plg/api/hooks";
-import { EmptyState, ErrorBlock, LoadingBlock, PageHeader, StatusChip } from "@features/plg/components/common";
+import { EmptyState, ErrorBlock, LoadingBlock, PageHeader } from "@features/plg/components/common";
 import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
-import {
-  LIFECYCLE_STAGES,
-  SUBSCRIPTION_TIERS,
-  type LifecycleStage,
-  type SubscriptionTier,
-  type UserRef,
-} from "@features/plg/api/types";
+import { SUBSCRIPTION_TIERS, type SubscriptionTier, type UserRef } from "@features/plg/api/types";
 import { CSUserSelect } from "@features/plg/components/CSUserSelect";
 import { formatDate, humanizeEnum } from "@features/plg/utils/format";
 import { selectLabelProps } from "@features/plg/components/selectLabelProps";
@@ -39,11 +33,9 @@ const PAGE_SIZE = 25;
 /**
  * The organisation list.
  *
- * Five columns, which is what the requirement asks for: the organisation, its
- * platforms and their stages, when it registered, who owns it, and which address
- * registered it. Filtering by product, stage or tier matches an organisation when
- * any of its pairings match — the only coherent reading once the stage belongs to
- * the pairing rather than the customer.
+ * Five columns: the organisation, its platforms, when it registered, who owns
+ * it, and which address registered it. Filtering by product or tier matches an
+ * organisation when any of its pairings match.
  */
 /**
  * The two rows that are not engineers. Sentinel ids the query layer already
@@ -61,7 +53,6 @@ export default function OrganizationsPage() {
 
   const [query, setQuery] = useState("");
   const [productCode, setProductCode] = useState("");
-  const [stage, setStage] = useState("");
   const [tier, setTier] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [ownerRef, setOwnerRef] = useState<UserRef | null>(null);
@@ -81,7 +72,6 @@ export default function OrganizationsPage() {
       filters: {
         query: query.trim() || undefined,
         productCodes: productCode ? [productCode] : undefined,
-        lifecycleStages: stage ? [stage as LifecycleStage] : undefined,
         subscriptionTiers: tier ? [tier as SubscriptionTier] : undefined,
         ownerIds: ownerId && ownerId !== "UNASSIGNED" ? [ownerId] : undefined,
         unowned: ownerId === "UNASSIGNED" ? true : undefined,
@@ -90,7 +80,7 @@ export default function OrganizationsPage() {
       sortBy: "registered" as const,
       sortOrder: "desc" as const,
     }),
-    [query, productCode, stage, tier, ownerId, page],
+    [query, productCode, tier, ownerId, page],
   );
 
   const { data, isPending, error } = useOrganizations(request);
@@ -113,7 +103,7 @@ export default function OrganizationsPage() {
 
       <Card sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={1.5}>
-          <Grid size={{ xs: 12, md: 3 }}>
+          <Grid size={{ xs: 12, md: 5 }}>
             <TextField
               fullWidth
               size="small"
@@ -136,24 +126,6 @@ export default function OrganizationsPage() {
               {(products ?? []).map((p) => (
                 <MenuItem key={p.code} value={p.code}>
                   {p.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-            <TextField
-              select
-              {...selectLabelProps(stage)}
-              fullWidth
-              size="small"
-              label="Lifecycle stage"
-              value={stage}
-              onChange={(e) => resetTo(setStage)(e.target.value)}
-            >
-              <MenuItem value="">All stages</MenuItem>
-              {LIFECYCLE_STAGES.map((s) => (
-                <MenuItem key={s} value={s}>
-                  {humanizeEnum(s)}
                 </MenuItem>
               ))}
             </TextField>
@@ -199,7 +171,6 @@ export default function OrganizationsPage() {
               onClick={() => {
                 setQuery("");
                 setProductCode("");
-                setStage("");
                 setTier("");
                 setOwnerId("");
                 // Without this the picker would keep offering the engineer it
@@ -225,7 +196,7 @@ export default function OrganizationsPage() {
               <TableHead>
                 <TableRow>
                   <TableCell>Organisation</TableCell>
-                  <TableCell>Platforms and lifecycle stage</TableCell>
+                  <TableCell>Platforms</TableCell>
                   <TableCell>Registered</TableCell>
                   <TableCell>PLG CS owner</TableCell>
                   <TableCell>Registered email</TableCell>
@@ -246,16 +217,13 @@ export default function OrganizationsPage() {
                     <TableCell>
                       <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                         {org.platformStages.map((ps) => (
-                          <Box key={ps.orgPlatformId} display="flex" alignItems="center" gap={0.5}>
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              label={ps.product.name}
-                              sx={{ fontWeight: 600 }}
-                            />
-                            <StatusChip value={ps.lifecycleStage} kind="lifecycle" />
-                            {ps.isNew ? <Chip size="small" color="warning" label="New" /> : null}
-                          </Box>
+                          <Chip
+                            key={ps.orgPlatformId}
+                            size="small"
+                            variant="outlined"
+                            label={ps.product.name}
+                            sx={{ fontWeight: 600 }}
+                          />
                         ))}
                       </Stack>
                     </TableCell>
