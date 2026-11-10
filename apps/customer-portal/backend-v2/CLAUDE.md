@@ -1056,6 +1056,13 @@ startup on an ambiguous pair.
   `X-Content-Type-Options: nosniff` and a sandboxing CSP are always set here too. A 416 from entity-service becomes
   `entity.RangeNotSatisfiableError` so its `Content-Range` reaches the browser.
 
+**Direct links for large files.** When entity-service has direct transfers on, the upload start answers
+`directUpload: true` for a large file, and two more routes relay entity-service's signed links untouched:
+`POST /attachments/upload/{id}/direct?type=` (one write-only link per chunk) and
+`GET /attachments/download/{id}/link?type=` (a read-only download link). The permission is the create action of the attachment type's module to get upload links, its read action for a download link; entity-service does the access
+check. The links are credentials: the answers are never cached and neither the links nor the answers are logged
+(a failed call logs only a summary of the error). The chunk route and the content route stay, as the fallback.
+
 **Config.** None of this backend's own: `AZURE_STORAGE_*` belong to entity-service. The orphan-file cleanup
 (`POST /attachments/uploads/cleanup`) is entity-service's too.
 

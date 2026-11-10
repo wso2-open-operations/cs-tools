@@ -480,6 +480,13 @@ Attachment files live in Azure Blob Storage, and **entity-service is the only se
 
 **The file client.** `entity.CustomerEntityClient` has a second `http.Client` (`fileHTTP`) for these routes, with **no total timeout** (the ordinary 60 s one would cut off a large download or a slow chunk; the OAuth2 helper copies the token fetch's own 10 s timeout onto the client it returns, so it is cleared explicitly, `TestFileClientHasNoTotalTimeout`). Each file call is bounded by a deadline the handler puts on its context (`attachmentChunkDeadline` 10 min per chunk, `attachmentStreamWriteDeadline` 30 min per download), and the handler extends the server's read and write deadlines for the same calls. Only the file's own headers are passed on (`streamedHeaders`); `X-Content-Type-Options: nosniff` and a sandboxing CSP are always set here too. A 416 from entity-service becomes `entity.RangeNotSatisfiableError` so its `Content-Range` reaches the browser. Entity-service answers refusals in words written for the person ("This case is closed...", "Only the person who uploaded an attachment can delete it", "too many file transfers are in progress"); `mapStoredAttachmentError` passes the 400, 403, 409 and 429 messages on (read only from its JSON envelope, never a raw body), maps 404, 401 as usual, 410 to `attachment_removed`, 502/503/504 to 503 and anything else to a fixed fallback.
 
+**Direct links for large files.** When entity-service has direct transfers on, the upload start answers
+`directUpload: true` for a large file, and two more routes relay entity-service's signed links untouched:
+`POST /attachments/upload/{id}/direct?type=` (one write-only link per chunk) and
+`GET /attachments/download/{id}/link?type=` (a read-only download link). The permission is PermWrite to get upload links, PermDownloadAttachment for a download link; entity-service does the access
+check. The links are credentials: the answers are never cached and neither the links nor the answers are logged
+(a failed call logs only a summary of the error). The chunk route and the content route stay, as the fallback.
+
 **Config.** None of this backend's own: `AZURE_STORAGE_*` belong to entity-service. The orphan-file cleanup (`POST /attachments/uploads/cleanup`) is entity-service's too.
 
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
