@@ -4804,7 +4804,7 @@ type CreateChangeRequestRequest struct {
 	// (the portal's Clone), recorded as change_request.cloned_from_change_request_id
 	// and never changed afterwards. Optional; must be an existing change request
 	// (400). PostgreSQL data sources only: the previous system has no field for
-	// it (the legacy data source refuses it; the dual-write mirror leaves it out).
+	// it (the legacy data source drops it; the dual-write mirror leaves it out).
 	ClonedFromChangeRequestID *string `json:"clonedFromChangeRequestId,omitempty"`
 }
 

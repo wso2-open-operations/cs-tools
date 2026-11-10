@@ -34,7 +34,7 @@ import (
 // from POST /change-requests clonedFromChangeRequestId, and never changed
 // afterwards. Clone lineage is a fact of this database only:
 // the previous system has no field for it (the dual-write mirror leaves it out,
-// the legacy data source refuses it).
+// the legacy data source drops it).
 
 const cloneSourceNotFoundMsg = "clonedFromChangeRequestId does not refer to an existing change request"
 
