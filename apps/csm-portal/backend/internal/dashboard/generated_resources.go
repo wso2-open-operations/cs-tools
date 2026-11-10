@@ -47,6 +47,7 @@ const (
 	valuesRating                       // a flat key's JSON whole number 1 to 5
 	valuesText                         // free text: 1 to maxGeneratedTextValues values, each 1 to maxGeneratedTextLength characters
 	valuesCode                         // a flat key's single string, 1 to maxGeneratedTextLength characters
+	valuesEmail                        // 1 to maxGeneratedTextValues email addresses, each at most maxGeneratedEmailLength characters
 )
 
 // The most values a valuesText list holds, and the longest one (entity-service
@@ -55,6 +56,10 @@ const (
 	maxGeneratedTextValues = 20
 	maxGeneratedTextLength = 100
 )
+
+// maxGeneratedEmailLength is the longest email address a valuesEmail list
+// holds (as entity-service's PLG owner email filter takes).
+const maxGeneratedEmailLength = 254
 
 // valueRule checks a value list: a flat key's list, or a field filter's values.
 type valueRule struct {
@@ -279,6 +284,7 @@ var (
 		"registeredTo":       aDate,
 		"unowned":            {kind: valuesJSONBool},
 		"ownerIds":           onlyMe,
+		"ownerEmails":        {kind: valuesEmail},
 		"countryNames":       {kind: valuesText},
 		"countryUnknown":     {kind: valuesJSONBool},
 		"playbookTask":       {kind: valuesCode},
@@ -287,7 +293,7 @@ var (
 	}
 	plgDateKeys      = map[string]bool{"registeredFrom": true, "registeredTo": true}
 	plgGroupByShapes = []Shape{ShapePie, ShapeBar}
-	plgExclusive     = [][2]string{{"countryNames", "countryUnknown"}, {"playbookAnswers", "playbookUnanswered"}}
+	plgExclusive     = [][2]string{{"countryNames", "countryUnknown"}, {"playbookAnswers", "playbookUnanswered"}, {"ownerEmails", "unowned"}}
 	plgNeeds         = map[string]string{"playbookAnswers": "playbookTask", "playbookUnanswered": "playbookTask"}
 )
 
@@ -553,6 +559,16 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 	case valuesBool:
 		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
 			return fmt.Errorf("%w: %s must be exactly one of \"true\", \"false\"", ErrGeneratedInvalid, at)
+		}
+	case valuesEmail:
+		if len(values) == 0 || len(values) > maxGeneratedTextValues {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d email addresses", ErrGeneratedInvalid, at, maxGeneratedTextValues)
+		}
+		for _, v := range values {
+			v = strings.TrimSpace(v)
+			if local, host, ok := strings.Cut(v, "@"); !ok || local == "" || host == "" || utf8.RuneCountInString(v) > maxGeneratedEmailLength {
+				return fmt.Errorf("%w: %s: each value must be an email address of at most %d characters", ErrGeneratedInvalid, at, maxGeneratedEmailLength)
+			}
 		}
 	case valuesText:
 		if len(values) == 0 || len(values) > maxGeneratedTextValues {

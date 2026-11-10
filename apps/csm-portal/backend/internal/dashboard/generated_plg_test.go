@@ -132,6 +132,36 @@ func TestParseGenerated_AcceptsMyPlgWidgets(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsPlgOwnerEmails checks "owned by <email>":
+// ownerEmails on either PLG type, in a query, a slice, a grouping by owner and
+// a registration line, kept as written.
+func TestParseGenerated_AcceptsPlgOwnerEmails(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"bobs","displayName":"Bob's PLG Organisations","resourceType":"plg_organization","shape":"list","gridWidth":6,"listLimit":5,
+		  "sortBy":{"field":"name","order":"asc"},"query":{"ownerEmails":["Bob.Owner@wso2.com"]}}`,
+		`{"id":"two-owners","displayName":"Registrations of Two Owners","resourceType":"plg_registration","shape":"count","gridWidth":3,
+		  "query":{"ownerEmails":["bob@wso2.com","alice@wso2.com"],"unowned":false}}`,
+		`{"id":"bob-vs-alice","displayName":"Bob and Alice","resourceType":"plg_organization","shape":"pie","gridWidth":6,"query":{},
+		  "slices":[{"label":"Bob","query":{"ownerEmails":["bob@wso2.com"]}},{"label":"Alice","query":{"ownerEmails":["alice@wso2.com"]}}]}`,
+		`{"id":"by-owner","displayName":"Bob and Alice by Owner","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{"ownerEmails":["bob@wso2.com","alice@wso2.com"]},"groupBy":{"field":"owner","maxGroups":5}}`,
+		`{"id":"bobs-signups","displayName":"Bob's Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"ownerEmails":["bob@wso2.com"]},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if got := d.Widgets[0].Query["ownerEmails"]; !reflect.DeepEqual(got, []any{"Bob.Owner@wso2.com"}) {
+		t.Errorf("bobs ownerEmails = %#v, want the address as written", got)
+	}
+	longest := strings.Repeat("a", 242) + "@example.com" // 254 characters
+	if _, err := ParseGenerated([]byte(plgDashboard(`{"id":"w","displayName":"W","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"ownerEmails":["  ` + longest + ` "]}}`))); err != nil {
+		t.Errorf("a 254-character owner email with spaces around it: %v", err)
+	}
+}
+
 // TestParseGenerated_AcceptsPlgOrganisationsByOwner checks "PLG
 // organisations by owner": a pie or bar grouped by owner on the server, with
 // the widget's filters and maxGroups kept.
@@ -273,6 +303,16 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 		{"lower-case stage", org("count", `,"query":{"lifecycleStages":["activated"]}`), `"activated" is not a PLG organisation lifecycle stage`},
 		{"unknown tier", org("count", `,"query":{"subscriptionTiers":["ENTERPRISE"]}`), `"ENTERPRISE" is not a PLG organisation subscription tier`},
 		{"owner ids", org("count", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}`), `query.ownerIds can only be ["__current_user__"]`},
+		{"an owner email as a string", org("count", `,"query":{"ownerEmails":"bob@wso2.com"}`), "ownerEmails must be a list of strings"},
+		{"no owner emails", reg("count", `,"query":{"ownerEmails":[]}`), "ownerEmails must be a list of 1 to 20 email addresses"},
+		{"21 owner emails", org("count", `,"query":{"ownerEmails":["o0@wso2.com","o1@wso2.com","o2@wso2.com","o3@wso2.com","o4@wso2.com","o5@wso2.com","o6@wso2.com","o7@wso2.com","o8@wso2.com","o9@wso2.com","o10@wso2.com","o11@wso2.com","o12@wso2.com","o13@wso2.com","o14@wso2.com","o15@wso2.com","o16@wso2.com","o17@wso2.com","o18@wso2.com","o19@wso2.com","o20@wso2.com"]}`), "ownerEmails must be a list of 1 to 20 email addresses"},
+		{"an owner's name", org("count", `,"query":{"ownerEmails":["Bob"]}`), "each value must be an email address of at most 254 characters"},
+		{"no name before the @", reg("count", `,"query":{"ownerEmails":["@wso2.com"]}`), "each value must be an email address"},
+		{"no domain after the @", org("count", `,"query":{"ownerEmails":["bob@ "]}`), "each value must be an email address"},
+		{"a blank owner email", org("count", `,"query":{"ownerEmails":["bob@wso2.com"," "]}`), "each value must be an email address"},
+		{"a 255-character owner email", org("count", `,"query":{"ownerEmails":["`+strings.Repeat("a", 243)+`@example.com"]}`), "each value must be an email address of at most 254 characters"},
+		{"an owner email and unowned", org("count", `,"query":{"ownerEmails":["bob@wso2.com"],"unowned":true}`), `query: "ownerEmails" and "unowned" cannot be combined`},
+		{"an owner email, and an unowned slice", reg("bar", `,"query":{"ownerEmails":["bob@wso2.com"]},"slices":[{"label":"Unowned","query":{"unowned":true}}]`), `slices[0].query: "ownerEmails" and "unowned" cannot be combined`},
 		{"me and another owner", org("count", `,"query":{"ownerIds":["__current_user__","5e636a12-0000-4000-8000-000000000001"]}`), `query.ownerIds can only be ["__current_user__"]`},
 		{"me as a string", reg("count", `,"query":{"ownerIds":"__current_user__"}`), `ownerIds`},
 		{"free text", org("count", `,"query":{"query":"acme"}`), `"query" is not a PLG organisation filter`},
