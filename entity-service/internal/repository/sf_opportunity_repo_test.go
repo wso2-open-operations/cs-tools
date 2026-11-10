@@ -350,7 +350,7 @@ func TestWriteSfOpportunity_LineItemMoveDerivesPreviousOpportunity(t *testing.T)
 		products:      map[string]string{"00k-moved": "opp-b"},
 	}
 	if _, err := writeSfOpportunity(context.Background(), q, domain.SalesforceOpportunityUpsert{
-		SfID: "006xx", KeepStaleLineItems: true, LineItems: []domain.SalesforceOpportunityLineItemUpsert{lineItem("00k-moved")},
+		SfID: "006xx", LineItems: []domain.SalesforceOpportunityLineItemUpsert{lineItem("00k-moved")},
 	}, oppState("UPDATED")); err != nil {
 		t.Fatal(err)
 	}
