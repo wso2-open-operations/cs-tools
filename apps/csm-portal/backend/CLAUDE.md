@@ -875,6 +875,15 @@ with `PermWrite` a view-only recipient would be handed a dashboard that answers 
 no data: each widget calls its own search route with the viewer's permissions (time cards, incidents
 and change requests keep theirs), so a widget outside the viewer's role fails on its own.
 
+**A closest dashboard's note.** When a request cannot be built exactly, the catalogue (section 1) has the
+model build the closest dashboard it can and add a top-level `note`, one sentence on what differs from the
+request; it declines only when nothing close answers it. `splitGeneratedNote`
+(`internal/handler/dashboard_generator_service.go`) takes the note off each candidate before
+`ParseGenerated` and starts the chat `reply` with it. The note is never part of the dashboard, so the
+draft, a save and a share never carry one, and `ParseGenerated` stays strict: a saved definition with a
+`note` is refused like any unknown field. A note that is not a string or is over
+`generatedNoteMaxChars` (500) makes that candidate invalid.
+
 **Time card totals widgets.** A time card widget may group on the server (`groupBy.field` `state`,
 `user`, `project` or `day`, through `POST /time-cards/aggregate`, see "Time card totals" above), and only
 a time card widget grouped by a field may set `groupBy.measure`: `count` (the default) or `hours`. The
@@ -901,8 +910,8 @@ empty list (leave the field out for both), an unknown or repeated value, and `se
 Every line widget saved or served before the field has none, so none of them changes. The view and the draft
 carry it (`widgetViews` / `widgetTemplates`), so a rename or an edit keeps it:
 `TestDraftToDefinition_KeepsLineSeries`, and the round trip fixture has a line widget with `series`. The
-catalogue (sections 4, 8 and 9) teaches the model when to set it. Deploy this backend before the catalogue
-mounts that teach it: an older backend refuses `series` as an unknown field, so those prompts would fail.
+catalogue (sections 4, 8 and 9) teaches the model when to set it. Deploy this backend before the AI service
+whose catalogue teaches it: an older backend refuses `series` as an unknown field, so those prompts would fail.
 
 **Line widgets: a fixed window.** Instead of `days` (the trailing window ending today), a `line` widget may
 set `startDate` / `endDate` (both inclusive) and `bucket` (`day`, the default, `week` or `month`), so a past
@@ -918,7 +927,7 @@ limit on every day, because a saved dashboard is checked again on every read (`_
 Gregorian cycle (the calendar, weekdays included, repeats every 400 years), once per window and kept
 (`relativeLinePoints`): sampling a few years missed windows that are too long only in rare years. Every line widget saved before these fields has none, so none of them changes. The view
 and the draft carry them: `TestDraftToDefinition_KeepsLineWindow`. Deploy order: entity-service (which
-must accept the fields first), then this backend, then the webapp, then the catalogue mounts. An older
+must accept the fields first), then this backend, then the webapp, then the AI service (its catalogue). An older
 entity-service ignores `startDate` / `endDate` / `bucket` and answers its trailing 30 days without an
 error, so `CaseHandler.VolumeTrend` refuses (502) a fixed window answered without its echo
 (`windowEchoed`) rather than show it as the window. Rolling this backend back once dashboards with `series`

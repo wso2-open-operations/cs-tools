@@ -19043,7 +19043,11 @@ components:
           $ref: '#/components/schemas/Dashboard'
         reply:
           type: string
-          description: The chat message to show for this turn.
+          description: >
+            The chat message to show for this turn. When the request could
+            not be built exactly and the model built the closest dashboard
+            instead, it starts with the model's one-sentence note saying what
+            differs from the request.
     SaveCustomDashboardRequest:
       type: object
       required:
