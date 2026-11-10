@@ -37,6 +37,7 @@ import {
   ENTITY_ATTACHMENT_RATE_LIMIT_MESSAGE,
   entityAttachmentErrorMessage,
   EntityUploadConfirmError,
+  DIRECT_TRANSFER_MIN_BYTES,
   UPLOAD_CHUNK_BYTES,
   UPLOAD_CANCELLED_MESSAGE,
   fetchEntityAttachmentBlob,
@@ -875,6 +876,188 @@ describe("chunked upload and streamed download", () => {
       await run(server.getResponse, save);
       expect(disk.picker).not.toHaveBeenCalled();
       expect(save).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe("direct transfers of large files", () => {
+  const CHUNK = UPLOAD_CHUNK_BYTES;
+  const started = {
+    attachmentId: "att-1",
+    number: "WIA0000001",
+    expiresAt: "2026-10-27T10:15:00Z",
+    maxBytes: 100 * 1024 * 1024,
+    directUpload: true,
+  };
+  const confirmed = { id: "att-1", number: "WIA0000001", name: "big.bin", sizeBytes: 0, status: "COMPLETE" };
+  const bigFile = (size: number) =>
+    ({
+      size,
+      name: "big.bin",
+      type: "application/octet-stream",
+      slice: (from: number, to: number) => new Blob([new Uint8Array(to - from)]),
+    }) as unknown as File;
+  const args = (file: File) => ({ type: "work_item" as const, parentId: "wi-1", file });
+  const linksFor = (count: number) => ({
+    links: Array.from({ length: count }, (_, i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`),
+    chunkBytes: CHUNK,
+    expiresAt: "2026-10-27T10:45:00Z",
+  });
+  const apiFor = (over: Partial<Record<"post" | "postEmpty" | "putBinary" | "get" | "getResponse", ReturnType<typeof vi.fn>>>) =>
+    ({ post: vi.fn(), postEmpty: vi.fn(), putBinary: vi.fn().mockResolvedValue(undefined), get: vi.fn(), getResponse: vi.fn(), ...over }) as unknown as BackendApi;
+  const okResponse = () => Promise.resolve(new Response(null, { status: 201 }));
+
+  beforeEach(() => {
+    window.config = {} as typeof window.config;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("sends each chunk to its own signed link without the session's token, then confirms", async () => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(3));
+    const putBinary = vi.fn();
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK + 5)));
+    expect(postEmpty).toHaveBeenCalledWith("/attachments/upload/att-1/direct?type=work_item");
+    expect(putBinary).not.toHaveBeenCalled();
+    const sent = fetchMock.mock.calls.map((c) => String(c[0])).sort();
+    expect(sent).toEqual([0, 1, 2].map((i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`));
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).method).toBe("PUT");
+      expect((call[1] as RequestInit).headers).toBeUndefined();
+    }
+    expect(post.mock.calls[1][0]).toBe("/attachments/upload/att-1/confirm");
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 3 });
+  });
+
+  it("never asks for links for a file that fits in one chunk, even when the server allows direct", async () => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn();
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(DIRECT_TRANSFER_MIN_BYTES)));
+    expect(postEmpty).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(putBinary).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the chunks through the backend when the links cannot be had", async () => {
+    vi.stubGlobal("fetch", vi.fn(okResponse));
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockRejectedValue(apiError(400, "This upload cannot be sent directly."));
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    expect(putBinary).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
+  });
+
+  it("falls back to the backend, without retrying, when Azure refuses a link", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 403 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2); // one try per chunk in flight, no retries
+    expect(putBinary).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
+  });
+
+  it("tries a chunk again when Azure is busy", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockImplementation(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
+    const putBinary = vi.fn();
+    const done = uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toMatchObject({ status: "COMPLETE" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it("stops, and does not fall back, when the upload is cancelled", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        controller.abort();
+        return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      }),
+    );
+    const post = vi.fn().mockResolvedValueOnce(started);
+    const postEmpty = vi.fn().mockResolvedValue(linksFor(2));
+    const putBinary = vi.fn();
+    await expect(
+      uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), { ...args(bigFile(2 * CHUNK)), signal: controller.signal }),
+    ).rejects.toThrow(UPLOAD_CANCELLED_MESSAGE);
+    expect(putBinary).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1); // never confirmed
+  });
+
+  describe("download", () => {
+    const click = () => vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    it("hands a large file's signed link to the browser as a download", async () => {
+      const clicked = click();
+      const get = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
+      const getResponse = vi.fn();
+      const onSaved = vi.fn();
+      const done = await downloadEntityAttachment(apiFor({ get, getResponse }), {
+        type: "work_item",
+        id: ID,
+        name: "big.bin",
+        size: DIRECT_TRANSFER_MIN_BYTES + 1,
+        onSaved,
+      });
+      expect(done).toBe(true);
+      expect(get).toHaveBeenCalledWith(`/attachments/download/${ID}/link?type=work_item`);
+      expect(clicked).toHaveBeenCalledTimes(1);
+      expect(onSaved).toHaveBeenCalledWith("started");
+      expect(getResponse).not.toHaveBeenCalled(); // nothing streamed through the backend
+    });
+
+    it("streams through the backend when no link is available", async () => {
+      const clicked = click();
+      const body = () =>
+        new Response("0123456789", {
+          status: 206,
+          headers: { "Content-Range": "bytes 0-9/10", "Content-Disposition": 'attachment; filename="big.bin"' },
+        });
+      for (const get of [vi.fn().mockResolvedValue(null), vi.fn().mockRejectedValue(apiError(400, "off"))]) {
+        const getResponse = vi.fn().mockResolvedValue(body());
+        const save = vi.fn();
+        const done = await downloadEntityAttachment(
+          apiFor({ get, getResponse }),
+          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
+          save,
+        );
+        expect(done).toBe(true);
+        expect(getResponse).toHaveBeenCalledTimes(1);
+      }
+      expect(clicked).not.toHaveBeenCalled();
+    });
+
+    it("does not ask for a link for a small file, or when the size is not known", async () => {
+      click();
+      for (const size of [DIRECT_TRANSFER_MIN_BYTES, undefined]) {
+        const get = vi.fn();
+        const getResponse = vi.fn().mockResolvedValue(
+          new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } }),
+        );
+        await downloadEntityAttachment(apiFor({ get, getResponse }), { type: "work_item", id: ID, size }, vi.fn());
+        expect(get).not.toHaveBeenCalled();
+      }
     });
   });
 });
