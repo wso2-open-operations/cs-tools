@@ -59,6 +59,23 @@ func NewCompanyResolver(entity IdentitySource, cloud CloudLookup) *CompanyResolv
 	return &CompanyResolver{entity: entity, cloud: cloud}
 }
 
+// Reveal answers the reveal for one organisation; an unknown id is not found.
+func (r *CompanyResolver) Reveal(ctx context.Context, organizationID string) (domain.CompanyIdentity, error) {
+	if err := validateUUID("organizationId", organizationID); err != nil {
+		return domain.CompanyIdentity{}, err
+	}
+	res, err := r.Resolve(ctx, domain.ResolveCompaniesRequest{OrganizationIDs: []string{organizationID}})
+	if err != nil {
+		return domain.CompanyIdentity{}, err
+	}
+	for _, id := range res.Identities {
+		if id.OrganizationID == organizationID {
+			return id, nil
+		}
+	}
+	return domain.CompanyIdentity{}, &apierror.NotFoundError{Msg: "organisation not found"}
+}
+
 // Resolve answers the reveal for each organisation id.
 func (r *CompanyResolver) Resolve(ctx context.Context, req domain.ResolveCompaniesRequest) (domain.ResolveCompaniesResponse, error) {
 	switch {

@@ -32,11 +32,16 @@ function renderRow(companyId?: string | null) {
 }
 
 function answer(identity: Record<string, unknown> | null) {
-  postMock.mockResolvedValue({ identities: identity ? [{ organizationId: ORG, ...identity }] : [] });
+  if (identity) postMock.mockResolvedValue({ organizationId: ORG, ...identity });
+  else postMock.mockImplementation(async () => {
+    throw Object.assign(new Error("organisation not found"), { status: 404 });
+  });
 }
 
 describe("the reveal", () => {
-  beforeEach(() => postMock.mockReset());
+  beforeEach(() => {
+    postMock.mockReset();
+  });
 
   it("shows the company id and stars, and asks for nothing until the eye is clicked", () => {
     renderRow();
@@ -53,7 +58,7 @@ describe("the reveal", () => {
     expect(await screen.findByText("Acme")).toBeInTheDocument();
     expect(screen.getByText("admin@acme.io")).toBeInTheDocument();
     expect(screen.queryByText("cloud-1")).not.toBeInTheDocument();
-    expect(postMock).toHaveBeenCalledWith("/companies/resolve", { organizationIds: [ORG] });
+    expect(postMock).toHaveBeenCalledWith(`/organizations/${ORG}/reveal`);
 
     fireEvent.click(screen.getByRole("button", { name: "Hide name and email" }));
     expect(await screen.findByText("cloud-1")).toBeInTheDocument();

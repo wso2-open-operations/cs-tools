@@ -673,15 +673,11 @@ export interface DashboardAnalytics {
 /** Where a revealed name and email came from. */
 export type IdentitySource = "DATABASE" | "CLOUD" | "UNRESOLVED" | "FAILED";
 
-/** One organisation's revealed identity (POST /plg/companies/resolve). */
+/** One organisation's revealed identity (POST /plg/organizations/{id}/reveal). */
 export interface CompanyIdentity {
   organizationId: string;
   companyId: string | null;
   organizationName: string | null;
   email: string | null;
   source: IdentitySource;
-}
-
-export interface ResolveCompaniesResponse {
-  identities: CompanyIdentity[];
 }

@@ -99,6 +99,7 @@ type Config struct {
 	// reaches entity-service over HTTP, so this is a base URL.
 	Entity  EntityConfig  `json:"entity"`
 	Cloud   CloudConfig   `json:"cloud"`
+	Reveal  RevealConfig  `json:"reveal"`
 	Server  ServerConfig  `json:"server"`
 	Logging LoggingConfig `json:"logging"`
 }
@@ -117,6 +118,13 @@ type CloudConfig struct {
 	OAuth OAuth2Config `json:"oauth2"`
 	// TimeoutSeconds bounds one call. Defaults to 10.
 	TimeoutSeconds int `json:"timeoutSeconds"`
+}
+
+// RevealConfig caps reveals per user: PLG_REVEAL_LIMIT_PER_MINUTE (default 20)
+// and PLG_REVEAL_LIMIT_PER_DAY (default 300).
+type RevealConfig struct {
+	PerMinute int `json:"perMinute"`
+	PerDay    int `json:"perDay"`
 }
 
 // Enabled reports whether the Cloud API is configured.
@@ -255,6 +263,12 @@ func applyDefaults(c *Config) {
 	if c.Cloud.TimeoutSeconds == 0 {
 		c.Cloud.TimeoutSeconds = 10
 	}
+	if c.Reveal.PerMinute <= 0 {
+		c.Reveal.PerMinute = 20
+	}
+	if c.Reveal.PerDay < c.Reveal.PerMinute {
+		c.Reveal.PerDay = max(300, c.Reveal.PerMinute)
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8090
 	}
@@ -293,6 +307,8 @@ func applyEnvOverrides(c *Config) {
 	setString(&c.Cloud.OrgPath, "CLOUD_API_ORG_PATH")
 	setString(&c.Cloud.UserEmailPath, "CLOUD_API_USER_EMAIL_PATH")
 	setInt(&c.Cloud.TimeoutSeconds, "CLOUD_API_TIMEOUT_SECONDS")
+	setInt(&c.Reveal.PerMinute, "PLG_REVEAL_LIMIT_PER_MINUTE")
+	setInt(&c.Reveal.PerDay, "PLG_REVEAL_LIMIT_PER_DAY")
 	setInt(&c.Server.Port, "PLG_SERVER_PORT")
 	// The only config.json key that had no environment override. It mattered
 	// because Choreo deploys from environment variables alone: the value was

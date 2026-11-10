@@ -205,3 +205,21 @@ func TestCompanyResolver_RefusesABadRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestCompanyResolver_RevealAnswersOneOrganisation(t *testing.T) {
+	r := NewCompanyResolver(identities(), goodCloud())
+
+	got, err := r.Reveal(context.Background(), orgMoesif)
+	if err != nil || got.OrganizationID != orgMoesif || got.Source != domain.IdentityFromDatabase {
+		t.Fatalf("Reveal = %+v, %v", got, err)
+	}
+
+	var nf *apierror.NotFoundError
+	if _, err := r.Reveal(context.Background(), orgMissing); !errors.As(err, &nf) {
+		t.Errorf("unknown organisation: err = %v, want not found", err)
+	}
+	var ve *apierror.ValidationError
+	if _, err := r.Reveal(context.Background(), "not-a-uuid"); !errors.As(err, &ve) {
+		t.Errorf("bad id: err = %v, want a validation error", err)
+	}
+}

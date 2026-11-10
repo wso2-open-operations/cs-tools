@@ -6,7 +6,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 
-import { usePlgApi } from "./client";
+import { usePlgApi, type ApiError } from "./client";
 import type {
   CreatePlaybookRequest,
   DashboardAnalytics,
@@ -27,7 +27,6 @@ import type {
   WorkQueueQuery,
   WorkQueueResponse,
   CompanyIdentity,
-  ResolveCompaniesResponse,
 } from "./types";
 
 /**
@@ -421,10 +420,13 @@ export function useCompanyReveal(organizationId: string): CompanyReveal {
   const query = useQuery({
     queryKey: key,
     queryFn: async () => {
-      const res = await api.post<ResolveCompaniesResponse>("/companies/resolve", {
-        organizationIds: [organizationId],
-      });
-      return res.identities.find((i) => i.organizationId === organizationId) ?? null;
+      try {
+        return await api.post<CompanyIdentity>(`/organizations/${encodeURIComponent(organizationId)}/reveal`);
+      } catch (e) {
+        // A 404 is an organisation that no longer exists.
+        if ((e as ApiError).status === 404) return null;
+        throw e;
+      }
     },
     enabled: false,
     // Never cached: the Cloud Directory API forbids keeping names and emails.

@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"errors"
+	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,11 +25,24 @@ type Handlers struct {
 
 	// companies answers the reveal; nil answers 503.
 	companies *service.CompanyResolver
+	// revealLimit caps reveals per user; nil means no limit.
+	revealLimit RateLimiter
+}
+
+// RateLimiter allows a user's call or says how long to wait.
+type RateLimiter interface {
+	Allow(user string) (ok bool, retryAfter time.Duration, daily bool)
 }
 
 // WithCompanyResolver wires the reveal.
 func (h *Handlers) WithCompanyResolver(r *service.CompanyResolver) *Handlers {
 	h.companies = r
+	return h
+}
+
+// WithRevealLimit caps reveals per user.
+func (h *Handlers) WithRevealLimit(l RateLimiter) *Handlers {
+	h.revealLimit = l
 	return h
 }
 
@@ -145,26 +162,46 @@ func (h *Handlers) GetOrganization(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchOrganization serves PATCH /organizations/{organizationId}.
-// ResolveCompanies serves POST /plg/companies/resolve, the reveal. Audited
-// with ids only, never what was revealed.
-func (h *Handlers) ResolveCompanies(w http.ResponseWriter, r *http.Request) {
+// RevealOrganization serves POST /plg/organizations/{organizationId}/reveal:
+// one organisation's name and owner email. Never cached; audited with the id
+// only, never what was revealed.
+func (h *Handlers) RevealOrganization(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if h.companies == nil {
 		writeServiceError(w, r, &apierror.ServiceUnavailableError{Msg: "company reveal is not configured"})
 		return
 	}
-	var req domain.ResolveCompaniesRequest
-	if !decodeRequest(w, r, &req) {
-		return
+	id := r.PathValue("organizationId")
+	if h.revealLimit != nil {
+		if ok, retryAfter, daily := h.revealLimit.Allow(actor(r)); !ok {
+			auditWrite(r, "reveal identity", errRevealLimited, "organizationId", id)
+			writeRevealLimited(w, retryAfter, daily)
+			return
+		}
 	}
-	res, err := h.companies.Resolve(r.Context(), req)
+	identity, err := h.companies.Reveal(r.Context(), id)
+	auditWrite(r, "reveal identity", err, "organizationId", id)
 	if err != nil {
-		auditWrite(r, "reveal identity", err, "organizationIds", strings.Join(req.OrganizationIDs, ","))
 		writeServiceError(w, r, err)
 		return
 	}
-	auditWrite(r, "reveal identity", nil, "organizationIds", strings.Join(req.OrganizationIDs, ","),
-		"revealed", len(res.Identities))
-	writeJSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, identity)
+}
+
+var errRevealLimited = errors.New("reveal rate limit reached")
+
+// writeRevealLimited is the 429 for a user over the reveal limit.
+func writeRevealLimited(w http.ResponseWriter, retryAfter time.Duration, daily bool) {
+	secs := int(math.Ceil(retryAfter.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	msg := fmt.Sprintf("Too many reveals in a short time. Try again in %d seconds.", secs)
+	if daily {
+		msg = "You've reached the daily limit of reveals. Try again later."
+	}
+	apierror.WriteJSON(w, http.StatusTooManyRequests, msg)
 }
 
 func (h *Handlers) PatchOrganization(w http.ResponseWriter, r *http.Request) {

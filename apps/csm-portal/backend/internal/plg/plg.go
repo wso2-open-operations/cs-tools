@@ -131,7 +131,8 @@ func Mount(
 		service.NewOrgPlatformService(entityclient.OrgPlatformRepo{Client: entity}),
 		service.NewPlaybookService(entityclient.PlaybookRepo{Client: entity}),
 		service.NewAnalyticsService(entityclient.AnalyticsRepo{Client: entity}),
-	).WithCompanyResolver(service.NewCompanyResolver(entity, cloud))
+	).WithCompanyResolver(service.NewCompanyResolver(entity, cloud)).
+		WithRevealLimit(csmhandler.NewGenerateRateLimiter(cfg.Reveal.PerMinute, cfg.Reveal.PerDay))
 
 	// PLG's routes carry one extra middleware of their own: the identity
 	// resolver, which turns the validated caller into the "user".id every PLG
@@ -213,8 +214,8 @@ func register(
 	add("GET /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.GetOrganization)
 	add("PATCH /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.PatchOrganization)
 
-	// The reveal: an organisation's name and email, hidden until asked.
-	add("POST /plg/companies/resolve", csmhandler.PermUsePlg, h.ResolveCompanies)
+	// The reveal: one organisation's name and email, hidden until asked.
+	add("POST /plg/organizations/{organizationId}/reveal", csmhandler.PermUsePlg, h.RevealOrganization)
 
 	// The product tab — one organisation, one platform.
 	add("GET /plg/organizations/{organizationId}/products/{product}", csmhandler.PermUsePlg, h.GetProduct)
