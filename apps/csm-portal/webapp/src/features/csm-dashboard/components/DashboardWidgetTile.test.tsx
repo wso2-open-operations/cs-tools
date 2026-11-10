@@ -1411,6 +1411,64 @@ describe("DashboardWidgetTile", () => {
     });
   });
 
+  describe("PLG organisations of named owners", () => {
+    const ALICE = "5e636a12-0000-4000-8000-000000000001";
+
+    it("counts the named owners' organisations, and links to them", async () => {
+      postMock.mockResolvedValue({ organizations: [], total: 3, limit: 1, offset: 0 });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="bobs-orgs"
+          displayName="Bob's PLG organisations"
+          resourceType="plg_organization"
+          shape="count"
+          filters={{ ownerEmails: ["bob@wso2.com"] }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/search",
+        { filters: { ownerEmails: ["bob@wso2.com"] }, pagination: { offset: 0, limit: 1 } },
+        { signal: expect.any(AbortSignal) },
+      );
+      const params = new URLSearchParams((screen.getByRole("link").getAttribute("href") ?? "").split("?")[1]);
+      expect(params.get("ownerEmails")).toBe("bob@wso2.com");
+    });
+
+    it("a click on an owner's bar opens that owner's organisations, with the named owners kept", async () => {
+      postMock.mockResolvedValue({
+        groups: [{ key: ALICE, label: "Alice Perera", count: 2 }],
+        othersCount: 0,
+        totalRecords: 2,
+      });
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="named-by-owner"
+          displayName="Bob and Alice by owner"
+          resourceType="plg_organization"
+          shape="bar"
+          filters={{ ownerEmails: ["bob@wso2.com", "alice@wso2.com"] }}
+          groupBy={{ field: "owner" }}
+        />,
+        "/dashboard/preview/plg-organizations",
+      );
+
+      fireEvent.click(await screen.findByText("bar:Alice Perera:2"));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        { filters: { ownerEmails: ["bob@wso2.com", "alice@wso2.com"] }, groupBy: "owner", maxGroups: undefined },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get("ownerIds")).toBe(ALICE);
+      expect(params.get("ownerEmails")).toBe("bob@wso2.com,alice@wso2.com");
+    });
+  });
+
   describe("PLG registrations by country", () => {
     const countryPie = (
       <DashboardWidgetTile

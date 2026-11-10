@@ -30,7 +30,7 @@ import {
   WIDGET_RESOURCE_CONFIG,
 } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { readCasesFiltersFromUrl } from "@features/csm-cases/utils/casesFiltersUrl";
-import { WIDGET_TITLE_PARAM } from "@features/csm-dashboard/utils/widgetPreviewUrl";
+import { WIDGET_TITLE_PARAM, parseWidgetPreviewFilters } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 
 function hrefParams(href: string): URLSearchParams {
   const [, qs] = href.split("?");
@@ -829,6 +829,17 @@ describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
     expect(build({ filters: { countryUnknown: ["maybe"] }, offset: 0, limit: 5 }).filters).toEqual({});
   });
 
+  it("keeps `ownerEmails` a list through View more's URL round trip", () => {
+    const ownerEmails = ["bob@wso2.com", "Alice.Perera@wso2.com"];
+    const href = config.buildHref({ ownerEmails, productCodes: ["IAM"] }, { widgetId: "w", displayName: "W" });
+    expect(href.startsWith("/dashboard/preview/plg-organizations?")).toBe(true);
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
+    expect(build({ filters, offset: 0, limit: 5 }).filters).toEqual({ ownerEmails, productCodes: ["IAM"] });
+    expect(build({ filters: { ownerEmails: ["bob@wso2.com"] }, offset: 0, limit: 5 }).filters).toEqual({
+      ownerEmails: ["bob@wso2.com"],
+    });
+  });
+
   it("unwraps `playbookTask`, turns `playbookUnanswered` back into a boolean and keeps `playbookAnswers` a list", () => {
     expect(
       build({
@@ -942,6 +953,17 @@ describe("WIDGET_RESOURCE_CONFIG.plg_registration", () => {
         limit: 5,
       }).filters,
     ).toEqual({ query: "acme", unowned: true, registeredFrom: "2026-07-01T00:00:00Z" });
+  });
+
+  it("keeps `ownerEmails` a list through View more's URL round trip", () => {
+    const ownerEmails = ["bob@wso2.com", "alice@wso2.com"];
+    const href = config.buildHref({ ownerEmails, unacknowledgedOnly: true }, { widgetId: "w", displayName: "W" });
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
+    expect(build({ filters, offset: 0, limit: 5 })).toEqual({
+      unacknowledgedOnly: true,
+      filters: { ownerEmails },
+      pagination: { offset: 0, limit: 5 },
+    });
   });
 
   it("never sends a sort, which the registration search does not take", () => {
