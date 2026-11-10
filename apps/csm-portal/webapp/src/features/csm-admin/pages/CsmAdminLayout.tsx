@@ -66,11 +66,14 @@ export default function CsmAdminLayout(): JSX.Element {
   const hasDashboardsTabAccess = hasDashboardBuilderAccess(user?.roles);
   const hasBannersTabAccess = (user?.roles ?? []).some((role) => role.toLowerCase() === "admin");
   const hasSlaEngineTabAccess = hasBannersTabAccess;
+  // Feature visibility is admin only, the same check as Banners.
+  const hasFeatureVisibilityTabAccess = hasBannersTabAccess;
   const allTabs = useRouteTabs("admin");
   const tabs = useMemo(() => {
     const visible = allTabs.tabs.filter((tab) => {
       if (tab.node.id === "admin.dashboards") return hasDashboardsTabAccess;
       if (tab.node.id === "admin.banners") return hasBannersTabAccess;
+      if (tab.node.id === "admin.feature-visibility") return hasFeatureVisibilityTabAccess;
       if (tab.node.id === "admin.sla-engine") return hasSlaEngineTabAccess;
       return true;
     });
@@ -83,7 +86,13 @@ export default function CsmAdminLayout(): JSX.Element {
       ? allTabs.activeKey
       : (visible[0]?.key ?? "");
     return { ...allTabs, tabs: visible, activeKey };
-  }, [allTabs, hasDashboardsTabAccess, hasBannersTabAccess, hasSlaEngineTabAccess]);
+  }, [
+    allTabs,
+    hasDashboardsTabAccess,
+    hasBannersTabAccess,
+    hasSlaEngineTabAccess,
+    hasFeatureVisibilityTabAccess,
+  ]);
 
   const location = useLocation();
   const { pathname } = location;

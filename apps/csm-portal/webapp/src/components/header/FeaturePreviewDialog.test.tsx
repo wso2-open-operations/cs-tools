@@ -53,17 +53,23 @@ describe("FeaturePreviewDialog", () => {
     setOverrides(undefined);
   });
 
-  it("renders a row for every hidden/WIP feature, with its state badge", () => {
-    setOverrides({ updates: "hidden", engagements: "wip" });
+  it("renders a row for a hidden feature, with its state badge", () => {
+    setOverrides({ updates: "hidden" });
     render(<FeaturePreviewDialog open onClose={vi.fn()} />);
 
     expect(screen.getByText("Updates")).toBeInTheDocument();
     expect(screen.getByText("Hidden")).toBeInTheDocument();
-    expect(screen.getByText("Engagements")).toBeInTheDocument();
-    expect(screen.getByText("WIP")).toBeInTheDocument();
   });
 
-  it("shows the empty state when nothing is hidden or WIP", () => {
+  it("does not list a feature in preview, because an admin already opens it", () => {
+    setOverrides({ updates: "hidden", engagements: "preview" });
+    render(<FeaturePreviewDialog open onClose={vi.fn()} />);
+
+    expect(screen.getByText("Updates")).toBeInTheDocument();
+    expect(screen.queryByText("Engagements")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when nothing is hidden", () => {
     render(<FeaturePreviewDialog open onClose={vi.fn()} />);
     expect(
       screen.getByText("Nothing to preview right now — every feature is already visible to you."),

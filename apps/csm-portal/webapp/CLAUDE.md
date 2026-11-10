@@ -163,17 +163,57 @@ also exposes `isPreviewedOnly` (`featureFlags.ts`) so each resolved `SectionTab`
 `CsmDashboardsLayout.tsx` was simplified in the same change — its own post-filter re-deriving `activeKey` is
 now redundant, since `useRouteTabs` already returns the fully-resolved, capability-and-preview-aware list.
 
-**Deliberately scoped to `useRouteTabs` only** — `useQueryTabs`/`usePathSectionTabs` (Operations, Security
-Center) still resolve tabs from `CSM_PORTAL_FEATURE_OVERRIDES` alone, with no `access`/preview wiring, same as
-before this fix. Operations/Security Center have no `requires`-gated child tabs today, so this wasn't a live
-bug there yet — widening it to those two flavours too, if they ever need it, is a separate, deliberate change,
-not an oversight.
+**All three tab hooks now read the caller's access** (`useTabAccess()` in `useSectionTabs.ts`, which also
+subscribes to the shared per-page state). This used to be scoped to `useRouteTabs` only, because
+`useQueryTabs`/`usePathSectionTabs` (Operations, Security Center) had no `requires`-gated tabs of their own.
+That changed with Preview (below): an admin opens a Preview tab, so Operations' tab strip, its index redirect
+(`SectionIndexRedirect`, `LegacyQueryTabRedirect`) and `firstEnabledPathTab`/`enabledPathTabKeys`/
+`firstEnabledTabHref` all take the caller's `PortalAccess`, or an admin would be sent past a tab they can open.
+A test that renders these hooks without a signed-in user now sees no access (Operations needs
+`canUseOperations`), so it mocks `@context/current-user/CurrentUserContext` with the roles it needs.
 
-**A tab visible only via an admin's own Feature Preview toggle now gets a distinct, filled "Preview" chip**
+## Feature visibility: the shared per-page state, and Preview (replaces WIP)
+
+An admin sets each section and page to **Available** (`enabled`) or **Preview** in Settings > Feature
+visibility (`src/features/csm-admin/feature-visibility/`). The saved map lives in entity-service
+(`GET`/`PUT /features`, one row per nav-node id, never deleted: choosing Available writes `enabled`),
+reaches the app through `useSharedFeatureOverrides` (mounted in `AppLayout`) into `featureOverridesStore.ts`,
+and `featureFlags.ts` reads it instead of `CSM_PORTAL_FEATURE_OVERRIDES`.
+
+* **Source order.** Once an admin has saved (`savedOnce`), only the saved rows count and `config.js` is not
+  read. Before that, `config.js` is the base and any rows (a first save that stopped part-way) sit on top —
+  including a `hidden` section already written as `preview`, which can open an explicitly `enabled` child
+  even though the mark was never set. If the shared map cannot be loaded (old backend, missing table, not
+  staff) the store is cleared and `config.js` alone applies, exactly as before — the loader never blocks the
+  shell, and `FeatureRouteGuard` waits for the first response only briefly (2.5s) so a Preview page never
+  opens for a moment from a stale config.
+* **`preview` replaced `wip`.** A `preview` page is open to an admin only: tagged **Preview**
+  through `isPreviewedOnly` (sidebar badge, filled tab chip) and under a thin `PreviewPageNotice`.
+  An admin (`access.isAdmin`) sees it as `enabled` (`ownFeatureState`). A signed-in person who is
+  not an admin has it resolved to `hidden`, so it is left out of the menu and a direct link is sent
+  away. The menu rule (a `preview` section with an `enabled` page is promoted for the menu) is
+  unchanged; `isPreviewedOnly` uses the state *before* that promotion, so an admin still sees the
+  tag on such a section. `wip` is only read, from `config.js`, as `preview`.
+* **`hidden` is no longer a stored state.** It still exists as a *resolved* result: a role capability the user
+  lacks, a Preview page for someone who is not an admin, or a legacy `hidden` line in `config.js` nobody has
+  saved over yet (that line keeps hiding until the first save writes it as `preview`, including a page under it that was explicitly `enabled`; that page then opens). Settings never offers it.
+* **The browser-local Feature Preview** (`FeaturePreviewDialog`, `featurePreview.ts`) is unchanged and now only
+  has legacy `hidden` lines to offer. It is slated for removal in a follow-up once this has been seen working.
+* **Re-rendering.** `featureState` is a plain function, so anything that renders from it calls
+  `useFeatureOverridesVersion()` (or `useTabAccess()`, which does) to repaint when the map loads or an admin
+  saves. A new consumer must do the same.
+* **A new nav node needs no database row**: it is Available, or follows its section. The Settings page lists
+  every node from `listFeatureNodes()` except shortcuts. Ids are database keys now, so renaming one orphans its row.
+* **Save** (`featureSave.ts`): one write per changed page. The first save also writes every config line that has
+  no row yet (`wip`/`hidden` as `preview`), then the edits, and the last write carries `markSaved`, sent only
+  if every other write succeeded. A save that stops part-way leaves no mark, so `config.js` stays the base,
+  but any rows that already landed still override it (see Source order).
+
+**A tab an admin can open only because of Preview (the shared Preview state, or their own Feature Preview toggle) gets a distinct, filled "Preview" chip**
 (`SectionTabs.tsx`, `tab.previewedOnly`) — solid, in the theme's own primary (button) colour
-(`color="primary" variant="filled"`), deliberately different from the WIP tab's outlined `color="warning"`
+(`color="primary" variant="filled"`), deliberately different from the disabled Preview tab's outlined `color="warning"`
 chip, so an admin previewing a still-restricted feature is never left thinking "I can see this" means "this
-shipped for everyone." The tab itself stays fully enabled and clickable (unlike a WIP tab, which is
+shipped for everyone." The tab itself stays fully enabled and clickable (unlike a Preview tab a non-admin sees, which is
 `disabled`) — only the chip marks it as preview-only. `isPreviewedOnly` (`featureFlags.ts`) compares `id`'s
 resolved state WITH the real preview overrides against its state with none, rather than checking
 `previewOverrides[id]` directly — a parent node can be promoted purely because one of its own DESCENDANTS was
@@ -182,7 +222,7 @@ and the direct check misses that case entirely (found by a CodeRabbit review on 
 
 **The sidebar carries the identical badge** (`CsmSideBar.tsx`, `Sidebar.ItemBadge color="primary"`) on a
 top-level item, a submenu parent (the same descendant-promotion case), and a submenu child — the same
-`isPreviewedOnly` call, same three render paths `featureState(..., "wip")` already has its own WIP badge/dim
+`isPreviewedOnly` call, same three render paths `featureState(..., "preview")` already has its own Preview badge/dim
 treatment in. A sibling descendant that is not itself previewed, under a still-hidden ancestor, is not
 rendered at all (not a bug — it inherits "hidden" the same as it always did); only the admin's own previewed
 node(s) get resurrected.
@@ -223,9 +263,9 @@ interchangeable:
   (Accounts, Projects, Customer Health) and the top-level Customer Health entry is dropped. That dropdown entry
   is a nav *shortcut* (`CsmNavNode.shortcutTo`): it owns no routes and is never a Customers page tab, so the
   route guard, Recent and Pin keep resolving `/customer-health` to the top-level node for every role. A
-  shortcut does not inherit a WIP section's state and does not promote one; it is only offered while its
+  shortcut does not inherit a preview section's state and does not promote one; it is only offered while its
   section is `enabled` for the user, otherwise the owner keeps its own top-level entry (so a deployment that
-  marks Customers WIP does not take Customer Health away from viewers). Feature Preview: a shortcut has no
+  puts Customers in preview does not take Customer Health away from viewers). Feature Preview: a shortcut has no
   toggle of its own (`listPreviewableFeatures` leaves it out, `featureState` ignores a stored value for it, and
   it never counts toward its section's preview promotion); only the owner's preview reaches it. Admins never
   hold the placement flag, so an admin's preview never shows the shortcut or changes what a viewer sees.
@@ -246,7 +286,7 @@ byte-identical to before it.
 
 - Route page components are statically imported (eager), not `React.lazy`-loaded — deliberate, to ship as one JS bundle instead of one chunk per route. Per-route `React.lazy()` caused a real UX bug: navigating to a route not yet visited that session fetched a fresh chunk on the critical path, freezing the UI mid-navigation. See `index.html`'s boot loader (shown until the single bundle finishes loading) for the tradeoff this enables. One dynamic `import()` remains outside routing — the click-triggered PDF export in the Updates feature — since it's not on any navigation path and inlining it would grow the main bundle for a rarely-used feature.
 - Declared with `react-router` v7's JSX `<Routes>`/`<Route>` API, not a data router (`createBrowserRouter`).
-- Everything except `/401`/`/403`/`/404` sits under `<Route element={<AuthGuard />}>` → `<Route element={<FeatureRouteGuard />}>` (a runtime feature-flag/WIP gate keyed by `CSM_PORTAL_FEATURE_OVERRIDES`).
+- Everything except `/401`/`/403`/`/404` sits under `<Route element={<AuthGuard />}>` → `<Route element={<FeatureRouteGuard />}>` (a feature-flag/Preview gate keyed by the shared per-page state, with `CSM_PORTAL_FEATURE_OVERRIDES` as the fallback; `src/components/feature-route-guard/FeatureRouteGuard.tsx`).
   - **Exception**: `/cs-monitor-dashboard` sits under its own `<Route element={<AuthGuard bare />}>`, deliberately OUTSIDE `FeatureRouteGuard`. It's a standalone, full-screen kiosk/wallboard view with no nav entry of its own to be WIP-gated against — `FeatureRouteGuard`'s whole job is keeping a route's availability consistent with its nav entry's `CSM_PORTAL_FEATURE_OVERRIDES` state, which doesn't apply to a route that was never reachable from the nav in the first place. `AuthGuard`'s own `bare` prop still runs the exact same sign-in/redirect/token-refresh logic as every other route — it only skips rendering `AppLayout` (header/sidebar/banners) once authenticated, rendering a bare `<Outlet />` (in its own `Suspense` boundary, since `AppLayout` is otherwise the only place that provides one) instead.
 - Legacy paths (e.g. `/accounts`, `/projects`) are kept as `<Navigate>` redirects for backward compatibility rather than removed outright.
 

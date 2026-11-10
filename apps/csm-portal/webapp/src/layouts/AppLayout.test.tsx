@@ -70,6 +70,8 @@ vi.mock("@components/notification-banner/GlobalNotificationBanner", () => ({
 }));
 vi.mock("@components/mobile-app-banner/MobileAppBanner", () => ({ default: () => null }));
 vi.mock("@components/portal-banners/PortalBanners", () => ({ default: () => null }));
+// The shared per-page feature state loader needs a backend; this file is about the layout.
+vi.mock("@hooks/useFeatureOverrides", () => ({ useSharedFeatureOverrides: () => undefined }));
 vi.mock("@components/header/Header", () => ({ default: () => <div data-testid="header" /> }));
 vi.mock("@components/side-nav-bar/CsmSideBar", () => ({ default: () => null }));
 
