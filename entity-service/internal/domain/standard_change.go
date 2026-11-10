@@ -25,11 +25,12 @@ import "time"
 // the risk, the customer gates -- is frozen on every change request raised from it;
 // only the declared parameters, the schedule and the scope vary per use.
 
-// A proposal is approved in one stage, by the Standard Change Authority
-// (StandardChangeAuthorityGroupName), of whom StandardChangeAuthorityApprovals
-// different people must approve; the proposer cannot. The CAB has no stage of its
-// own: being on it lets nobody decide a proposal.
-const StandardChangeAuthorityApprovals = 2
+// A proposal is approved in one stage, by the CAB (CABApprovalGroupName, the
+// group that approves normal change requests), of whom StandardChangeCABApprovals
+// different people must approve; the proposer cannot, and one rejection ends it.
+// (Until 2026-11-10 a separate "Standard Change Authority" group did this;
+// migration 0289 returned the proposals still waiting on it to draft.)
+const StandardChangeCABApprovals = 2
 
 // StandardChangeTemplateState is a template's lifecycle state.
 type StandardChangeTemplateState string
@@ -45,8 +46,7 @@ const (
 	StandardChangeTemplateStateRetired StandardChangeTemplateState = "retired"
 )
 
-// StandardChangeProposalKind says what a proposal asks the Standard Change
-// Authority to authorise.
+// StandardChangeProposalKind says what a proposal asks the CAB to authorise.
 type StandardChangeProposalKind string
 
 const (
@@ -63,15 +63,17 @@ type StandardChangeProposalState string
 
 const (
 	StandardChangeProposalStateDraft StandardChangeProposalState = "draft"
-	// AuthorityReview: submitted, waiting on the Standard Change Authority. (A
-	// proposal used to go to the CAB first, in cab_review; migration 0287 returned
-	// the ones still there to draft, and no proposal holds that state any more.)
+	// AuthorityReview: submitted, waiting on the CAB's approval. The name is
+	// historical: until 2026-11-10 the authorising group was the "Standard Change
+	// Authority" (migration 0289 moved that to the CAB). (Before 0287 a proposal
+	// went through a separate CAB stage first, in cab_review; 0287 returned the
+	// ones still there to draft, and no proposal holds that state any more.)
 	StandardChangeProposalStateAuthorityReview StandardChangeProposalState = "authority_review"
 	StandardChangeProposalStateApproved        StandardChangeProposalState = "approved"
 	StandardChangeProposalStateRejected        StandardChangeProposalState = "rejected"
 	StandardChangeProposalStateWithdrawn       StandardChangeProposalState = "withdrawn"
-	// Cancelled: a Standard Change Authority member ended an open proposal (its
-	// proposer left or abandoned it), with a reason.
+	// Cancelled: a CAB member ended an open proposal (its proposer left or
+	// abandoned it), with a reason.
 	StandardChangeProposalStateCancelled StandardChangeProposalState = "cancelled"
 )
 
@@ -82,7 +84,7 @@ func (s StandardChangeProposalState) IsOpen() bool {
 }
 
 // IsInReview reports whether a proposal in this state waits on a decision of the
-// Standard Change Authority.
+// CAB.
 func (s StandardChangeProposalState) IsInReview() bool {
 	return s == StandardChangeProposalStateAuthorityReview
 }
@@ -208,7 +210,7 @@ type StandardChangeTemplate struct {
 	// ReviewRequired is raised when a change request raised from the template was
 	// rolled back or deviated from its implementation plan. It does not stop the
 	// template being used: anyone internal may propose a revision or a
-	// retirement, or a Standard Change Authority member clears the flag.
+	// retirement, or a CAB member clears the flag.
 	ReviewRequired              bool       `json:"reviewRequired"`
 	ReviewRequiredReason        *string    `json:"reviewRequiredReason"`
 	ReviewRequiredOn            *time.Time `json:"reviewRequiredOn"`
@@ -218,9 +220,8 @@ type StandardChangeTemplate struct {
 	// /standard-change-templates/{id} only.
 	History []StandardChangeTemplateEvent `json:"history,omitempty"`
 	// What the caller may do now (advisory; every action re-checks). Suspending
-	// is open to the owner, the CAB and the Standard Change Authority; resuming
-	// and clearing the review flag, which put the template back in use without a
-	// review, to the Standard Change Authority only.
+	// is open to the owner and the CAB; resuming and clearing the review flag,
+	// which put the template back in use without a review, to the CAB only.
 	CanSuspend     bool `json:"canSuspend"`
 	CanResume      bool `json:"canResume"`
 	CanClearReview bool `json:"canClearReview"`
@@ -316,14 +317,16 @@ type StandardChangeEvidence struct {
 	Customer *EntityRef `json:"customer"`
 }
 
-// StandardChangeProposalStage is one approval stage of a proposal: the Standard
-// Change Authority's. A proposal decided before migration 0287 removed the CAB
-// stage may also show its "CAB Approval" stage, first (0287 removed it from every
-// open proposal).
+// StandardChangeProposalStage is one approval stage of a proposal: the CAB's
+// ("CAB Approval", two approvals). A proposal decided before 2026-11-10 has a
+// "Standard Change Authority" stage instead (the group that authorised templates
+// until then); one decided before migration 0287 removed the separate CAB stage
+// also shows that older "CAB Approval" stage first, with one required approval
+// (0287 removed it from every open proposal).
 type StandardChangeProposalStage struct {
 	ID string `json:"id"`
-	// Label is the stage's name ("Standard Change Authority"; "CAB Approval" on
-	// a proposal decided before 0287).
+	// Label is the stage's name: "CAB Approval"; "Standard Change Authority" on
+	// a proposal submitted before 2026-11-10.
 	Label string `json:"label"`
 	// RequiredApprovals is how many different approvers must approve it;
 	// Approvals is how many have.
@@ -403,8 +406,7 @@ type StandardChangeProposal struct {
 	CanWithdraw bool `json:"canWithdraw"`
 	// CanDelete: the proposer, on a draft (never submitted).
 	CanDelete bool `json:"canDelete"`
-	// CanCancel: a Standard Change Authority member, on someone else's open
-	// proposal.
+	// CanCancel: a CAB member, on someone else's open proposal.
 	CanCancel bool `json:"canCancel"`
 }
 
@@ -493,7 +495,7 @@ type SearchStandardChangeProposalsRequest struct {
 	AccountID *string `json:"accountId,omitempty"`
 	// ProposedByMe narrows to the caller's own proposals.
 	ProposedByMe bool `json:"proposedByMe,omitempty"`
-	// AwaitingMyDecision narrows to proposals in authority review on which the
+	// AwaitingMyDecision narrows to proposals awaiting CAB approval on which the
 	// caller holds a pending approval.
 	AwaitingMyDecision bool       `json:"awaitingMyDecision,omitempty"`
 	Query              *string    `json:"query,omitempty"`

@@ -98,8 +98,9 @@ import {
   normalizeStandardChangeParameters,
   retirementChangeRequestsInNewText,
   STANDARD_CHANGE_APPROVAL_RULE,
-  STANDARD_CHANGE_AUTHORITY,
-  STANDARD_CHANGE_AUTHORITY_APPROVALS,
+  STANDARD_CHANGE_CAB_APPROVALS,
+  STANDARD_CHANGE_CAB_STAGE,
+  STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE,
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
   STANDARD_CHANGE_PROPOSALS_PATH,
@@ -360,7 +361,7 @@ function EvidenceTable({
   disabled?: boolean;
   /**
    * The proposal's customer: a change request whose project now belongs to
-   * another customer (or to none) is marked, since the authority cannot approve
+   * another customer (or to none) is marked, since the CAB cannot approve
    * the proposal while it cites one.
    */
   customerId?: string | null;
@@ -500,7 +501,7 @@ function ProposalEditor({
     );
   };
 
-  // Submit saves first, so what the authority sees is what is on screen.
+  // Submit saves first, so what the CAB sees is what is on screen.
   const saveAndSubmit = async (): Promise<void> => {
     setNotice(null);
     try {
@@ -897,8 +898,8 @@ function ProposalEditor({
 
       <Section title="Evidence">
         <Typography variant="body2" color="text.secondary">
-          Closed change requests of the proposal&apos;s customer that show this change has been done safely before. The{" "}
-          {STANDARD_CHANGE_AUTHORITY} judges them.
+          Closed change requests of the proposal&apos;s customer that show this change has been done safely before. The
+          CAB judges them.
         </Typography>
         <EvidenceTable
           evidence={form.evidence}
@@ -938,7 +939,7 @@ function ProposalEditor({
             </Typography>
           ) : canSubmitNow ? (
             <Typography variant="body2" color="text.secondary">
-              Ready to submit: two members of the {STANDARD_CHANGE_AUTHORITY} other than you must authorise it.
+              Ready to submit: two CAB members other than you must authorise it.
               Submitting saves first.
             </Typography>
           ) : (
@@ -1091,11 +1092,11 @@ function DecisionDialog({
   const reject = decision === "rejected";
   // From the page as loaded: another member may have authorised since, so it
   // never promises that nothing will be applied.
-  const required = stage?.requiredApprovals ?? STANDARD_CHANGE_AUTHORITY_APPROVALS;
+  const required = stage?.requiredApprovals ?? STANDARD_CHANGE_CAB_APPROVALS;
   const remaining = Math.max(required - (stage?.approvals ?? 0), 1);
   const approveText =
     remaining > 1
-      ? `${required} different members of the ${STANDARD_CHANGE_AUTHORITY} must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
+      ? `${required} different CAB members must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
       : `Yours is the last approval needed: authorising applies the template change.`;
   return (
     <ReasonDialog
@@ -1120,7 +1121,7 @@ function DecisionDialog({
   );
 }
 
-/** A Standard Change Authority member ends someone else's open proposal; the reason is required. */
+/** A CAB member ends someone else's open proposal; the reason is required. */
 function CancelDialog({
   open,
   number,
@@ -1200,8 +1201,9 @@ function ConfirmDialog({
 
 /**
  * One approval stage, named by its own label: its progress and its approvers. A
- * proposal has one stage now, the authority's; one decided or returned to draft
- * before may hold an earlier stage too, numbered in order.
+ * proposal has one stage now, the CAB's ("CAB Approval"); one decided before may
+ * show the Standard Change Authority's instead, and an earlier one-approval CAB
+ * stage too, numbered in order.
  */
 function StageApprovers({
   stage,
@@ -1218,7 +1220,7 @@ function StageApprovers({
   approvers: BeStandardChangeProposalApprover[];
   proposalState: string;
 }): JSX.Element {
-  const label = stage?.label || STANDARD_CHANGE_AUTHORITY;
+  const label = stage?.label || STANDARD_CHANGE_CAB_STAGE;
   const status = !stage
     ? null
     : stage.decision === "APPROVED"
@@ -1288,9 +1290,17 @@ function StageApprovers({
   );
 }
 
-/** Who settled a proposal: the authority, or (on one decided before) the stage named by its own label. */
+/**
+ * Who settled a proposal: the CAB (its two-approval "CAB Approval" stage), the
+ * Standard Change Authority on one decided before 2026-11-10, or, on one decided
+ * before that under the oldest flow, the stage named by its own label (its
+ * one-approval "CAB Approval" stage, told apart by the approvals it needed).
+ */
 function settledBy(verb: "Approved" | "Rejected", stage: BeStandardChangeProposalStage | undefined): string {
-  if (!stage || stage.label === STANDARD_CHANGE_AUTHORITY) return `${verb} by the ${STANDARD_CHANGE_AUTHORITY}`;
+  if (!stage || (stage.label === STANDARD_CHANGE_CAB_STAGE && stage.requiredApprovals >= STANDARD_CHANGE_CAB_APPROVALS)) {
+    return `${verb} by the CAB`;
+  }
+  if (stage.label === STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE) return `${verb} by the ${STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE}`;
   return `${verb} at the ${stage.label} stage`;
 }
 
@@ -1304,7 +1314,10 @@ function decisionHeadline(proposal: BeStandardChangeProposal): string {
     case "rejected":
       return settledBy("Rejected", stages.find((s) => s.decision === "REJECTED"));
     case "cancelled":
-      return `Cancelled by the ${STANDARD_CHANGE_AUTHORITY}`;
+      // By a member of the group its latest stage asked (the CAB since 2026-11-10).
+      return stages[stages.length - 1]?.label === STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE
+        ? `Cancelled by the ${STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE}`
+        : "Cancelled by a CAB member";
     default:
       return "Withdrawn by the proposer";
   }
@@ -1312,11 +1325,11 @@ function decisionHeadline(proposal: BeStandardChangeProposal): string {
 
 /**
  * One standard change proposal (`/operations/standard-change-proposals/:id`): a
- * request to the Standard Change Authority to add a template to the catalogue,
+ * request to the CAB to add a template to the catalogue,
  * revise one or retire one. Its proposer edits a draft here (`canEdit`): the
  * content, generalised with `{{key}}` placeholders, the parameters they need, a
  * live preview and the evidence, then submits it. Everybody else (and the
- * proposer once it is submitted) reads it; an authority member decides on their
+ * proposer once it is submitted) reads it; a CAB member decides on their
  * own row (`canDecide`), and the second approval applies it. A
  * rejected or withdrawn new-template proposal stays as the record and can be
  * copied into a new one.
@@ -1397,7 +1410,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const stages = proposal.stages ?? [];
   const myStage = stages.find((st) => st.id === myRow?.stageId) ?? stages[stages.length - 1] ?? null;
   // One table per stage, oldest first (an older decided proposal may hold a
-  // stage before the authority's). An answer without stages is one table.
+  // stage before its last). An answer without stages is one table.
   const stageGroups =
     stages.length > 0
       ? stages.map((st) => ({ stage: st, rows: approvers.filter((a) => a.stageId === st.id) }))

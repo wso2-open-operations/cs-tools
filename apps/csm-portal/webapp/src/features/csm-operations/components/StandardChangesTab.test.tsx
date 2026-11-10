@@ -331,7 +331,7 @@ describe("StandardChangesTab — proposals", () => {
     const row = within(screen.getByRole("table", { name: "Standard change proposals" })).getAllByRole("row")[1]!;
     expect(row).toHaveTextContent("SCP0000001");
     expect(row).toHaveTextContent("New template");
-    expect(row).toHaveTextContent("Awaiting authorisation");
+    expect(row).toHaveTextContent("Awaiting CAB approval");
     expect(row).toHaveTextContent("Jane Doe");
   });
 
@@ -351,13 +351,13 @@ describe("StandardChangesTab — proposals", () => {
     ]);
   });
 
-  it("offers the proposal states, one review state among them: the authority's", () => {
+  it("offers the proposal states, one review state among them: the CAB's", () => {
     renderTab(PROPOSALS_VIEW);
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "State" }));
     expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual([
       "Any state",
       "Draft",
-      "Awaiting authorisation",
+      "Awaiting CAB approval",
       "Approved",
       "Rejected",
       "Withdrawn",
@@ -383,7 +383,7 @@ describe("StandardChangesTab — proposals", () => {
   it.each([
     ["&scope=awaiting", { awaitingMyDecision: true }, "Awaiting my decision", "Any state"],
     ["&scope=mine&state=draft", { proposedByMe: true, states: ["draft"] }, "Proposed by me", "Draft"],
-    ["&scope=all&state=authority_review", { states: ["authority_review"] }, "All proposals", "Awaiting authorisation"],
+    ["&scope=all&state=authority_review", { states: ["authority_review"] }, "All proposals", "Awaiting CAB approval"],
     // CAB review is no longer a state: an old link's filter is dropped.
     ["&state=cab_review", {}, "All proposals", "Any state"],
     ["&scope=nonsense&state=open", {}, "All proposals", "Any state"],

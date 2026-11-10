@@ -174,7 +174,7 @@ export function standardChangeTemplateUnusableWarning(
   if (!reason) return null;
   if (standardChange.templateState === "retired") return `${reason}. Cancel it, and raise a Normal change if the work is still needed.`;
   if (standardChange.superseded) return `${reason}. Cancel it and raise a new one from the current version.`;
-  return `${reason} by a member of the Standard Change Authority.`;
+  return `${reason} by a CAB member.`;
 }
 
 /**
@@ -242,7 +242,7 @@ export function standardChangeTemplateStateColor(state?: string | null): ChipCol
 
 const PROPOSAL_STATE: Record<BeStandardChangeProposalState, { label: string; color: ChipColor }> = {
   draft: { label: "Draft", color: "default" },
-  authority_review: { label: "Awaiting authorisation", color: "info" },
+  authority_review: { label: "Awaiting CAB approval", color: "info" },
   approved: { label: "Approved", color: "success" },
   rejected: { label: "Rejected", color: "error" },
   withdrawn: { label: "Withdrawn", color: "default" },
@@ -274,20 +274,31 @@ export function isStandardChangeProposalFinal(state?: string | null): boolean {
   return state === "approved" || state === "rejected" || state === "withdrawn" || state === "cancelled";
 }
 
-/** A proposal waiting on the Standard Change Authority's decision. */
+/** A proposal waiting on the CAB's decision (stored state `authority_review`). */
 export function isStandardChangeProposalInReview(state?: string | null): boolean {
   return state === "authority_review";
 }
 
-/** The name of the group that approves a template (the server's `StandardChangeAuthorityGroupName`). */
-export const STANDARD_CHANGE_AUTHORITY = "Standard Change Authority";
+/**
+ * The label of a proposal's approval stage, and the name of the group asked: the
+ * CAB (the server's `CABApprovalGroupName`), the same group and label as a
+ * change request's CAB stage.
+ */
+export const STANDARD_CHANGE_CAB_STAGE = "CAB Approval";
 
-/** How many different members of the authority must approve (the server's `StandardChangeAuthorityApprovals`). */
-export const STANDARD_CHANGE_AUTHORITY_APPROVALS = 2;
+/**
+ * The label of the stage of a proposal submitted before 2026-11-10, when a
+ * separate group, the Standard Change Authority, authorised templates. Read on
+ * older proposals only.
+ */
+export const STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE = "Standard Change Authority";
+
+/** How many different CAB members must approve (the server's `StandardChangeCABApprovals`). */
+export const STANDARD_CHANGE_CAB_APPROVALS = 2;
 
 /** Who approves a template, for the proposal page and its dialogs. */
 export const STANDARD_CHANGE_APPROVAL_RULE =
-  "A standard change skips the CAB every time it is used, so its template is authorised by two different members of the Standard Change Authority. The proposer cannot authorise their own proposal.";
+  "A standard change skips the CAB every time it is used, so its template is authorised by two different CAB members. The proposer cannot authorise their own proposal.";
 
 /** The longest summary the server takes. */
 export const MAX_STANDARD_CHANGE_SUMMARY = 2000;
@@ -348,7 +359,7 @@ export function contentPlaceholderKeys(content: Partial<Pick<BeStandardChangeCon
   return [...seen].sort();
 }
 
-/** The placeholders the content uses that no parameter declares (the authority is never asked while there are any). */
+/** The placeholders the content uses that no parameter declares (the CAB is never asked while there are any). */
 export function undeclaredPlaceholders(
   content: Partial<Pick<BeStandardChangeContent, StandardChangeTextField>>,
   parameters: readonly BeStandardChangeParameter[],
@@ -794,7 +805,7 @@ export function standardChangeRecentEntry(
   };
 }
 
-/** What a proposal still needs before the authority can be asked (the server's `checkStandardChangeProposalComplete`), worded for the form. */
+/** What a proposal still needs before the CAB can be asked (the server's `checkStandardChangeProposalComplete`), worded for the form. */
 export function standardChangeProposalGaps(
   kind: BeStandardChangeProposalKind,
   draft: {

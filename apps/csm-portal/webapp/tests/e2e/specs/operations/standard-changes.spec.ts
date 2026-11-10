@@ -49,8 +49,9 @@
 //      number) and the sidebar's "Change requests" is the one active entry
 //      throughout.
 //   2. The "needs your attention" strip above the catalogue: hidden for jane,
-//      who has nothing pending, and for carol, a CAB member, whom no proposal
-//      asks (the CAB does not decide standard change proposals); for bob (who
+//      who has nothing pending (she is not on the CAB, so no proposal asks
+//      her), and for carol, a CAB member, while no proposal awaits the CAB (the
+//      seed leaves none); for bob (who
 //      has the seed's drafts) it reads the counts Postgres holds, in words,
 //      each part a link to the proposals filtered to it, which lists that
 //      seeded proposal. Hidden on the
@@ -67,10 +68,11 @@
 //      ({{host}} / {{env}}) before sample values are typed, open and filled
 //      side by side (styled differently: the filled one with a dotted
 //      underline) once only the host is typed, and filled with them all
-//      after. He saves and submits it: it awaits the Standard Change Authority
-//      alone (no CAB stage; carol, on the CAB, is not asked); alice finds it
-//      through her attention strip and authorises it, and jane's authorisation,
-//      the second, applies it; the template's page shows the current
+//      after. He saves and submits it: it awaits the CAB, one "CAB Approval"
+//      stage needing two approvals (alice and carol are asked; bob, on the CAB
+//      too, is listed cancelled: nobody decides their own proposal; jane, not on
+//      the CAB, is not asked); alice finds it through her attention strip and
+//      authorises it, and carol's authorisation, the second, applies it; the template's page shows the current
 //      version with its placeholders highlighted and its customer (Example
 //      Corp), and it is in the catalogue as active version 1 of Example Corp;
 //      alice raises a change request from it on the create form (type
@@ -114,13 +116,13 @@
 //
 // The seed must have been run first (scripts/csm-compose/seed-standard-changes.sh).
 // The personas sign in through the local mock identity provider (no password):
-// bob proposes, then alice and jane authorise it as the two members of the
-// "Standard Change Authority" group (the seed makes them its two members, and this
-// spec's beforeAll repeats that idempotently so it does not depend on how recent
-// the seed is; the proposer cannot decide his own), and alice raises
-// and moves the change request. carol, a member of the "CAB Approval" group, has
-// no say over a proposal. jane, with no proposals, has nothing pending until bob
-// submits his.
+// bob proposes, then alice and carol authorise it as members of the CAB, the
+// "CAB Approval" group (scripts/csm-compose/seed-entity-service.sql seats alice,
+// bob and carol there, and this spec's beforeAll makes sure alice and carol are
+// members, idempotently, so it does not depend on how the stack was seeded; the
+// proposer cannot decide his own), and alice raises and moves the change
+// request. jane is not on the CAB: she has no say over a proposal, and nothing
+// pending.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -186,7 +188,7 @@ const OPERATIONS_HEADING = {
 /** Standard changes' heading, the same for the catalogue and the proposals. */
 const STANDARD_CHANGES_HEADING = {
   title: "Standard changes",
-  subtitle: "Pre-authorised change requests, raised from templates the Standard Change Authority has approved.",
+  subtitle: "Pre-authorised change requests, raised from templates two CAB members have approved.",
 };
 /** What the user complained about: the standard change views headed with the entities they have nothing to do with. */
 const OTHER_OPERATIONS_ENTITIES = /service requests?|incidents?|problems?|runbooks?/i;
@@ -603,14 +605,16 @@ test.describe("standard changes (real stack)", () => {
 
   test.beforeAll(async () => {
     await cleanUp();
-    // The Standard Change Authority (migration 0277) is created empty: alice and jane are its two members here, so
-    // a proposal bob makes has the two different authorisers it needs (submit refuses one without). Idempotent.
+    // The CAB ("CAB Approval", migration 0188) authorises proposals: alice and carol are members here (the entity
+    // seed seats them with team_member rows), so a proposal bob makes has the two different authorisers it needs
+    // (submit refuses one without). A person who is a member in neither form gets a group_member row. Idempotent.
     await psql(`
       INSERT INTO group_member (id, created_on, updated_on, created_by, updated_by, group_id, user_id)
       SELECT gen_random_uuid(), now(), now(), 'e2e', 'e2e', g.id, u.id
-        FROM "group" g CROSS JOIN "user" u
-       WHERE g.name = 'Standard Change Authority' AND lower(u.email) IN (lower('${USERS.alice}'), lower('${USERS.jane}'))
-         AND NOT EXISTS (SELECT 1 FROM group_member gm WHERE gm.group_id = g.id AND gm.user_id = u.id);`);
+        FROM (SELECT id FROM "group" WHERE name = 'CAB Approval' ORDER BY created_on, id LIMIT 1) g CROSS JOIN "user" u
+       WHERE lower(u.email) IN (lower('${USERS.alice}'), lower('${USERS.carol}'))
+         AND NOT EXISTS (SELECT 1 FROM group_member gm JOIN "group" gg ON gg.id = gm.group_id WHERE gg.name = 'CAB Approval' AND gm.user_id = u.id)
+         AND NOT EXISTS (SELECT 1 FROM team_member tm JOIN "group" gg ON gg.id = tm.group_id WHERE gg.name = 'CAB Approval' AND tm.user_id = u.id);`);
   });
   test.afterAll(async () => {
     if (POSTGRES_CONTAINER && realStackNamed()) await cleanUp();
@@ -943,7 +947,7 @@ test.describe("standard changes (real stack)", () => {
     }
   });
 
-  test("the attention strip above the catalogue: nothing for jane or for carol (the CAB), bob's drafts linking to them", async ({ browser }) => {
+  test("the attention strip above the catalogue: nothing for jane or for carol (nothing awaits the CAB), bob's drafts linking to them", async ({ browser }) => {
     test.setTimeout(180_000);
 
     // jane: no proposal awaits her and she has no draft, so there is no strip at all.
@@ -981,8 +985,8 @@ test.describe("standard changes (real stack)", () => {
       await jane.context().close();
     }
 
-    // carol sits on the CAB, which does not decide a standard change proposal: nothing awaits her, so no strip.
-    expect(await pendingFor(USERS.carol), "carol (CAB) has nothing pending in Postgres").toEqual({ awaiting: 0, drafts: 0 });
+    // carol sits on the CAB, which decides proposals, but the seed leaves none awaiting it: nothing awaits her, so no strip.
+    expect(await pendingFor(USERS.carol), `carol (CAB) has nothing pending in Postgres (${SEED_HINT})`).toEqual({ awaiting: 0, drafts: 0 });
     const carol = await signedIn(browser, USERS.carol, "/operations");
     try {
       await openStandardChangesCounted(carol);
@@ -1025,7 +1029,7 @@ test.describe("standard changes (real stack)", () => {
     }
   });
 
-  test("propose from a closed change request, two members of the Standard Change Authority authorise it, raise a change request from the template, roll it back: the template needs review", async ({ browser }) => {
+  test("propose from a closed change request, two CAB members authorise it, raise a change request from the template, roll it back: the template needs review", async ({ browser }) => {
     test.setTimeout(360_000);
 
     // The evidence: a closed change request of Example Corp (its project's customer), raised and walked through the
@@ -1153,7 +1157,7 @@ test.describe("standard changes (real stack)", () => {
       await shot(bob, "07-proposal-preview-with-sample-values", preview);
 
       await expect(
-        main.getByText("Ready to submit: two members of the Standard Change Authority other than you must authorise it. Submitting saves first."),
+        main.getByText("Ready to submit: two CAB members other than you must authorise it. Submitting saves first."),
       ).toBeVisible();
       const [saved] = await Promise.all([
         bob.waitForResponse((r) => r.request().method() === "PATCH" && /\/standard-change-proposals\/[^/]+$/.test(r.url())),
@@ -1162,18 +1166,20 @@ test.describe("standard changes (real stack)", () => {
       expect(saved.status(), await saved.text()).toBe(200);
 
       await main.getByRole("button", { name: "Submit for approval" }).click();
-      await expect(main.getByText("Awaiting authorisation", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(main.getByText("Awaiting CAB approval", { exact: true })).toBeVisible({ timeout: 15_000 });
       await expect(main.getByRole("heading", { name: TEMPLATE_NAME })).toBeVisible();
-      // One stage, the authority's: its two members are asked at once, the proposer is not, and there is no CAB stage.
+      // One stage, the CAB's: its members are asked at once, the proposer (on the CAB too) is listed cancelled, and
+      // jane, not on the CAB, is not asked.
       const approval = main.getByRole("region", { name: "Approval" });
-      const authority = main.getByRole("region", { name: "Standard Change Authority approvers" });
-      await expect(authority).toContainText("0 of 2 approvals");
-      const approvers = main.getByRole("table", { name: "Standard Change Authority approvers" });
+      const cab = main.getByRole("region", { name: "CAB Approval approvers" });
+      await expect(cab).toContainText("0 of 2 approvals");
+      const approvers = main.getByRole("table", { name: "CAB Approval approvers" });
       await expect(approvers.getByRole("row").filter({ hasText: "Alice Perera" })).toContainText("Requested");
-      await expect(approvers.getByRole("row").filter({ hasText: "Jane Doe" })).toContainText("Requested");
-      await expect(approvers.getByRole("row").filter({ hasText: "Bob Fernando" })).toHaveCount(0);
+      await expect(approvers.getByRole("row").filter({ hasText: "Carol Silva" })).toContainText("Requested");
+      await expect(approvers.getByRole("row").filter({ hasText: "Bob Fernando" })).not.toContainText("Requested");
+      await expect(approvers.getByRole("row").filter({ hasText: "Jane Doe" })).toHaveCount(0);
       await expect(main.getByRole("region", { name: /approvers$/ })).toHaveCount(1);
-      await expect(approval).not.toContainText("CAB Approval");
+      await expect(approval).not.toContainText("Standard Change Authority");
       // The proposer is not one of the deciders, and has no Authorise of his own.
       await expect(approval.getByRole("button", { name: /^(Approve|Authorise)$/ })).toHaveCount(0);
       await shot(bob, "08-proposal-awaiting-authorisation", approval);
@@ -1181,7 +1187,7 @@ test.describe("standard changes (real stack)", () => {
       await bob.context().close();
     }
 
-    // The API says the same: one stage, the authority's, needing two approvals; carol (the CAB) is asked nothing.
+    // The API says the same: one stage, the CAB's, needing two approvals; jane (not on the CAB) is asked nothing.
     const proposalId = decodeURIComponent(proposalUrl.split("/").pop()!);
     const submitted = await staff("bob").request<{ state: string; stages: Array<{ label: string; requiredApprovals: number }> }>(
       "GET",
@@ -1189,8 +1195,9 @@ test.describe("standard changes (real stack)", () => {
     );
     expect(submitted.status, JSON.stringify(submitted.body)).toBe(200);
     expect(submitted.body.state).toBe("authority_review");
-    expect(submitted.body.stages.map((st) => [st.label, st.requiredApprovals])).toEqual([["Standard Change Authority", 2]]);
-    expect((await pendingFor(USERS.carol)).awaiting, "the CAB is not asked about a proposal").toBe(0);
+    expect(submitted.body.stages.map((st) => [st.label, st.requiredApprovals])).toEqual([["CAB Approval", 2]]);
+    expect((await pendingFor(USERS.jane)).awaiting, "someone not on the CAB is not asked about a proposal").toBe(0);
+    expect((await pendingFor(USERS.carol)).awaiting, "the CAB is asked").toBeGreaterThan(0);
 
     // ---- alice finds it through her attention strip and authorises it: the first of the two -------------------
     const alicePage = await signedIn(browser, USERS.alice, "/operations");
@@ -1213,7 +1220,7 @@ test.describe("standard changes (real stack)", () => {
       await main.getByRole("textbox", { name: "Search proposals by number or name" }).fill(TEMPLATE_NAME);
       const mine = main.getByRole("table", { name: "Standard change proposals" }).getByRole("row").filter({ hasText: TEMPLATE_NAME });
       await expect(mine).toHaveCount(1);
-      await expect(mine.getByRole("cell").nth(P("State"))).toHaveText("Awaiting authorisation");
+      await expect(mine.getByRole("cell").nth(P("State"))).toHaveText("Awaiting CAB approval");
       await mine.click();
       await expect(alicePage).toHaveURL(new RegExp(`${escapeRegExp(proposalUrl)}$`));
 
@@ -1227,9 +1234,9 @@ test.describe("standard changes (real stack)", () => {
       await dialog.getByRole("textbox", { name: /^Comment/ }).fill("Low risk and well rehearsed.");
       await dialog.getByRole("button", { name: "Authorise", exact: true }).click();
       await expect(dialog).toBeHidden();
-      await expect(main.getByText("Awaiting authorisation", { exact: true })).toBeVisible();
+      await expect(main.getByText("Awaiting CAB approval", { exact: true })).toBeVisible();
       await expect(main.getByRole("region", { name: "Decision" })).toHaveCount(0);
-      await expect(main.getByRole("region", { name: "Standard Change Authority approvers" })).toContainText("1 of 2 approvals");
+      await expect(main.getByRole("region", { name: "CAB Approval approvers" })).toContainText("1 of 2 approvals");
       // She has decided: nothing more for her here.
       await expect(approval.getByRole("button", { name: /^(Approve|Authorise)$/ })).toHaveCount(0);
       await shot(alicePage, "08b-proposal-one-of-two-authorisations", approval);
@@ -1238,26 +1245,26 @@ test.describe("standard changes (real stack)", () => {
       await alicePage.context().close();
     }
 
-    // ---- jane authorises it: the second authorisation applies it ------------------------------------------------
-    const janePage = await signedIn(browser, USERS.jane, proposalUrl);
+    // ---- carol authorises it: the second authorisation applies it -----------------------------------------------
+    const carolPage = await signedIn(browser, USERS.carol, proposalUrl);
     try {
-      const main = janePage.getByRole("main");
+      const main = carolPage.getByRole("main");
       const approval = main.getByRole("region", { name: "Approval" });
       await expect(approval.getByRole("button", { name: "Authorise" })).toBeVisible({ timeout: 20_000 });
       await approval.getByRole("button", { name: "Authorise" }).click();
-      const dialog = janePage.getByRole("dialog", { name: "Authorise the proposal" });
+      const dialog = carolPage.getByRole("dialog", { name: "Authorise the proposal" });
       await expect(dialog).toContainText("Yours is the last approval needed");
       await dialog.getByRole("button", { name: "Authorise", exact: true }).click();
       await expect(dialog).toBeHidden();
       const decision = main.getByRole("region", { name: "Decision" });
-      await expect(decision).toContainText("Approved by the Standard Change Authority");
-      await expect(decision).not.toContainText("CAB");
+      await expect(decision).toContainText("Approved by the CAB");
+      await expect(decision).not.toContainText("Standard Change Authority");
       // The template is named by its catalogue number and name.
       await expect(decision).toContainText(new RegExp(`Resulting template: STD\\d+ ${escapeRegExp(TEMPLATE_NAME)}, version 1`));
-      await expect(main.getByRole("region", { name: "Standard Change Authority approvers" })).toContainText("Approved");
-      await shot(janePage, "08c-proposal-authorised", decision);
+      await expect(main.getByRole("region", { name: "CAB Approval approvers" })).toContainText("Approved");
+      await shot(carolPage, "08c-proposal-authorised", decision);
     } finally {
-      await janePage.context().close();
+      await carolPage.context().close();
     }
 
     // ---- carol opens the template it wrote ----------------------------------------------------------------------

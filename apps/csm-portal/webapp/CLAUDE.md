@@ -706,8 +706,9 @@ The previous system has no Emergency CAB and acts on an Emergency change **witho
 
 ## Standard changes: templates, proposals, and a change raised from one
 
-A standard change is raised only from an approved template: authorised by two different members of the Standard Change
-Authority, in one stage; the CAB does not decide a proposal (it used to, before the authority, until 2026-11-06)
+A standard change is raised only from an approved template: authorised by two different CAB members, in one "CAB
+Approval" stage (until 2026-11-10 a separate Standard Change Authority group did; before 2026-11-06 a one-approval CAB
+stage came first)
 (entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
 thin proxy that keeps entity-service's 400 / 403 / 404 / 409 words and `errorCode`). Hooks: `api/useStandardChanges.ts` (every
 write invalidates `STANDARD_CHANGES_KEY`, refused or not); pure rules mirroring `standard_change_template.go` (key shape,
@@ -790,7 +791,7 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     (`/operations?tab=standard_changes|standard-changes[&view=proposals]`, `/operations/standard-changes[?view=proposals]`)
     is redirected the same way (`OperationsLegacyRedirects`, `legacyStandardChangesHref`).
   - **Heading.** On Standard changes the page heading is "Standard changes" with "Pre-authorised change requests,
-    raised from templates the Standard Change Authority has approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
+    raised from templates two CAB members have approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
     and the proposals alike, never the Operations-wide "Service requests, change requests, incidents, problems, and
     runbooks" line, which every other Operations tab (the change request list included) keeps.
   - **Template and proposal pages.** The Change requests nav node owns `/operations/standard-changes` and
@@ -853,7 +854,7 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code. While the
     change request is still New and its template is retired, suspended or revised since (`templateState`,
     `superseded`) the banner also turns `warning` and says approval cannot be requested and what is left: cancel and
-    raise a Normal change / wait for the authority to resume it / cancel and raise from the current version
+    raise a Normal change / wait for a CAB member to resume it / cancel and raise from the current version
     (`standardChangeTemplateUnusableWarning`; the backend's 409 `standard_change_template_unavailable`), and the action
     bar disables Request Approval / Schedule with the reason (`requestApprovalNeedsUsableTemplateReason`, first in
     `TARGET_BLOCKED_REASON.assess`; null for a change not raised from a template, so nothing changes for Normal or
@@ -873,9 +874,9 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   the note, the flagging change request or the retirement proposal, who), Propose a revision /
   retirement (disabled while one is open: `openProposal`), Raise a change request (`?standardChangeTemplateId=`).
   Suspend, Resume and Clear review follow the server's `canSuspend` / `canResume` / `canClearReview`: Suspend for the
-  owner, the CAB and the Standard Change Authority (optional reason); Resume and Clear review for the authority only,
+  owner and the CAB (optional reason); Resume and Clear review for the CAB only,
   each with a required note in its confirmation (the hooks take `{id, note}`); otherwise the suspended notice and the
-  review flag say "Only a member of the Standard Change Authority can resume it" / "... clears it once reviewed".
+  review flag say "Only a CAB member can resume it" / "... a CAB member clears it once reviewed".
 - **Proposal** `/operations/standard-change-proposals/:id` (`StandardChangeProposalPage`): the proposer's editor while `canEdit`
   (a required **Summary** under the name; parameters editor, "Insert {{…}}" per text field; **Priority** ("Chosen per
   change" = `""`) and **Deployment types** (multi-select, none = "Any deployment") beside the classification; the
@@ -885,24 +886,27 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   Withdraw. A **retirement** shows its Name disabled (named after the template; the server refuses another) and asks
   only for the rationale and evidence; while it is open, a warning lists the template's change requests still New
   (`changeRequestsInNew`, "and N more" past 100, `retirementChangeRequestsInNewText`): once it is retired they can only
-  be cancelled. A complete draft reads "Ready to submit: two members of the Standard Change Authority other than you must
-  authorise it." Submit goes straight to `authority_review` ("Awaiting authorisation"; there is no `cab_review` state
+  be cancelled. A complete draft reads "Ready to submit: two CAB members other than you must
+  authorise it." Submit goes straight to `authority_review` ("Awaiting CAB approval"; there is no `cab_review` state
   any more, in the type or the State filter, and an old `state=cab_review` link's filter is dropped). Read-only
-  otherwise, with an **Approval** section: the rule (`STANDARD_CHANGE_APPROVAL_RULE`: two different members, never the
+  otherwise, with an **Approval** section: the rule (`STANDARD_CHANGE_APPROVAL_RULE`: two different CAB members, never the
   proposer) and one table per stage (`proposal.stages`, approver rows by `stageId`), **rendered generically**: each
   stage by its own `label` and count ("1 of 2 approvals"), numbered only when there is more than one, with no
-  CAB-specific code. A proposal has one stage, the authority's; one decided before migration 0287 may also hold an earlier "CAB Approval" stage (0287 removed it
-  from every open proposal),
-  shown as "1. CAB Approval" above "2. Standard Change Authority". **Authorise** / Reject on the
+  CAB-specific code. A proposal has one stage, the CAB's (`STANDARD_CHANGE_CAB_STAGE`, "CAB Approval", 2 approvals);
+  one decided before 2026-11-10 has a "Standard Change Authority" stage (`STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE`)
+  instead, and one decided before migration 0287 an earlier one-approval "CAB Approval" stage too, shown as "1. CAB
+  Approval" above "2. Standard Change Authority". **Authorise** / Reject on the
   viewer's own `canDecide` row (there is no Approve); the dialog says whether a second member must still approve or
-  this one applies it (`STANDARD_CHANGE_AUTHORITY_APPROVALS` when the answer has no stage); the decision sends the
+  this one applies it (`STANDARD_CHANGE_CAB_APPROVALS` when the answer has no stage); the decision sends the
   `stageId` of the row it was offered on, so one from a page loaded before that stage was settled or closed is refused
   (409, the page reloads). Only the latest stage can read as open, "Withdrawn" or "Cancelled"; an earlier stage left
   undecided reads "Not decided", never as waiting. The read-only view shows the Summary above what the template specifies. A rejection needs a comment.
-  `canCancel` (an authority member, someone else's open proposal) offers **Cancel proposal** with a required reason.
-  The decision banner names the stage that ended it (`decisionHeadline`: "Approved by" / "Rejected by the Standard
-  Change Authority"; an older proposal settled at another stage, "Approved at the CAB Approval stage"; withdrawn,
-  cancelled). "Copy into a new proposal" only for a rejected / withdrawn / cancelled **new** proposal: the API's
+  `canCancel` (a CAB member, someone else's open proposal) offers **Cancel proposal** with a required reason.
+  The decision banner names who ended it (`decisionHeadline` / `settledBy`: "Approved by" / "Rejected by the CAB" for
+  the two-approval "CAB Approval" stage; "... by the Standard Change Authority" for that older stage; an older
+  proposal settled at its one-approval CAB stage, "Approved at the CAB Approval stage", told apart by
+  `requiredApprovals`; withdrawn; "Cancelled by a CAB member", or by the Standard Change Authority when that was the
+  latest stage). "Copy into a new proposal" only for a rejected / withdrawn / cancelled **new** proposal: the API's
   `copyFromProposalId` starts new templates only.
 - **Create form**: type Standard shows a template picker (active only, of the project's customer, each result with its
   summary as a second line: `AsyncEntitySelect getCaption`), "Change specifics" (one input per parameter type) and a

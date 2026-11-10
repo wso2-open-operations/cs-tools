@@ -1107,7 +1107,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary">
-                  A standard change is raised from a template the Standard Change Authority has approved and needs no
+                  A standard change is raised from a template two CAB members have approved and needs no
                   approval of its own. What the template specifies is fixed; fill in its change specifics below.
                 </Typography>
                 <AsyncEntitySelect<BeStandardChangeTemplate>

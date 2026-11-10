@@ -8386,10 +8386,10 @@ so that function, and the internal caller's right to stamp the flags, are gone:
   code's own `ForbiddenError` instead of `work_item`'s RLS `NotFoundError`; the tests' doc comments
   say so, and the suite is also run as `csm_app` (RLS enforced).
 
-## Standard changes: templates, proposals and the Standard Change Authority
+## Standard changes: templates, proposals and the CAB's authorisation
 
 A **standard change** is pre-authorised at the level of its *template* (ITIL 4 change enablement):
-two members of the Standard Change Authority approve a template once, and every change request
+two CAB members approve a template once, and every change request
 raised from it follows it without a CAB stage of its own. Before this, choosing Standard opened the ordinary create form with every field
 free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repository and
 service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
@@ -8398,7 +8398,8 @@ migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, n
 (the customer: `account_id` on template and proposal), `0277` (the authority, its stage,
 summary / priority / deployment types, the template history), `0287` (no CAB stage: the proposals
 still in CAB review returned to draft, `CAB_REVIEW` out of the state check), `0288` (retirement in the
-template history: `RETIRED` and `proposal_id`, backfilled; retired templates' review flags cleared) and `100026` / `100028`
+template history: `RETIRED` and `proposal_id`, backfilled; retired templates' review flags cleared), `0289` (the CAB
+authorises: proposals still waiting on the authority returned to draft) and `100026` / `100028`
 (row-level security). PostgreSQL data sources only; every route is `internalOnly`.
 
 **Tables.** `standard_change_template` (STD number, its customer `account_id`, name unique among the
@@ -8473,13 +8474,13 @@ is its project's account.
   completed (closed): CHG.. (another customer: X)"), checked at create (from a change request, and for a
   copy, which carries the copied proposal's source change request over) and again at Submit.
 - **Approval re-checks both** (`checkProposalCustomerAtDecision`, NEW and MODIFY), at the
-  authority's final approval (in `applyApprovedProposal`): a source change request
+  CAB's final approval (in `applyApprovedProposal`): a source change request
   or a piece of evidence that is no longer a closed change request of the proposal's customer (its
   project moved after Submit) makes the approval a **409** ("this proposal cannot be approved now: ...
   reject it, or ask the proposer to withdraw it and propose again"), written nothing (the decision's
   transaction rolls back, the rows stay REQUESTED). A
   rejection is still accepted. Each evidence item reads its current `customer` {id, name}, so the
-  authority sees which one moved.
+  CAB sees which one moved.
 - **Projects move.** A change request's customer is its project's account, and the Salesforce project
   sync (`salesforce_project_repo.go`, `updateSalesforceProjectQuery`) can re-parent a project to
   another account. The sync is the source of truth and is NOT blocked; instead what depends on the
@@ -8514,38 +8515,48 @@ is its project's account.
 mark the varying bits as `{{key}}` placeholders, each declared as a parameter (text, textarea,
 number, date, select; up to 30). A new proposal can start from a closed change request (its content
 is copied and it becomes the first evidence) or copy an earlier proposal (a rejected one, say).
-Evidence is any number of closed change requests: the authority judges it. Submit checks completeness
+Evidence is any number of closed change requests: the CAB judges it. Submit checks completeness
 (name, rationale, **summary** (what the template is for, when to use it, what it does not cover; plain
 text, no placeholders, at most 2000 characters), subject, **description**, the three plans, impact, a
 risk that is not high, every placeholder declared) and opens the proposal's one approval stage
 (`DRAFT` -> `AUTHORITY_REVIEW`).
 
-**One stage: the Standard Change Authority** (0277; the CAB stage before it was removed by 0287, the
-user's decision: "the two Standard Change Authority approvals are adequate").
-`domain.StandardChangeAuthorityGroupName` is a named `"group"` created empty by 0277 with id `…05ca`,
-resolved by name like the CAB; its members are the heads of SaaS SRE, of each SaaS ABT and of SRE,
-added as `team_member.group_id` / `group_member` rows by an operator (there is no admin API). The
-stage (`standardChangeAuthorityCheckpoint`, position 0, label "Standard Change Authority") lists its
-active internal members, the proposer listed cancelled by every user row of their email
+**One stage: the CAB** (the user's rule, 2026-11-10: "Two CAB approvals to make a change template
+viable"; migration 0289). The group is the CAB that approves normal change requests,
+`domain.CABApprovalGroupName` ("CAB Approval", 0188), resolved by name through the same
+`resolveApprovalPool` / `namedGroup` as a change request's CAB stage (members: `team_member.group_id`,
+`group_member`, a team of that name; active internal users only). The stage
+(`standardChangeCABCheckpoint`, position 0, label "CAB Approval", `assignment_group_id` the CAB) lists
+those members, the proposer listed cancelled by every user row of their email
 (`changeRequestCreatorUserIDs`). `approval_stage.required_approvals` (0277, default 1, so every change
-request stage is unchanged) is `domain.StandardChangeAuthorityApprovals` = 2: the stage stays open
-until two different members approve, each once; the second approval applies the proposal. Any
-rejection ends it and needs a comment. Being on the CAB lets nobody decide a proposal: only a
-REQUESTED row on the stage does (403 otherwise). **People, not user rows**: `"user".email` is not
-unique, so the quorum and the approvals a proposal's `stages` show both count distinct emails of
-APPROVED rows (`stageApprovalsSQL`), an approval cancels the approver's other REQUESTED rows on the
-stage, a second decision by an email that already approved is a 403, and `resolveAuthorityPool`
-counts eligible members by distinct email.
+request stage is unchanged) is `domain.StandardChangeCABApprovals` = 2: the stage stays open until two
+different CAB members approve, each once; the second approval applies the proposal. Any rejection ends
+it and needs a comment. Only a REQUESTED row on the stage lets someone decide (403 otherwise).
+**People, not user rows**: `"user".email` is not unique, so the quorum and the approvals a proposal's
+`stages` show both count distinct emails of APPROVED rows (`stageApprovalsSQL`), an approval cancels
+the approver's other REQUESTED rows on the stage, a second decision by an email that already approved
+is a 403, and `resolveProposalCABPool` counts eligible members by distinct email. This is still the one
+stage 0287 left: no CAB stage in front of another, no hand-over, no `CAB_REVIEW` (stored state
+`AUTHORITY_REVIEW` keeps its name and now means "awaiting CAB approval").
+
+History, kept short: until 2026-11-10 a separate Standard Change Authority group (0277, `…05ca`, the
+heads of SaaS SRE, each SaaS ABT and SRE) held this stage; before 0287 (2026-11-06) a proposal also
+went through a one-approval CAB stage first. The proposal shares the label "CAB Approval" with a change
+request's CAB stage, which mixes nothing up: a proposal's stages are only read by its own id (every
+change request read joins or filters on the change request's id). It does affect migration 0287,
+whose DELETE keeps only "Standard Change Authority" stages on an open proposal: 0287 never runs
+again on a server (`make migrate` records it), and its integration test labels its fixtures the old
+way and parks other open proposals' "CAB Approval" stages while it re-runs the file.
 
 `DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
 the stage it was meant for (`stageId`, which the webapp always sends): when that is not the stage the
-proposal waits on (its old CAB stage, on a page loaded before 0287), it
-is a 409 with nothing written. Submit refuses (400) when the authority group has fewer than two
-eligible members besides the proposer (`resolveAuthorityPool`), so a proposal never waits on a group
-that could not authorise it. **Approved**: `NEW`
+proposal waits on (its old stage, on a page loaded before 0287 or 0289), it
+is a 409 with nothing written. Submit refuses (400) when the CAB has fewer than two
+eligible members besides the proposer (`resolveProposalCABPool`, the message names the CAB), so a
+proposal never waits on a group that could not authorise it. **Approved**: `NEW`
 writes the template and version 1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and
 clears the review flag, `RETIRE` retires it (below); `decided_by_user_id` and the version's `approved_by` are
-the final authority approver, every decision is in the approver rows. **Rejected**: the catalogue is
+the final CAB approver, every decision is in the approver rows. **Rejected**: the catalogue is
 untouched and the proposal stays as the record. A modification starts from the current version and is
 refused (409) at submit and approval when the template moved on to another version since; a
 retirement is checked only for the template having been retired meanwhile (it carries no content, so
@@ -8553,8 +8564,9 @@ a revision approved in between does not stop it); at most one is open (`DRAFT`,
 `AUTHORITY_REVIEW`) per template (unique partial index, recreated by 0277; its predicate still names
 `CAB_REVIEW`, which no row can hold). The approval stage writes `approval_stage.raw_status` in the
 enum's own spelling (`APPROVED` / `REJECTED`). The proposal reads `stages` (label, required and
-received approvals, decision, generically: a proposal decided before 0287 may show a "CAB Approval"
-stage, required 1, before its authority stage; an open proposal never does) and each approver row's `stageId`;
+received approvals, decision, generically: a proposal decided before 2026-11-10 shows a "Standard
+Change Authority" stage, and one decided before 0287 also a "CAB Approval" stage, required 1, before
+it; an open proposal has only its "CAB Approval" stage, required 2) and each approver row's `stageId`;
 `awaitingMyDecision` covers `AUTHORITY_REVIEW` only.
 
 **Retirement.** Anyone internal with write access may propose one (as for a modification; the two
@@ -8564,7 +8576,7 @@ approving it renames nothing; resending that name is accepted). While it is open
 proposal reads `changeRequestsInNew` (the change requests raised from any version of the template that
 are still `NEW`, newest 100, id and number) and `changeRequestsInNewTotal`: once the template is retired
 they cannot request approval (409 `standard_change_template_unavailable`) and can only be cancelled,
-so the proposer and the authority see them before deciding. Change requests past `NEW` are not
+so the proposer and the CAB see them before deciding. Change requests past `NEW` are not
 affected (the template is checked only at Request Approval). Approved, it sets the template
 `RETIRED`, clears its suspension and its review flag (nothing is left to review on a template never
 used again, and clear-review refuses a retired one), and writes a `RETIRED` history entry with the
@@ -8589,11 +8601,22 @@ proposal write waits instead of deadlocking. `SearchProposals` still accepts `st
 (it matches nothing) for a webapp deployed before this release; remove that
 (`legacyCABReviewState`) in the next release.
 
+**0289** (2026-11-10) returned every proposal still in `AUTHORITY_REVIEW` with no "CAB Approval"
+stage (so still waiting on the authority) to `DRAFT` (`submitted_on` cleared, `customer_locked`
+kept) and deleted its stage, approver rows and any approval already given with it, as 0287 did for
+`CAB_REVIEW`: the proposer submits it again, to the CAB. Decided proposals keep their "Standard Change
+Authority" stages; the group row stays (they point at it) and its description says it is no longer
+used (reworded only while it reads as 0287 left it, or as 0277 wrote it). One transaction,
+`lock_timeout` 5s, the `app.is_internal` bracket and `lockProposal`'s lock order; safe to re-run (a
+proposal submitted to the CAB is never selected). **Run 0289 immediately before rolling out the build
+that asks the CAB**; a proposal an old pod submits after it asks the authority's members and still
+works (decisions go by the latest stage's rows), it is just not returned.
+
 **Drafts, withdrawal, cancellation.** A draft that was never submitted is deleted by its proposer
 (`DELETE /standard-change-proposals/{id}`, 204; the work item's delete cascades to the proposal and
 its evidence): it has never been before anyone. Once submitted a proposal is never deleted: the
-proposer withdraws it (any open state; `decided_by_user_id` records who), and a Standard Change
-Authority member can **cancel** someone else's open proposal with a reason (`POST .../cancel`,
+proposer withdraws it (any open state; `decided_by_user_id` records who), and a CAB member can
+**cancel** someone else's open proposal with a reason (`POST .../cancel`,
 state `CANCELLED`, the reason in `decision_comment`): the way out for a proposal whose proposer left,
 and for an abandoned revision that otherwise holds its template's one-open slot. `canDelete` /
 `canCancel` on the proposal say which applies to the caller.
@@ -8650,8 +8673,8 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 - **Review flag**: a rollback (manual, or a customer's failed review) or a non-blank deviation from the
   implementation plan sets `review_required` on the template with the change request and a reason
   (`flagStandardTemplateOnFailure`, last in the PATCH / decision transaction since it escalates the
-  identity) and is recorded in the template's history. It does not suspend the template; a Standard
-  Change Authority member clears it (with a note), or approving a modification does. A retired
+  identity) and is recorded in the template's history. It does not suspend the template; a CAB member
+  clears it (with a note), or approving a modification does. A retired
   template is never flagged.
 - **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`,
   `templateState` and `superseded` (revised since; with the state, what Request Approval checks, so the
@@ -8661,14 +8684,14 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 **Error codes**: `change_request_standard_template_field` (400),
 `standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400).
 
-**Who may**: suspend (a brake, so open): the template's owner, a CAB member or a Standard Change
-Authority member. Resume and clear the review flag (both put the template back in use with no review):
-a Standard Change Authority member only, with a required note (`{note}`, at most 1000 characters);
+**Who may**: suspend (a brake, so open): the template's owner or a CAB member. Resume and clear the
+review flag (both put the template back in use with no review): a CAB member only, with a required
+note (`{note}`, at most 1000 characters);
 clearing is refused (409) on a retired template or one not flagged. `canSuspend` / `canResume` /
 `canClearReview` on the template say what the caller may do. Propose a new template, a revision or a
 retirement: any internal user with write access, not only the template's owner (decided 2026-11-06:
-the two authority approvals are the check). Edit, submit, withdraw, delete a draft: its proposer. Cancel: a Standard Change Authority member, not on their own. Decide: two authority
-members; never the proposer, and no CAB member as such.
+the two CAB approvals are the check). Edit, submit, withdraw, delete a draft: its proposer. Cancel: a
+CAB member, not on their own. Decide: two CAB members asked on the stage; never the proposer.
 
 **Suspension.** `POST .../suspend` takes an optional body `{reason}` (`decodeOptionalRequest`: an
 empty body is `{}`; trimmed, blank is none, at most 1000 characters or 400). `SetTemplateState`
@@ -8678,9 +8701,8 @@ them as `suspendedReason` / `suspendedOn` / `suspendedBy`, null unless the templ
 Every suspension and resumption (with its reason or note) also goes into the template's history.
 
 **Not done**: no import of the previous system's standard change templates (decision: they are
-re-proposed through this flow); no notices (mail / chat) on submit or decision, so the Standard
-Change Authority learns of pending work only from the "awaiting my decision" view; no API to manage
-the authority group's members.
+re-proposed through this flow); no notices (mail / chat) on submit or decision, so the CAB learns
+of pending proposals only from the "awaiting my decision" view.
 
 Tests: `standard_change_template_test.go` (parameters, completeness incl. the customer, the summary and
 the description, placeholders, rendering, the suspension reason, deployment types), `change_request_standard_change_customer_test.go` (the customer
@@ -8688,7 +8710,10 @@ check before the previous system is called), `handler/standard_change_handler_te
 suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
 (real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
-without BYPASSRLS so the internal-only policies apply; run with `-p 1`).
+without BYPASSRLS so the internal-only policies apply; run with `-p 1`). The tests seat their own
+authorisers on the CAB and take everyone else off it while they run (`isolateStdCAB`, put back on
+cleanup, as the change request flow tests' `isolateApprovalGroup` does), since a local or synced
+database has real CAB members; `TestStandardChangeIntegration_CABAuthorisesMigration` re-runs 0289.
 
 ## Standard change suggestions (`GET /standard-change-suggestions`)
 
@@ -8831,7 +8856,7 @@ production data); no member with high risk; no member with high impact. An unkno
 risk or impact is counted (`unknown`) and does not block. `unmet` says, in words, each one it misses.
 `proposeFrom` is the newest closed member with no deviation from its plan (none: nothing to propose
 from), `evidence` the other closed members newest first, at most 99, so the source plus the evidence fit
-the 100 a proposal may cite. `openProposals` are the open proposals (draft or authority review)
+the 100 a proposal may cite. `openProposals` are the open proposals (draft or awaiting CAB approval)
 already started from or citing a member.
 
 **Not related to the customer's templates, on purpose.** An earlier version labelled each cluster

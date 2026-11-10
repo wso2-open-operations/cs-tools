@@ -177,7 +177,7 @@ func blankText(s *string) bool { return s == nil || strings.TrimSpace(*s) == "" 
 func blankRich(s *string) bool { return s == nil || repository.IsBlankRichText(*s) }
 
 // checkStandardChangeProposalComplete is what a proposal must hold before the
-// Standard Change Authority is asked: everything a change request raised from it
+// CAB is asked: everything a change request raised from it
 // needs and cannot supply itself. A retirement needs only its rationale.
 func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error {
 	var missing []string

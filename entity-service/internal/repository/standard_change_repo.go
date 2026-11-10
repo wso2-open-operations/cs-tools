@@ -62,8 +62,7 @@ type StandardChangeRepository interface {
 	// change request and why. Safe to call on any change request.
 	FlagReviewRequired(ctx context.Context, tx pgx.Tx, changeRequestID, reason, actor string) error
 	// IsGroupMember reports whether the email is an active internal member of the
-	// named group (domain.CABApprovalGroupName, domain.StandardChangeAuthorityGroupName),
-	// as the approval pools resolve it.
+	// named group (domain.CABApprovalGroupName), as the approval pools resolve it.
 	IsGroupMember(ctx context.Context, email, group string) (bool, error)
 	// ProjectAccount returns the customer (account) of a project: nil when there
 	// is no such project, an empty EntityRef when it has no account.
@@ -77,20 +76,19 @@ type StandardChangeRepository interface {
 	SearchProposals(ctx context.Context, f StandardChangeProposalFilter) ([]domain.StandardChangeProposalSummary, int, error)
 	// UpdateProposal edits a draft; only its proposer may.
 	UpdateProposal(ctx context.Context, id, actor string, req domain.UpdateStandardChangeProposalRequest) error
-	// SubmitProposal sends a draft to the Standard Change Authority: check runs
-	// on the proposal read under the row lock, then the authority's stage is
-	// provisioned.
+	// SubmitProposal sends a draft to the CAB: check runs on the proposal read
+	// under the row lock, then the CAB's stage is provisioned.
 	SubmitProposal(ctx context.Context, id, actor string, check func(domain.StandardChangeProposal) error) error
 	// WithdrawProposal withdraws the proposer's own open proposal.
 	WithdrawProposal(ctx context.Context, id, actor string) error
 	// CancelProposal ends someone else's open proposal, with a reason; the
-	// service checks the actor is a Standard Change Authority member.
+	// service checks the actor is a CAB member.
 	CancelProposal(ctx context.Context, id, actor, reason string) error
 	// DeleteProposal deletes the proposer's own draft (never submitted), with
 	// everything that hangs off it.
 	DeleteProposal(ctx context.Context, id, actor string) error
 	// DecideProposal records a decision on the stage the proposal waits on (the
-	// Standard Change Authority's). Its last required approval applies the
+	// CAB's). Its last required approval applies the
 	// proposal (new template, new version, or retirement) in the same
 	// transaction. Any rejection ends it.
 	// expectedStage, when not nil, is the stage the caller meant: another
@@ -117,7 +115,7 @@ type StandardChangeProposalFilter struct {
 	TemplateID      *string
 	AccountID       *string
 	ProposedByEmail string // "" = anyone
-	AwaitingEmail   string // "" = no filter: proposals in authority review with a REQUESTED row for this email
+	AwaitingEmail   string // "" = no filter: proposals awaiting CAB approval with a REQUESTED row for this email
 	Query           string
 	Limit, Offset   int
 }
@@ -131,24 +129,29 @@ func NewStandardChangeRepository(db *Scoped) StandardChangeRepository {
 	return &standardChangeRepo{db: db}
 }
 
-// standardChangeAuthorityStageLabel is the label of a proposal's approval stage.
-// A proposal decided before the CAB stage was removed (migration 0287) may also
-// have a "CAB Approval" stage; it is read like any other.
-const standardChangeAuthorityStageLabel = domain.StandardChangeAuthorityGroupName
+// standardChangeCABStageLabel is the label of a proposal's approval stage: the
+// one a change request's CAB stage has ("CAB Approval"). Older proposals carry
+// other labels, read like any other: "Standard Change Authority" on one
+// submitted before 2026-11-10 (that group authorised templates until migration
+// 0289), and, before it, a one-approval "CAB Approval" stage on one decided
+// before migration 0287 removed the separate CAB stage. A proposal's stages are
+// only ever read by its own id, never as a change request's, so sharing the
+// label with change requests mixes nothing up.
+const standardChangeCABStageLabel = approvalStageLabelCAB
 
-// standardChangeAuthorityCheckpoint provisions a proposal's one stage, at
-// submit: the Standard Change Authority, the proposer listed cancelled (nobody
-// approves their own proposal); domain.StandardChangeAuthorityApprovals of the
-// rest must approve.
-var standardChangeAuthorityCheckpoint = changeRequestApprovalCheckpoint{Position: 0, Label: standardChangeAuthorityStageLabel, Pool: poolNamedGroup, GroupName: domain.StandardChangeAuthorityGroupName}
+// standardChangeCABCheckpoint provisions a proposal's one stage, at submit: the
+// CAB (the same group a normal change request's CAB stage asks), the proposer
+// listed cancelled (nobody approves their own proposal);
+// domain.StandardChangeCABApprovals of the rest must approve.
+var standardChangeCABCheckpoint = changeRequestApprovalCheckpoint{Position: 0, Label: standardChangeCABStageLabel, Pool: poolNamedGroup, GroupName: domain.CABApprovalGroupName}
 
-// resolveAuthorityPool resolves the Standard Change Authority's approvers and
-// refuses (400) a group with fewer than the required number of eligible members
-// once excluded (the proposer).
+// resolveProposalCABPool resolves the CAB's approvers for a proposal and refuses
+// (400) a group with fewer than the required number of eligible members once
+// excluded (the proposer).
 // Members are counted as people, by email: one person may have several "user"
 // rows (the email is not unique), and two rows of one person are one approver.
-func resolveAuthorityPool(ctx context.Context, q crQuerier, excluded map[string]bool) (approvalPool, error) {
-	pool, err := resolveApprovalPool(ctx, q, standardChangeAuthorityCheckpoint, nil, excluded)
+func resolveProposalCABPool(ctx context.Context, q crQuerier, excluded map[string]bool) (approvalPool, error) {
+	pool, err := resolveApprovalPool(ctx, q, standardChangeCABCheckpoint, nil, excluded)
 	if err != nil {
 		return approvalPool{}, err
 	}
@@ -160,11 +163,11 @@ func resolveAuthorityPool(ctx context.Context, q crQuerier, excluded map[string]
 	}
 	var eligible int
 	if err := q.QueryRow(ctx, `SELECT COUNT(DISTINCT LOWER(email)) FROM "user" WHERE id::text = ANY($1::text[])`, open).Scan(&eligible); err != nil {
-		return approvalPool{}, fmt.Errorf("count the Standard Change Authority's members: %w", err)
+		return approvalPool{}, fmt.Errorf("count the CAB's members: %w", err)
 	}
-	if eligible < domain.StandardChangeAuthorityApprovals {
-		return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the %q group has %d member(s) who may authorise this proposal, and %d different people must: the proposer cannot; ask for members to be added to the group",
-			domain.StandardChangeAuthorityGroupName, eligible, domain.StandardChangeAuthorityApprovals)}
+	if eligible < domain.StandardChangeCABApprovals {
+		return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the CAB (the %q group) has %d member(s) who may authorise this proposal, and %d different people must: the proposer cannot; ask for members to be added to the CAB",
+			domain.CABApprovalGroupName, eligible, domain.StandardChangeCABApprovals)}
 	}
 	return pool, nil
 }
@@ -941,7 +944,7 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				return "", &apierror.ConflictError{Msg: "this template already has a modification or retirement in draft or under review: continue that one, or withdraw it first (a member of the Standard Change Authority can cancel one its proposer abandoned)"}
+				return "", &apierror.ConflictError{Msg: "this template already has a modification or retirement in draft or under review: continue that one, or withdraw it first (a CAB member can cancel one its proposer abandoned)"}
 			}
 			return "", fmt.Errorf("create standard change proposal: %w", err)
 		}
@@ -984,7 +987,7 @@ func setEvidenceTx(ctx context.Context, tx pgx.Tx, proposalID, actor string, acc
 }
 
 // checkEvidenceTx de-duplicates (lower-cased) evidence ids and refuses (400) any
-// that is not a closed change request of the customer account: what the authority
+// that is not a closed change request of the customer account: what the CAB
 // pre-authorises for one customer is judged on that customer's changes. With no
 // customer (a new draft that has not named one) no evidence can be cited.
 //
@@ -1106,7 +1109,7 @@ func checkSourceChangeRequestTx(ctx context.Context, tx pgx.Tx, account, sourceC
 }
 
 // checkProposalCustomerAtDecision refuses (409) the approval that applies a
-// proposal (the authority's final one) whose source change request or evidence
+// proposal (the CAB's final one) whose source change request or evidence
 // is no longer a closed change request of the proposal's customer, naming them.
 // Nothing is written by the refused approval.
 //
@@ -1668,7 +1671,7 @@ func checkTemplateStillCurrent(ctx context.Context, tx pgx.Tx, proposalID string
 	return nil
 }
 
-// crvis: internal callers only; provisions the authority's stage on a standard change proposal, never a change request
+// crvis: internal callers only; provisions the CAB's stage on a standard change proposal, never a change request
 func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor string, check func(domain.StandardChangeProposal) error) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		_, state, proposer, err := lockProposal(ctx, tx, id)
@@ -1701,7 +1704,7 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 			return &apierror.ConflictError{Msg: standardTemplateNoCustomerMsg}
 		}
 		// The evidence was checked when it was cited; checked again against the
-		// customer the authority is asked about.
+		// customer the CAB is asked about.
 		ids := make([]string, 0, len(p.Evidence))
 		for _, e := range p.Evidence {
 			ids = append(ids, e.ID)
@@ -1721,7 +1724,7 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		}
 		// The name is checked here too, while the proposer can still rename the
 		// draft; approval checks it again (a template may take the name meanwhile).
-		// Another proposal of the same customer already before the authority under
+		// Another proposal of the same customer already before the CAB under
 		// that name is the same template proposed twice.
 		if p.Kind != domain.StandardChangeProposalKindRetire {
 			// Two submits of one name for one customer queue here, so the second
@@ -1768,11 +1771,11 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		}
 		// The proposer (every "user" row of their email) is listed cancelled, and a
 		// group that has too few others to authorise the proposal is refused.
-		pool, err := resolveAuthorityPool(ctx, tx, creators)
+		pool, err := resolveProposalCABPool(ctx, tx, creators)
 		if err != nil {
 			return err
 		}
-		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeAuthorityStageLabel, domain.StandardChangeAuthorityApprovals, pool, creators); err != nil {
+		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeCABStageLabel, domain.StandardChangeCABApprovals, pool, creators); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'AUTHORITY_REVIEW', submitted_on = NOW(), customer_locked = true WHERE id = $1::uuid`, id)
@@ -2011,7 +2014,7 @@ func requestedProposalApprover(ctx context.Context, tx pgx.Tx, stage proposalSta
 		return "", "", fmt.Errorf("decide standard change proposal: %w", err)
 	}
 	if already {
-		return "", "", &apierror.ForbiddenError{Msg: "you have already authorised this proposal: another member of the Standard Change Authority must"}
+		return "", "", &apierror.ForbiddenError{Msg: "you have already authorised this proposal: another CAB member must"}
 	}
 	err = tx.QueryRow(ctx, `
 		SELECT a.id::text, a.approver_user_id::text
@@ -2024,7 +2027,7 @@ func requestedProposalApprover(ctx context.Context, tx pgx.Tx, stage proposalSta
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", "", fmt.Errorf("decide standard change proposal: %w", err)
 	}
-	return "", "", &apierror.ForbiddenError{Msg: "only the members of the Standard Change Authority asked to authorise this proposal can approve or reject it; the proposer cannot, and each member decides once"}
+	return "", "", &apierror.ForbiddenError{Msg: "only the CAB members asked to authorise this proposal can approve or reject it; the proposer cannot, and each member decides once"}
 }
 
 // applyApprovedProposal does what an approved proposal asks: a new template with

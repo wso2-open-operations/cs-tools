@@ -115,8 +115,8 @@ const TEMPLATE = {
   suspendedOn: null,
   suspendedBy: null,
   openProposal: null,
-  // What the viewer may do: the server's answer (its owner, the CAB or the
-  // authority suspends; only the authority resumes or clears the flag).
+  // What the viewer may do: the server's answer (its owner or the CAB
+  // suspends; only the CAB resumes or clears the flag).
   canSuspend: true,
   canResume: false,
   canClearReview: false,
@@ -312,8 +312,8 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByRole("textbox", { name: /note/i }), { target: { value: "Root cause fixed" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
-    act(() => mocks.resume.mock.calls[0]![1].onError(new Error("only a member of the Standard Change Authority can do this")));
-    expect(within(screen.getByRole("dialog")).getByText("only a member of the Standard Change Authority can do this")).toBeInTheDocument();
+    act(() => mocks.resume.mock.calls[0]![1].onError(new Error("only a CAB member can do this")));
+    expect(within(screen.getByRole("dialog")).getByText("only a CAB member can do this")).toBeInTheDocument();
     expect(within(screen.getByRole("dialog")).getByRole("textbox", { name: /note/i })).toHaveValue("Root cause fixed");
   });
 
@@ -322,7 +322,7 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     renderPage();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Suspended" })).toHaveTextContent(
-      "Only a member of the Standard Change Authority can resume it.",
+      "Only a CAB member can resume it.",
     );
   });
 
@@ -427,8 +427,8 @@ describe("StandardChangeTemplateDetailPage — review flag", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: /note/i }), { target: { value: "One-off network fault" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear review" }));
     expect(mocks.clearReview).toHaveBeenCalledWith({ id: "tpl-1", note: "One-off network fault" }, expect.anything());
-    act(() => mocks.clearReview.mock.calls[0]![1].onError(new Error("only a member of the Standard Change Authority can do this")));
-    expect(screen.getByText("only a member of the Standard Change Authority can do this")).toBeInTheDocument();
+    act(() => mocks.clearReview.mock.calls[0]![1].onError(new Error("only a CAB member can do this")));
+    expect(screen.getByText("only a CAB member can do this")).toBeInTheDocument();
   });
 
   it("offers Clear review only to whoever may clear it, and says who can", () => {
@@ -436,7 +436,7 @@ describe("StandardChangeTemplateDetailPage — review flag", () => {
     renderPage();
     const flag = screen.getByRole("region", { name: "Review needed" });
     expect(within(flag).queryByRole("button", { name: "Clear review" })).not.toBeInTheDocument();
-    expect(flag).toHaveTextContent("a member of the Standard Change Authority clears it once reviewed");
+    expect(flag).toHaveTextContent("a CAB member clears it once reviewed");
   });
 
   it("shows no flag when none is raised", () => {

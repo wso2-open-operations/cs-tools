@@ -33,7 +33,7 @@ import (
 // standardChangeService serves the standard change catalogue and its proposals.
 // Every method is for internal (WSO2) callers only; a write also needs the
 // caller's own user token, because who did it decides what they may do (the
-// proposer edits, a Standard Change Authority member decides, and nobody decides
+// proposer edits, a CAB member decides, and nobody decides
 // their own proposal).
 type standardChangeService struct {
 	repo   repository.StandardChangeRepository
@@ -151,18 +151,18 @@ func (s *standardChangeService) GetTemplate(ctx context.Context, id string) (dom
 	return withTemplatePermissions(t, roles), nil
 }
 
-// templateRoles is who the caller is to a template.
-type templateRoles struct{ owner, cab, authority bool }
+// templateRoles is who the caller is to a template: its owner, and a member of
+// the CAB (which authorises templates).
+type templateRoles struct{ owner, cab bool }
 
 // mayManage says whether the caller may act on a template: suspending it (a
-// brake) is open to its owner, the CAB and the Standard Change Authority;
-// releasing it (resume, clear the review flag), which puts it back in use with no
-// review, to the Standard Change Authority only.
+// brake) is open to its owner and the CAB; releasing it (resume, clear the
+// review flag), which puts it back in use with no review, to the CAB only.
 func (r templateRoles) mayManage(release bool) bool {
 	if release {
-		return r.authority
+		return r.cab
 	}
-	return r.owner || r.cab || r.authority
+	return r.owner || r.cab
 }
 
 // withTemplatePermissions sets what the caller, of roles, may do to t now.
@@ -178,9 +178,6 @@ func (s *standardChangeService) rolesOf(ctx context.Context, actor string, t dom
 	var err error
 	r.owner = t.Owner != nil && strings.EqualFold(t.Owner.Email, actor)
 	if r.cab, err = s.repo.IsGroupMember(ctx, actor, domain.CABApprovalGroupName); err != nil {
-		return r, err
-	}
-	if r.authority, err = s.repo.IsGroupMember(ctx, actor, domain.StandardChangeAuthorityGroupName); err != nil {
 		return r, err
 	}
 	return r, nil
@@ -233,9 +230,9 @@ func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id
 		return roles, nil
 	}
 	if release {
-		return templateRoles{}, &apierror.ForbiddenError{Msg: "only a member of the Standard Change Authority can put a template back in use (resume it, or clear its review flag)"}
+		return templateRoles{}, &apierror.ForbiddenError{Msg: "only a CAB member can put a template back in use (resume it, or clear its review flag)"}
 	}
-	return templateRoles{}, &apierror.ForbiddenError{Msg: "only the template's owner, a member of the CAB or a member of the Standard Change Authority can suspend it"}
+	return templateRoles{}, &apierror.ForbiddenError{Msg: "only the template's owner or a CAB member can suspend it"}
 }
 
 // managedTemplate is the template a suspend, resume or clear-review wrote, as
@@ -291,8 +288,7 @@ func (s *standardChangeService) ClearTemplateReview(ctx context.Context, id stri
 	return managedTemplate(t, roles)
 }
 
-// releaseNote checks a resume or clear-review: a Standard Change Authority
-// member, with a note saying why the template may be used again.
+// releaseNote checks a resume or clear-review: a CAB member, with a note saying why the template may be used again.
 func (s *standardChangeService) releaseNote(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (string, string, templateRoles, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
@@ -396,11 +392,11 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 	p.CanWithdraw = mine && p.State.IsOpen()
 	p.CanDelete = p.CanEdit && p.SubmittedOn == nil && len(p.Stages) == 0
 	if !mine && viewer != "" && p.State.IsOpen() {
-		authority, err := s.repo.IsGroupMember(ctx, viewer, domain.StandardChangeAuthorityGroupName)
+		cab, err := s.repo.IsGroupMember(ctx, viewer, domain.CABApprovalGroupName)
 		if err != nil {
 			return domain.StandardChangeProposal{}, err
 		}
-		p.CanCancel = authority
+		p.CanCancel = cab
 	}
 	// Only the stage the proposal waits on (its latest) has REQUESTED rows.
 	for i := range p.Approvers {
@@ -613,12 +609,12 @@ func (s *standardChangeService) CancelProposal(ctx context.Context, id string, r
 	if utf8.RuneCountInString(reason) > 4000 {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "reason must be at most 4000 characters"}
 	}
-	authority, err := s.repo.IsGroupMember(ctx, actor, domain.StandardChangeAuthorityGroupName)
+	cab, err := s.repo.IsGroupMember(ctx, actor, domain.CABApprovalGroupName)
 	if err != nil {
 		return domain.StandardChangeProposal{}, err
 	}
-	if !authority {
-		return domain.StandardChangeProposal{}, &apierror.ForbiddenError{Msg: "only a member of the Standard Change Authority can cancel someone else's proposal"}
+	if !cab {
+		return domain.StandardChangeProposal{}, &apierror.ForbiddenError{Msg: "only a CAB member can cancel someone else's proposal"}
 	}
 	if err := s.repo.CancelProposal(ctx, id, actor, reason); err != nil {
 		return domain.StandardChangeProposal{}, err

@@ -53,10 +53,9 @@ import type {
 // Operations > Change requests > Standard changes: the approved template
 // catalogue and the proposals that create, revise or retire its templates.
 // Every route is a thin BFF proxy of entity-service, which decides who may act
-// (the proposer edits, submits and deletes a draft; two members of the Standard
-// Change Authority decide, the CAB not at all; the owner, the CAB or the authority
-// suspends; only the authority resumes, clears a review flag or cancels someone
-// else's proposal): a refusal keeps its message and `errorCode`, so callers show
+// (the proposer edits, submits and deletes a draft; two CAB members decide; the
+// owner or the CAB suspends; only the CAB resumes, clears a review flag or
+// cancels someone else's proposal): a refusal keeps its message and `errorCode`, so callers show
 // `err.message`.
 
 /** Every standard change query lives under this key, so one write refreshes them all. */
@@ -224,7 +223,7 @@ function useStandardChangeMutation<TVars, TResult>(
 export const MAX_SUSPEND_REASON_LENGTH = 1000;
 
 /**
- * `POST /standard-change-templates/{id}/suspend` (the owner, a CAB member or an authority member), with
+ * `POST /standard-change-templates/{id}/suspend` (the owner or a CAB member), with
  * the optional reason trimmed: a blank one is left out of the body.
  */
 export function useSuspendStandardChangeTemplate(): UseMutationResult<
@@ -242,7 +241,7 @@ export function useSuspendStandardChangeTemplate(): UseMutationResult<
   });
 }
 
-/** `POST /standard-change-templates/{id}/resume` (a Standard Change Authority member, with a note). */
+/** `POST /standard-change-templates/{id}/resume` (a CAB member, with a note). */
 export function useResumeStandardChangeTemplate(): UseMutationResult<
   BeStandardChangeTemplate,
   Error,
@@ -256,7 +255,7 @@ export function useResumeStandardChangeTemplate(): UseMutationResult<
   );
 }
 
-/** `POST /standard-change-templates/{id}/clear-review` (a Standard Change Authority member, with a note). */
+/** `POST /standard-change-templates/{id}/clear-review` (a CAB member, with a note). */
 export function useClearStandardChangeTemplateReview(): UseMutationResult<
   BeStandardChangeTemplate,
   Error,
@@ -294,7 +293,7 @@ export function useUpdateStandardChangeProposal(): UseMutationResult<
   );
 }
 
-/** `POST /standard-change-proposals/{id}/submit`: sends a complete draft to the Standard Change Authority. */
+/** `POST /standard-change-proposals/{id}/submit`: sends a complete draft to the CAB. */
 export function useSubmitStandardChangeProposal(): UseMutationResult<BeStandardChangeProposal, Error, string> {
   const api = useBackendApi();
   return useStandardChangeMutation((id: string) =>
@@ -310,7 +309,7 @@ export function useWithdrawStandardChangeProposal(): UseMutationResult<BeStandar
   );
 }
 
-/** `POST /standard-change-proposals/{id}/cancel`: a Standard Change Authority member, on someone else's open proposal. */
+/** `POST /standard-change-proposals/{id}/cancel`: a CAB member, on someone else's open proposal. */
 export function useCancelStandardChangeProposal(): UseMutationResult<
   BeStandardChangeProposal,
   Error,
@@ -330,7 +329,7 @@ export function useDeleteStandardChangeProposal(): UseMutationResult<null, Error
   return useStandardChangeMutation((id: string) => api.del<null>(`${PROPOSALS}/${enc(id)}`));
 }
 
-/** `POST /standard-change-proposals/{id}/decision`: an authority member on their own row. */
+/** `POST /standard-change-proposals/{id}/decision`: a CAB member on their own row. */
 export function useDecideStandardChangeProposal(): UseMutationResult<
   BeStandardChangeProposal,
   Error,

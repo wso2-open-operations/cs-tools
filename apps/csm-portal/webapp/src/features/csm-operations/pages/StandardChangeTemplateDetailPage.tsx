@@ -64,7 +64,6 @@ import { errorText } from "@features/csm-operations/utils/changeRequests";
 import {
   customerAccountPath,
   raiseFromTemplatePath,
-  STANDARD_CHANGE_AUTHORITY,
   STANDARD_CHANGE_ONE_CUSTOMER_RULE,
   STANDARD_CHANGES_PATH,
   standardChangeProposalPath,
@@ -113,9 +112,9 @@ function suspendedBySuffix(by: string | null, on: string | null): string {
  * version (the text a change request raised from it takes, placeholders
  * highlighted, and its parameters), every earlier version, its usage and the
  * review flag and its history. From here a change request is raised from it, a
- * revision or the retirement is proposed, and the template suspended (its owner,
- * the CAB or the Standard Change Authority: a brake) or resumed and its review
- * flag cleared (the Standard Change Authority only, with a note: both put it back
+ * revision or the retirement is proposed, and the template suspended (its owner
+ * or the CAB: a brake) or resumed and its review flag cleared (the CAB only,
+ * with a note: both put it back
  * in use without a review). The buttons follow the server's `canSuspend`,
  * `canResume` and `canClearReview`; every action is checked again there.
  */
@@ -359,7 +358,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
           <Typography variant="body2">
             No change request can be raised from this template, and one already raised from it cannot be sent for
             approval, until it is resumed.
-            {!template.canResume && ` Only a member of the ${STANDARD_CHANGE_AUTHORITY} can resume it.`}
+            {!template.canResume && " Only a CAB member can resume it."}
           </Typography>
         </Alert>
       )}
@@ -412,8 +411,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
             </Link>
           )}
           <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
-            The template can still be used. Propose a revision (approving one clears the flag), or a member of the{" "}
-            {STANDARD_CHANGE_AUTHORITY} clears it once reviewed.
+            The template can still be used. Propose a revision (approving one clears the flag), or a CAB member clears it
+            once reviewed.
           </Typography>
         </Alert>
       )}
@@ -627,7 +626,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <DialogContentText>
             {confirm === "suspend"
-              ? "No change request can be raised from a suspended template, and one already raised from it cannot be sent for approval. Only a member of the Standard Change Authority can resume it."
+              ? "No change request can be raised from a suspended template, and one already raised from it cannot be sent for approval. Only a CAB member can resume it."
               : confirm === "resume"
                 ? "Change requests can be raised from it again, following its current version, with no review of it. Say why that is safe."
                 : "The template stays as it is. Say why the change that flagged it does not call for a revision."}

@@ -831,8 +831,8 @@ func main() {
 	// Operations > Change requests > Standard changes: the approved standard change templates and the
 	// proposals that create, revise or retire them. Reading is for whoever sees
 	// Operations; every write is checked again by entity-service (the proposer edits
-	// and submits, two Standard Change Authority members decide, the owner, the CAB
-	// or the Standard Change Authority suspends).
+	// and submits, two CAB members decide, the owner or the CAB suspends, only the
+	// CAB resumes).
 	standardChangeHandler := handler.NewStandardChangeHandler(customerEntityClient)
 	route("POST /standard-change-templates/search", handler.PermViewOperations, standardChangeHandler.SearchTemplates)
 	route("GET /standard-change-templates/{id}", handler.PermViewOperations, standardChangeHandler.GetTemplate)

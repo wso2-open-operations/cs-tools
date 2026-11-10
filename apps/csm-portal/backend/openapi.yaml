@@ -14924,7 +14924,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-templates/{id}/suspend:
     post:
-      summary: Suspend a template (its owner, a CAB member or a Standard Change Authority member; checked by the entity service).
+      summary: Suspend a template (its owner or a CAB member; checked by the entity service).
       operationId: suspendStandardChangeTemplate
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -14999,7 +14999,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-templates/{id}/resume:
     post:
-      summary: Resume a suspended template (a Standard Change Authority member, with a note).
+      summary: Resume a suspended template (a CAB member, with a note).
       operationId: resumeStandardChangeTemplate
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -15059,7 +15059,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-templates/{id}/clear-review:
     post:
-      summary: Clear the review flag a failed change raised (a Standard Change Authority member, with a note).
+      summary: Clear the review flag a failed change raised (a CAB member, with a note).
       operationId: clearStandardChangeTemplateReview
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -15402,7 +15402,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-proposals/{id}/submit:
     post:
-      summary: Send a complete proposal to the Standard Change Authority (its proposer).
+      summary: Send a complete proposal to the CAB (its proposer); two CAB members other than the proposer must approve it.
       operationId: submitStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -15508,7 +15508,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-proposals/{id}/decision:
     post:
-      summary: Approve or reject a proposal (two Standard Change Authority members; never the proposer; a rejection needs a comment).
+      summary: Approve or reject a proposal (two CAB members; never the proposer; a rejection needs a comment).
       operationId: decideStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -15568,7 +15568,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-proposals/{id}/cancel:
     post:
-      summary: Cancel someone else's open proposal (a Standard Change Authority member; body {reason}).
+      summary: Cancel someone else's open proposal (a CAB member; body {reason}).
       operationId: cancelStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal

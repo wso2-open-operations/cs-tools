@@ -60,7 +60,7 @@ func wantCode(t *testing.T, err error, code, what string) {
 }
 
 // stdApprovedTemplate takes a proposal from a closed change request through the
-// Standard Change Authority and returns the template.
+// CAB and returns the template.
 func stdApprovedTemplate(t *testing.T, env *stdEnv, name string) domain.StandardChangeTemplate {
 	t.Helper()
 	p, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{
@@ -100,7 +100,7 @@ func TestChangeRequestStandardChangeIntegration(t *testing.T) {
 }
 
 func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
-	ctx := crCtx(t, stdCAB2)
+	ctx := crCtx(t, stdColleague)
 	tpl := stdApprovedTemplate(t, env, stdTag+" Key rotation")
 	standard := domain.ChangeRequestTypeStandard
 	normal := domain.ChangeRequestTypeNormal
@@ -245,7 +245,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 		t.Fatalf("a flag does not suspend the template: %s", got.State)
 	}
 	if _, err := env.svc.ClearTemplateReview(stdCtx(stdAuth1), tpl.ID, domain.StandardChangeTemplateNoteRequest{Note: "Understood"}); err != nil {
-		t.Fatalf("the authority clears the flag: %v", err)
+		t.Fatalf("a CAB member clears the flag: %v", err)
 	}
 
 	implement := domain.ChangeRequestStateImplement
@@ -302,7 +302,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 // previous system is called on dual-write) and again in the create transaction
 // -- and a PATCH never moves it to another customer's project, in any state.
 func stdChangeRequestCustomer(t *testing.T, env *stdEnv, crs ChangeRequestService, crRepo repository.ChangeRequestRepository, stdRepo repository.StandardChangeRepository) {
-	ctx := crCtx(t, stdCAB2)
+	ctx := crCtx(t, stdColleague)
 	tpl := stdApprovedTemplate(t, env, stdTag+" Customer key rotation")
 	if tpl.Customer == nil || tpl.Customer.ID != env.accounts["A"] {
 		t.Fatalf("the template is customer A's: %+v", tpl.Customer)
@@ -337,7 +337,7 @@ func stdChangeRequestCustomer(t *testing.T, env *stdEnv, crs ChangeRequestServic
 	direct.Subject = stdTag + " direct"
 	direct.StandardChangeTemplateVersionID = &tpl.CurrentVersion.ID
 	direct.StandardChangeTemplateID, direct.StandardChangeParameters = nil, map[string]string{"cluster": "aks-3", "env": "dev"}
-	_, err = crRepo.CreateChangeRequest(ctx, direct, stdCAB2)
+	_, err = crRepo.CreateChangeRequest(ctx, direct, stdColleague)
 	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "the repository's create for customer B's project")
 	var left int
 	if err := env.scoped.QueryRow(repository.WithSystemIdentity(context.Background()),
@@ -430,7 +430,7 @@ func stdChangeRequestCustomer(t *testing.T, env *stdEnv, crs ChangeRequestServic
 // stdChangeRequestScope: what a template fixes (a priority, the deployment types)
 // is used and kept; what it leaves open the change request chooses.
 func stdChangeRequestScope(t *testing.T, env *stdEnv, crs ChangeRequestService) {
-	ctx := crCtx(t, stdCAB2)
+	ctx := crCtx(t, stdColleague)
 	sys := repository.WithSystemIdentity(context.Background())
 	deployments := map[string]string{}
 	for label, typ := range map[string]string{"prod1": "PRIMARY_PRODUCTION", "prod2": "PRIMARY_PRODUCTION", "staging": "STAGING", "untyped": ""} {

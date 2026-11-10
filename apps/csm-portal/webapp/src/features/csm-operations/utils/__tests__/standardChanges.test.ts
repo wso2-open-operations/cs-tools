@@ -248,7 +248,7 @@ describe("inserting a placeholder", () => {
   });
 });
 
-describe("what a proposal still needs before the Standard Change Authority", () => {
+describe("what a proposal still needs before the CAB", () => {
   const complete = {
     name: "Rotate",
     rationale: "<p>Done often.</p>",
@@ -513,9 +513,9 @@ describe("standard changes inside Operations > Change requests", () => {
   });
 });
 
-describe("the Standard Change Authority's states, and what a template fixes", () => {
+describe("the proposal states, and what a template fixes", () => {
   it("names the one review state and the cancelled one", () => {
-    expect(standardChangeProposalStateLabel("authority_review")).toBe("Awaiting authorisation");
+    expect(standardChangeProposalStateLabel("authority_review")).toBe("Awaiting CAB approval");
     expect(standardChangeProposalStateLabel("cancelled")).toBe("Cancelled");
     expect(STANDARD_CHANGE_PROPOSAL_STATES).toEqual(["draft", "authority_review", "approved", "rejected", "withdrawn", "cancelled"]);
     // A state the page does not know is shown as it comes, never as a CAB stage.
@@ -551,7 +551,7 @@ describe("a template that can no longer be used", () => {
         "Cancel it, and raise a Normal change if the work is still needed.",
     );
     expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "suspended" }, "new")).toMatch(
-      /^STD0000020 is suspended, so approval cannot be requested for this change request until it is resumed by a member of the Standard Change Authority\.$/,
+      /^STD0000020 is suspended, so approval cannot be requested for this change request until it is resumed by a CAB member\.$/,
     );
     expect(standardChangeTemplateUnusableWarning({ ...sc, superseded: true }, "new")).toMatch(/has been revised since/);
   });

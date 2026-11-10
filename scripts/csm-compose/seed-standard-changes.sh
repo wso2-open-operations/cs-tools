@@ -23,29 +23,31 @@
 #
 # WHO PLAYS WHAT (the local seed's internal personas):
 #   bob.fernando@example.com   proposes every template (the proposer: he can never
-#                              decide his own proposal) and owns what gets approved
-#   alice.perera@example.com   one of the two Standard Change Authority members who
-#                              decide the proposals; also the engineer who raises
-#                              and walks change requests from the templates (and
-#                              is their "Requested by")
-#   jane.doe@example.com       the other Standard Change Authority member
-# carol.silva@example.com (in "CAB Approval") has no part: the CAB does not decide
-# standard change proposals.
+#                              decide his own proposal, though he sits on the CAB)
+#                              and owns what gets approved
+#   alice.perera@example.com   one of the two CAB members who decide the proposals;
+#                              also the engineer who raises and walks change
+#                              requests from the templates (and is their
+#                              "Requested by")
+#   carol.silva@example.com    the other CAB member who decides them
+# jane.doe@example.com is not on the CAB and has no part in deciding.
 #
-# THE STANDARD CHANGE AUTHORITY. A proposal is submitted to the "Standard Change
-# Authority" group alone (there is no CAB stage): two different members, never
-# the proposer, must approve it, and one member's rejection, with a comment,
-# rejects it. Submit is refused while the group has fewer than two members
-# besides the proposer, and migration 0277 creates the group empty, so the run
-# first makes alice and jane members (group_member rows written through the local
-# Postgres, the same rows the E2E spec's beforeAll writes; rows already there are
-# kept, other members are left alone). Only alice and jane decide here, and when
-# the run ends no proposal is awaiting a decision, so neither jane nor carol has
-# anything pending.
+# THE CAB AUTHORISES. A proposal is submitted to the CAB (the "CAB Approval"
+# group, the one that approves normal change requests), in one "CAB Approval"
+# stage: two different CAB members, never the proposer, must approve it, and one
+# member's rejection, with a comment, rejects it. (Until 2026-11-10 a separate
+# "Standard Change Authority" group did this.) Submit is refused while the CAB
+# has fewer than two members besides the proposer. seed-entity-service.sql seats
+# alice, bob and carol on the CAB (team_member rows); the run makes sure alice
+# and carol are members, writing a group_member row through the local Postgres
+# only for one who is a member in neither form (the same rows the E2E spec's
+# beforeAll writes; other members are left alone). Only alice and carol decide
+# here, and when the run ends no proposal is awaiting a decision, so neither
+# carol nor jane has anything pending.
 #
 # WHAT IT LEAVES (so every screen of the feature has something to show):
 #   * six templates, each proposed by bob, submitted and authorised by alice and
-#     jane, with generalised plans using {{key}} placeholders and parameters of
+#     carol, with generalised plans using {{key}} placeholders and parameters of
 #     every type (text, textarea, number, date, select), every one of them required: an
 #     optional value inside a sentence would render "... no later than ." when
 #     left empty;
@@ -70,7 +72,7 @@
 #     that is his own statement and needs no other record: the restart
 #     procedure for clustered deployments is being reworked (it claims no
 #     revision, review or incident, and none exists);
-#   * one proposal REJECTED by the Standard Change Authority (alice's rejection,
+#   * one proposal REJECTED by the CAB (alice's rejection,
 #     with its comment), and two DRAFTs: "Raise the memory limit of a Choreo
 #     component", complete and ready to submit, and "Enable debug logging ...",
 #     started and not finished;
@@ -85,10 +87,10 @@
 # whose name already exists FOR THAT CUSTOMER is skipped; a proposal is found
 # again by its name and customer among bob's own proposals and carried on from
 # the state it is in (a draft is
-# completed and submitted, one awaiting the Standard Change Authority is decided
-# by whichever of alice and jane it still asks) rather than duplicated; a change
-# request is found again by its rendered subject and walked on from its state;
-# alice and jane are made members of the authority only when they are not.
+# completed and submitted, one awaiting the CAB is decided by whichever of alice
+# and carol it still asks) rather than duplicated; a change request is found again
+# by its rendered subject and walked on from its state; alice and carol are made
+# CAB members only when they are not.
 # Run it twice: the second run reports "0 created, 0 updated, 0 write
 # request(s)".
 #
@@ -97,14 +99,17 @@
 #   * the memory limit proposal, which an earlier version left in CAB review:
 #     CAB review is no longer a state, and migration 0287 returned it to Draft,
 #     so it is found again as a draft and left as it is (what this version leaves);
+#   * a proposal an interrupted earlier run left awaiting the Standard Change
+#     Authority: migration 0289 returned it to Draft, so it is found again as a
+#     draft, submitted to the CAB and decided by alice and carol;
 #   * the suspended template's reason: when the stored reason differs from this
-#     script's, alice resumes it with a note (only a Standard Change Authority
-#     member may put a template back in use) and its owner (bob) suspends it again
+#     script's, alice resumes it with a note (only a CAB member may put a
+#     template back in use) and its owner (bob) suspends it again
 #     with the current reason (counted as "updated");
 #   * a seed draft with no customer (left before templates had customers) is
 #     given its customer (counted as "updated");
 #   * a proposal that is no longer a draft (approved, rejected, awaiting the
-#     Standard Change Authority)
+#     CAB)
 #     cannot be edited, so its evidence or customer cannot be corrected in place.
 #     When such a seed proposal cites a change request this script would no
 #     longer choose as evidence, or has no customer, the run prints a NOTE naming
@@ -137,7 +142,7 @@
 #   scripts/csm-compose/seed-standard-changes.sh            # seed / complete
 #   scripts/csm-compose/seed-standard-changes.sh --reset    # delete the seed's rows, then seed
 # Overrides: ENTITY_SERVICE_URL, OIDC_URL. Needs bash, curl, jq and docker.
-# Every run reaches Postgres (the authority's members; --reset's deletes) with
+# Every run reaches Postgres (the CAB's members; --reset's deletes) with
 # `docker compose exec -T postgres psql` on the
 # repository's docker-compose.yml (falling back to docker-compose); a stack
 # started under another project name needs COMPOSE_PROJECT_NAME=<name>, or name
@@ -166,12 +171,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 PROPOSER="bob.fernando@example.com"
 ENGINEER="alice.perera@example.com"
-# The two members of the Standard Change Authority who decide the seed's
-# proposals (two different people approve; the first one asked rejects). Neither
-# may be the proposer.
+# The two CAB members who decide the seed's proposals (two different people
+# approve; the first one asked rejects). Neither may be the proposer.
 AUTHORISER_1="alice.perera@example.com"
-AUTHORISER_2="jane.doe@example.com"
-AUTHORITY_GROUP="Standard Change Authority"
+AUTHORISER_2="carol.silva@example.com"
+CAB_GROUP="CAB Approval"
 
 # The local seed's fixed rows: the customer projects the change requests are
 # raised for (a template's customer is the account of its project), and Example
@@ -412,7 +416,7 @@ check_cited_evidence() {
 }
 
 # authorise ID NUMBER TARGET [REJECT_COMMENT]
-# The Standard Change Authority decides a proposal awaiting it, as the seed's two
+# The CAB decides a proposal awaiting it, as the seed's two
 # authorisers, each only while the proposal still asks them (an approver row of
 # theirs the portal would let them decide: "canDecide"). approved: each of them
 # approves, until the stage has the two different approvals it needs (one may
@@ -442,14 +446,14 @@ authorise() {
   must "read proposal" GET "/standard-change-proposals/$id" "$TOK_BOB"
   state="$(printf '%s' "$BODY" | jq -r .state)"
   [ "$state" = "$target" ] ||
-    die "$number is $state, not $target: the Standard Change Authority could not decide it as $AUTHORISER_1 and $AUTHORISER_2 (see who it asks on the proposal's page)"
+    die "$number is $state, not $target: the CAB could not decide it as $AUTHORISER_1 and $AUTHORISER_2 (see who it asks on the proposal's page)"
 }
 
 # drive_proposal ID TARGET SPEC_FILE EVIDENCE_IDS_JSON [REJECT_COMMENT]
 # Carries a proposal of bob's from whatever state it is in to TARGET (draft,
 # approved or rejected): a draft is filled from the spec (its evidence set to
 # exactly EVIDENCE_IDS_JSON) and, unless TARGET is draft, submitted to the
-# Standard Change Authority, which decides it (authorise).
+# CAB, which decides it (authorise).
 drive_proposal() {
   local id="$1" target="$2" spec="$3" evidence="$4" comment="${5:-}" state patch number
   must "read proposal" GET "/standard-change-proposals/$id" "$TOK_BOB"
@@ -488,14 +492,14 @@ drive_proposal() {
     step "$number filled in as a draft, citing $(printf '%s' "$evidence" | jq length) change request(s) as evidence"
     [ "$target" = "draft" ] && return 0
     must "submit $number" POST "/standard-change-proposals/$id/submit" "$TOK_BOB"
-    step "$number submitted to the Standard Change Authority"
+    step "$number submitted to the CAB"
     state="authority_review"
   fi
   if [ "$state" = "authority_review" ]; then
     if [ "$target" = "draft" ]; then
       # Someone submitted the seed's draft by hand: deciding it is not this
       # script's call, and it cannot be taken back to a draft.
-      step "NOTE: $number is awaiting the Standard Change Authority, not a draft: left as it is"
+      step "NOTE: $number is awaiting the CAB, not a draft: left as it is"
       return 0
     fi
     authorise "$id" "$number" "$target" "$comment"
@@ -549,8 +553,8 @@ ensure_new_proposal() {
 }
 
 # ensure_modified TEMPLATE_NAME SPEC_FILE EVIDENCE_IDS_JSON: the template at
-# version 2 or later, through a MODIFY proposal bob raises and the Standard
-# Change Authority (alice and jane) approves.
+# version 2 or later, through a MODIFY proposal bob raises and the CAB (alice
+# and carol) approves.
 ensure_modified() {
   local name="$1" spec="$2" evidence="$3" t version open id
   log "* $name  (for $CUSTOMER_NAME; target: version 2 through a modification)"
@@ -588,8 +592,8 @@ ensure_modified() {
 
 # ensure_suspended TEMPLATE_NAME REASON: suspended by its owner (bob), with REASON.
 # A template suspended with another reason (an earlier version of this script's)
-# is resumed by alice, with a note (only a Standard Change Authority member may
-# put a template back in use), and suspended again by its owner, so the stored
+# is resumed by alice, with a note (only a CAB member may put a template back
+# in use), and suspended again by its owner, so the stored
 # reason converges.
 ensure_suspended() {
   local name="$1" reason="$2" t id stored
@@ -863,7 +867,7 @@ jq '.evidenceNote = "<p>The cited evidence is earlier certificate rotation work 
     | .patch.rationale = "<p>Other Corp'"'"'s gateway certificates are issued for 90 days, so its gateways are rotated several times a quarter, always the same way: secret update, rolling restart one node at a time, fingerprint check. Done that way the rotation is invisible to Other Corp'"'"'s API consumers. Pre-authorising it for Other Corp removes a CAB round trip from a change whose only real risk is a bad chain, which the readiness check catches on the first node.</p>"' \
   "$WORK/tls.json" >"$WORK/tls-other-corp.json"
 
-# The proposal the Standard Change Authority rejects: deleting data is not a
+# The proposal the CAB rejects: deleting data is not a
 # pre-authorisable change.
 cat >"$WORK/purge.json" <<'JSON'
 {"evidenceMatch": "\\b(purge|analytics (data|tables?))\\b",
@@ -941,7 +945,7 @@ TEMPLATE_SPECS=(tls scale update-level restart allowlist)
 PROPOSAL_SPECS=(tls scale update-level restart allowlist purge memory debug-logging)
 
 # ===========================================================================
-# The local Postgres, LOCAL ONLY: the authority's members and --reset.
+# The local Postgres, LOCAL ONLY: the CAB's members and --reset.
 
 psql_local() {
   if [ -n "${PG_CONTAINER:-}" ]; then
@@ -953,18 +957,24 @@ psql_local() {
   fi
 }
 
-# ensure_authority_members: AUTHORISER_1 and AUTHORISER_2 are members of the
-# Standard Change Authority. Group membership has no API (an operations matter, as
-# for "CAB Approval" in seed-entity-service.sql), so the group_member rows are
-# written here, exactly as the E2E spec's beforeAll writes them: one per "user"
-# row of each email, only where none is there yet. Other members are kept.
-ensure_authority_members() {
+# ensure_cab_members: AUTHORISER_1 and AUTHORISER_2 are CAB members, as the
+# approval pools resolve it (a team_member.group_id or group_member row on a group
+# named "CAB Approval"; seed-entity-service.sql writes team_member rows for alice,
+# bob and carol). Group membership has no API (an operations matter), so a
+# group_member row is written here, exactly as the E2E spec's beforeAll writes
+# it, for each "user" row of an email that is a member in neither form yet, on
+# the group the pools would pick (the one with the most members). Other members
+# are kept.
+ensure_cab_members() {
   local members out found inserted people
   members="$(jq -nc --arg a "$AUTHORISER_1" --arg b "$AUTHORISER_2" '[$a, $b]')"
-  log "* $AUTHORITY_GROUP  (target: $AUTHORISER_1 and $AUTHORISER_2 are members)"
-  out="$(psql_local -t -A -v group_name="$AUTHORITY_GROUP" -v members="$members" <<'SQL'
+  log "* $CAB_GROUP  (target: $AUTHORISER_1 and $AUTHORISER_2 are members)"
+  out="$(psql_local -t -A -v group_name="$CAB_GROUP" -v members="$members" <<'SQL'
 WITH g AS (
-  SELECT id FROM "group" WHERE name = :'group_name'
+  SELECT gg.id FROM "group" gg WHERE gg.name = :'group_name'
+   ORDER BY (SELECT count(*) FROM team_member tm WHERE tm.group_id = gg.id)
+          + (SELECT count(*) FROM group_member gm WHERE gm.group_id = gg.id) DESC, gg.created_on, gg.id
+   LIMIT 1
 ), wanted AS (
   SELECT u.id FROM "user" u
    WHERE lower(u.email) IN (SELECT lower(jsonb_array_elements_text(:'members'::jsonb)))
@@ -972,16 +982,19 @@ WITH g AS (
   INSERT INTO group_member (id, created_on, updated_on, created_by, updated_by, group_id, user_id)
   SELECT gen_random_uuid(), now(), now(), 'seed-standard-changes', 'seed-standard-changes', g.id, w.id
     FROM g CROSS JOIN wanted w
-   WHERE NOT EXISTS (SELECT 1 FROM group_member gm WHERE gm.group_id = g.id AND gm.user_id = w.id)
+   WHERE NOT EXISTS (SELECT 1 FROM group_member gm JOIN "group" gg ON gg.id = gm.group_id
+                      WHERE gg.name = :'group_name' AND gm.user_id = w.id)
+     AND NOT EXISTS (SELECT 1 FROM team_member tm JOIN "group" gg ON gg.id = tm.group_id
+                      WHERE gg.name = :'group_name' AND tm.user_id = w.id)
   RETURNING user_id
 )
 SELECT (SELECT count(*) FROM g),
        (SELECT count(*) FROM added),
        (SELECT count(DISTINCT lower(u.email)) FROM "user" u WHERE u.id IN (SELECT id FROM wanted));
 SQL
-)" || die "could not reach the local Postgres to make $AUTHORISER_1 and $AUTHORISER_2 members of \"$AUTHORITY_GROUP\" (see PG_CONTAINER / COMPOSE_PROJECT_NAME in --help)"
+)" || die "could not reach the local Postgres to make $AUTHORISER_1 and $AUTHORISER_2 members of \"$CAB_GROUP\" (see PG_CONTAINER / COMPOSE_PROJECT_NAME in --help)"
   IFS='|' read -r found inserted people <<<"$out"
-  [ "$found" = "1" ] || die "no single \"$AUTHORITY_GROUP\" group on this stack (found ${found:-none}): run make migrate (migration 0277 creates it)"
+  [ "$found" = "1" ] || die "no \"$CAB_GROUP\" group on this stack: run make migrate (migration 0188 creates it)"
   [ "$people" = "2" ] || die "only ${people:-0} of $AUTHORISER_1 and $AUTHORISER_2 have a user on this stack: load scripts/csm-compose/seed-entity-service.sql first"
   if [ "$inserted" -gt 0 ]; then
     CREATED=$((CREATED + inserted))
@@ -1078,12 +1091,12 @@ ENGINEER_ID="$(printf '%s' "$BODY" | jq -er '.id // .user.id')" || die "no user 
 load_closed_change_requests
 
 log "Seeding standard changes on $ES_URL"
-log "  proposer: $PROPOSER   authority: $AUTHORISER_1, $AUTHORISER_2   engineer: $ENGINEER"
+log "  proposer: $PROPOSER   CAB authorisers: $AUTHORISER_1, $AUTHORISER_2   engineer: $ENGINEER"
 log "  closed change requests that may serve as evidence: $(printf '%s' "$CLOSED_CRS" | jq length)"
 log ""
 
 log "Who decides the proposals"
-ensure_authority_members
+ensure_cab_members
 log ""
 
 use_customer "$EXAMPLE_CORP_PROJECT_ID" "$EXAMPLE_CORP_ABT_GROUP_ID"

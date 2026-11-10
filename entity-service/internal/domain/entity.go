@@ -4609,7 +4609,10 @@ func IsCreatableChangeRequestType(t ChangeRequestType) bool {
 //   - CABApprovalGroupName: the Change Advisory Board, the approver pool of a
 //     Normal change's second (CAB) approval stage and of an Emergency change's
 //     only approval stage (the previous system has no Emergency CAB: an Emergency change is
-//     approved by this same group).
+//     approved by this same group). It also authorises standard change
+//     templates: two of its members (StandardChangeCABApprovals) approve every
+//     standard change proposal (migration 0289; until 2026-11-10 a separate
+//     "Standard Change Authority" group, created by 0277, did).
 //   - PeerApprovalFallbackGroupName: the peer approval fallback group
 //     ("Devops Approval" in the ServiceNow flow). A Normal change's peer stage
 //     draws its approvers from the active internal members of the change's
@@ -4621,14 +4624,9 @@ func IsCreatableChangeRequestType(t ChangeRequestType) bool {
 // CAB Approval is created by migration 0188_change_request_approval_groups.sql when
 // absent (that migration also created an "ECAB Approval" group, which nothing
 // resolves any more and which is left in place).
-//   - StandardChangeAuthorityGroupName: the heads (of SaaS SRE, of each SaaS ABT,
-//     of SRE) who authorise a standard change template, with no CAB stage before
-//     them (migration 0287), created by migration 0277
-//     (domain.StandardChangeAuthorityApprovals of them).
 const (
-	CABApprovalGroupName             = "CAB Approval"
-	PeerApprovalFallbackGroupName    = "Devops Approval"
-	StandardChangeAuthorityGroupName = "Standard Change Authority"
+	CABApprovalGroupName          = "CAB Approval"
+	PeerApprovalFallbackGroupName = "Devops Approval"
 )
 
 // ChangeRequestState represents the current workflow state of a change request.

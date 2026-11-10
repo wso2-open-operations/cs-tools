@@ -5556,7 +5556,7 @@ export interface BeSpecialistHandoffSummary {
 
 
 // ---------------------------------------------------------------------------
-// Standard changes: the template catalogue the Standard Change Authority approves, and its proposals
+// Standard changes: the template catalogue the CAB approves, and its proposals
 // (`/standard-change-templates/...`, `/standard-change-proposals/...`; entity
 // service `domain/standard_change.go`)
 // ---------------------------------------------------------------------------
@@ -5564,9 +5564,9 @@ export interface BeSpecialistHandoffSummary {
 export type BeStandardChangeTemplateState = "active" | "suspended" | "retired";
 export type BeStandardChangeProposalKind = "new" | "modify" | "retire";
 /**
- * `authority_review`: submitted; two different members of the Standard Change
- * Authority must approve it (the CAB does not decide a proposal). `cancelled`: an
- * authority member ended someone else's open proposal, with a reason.
+ * `authority_review`: submitted, awaiting CAB approval; two different CAB members
+ * must approve it (until 2026-11-10 the Standard Change Authority did, hence the
+ * name). `cancelled`: a CAB member ended someone else's open proposal, with a reason.
  */
 export type BeStandardChangeProposalState =
   | "draft"
@@ -5693,9 +5693,8 @@ export interface BeStandardChangeTemplate {
   /** On `GET /standard-change-templates/{id}` only, newest first: suspensions, resumptions, review flags. */
   history?: BeStandardChangeTemplateEvent[];
   /**
-   * What the caller may do (advisory). Suspend: its owner, a CAB member or a
-   * Standard Change Authority member. Resume and clear the review flag: a
-   * Standard Change Authority member only.
+   * What the caller may do (advisory). Suspend: its owner or a CAB member.
+   * Resume and clear the review flag: a CAB member only.
    */
   canSuspend?: boolean;
   canResume?: boolean;
@@ -5759,15 +5758,16 @@ export interface BeStandardChangeEvidence {
 }
 
 /**
- * One approval stage of a proposal: the Standard Change Authority's, the only one
- * now. A proposal decided before migration 0287 may also hold an earlier
- * "CAB Approval" stage (0287 removed it from every open proposal).
+ * One approval stage of a proposal: the CAB's ("CAB Approval", two approvals),
+ * the only one now. A proposal decided before 2026-11-10 holds a "Standard Change
+ * Authority" stage instead, and one decided before migration 0287 also an
+ * earlier one-approval "CAB Approval" stage.
  */
 export interface BeStandardChangeProposalStage {
   id: string;
-  /** "Standard Change Authority" (or, on a proposal decided before 0287, "CAB Approval"). */
+  /** "CAB Approval" (or, on an older proposal, "Standard Change Authority"). */
   label: string;
-  /** How many different approvers must approve (2 for the authority). */
+  /** How many different approvers must approve (2; 1 on the oldest CAB stage). */
   requiredApprovals: number;
   approvals: number;
   /** APPROVED or REJECTED once settled; null while open. */
@@ -5845,7 +5845,7 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
   canWithdraw: boolean;
   /** The proposer, on a draft never submitted. */
   canDelete?: boolean;
-  /** A Standard Change Authority member, on someone else's open proposal. */
+  /** A CAB member, on someone else's open proposal. */
   canCancel?: boolean;
 }
 
@@ -5925,7 +5925,7 @@ export interface BeSearchStandardChangeProposalsPayload {
   /** Narrows the list to the proposals for one customer (account). */
   accountId?: string;
   proposedByMe?: boolean;
-  /** Awaiting authorisation, with a pending approval of the caller's. */
+  /** Awaiting CAB approval, with a pending approval of the caller's. */
   awaitingMyDecision?: boolean;
   query?: string;
   pagination: BePagination;
