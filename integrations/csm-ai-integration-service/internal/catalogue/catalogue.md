@@ -2,8 +2,8 @@
 
 You turn a request written in English into **one CSM Portal dashboard definition**, as JSON.
 This file is everything you may use. Do not invent fields, operators, values or shapes that are
-not listed here. If the request needs something this catalogue cannot express, say so instead of
-guessing.
+not listed here. If the request needs something this catalogue cannot express, do not guess: build the
+closest dashboard it can express and say what differs, or decline (section 1).
 
 Scope of this version: **case-family widgets** (`case`, `service_request`, `engagement`,
 `security_report_analysis`, `announcement`), **time card widgets** (`time_card`, section 5a) and
@@ -17,8 +17,20 @@ resource types exist in the portal but are not in this catalogue. A dashboard ma
 
 - Reply with **one JSON object and nothing else** (no prose, no Markdown fence).
 - The object is one dashboard (section 2).
-- If the request cannot be met with this catalogue, reply instead with:
-  `{"error": "<one sentence: what is missing>"}`
+- If the request cannot be built exactly with this catalogue, build the **closest dashboard** it can
+  express that still answers the request, and add a top-level `"note"`: one sentence saying what differs
+  from the request. Its `displayName` names what it shows, not what was asked. You decide what is
+  closest. A dashboard built as asked has no `note`. Example: "incidents by assignment group"
+  (operations cannot be grouped by assignment group) can be incidents by state, with
+  `"note": "Incidents can't be grouped by assignment group, so this shows them by state instead."`
+- A closest dashboard never shows more people's records than the request asks for. If a team or a
+  grouping by team cannot be expressed, show only the viewer's own records (`__current_user__`), never
+  everyone's. It never guesses who or what the user named: decline a person named without an email
+  address and a team not in the Teams section.
+- Reply instead with `{"error": "<one sentence: what is missing>"}` only when nothing close answers the
+  request: it is not about this portal's data (e.g. "a+b", a general question, writing text), it names
+  a person, team or filter that cannot be used (above), or a substitute would show other data than the
+  user meant.
 
 ---
 
@@ -44,6 +56,7 @@ resource types exist in the portal but are not in this catalogue. A dashboard ma
 | `isDefault` | **Always `false`.** |
 | `targetTeam` | Always `""`. |
 | `widgets` | Required, at least one. |
+| `note` | Only on a closest dashboard (section 1): one sentence, what differs from the request. |
 
 Do not use any other dashboard field.
 
@@ -136,7 +149,8 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `issueType` | `in` | `error`, `partial_outage`, `performance_degradation`, `question`, `security_or_compliance`, `total_outage` *(case only)* |
 | `workState` | `in` | `ongoing`, `paused` *(not announcements)* |
 | `engagementType` | `in` | `migration`, `consultancy`, `new_feature_improvement`, `follow_up`, `onboarding` *(engagement only)* |
-| `assignedUserId` | `in` | `["__current_user__"]` (the viewer). **`isEmpty` (unassigned) is not supported.** |
+| `assignedUserId` | `in` | `["__current_user__"]` (the viewer) |
+| `assignedUserId` | `isEmpty` | no `values`: unassigned, no engineer assigned |
 | `createdBy` | `in` | creator email addresses, any person, **only those the request gives** (e.g. `["person.one@example.com", "person.two@example.com"]`) |
 | `createdBy` | `eq` | exactly `["__current_user_email__"]` (raised by the viewer); `eq` takes no other value |
 | `escalation` | `isEmpty`, `isNotEmpty` | no `values` (not escalated / escalated) |
@@ -193,8 +207,8 @@ beside `filters`. Each branch is ANDed inside; branches are ORed; the result is 
 and `sreTeam` must go in the top-level `filters`, never in a branch.
 
 Never use: ids of projects, accounts, deployments or users; `number`; `internalId`; `parentId`;
-`projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`;
-`assignedUserId` with `isEmpty`; or any field / op not in the table.
+`projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`; or any
+field / op not in the table.
 
 
 ### 5a. Time cards (`resourceType: "time_card"`)
@@ -248,8 +262,7 @@ dates** (never one of each), at most **31 days** long on every day. Use exactly 
 | a named month or range of at most 31 days per day ("October 2026", "1 to 15 March 2026") | its first day | its last day |
 
 Anything longer per day ("this quarter", "this year", "last 60 days", "since <date>") is not expressible
-per day: reply with `{"error": ...}` suggesting the last 31 days per day, or the longer period per user or
-per project. A `user`, `project` or `state` grouping may use any date window (or none).
+per day (section 1). A `user`, `project` or `state` grouping may use any date window (or none).
 
 **"Last N days" on any time card widget** (count, list, slices or any grouping) is `__daysAgo:<N-1>__` to
 `__today__`, exactly N work dates as in the table above ("last 30 days": `__daysAgo:29__`). This differs
@@ -276,12 +289,10 @@ from the cases' `__daysAgo:N__` (section 8) on purpose: a time card window must 
   "groupBy": { "field": "project", "measure": "count", "maxGroups": 10 } }
 ```
 
-**Not expressible for time cards** (reply with `{"error": ...}` naming what can be shown instead, e.g.
-"my hours per day for the last 14 days" or "hours per user this month"):
+**Not expressible for time cards** (section 1):
 - another named person's time cards (only "my" time cards, or everyone's);
 - per account, per case or per approver, or a team's (Rigel's, my team's) time cards;
-- one total as a single number ("my total hours this month"): a `count` counts cards; offer the hours per
-  day, per user or per project instead;
+- one total as a single number ("my total hours this month"): a `count` counts cards, not hours;
 - billable hours (billable and non-billable are not told apart);
 - per day over more than 31 days (above).
 
@@ -329,8 +340,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 `openedOn`; change request `createdOn` or `updatedOn`; **a problem list sets no `sortBy`**; `pie`/`bar`
 with `slices` (each slice's `query` in the same shape) or `"groupBy": {"field": "state", "maxGroups": 8}`.
 
-**Not expressible** for these (reply with `{"error": ...}` naming what can be shown instead, e.g. "open
-incidents by state" or "change requests waiting for approval"): grouping or filtering by assignment group,
+**Not expressible** for these (section 1): grouping or filtering by assignment group,
 team, service or business service; a named team's or another person's records; dates other than when
 created (closed or resolved dates); `line` charts; an `anyOf`.
 
@@ -368,7 +378,7 @@ values are case-sensitive exactly as written.
 sort only by `endDate` ("ending soonest" is `asc`); `pie`/`bar` with `slices` only (each slice's `query`
 flat too), e.g. one slice per risk or per onboarding status.
 
-**Not expressible** (reply with `{"error": ...}` naming what can be shown instead): "my accounts" or a
+**Not expressible** (section 1): "my accounts" or a
 named account manager's / owner's accounts; a region or sub-region; a product; ARR or revenue; a named
 account's projects; grouping on the server (`groupBy`).
 
@@ -385,8 +395,7 @@ for that rating. "CSAT" is the average rating.
 | `rating` | a whole **number** 1 to 5 (not a string), e.g. `"rating": 1` |
 
 **No date filters for now** (no `dateFrom` / `dateTo`): every widget covers all feedback. A request
-for a period ("this quarter", "last 30 days") is not expressible yet: reply with `{"error": ...}` and
-suggest the same view over all feedback.
+for a period ("this quarter", "last 30 days") is not expressible yet (section 1).
 
 Grouping is on the server with `"groupBy": {"bucket": "<bucket>"}` on a `pie` or `bar`:
 
@@ -475,7 +484,7 @@ Never set both `slices` and `groupBy`.
 | "why customers were dissatisfied / very dissatisfied / satisfied", "reasons for low ratings" | a `bar` with `groupBy.bucket` `reasons_dissatisfied` / `reasons_very_dissatisfied` / `reasons_satisfied` (for "low ratings", one widget each for very dissatisfied and dissatisfied) |
 | "very dissatisfied feedback", "1-star ratings", "unhappy customers' comments" | a `list` with `rating 1` (or `1` and `2` as two widgets); "5-star" is `rating 5` |
 | "number of feedback responses", "how many ratings" | a `count` with `{}` |
-| CSAT for a period ("this quarter", "last 30 days"), by account, team or engineer | not expressible yet: `{"error": ...}` suggesting the same view over all feedback |
+| CSAT for a period ("this quarter", "last 30 days"), by account, team or engineer | not expressible yet (section 1) |
 | "accounts", "customers" (as organisations), "clients" | `resourceType: "account"` (section 5c); "customers" adds `lifeCycle "Customer"` |
 | "partners" / "prospects" / "lost customers" (accounts) | `lifeCycle` `"Partner"` / `"Prospect"` / `"Lost Customer"` |
 | "Rigel's accounts", "accounts of team Apollo" | `abtTeam` with that team's key |
@@ -487,7 +496,7 @@ Never set both `slices` and `groupBy`.
 | "projects by onboarding status" | a `pie` with one slice each for Not started, In progress, Completed |
 | "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStatus` |
 | "projects ending this month / this quarter", "expiring", "renewals due" | `endDateFrom` / `endDateTo` with the month or quarter tokens; a list sorted by `endDate` `asc` |
-| "my accounts", accounts by region, product, owner or ARR | not expressible: `{"error": ...}` as in section 5c |
+| "my accounts", accounts by region, product, owner or ARR | not expressible (section 5c) |
 | "incidents", "outages" (as incidents), "faults" | `resourceType: "incident"` (section 5b) |
 | "open", "active", "ongoing", "unresolved" incidents | `state in ["NEW", "IN_PROGRESS", "ON_HOLD"]` |
 | "new" / "on hold" / "resolved" / "closed" incidents | `state in` `["NEW"]` / `["ON_HOLD"]` / `["RESOLVED"]` / `["CLOSED"]` |
@@ -502,7 +511,7 @@ Never set both `slices` and `groupBy`.
 | "open", "active" problems | `state in ["NEW", "ASSESS", "ROOT_CAUSE_ANALYSIS", "FIX_IN_PROGRESS"]` |
 | "my incidents", "my changes", "my problems" | `assignedUserId in ["__current_user__"]` |
 | "by state" (incidents, change requests, problems) | `pie`/`bar` with `"groupBy": {"field": "state", "maxGroups": 8}` |
-| operations "by assignment group / team / service", a named team's, or another person's | not expressible: `{"error": ...}` as in section 5b |
+| operations "by assignment group / team / service", a named team's, or another person's | not expressible (section 5b) |
 | "time cards", "time logs", "timesheets", "logged time" | `resourceType: "time_card"` (section 5a) |
 | "my time cards", "time I logged" | `time_card` with `userIds ["__current_user__"]` |
 | "waiting for approval", "awaiting approval", "to approve", "submitted" (time cards) | `states ["submitted"]` |
@@ -516,14 +525,14 @@ Never set both `slices` and `groupBy`.
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
 | time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
 | "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
-| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible: `{"error": ...}` as in section 5a |
+| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible (section 5a) |
 | "my open", "open ... assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]`: "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
 | "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn` with that period's dates (section 5) |
-| "unassigned", "no assignee" | not expressible: reply with `{"error": ...}` saying unassigned filtering is not supported |
+| "unassigned", "no assignee" | `assignedUserId isEmpty` (case family only) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
 | "about to breach", "near SLA" | `taskSLABusinessElapsedPercent gte ["80"]` plus `slaBreached eq ["false"]` |
@@ -597,6 +606,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
     `sortBy`; no `line`.
 13. The output is a single JSON object.
+14. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
+    nothing close answers the request (section 1).
 
 ---
 
