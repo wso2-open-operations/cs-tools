@@ -39,8 +39,10 @@ type fakeLinks struct {
 	downloadTTL  time.Duration
 }
 
+// CanSignLinks reports whether this fake signs, unless told it cannot.
 func (f *fakeLinks) CanSignLinks() bool { return !f.cannotSign }
 
+// UploadLinks records the request and answers with one link per chunk.
 func (f *fakeLinks) UploadLinks(key string, count int, ttl time.Duration) ([]string, time.Time, error) {
 	f.uploadKey, f.uploadCount, f.uploadTTL = key, count, ttl
 	links := make([]string, count)
@@ -50,6 +52,7 @@ func (f *fakeLinks) UploadLinks(key string, count int, ttl time.Duration) ([]str
 	return links, saNow.Add(ttl), f.err
 }
 
+// DownloadLink records the request and answers with a link.
 func (f *fakeLinks) DownloadLink(key, name, contentType string, ttl time.Duration) (string, time.Time, error) {
 	f.downloadKey, f.downloadName, f.downloadType, f.downloadTTL = key, name, contentType, ttl
 	return "https://blob.example/" + key + "?sig=y", saNow.Add(ttl), f.err
@@ -63,12 +66,18 @@ const (
 // newDirectSvc builds a file service that allows files up to 100 MiB and sends
 // those above 8 MiB direct, when links can sign.
 func newDirectSvc(repo *fakeStoredRepo, links LinkStore) StoredAttachmentFileService {
+	return newDirectSvcWith(repo, links, newFakeBlob())
+}
+
+// newDirectSvcWith is newDirectSvc over the given blob store.
+func newDirectSvcWith(repo *fakeStoredRepo, links LinkStore, blob FileStore) StoredAttachmentFileService {
 	svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 100 * mib, InlineTotalMaxBytes: 100}).(*storedAttachmentService)
 	svc.now = func() time.Time { return saNow }
 	svc.shares.now = func() time.Time { return saNow }
-	return NewStoredAttachmentFileService(svc, newFakeBlob(), 2, WithDirectTransfers(links, directMinMB))
+	return NewStoredAttachmentFileService(svc, blob, 2, WithDirectTransfers(links, directMinMB))
 }
 
+// TestDirectUploadAllowed: only a file above the threshold goes direct, and only when links can be signed.
 func TestDirectUploadAllowed(t *testing.T) {
 	repo := newFakeStoredRepo()
 	on := newDirectSvc(repo, &fakeLinks{})
@@ -85,6 +94,7 @@ func TestDirectUploadAllowed(t *testing.T) {
 	}
 }
 
+// TestDirectUploadLinks: the access checks of a chunk, made once, then one link per chunk for the upload's own key.
 func TestDirectUploadLinks(t *testing.T) {
 	t.Run("one link per chunk, signed for the upload's own key", func(t *testing.T) {
 		repo := newFakeStoredRepo()
@@ -154,13 +164,14 @@ func TestDirectUploadLinks(t *testing.T) {
 	})
 }
 
+// TestDirectDownloadLink: a stored file the caller may see gets a link for its own name, and nothing else does.
 func TestDirectDownloadLink(t *testing.T) {
 	key := workItemKey
 	t.Run("a stored file gets a download link for its own name", func(t *testing.T) {
 		repo := newFakeStoredRepo()
 		repo.rows[saAttID] = completeRow("COMPLETE", &key)
 		links := &fakeLinks{}
-		got, err := newDirectSvc(repo, links).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
+		got, err := newDirectSvcWith(repo, links, storedFile(key, 500)).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		if err != nil {
 			t.Fatalf("DirectDownloadLink: %v", err)
 		}
@@ -170,6 +181,27 @@ func TestDirectDownloadLink(t *testing.T) {
 		// Whatever type the row declares, the link answers as an opaque download.
 		if links.downloadKey != key || links.downloadName != "report.pdf" || links.downloadType != "application/octet-stream" || links.downloadTTL != directDownloadTTL {
 			t.Errorf("signed %q %q %q %v", links.downloadKey, links.downloadName, links.downloadType, links.downloadTTL)
+		}
+	})
+	t.Run("a stored file that is not the size on record gets no link", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.rows[saAttID] = completeRow("COMPLETE", &key)
+		links := &fakeLinks{}
+		// The row says 500 bytes; the file was overwritten with another size.
+		_, err := newDirectSvcWith(repo, links, storedFile(key, 900)).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
+		wantErr[*apierror.ServiceUnavailableError](t, err, "a file of another size")
+		if links.downloadKey != "" {
+			t.Error("a link was signed for a file that is not the size on record")
+		}
+	})
+	t.Run("a stored file that is missing gets no link", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.rows[saAttID] = completeRow("COMPLETE", &key)
+		links := &fakeLinks{}
+		_, err := newDirectSvc(repo, links).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
+		wantErr[*apierror.NotFoundError](t, err, "a file that is not in storage")
+		if links.downloadKey != "" {
+			t.Error("a link was signed for a missing file")
 		}
 	})
 	t.Run("a deleted attachment is gone", func(t *testing.T) {
@@ -197,4 +229,11 @@ func TestDirectDownloadLink(t *testing.T) {
 		_, err := newDirectSvc(repo, nil).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		wantErr[*apierror.ValidationError](t, err, "direct transfers off")
 	})
+}
+
+// storedFile is a blob store holding a committed file of size bytes at key.
+func storedFile(key string, size int) *fakeBlob {
+	blob := newFakeBlob()
+	blob.committed[key] = make([]byte, size)
+	return blob
 }

@@ -107,6 +107,7 @@ func TestStoredAttachmentHandler_InitiateReturns201(t *testing.T) {
 	}
 }
 
+// TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect: the upload start reports directUpload from the declared size.
 func TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect(t *testing.T) {
 	for _, direct := range []bool{true, false} {
 		files := &fakeFiles{direct: direct}
@@ -125,6 +126,7 @@ func TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect(t *testing
 	}
 }
 
+// TestStoredAttachmentHandler_DirectLinksAreNeverCached: the answers carry links, which are credentials, so they are no-store.
 func TestStoredAttachmentHandler_DirectLinksAreNeverCached(t *testing.T) {
 	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{}, http.MethodPost, "/attachments/upload/abc/direct?type=work_item", "")
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"links":["https://blob.example/abc?c=0"]`) {
@@ -136,6 +138,7 @@ func TestStoredAttachmentHandler_DirectLinksAreNeverCached(t *testing.T) {
 	}
 }
 
+// TestStoredAttachmentHandler_DirectLinkRefusalsAreMapped: each refusal of the service keeps its HTTP status on both routes.
 func TestStoredAttachmentHandler_DirectLinkRefusalsAreMapped(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err  error
@@ -316,15 +319,18 @@ type fakeFiles struct {
 	directSize int64
 }
 
+// DirectUploadAllowed records the size it was asked about and answers as configured.
 func (f *fakeFiles) DirectUploadAllowed(size int64) bool {
 	f.directSize = size
 	return f.direct
 }
 
+// DirectUploadLinks answers with one link, or the configured error.
 func (f *fakeFiles) DirectUploadLinks(_ context.Context, _ domain.StoredAttachmentKind, id string) (domain.DirectUploadLinks, error) {
 	return domain.DirectUploadLinks{Links: []string{"https://blob.example/" + id + "?c=0"}, ChunkBytes: service.UploadChunkBytes}, f.err
 }
 
+// DirectDownloadLink answers with a link, or the configured error.
 func (f *fakeFiles) DirectDownloadLink(_ context.Context, _ domain.StoredAttachmentKind, id string) (domain.DirectDownloadLink, error) {
 	return domain.DirectDownloadLink{URL: "https://blob.example/" + id + "?sig=x", Name: "a.pdf"}, f.err
 }
