@@ -100,7 +100,7 @@ Do not use any other dashboard field.
 | `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
-state, user, project or day, counting cards or summing hours; no `line`).
+state, user, project, day or team, counting cards or summing hours; no `line`).
 An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`/`bar` with `slices` or
 `groupBy` by `state` only (no `line`). An `account` or `project` widget is `count`, `list`, or `pie`/`bar`
 with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
@@ -224,6 +224,7 @@ A time card's `query` is a **flat object**, never a `filters` array, and takes o
 |---|---|
 | `states` | a non-empty list of `pending`, `submitted`, `approved`, `rejected`, `processed`, `recalled` |
 | `userIds` | **only** `["__current_user__"]`: the viewer's own time cards ("my time cards") |
+| `teamIds` | the time cards of a team's members: team **keys** from the Teams section, CRE or SRE (e.g. `["rigel"]`, `["rigel", "sirius"]`, `["apollo"]`), or `["__current_team__"]` ("my team's", **only on a `"cre"` dashboard**, never together with a key) |
 | `startDate` | the work date from (inclusive): one date (section 5) |
 | `endDate` | the work date to (inclusive): one date (section 5) |
 
@@ -235,6 +236,9 @@ A time card's `query` is a **flat object**, never a `filters` array, and takes o
 Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pie`/`bar` with
 `slices` (each slice's `query` also a flat object, e.g. one slice per state) or `groupBy` (below).
 
+A team's time cards are those of the people **on the team today** (its current members, as the Team
+Schedule lists them), whenever the cards were logged: someone who moved teams counts in the new team.
+
 **Totals: grouping on the server.** A `pie`/`bar` time card widget may group with
 `"groupBy": {"field": "<field>", "measure": "count" | "hours", "maxGroups": N}`:
 
@@ -244,6 +248,7 @@ Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pi
 | `project` | project the cards were logged on | "per project"; `bar`, `maxGroups` 5 to 12; cards with no project count under "Others" |
 | `day` | work date, every day of the window in date order (days with nothing at 0) | "per day", "daily"; always `bar`, no `maxGroups`; the window rules below |
 | `state` | time card state, as stored (approved and processed apart) | only for **hours** by state; card **counts** by state use the state slices of section 8 |
+| `team` | team in the widget's own `query.teamIds`, every one of them (a team with nothing at 0) | "by ABT", "per team", "by team"; **needs `query.teamIds`** (the teams to show); `bar`; someone on two of the teams counts in both |
 
 `measure`: `"hours"` sums the time logged on the cards ("hours", "time logged", "time spent", "effort");
 `"count"` (or leaving `measure` out) counts the cards ("number of time cards", "how many"). With
@@ -289,9 +294,27 @@ from the cases' `__daysAgo:N__` (section 8) on purpose: a time card window must 
   "groupBy": { "field": "project", "measure": "count", "maxGroups": 10 } }
 ```
 
+```json
+{ "id": "hours-by-abt", "displayName": "Hours Logged by ABT This Month", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "teamIds": ["rigel", "sirius", "draco"], "startDate": "__startOfMonth:0__", "endDate": "__today__" },
+  "groupBy": { "field": "team", "measure": "hours" } }
+```
+
+```json
+{ "id": "rigel-hours-per-member", "displayName": "Rigel: Hours per Member This Month", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "teamIds": ["rigel"], "startDate": "__startOfMonth:0__", "endDate": "__today__" },
+  "groupBy": { "field": "user", "measure": "hours", "maxGroups": 12 } }
+```
+
+(In these examples `rigel`, `sirius` and `draco` stand for the CRE ABT keys of the Teams section: use
+the real keys, and for "by ABT" every CRE ABT key, in the order of the Teams section.)
+
 **Not expressible for time cards** (section 1):
-- another named person's time cards (only "my" time cards, or everyone's);
-- per account, per case or per approver, or a team's (Rigel's, my team's) time cards;
+- another named person's time cards (only "my" time cards, a team's, or everyone's);
+- per account, per case or per approver;
+- a team's members as they were on a past date (a team is its members today);
 - one total as a single number ("my total hours this month"): a `count` counts cards, not hours;
 - billable hours (billable and non-billable are not told apart);
 - per day over more than 31 days (above).
@@ -450,7 +473,7 @@ or breached group, `warning` next, otherwise leave it out.
 ```
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
-`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
+`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day`, `state` or `team` with
 `measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
 section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
@@ -522,10 +545,13 @@ Never set both `slices` and `groupBy`.
 | "this month", "last month", "past 30 days", "this week", "December 2025" (time cards) | `startDate` (and `endDate`) with the dates of section 5, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
 | "hours", "time logged", "time spent", "effort" (time cards, per something) | `groupBy` with `"measure": "hours"` (section 5a) |
 | time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
+| a team's time cards or hours ("Rigel's", "team Rigel", "Rigel and Sirius") | `teamIds` with the teams' keys (section 5a), on a `"cs"` dashboard; the team names start `displayName`. "Rigel's hours per member": that plus `groupBy` `user` |
+| "my team's" time cards or hours | a `"cre"` dashboard with `teamIds ["__current_team__"]` |
+| time cards or hours "by ABT", "per ABT", "per team", "for each ABT" | one `bar` with `groupBy` `team` and `teamIds` the keys of **every** CRE ABT team (or only the teams named; "by SRE ABT": every SRE ABT team), on a `"cs"` dashboard; never one slice or widget per team |
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
 | time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
 | "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
-| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible (section 5a) |
+| time cards per account, per case, per approver or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible (section 5a) |
 | "my open", "open ... assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]`: "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
@@ -553,13 +579,13 @@ Never set both `slices` and `groupBy`.
 | "cases" with no other type named | `resourceType: "case"` |
 | "service requests", "SRs" | `resourceType: "service_request"` |
 | "engagements", "migrations" | `resourceType: "engagement"` (migrations add `engagementType in ["migration"]`) |
-| "my team's" | a `"cre"` dashboard with `creTeam in ["__current_team__"]` |
+| "my team's" | a `"cre"` dashboard with `creTeam in ["__current_team__"]` (time cards: `teamIds`, above) |
 | a team by name: "Rigel", "Rigel's", "team Rigel", "the Rigel team", "Sirius and Draco" (any case) | that team's **key** in that team's **field** from the Teams section, on a `"cs"` dashboard, in **every** widget the request is about; several teams: one `in` with all their keys; the team names start `displayName` |
 | "ABT", "ABT team", "account based team", "CRE ABT" | a team whose **family is CRE ABT** in the Teams section. Teams of any other family (e.g. a CRE team such as Americas, or an SRE ABT team) are **not** ABT teams |
 | "my ABT", "my ABT team" | same as "my team's" |
 | a named team with "ABT": "Rigel ABT", "the Sirius ABT" | same as the team by name |
 | "all ABTs", "every ABT" (no grouping) | one `creTeam in [...]` with the keys of **every** CRE ABT team |
-| "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section |
+| "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section (time cards: `groupBy` `team`, above) |
 | "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some |
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
@@ -592,10 +618,12 @@ If two readings are plausible and the table does not settle it, pick the one abo
    "ABT" means only the teams whose family is CRE ABT; a team filter may sit in a slice's query
    ("by ABT"), never in an `anyOf` branch.
 9. A `time_card` widget: a flat `query` with only `states`, `userIds` (`["__current_user__"]` only),
-   `startDate`, `endDate`; shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with
-   flat-query `slices` or `groupBy` (`user`, `project`, `day`, `state`; `measure` `hours` or `count`); a
-   `day` grouping has both dates from section 5a's window table (31 days at most); never `line`, a
-   `filters` array or a team filter. `measure` appears on no other resourceType.
+   `teamIds` (team keys, CRE or SRE, or `["__current_team__"]` on a `"cre"` dashboard), `startDate`, `endDate`;
+   shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with flat-query `slices` or
+   `groupBy` (`user`, `project`, `day`, `state`, `team`; `measure` `hours` or `count`); a `team` grouping
+   has `teamIds` in the widget's own `query`; a `day` grouping has both dates from section 5a's window
+   table (31 days at most); never `line`, a `filters` array or a `creTeam` / `sreTeam` filter. `measure`
+   appears on no other resourceType.
 10. An `incident` / `change_request` / `problem` widget: only the keys, fields, ops and **exact-case
     values** of section 5b; change request state in the flat `states`, never in `filters`; `groupBy` by
     `state` only; a problem list has no `sortBy`; no ids, no `anyOf`, no `line`.
