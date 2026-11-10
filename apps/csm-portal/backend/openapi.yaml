@@ -16308,45 +16308,7 @@ paths:
                   holidays:
                     type: array
                     items:
-                    type: object
-                    description: >
-                      One CRE team's availability on one public holiday; the entity
-                      service's HolidayAvailability, passed through unchanged.
-                    required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
-                    properties:
-                      teamKey: { type: string }
-                      teamName: { type: string }
-                      date: { type: string, format: date }
-                      titles: { type: array, items: { type: string } }
-                      countries: { type: array, items: { type: string } }
-                      status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
-                      fullyMarked: { type: boolean }
-                      members:
-                        type: array
-                        items:
-                          type: object
-                          required: [userId, name, status]
-                          properties:
-                            userId: { type: string, format: uuid }
-                            name: { type: string }
-                            email: { type: string }
-                            status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
-                            absenceId: { type: string, format: uuid }
-                            awayKind: { type: string }
-                      turns: { type: integer }
-                      uncovered:
-                        type: array
-                        items:
-                          type: object
-                          required: [shiftCode, shiftLabel, userId, name]
-                          properties:
-                            shiftCode: { type: string }
-                            shiftLabel: { type: string }
-                            userId: { type: string, format: uuid }
-                            name: { type: string }
-                      confirmedBy: { type: string }
-                      confirmedOn: { type: string, format: date-time }
-                      canConfirm: { type: boolean }
+                      $ref: '#/components/schemas/HolidayAvailability'
                   count: { type: integer }
         "400":
           description: Bad request.
@@ -16389,45 +16351,7 @@ paths:
           content:
             application/json:
               schema:
-              type: object
-              description: >
-                One CRE team's availability on one public holiday; the entity
-                service's HolidayAvailability, passed through unchanged.
-              required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
-              properties:
-                teamKey: { type: string }
-                teamName: { type: string }
-                date: { type: string, format: date }
-                titles: { type: array, items: { type: string } }
-                countries: { type: array, items: { type: string } }
-                status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
-                fullyMarked: { type: boolean }
-                members:
-                  type: array
-                  items:
-                    type: object
-                    required: [userId, name, status]
-                    properties:
-                      userId: { type: string, format: uuid }
-                      name: { type: string }
-                      email: { type: string }
-                      status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
-                      absenceId: { type: string, format: uuid }
-                      awayKind: { type: string }
-                turns: { type: integer }
-                uncovered:
-                  type: array
-                  items:
-                    type: object
-                    required: [shiftCode, shiftLabel, userId, name]
-                    properties:
-                      shiftCode: { type: string }
-                      shiftLabel: { type: string }
-                      userId: { type: string, format: uuid }
-                      name: { type: string }
-                confirmedBy: { type: string }
-                confirmedOn: { type: string, format: date-time }
-                canConfirm: { type: boolean }
+                $ref: '#/components/schemas/HolidayAvailability'
         "400":
           description: Bad request.
           content:
@@ -16473,45 +16397,7 @@ paths:
           content:
             application/json:
               schema:
-              type: object
-              description: >
-                One CRE team's availability on one public holiday; the entity
-                service's HolidayAvailability, passed through unchanged.
-              required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
-              properties:
-                teamKey: { type: string }
-                teamName: { type: string }
-                date: { type: string, format: date }
-                titles: { type: array, items: { type: string } }
-                countries: { type: array, items: { type: string } }
-                status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
-                fullyMarked: { type: boolean }
-                members:
-                  type: array
-                  items:
-                    type: object
-                    required: [userId, name, status]
-                    properties:
-                      userId: { type: string, format: uuid }
-                      name: { type: string }
-                      email: { type: string }
-                      status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
-                      absenceId: { type: string, format: uuid }
-                      awayKind: { type: string }
-                turns: { type: integer }
-                uncovered:
-                  type: array
-                  items:
-                    type: object
-                    required: [shiftCode, shiftLabel, userId, name]
-                    properties:
-                      shiftCode: { type: string }
-                      shiftLabel: { type: string }
-                      userId: { type: string, format: uuid }
-                      name: { type: string }
-                confirmedBy: { type: string }
-                confirmedOn: { type: string, format: date-time }
-                canConfirm: { type: boolean }
+                $ref: '#/components/schemas/HolidayAvailability'
         "400":
           description: Bad request.
           content:
@@ -19249,6 +19135,46 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    HolidayAvailability:
+      type: object
+      description: >
+        One CRE team's availability on one public holiday; the entity
+        service's HolidayAvailability, passed through unchanged.
+      required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+      properties:
+        teamKey: { type: string }
+        teamName: { type: string }
+        date: { type: string, format: date }
+        titles: { type: array, items: { type: string } }
+        countries: { type: array, items: { type: string } }
+        status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+        fullyMarked: { type: boolean }
+        members:
+          type: array
+          items:
+            type: object
+            required: [userId, name, status]
+            properties:
+              userId: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: string }
+              status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
+              absenceId: { type: string, format: uuid }
+              awayKind: { type: string }
+        turns: { type: integer }
+        uncovered:
+          type: array
+          items:
+            type: object
+            required: [shiftCode, shiftLabel, userId, name]
+            properties:
+              shiftCode: { type: string }
+              shiftLabel: { type: string }
+              userId: { type: string, format: uuid }
+              name: { type: string }
+        confirmedBy: { type: string }
+        confirmedOn: { type: string, format: date-time }
+        canConfirm: { type: boolean }
     DismissScheduleEngagementAllocationRequest:
       type: object
       required: [id, teamKey, from, to]
