@@ -434,6 +434,9 @@ optional and lists match **any** of their values (an organisation matches when a
 | `countryNames` | a list of countries, each its common English name as the request names it ("Sri Lanka", "India", "United States", "United Kingdom"; "US" / "UK" written out); case does not matter; a registration matches by its organisation's country |
 | `countryUnknown` | `true`: no country recorded ("unknown country"); never with `countryNames` |
 | `unacknowledgedOnly` | **`plg_registration` only**, `true`: not yet acknowledged by the team |
+| `playbookTask` | one playbook task's **code**, from the "PLG playbook answers" section at the end; needed by the two keys below and by a grouping by answer |
+| `playbookAnswers` | a list of that task's answer **codes** (any of them): the sign-ups (or organisations with one) that answered so |
+| `playbookUnanswered` | `true`: no answer to that task yet (never assessed); never with `playbookAnswers` |
 
 ```json
 { "resourceType": "plg_organization", "shape": "count", "query": { "productCodes": ["IAM"], "subscriptionTiers": ["TRIAL", "TRIAL_EXTENDED"] } }
@@ -442,7 +445,7 @@ optional and lists match **any** of their values (an organisation matches when a
 **Shapes.** `count`; `list` with `listLimit`: an organisation list may sort by `name` or
 `registeredOn` ("newest" is `registeredOn` `desc`), a **registration list sets no `sortBy`** (newest
 first); `pie`/`bar` with **`slices`**, each slice's `query` flat too and
-added to the widget's, or `groupBy` by owner (organisations only) or by country, below. A split by product, stage or tier is one slice per value, in the order of the
+added to the widget's, or `groupBy` by owner (organisations only), by country or by playbook answer (registrations only), below. A split by product, stage or tier is one slice per value, in the order of the
 table, labelled with the names above ("Trial" is `TRIAL` + `TRIAL_EXTENDED`):
 
 ```json
@@ -471,6 +474,31 @@ compared side by side are slices, one `countryNames` per slice.
 { "resourceType": "plg_registration", "shape": "pie", "query": {}, "groupBy": { "field": "country", "maxGroups": 10 } }
 ```
 
+**Playbook answers.** The PLG team assesses sign-ups by running playbooks on them; the tasks whose
+answers a widget can use, with their answer codes and labels, are listed in the **"PLG playbook
+answers"** section at the end of this catalogue (with no such section, playbook answers are not
+expressible). Match the request's words to a task's name or an answer's label: "eligible", "monitor",
+"excluded" or "assessment outcome" are the answers of an eligibility assessment task; "disposable" or
+"personal email" an email classification task's. A filter names the task's code in `playbookTask`
+and the answers' codes in `playbookAnswers`; "not assessed", "not answered" or "no outcome yet" is
+`playbookUnanswered: true`. Sign-ups **by** a task ("by assessment outcome", "by email
+classification", "eligible vs monitor vs excluded") are a `plg_registration` `pie` or `bar` with
+`"groupBy": { "field": "playbookAnswer", "maxGroups": 10 }`, `playbookTask` in its `query` and no
+slices: one group per answer, and "Not answered" for the sign-ups with none (including those never
+assessed, at any stage). Organisations by answer are slices, one `playbookAnswers` per slice (an
+organisation counts when any of its sign-ups answered so). A trend of an answer ("excluded sign-ups
+per month") is a `line` with the filter. Only the listed tasks and codes exist: never a label as a
+code, never a task the section does not list. For example, if the section lists an
+`ELIGIBILITY_ASSESSMENT_OUTCOME` task:
+
+```json
+{ "resourceType": "plg_registration", "shape": "bar", "query": { "playbookTask": "ELIGIBILITY_ASSESSMENT_OUTCOME" },
+  "groupBy": { "field": "playbookAnswer", "maxGroups": 10 } }
+```
+
+"Eligible" alone, "eligible for CS" or "PLG CS eligible" is the lifecycle stage `PLG_CS_ELIGIBLE`;
+it is the assessment answer only beside "assessment", "assessed", "outcome", "monitor" or "excluded".
+
 **Sign-ups over time.** Registrations (sign-ups) per day, week or month, or a sign-up trend, are one
 `plg_registration` **`line`**: one line, registrations by sign-up date, with section 4's window (`days`,
 or `startDate` + `endDate` + `bucket`) and `"chart": "bar"` when bars are asked for; never `series`, and
@@ -485,7 +513,7 @@ sign-ups per month.
 ```
 
 **Not expressible** (section 1): a named owner's organisations (only the viewer's own, `ownerIds`;
-the closest is organisations by owner, where that owner is one bar); registrations split by owner; a region or continent ("Asia", "EMEA"; the closest is by country); an organisation by name or email; health or "at risk"; playbooks; usage, revenue or ARR.
+the closest is organisations by owner, where that owner is one bar); registrations split by owner; a region or continent ("Asia", "EMEA"; the closest is by country); an organisation by name or email; health or "at risk"; playbook progress, or a task not in the "PLG playbook answers" section (a number or text one: session minutes, exit point); usage, revenue or ARR.
 
 ---
 
@@ -525,7 +553,7 @@ or breached group, `warning` next, otherwise leave it out.
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
 `change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
-`measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` only, section 5e; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+`measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` or `playbookAnswer` (with `playbookTask`), section 5e; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
 section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
 add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
@@ -581,6 +609,8 @@ Never set both `slices` and `groupBy`.
 | PLG organisations "by owner", "per owner", "per CS owner" | a `plg_organization` `pie` or `bar` with `groupBy` `owner` (section 5e) |
 | PLG organisations or sign-ups "by country", "per country" | a `pie` or `bar` with `groupBy` `country` (section 5e) |
 | PLG "in <country>", "from <country>"; "no country", "unknown country" | `countryNames ["<country>"]`; `countryUnknown: true` (section 5e) |
+| PLG "eligible / monitor / excluded" with "assessment", "assessed" or "outcome", or "monitor" / "excluded"; "disposable email", "personal email" | `playbookTask` and `playbookAnswers` from the "PLG playbook answers" section (section 5e) |
+| PLG sign-ups "by assessment outcome", "by email classification", by any listed task; "not assessed" | a `plg_registration` `pie` or `bar` with `groupBy` `playbookAnswer` and that `playbookTask`; `playbookUnanswered: true` (section 5e) |
 | a PLG product: "IAM", "identity" / "API platform" / "integration platform" / "agent platform" / "engineering platform" | `productCodes` `["IAM"]` / `["API_PLATFORM"]` / `["INTEGRATION_PLATFORM"]` / `["AGENT_PLATFORM"]` / `["ENG_PLATFORM"]` |
 | "signed up this month / last 30 days" (PLG) | `registeredFrom` (and `registeredTo`) with the date tokens of section 5 |
 | PLG "by product / stage / tier" | a `pie` (share) or `bar` (comparison) with one slice per value (section 5e) |
@@ -699,8 +729,10 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `plg_registration`; shape `count`, `list` (organisations sort by `name` / `registeredOn`,
     registrations no `sortBy`) or `pie`/`bar` with `slices`, or a registration `line` (item 5, no
     `series`); `groupBy` only on a `pie`/`bar`: organisations by `owner` or `country`, registrations by
-    `country`; `ownerIds` only `["__current_user__"]`; `countryNames` never with `countryUnknown`;
-    never an organisation `line`.
+    `country` or `playbookAnswer` (with `playbookTask` in the `query`); `ownerIds` only
+    `["__current_user__"]`; `countryNames` never with `countryUnknown`; `playbookAnswers` and
+    `playbookUnanswered` only with `playbookTask`, never together, and every code from the "PLG playbook
+    answers" section; never an organisation `line`.
 14. The output is a single JSON object.
 15. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).
