@@ -1982,9 +1982,18 @@ needs CORS for the portal origins.
   PUTs each chunk to its link and calls the ordinary confirm, which commits the staged blocks and **reads the real
   size**: a link cannot cap how much is sent, so an oversize file is refused there and removed. Both paths stage the
   same block ids, so a browser that cannot reach Azure falls back to the chunk route for the same upload.
+- **The links never write the file readers use.** A write link is for a whole blob and stays valid after the confirm, so
+  an upload that may be sent direct (`stagedUpload`: declared size above the threshold, links on) is put together under
+  a staging key, `<key>.upload` (`uploadKey`): the links, `PutChunk` and `ListChunks` all use it. Confirm commits and
+  checks the blocks there, `Copy`s the file to its own key inside Azure (`azblobstore.Copy`, one request), records it,
+  and deletes the staging file; a refusal deletes both. A leftover link can then only write a file nothing reads. A
+  smaller upload has no links and is put at its own key as before. An abandoned upload's staging blocks are not removed
+  by the cleanup job (it does not know the key); Azure discards uncommitted blocks about a week after the last write.
 - `GET /attachments/download/{id}/link?type=` makes the checks of a download (`LocateAttachment`, charged one unit
   of the per-caller allowance) and returns a read-only link valid for the same size-based time (`directLinkTTL`), signed to answer
   as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
+  With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
+  the webapps answer by streaming the file.
 - **Size limit.** While direct transfers are on, an ordinary file (never an inline image) above
   `ATTACHMENT_DIRECT_MIN_MB` may be up to `ATTACHMENT_DIRECT_MAX_MB` (default and at most 1024 MB) instead of
   `ATTACHMENT_MAX_MB` (`limitForSize`). The cap that applied to the size declared at the start is the one the

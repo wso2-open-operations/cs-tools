@@ -37,6 +37,8 @@ type fakeBlob struct {
 	commitErr error
 	putErr    error
 	opened    []string
+	copyErr   error
+	copied    [][2]string // {from, to}
 }
 
 func newFakeBlob() *fakeBlob {
@@ -109,6 +111,20 @@ func (b *fakeBlob) Delete(_ context.Context, key string) error {
 	if !had {
 		return azblobstore.ErrNotFound
 	}
+	return nil
+}
+
+// Copy duplicates a committed file, as Azure does inside the account.
+func (b *fakeBlob) Copy(_ context.Context, from, to string) error {
+	if b.copyErr != nil {
+		return b.copyErr
+	}
+	data, ok := b.committed[from]
+	if !ok {
+		return azblobstore.ErrNotFound
+	}
+	b.committed[to], b.types[to] = append([]byte(nil), data...), b.types[from]
+	b.copied = append(b.copied, [2]string{from, to})
 	return nil
 }
 

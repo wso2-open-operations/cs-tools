@@ -581,8 +581,10 @@ paths:
         (the upload start says so with directUpload). The access check, the open parent and
         the size rules are those of storing a chunk, made once when the links are issued.
         The client PUTs chunk i (chunkBytes long, the last one shorter) to links[i], then
-        confirms the upload; confirm commits the chunks and checks the real size, and a
-        file that is too large is refused and removed. The links are credentials, valid
+        confirms the upload; the chunks are put under a staging key, and confirm commits
+        them there, checks the real size, and copies the file to its own key (a file that
+        is too large is refused and removed), so a link still valid after the confirm
+        cannot change the confirmed file. The links are credentials, valid
         for the time in expiresAt (5 minutes for a file up to 50 MiB, 7 up to 100 MiB, then 10, 15
         and 20 minutes up to 250, 500 and 1024 MiB), and the response is never cached. Calling this
         again for an upload still pending returns fresh links, which is how a client carries on after
@@ -779,7 +781,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: "The attachment does not exist, the caller may not see it, or it has no stored file."
+          description: "The attachment does not exist, the caller may not see it, it has no stored file, or direct downloads are not available (stream it through the content route). The portal backends do not log this as an error."
           content:
             application/json:
               schema:
@@ -841,7 +843,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DirectDownloadLink'
         "400":
-          description: "The type or id is invalid, or direct downloads are not available (use the content route)."
+          description: "The type or id is invalid."
           content:
             application/json:
               schema:
