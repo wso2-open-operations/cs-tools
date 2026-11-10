@@ -27,7 +27,7 @@ import (
 )
 
 // The clouds the dashboard serves, and the only values the endpoints accept,
-// are the active rows of the cloud registry (cloud_status_cloud); see
+// are the active rows of the cloud registry (cloud_registry); see
 // migration 0282. Seven are seeded: asgardeo, choreo, bijira, devant, moesif,
 // choreo-eu and agent-manager. The previous backend's monitors script knew
 // five and answered the rest with a 400; this one serves every registered

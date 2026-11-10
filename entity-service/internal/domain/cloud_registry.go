@@ -24,9 +24,8 @@ import (
 // The cloud registry.
 //
 // A cloud product on the public status dashboard is DATA, not code: a row in
-// cloud_status_cloud, its regions in cloud_status_cloud_region and its
-// per-offering availability weights in cloud_status_offering_weight (migration
-// 0282). Onboarding another cloud is a set of INSERTs plus a webhook URL and
+// cloud_registry, its regions in cloud_registry_region and its per-offering
+// availability weights in cloud_registry_offering_weight (migration 0282). Onboarding another cloud is a set of INSERTs plus a webhook URL and
 // secret in the notification service's environment -- no Go change.
 //
 // The weights are a product decision, not a derivation: how much each
