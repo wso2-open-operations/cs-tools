@@ -86,7 +86,7 @@ func TestProcessProject_CustomerNoticeGoesToEveryBusinessContact(t *testing.T) {
 	ntf := &mockNotifier{}
 	now, proj := sevenDayProject()
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -110,7 +110,7 @@ func TestProcessProject_ReadsEveryPageOfProjectContacts(t *testing.T) {
 	ntf := &mockNotifier{}
 	now, proj := sevenDayProject()
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -136,7 +136,7 @@ func TestProcessProject_ReadsEveryPageOfAccountContacts(t *testing.T) {
 	ntf := &mockNotifier{}
 	now, proj := sevenDayProject()
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -169,7 +169,7 @@ func TestProcessProject_BusinessContactFromRealResponseGetsTheCustomerNotice(t *
 	ntf := &mockNotifier{}
 	now, proj := sevenDayProject()
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -198,7 +198,7 @@ func TestProcessProject_SkipsAccountContactsWhenBusinessContactsFound(t *testing
 	ntf := &mockNotifier{}
 	now, proj := sevenDayProject()
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil (account contacts aren't needed)", err)
 	}
 	if accountContactCalls != 0 {
@@ -233,7 +233,7 @@ func TestProcessProject_V10ContactsFallBackToPrimaryContacts(t *testing.T) {
 	ntf := &mockNotifier{}
 	now, proj := sevenDayProject()
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 

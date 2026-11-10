@@ -66,7 +66,7 @@ func TestProcessProject_InvoiceCascade_FiresNotifyAndSuspendOnDueDate(t *testing
 		// subscription one entirely.
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -138,7 +138,7 @@ func TestProcessProject_InvoiceCascade_IsPartnerWithoutPrimaryPartnerDisablesCas
 		Account: &projectAccountRef{ID: "a1", IsPartner: &isPartner},
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -174,7 +174,7 @@ func TestProcessProject_InvoiceCascade_HasPrimaryPartnerOverridesIsPartner(t *te
 		Account: &projectAccountRef{ID: "a1", IsPartner: &isPartner},
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -191,7 +191,7 @@ func TestProcessProject_InvoiceCascade_NoDueInvoiceIsNoOp(t *testing.T) {
 
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -217,7 +217,7 @@ func TestProcessProject_InvoiceCascade_SkipsNotifyWhenAlreadyClosedForAnyReason(
 		ClosureState: &closureState,
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -277,7 +277,7 @@ func TestProcessProject_InvoiceCascade_HasPrimaryPartnerForcesGracePeriod(t *tes
 
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -309,7 +309,7 @@ func TestProcessProject_InvoiceCascade_PassesInvoiceSfIDToInternalNoticeOnly(t *
 	ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -365,7 +365,7 @@ func TestProcessProject_InvoiceNoticeShowsInvoiceNumber(t *testing.T) {
 			ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
 			proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-			if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+			if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 				t.Fatalf("processProject() error = %v, want nil", err)
 			}
 			for _, n := range ntf.sent {
@@ -394,7 +394,7 @@ func TestProcessProject_InternalInvoiceNoticeListsEveryDueInvoice(t *testing.T) 
 	ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 

@@ -312,7 +312,13 @@ type searchInvoicesRequest struct {
 type Result struct {
 	ProjectsEvaluated int
 	ProjectsExcluded  int
-	Failures          []ProjectFailure
+	// ProjectsActed counts projects with at least one notice sent or
+	// recorded, or a suspension attempted (what ACP_DAILY_LIMIT caps).
+	ProjectsActed int
+	// NotEvaluatedByLimit counts listed projects left unevaluated because
+	// the limit was reached.
+	NotEvaluatedByLimit int
+	Failures            []ProjectFailure
 	// Skipped are projects whose own record is unusable (dataError): logged
 	// and left for someone to fix, without failing the run.
 	Skipped []ProjectFailure

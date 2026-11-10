@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -248,6 +249,28 @@ func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (aut
 			}
 		}
 		cfg.States = chosen
+	}
+	return cfg, nil
+}
+
+// narrowACP applies an on-demand run's arguments to acp_closure's configured
+// settings. They can only tighten: a dry run stays a dry run, and the limit may
+// not exceed a configured ACP_DAILY_LIMIT (when none is configured it sets one
+// for the run). Forcing a dry run also turns emails off unless there is a debug
+// list: a dry run records no notice, so with emails on it would send real
+// notices that the next run sends again (acpConfig refuses that combination).
+func narrowACP(cfg acp.Config, a registry.RunNowOptions, hasDebug bool) (acp.Config, error) {
+	if a.DryRun {
+		cfg.DryRun = true
+		if !hasDebug {
+			cfg.EmailEnabled = false
+		}
+	}
+	if a.Limit > 0 {
+		if cfg.DailyLimit != 0 && a.Limit > cfg.DailyLimit {
+			return cfg, fmt.Errorf("--limit=%d exceeds ACP_DAILY_LIMIT=%d; a run-now can only tighten the configured limit", a.Limit, cfg.DailyLimit)
+		}
+		cfg.DailyLimit = a.Limit
 	}
 	return cfg, nil
 }
