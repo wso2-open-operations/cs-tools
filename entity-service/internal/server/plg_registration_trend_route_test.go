@@ -53,7 +53,27 @@ func TestPLGOrganizationAggregateRoute(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/plg/organizations/aggregate",
 		strings.NewReader(`{"groupBy":"lifecycleStage"}`)))
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `groupBy must be \"owner\"`) {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `groupBy must be \"owner\" or \"country\"`) {
 		t.Errorf("POST with groupBy lifecycleStage = %d (%s), want 400 from the groupBy check", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+// The registration aggregate is a PLG route: POST only, and a groupBy other
+// than "country" is refused by the service before any query.
+func TestPLGRegistrationAggregateRoute(t *testing.T) {
+	mux := http.NewServeMux()
+	registerPLGRoutes(mux, nil)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/plg/registrations/aggregate",
+		strings.NewReader(`{"groupBy":"owner"}`)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `groupBy must be \"country\"`) {
+		t.Errorf("POST with groupBy owner = %d (%s), want 400 from the groupBy check", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/plg/registrations/aggregate", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET = %d, want 405", rec.Code)
 	}
 }

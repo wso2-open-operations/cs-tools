@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -18,6 +20,7 @@ type PairingService interface {
 	Get(ctx context.Context, orgID, productCode string) (*domain.ProductDetail, error)
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) (domain.SearchRegistrationsResponse, error)
 	RegistrationVolumeTrend(ctx context.Context, req domain.RegistrationVolumeTrendRequest) (domain.CaseVolumeTrendResponse, error)
+	AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error)
 
 	// The writes live in plg_pairing_writes.go. Embedded rather than listed
 	// again so the two files cannot drift apart.
@@ -58,6 +61,22 @@ func (s *pairingService) SearchRegistrations(ctx context.Context, req domain.Sea
 		Limit:         req.Pagination.Limit,
 		Offset:        req.Pagination.Offset,
 	}, nil
+}
+
+// AggregateRegistrations counts the registrations req's filters match per
+// group (POST /plg/registrations/aggregate): groupBy "country" only.
+func (s *pairingService) AggregateRegistrations(ctx context.Context, req domain.AggregateRegistrationsRequest) (domain.AggregateResponse, error) {
+	if req.GroupBy != "country" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy must be %q, got %q", "country", req.GroupBy)}
+	}
+	if err := validatePlgMaxGroups(req.MaxGroups); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := validateOrganizationFilters(&req.Filters); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	return s.repo.AggregateRegistrationsByCountry(ctx,
+		domain.SearchRegistrationsRequest{UnacknowledgedOnly: req.UnacknowledgedOnly, Filters: req.Filters}, req.MaxGroups)
 }
 
 // RegistrationVolumeTrend counts the registrations req's filters match per

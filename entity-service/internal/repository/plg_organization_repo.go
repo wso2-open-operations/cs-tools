@@ -20,6 +20,7 @@ type OrganizationRepository interface {
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error
 	AggregateByOwner(ctx context.Context, filters domain.OrganizationSearchFilters, maxGroups int) (domain.AggregateResponse, error)
+	AggregateByCountry(ctx context.Context, filters domain.OrganizationSearchFilters, maxGroups int) (domain.AggregateResponse, error)
 }
 
 type organizationRepository struct{ db *pgxpool.Pool }
@@ -81,7 +82,38 @@ func buildConditions(f *domain.OrganizationSearchFilters, b *argBuilder) []strin
 	if f.RegisteredTo != nil {
 		conds = append(conds, `v.created_on <= `+b.add(*f.RegisteredTo))
 	}
+	return append(conds, countryConditions(f, b, `v.country_name`)...)
+}
+
+// countryConditions are the country filters on column, the organisation's
+// resolved country: countryNames any of them, trimmed and ignoring case,
+// and countryUnknown no country (NULL or blank), so that each group of a
+// country grouping (countryGroupKey) is exactly what its filter lists.
+func countryConditions(f *domain.OrganizationSearchFilters, b *argBuilder, column string) []string {
+	var conds []string
+	if len(f.CountryNames) > 0 {
+		names := make([]string, len(f.CountryNames))
+		for i, n := range f.CountryNames {
+			names[i] = strings.ToLower(strings.TrimSpace(n))
+		}
+		conds = append(conds, `LOWER(TRIM(`+column+`)) = ANY(`+b.add(names)+`::TEXT[])`)
+	}
+	if f.CountryUnknown != nil && *f.CountryUnknown {
+		conds = append(conds, `NULLIF(TRIM(`+column+`), '') IS NULL`)
+	}
 	return conds
+}
+
+// countryGroupKey and countryGroupLabel group rows by column the way
+// countryConditions matches it: one group per country ignoring case and
+// surrounding spaces, labelled with one of its spellings; the rows with no
+// country are the group with key "".
+func countryGroupKey(column string) string {
+	return `COALESCE(LOWER(NULLIF(TRIM(` + column + `), '')), '')`
+}
+
+func countryGroupLabel(column string) string {
+	return `COALESCE(MIN(TRIM(` + column + `)), '')`
 }
 
 // AggregateByOwner counts the organisations filters match per PLG CS owner,
@@ -128,6 +160,61 @@ func (r *organizationRepository) AggregateByOwner(ctx context.Context, filters d
 	if err := rows.Err(); err != nil {
 		return domain.AggregateResponse{}, fmt.Errorf("iterate organization owner groups: %w", err)
 	}
+	return rankGroups(groups, total, maxGroups), nil
+}
+
+// AggregateByCountry counts the organisations filters match per country,
+// with the same conditions as Search, so a group's count is what the search
+// for its countryNames (or countryUnknown) lists. A group's key and label
+// are the country as written; the organisations with no country are one
+// group, PlgUnknownCountryGroupKey labelled "Unknown". Groups are ranked and
+// folded as AggregateByOwner's are.
+func (r *organizationRepository) AggregateByCountry(ctx context.Context, filters domain.OrganizationSearchFilters, maxGroups int) (domain.AggregateResponse, error) {
+	b := &argBuilder{}
+	conds := buildConditions(&filters, b)
+
+	q := `
+		SELECT ` + countryGroupLabel(`v.country_name`) + `, COUNT(*)
+		FROM   plg_organization_v v` +
+		whereClause(conds) + `
+		GROUP  BY ` + countryGroupKey(`v.country_name`)
+
+	groups, total, err := scanCountryGroups(ctx, r.db, q, b.list())
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate organizations by country: %w", err)
+	}
+	return rankGroups(groups, total, maxGroups), nil
+}
+
+// scanCountryGroups runs a country grouping query (each row a label and a
+// count; the no-country row's label "") into groups and their total.
+func scanCountryGroups(ctx context.Context, db *pgxpool.Pool, q string, args []any) ([]domain.AggregateBucket, int, error) {
+	rows, err := db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	groups := []domain.AggregateBucket{}
+	total := 0
+	for rows.Next() {
+		var g domain.AggregateBucket
+		if err := rows.Scan(&g.Label, &g.Count); err != nil {
+			return nil, 0, err
+		}
+		g.Key = g.Label
+		if g.Label == "" {
+			g.Key, g.Label = domain.PlgUnknownCountryGroupKey, "Unknown"
+		}
+		groups = append(groups, g)
+		total += g.Count
+	}
+	return groups, total, rows.Err()
+}
+
+// rankGroups orders groups largest first, ties by label, and with
+// maxGroups > 0 sums the groups after the first maxGroups into OthersCount.
+func rankGroups(groups []domain.AggregateBucket, total, maxGroups int) domain.AggregateResponse {
 	sort.SliceStable(groups, func(i, j int) bool {
 		if groups[i].Count != groups[j].Count {
 			return groups[i].Count > groups[j].Count
@@ -142,7 +229,7 @@ func (r *organizationRepository) AggregateByOwner(ctx context.Context, filters d
 		}
 		resp.Groups = groups[:maxGroups]
 	}
-	return resp, nil
+	return resp
 }
 
 func (r *organizationRepository) Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error) {

@@ -408,6 +408,13 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// CountryNames matches the organisation's country (as plg_organization_v
+	// resolves it, inherited from a sibling when the row has none), any of
+	// them, trimmed and ignoring case. CountryUnknown true matches the
+	// organisations with no country. A registration matches by its
+	// organisation's country.
+	CountryNames   []string `json:"countryNames"`
+	CountryUnknown *bool    `json:"countryUnknown"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.
@@ -443,7 +450,8 @@ type OrganizationSummary struct {
 
 // AggregateOrganizationsRequest is the body of POST
 // /plg/organizations/aggregate: the organisation search's filters, the field
-// to group by (only "owner" for now: the organisation's PLG CS owner) and,
+// to group by ("owner": the organisation's PLG CS owner; "country": its
+// country) and,
 // optionally, how many groups to return before the rest are folded into
 // othersCount. It answers an AggregateResponse, the shape every aggregate
 // endpoint shares.
@@ -456,6 +464,24 @@ type AggregateOrganizationsRequest struct {
 // PlgUnownedGroupKey is the key of the organisations with no PLG CS owner in
 // an owner grouping; every other group's key is the owner's user id.
 const PlgUnownedGroupKey = "unowned"
+
+// PlgUnknownCountryGroupKey is the key of the organisations (or
+// registrations) with no country in a country grouping; every other group's
+// key is the country as written, which countryNames matches.
+const PlgUnknownCountryGroupKey = "unknown"
+
+// AggregateRegistrationsRequest is the body of POST
+// /plg/registrations/aggregate: the registration search's filters and
+// unacknowledgedOnly, the field to group by (only "country": the
+// registration's organisation's country) and, optionally, how many groups
+// to return before the rest are folded into othersCount. It answers an
+// AggregateResponse.
+type AggregateRegistrationsRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	GroupBy            string                    `json:"groupBy"`
+	MaxGroups          int                       `json:"maxGroups,omitempty"`
+}
 
 // SearchOrganizationsResponse is the paged organisation list.
 type SearchOrganizationsResponse struct {

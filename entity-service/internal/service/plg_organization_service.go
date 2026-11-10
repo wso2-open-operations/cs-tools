@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -29,7 +31,9 @@ func NewOrganizationService(repo repository.OrganizationRepository) Organization
 // validateOrganizationFilters checks the enums and the date range.
 //
 // The owner filter carries ids, so it is checked as UUIDs rather than passed
-// through as free text.
+// through as free text. Country names are free text, each one non-blank and
+// at most maxPlgCountryNameLength characters, and never with countryUnknown
+// (no organisation has both a country and none).
 func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
 	if err := validateEnums("lifecycleStage", f.LifecycleStages, domain.ValidLifecycleStage); err != nil {
 		return err
@@ -43,26 +47,49 @@ func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
 	if f.RegisteredFrom != nil && f.RegisteredTo != nil && f.RegisteredTo.Before(*f.RegisteredFrom) {
 		return &apierror.ValidationError{Msg: "registeredTo must not be earlier than registeredFrom"}
 	}
+	for _, n := range f.CountryNames {
+		if n = strings.TrimSpace(n); n == "" || utf8.RuneCountInString(n) > maxPlgCountryNameLength {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("filters.countryNames entries must be 1 to %d characters", maxPlgCountryNameLength)}
+		}
+	}
+	if len(f.CountryNames) > 0 && f.CountryUnknown != nil && *f.CountryUnknown {
+		return &apierror.ValidationError{Msg: "filters.countryNames and filters.countryUnknown cannot be combined"}
+	}
 	return nil
 }
+
+// maxPlgCountryNameLength is the longest country name a filter takes.
+const maxPlgCountryNameLength = 100
 
 // maxPlgAggregateGroups is the most groups an organisation aggregate returns
 // on its own; a larger maxGroups is refused.
 const maxPlgAggregateGroups = 50
 
 // Aggregate counts the organisations the search's filters match per group
-// (POST /plg/organizations/aggregate). Only groupBy "owner" exists.
+// (POST /plg/organizations/aggregate): groupBy "owner" or "country".
 func (s *organizationService) Aggregate(ctx context.Context, req domain.AggregateOrganizationsRequest) (domain.AggregateResponse, error) {
-	if req.GroupBy != "owner" {
-		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy must be %q, got %q", "owner", req.GroupBy)}
+	if req.GroupBy != "owner" && req.GroupBy != "country" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy must be %q or %q, got %q", "owner", "country", req.GroupBy)}
 	}
-	if req.MaxGroups < 0 || req.MaxGroups > maxPlgAggregateGroups {
-		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("maxGroups must be between 0 and %d", maxPlgAggregateGroups)}
+	if err := validatePlgMaxGroups(req.MaxGroups); err != nil {
+		return domain.AggregateResponse{}, err
 	}
 	if err := validateOrganizationFilters(&req.Filters); err != nil {
 		return domain.AggregateResponse{}, err
 	}
+	if req.GroupBy == "country" {
+		return s.repo.AggregateByCountry(ctx, req.Filters, req.MaxGroups)
+	}
 	return s.repo.AggregateByOwner(ctx, req.Filters, req.MaxGroups)
+}
+
+// validatePlgMaxGroups refuses a maxGroups outside 0 (every group) to
+// maxPlgAggregateGroups.
+func validatePlgMaxGroups(maxGroups int) error {
+	if maxGroups < 0 || maxGroups > maxPlgAggregateGroups {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("maxGroups must be between 0 and %d", maxPlgAggregateGroups)}
+	}
+	return nil
 }
 
 func (s *organizationService) Search(ctx context.Context, req domain.SearchOrganizationsRequest) (domain.SearchOrganizationsResponse, error) {

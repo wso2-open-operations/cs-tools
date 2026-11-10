@@ -51,6 +51,22 @@ func (h *PlgPairingHandler) SearchRegistrations(w http.ResponseWriter, r *http.R
 	writeOK(w, result)
 }
 
+// AggregateRegistrations serves POST /plg/registrations/aggregate: the
+// registrations the search's filters match, counted per their
+// organisation's country, in the AggregateResponse shape.
+func (h *PlgPairingHandler) AggregateRegistrations(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateRegistrationsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	result, err := h.svc.AggregateRegistrations(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeOK(w, result)
+}
+
 // RegistrationVolumeTrend serves POST /plg/registrations/volume-trend: the
 // registrations the search's filters match, counted per day, week or month
 // of a window, in the case trend's response shape (one series, "Registered").

@@ -31,6 +31,7 @@ type OrgPlatformRepository interface {
 	UpdateNote(ctx context.Context, req domain.UpdateNoteRequest, actor string) (res domain.WriteResult, orgID, productCode string, err error)
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error)
 	RegistrationVolumeTrend(ctx context.Context, req domain.SearchRegistrationsRequest, start, end time.Time) (map[string]int, error)
+	AggregateRegistrationsByCountry(ctx context.Context, req domain.SearchRegistrationsRequest, maxGroups int) (domain.AggregateResponse, error)
 	LocatePairing(ctx context.Context, orgPlatformID string) (orgID, productCode string, err error)
 }
 
@@ -1089,7 +1090,37 @@ func buildRegistrationConditions(f *domain.OrganizationSearchFilters, b *argBuil
 	if f.RegisteredTo != nil {
 		conds = append(conds, `v.registered_on <= `+b.add(*f.RegisteredTo))
 	}
-	return conds
+	return append(conds, countryConditions(f, b, registrationCountry)...)
+}
+
+// registrationCountry is a registration's country: its organisation's, as
+// plg_organization_v resolves it (plg_org_platform_v does not carry it).
+const registrationCountry = `(SELECT ov.country_name FROM plg_organization_v ov WHERE ov.organization_id = v.organization_id)`
+
+// AggregateRegistrationsByCountry counts the registrations req matches (the
+// same filters and unacknowledgedOnly as SearchRegistrations) per their
+// organisation's country, grouped, keyed, ranked and folded as
+// AggregateByCountry groups organisations. It backs
+// POST /plg/registrations/aggregate.
+func (r *orgPlatformRepository) AggregateRegistrationsByCountry(ctx context.Context, req domain.SearchRegistrationsRequest, maxGroups int) (domain.AggregateResponse, error) {
+	b := &argBuilder{}
+	conds := buildRegistrationConditions(&req.Filters, b)
+	if req.UnacknowledgedOnly {
+		conds = append(conds, `v.is_new`)
+	}
+
+	q := `
+		SELECT ` + countryGroupLabel(`ov.country_name`) + `, COUNT(*)
+		FROM   plg_org_platform_v v
+		JOIN   plg_organization_v ov ON ov.organization_id = v.organization_id` +
+		whereClause(conds) + `
+		GROUP  BY ` + countryGroupKey(`ov.country_name`)
+
+	groups, total, err := scanCountryGroups(ctx, r.db, q, b.list())
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate registrations by country: %w", err)
+	}
+	return rankGroups(groups, total, maxGroups), nil
 }
 
 func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error) {

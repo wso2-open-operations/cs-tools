@@ -104,6 +104,7 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
 	// --- registrations -------------------------------------------------------
 	mux.HandleFunc("POST /plg/registrations/search", pairingHandler.SearchRegistrations)
 	mux.HandleFunc("POST /plg/registrations/volume-trend", pairingHandler.RegistrationVolumeTrend)
+	mux.HandleFunc("POST /plg/registrations/aggregate", pairingHandler.AggregateRegistrations)
 	mux.HandleFunc("POST /plg/registrations/{orgPlatformId}/acknowledge",
 		pairingHandler.Acknowledge) // W1
 
