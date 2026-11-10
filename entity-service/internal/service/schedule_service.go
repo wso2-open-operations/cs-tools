@@ -647,19 +647,14 @@ func (s *scheduleService) DeleteAbsenceKind(ctx context.Context, code string) er
 		return err
 	}
 	// A rota admin or lead deletes only their own family's tags; a portal
-	// admin who runs no rota may delete any custom tag.
-	families, err := s.tagFamilies(ctx)
+	// admin who runs no rota (whether or not they lead a team) may delete any
+	// custom tag.
+	families, portalAdmin, err := s.tagFamilies(ctx)
 	if err != nil {
 		return err
 	}
-	if len(families) == 0 {
-		admin, err := s.isPortalAdmin(ctx)
-		if err != nil {
-			return err
-		}
-		if !admin {
-			return errNoTagFamily
-		}
+	if len(families) == 0 && !portalAdmin {
+		return errNoTagFamily
 	}
 	return s.repo.DeleteAbsenceKind(ctx, code, email, families)
 }
@@ -782,23 +777,18 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	}
 	// A tag belongs to its creator's family -- a rota admin's family, or the
 	// family of the team a lead leads -- and only that family's rosters offer
-	// it. A portal admin who runs no rota names the family, or adds a shared
-	// tag.
-	families, err := s.tagFamilies(ctx)
+	// it. A portal admin who runs no rota (whether or not they lead a team)
+	// names any family, or adds a shared tag.
+	families, portalAdmin, err := s.tagFamilies(ctx)
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}
-	if len(families) == 0 {
-		admin, err := s.isPortalAdmin(ctx)
-		if err != nil {
-			return domain.ScheduleAbsenceKind{}, err
-		}
-		if !admin {
-			return domain.ScheduleAbsenceKind{}, errNoTagFamily
-		}
+	if portalAdmin {
 		if families, err = portalAdminTagFamily(req.Family); err != nil {
 			return domain.ScheduleAbsenceKind{}, err
 		}
+	} else if len(families) == 0 {
+		return domain.ScheduleAbsenceKind{}, errNoTagFamily
 	}
 	family, err := kindFamilyFor(families, req.Family)
 	if err != nil {

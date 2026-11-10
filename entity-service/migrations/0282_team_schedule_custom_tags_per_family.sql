@@ -32,9 +32,16 @@ WITH creator_family AS (
               JOIN team t ON t.id = tm.team_id
              WHERE tm.user_id = u.id
                AND tm.role IN ('lead', 'americas_team_lead')
-               AND t.type IS NOT NULL
-               AND lower(t.type) LIKE ANY (ARRAY['cre%', 'sre%', 'sme%'])
-               AND lower(t.type) NOT LIKE '%leadership%'
+               -- Same team test as the service's LeadFamiliesFor
+               -- (rosteredTeamWhere in schedule_repo.go): keep the two in step.
+               AND t.type IS NOT NULL AND lower(t.type) LIKE ANY (ARRAY['cre%', 'sre%', 'sme%'])
+               AND lower(t.type) NOT LIKE '%leadership%' AND lower(COALESCE(t.name, '')) NOT LIKE '%leadership%'
+               AND (lower(t.type) LIKE '%-abt'
+                    OR EXISTS (SELECT 1 FROM team_schedule_rota rr WHERE lower(rr.team_type) = lower(t.type) AND rr.is_active)
+                    OR EXISTS (SELECT 1 FROM team_schedule_team_default_shift dd WHERE dd.team_key = t.key)
+                    OR EXISTS (SELECT 1 FROM team_schedule_absence_kind kk WHERE lower(kk.moves_to_team_key) = lower(t.key))
+                    OR EXISTS (SELECT 1 FROM team_schedule_assignment aa WHERE aa.team_key = t.key)
+                    OR EXISTS (SELECT 1 FROM team_schedule_absence bb WHERE bb.team_key = t.key))
            ) f ON TRUE
      WHERE k.family IS NULL
        AND k.created_by IS DISTINCT FROM 'migration'

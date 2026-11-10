@@ -465,8 +465,27 @@ describe("CellPicker: adding a tag", () => {
     renderWithCreate(vi.fn(() => Promise.resolve()));
     fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
     expect(screen.queryByLabelText("Tag short code")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Tag name")).toHaveAttribute("maxLength", "10");
     expect(screen.getByText(/up to 10 characters\. Explain it in the description/)).toBeInTheDocument();
+  });
+
+  it("counts the name in characters as the server does, so an emoji counts once", () => {
+    const onCreateKind = vi.fn(() => Promise.resolve());
+    renderWithCreate(onCreateKind);
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    // Ten characters, twenty UTF-16 units: the server accepts it, so must the form.
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "🔥".repeat(10) } });
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    expect(onCreateKind).toHaveBeenCalled();
+  });
+
+  it("refuses a name longer than 10 characters without asking the server", () => {
+    const onCreateKind = vi.fn(() => Promise.resolve());
+    renderWithCreate(onCreateKind);
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "🔥".repeat(11) } });
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    expect(onCreateKind).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("at most 10 characters");
   });
 
   it("refuses a name another tag already draws, without asking the server", () => {

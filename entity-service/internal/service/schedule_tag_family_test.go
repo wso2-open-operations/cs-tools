@@ -165,6 +165,34 @@ func TestAbsenceKinds_ADatabasePortalAdminNeedsNoFamily(t *testing.T) {
 	}
 }
 
+// A portal admin who also leads a CRE team is not limited to CRE: they may add
+// a tag for another family, add a shared one, and delete any family's tag, as
+// before tags were family-scoped.
+func TestAbsenceKinds_APortalAdminWhoLeadsIsNotLimitedToTheirFamily(t *testing.T) {
+	req := domain.CreateScheduleAbsenceKindRequest{ShortCode: "TR", Label: "TR", Bucket: "ALLOCATION", ColourToken: "INT", Family: "SRE"}
+	repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}, portalAdmin: true}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	if _, err := svc.CreateAbsenceKind(scheduleCaller("admin.lead@example.com"), req); err != nil {
+		t.Fatalf("create for SRE: %v", err)
+	}
+	if repo.gotKindFamily == nil || *repo.gotKindFamily != "SRE" {
+		t.Errorf("family = %v, want SRE", repo.gotKindFamily)
+	}
+	req.Family = ""
+	if _, err := svc.CreateAbsenceKind(scheduleCaller("admin.lead@example.com"), req); err != nil {
+		t.Fatalf("create shared: %v", err)
+	}
+	if repo.gotKindFamily != nil {
+		t.Errorf("family = %v, want none (shared)", *repo.gotKindFamily)
+	}
+	if err := svc.DeleteAbsenceKind(scheduleCaller("admin.lead@example.com"), "SRE_TAG"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if repo.gotKindAllowed != nil {
+		t.Errorf("allowed families = %v, want none (any family)", repo.gotKindAllowed)
+	}
+}
+
 // A lead of a team that works no rota (a change approval board, say) passes
 // the "any lead" gate but has no family, so may neither add a tag -- for any
 // family or shared -- nor delete one. Only a portal admin may without a family.

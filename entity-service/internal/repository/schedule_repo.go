@@ -1307,11 +1307,6 @@ func (r *scheduleRepository) ActivityForTeam(ctx context.Context, teamKey, from,
 	return out, rows.Err()
 }
 
-// LeadTeamsFor returns the registry keys of every team this caller leads.
-//
-// team.name is the display name the registry maps a key onto, so it is
-// lowercased here to give the frontend the same key it filters by everywhere
-// else.
 // LeadFamiliesFor implements ScheduleRepository.
 func (r *scheduleRepository) LeadFamiliesFor(ctx context.Context, userEmail string) ([]string, error) {
 	return r.distinctStrings(ctx, `
@@ -1324,6 +1319,11 @@ func (r *scheduleRepository) LeadFamiliesFor(ctx context.Context, userEmail stri
 		   AND `+rosteredTeamWhere, userEmail)
 }
 
+// LeadTeamsFor returns the registry keys of every team this caller leads.
+//
+// team.name is the display name the registry maps a key onto, so it is
+// lowercased here to give the frontend the same key it filters by everywhere
+// else.
 func (r *scheduleRepository) LeadTeamsFor(ctx context.Context, userEmail string) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT t.key

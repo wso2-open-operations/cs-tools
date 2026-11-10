@@ -46,24 +46,28 @@ func (s *scheduleService) rotaAdminFamilies(ctx context.Context) ([]string, erro
 }
 
 // tagFamilies is the families whose tags the caller adds and deletes: a rota
-// admin's own families, else the families of the rota teams they lead. A tag
-// belongs to one family (a CRE ABT lead's tag is CRE's), so it is offered only
-// on that family's rosters. None for a portal admin who neither runs nor leads
-// a rota.
-func (s *scheduleService) tagFamilies(ctx context.Context) ([]string, error) {
+// admin's own families; else none, with portalAdmin set, for a portal admin
+// (who is not limited to a family, even when they also lead a rota team);
+// else the families of the rota teams they lead. A tag belongs to one family
+// (a CRE ABT lead's tag is CRE's), so it is offered only on that family's
+// rosters.
+func (s *scheduleService) tagFamilies(ctx context.Context) (families []string, portalAdmin bool, err error) {
 	admin, err := s.rotaAdminFamilies(ctx)
 	if err != nil || len(admin) > 0 {
-		return admin, err
+		return admin, false, err
+	}
+	if portalAdmin, err = s.isPortalAdmin(ctx); err != nil || portalAdmin {
+		return nil, portalAdmin, err
 	}
 	email := auth.IdentityFromContext(ctx).UserEmail
 	if email == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	led, err := s.repo.LeadFamiliesFor(ctx, email)
 	if err != nil || len(led) == 0 {
-		return nil, err
+		return nil, false, err
 	}
-	return led, nil
+	return led, false, nil
 }
 
 // kindFamilyFor is the family a new absence kind is stored under: none (shared)

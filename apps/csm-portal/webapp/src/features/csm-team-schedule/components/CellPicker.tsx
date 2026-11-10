@@ -942,7 +942,9 @@ export default function CellPicker({
                       setTagError("A tag name is needed.");
                       return;
                     }
-                    if (name.length > TAG_NAME_MAX) {
+                    // Counted in characters (code points), as the server
+                    // counts runes, so an emoji counts once on both sides.
+                    if ([...name].length > TAG_NAME_MAX) {
                       setTagError(`A tag name is at most ${TAG_NAME_MAX} characters; put the rest in the description.`);
                       return;
                     }
@@ -987,7 +989,6 @@ export default function CellPicker({
                       <span>Name</span>
                       <input
                         value={tag.label}
-                        maxLength={TAG_NAME_MAX}
                         placeholder={`e.g. SRE, WFH (up to ${TAG_NAME_MAX} characters)`}
                         onChange={(e) => setTag({ ...tag, label: e.target.value })}
                         aria-label="Tag name"

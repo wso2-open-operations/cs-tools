@@ -1145,8 +1145,6 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     );
   };
 
-  /** Add a tag to the shared catalogue. The picker stays open so the lead can
-   *  use it straight away; the form shows why when it is refused. */
   /** Add a tag for the family whose roster is being edited (a rota admin of
    *  several families must say which). A refusal shows the server's own
    *  reason, which is written for the lead who typed the tag. */
