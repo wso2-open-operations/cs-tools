@@ -42,6 +42,7 @@
 -- one, and a cleared flag stays cleared.
 
 BEGIN;
+SET LOCAL lock_timeout = '5s';
 
 SELECT set_config('app.is_internal', 'true', false);
 

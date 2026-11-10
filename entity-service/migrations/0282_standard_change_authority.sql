@@ -66,6 +66,10 @@ SELECT '00000000-0000-4000-8000-0000000005ca'::uuid, now(), now(), 'migration', 
 WHERE NOT EXISTS (SELECT 1 FROM "group" WHERE name = 'Standard Change Authority')
 ON CONFLICT (id) DO NOTHING;
 
+-- Every ALTER below waits at most 5s for a lock; a busy table fails the run
+-- instead of queueing every change request approval behind it. Reset at the end.
+SET lock_timeout = '5s';
+
 ALTER TABLE approval_stage
     ADD COLUMN IF NOT EXISTS required_approvals SMALLINT NOT NULL DEFAULT 1 CHECK (required_approvals >= 1);
 
@@ -99,3 +103,5 @@ CREATE TABLE IF NOT EXISTS standard_change_template_event (
 
 CREATE INDEX IF NOT EXISTS idx_standard_change_template_event_template
     ON standard_change_template_event (template_id, created_on DESC);
+
+RESET lock_timeout;
