@@ -833,6 +833,28 @@ next run. Both rollups are idempotent (a rerun over unchanged rows writes nothin
 costs nothing. One failing day or month does not stop the others; the handler returns every failure
 together and the engine retries the whole run. Days and months are UTC, so run with `TZ=UTC`.
 
+## PLG signups from Moesif
+
+**`plg_moesif_sync`** (default `*/15 * * * *`) lands WSO2 Cloud signups in the PLG portal. Moesif is the
+source of truth: a registration event (`metadata.initiating_product`, once per user) and each later
+subscription event (`metadata.product`) become one registration, by company id, user id and product,
+posted to entity-service's `POST /plg/registrations/ingest`. entity-service maps the product name to a
+portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
+
+- **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
+  `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only
+  refreshes what is stored, and a failed or superseded period is covered by the next run as long as the
+  outage is shorter than the window. The handler reads the wall clock, not the period start.
+- **Failures.** An event with no company id or product, or one entity-service rejects, is recorded in
+  `plg_ingest_failure` under its Moesif event id, by ids only; entity-service keeps one open row per
+  event id, so later runs do not repeat it. Neither fails the run. Moesif or entity-service unreachable,
+  or a window larger than `PLG_MOESIF_SYNC_MAX_PAGES` pages, fails it (retried and alerted as usual).
+- **Personal data.** Only time, action, user id, company id and the product fields are requested from
+  Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
+- **`internal/moesif`** is the shared Management API client (event search with `search_after` paging).
+  Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
+  sub-crons run one after another.
+
 ## Unresolved products digest
 
 `internal/unresolvedproducts.SendDigest`, registered as **`unresolved_products_digest`** (default
@@ -949,6 +971,7 @@ report emails" below for why that's not a generic engine feature.
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
+| `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
 

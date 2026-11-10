@@ -83,6 +83,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | `availability_recalculation` | `0 3 * * *` | Only if `AVAILABILITY_RECALC_ENABLED=true` | Triggers entity-service to recompute service availability figures; fails the run on a partial sweep or an empty subject list. The arithmetic runs in entity-service. |
 | `usage_rollup_daily` | `30 0 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild the daily usage rows of the last `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` days (default 2) before today from the hourly rows. The arithmetic runs in the database. |
 | `usage_rollup_monthly` | `30 1 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild last month's and the current month's monthly usage rows from the daily rows. |
+| `plg_moesif_sync` | `*/15 * * * *` | Only if `PLG_MOESIF_SYNC_ENABLED=true` | Reads WSO2 Cloud registration and subscription events from Moesif and lands each in the PLG portal by company id, user id and product. Rejected events are recorded once in `plg_ingest_failure`. |
 | `unresolved_products_digest` | `0 6 * * *` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the deployment nodes seen in the last 24 hours whose reported product or version is not in the product catalogue (from entity-service's `GET /instances/unresolved-products`). Sends nothing on a day with nothing to report. |
 | `acp_reopen_check` | `30 3 * * *` | Only if `ACP_REOPEN_CHECK_ENABLED=true` | Drives entity-service's daily ACP reopen check (`POST /acp/reopen-check`, page by page): reopens projects ACP suspended whose renewal or payment an event missed, and finishes ones a person set back to Open. Needs entity-service with `CSM_ACP_REOPEN_ENABLED=true`. See CLAUDE.md, "ACP reopen check". |
 | `acp_closure` | `0 4 * * 1-5` | Only if `ACP_ENABLED=true` | The Account Closure Process: sends the end-date and invoice notices that are due (90/60/30/15/7 days) and suspends projects at day 0 in CSM and Salesforce. Dry run by default (`ACP_DRY_RUN`). Skips weekends in Colombo time. Retried after 4 hours, not every tick. See CLAUDE.md, "ACP closure". |
@@ -197,6 +198,8 @@ csm-scheduled-tasks/
 │   ├── worklogreport/            # Client, wire types and audience resolver for the CS Worklogs reports
 │   ├── worklogsreport/           # Handlers for cs_worklogs_daily_report and cs_worklogs_weekly_report
 │   ├── acp/                      # Handler for acp_closure, and the ACP rules and clients (closure, sweep, recipients, notify, entity, salesentity, ...)
+│   ├── moesif/                   # Moesif Management API client shared by the Moesif sub-crons
+│   ├── plgsignups/               # Client + handler for plg_moesif_sync
 │   ├── notify/                   # Email client and HTML templates (alert, stale/open case reports, CS Worklogs, migration case scan)
 │   ├── httpsec/                  # Shared https-only URL guard and redirect guard for the HTTP clients
 │   └── apierror/                 # Typed upstream-error wrapper shared by the clients
@@ -305,6 +308,13 @@ treated as unset, except where noted. All example values are placeholders.
 | `AVAILABILITY_RECALC_ENABLED` | No | `false` | Registers `availability_recalculation`. Enable only once no other process writes the same availability data, otherwise rows can be duplicated. | `true` |
 | `USAGE_ROLLUP_ENABLED` | No | `false` | Registers `usage_rollup_daily` and `usage_rollup_monthly`. Enable only once ServiceNow's usage aggregation jobs and csm-sync-service's mirroring of the same tables are off, otherwise the rows are fought over. | `true` |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No | `2` | How many days before today the daily rollup rebuilds each night. | `3` |
+| `PLG_MOESIF_SYNC_ENABLED` | No | `false` | Registers `plg_moesif_sync`. | `true` |
+| `MOESIF_API_KEY` | When `PLG_MOESIF_SYNC_ENABLED=true` | – | **Secret.** Moesif Management API token, shared by every Moesif sub-cron. | – |
+| `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` | No | `https://api.moesif.com` / `30s` | Moesif API host and the ceiling on one call. | – |
+| `PLG_MOESIF_SYNC_WINDOW_MINUTES` | No | 2 × `DRIVER_INTERVAL`, at least 120 | How far back each run reads. Keep it above the interval so a missed run is covered. | `120` |
+| `PLG_MOESIF_SYNC_EVENTS` | No | registration and subscription events | Comma-separated `action_name`s that mark a signup. | – |
+| `PLG_MOESIF_SYNC_PRODUCT_FIELDS` | No | `metadata.initiating_product,metadata.product` | Where an event holds the product; the first present wins. | – |
+| `PLG_MOESIF_SYNC_BATCH_SIZE` / `PLG_MOESIF_SYNC_MAX_PAGES` | No | `100` / `100` | Registrations per ingest call; pages of 100 events per run. | – |
 | `ACP_ENABLED` | No | `false` | Registers `acp_closure`. No other `ACP_*` setting is read while false. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. | `true` |
 | `ACP_DRY_RUN` | No | `true` | Decide and log, write nothing to CSM or Salesforce. A malformed value is true. `false` needs `ACP_EMAIL_SEND_ENABLED=true` (startup refuses otherwise). With `ACP_EMAIL_SEND_ENABLED=true` too, a dry run records nothing and would send the same notices on every run, so startup refuses it unless `acp_closure` has a `debug` list in `SUB_CRON_RECIPIENTS`. A `TRYOUT_TASK=acp_closure` without `ACP_TEST_PROJECT_ID` is always a dry run. | `false` |
 | `ACP_EMAIL_SEND_ENABLED` | No | `false` | Sends the notices for real (needs `EMAIL_BASE_URL` and `EMAIL_FROM_ADDRESS`); false logs them. `ALERTS_ENABLED=false` turns `acp_closure` into a dry run without emails. A `debug` list for `acp_closure` in `SUB_CRON_RECIPIENTS` redirects every notice; startup refuses one with `ACP_DRY_RUN=false` unless `ACP_TEST_PROJECT_ID` is set. | `true` |

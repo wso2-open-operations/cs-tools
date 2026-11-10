@@ -55,8 +55,10 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/moesif"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -276,6 +278,36 @@ func main() {
 		})
 		if err != nil {
 			slog.Error("failed to construct entity-service usage rollup client", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	// PLG signups from Moesif: the Moesif reader and the PLG ingest client.
+	// Off by default; MOESIF_API_KEY is required once it is on.
+	plgMoesifSyncEnabled := envBool("PLG_MOESIF_SYNC_ENABLED", false)
+	var (
+		moesifClient     *moesif.Client
+		plgSignupsClient *plgsignups.Client
+	)
+	if plgMoesifSyncEnabled {
+		moesifClient, err = moesif.NewClient(moesif.Config{
+			BaseURL: envString("MOESIF_BASE_URL", moesif.DefaultBaseURL),
+			APIKey:  mustEnv("MOESIF_API_KEY"),
+			Timeout: envDuration("MOESIF_TIMEOUT", 30*time.Second),
+		})
+		if err != nil {
+			slog.Error("failed to construct Moesif client", "err", err)
+			os.Exit(1)
+		}
+		plgSignupsClient, err = plgsignups.NewClient(plgsignups.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG ingest client", "err", err)
 			os.Exit(1)
 		}
 	}
@@ -509,6 +541,8 @@ func main() {
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
 	const usageRollupMonthlyTaskName = "usage_rollup_monthly"
 	usageRollupMonthlyTo, usageRollupMonthlyCc := recipientsFor(recipientOverrides, usageRollupMonthlyTaskName)
+	const plgMoesifSyncTaskName = "plg_moesif_sync"
+	plgMoesifSyncTo, plgMoesifSyncCc := recipientsFor(recipientOverrides, plgMoesifSyncTaskName)
 	const unresolvedProductsTaskName = "unresolved_products_digest"
 	unresolvedProductsTo, unresolvedProductsCc := recipientsFor(recipientOverrides, unresolvedProductsTaskName)
 	unresolvedProductsEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, unresolvedProductsTaskName))
@@ -1012,6 +1046,39 @@ func main() {
 				Cc:       usageRollupMonthlyCc,
 			},
 		)
+	}
+
+	// PLG signups from Moesif, every 15 minutes by default. A run reads a
+	// window of at least two driver intervals (and 2 hours), so a missed or
+	// failed run is covered by the next; ingest is idempotent, so the overlap
+	// is harmless. The handler reads the wall clock, not the period start: the
+	// window must end now to catch the newest signups.
+	if plgMoesifSyncEnabled {
+		window := max(2*driverInterval, 2*time.Hour)
+		if minutes := envInt("PLG_MOESIF_SYNC_WINDOW_MINUTES", 0); minutes > 0 {
+			window = time.Duration(minutes) * time.Minute
+		}
+		events := splitComma(os.Getenv("PLG_MOESIF_SYNC_EVENTS"))
+		if len(events) == 0 {
+			events = plgsignups.DefaultEvents
+		}
+		productFields := splitComma(os.Getenv("PLG_MOESIF_SYNC_PRODUCT_FIELDS"))
+		if len(productFields) == 0 {
+			productFields = plgsignups.DefaultProductFields
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     plgMoesifSyncTaskName,
+			Schedule: scheduleFor(scheduleOverrides, plgMoesifSyncTaskName, "*/15 * * * *"),
+			Handler: plgsignups.Sync(moesifClient, plgSignupsClient, plgsignups.Options{
+				Events:        events,
+				ProductFields: productFields,
+				Window:        window,
+				BatchSize:     envInt("PLG_MOESIF_SYNC_BATCH_SIZE", 100),
+				MaxPages:      envInt("PLG_MOESIF_SYNC_MAX_PAGES", 100),
+			}, time.Now),
+			To: plgMoesifSyncTo,
+			Cc: plgMoesifSyncCc,
+		})
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
