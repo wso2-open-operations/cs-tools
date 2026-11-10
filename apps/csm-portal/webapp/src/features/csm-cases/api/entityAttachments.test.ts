@@ -947,6 +947,25 @@ describe("direct transfers of large files", () => {
     expect(putBinary).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["no chunk size", { links: ["https://blob.example/x"], expiresAt: "x" }],
+    ["a zero chunk size", { ...linksFor(2), chunkBytes: 0 }],
+    ["a negative chunk size", { ...linksFor(2), chunkBytes: -8 }],
+    ["a fractional chunk size", { ...linksFor(2), chunkBytes: 1.5 }],
+    ["links that are not a list", { ...linksFor(2), links: "https://blob.example/x" }],
+    ["too few links", linksFor(1)],
+  ])("sends the chunks through the backend when the links answer has %s", async (_name, answer) => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const postEmpty = vi.fn().mockResolvedValue(answer);
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK)));
+    expect(fetchMock).not.toHaveBeenCalled(); // nothing was sent to an address from a bad answer
+    expect(putBinary).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 2 });
+  });
+
   it("sends the chunks through the backend when the links cannot be had", async () => {
     vi.stubGlobal("fetch", vi.fn(okResponse));
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
