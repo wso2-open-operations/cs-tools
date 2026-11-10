@@ -1858,6 +1858,93 @@ func TestScheduleIntegration_SearchAssignmentsCanLeaveOutSomebodyAway(t *testing
 	}
 }
 
+// An allocation that moves nobody (Allo-INT, ENG, ...) does not hide a turn on
+// the same day, so excludeAbsent keeps the turn: the person still works it and
+// must get its reminder.
+func TestScheduleIntegration_SearchAssignmentsExcludeAbsentKeepsAnAllocatedTurn(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	code := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	const tuesday = "2026-09-22"
+
+	var kind string
+	if err := pool.QueryRow(ctx, `SELECT code FROM team_schedule_absence_kind
+		WHERE bucket = 'ALLOCATION' AND moves_to_team_key IS NULL AND is_active
+		ORDER BY sort_order LIMIT 1`).Scan(&kind); err != nil {
+		t.Fatalf("no allocation kind that moves nobody: %v", err)
+	}
+	if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: code,
+		From: schedMonday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: kind,
+		From: tuesday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyAbsence(%s): %v", kind, err)
+	}
+
+	rows, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
+		From: schedMonday, To: tuesday, TeamKeys: []string{schedTeamKey},
+		ExcludeAbsent: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchAssignments: %v", err)
+	}
+	if len(rows) != 2 || rows[0].RotaDate != schedMonday || rows[1].RotaDate != tuesday {
+		t.Fatalf("got %d turns, want Mon and Tue (an allocation on Tue keeps the turn)", len(rows))
+	}
+}
+
+// A moving tag whose destination team is not set (unmatched when it was
+// configured, or the team deleted) is still a move away, not an allocation
+// that moves nobody: excludeAbsent keeps leaving the person out.
+func TestScheduleIntegration_SearchAssignmentsExcludeAbsentCountsAMoveWithNoDestination(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	code := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	const kind, tuesday = "FIXTURE_UNSET_MOVE", "2026-09-22"
+	cleanup := func() {
+		mustExec(t, pool, `DELETE FROM team_schedule_absence_activity WHERE kind_code = $1`, kind)
+		mustExec(t, pool, `DELETE FROM team_schedule_absence WHERE kind_id IN (SELECT id FROM team_schedule_absence_kind WHERE code = $1)`, kind)
+		mustExec(t, pool, `DELETE FROM team_schedule_absence_kind WHERE code = $1`, kind)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	mustExec(t, pool, `
+		INSERT INTO team_schedule_absence_kind
+		  (code, short_code, label, bucket, colour_token, sort_order, is_active,
+		   created_by, updated_by, moves_to_team_key, works_rota_there, shows_as_shift_code)
+		VALUES ($1, 'FXU', 'Fixture unset move', 'ALLOCATION', 'BR', 999, TRUE,
+		        'test', 'test', NULL, FALSE, $2)`, kind, code)
+
+	if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: code,
+		From: schedMonday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: kind,
+		From: tuesday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyAbsence: %v", err)
+	}
+
+	rows, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
+		From: schedMonday, To: tuesday, TeamKeys: []string{schedTeamKey},
+		ExcludeAbsent: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchAssignments: %v", err)
+	}
+	if len(rows) != 1 || rows[0].RotaDate != schedMonday {
+		t.Fatalf("got %d turns, want only Mon (a move with no destination on Tue)", len(rows))
+	}
+}
+
 // A span that moves somebody to another team keeps them on that team's
 // shifts, and away from their own, exactly as the on-duty lookup has it.
 func TestScheduleIntegration_SearchAssignmentsExcludeAbsentFollowsAMove(t *testing.T) {

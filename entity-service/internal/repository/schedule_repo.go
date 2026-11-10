@@ -523,7 +523,7 @@ func (r *scheduleRepository) SearchAssignments(ctx context.Context, req domain.S
 		// Asked of the rota day rather than an instant: a whole shift is about
 		// to be announced, and the day it is rostered for is the day leave is
 		// granted against.
-		where += " AND " + absenceOn("NOT EXISTS", "a.rota_date")
+		where += " AND " + reminderAbsenceOn("a.rota_date")
 	}
 
 	rows, err := r.db.Query(ctx, `SELECT `+assignmentColumns+assignmentFrom+" "+where+
@@ -589,13 +589,41 @@ func (r *scheduleRepository) onDutyRows(ctx context.Context, at time.Time, exist
 	return scanAssignments(rows)
 }
 
-// absenceOn is the one rule for "this assignment's person is away on day":
-// exists is "EXISTS" (they are away) or "NOT EXISTS" (they are not). The
-// on-duty lookup, its include-on-leave mode, and a search that leaves absent
-// people out all read it, so they can never disagree about who is working.
-// Both arguments are always constants from this file, never caller input: day
-// is a SQL date expression over the assignment (a) and its shift (s).
+// absenceOn is the on-duty rule for "this assignment's person is away on
+// day": exists is "EXISTS" (they are away) or "NOT EXISTS" (they are not). The
+// on-duty lookup and its include-on-leave mode read it. Every absence kind
+// counts, allocations included. Both arguments are always constants from this
+// file, never caller input: day is a SQL date expression over the assignment
+// (a) and its shift (s).
 func absenceOn(exists, day string) string {
+	return awayOn(exists, day, "")
+}
+
+// reminderAbsenceOn is the rota search's excludeAbsent rule (the rota
+// reminders): absenceOn, except that an allocation that moves nobody (Allo-INT,
+// Allo-EXT, ENG, ...) does not count. An allocation does not hide a turn on
+// the same day, so a person with one still works that turn and must get its
+// reminder. Leave and "excluded from rota" still count, and so does an
+// allocation that moves its person to another team (Brazil rotation,
+// Migration), with absenceOn's same exception for the team it moved them to.
+// A moving tag whose destination is not set (no team matched when 0202 set
+// it, or the team was deleted: ON DELETE SET NULL) still counts as away: it is
+// told apart by works_rota_there, shows_as_shift_code or its built-in code,
+// never by a NULL moves_to_team_key alone.
+// The on-duty lookup keeps absenceOn for now, so the two differ for a person
+// with such an allocation on a turn day.
+func reminderAbsenceOn(day string) string {
+	return awayOn("NOT EXISTS", day,
+		`AND NOT (k.bucket = 'ALLOCATION'
+		          AND k.moves_to_team_key IS NULL
+		          AND NOT k.works_rota_there
+		          AND k.shows_as_shift_code IS NULL
+		          AND k.code NOT IN ('ALLO_BR', 'MIGRATION'))`)
+}
+
+// awayOn is the shared body of absenceOn and reminderAbsenceOn; also is a
+// further constant condition on the absence (ab) and its kind (k), or "".
+func awayOn(exists, day, also string) string {
 	return exists + ` (
 		        SELECT 1 FROM team_schedule_absence ab
 		        JOIN team_schedule_absence_kind k ON k.id = ab.kind_id
@@ -605,6 +633,7 @@ func absenceOn(exists, day string) string {
 		          -- and that team's rota: someone on the Brazil rotation is
 		          -- working the Americas rota, and is on duty for its shifts.
 		          AND NOT ` + movedWithinRota + `
+		          ` + also + `
 		      )`
 }
 
