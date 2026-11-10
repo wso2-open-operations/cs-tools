@@ -19094,12 +19094,19 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /plg/registrations/aggregate:
     post:
-      summary: Count registrations per country.
+      summary: Count registrations per country or per playbook answer.
       description: >-
         The registrations the search's filters and unacknowledgedOnly match
-        (as POST /plg/registrations/search), counted per their organisation's
-        country, grouped, keyed and ordered as POST /plg/organizations/aggregate
-        groups organisations by country. groupBy "country" is the only grouping.
+        (as POST /plg/registrations/search), counted per group. groupBy
+        "country": per their organisation's country, grouped, keyed and
+        ordered as POST /plg/organizations/aggregate groups organisations by
+        country. groupBy "playbookAnswer": per their answer to
+        filters.playbookTask on their attached runs, keyed by the option code
+        and labelled with its label (the code when the run's options lost
+        it), the registrations with no answer one group keyed "unanswered"
+        ("Not answered"); with filters.playbookAnswers, only those answers
+        are groups. A checklist registration counts once per ticked option,
+        so totalRecords (the groups' sum) counts ticks.
       operationId: plgAggregateRegistrations
       requestBody:
         required: true
@@ -19109,13 +19116,13 @@ paths:
               $ref: "#/components/schemas/PlgAggregateRegistrationsRequest"
       responses:
         "200":
-          description: Registrations per country.
+          description: Registrations per country or per answer.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AggregateResponse"
         "400":
-          description: Bad request — an invalid enum, groupBy, maxGroups, window, date or country filter.
+          description: Bad request — an invalid enum, groupBy, maxGroups, window, date, country or playbook answer filter, or a playbookAnswer grouping with no filters.playbookTask.
           content:
             application/json:
               schema:
@@ -39752,6 +39759,31 @@ components:
           description: >-
             true matches the organisations (registrations) with no country.
             Not with countryNames.
+        playbookTask:
+          type: string
+          maxLength: 100
+          description: >-
+            A playbook task's code, the task playbookAnswers and
+            playbookUnanswered match on (and a registration aggregate's
+            playbookAnswer grouping groups by). On its own it filters nothing.
+        playbookAnswers:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+          description: >-
+            Matches the registrations whose attached runs answered
+            playbookTask with any of these option codes (a checklist: any of
+            them ticked); an organisation matches when any of its
+            registrations does. Codes match as written, trimmed. Needs
+            playbookTask; not with playbookUnanswered.
+        playbookUnanswered:
+          type: boolean
+          nullable: true
+          description: >-
+            true matches the registrations with no answer to playbookTask on
+            any attached run, including those the playbook was never run on.
+            Needs playbookTask; not with playbookAnswers.
     PlgAggregateOrganizationsRequest:
       type: object
       required: [groupBy]
@@ -39776,7 +39808,8 @@ components:
           $ref: "#/components/schemas/PlgOrganizationSearchFilters"
         groupBy:
           type: string
-          enum: [country]
+          enum: [country, playbookAnswer]
+          description: playbookAnswer needs filters.playbookTask.
         maxGroups:
           type: integer
           minimum: 0
