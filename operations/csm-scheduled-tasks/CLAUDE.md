@@ -211,9 +211,9 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 
 | Task | Default schedule | Announces |
 |---|---|---|
-| `rota_weekday_reminder` | `30 9 * * 1-5` (15:00 Colombo, Mon–Fri) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): tomorrow from Monday to Thursday, **Monday from Friday** |
-| `rota_weekend_notice` | `30 14 * * 0-4` (20:00 Colombo, Sun–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once; until then the rota admins are asked every evening |
-| `rota_weekend_reminder` | `30 9 * * 5` (15:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
+| `rota_weekday_reminder` | `30 3 * * 0-4` (09:00 Colombo, Sun–Thu) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): always tomorrow, so **Monday from Sunday** |
+| `rota_weekend_notice` | `30 3 * * 1-4` (09:00 Colombo, Mon–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once (on Monday when it is already marked); until then the rota admins are asked every morning |
+| `rota_weekend_reminder` | `30 3 * * 5` (09:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
 
 The schedule decides only *when* a task runs. Which days it announces comes from the day it runs
@@ -309,10 +309,10 @@ schedules assume `TZ=UTC` like every other here.
   `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) is how many people each shift needs on each day; the on-call
   variant does not count. Until that holds, `rota_weekend_notice` emails the family's rota admins
   (entity-service `GET /team-schedule/rota-admins/{family}`; the task's alert audience when there
-  are none) a table of what is missing, every evening, and sends nothing to the rota. Friday's
+  are none) a table of what is missing, every morning, and sends nothing to the rota. Friday's
   `rota_weekend_reminder` sends anyway, listing the gaps, and tells the admins.
 - **The weekend send is recorded in entity-service** (`team_schedule_reminder_sent`, migration
-  0241, `GET`/`PUT /team-schedule/reminders/{family}/weekend_notice/{saturday}`): an evening that
+  0241, `GET`/`PUT /team-schedule/reminders/{family}/weekend_notice/{saturday}`): a morning run that
   finds the record sends nothing, and Friday compares its invitations with the recorded ones and
   sends a cancellation (`METHOD:CANCEL`) to anybody taken off a window, or to everybody on a window
   that is gone. A failure to record is reported in the partial-failure alert; the emails are not

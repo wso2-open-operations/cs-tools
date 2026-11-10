@@ -328,6 +328,7 @@ export default function RotaReminderSettings(): JSX.Element {
               <legend>Automatic reminders</legend>
               <p className="cp-help" id={id("automatic-help")}>
                 The only on/off for the automatic reminders in this environment. A change applies from the next run.
+                Times are when the reminders run; an email can arrive up to an hour later.
               </p>
               <div className="rrs-checks">
                 <div>
@@ -342,7 +343,8 @@ export default function RotaReminderSettings(): JSX.Element {
                     Send weekday reminders
                   </label>
                   <p className="cp-help" id={id("weekday-help")}>
-                    Morning and Evening, emailed the working day before at 15:00 IST.
+                    Morning and Evening rotations. Each person gets one email with a calendar invitation at 09:00 IST
+                    the day before (Sunday to Thursday; on Sunday for Monday).
                   </p>
                 </div>
                 <div>
@@ -357,8 +359,10 @@ export default function RotaReminderSettings(): JSX.Element {
                     Send weekend reminders
                   </label>
                   <p className="cp-help" id={id("weekend-help")}>
-                    Sunday to Thursday at 20:00 IST once the weekend is fully marked, and again on Friday at 15:00
-                    IST.
+                    Sent at 09:00 IST on Monday once the weekend is fully marked (or on the first morning from Tuesday to
+                    Thursday that it is): a summary to everyone on the weekend and one invitation per day. A final
+                    reminder with any changes follows on Friday at 09:00 IST. Until the weekend is fully marked, only
+                    the CRE rota admins get a daily 09:00 IST email listing what is missing.
                   </p>
                 </div>
                 <div>

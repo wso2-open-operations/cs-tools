@@ -496,7 +496,7 @@ func buildAdminEmail(cfg Config, admins []teamschedule.RotaAdmin, days []time.Ti
 	when := dayList(days)
 	intro := fmt.Sprintf("The %s weekend rota for %s is not fully marked in the Team Schedule, so the weekend reminder and its "+
 		"calendar invitations have not been sent yet.", cfg.Family, when)
-	after := "Please mark the missing rotations. The reminder goes out automatically at the next evening check once the rota is complete."
+	after := "Please mark the missing rotations. The reminder goes out automatically at the next morning check (09:00 IST, Monday to Thursday) once the rota is complete."
 	if final {
 		intro = fmt.Sprintf("The %s weekend rota for %s is still not fully marked in the Team Schedule. The weekend reminder has been "+
 			"sent with the rotations marked so far.", cfg.Family, when)

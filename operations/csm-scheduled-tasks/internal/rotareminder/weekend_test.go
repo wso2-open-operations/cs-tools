@@ -188,7 +188,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 		t.Fatalf("recorded = %+v", store.recorded)
 	}
 
-	// The next evening finds the record and sends nothing.
+	// The next morning finds the record and sends nothing.
 	mail.sent = nil
 	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-19 20:00", "rota_weekend_notice"))(context.Background()); err != nil {
 		t.Fatalf("second evening: %v", err)
@@ -199,7 +199,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 }
 
 // A weekend that is not fully marked is not announced: the rota admins are
-// told what is missing, every evening, until it is; then it goes out.
+// told what is missing, every morning, until it is; then it goes out.
 func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 	short := []teamschedule.Assignment{}
 	for _, a := range fullWeekend() {
@@ -230,7 +230,7 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 		t.Fatalf("admin email = %+v", m)
 	}
 
-	// Once marked, the next evening announces it.
+	// Once marked, the next morning announces it.
 	rota.assignments = fullWeekend()
 	mail.sent = nil
 	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-19 20:00", "rota_weekend_notice"))(context.Background()); err != nil {

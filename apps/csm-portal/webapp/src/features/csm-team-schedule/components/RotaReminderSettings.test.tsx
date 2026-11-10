@@ -117,6 +117,18 @@ describe("RotaReminderSettings", () => {
     expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).not.toBeChecked();
   });
 
+  it("says when each reminder goes out: 09:00 IST the day before, the weekend on Monday and Friday", () => {
+    render(<RotaReminderSettings />);
+    expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).toHaveAccessibleDescription(
+      /one email with a calendar invitation at 09:00 IST the day before \(Sunday to Thursday; on Sunday for Monday\)/,
+    );
+    const weekend = screen.getByRole("checkbox", { name: "Send weekend reminders" });
+    expect(weekend).toHaveAccessibleDescription(/Sent at 09:00 IST on Monday once the weekend is fully marked/);
+    expect(weekend).toHaveAccessibleDescription(/final reminder with any changes follows on Friday at 09:00 IST/);
+    expect(weekend).toHaveAccessibleDescription(/only the CRE rota admins get a daily 09:00 IST email/);
+    expect(screen.getByText(/an email can arrive up to an hour later/)).toBeInTheDocument();
+  });
+
   it("groups the settings under Settings, in Automatic reminders, Weekend rota and Cc", () => {
     render(<RotaReminderSettings />);
     expect(screen.getByRole("heading", { name: "Settings", level: 4 })).toBeInTheDocument();
