@@ -399,6 +399,10 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// OwnerEmails matches the organisation's PLG CS owner by email address,
+	// any of them, ignoring case; a registration matches by its
+	// organisation's owner. entity-service checks it.
+	OwnerEmails []string `json:"ownerEmails"`
 	// CountryNames matches the organisation's country, any of them, ignoring
 	// case; CountryUnknown true matches the organisations with no country.
 	// A registration matches by its organisation's country. entity-service
