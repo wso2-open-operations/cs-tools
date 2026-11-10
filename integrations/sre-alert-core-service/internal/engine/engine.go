@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"alert-core-service/internal/model"
+	"alert-core-service/internal/muterule"
 	"alert-core-service/internal/store"
 )
 
@@ -44,6 +45,15 @@ type incidentStore interface {
 	ClearNotes(ctx context.Context, incident int64, noteIDs []int64, csm, chat bool) error
 	SettleNotes(ctx context.Context, incident int64, csm, chat bool) error
 	FinishDelivery(ctx context.Context, id, foldVersion int64, next *time.Time) error
+	Mute(ctx context.Context, id int64, ruleID, ruleNumber string) error
+	Unmute(ctx context.Context, id int64) error
+	MuteOutcome(ctx context.Context, inc model.Incident) (resolved, superseded bool, err error)
+	CloseMuted(ctx context.Context, id, foldVersion int64) (bool, error)
+}
+
+// RuleMatcher finds an active alert mute rule matching an incident's fields; *muterule.Cache implements it.
+type RuleMatcher interface {
+	Match(f muterule.Fields) (muterule.Rule, bool)
 }
 
 // notifier lets tests fake *notify.Notifier.
@@ -80,7 +90,14 @@ type Config struct {
 	ChatThreadingEnabled bool
 	// DeliveryConcurrency bounds how many incidents DeliverDue works on at once per replica.
 	DeliveryConcurrency int
+	// Rules holds the active alert mute rules; nil turns muting off. Muting is also off while CSM is not configured.
+	Rules RuleMatcher
+	// MuteRecheckInterval is how often a muted incident is re-checked against the active alert mute rules.
+	MuteRecheckInterval time.Duration
 }
+
+// defaultMuteRecheckInterval applies when Config.MuteRecheckInterval is unset.
+const defaultMuteRecheckInterval = 30 * time.Second
 
 // Engine folds alert groups and delivers due incidents.
 type Engine struct {
@@ -93,6 +110,9 @@ type Engine struct {
 // New wires the engine.
 func New(logger *slog.Logger, incidents incidentStore, n notifier, cfg Config) *Engine {
 	cfg.DeliveryConcurrency = max(cfg.DeliveryConcurrency, 1)
+	if cfg.MuteRecheckInterval <= 0 {
+		cfg.MuteRecheckInterval = defaultMuteRecheckInterval
+	}
 	return &Engine{logger: logger, incidents: incidents, notifier: n, cfg: cfg}
 }
 
@@ -192,6 +212,7 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 					Service: it.Alert.Service, MetricName: it.Alert.MetricName, Category: it.Alert.Category,
 					Environment: it.Alert.Environment, Source: it.Alert.Source,
 					AlertCount: 1, FirstSeen: at, LastSeen: at,
+					UniqueIdentifier: it.Alert.UniqueIdentifier, SeverityLabel: it.Alert.Severity,
 				},
 				Notes: []model.Note{{AlertID: it.ID, Kind: model.NoteCreated, Text: model.BuildCreationNote(it.ID, it.Alert)}},
 			})
@@ -301,6 +322,13 @@ func (e *Engine) deliver(ctx context.Context, id int64) {
 		}
 		return
 	}
+	if inc.MuteEligible() && e.holdMuted(ctx, &inc) {
+		return
+	}
+	if inc.QuietlyClosed() {
+		e.settleQuietlyClosed(ctx, inc)
+		return
+	}
 	notes, err := e.incidents.PendingNotes(ctx, id, notesPerDelivery)
 	if err != nil {
 		e.logger.Error("delivery: failed to read pending notes", "incident", id, "error", err)
@@ -336,6 +364,110 @@ func (e *Engine) deliver(ctx context.Context, id int64) {
 	d.persist("next delivery time", func(c context.Context) error {
 		return e.incidents.FinishDelivery(c, id, inc.FoldVersion, next)
 	})
+}
+
+// matchRule returns the active alert mute rule matching inc, if muting is on.
+func (e *Engine) matchRule(inc model.Incident) (muterule.Rule, bool) {
+	if e.cfg.Rules == nil || !e.notifier.CSMEnabled() {
+		return muterule.Rule{}, false
+	}
+	return e.cfg.Rules.Match(muterule.Fields{
+		Service: inc.Service, Environment: inc.Environment, Source: inc.Source, MetricName: inc.MetricName,
+		Severity: inc.SeverityLabel, Category: inc.Category, UniqueIdentifier: inc.UniqueIdentifier,
+	})
+}
+
+// holdMuted applies alert mute rules to an incident that was never delivered (or is muted). It returns true when this
+// delivery pass is over: the incident is (still) muted and re-checked in MuteRecheckInterval, or it resolved or was
+// replaced while muted and is closed without ever reaching CSM or Chat. It returns false once no rule matches a
+// muted incident that is still firing; it is then unmuted and delivered as normal.
+func (e *Engine) holdMuted(ctx context.Context, inc *model.Incident) bool {
+	log := e.logger.With("incident", inc.ID, "fingerprint", inc.Fingerprint, "service", inc.Service,
+		"environment", inc.Environment, "source", inc.Source, "metric_name", inc.MetricName)
+	recheck := func() {
+		next := time.Now().Add(e.cfg.MuteRecheckInterval)
+		pctx, cancel := persistCtx(ctx)
+		defer cancel()
+		if err := e.incidents.FinishDelivery(pctx, inc.ID, inc.FoldVersion, &next); err != nil {
+			log.Error("mute: failed to schedule the next check", "error", err)
+		}
+	}
+	write := func(what string, fn func(context.Context) error) bool {
+		pctx, cancel := persistCtx(ctx)
+		defer cancel()
+		if err := fn(pctx); err != nil {
+			log.Error("mute: failed to persist "+what+", will retry", "error", err)
+			return false
+		}
+		return true
+	}
+
+	if rule, ok := e.matchRule(*inc); ok {
+		if !inc.Muted || inc.MuteRuleID != rule.ID {
+			if !write("mute", func(c context.Context) error { return e.incidents.Mute(c, inc.ID, rule.ID, rule.Number) }) {
+				recheck()
+				return true
+			}
+			if inc.Muted {
+				log.Info("muted incident is now held by another alert mute rule", "alert_mute_rule", rule.Number, "alert_mute_rule_id", rule.ID,
+					"previous_alert_mute_rule", inc.MuteRuleNumber)
+			} else {
+				log.Info("incident muted by alert mute rule; not delivering to CSM or Chat", "alert_mute_rule", rule.Number,
+					"alert_mute_rule_id", rule.ID, "alert_mute_rule_name", rule.Name, "alert_mute_rule_end", rule.EndOn)
+			}
+		}
+		recheck()
+		return true
+	}
+	if !inc.Muted {
+		return false
+	}
+
+	log = log.With("alert_mute_rule", inc.MuteRuleNumber, "alert_mute_rule_id", inc.MuteRuleID)
+	resolved, superseded, err := e.incidents.MuteOutcome(ctx, *inc)
+	if err != nil {
+		log.Error("mute: failed to read muted incident's outcome, will retry", "error", err)
+		recheck()
+		return true
+	}
+	if resolved || superseded {
+		var closed bool
+		if !write("quiet close", func(c context.Context) (err error) {
+			closed, err = e.incidents.CloseMuted(c, inc.ID, inc.FoldVersion)
+			return err
+		}) {
+			recheck()
+			return true
+		}
+		if closed {
+			reason := "resolved"
+			if superseded {
+				reason = "superseded by a newer incident"
+			}
+			log.Info("alert mute rule ended; muted incident closed quietly without a CSM incident", "reason", reason, "alerts", inc.AlertCount)
+		}
+		// Not closed means a fold just changed it; that fold left it due, so the next pass decides again.
+		return true
+	}
+	if !write("unmute", func(c context.Context) error { return e.incidents.Unmute(c, inc.ID) }) {
+		recheck()
+		return true
+	}
+	now := time.Now()
+	inc.Muted, inc.UnmutedAt = false, &now
+	log.Info("alert mute rule no longer matches; delivering muted incident that is still firing", "alerts", inc.AlertCount)
+	return false
+}
+
+// settleQuietlyClosed settles the notes that later alerts (an OK, say) folded into an incident closed quietly while
+// muted, without sending anything to CSM or Chat. CloseMuted is fold-version guarded: if another fold lands first, the
+// incident stays due and the next pass settles it.
+func (e *Engine) settleQuietlyClosed(ctx context.Context, inc model.Incident) {
+	pctx, cancel := persistCtx(ctx)
+	defer cancel()
+	if _, err := e.incidents.CloseMuted(pctx, inc.ID, inc.FoldVersion); err != nil {
+		e.logger.Error("mute: failed to settle quietly closed incident, will retry next sweep", "incident", inc.ID, "error", err)
+	}
 }
 
 // createInCSM attempts CreateIncident once, carrying the creation note, and records the outcome.
@@ -410,7 +542,7 @@ func (d *delivery) notifyChat() {
 	if !d.inc.CSMConfirmed && !d.inc.Fallback {
 		// CSM still has a chance to confirm; without CSM, or after a permanent rejection, there is nothing to wait for.
 		if e.notifier.CSMEnabled() && !d.inc.CSMPermanentlyFailed {
-			if postAt := d.inc.CreatedAt.Add(e.cfg.ChatFallbackDelay); time.Now().Before(postAt) {
+			if postAt := d.inc.DeliverableSince().Add(e.cfg.ChatFallbackDelay); time.Now().Before(postAt) {
 				d.retryAfter(postAt)
 				return
 			}
