@@ -20,6 +20,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,78 @@ func TestParseGenerated_AcceptsPlgSlices(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsPlgRegistrationLines checks the registration trend
+// a generated dashboard may hold: the trailing days, a fixed window by day,
+// week or month (plain or relative dates), as bars, over the registration
+// filters.
+func TestParseGenerated_AcceptsPlgRegistrationLines(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"last-30","displayName":"PLG Sign-ups, Last 30 Days","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"productCodes":["IAM"]},"days":30}`,
+		`{"id":"per-month","displayName":"PLG Sign-ups per Month, Last 3 Months","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month","chart":"bar"}`,
+		`{"id":"per-week","displayName":"New Registrations per Week This Year","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"unacknowledgedOnly":true},"startDate":"__startOfYear:0__","endDate":"__endOfYear:0__","bucket":"week"}`,
+		`{"id":"oct-2026","displayName":"Sign-ups per Day in October 2026","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"lifecycleStages":["ACTIVATED"]},"startDate":"2026-10-01","endDate":"2026-10-31"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if w := d.Widgets[1]; w.Shape != ShapeLine || w.Bucket != LineBucketMonth || w.Chart != LineChartBar || w.StartDate != "__startOfMonth:-2__" {
+		t.Errorf("per-month = %+v, want a month line from __startOfMonth:-2__ as bars", w)
+	}
+	if w := d.Widgets[0]; w.Days != 30 || w.StartDate != "" {
+		t.Errorf("last-30 = days %d window %q, want the trailing 30 days", w.Days, w.StartDate)
+	}
+}
+
+// TestParseGenerated_AcceptsMyPlgWidgets checks "my PLG organisations" and
+// "my registrations": ownerIds exactly ["__current_user__"], on either PLG
+// type, in a query, a slice or a registration line.
+func TestParseGenerated_AcceptsMyPlgWidgets(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"mine","displayName":"My PLG Organisations","resourceType":"plg_organization","shape":"list","gridWidth":6,"listLimit":5,
+		  "sortBy":{"field":"name","order":"asc"},"query":{"ownerIds":["__current_user__"]}}`,
+		`{"id":"my-new","displayName":"My New Registrations","resourceType":"plg_registration","shape":"count","gridWidth":3,
+		  "query":{"ownerIds":["__current_user__"],"unacknowledgedOnly":true}}`,
+		`{"id":"mine-vs-unowned","displayName":"Mine and Unowned","resourceType":"plg_organization","shape":"pie","gridWidth":6,"query":{},
+		  "slices":[{"label":"Mine","query":{"ownerIds":["__current_user__"]}},{"label":"Unowned","query":{"unowned":true}}]}`,
+		`{"id":"my-signups","displayName":"My Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"ownerIds":["__current_user__"]},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if got := d.Widgets[0].Query["ownerIds"]; !reflect.DeepEqual(got, []any{"__current_user__"}) {
+		t.Errorf("mine ownerIds = %#v, want the placeholder kept for the webapp to resolve", got)
+	}
+}
+
+// TestParseGenerated_AcceptsPlgOrganisationsByOwner checks "PLG
+// organisations by owner": a pie or bar grouped by owner on the server, with
+// the widget's filters and maxGroups kept.
+func TestParseGenerated_AcceptsPlgOrganisationsByOwner(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-owner","displayName":"PLG Organisations by Owner","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{},"groupBy":{"field":"owner","maxGroups":10}}`,
+		`{"id":"iam-by-owner","displayName":"Activated IAM Organisations by Owner","resourceType":"plg_organization","shape":"pie","gridWidth":6,
+		  "query":{"productCodes":["IAM"],"lifecycleStages":["ACTIVATED"]},"groupBy":{"field":"owner","maxGroups":5}}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[1].GroupBy; g == nil || g.Field != "owner" || g.MaxGroups != 5 {
+		t.Errorf("iam-by-owner groupBy = %+v, want owner with maxGroups 5", g)
+	}
+	if got := d.Widgets[1].Query["productCodes"]; !reflect.DeepEqual(got, []any{"IAM"}) {
+		t.Errorf("iam-by-owner productCodes = %#v, want the filter kept", got)
+	}
+}
+
 // TestParseGenerated_RejectsPlgWidgetsItCannotRun checks that a PLG widget
 // holds only what the PLG searches take and a prompt can name.
 func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
@@ -95,15 +168,22 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 	}{
 		{"line", org("line", `,"query":{},"days":30`), "shape must be count, list, pie or bar"},
 		{"pie without slices", org("pie", `,"query":{}`), "needs either"},
-		{"pie grouped on the server", org("pie", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "cannot use groupBy; group with slices"},
-		{"slice with owner ids", org("bar", `,"query":{},"slices":[{"label":"Mine","query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}}]`), `slices[0].query: "ownerIds" is not a PLG organisation filter`},
+		{"pie grouped by product on the server", org("pie", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "groups by owner only"},
+		{"bar grouped by an owner bucket", org("bar", `,"query":{},"groupBy":{"bucket":"month"}`), "groups by owner only"},
+		{"owner grouping and slices", org("pie", `,"query":{},"groupBy":{"field":"owner"},"slices":[{"label":"Unowned","query":{"unowned":true}}]`), `carries both "slices" and "groupBy"`},
+		{"owner grouping in hours", org("bar", `,"query":{},"groupBy":{"field":"owner","measure":"hours"}`), `"groupBy.measure"`},
+		{"registrations by owner", reg("pie", `,"query":{},"groupBy":{"field":"owner","maxGroups":5}`), "cannot use groupBy; group with slices"},
+		{"a registration line by owner", reg("line", `,"query":{},"days":30,"groupBy":{"field":"owner"}`), "cannot use groupBy"},
+		{"slice with owner ids", org("bar", `,"query":{},"slices":[{"label":"Mine","query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}}]`), `slices[0].query.ownerIds can only be ["__current_user__"]`},
 		{"slice with an unknown stage", reg("pie", `,"query":{},"slices":[{"label":"Won","query":{"lifecycleStages":["WON"]}}]`), `"WON" is not a PLG registration lifecycle stage`},
 		{"slice unacknowledged on organisations", org("pie", `,"query":{},"slices":[{"label":"New","query":{"unacknowledgedOnly":true}}]`), `slices[0].query: "unacknowledgedOnly" is not a PLG organisation filter`},
 		{"slice with a bad date", reg("bar", `,"query":{},"slices":[{"label":"Sep","query":{"registeredFrom":"September"}}]`), "slices[0].query.registeredFrom must be a date"},
 		{"unknown product", org("count", `,"query":{"productCodes":["CHOREO"]}`), `"CHOREO" is not a PLG organisation product`},
 		{"lower-case stage", org("count", `,"query":{"lifecycleStages":["activated"]}`), `"activated" is not a PLG organisation lifecycle stage`},
 		{"unknown tier", org("count", `,"query":{"subscriptionTiers":["ENTERPRISE"]}`), `"ENTERPRISE" is not a PLG organisation subscription tier`},
-		{"owner ids", org("count", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}`), `"ownerIds" is not a PLG organisation filter`},
+		{"owner ids", org("count", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}`), `query.ownerIds can only be ["__current_user__"]`},
+		{"me and another owner", org("count", `,"query":{"ownerIds":["__current_user__","5e636a12-0000-4000-8000-000000000001"]}`), `query.ownerIds can only be ["__current_user__"]`},
+		{"me as a string", reg("count", `,"query":{"ownerIds":"__current_user__"}`), `ownerIds`},
 		{"free text", org("count", `,"query":{"query":"acme"}`), `"query" is not a PLG organisation filter`},
 		{"unowned as a string", org("count", `,"query":{"unowned":"true"}`), "unowned must be true or false"},
 		{"bad date", org("count", `,"query":{"registeredFrom":"last month"}`), "registeredFrom must be a date"},
@@ -111,6 +191,14 @@ func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
 		{"unacknowledged on organisations", org("count", `,"query":{"unacknowledgedOnly":true}`), `"unacknowledgedOnly" is not a PLG organisation filter`},
 		{"registration sort", reg("list", `,"query":{},"listLimit":5,"sortBy":{"field":"name","order":"asc"}`), "a PLG registration list takes no sortBy"},
 		{"registration groupBy", reg("count", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "cannot use groupBy"},
+		{"registration table", reg("table", `,"query":{}`), "shape must be count, list, pie, bar or line"},
+		{"registration line with a series", reg("line", `,"query":{},"days":30,"series":["opened"]`), `"series" is only meaningful for resourceType "case"`},
+		{"registration line over 90 days", reg("line", `,"query":{},"days":91`), `"days" is 91`},
+		{"registration line, days and a window", reg("line", `,"query":{},"days":30,"startDate":"2026-01-01","endDate":"2026-01-31"`), `"days" cannot be combined`},
+		{"registration line, this year by day", reg("line", `,"query":{},"startDate":"__startOfYear:0__","endDate":"__today__"`), "cover at most 90 days"},
+		{"registration line, a bucket alone", reg("line", `,"query":{},"bucket":"month"`), `"bucket" needs "startDate" and "endDate"`},
+		{"registration line, an owner filter", reg("line", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]},"days":30`), `query.ownerIds can only be ["__current_user__"]`},
+		{"registration line, unknown chart", reg("line", `,"query":{},"days":30,"chart":"area"`), `unknown "chart" "area"`},
 	}
 	for _, c := range cases {
 		_, err := ParseGenerated([]byte(c.raw))

@@ -196,14 +196,22 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	// PLG organisations and registrations (POST /plg/organizations/search,
 	// /plg/registrations/search) take the PLG list's flat filters, and only
 	// those a prompt can name: products, lifecycle stages, subscription
-	// tiers, the registration dates and "unowned" (no owner ids, no free
-	// text). Neither groups on the server, so a pie or bar uses slices (one
-	// search per slice, each slice's query held to the same filters), never
-	// groupBy. The organisation search sorts by name or registration date;
-	// the registration search has one order and takes no sortBy.
+	// tiers, the registration dates, "unowned" and the viewer's own (ownerIds
+	// exactly ["__current_user__"], which the webapp resolves to the viewer's
+	// user id, the id an owner is; no other owner ids), no free
+	// text). A pie or bar uses slices (one search per slice, each slice's
+	// query held to the same filters); organisations may instead group by
+	// owner on the server (POST /plg/organizations/aggregate, "Unowned" its
+	// own group), and nothing else. The organisation search sorts by name
+	// or registration date; the registration search has one order and takes
+	// no sortBy.
+	// Registrations may also be a line: registrations per day, week or month
+	// (POST /plg/registrations/volume-trend), with the case line's days or
+	// fixed window and chart, checked as for any definition; never series.
 	ResourcePlgOrganization: {
 		noun:      "PLG organisation",
 		shapes:    plgShapes,
+		groupBy:   []string{"owner"},
 		flat:      plgFilters,
 		dateKeys:  plgDateKeys,
 		sortBy:    []string{"name", "registeredOn"},
@@ -211,7 +219,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	},
 	ResourcePlgRegistration: {
 		noun:      "PLG registration",
-		shapes:    plgShapes,
+		shapes:    plgRegistrationShapes,
 		flat:      withRule(plgFilters, "unacknowledgedOnly", valueRule{kind: valuesJSONBool}),
 		dateKeys:  plgDateKeys,
 		slicesVia: "group with slices",
@@ -239,9 +247,13 @@ var (
 		"registeredFrom":    aDate,
 		"registeredTo":      aDate,
 		"unowned":           {kind: valuesJSONBool},
+		"ownerIds":          onlyMe,
 	}
 	plgDateKeys = map[string]bool{"registeredFrom": true, "registeredTo": true}
 )
+
+// plgRegistrationShapes are plgShapes and the registration trend.
+var plgRegistrationShapes = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar, ShapeLine}
 
 // withRule is rules plus one more key, as a new map.
 func withRule(rules map[string]valueRule, key string, rule valueRule) map[string]valueRule {
