@@ -52,7 +52,8 @@ export const WORK_ITEM_ATTACHMENT_TYPE: EntityAttachmentType = "work_item";
 
 /**
  * Response of `POST /attachments/upload`. There is no upload address: the file
- * is sent to the portal backend in chunks.
+ * is sent to the portal backend in chunks, or, when `directUpload` is true (a
+ * large file, with direct transfers on), to Azure through signed links.
  */
 export interface EntityUploadStart {
   attachmentId: string;
@@ -61,6 +62,7 @@ export interface EntityUploadStart {
   fieldName?: string;
   expiresAt: string;
   maxBytes: number;
+  directUpload?: boolean;
 }
 
 export interface EntityConfirmedAttachment {
@@ -413,9 +415,44 @@ async function readAndStore(
   return true;
 }
 
+/** Hands a signed link to the browser as a download; the link itself says it is an attachment. */
+function startBrowserDownload(url: string, name: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+/**
+ * Starts a large file's download straight from Azure through a signed link the
+ * backend makes after checking access. Resolves `false` when there is no link
+ * (direct transfers are off, or the request failed); the caller then streams the
+ * file through the backend, which reports any real refusal (a removed file) itself.
+ */
+async function startDirectDownload(
+  api: BackendApi,
+  args: { type: EntityAttachmentType; id: string; name?: string },
+): Promise<boolean> {
+  try {
+    const link = await api.get<{ url?: string; name?: string }>(
+      `/attachments/download/${encodeURIComponent(args.id)}/link?type=${encodeURIComponent(args.type)}`,
+    );
+    if (!link?.url) return false;
+    startBrowserDownload(link.url, args.name || link.name || "attachment");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Downloads an attachment under its own name through the portal backend, which
- * streams it. Resolves `false` on a 404.
+ * streams it. A file above {@link DIRECT_TRANSFER_MIN_BYTES} is first tried as a
+ * direct download from Azure, which the browser then shows and saves itself
+ * (outcome `started`, no in-page progress). Resolves `false` on a 404.
  */
 export async function downloadEntityAttachment(
   api: BackendApi,
@@ -423,6 +460,13 @@ export async function downloadEntityAttachment(
   args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
+  if (args.size !== undefined && args.size > DIRECT_TRANSFER_MIN_BYTES) {
+    if (args.signal?.aborted) throw downloadCancelledError();
+    if (await startDirectDownload(api, args)) {
+      args.onSaved?.("started");
+      return true;
+    }
+  }
   return downloadFromBackend(api, args, save);
 }
 
@@ -538,10 +582,46 @@ async function sendChunk(
 }
 
 /**
+ * Cuts `file` into `count` chunks of `chunkBytes` and sends them a few at a time
+ * with `send`. Once one chunk fails for good the others stop taking new chunks
+ * (one already in flight finishes) and that first failure is thrown.
+ */
+async function sendChunksInParallel(args: {
+  file: Blob;
+  chunkBytes: number;
+  count: number;
+  send: (index: number, body: Blob) => Promise<void>;
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
+}): Promise<void> {
+  const { file, chunkBytes, count, send, onProgress } = args;
+  let next = 0;
+  let sent = 0;
+  let failure: { error: unknown } | undefined;
+  const worker = async (): Promise<void> => {
+    while (!failure) {
+      const index = next;
+      next += 1;
+      if (index >= count) return;
+      const from = index * chunkBytes;
+      const body = file.slice(from, Math.min(from + chunkBytes, file.size));
+      try {
+        await send(index, body);
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
+      sent += body.size;
+      onProgress?.(sent, file.size);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) }, worker));
+  if (failure) throw failure.error;
+}
+
+/**
  * Sends `file` to the portal backend in {@link UPLOAD_CHUNK_BYTES} chunks, a few
- * at a time, each retried on a passing failure. Once one chunk fails for good the
- * others stop taking new chunks (one already in flight finishes) and that first
- * failure is thrown. Returns the number of chunks, which the confirm step needs.
+ * at a time, each retried on a passing failure. Returns the number of chunks,
+ * which the confirm step needs.
  */
 export async function sendFileInChunks(
   api: BackendApi,
@@ -555,28 +635,87 @@ export async function sendFileInChunks(
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = args;
   const count = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
-  let next = 0;
-  let sent = 0;
-  let failure: { error: unknown } | undefined;
-  const worker = async (): Promise<void> => {
-    while (!failure) {
-      const index = next;
-      next += 1;
-      if (index >= count) return;
-      const from = index * UPLOAD_CHUNK_BYTES;
-      const body = file.slice(from, Math.min(from + UPLOAD_CHUNK_BYTES, file.size));
-      try {
-        await sendChunk(api, { type, attachmentId, index, body, signal });
-      } catch (error) {
-        failure ??= { error };
-        return;
+  await sendChunksInParallel({
+    file,
+    chunkBytes: UPLOAD_CHUNK_BYTES,
+    count,
+    onProgress,
+    send: (index, body) => sendChunk(api, { type, attachmentId, index, body, signal }),
+  });
+  return count;
+}
+
+/**
+ * Files above this size go to and from Azure through signed links (when the
+ * backend says they may), so their bytes do not pass through the portal backend.
+ * It is one chunk: smaller files, and every inline image, keep the backend path.
+ */
+export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
+
+/** The links `POST /attachments/upload/{id}/direct` returns: one per chunk. */
+interface DirectUploadLinks {
+  links: string[];
+  chunkBytes: number;
+  expiresAt: string;
+}
+
+/** Sends one chunk to its signed link, trying again with a short pause when it fails in passing. */
+async function sendChunkToLink(link: string, body: Blob, signal?: AbortSignal): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    if (signal?.aborted) throw new EntityUploadAbortedError();
+    try {
+      // No Authorization header: the link itself is the credential.
+      const response = await fetch(link, { method: "PUT", body, signal });
+      if (response.ok) return;
+      // Azure answers 500/503 when it is busy; any other refusal (a link that
+      // expired or was refused) will not change.
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || ![408, 429, 500, 503].includes(response.status)) {
+        throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
       }
-      sent += body.size;
-      onProgress?.(sent, file.size);
+    } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        throw new EntityUploadAbortedError();
+      }
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || (err instanceof Error && err.message === UPLOAD_INTERRUPTED_MESSAGE)) {
+        throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+      }
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) }, worker));
-  if (failure) throw failure.error;
+    await pause(500 * 2 ** (attempt - 1), signal);
+  }
+}
+
+/**
+ * Sends `file` straight to Azure through signed links the backend makes (one per
+ * chunk), a few at a time. Returns the number of chunks, which the confirm step
+ * needs. Throws when the links cannot be had or a chunk cannot be sent (for
+ * example a storage account that does not allow this site); the caller then
+ * sends the file through the backend instead, which stages the same chunks.
+ */
+export async function sendFileDirect(
+  api: BackendApi,
+  args: {
+    type: EntityAttachmentType;
+    attachmentId: string;
+    file: Blob;
+    signal?: AbortSignal;
+    onProgress?: (bytesSent: number, bytesTotal: number) => void;
+  },
+): Promise<number> {
+  const { type, attachmentId, file, signal, onProgress } = args;
+  const direct = await api.postEmpty<DirectUploadLinks>(
+    `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`,
+  );
+  const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
+  if (!Array.isArray(direct.links) || direct.links.length < count) {
+    throw new Error("The upload links do not cover the file.");
+  }
+  await sendChunksInParallel({
+    file,
+    chunkBytes: direct.chunkBytes,
+    count,
+    onProgress,
+    send: (index, body) => sendChunkToLink(direct.links[index], body, signal),
+  });
   return count;
 }
 
@@ -624,15 +763,27 @@ export async function uploadEntityAttachment(
   }
   if (args.signal?.aborted) throw new EntityUploadAbortedError();
 
-  // Chunks go to the portal backend (bytes sent map to 10-90 %).
-  const chunks = await sendFileInChunks(api, {
+  // Bytes sent map to 10-90 %.
+  const send = {
     type: args.type,
     attachmentId: start.attachmentId,
     file: args.file,
     signal: args.signal,
-    onProgress: (sent, total) =>
+    onProgress: (sent: number, total: number) =>
       args.onProgress?.(total > 0 ? 10 + Math.min(80, Math.floor((sent / total) * 80)) : 10),
-  });
+  };
+  let chunks: number | undefined;
+  if (start.directUpload && args.file.size > DIRECT_TRANSFER_MIN_BYTES) {
+    // A large file goes straight to Azure. If that does not work for any reason,
+    // the same chunks go through the backend; only a cancel stops the upload.
+    try {
+      chunks = await sendFileDirect(api, send);
+    } catch (err) {
+      if (args.signal?.aborted || (err instanceof Error && err.name === "AbortError")) throw err;
+      args.onProgress?.(10);
+    }
+  }
+  chunks ??= await sendFileInChunks(api, send);
   args.onProgress?.(90);
 
   let lastError: unknown;
