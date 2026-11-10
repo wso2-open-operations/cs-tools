@@ -441,6 +441,22 @@ type OrganizationSummary struct {
 	Owner            *UserRef        `json:"owner"`
 }
 
+// AggregateOrganizationsRequest is the body of POST
+// /plg/organizations/aggregate: the organisation search's filters, the field
+// to group by (only "owner" for now: the organisation's PLG CS owner) and,
+// optionally, how many groups to return before the rest are folded into
+// othersCount. It answers an AggregateResponse, the shape every aggregate
+// endpoint shares.
+type AggregateOrganizationsRequest struct {
+	Filters   OrganizationSearchFilters `json:"filters"`
+	GroupBy   string                    `json:"groupBy"`
+	MaxGroups int                       `json:"maxGroups,omitempty"`
+}
+
+// PlgUnownedGroupKey is the key of the organisations with no PLG CS owner in
+// an owner grouping; every other group's key is the owner's user id.
+const PlgUnownedGroupKey = "unowned"
+
 // SearchOrganizationsResponse is the paged organisation list.
 type SearchOrganizationsResponse struct {
 	Organizations []OrganizationSummary `json:"organizations"`
@@ -872,6 +888,22 @@ type SearchRegistrationsRequest struct {
 	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
 	Filters            OrganizationSearchFilters `json:"filters"`
 	Pagination         Pagination                `json:"pagination"`
+}
+
+// RegistrationVolumeTrendRequest is the body of POST
+// /plg/registrations/volume-trend: the registration search's filters and
+// unacknowledgedOnly, and a window as a case trend takes it
+// (CaseVolumeTrendRequest): the trailing Days, or StartDate and EndDate (plain
+// or relative dates, both inclusive UTC days) with a Bucket of "day", "week"
+// or "month", within the same limits. It answers a CaseVolumeTrendResponse
+// with one series, "Registered", counted on the registration date.
+type RegistrationVolumeTrendRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	Days               int                       `json:"days,omitempty"`
+	StartDate          string                    `json:"startDate,omitempty"`
+	EndDate            string                    `json:"endDate,omitempty"`
+	Bucket             string                    `json:"bucket,omitempty"`
 }
 
 // SearchRegistrationsResponse is the paged registration list.

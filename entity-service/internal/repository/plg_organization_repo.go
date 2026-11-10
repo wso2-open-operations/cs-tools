@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,7 @@ type OrganizationRepository interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error
+	AggregateByOwner(ctx context.Context, filters domain.OrganizationSearchFilters, maxGroups int) (domain.AggregateResponse, error)
 }
 
 type organizationRepository struct{ db *pgxpool.Pool }
@@ -80,6 +82,67 @@ func buildConditions(f *domain.OrganizationSearchFilters, b *argBuilder) []strin
 		conds = append(conds, `v.created_on <= `+b.add(*f.RegisteredTo))
 	}
 	return conds
+}
+
+// AggregateByOwner counts the organisations filters match per PLG CS owner,
+// with the same conditions as Search, so a group's count is what the search
+// for that owner lists. Each group's key is the owner's user id and its label
+// the owner's name (or email when there is no name); the organisations with
+// no owner are one group, PlgUnownedGroupKey labelled "Unowned". Groups come
+// largest first, ties by label; with maxGroups > 0 the groups after the
+// first maxGroups are summed into OthersCount.
+func (r *organizationRepository) AggregateByOwner(ctx context.Context, filters domain.OrganizationSearchFilters, maxGroups int) (domain.AggregateResponse, error) {
+	b := &argBuilder{}
+	conds := buildConditions(&filters, b)
+
+	q := `
+		SELECT COALESCE(v.plg_cs_owner::TEXT, ''),
+		       COALESCE(NULLIF(MAX(v.plg_cs_owner_name), ''), MAX(v.plg_cs_owner_email), ''),
+		       COUNT(*)
+		FROM   plg_organization_v v` +
+		whereClause(conds) + `
+		GROUP  BY v.plg_cs_owner`
+
+	rows, err := r.db.Query(ctx, q, b.list()...)
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate organizations by owner: %w", err)
+	}
+	defer rows.Close()
+
+	groups := []domain.AggregateBucket{}
+	total := 0
+	for rows.Next() {
+		var g domain.AggregateBucket
+		if err := rows.Scan(&g.Key, &g.Label, &g.Count); err != nil {
+			return domain.AggregateResponse{}, fmt.Errorf("scan organization owner group: %w", err)
+		}
+		switch {
+		case g.Key == "":
+			g.Key, g.Label = domain.PlgUnownedGroupKey, "Unowned"
+		case g.Label == "":
+			g.Label = g.Key
+		}
+		groups = append(groups, g)
+		total += g.Count
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("iterate organization owner groups: %w", err)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].Count != groups[j].Count {
+			return groups[i].Count > groups[j].Count
+		}
+		return groups[i].Label < groups[j].Label
+	})
+
+	resp := domain.AggregateResponse{Groups: groups, TotalRecords: total}
+	if maxGroups > 0 && maxGroups < len(groups) {
+		for _, g := range groups[maxGroups:] {
+			resp.OthersCount += g.Count
+		}
+		resp.Groups = groups[:maxGroups]
+	}
+	return resp, nil
 }
 
 func (r *organizationRepository) Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error) {

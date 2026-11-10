@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -13,6 +14,7 @@ type OrganizationService interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) (domain.SearchOrganizationsResponse, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) (*domain.OrganizationDetail, error)
+	Aggregate(ctx context.Context, req domain.AggregateOrganizationsRequest) (domain.AggregateResponse, error)
 }
 
 type organizationService struct {
@@ -42,6 +44,25 @@ func validateOrganizationFilters(f *domain.OrganizationSearchFilters) error {
 		return &apierror.ValidationError{Msg: "registeredTo must not be earlier than registeredFrom"}
 	}
 	return nil
+}
+
+// maxPlgAggregateGroups is the most groups an organisation aggregate returns
+// on its own; a larger maxGroups is refused.
+const maxPlgAggregateGroups = 50
+
+// Aggregate counts the organisations the search's filters match per group
+// (POST /plg/organizations/aggregate). Only groupBy "owner" exists.
+func (s *organizationService) Aggregate(ctx context.Context, req domain.AggregateOrganizationsRequest) (domain.AggregateResponse, error) {
+	if req.GroupBy != "owner" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy must be %q, got %q", "owner", req.GroupBy)}
+	}
+	if req.MaxGroups < 0 || req.MaxGroups > maxPlgAggregateGroups {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("maxGroups must be between 0 and %d", maxPlgAggregateGroups)}
+	}
+	if err := validateOrganizationFilters(&req.Filters); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	return s.repo.AggregateByOwner(ctx, req.Filters, req.MaxGroups)
 }
 
 func (s *organizationService) Search(ctx context.Context, req domain.SearchOrganizationsRequest) (domain.SearchOrganizationsResponse, error) {

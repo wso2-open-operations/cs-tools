@@ -50,3 +50,19 @@ func (h *PlgPairingHandler) SearchRegistrations(w http.ResponseWriter, r *http.R
 	}
 	writeOK(w, result)
 }
+
+// RegistrationVolumeTrend serves POST /plg/registrations/volume-trend: the
+// registrations the search's filters match, counted per day, week or month
+// of a window, in the case trend's response shape (one series, "Registered").
+func (h *PlgPairingHandler) RegistrationVolumeTrend(w http.ResponseWriter, r *http.Request) {
+	var req domain.RegistrationVolumeTrendRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	result, err := h.svc.RegistrationVolumeTrend(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeOK(w, result)
+}

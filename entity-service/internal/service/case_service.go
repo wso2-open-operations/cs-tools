@@ -3868,31 +3868,11 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 		}
 	}
 
-	// A day point per day; a week or month point sums its days, from the
-	// bucket's first day in the window (Date) to its last (EndDate).
-	grouped := window.bucket == caseVolumeTrendBucketWeek || window.bucket == caseVolumeTrendBucketMonth
-	var opened, closed []domain.CaseVolumeTrendPoint
-	for _, d := range allDays {
-		dc := counts[d]
-		if n := len(opened); grouped && n > 0 && caseVolumeTrendSameBucket(opened[n-1].Date, d, window.bucket) {
-			opened[n-1].Count += dc.Opened
-			opened[n-1].EndDate = d
-			closed[n-1].Count += dc.Closed
-			closed[n-1].EndDate = d
-			continue
-		}
-		var endDate string
-		if grouped {
-			endDate = d
-		}
-		opened = append(opened, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: dc.Opened})
-		closed = append(closed, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: dc.Closed})
-	}
 	resp := domain.CaseVolumeTrendResponse{
 		Days: days,
 		Series: []domain.CaseVolumeTrendSeries{
-			{Label: "Opened", Points: opened},
-			{Label: "Closed", Points: closed},
+			{Label: "Opened", Points: volumeTrendPoints(allDays, window.bucket, func(d string) int { return counts[d].Opened })},
+			{Label: "Closed", Points: volumeTrendPoints(allDays, window.bucket, func(d string) int { return counts[d].Closed })},
 		},
 	}
 	if window.fixed {
@@ -3901,6 +3881,29 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 		resp.Bucket = window.bucket
 	}
 	return resp, nil
+}
+
+// volumeTrendPoints turns days (a window's UTC days, YYYY-MM-DD, in order),
+// each counted by count, into a trend's points: a point per day, or for a
+// "week" or "month" bucket a point per bucket summing its days, from the
+// bucket's first day in the window (Date) to its last (EndDate). Shared by
+// the case trend and the PLG registration trend.
+func volumeTrendPoints(days []string, bucket string, count func(day string) int) []domain.CaseVolumeTrendPoint {
+	grouped := bucket == caseVolumeTrendBucketWeek || bucket == caseVolumeTrendBucketMonth
+	points := []domain.CaseVolumeTrendPoint{}
+	for _, d := range days {
+		if n := len(points); grouped && n > 0 && caseVolumeTrendSameBucket(points[n-1].Date, d, bucket) {
+			points[n-1].Count += count(d)
+			points[n-1].EndDate = d
+			continue
+		}
+		var endDate string
+		if grouped {
+			endDate = d
+		}
+		points = append(points, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: count(d)})
+	}
+	return points
 }
 
 // caseVolumeTrendWindow is the inclusive span of UTC days a

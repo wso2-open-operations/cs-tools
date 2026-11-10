@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,6 +30,7 @@ type OrgPlatformRepository interface {
 	CreateNote(ctx context.Context, req domain.CreateNoteRequest, actor string) error
 	UpdateNote(ctx context.Context, req domain.UpdateNoteRequest, actor string) (res domain.WriteResult, orgID, productCode string, err error)
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error)
+	RegistrationVolumeTrend(ctx context.Context, req domain.SearchRegistrationsRequest, start, end time.Time) (map[string]int, error)
 	LocatePairing(ctx context.Context, orgPlatformID string) (orgID, productCode string, err error)
 }
 
@@ -1137,4 +1139,53 @@ func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req dom
 		items = append(items, it)
 	}
 	return items, total, rows.Err()
+}
+
+// RegistrationVolumeTrend counts the registrations req matches (the same
+// filters and unacknowledgedOnly as SearchRegistrations) per UTC day of
+// registered_on, for every day from start to end, both UTC days and
+// inclusive. Every day of the window is in the map, a day with none as 0, so
+// the caller draws a continuous series. It backs
+// POST /plg/registrations/volume-trend, which groups the days into weeks or
+// months.
+func (r *orgPlatformRepository) RegistrationVolumeTrend(ctx context.Context, req domain.SearchRegistrationsRequest, start, end time.Time) (map[string]int, error) {
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	if end.Before(start) {
+		return nil, fmt.Errorf("registration volume trend: end %s is before start %s", end.Format("2006-01-02"), start.Format("2006-01-02"))
+	}
+	out := map[string]int{}
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		out[d.Format("2006-01-02")] = 0
+	}
+
+	b := &argBuilder{}
+	conds := buildRegistrationConditions(&req.Filters, b)
+	if req.UnacknowledgedOnly {
+		conds = append(conds, `v.is_new`)
+	}
+	// A half-open range on the column itself, so the registered_on index
+	// can serve it; the day is read in UTC, whatever the session's zone.
+	conds = append(conds, `v.registered_on >= `+b.add(start), `v.registered_on < `+b.add(end.AddDate(0, 0, 1)))
+
+	q := `
+		SELECT to_char(v.registered_on AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)
+		FROM   plg_org_platform_v v` +
+		whereClause(conds) + `
+		GROUP  BY day`
+
+	rows, err := r.db.Query(ctx, q, b.list()...)
+	if err != nil {
+		return nil, fmt.Errorf("registration volume trend: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day string
+		var count int
+		if err := rows.Scan(&day, &count); err != nil {
+			return nil, fmt.Errorf("scan registration volume trend day: %w", err)
+		}
+		out[day] = count
+	}
+	return out, rows.Err()
 }
