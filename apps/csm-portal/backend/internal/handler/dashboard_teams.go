@@ -102,7 +102,7 @@ func (t dashboardTeams) knownTeams() string {
 
 // resolve swaps every team key or name in the definition's creTeam / sreTeam
 // filters (each widget's query and each pie slice's query) for that team's
-// group id, and an account query's abtTeam key for the team's name, and checks every team filter: "in" only, top-level filters only
+// group id, a time card query's teamIds for the teams' group ids, and an account query's abtTeam key for the team's name, and checks every team filter: "in" only, top-level filters only
 // (not an anyOf branch), a team of the field's family, with a group id
 // configured. "__current_team__" is left as it is. Anything else in the
 // definition is untouched. A definition that is not a JSON object with a
@@ -172,6 +172,13 @@ func (t dashboardTeams) resolveQuery(q any, where string) (changed bool, err err
 			changed = true
 		}
 	}
+	if v, ok := query["teamIds"]; ok {
+		c, err := t.resolveTimeCardTeams(v, where)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || c
+	}
 	filters, _ := query["filters"].([]any)
 	for _, f := range filters {
 		c, err := t.resolveFilter(f, where)
@@ -188,6 +195,37 @@ func (t dashboardTeams) resolveQuery(q any, where string) (changed bool, err err
 			if field := teamFilterField(f); field != "" {
 				return false, fmt.Errorf("%w: %s: a %s filter must be in the top-level filters, not an anyOf branch", errDashboardTeam, where, field)
 			}
+		}
+	}
+	return changed, nil
+}
+
+// resolveTimeCardTeams swaps the team keys or names in a time card query's
+// teamIds for the teams' group ids, in place: a CRE team's CRE group id, an
+// SRE team's SRE group id, which is the Team Schedule's team id that
+// entity-service's time card teamIds filter matches. "__current_team__"
+// passes through. ParseGenerated has checked the list's shape.
+func (t dashboardTeams) resolveTimeCardTeams(v any, where string) (bool, error) {
+	values, _ := v.([]any)
+	changed := false
+	for k, value := range values {
+		name, _ := value.(string)
+		if name == currentTeamPlaceholder {
+			continue
+		}
+		team, ok := t.byName[strings.ToLower(strings.TrimSpace(name))]
+		if !ok {
+			team, ok = t.byGroupID[strings.ToLower(name)]
+		}
+		if !ok {
+			return false, fmt.Errorf("%w: %s: unknown team %q (known teams: %s)", errDashboardTeam, where, name, t.knownTeams())
+		}
+		if team.GroupID == "" {
+			return false, fmt.Errorf("%w: %s: team %s has no group configured, so its members' time cards cannot be found", errDashboardTeam, where, team.Name)
+		}
+		if name != team.GroupID {
+			values[k] = team.GroupID
+			changed = true
 		}
 	}
 	return changed, nil

@@ -44,7 +44,11 @@ const (
 	valuesJSONBool                     // a flat key's JSON true / false
 	valuesTeamName                     // a flat key's single team name or key (checked against the registry later)
 	valuesRating                       // a flat key's JSON whole number 1 to 5
+	valuesTeamNames                    // 1 to maxGeneratedTeams team keys or names (checked against the registry later)
 )
+
+// maxGeneratedTeams is the most teams one valuesTeamNames list may name.
+const maxGeneratedTeams = 20
 
 // valueRule checks a value list: a flat key's list, or a field filter's values.
 type valueRule struct {
@@ -103,10 +107,11 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	ResourceTimeCard: {
 		noun:    "time card",
 		shapes:  opsShapes,
-		groupBy: []string{"state", "user", "project", "day"},
+		groupBy: []string{"state", "user", "project", "day", "team"},
 		flat: map[string]valueRule{
 			"states":    {kind: valuesEnum, values: []string{"pending", "submitted", "approved", "rejected", "processed", "recalled"}},
 			"userIds":   onlyMe,
+			"teamIds":   {kind: valuesTeamNames},
 			"startDate": aDate,
 			"endDate":   aDate,
 		},
@@ -230,6 +235,13 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		if w.GroupBy.Field == "day" && rules.dayWindow != nil {
 			if err := checkDayWindow(at, w.Query, *rules.dayWindow); err != nil {
 				return err
+			}
+		}
+		// Time cards by team: one group per team the widget names, so the
+		// widget's own query must name them.
+		if w.GroupBy.Field == "team" {
+			if _, has := w.Query["teamIds"]; !has {
+				return fmt.Errorf("%w: %s.groupBy: grouping by team needs query.teamIds (the teams to show)", ErrGeneratedInvalid, at)
 			}
 		}
 	}
@@ -374,6 +386,15 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 		for _, v := range values {
 			if !contains(rule.values, v) {
 				return fmt.Errorf("%w: %s: %q is not a %s %s (%s)", ErrGeneratedInvalid, at, v, noun, singular(key), strings.Join(rule.values, ", "))
+			}
+		}
+	case valuesTeamNames:
+		if len(values) == 0 || len(values) > maxGeneratedTeams {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d team keys from the Teams section", ErrGeneratedInvalid, at, maxGeneratedTeams)
+		}
+		for _, v := range values {
+			if strings.TrimSpace(v) == "" {
+				return fmt.Errorf("%w: %s: each value must be a team's key from the Teams section", ErrGeneratedInvalid, at)
 			}
 		}
 	case valuesOneOf:
