@@ -747,8 +747,24 @@ func slotConflict(err error, isoDate string) error {
 	}
 }
 
+// lockPersonDay serialises the writes to one person's rota day. Under READ
+// COMMITTED two writes for the same person and day -- IST from one lead, PDT
+// from another -- would each read the other's row as absent and both commit,
+// leaving two sets of regular hours that regularHoursConflict exists to stop.
+// Taken before the day's rows are displaced or checked and held to the commit,
+// so the second write waits and then reads what the first left. A span locks
+// its days in date order and holds one person, so two spans never wait on each
+// other in a cycle; a rota import locks each assignment's days in turn.
+func lockPersonDay(ctx context.Context, tx pgx.Tx, userID, isoDate string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`,
+		"team-schedule-person-day:"+userID+":"+isoDate); err != nil {
+		return fmt.Errorf("lock the rota day %s: %w", isoDate, err)
+	}
+	return nil
+}
+
 // regularHoursConflict refuses a second set of regular hours for one person on
-// one day.
+// one day. The caller holds lockPersonDay for that day.
 //
 // Regular hours (a window that is neither a rotation turn nor an escalation
 // window: Regular hours IST, Americas regular hours PDT, AEST, an SRE zone's
@@ -1155,6 +1171,9 @@ func (r *scheduleRepository) CreateAssignment(ctx context.Context, req domain.Cr
 		return domain.ScheduleAssignment{}, err
 	}
 
+	if err := lockPersonDay(ctx, tx, req.UserID, req.RotaDate); err != nil {
+		return domain.ScheduleAssignment{}, err
+	}
 	if err := regularHoursConflict(ctx, tx, req.UserID, req.ShiftCode, req.TeamKey, req.RotaDate, nil, actorEmail); err != nil {
 		return domain.ScheduleAssignment{}, err
 	}
@@ -1761,6 +1780,12 @@ func applyRangeTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleRangeR
 			continue
 		}
 		iso := d.Format("2006-01-02")
+
+		// The person's day is locked before anything of it is read, displaced
+		// or checked, so a concurrent write for the same day sees this one.
+		if err := lockPersonDay(ctx, tx, req.UserID, iso); err != nil {
+			return out, err
+		}
 
 		// Refused before anything of the day is touched, though the rollback
 		// would undo it anyway: the whole span is one transaction, so a clash

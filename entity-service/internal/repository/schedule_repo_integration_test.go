@@ -2744,6 +2744,49 @@ func TestScheduleIntegration_ApplyRangeRefusesASecondSetOfRegularHours(t *testin
 // hours that day on another team the caller may also change, and the history
 // of the other team says what replaced them. Where the caller may not change
 // that team, they are told whose rota it is and nothing is written.
+// A write to a person's day waits for another write to the same day, so the
+// second reads what the first left: two leads cannot both pass the one-set-of-
+// regular-hours check and commit IST and PDT side by side.
+func TestScheduleIntegration_ApplyRangeWaitsForTheSamePersonDay(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`,
+		"team-schedule-person-day:"+schedMemberID+":"+schedMonday); err != nil {
+		t.Fatalf("hold the day: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+			UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: "CRE_REGULAR",
+			From: schedMonday, To: schedMonday,
+		}, schedLeadEmail)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("ApplyRange finished while another write held the day (err %v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatalf("release the day: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ApplyRange after the day was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ApplyRange still waiting after the day was released")
+	}
+}
+
 func TestScheduleIntegration_ApplyRangeReplacesRegularHoursOnAnotherTeam(t *testing.T) {
 	repo, pool := newScheduleIntegrationRepo(t)
 	ctx := context.Background()
