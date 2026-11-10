@@ -16207,6 +16207,341 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays/search:
+    post:
+      summary: Public holidays of the given engineers over a date window.
+      operationId: searchTeamSchedulePublicHolidays
+      description: >
+        Each engineer's public holidays (their own location's, else their
+        team's country: India for the India team, Sri Lanka otherwise), for the
+        roster to shade. Not leave; moves no shift. Body is validated by the
+        entity service and forwarded unchanged; the response is returned as sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userIds, from, to]
+              properties:
+                userIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+                from: { type: string, format: date, description: "First day of the window, inclusive." }
+                to: { type: string, format: date, description: "Last day of the window, inclusive; at most 70 days after `from`." }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, count]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      type: object
+                      required: [userId, date, title, country, countrySource]
+                      properties:
+                        userId: { type: string, format: uuid }
+                        date: { type: string, format: date }
+                        title: { type: string }
+                        country: { type: string, description: 'e.g. "Sri Lanka", "India".' }
+                        countrySource: { type: string, enum: [EMPLOYEE, TEAM] }
+                  count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/holiday-availability/search:
+    post:
+      summary: Each CRE team's availability on each public holiday in a window.
+      operationId: searchTeamScheduleHolidayAvailability
+      description: >
+        A CRE member is off on a public holiday of their country (a "Public
+        holiday" tag, placed three weeks ahead). One entry per team and holiday
+        with who is tagged, who was made available, the rota turns with nobody,
+        the confirmation and whether the caller may confirm. Forwarded unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date, description: "Inclusive; at most 70 days after `from`." }
+                teamKeys: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, count]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                    type: object
+                    description: >
+                      One CRE team's availability on one public holiday; the entity
+                      service's HolidayAvailability, passed through unchanged.
+                    required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+                    properties:
+                      teamKey: { type: string }
+                      teamName: { type: string }
+                      date: { type: string, format: date }
+                      titles: { type: array, items: { type: string } }
+                      countries: { type: array, items: { type: string } }
+                      status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+                      fullyMarked: { type: boolean }
+                      members:
+                        type: array
+                        items:
+                          type: object
+                          required: [userId, name, status]
+                          properties:
+                            userId: { type: string, format: uuid }
+                            name: { type: string }
+                            email: { type: string }
+                            status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
+                            absenceId: { type: string, format: uuid }
+                            awayKind: { type: string }
+                      turns: { type: integer }
+                      uncovered:
+                        type: array
+                        items:
+                          type: object
+                          required: [shiftCode, shiftLabel, userId, name]
+                          properties:
+                            shiftCode: { type: string }
+                            shiftLabel: { type: string }
+                            userId: { type: string, format: uuid }
+                            name: { type: string }
+                      confirmedBy: { type: string }
+                      confirmedOn: { type: string, format: date-time }
+                      canConfirm: { type: boolean }
+                  count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/holiday-availability/{teamKey}/{date}/confirmation:
+    parameters:
+      - { name: teamKey, in: path, required: true, schema: { type: string } }
+      - { name: date, in: path, required: true, schema: { type: string, format: date } }
+    put:
+      summary: Confirm a CRE team's availability on a public holiday.
+      operationId: confirmTeamScheduleHolidayAvailability
+      description: >
+        The team's lead, its rota manager, a CRE rota admin or an admin. Refused
+        (409, with the entity service's reason naming the turns) while a rota
+        turn that day has nobody available.
+      responses:
+        "200":
+          description: The team's availability, now confirmed.
+          content:
+            application/json:
+              schema:
+              type: object
+              description: >
+                One CRE team's availability on one public holiday; the entity
+                service's HolidayAvailability, passed through unchanged.
+              required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+              properties:
+                teamKey: { type: string }
+                teamName: { type: string }
+                date: { type: string, format: date }
+                titles: { type: array, items: { type: string } }
+                countries: { type: array, items: { type: string } }
+                status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+                fullyMarked: { type: boolean }
+                members:
+                  type: array
+                  items:
+                    type: object
+                    required: [userId, name, status]
+                    properties:
+                      userId: { type: string, format: uuid }
+                      name: { type: string }
+                      email: { type: string }
+                      status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
+                      absenceId: { type: string, format: uuid }
+                      awayKind: { type: string }
+                turns: { type: integer }
+                uncovered:
+                  type: array
+                  items:
+                    type: object
+                    required: [shiftCode, shiftLabel, userId, name]
+                    properties:
+                      shiftCode: { type: string }
+                      shiftLabel: { type: string }
+                      userId: { type: string, format: uuid }
+                      name: { type: string }
+                confirmedBy: { type: string }
+                confirmedOn: { type: string, format: date-time }
+                canConfirm: { type: boolean }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No member of the team is tagged for a holiday that day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: A rota turn that day has nobody available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Withdraw a CRE team's holiday availability confirmation.
+      operationId: withdrawTeamScheduleHolidayAvailability
+      responses:
+        "200":
+          description: The team's availability, no longer confirmed.
+          content:
+            application/json:
+              schema:
+              type: object
+              description: >
+                One CRE team's availability on one public holiday; the entity
+                service's HolidayAvailability, passed through unchanged.
+              required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+              properties:
+                teamKey: { type: string }
+                teamName: { type: string }
+                date: { type: string, format: date }
+                titles: { type: array, items: { type: string } }
+                countries: { type: array, items: { type: string } }
+                status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+                fullyMarked: { type: boolean }
+                members:
+                  type: array
+                  items:
+                    type: object
+                    required: [userId, name, status]
+                    properties:
+                      userId: { type: string, format: uuid }
+                      name: { type: string }
+                      email: { type: string }
+                      status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
+                      absenceId: { type: string, format: uuid }
+                      awayKind: { type: string }
+                turns: { type: integer }
+                uncovered:
+                  type: array
+                  items:
+                    type: object
+                    required: [shiftCode, shiftLabel, userId, name]
+                    properties:
+                      shiftCode: { type: string }
+                      shiftLabel: { type: string }
+                      userId: { type: string, format: uuid }
+                      name: { type: string }
+                confirmedBy: { type: string }
+                confirmedOn: { type: string, format: date-time }
+                canConfirm: { type: boolean }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/engagement-allocations/search:
     post:
       summary: Search confirmed customer engagement allocations.

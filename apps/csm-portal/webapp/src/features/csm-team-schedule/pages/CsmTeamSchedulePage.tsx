@@ -47,9 +47,11 @@ import MyWeekStrip from "../components/MyWeekStrip";
 import NextRotation from "../components/NextRotation";
 import RecentChanges from "../components/RecentChanges";
 import RosterFreezeBanner from "../components/RosterFreezeBanner";
+import HolidayAvailabilityPanel from "../components/HolidayAvailabilityPanel";
 import UndoToast, { type UndoOffer } from "../components/UndoToast";
 import { UndoIncomplete, applyRevertRuns, awayIsRevertible, rotaRevertRuns } from "../utils/undo";
 import { useEngagementAllocations } from "../api/useEngagementAllocations";
+import { usePublicHolidays } from "../api/usePublicHolidays";
 import { distinctUserIds, engagementUndoIsExact } from "../utils/engagementAllocations";
 import { weekClear } from "../utils/weekEdit";
 import WeekTable, { type WeekEditControls, type WeekPerson, type WeekTurn } from "../components/WeekTable";
@@ -1506,6 +1508,14 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     engagementWindow.to,
     (view === "week" || view === "roster") && engagementUserIds.length > 0,
   );
+  // Public holidays over the same people and window: decoration only, like
+  // the allocations -- a failure just leaves the days unshaded.
+  const publicHolidays = usePublicHolidays(
+    engagementUserIds,
+    engagementWindow.from,
+    engagementWindow.to,
+    (view === "week" || view === "roster") && engagementUserIds.length > 0,
+  );
 
   /** This week is editable by a rota admin of the family on screen and by a
    *  CSM or portal admin; a lead keeps the roster. The server checks every
@@ -1554,6 +1564,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
       <div className="wrap">
         <h1>Team Schedule</h1>
         <RosterFreezeBanner />
+        <HolidayAvailabilityPanel />
 
         <div className="tabrow">
           <div className="tabs" role="tablist" aria-busy={visibleTabs.length === 0}>
@@ -1880,6 +1891,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               engagementAllocations={engagements.allocations}
               engagementPeople={engagementPeople}
               engagementsFailed={engagements.isError}
+              publicHolidays={publicHolidays.holidays}
               edit={
                 weekEditable && editing
                   ? ({
@@ -1929,6 +1941,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               onSpanChange={setRosterSpan}
               engagementAllocations={engagements.allocations}
               engagementsFailed={engagements.isError}
+              publicHolidays={publicHolidays.holidays}
               assignments={rows}
               absences={absences.data?.absences ?? []}
               shifts={shifts}

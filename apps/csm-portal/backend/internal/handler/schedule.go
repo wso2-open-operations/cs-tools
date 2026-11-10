@@ -36,6 +36,10 @@ type entityScheduleClient interface {
 	SearchScheduleAssignments(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleAbsences(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error)
+	SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error)
+	SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error)
+	ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error)
+	WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error)
 	DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error)
 	GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error)
 
@@ -187,6 +191,89 @@ func (h *ScheduleHandler) SearchScheduleEngagementAllocations(w http.ResponseWri
 		return
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchSchedulePublicHolidays handles
+// POST /team-schedule/public-holidays/search: each given person's public
+// holidays (Sri Lanka, India, or their own location's) over a date window,
+// for the roster to shade. Proxied unchanged.
+func (h *ScheduleHandler) SearchSchedulePublicHolidays(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.SearchSchedulePublicHolidays(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchSchedulePublicHolidays failed", "userID", userID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to load public holidays.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchHolidayAvailability handles
+// POST /team-schedule/holiday-availability/search: each CRE team's
+// availability on each public holiday in a window (who is tagged, who was
+// made available, the turns with nobody, the confirmation). Proxied
+// unchanged.
+func (h *ScheduleHandler) SearchHolidayAvailability(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.SearchHolidayAvailability(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchHolidayAvailability failed", "userID", userID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to load the holiday availability.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ConfirmHolidayAvailability handles
+// PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation: a
+// team's lead, rota manager or a CRE rota admin confirming the team's
+// availability on a holiday. entity-service decides who may and refuses
+// (409, in words) while a rota turn has nobody available.
+func (h *ScheduleHandler) ConfirmHolidayAvailability(w http.ResponseWriter, r *http.Request) {
+	h.holidayConfirmation(w, r, true)
+}
+
+// WithdrawHolidayAvailability handles
+// DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation.
+func (h *ScheduleHandler) WithdrawHolidayAvailability(w http.ResponseWriter, r *http.Request) {
+	h.holidayConfirmation(w, r, false)
+}
+
+func (h *ScheduleHandler) holidayConfirmation(w http.ResponseWriter, r *http.Request, confirm bool) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	teamKey, date := r.PathValue("teamKey"), r.PathValue("date")
+	var (
+		result []byte
+		err    error
+		verb   = "WithdrawHolidayAvailability"
+		msg    = "Failed to withdraw the confirmation."
+	)
+	if confirm {
+		verb, msg = "ConfirmHolidayAvailability", "Failed to confirm the team's availability."
+		result, err = h.entity.ConfirmHolidayAvailability(r.Context(), teamKey, date)
+	} else {
+		result, err = h.entity.WithdrawHolidayAvailability(r.Context(), teamKey, date)
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity "+verb+" failed", "userID", user.UserID, "err", err)
+		mapAbsenceKindWriteError(w, err, msg)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -1626,3 +1626,38 @@ describe("MonthRoster: the legend across 1 Nov 2026 from blank weekdays alone", 
     expect(legend).toContain("IST");
   });
 });
+
+describe("MonthRoster: public holidays", () => {
+  const poya = {
+    userId: "u-Asela",
+    date: "2026-09-21",
+    title: "Binara Full Moon Poya Day",
+    country: "Sri Lanka",
+    countrySource: "TEAM" as const,
+  };
+
+  it("shades the day and names it on hover, for the person it applies to only", () => {
+    const { container } = renderRoster({
+      assignments: [
+        assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: EVENING.code }),
+        assignment({ name: "Priya", rotaDate: "2026-09-21", shiftCode: EVENING.code }),
+      ],
+      publicHolidays: [poya],
+    });
+    const shaded = container.querySelectorAll("tbody td.ph");
+    expect(shaded).toHaveLength(1);
+    expect(shaded[0]).toHaveAttribute("title", expect.stringContaining("Asela"));
+    expect(shaded[0]).toHaveAttribute(
+      "title",
+      expect.stringContaining("Public holiday: Binara Full Moon Poya Day (Sri Lanka)"),
+    );
+    // Not leave, and it moves no shift: the turn is still drawn, no clash.
+    expect(shaded[0]).toHaveTextContent("6-9p");
+    expect(container.querySelector("tbody td.clash")).toBeNull();
+  });
+
+  it("draws nothing extra without holidays", () => {
+    const { container } = renderRoster();
+    expect(container.querySelector("tbody td.ph")).toBeNull();
+  });
+});

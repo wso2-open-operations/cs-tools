@@ -9503,6 +9503,309 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/public-holidays/search:
+    post:
+      summary: Public holidays of the given people over a date window.
+      description: >
+        Read-only, internal staff only. Each person keeps the holidays of their
+        employee-service location, else of their team's country (India for the
+        India team, Sri Lanka otherwise). Served only from the local copy
+        (migration 0283), so it works while the calendar-events service is
+        down. A holiday is not leave and moves no shift. At most 500 `userIds`
+        and a window of at most 70 days.
+      operationId: searchSchedulePublicHolidays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSchedulePublicHolidaysRequest'
+      responses:
+        "200":
+          description: One entry per person per holiday day in the window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulePublicHolidaysResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — registered only when a database pool is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/public-holidays/refresh:
+    post:
+      summary: Start a public holiday refresh now (service credential only).
+      description: >
+        The same run as the daily refresh: each member's location from the
+        employee service, then the current and next year's holidays of every
+        country in use from the calendar-events service, upserted. Safe to
+        re-run; a country-year that fails or comes back empty keeps what is
+        stored. Starts in the background and answers at once; the result is
+        logged and returned as `lastRefresh` by the next call.
+      operationId: refreshSchedulePublicHolidays
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [started]
+                properties:
+                  started: { type: boolean }
+                  lastRefresh:
+                    description: The last finished run in this replica; null before the first.
+                    allOf: [{ $ref: '#/components/schemas/PublicHolidayRefreshResult' }]
+        "401":
+          description: No authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: A user token, or not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: A refresh is already running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/holiday-availability/search:
+    post:
+      summary: Each CRE team's availability on each public holiday in a window.
+      description: >
+        Internal staff only. A CRE member is off on a public holiday of their
+        country: the Team Schedule places a "Public holiday" tag (PH) on them
+        three weeks ahead, which takes the day off the timesheet and them off
+        the rota (Case Alerts does not call them). A lead or rota manager makes
+        somebody available by removing the tag. One entry per team and holiday
+        on which at least one of its members was tagged, with each member's
+        status, the rota turns that day with nobody available, the
+        confirmation and whether the caller may confirm. A window of at most
+        70 days.
+      operationId: searchHolidayAvailability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchHolidayAvailabilityRequest'
+      responses:
+        "200":
+          description: The teams' availability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailabilityResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff, or may not change this team's rota.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/holiday-availability/{teamKey}/{date}/confirmation:
+    parameters:
+      - { name: teamKey, in: path, required: true, schema: { type: string } }
+      - { name: date, in: path, required: true, schema: { type: string, format: date } }
+    put:
+      summary: Confirm a team's availability on a public holiday.
+      description: >
+        A user token of the team's lead, its rota manager, a CRE rota admin or
+        an admin (the same people who may change the team's rota). Refused
+        with 409 while a rota turn the team holds that day has nobody
+        available. Confirmed and every turn covered is "fully marked": the
+        reminders stop. A turn that later loses its person shows
+        NEEDS_ATTENTION and the reminders resume.
+      operationId: confirmHolidayAvailability
+      responses:
+        "200":
+          description: The team's availability, now confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailability'
+        "400":
+          description: A malformed or past date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff, or may not change this team's rota.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No member of the team is tagged for a holiday that day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: A rota turn that day has nobody available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Withdraw a team's confirmation.
+      operationId: withdrawHolidayAvailability
+      responses:
+        "200":
+          description: The team's availability, no longer confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailability'
+        "400":
+          description: A malformed or past date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff, or may not change this team's rota.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The team's availability that day is not confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/holiday-availability/reminders/due:
+    post:
+      summary: The holiday availability reminders due today (service credential only).
+      description: >
+        For the daily reminder task. Each team is reminded 14 days before a
+        holiday (always), then 7 days, 2 working days and 1 working day before
+        while it is not fully marked (a Monday holiday: Thursday and Friday).
+        Only the latest stage whose day has come is due, and only once.
+      operationId: dueHolidayReminders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                today: { type: string, format: date, description: The rota's calendar day; defaults to today in Asia/Colombo. }
+      responses:
+        "200":
+          description: The reminders due, each with the team's leads and rota managers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reminders]
+                properties:
+                  reminders:
+                    type: array
+                    items: { $ref: '#/components/schemas/DueHolidayReminder' }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: A user token, or not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/holiday-availability/reminders/{teamKey}/{date}/{stage}:
+    put:
+      summary: Record that a holiday availability reminder was sent (service credential only).
+      operationId: recordHolidayReminder
+      parameters:
+        - { name: teamKey, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+        - { name: stage, in: path, required: true, schema: { type: string, enum: [notice, week, two_days, one_day] } }
+      responses:
+        "204":
+          description: Recorded (recording twice is harmless).
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: A user token, or not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /team-schedule/engagement-allocations/search:
     post:
       summary: Customer engagement allocations of the given people over a date window.
@@ -29209,6 +29512,141 @@ components:
       required: [days]
       properties:
         days: { type: integer, description: How many days changed. }
+    SearchSchedulePublicHolidaysRequest:
+      type: object
+      required: [from, to, userIds]
+      additionalProperties: false
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date, description: Inclusive; at most 70 days after from. }
+        userIds:
+          type: array
+          maxItems: 500
+          items: { type: string, format: uuid }
+    SchedulePublicHoliday:
+      type: object
+      required: [userId, date, title, country, countrySource]
+      properties:
+        userId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        title:
+          type: string
+          description: The holiday's name; several holidays on one day are joined with " / ".
+        country:
+          type: string
+          description: As the calendar-events service spells it, e.g. "Sri Lanka", "India".
+        countrySource:
+          type: string
+          enum: [EMPLOYEE, TEAM]
+          description: >
+            EMPLOYEE when the country is the person's employee-service location;
+            TEAM when that is unknown and the team decided it (India for the
+            India team, Sri Lanka otherwise).
+    SchedulePublicHolidaysResponse:
+      type: object
+      required: [holidays, count]
+      properties:
+        holidays:
+          type: array
+          items: { $ref: '#/components/schemas/SchedulePublicHoliday' }
+        count: { type: integer }
+    PublicHolidayRefreshResult:
+      type: object
+      properties:
+        calendarConfigured: { type: boolean }
+        employeesConfigured: { type: boolean }
+        people: { type: integer }
+        locationsUpdated: { type: integer }
+        locationsFailed: { type: integer }
+        countries: { type: array, items: { type: string } }
+        years: { type: array, items: { type: integer } }
+        holidaysStored: { type: integer }
+        countryYearsFailed: { type: integer }
+        countryYearsEmpty: { type: integer }
+        ranAt: { type: string, format: date-time }
+        tags:
+          description: What placing the Public holiday tags did after the refresh; absent when it was not run or failed.
+          type: object
+          properties:
+            placed: { type: integer }
+            skipped: { type: integer }
+            removed: { type: integer }
+    SearchHolidayAvailabilityRequest:
+      type: object
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date, description: Inclusive; at most 70 days after from. }
+        teamKeys: { type: array, items: { type: string } }
+    HolidayAvailabilityMember:
+      type: object
+      required: [userId, name, status]
+      properties:
+        userId: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        status:
+          type: string
+          enum: [TAGGED, AVAILABLE, AWAY]
+          description: TAGGED, off for the holiday; AVAILABLE, the tag was removed and they work; AWAY, another tag (leave) that day.
+        absenceId: { type: string, format: uuid, description: The Public holiday tag while TAGGED. }
+        awayKind: { type: string, description: The other tag's code while AWAY. }
+    HolidayAvailabilityTurn:
+      type: object
+      required: [shiftCode, shiftLabel, userId, name]
+      properties:
+        shiftCode: { type: string }
+        shiftLabel: { type: string }
+        userId: { type: string, format: uuid }
+        name: { type: string }
+    HolidayAvailability:
+      type: object
+      required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+      properties:
+        teamKey: { type: string }
+        teamName: { type: string }
+        date: { type: string, format: date }
+        titles: { type: array, items: { type: string } }
+        countries: { type: array, items: { type: string } }
+        status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+        fullyMarked: { type: boolean, description: Every turn covered and confirmed; the reminders stop. }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/HolidayAvailabilityMember' }
+        turns: { type: integer, description: The rota turns the team holds that day. }
+        uncovered:
+          type: array
+          description: The turns whose person is not available that day.
+          items: { $ref: '#/components/schemas/HolidayAvailabilityTurn' }
+        confirmedBy: { type: string }
+        confirmedOn: { type: string, format: date-time }
+        canConfirm: { type: boolean, description: Whether the caller may confirm or withdraw. }
+    HolidayAvailabilityResponse:
+      type: object
+      required: [holidays, count]
+      properties:
+        holidays:
+          type: array
+          items: { $ref: '#/components/schemas/HolidayAvailability' }
+        count: { type: integer }
+    DueHolidayReminder:
+      type: object
+      required: [stage, daysBefore, availability, recipients]
+      properties:
+        stage: { type: string, enum: [notice, week, two_days, one_day] }
+        daysBefore: { type: integer }
+        availability: { $ref: '#/components/schemas/HolidayAvailability' }
+        recipients:
+          type: array
+          description: The team's leads and rota managers; empty when it has none.
+          items:
+            type: object
+            required: [name, email, role]
+            properties:
+              name: { type: string }
+              email: { type: string }
+              role: { type: string, enum: [lead, rota_manager] }
     ScheduleEngagementAllocationsResponse:
       type: object
       required: [allocations, count]
