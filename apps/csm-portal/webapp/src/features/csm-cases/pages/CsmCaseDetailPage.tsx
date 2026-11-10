@@ -21,6 +21,7 @@ import {
   Button,
   Card,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -46,6 +47,7 @@ import {
   Paperclip,
   PauseCircle,
   Phone,
+  RefreshCw,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
@@ -173,6 +175,7 @@ import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
 import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import { useGetWorkItemSlas } from "@features/csm-sla/api/useGetWorkItemSlas";
+import { usePostCaseSlaRecalculation } from "@features/csm-sla/api/usePostCaseSlaRecalculation";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import {
@@ -732,6 +735,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const currentEscalationLevel =
     escalationHistory?.escalations[0]?.currentLevel ?? null;
   const postEscalation = usePostCsmCaseEscalation(caseId);
+  const recalcCaseSla = usePostCaseSlaRecalculation(caseId);
   const requestCaseUpdate = useRequestCaseUpdate();
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
@@ -1175,6 +1179,30 @@ export default function CsmCaseDetailPage(): JSX.Element {
       setIsAcknowledging(false);
     }
   }, [patchCase, showError, showSuccess]);
+
+  // Admin-only: recompute this case's currently active SLA clocks' pause
+  // totals from its real state-change history (see
+  // usePostCaseSlaRecalculation's own doc comment). The hook's own
+  // onSuccess already invalidates the SLA list query, so the table reflects
+  // any correction without a manual refresh.
+  const handleRecalculateSla = useCallback(async (): Promise<void> => {
+    try {
+      const result = await recalcCaseSla.mutateAsync();
+      if (!result.hasHistory) {
+        showSuccess(
+          "This case has no SLA activity history to replay — nothing to recalculate.",
+        );
+        return;
+      }
+      const updatedCount = result.clocks.filter((clock) => clock.updated).length;
+      const skippedCount = result.clocks.filter((clock) => clock.skipped).length;
+      showSuccess(
+        `Recalculated this case's SLA clocks — ${updatedCount} updated, ${skippedCount} skipped.`,
+      );
+    } catch (err) {
+      showError("Could not recalculate this case's SLA clocks. Please try again.", err);
+    }
+  }, [recalcCaseSla, showError, showSuccess]);
 
   // Starting work: enforce the single-active-case rule.
   // 1) look up the engineer's other ongoing cases (abort on failure — we
@@ -3239,6 +3267,30 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {activeTab === "sla" && canViewSlaTab && caseId && (
         <>
+          {isAdmin && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Tooltip title="Recompute this case's SLA pause totals from its real state-change history.">
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={
+                      recalcCaseSla.isPending ? (
+                        <CircularProgress size={14} color="inherit" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )
+                    }
+                    disabled={recalcCaseSla.isPending}
+                    onClick={() => void handleRecalculateSla()}
+                    sx={{ textTransform: "none" }}
+                  >
+                    Recalculate SLA
+                  </Button>
+                </span>
+              </Tooltip>
+            </Box>
+          )}
           <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
           <SlaImpactTimeline
             entries={activityAudit}

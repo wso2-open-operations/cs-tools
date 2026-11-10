@@ -823,7 +823,7 @@ func main() {
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
 	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
-	route("POST /cases/{id}/sla/recalculate-pause", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
+	route("POST /cases/{id}/sla/recalculate", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)

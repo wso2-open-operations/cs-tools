@@ -2078,7 +2078,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
 	if caseSLARecalcHandler != nil {
-		mux.HandleFunc("POST /cases/{id}/sla/recalculate-pause", caseSLARecalcHandler.RecalculatePauseTotals)
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate", caseSLARecalcHandler.RecalculatePauseTotals)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
