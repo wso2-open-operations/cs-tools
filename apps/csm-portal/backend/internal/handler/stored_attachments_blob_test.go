@@ -17,10 +17,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -463,5 +465,24 @@ func TestBlobDirectLinks_Refusals(t *testing.T) {
 	rec := serveBlob(e, http.MethodGet, "/attachments/download/"+storedAttID+"/link?type=work_item", nil, nil, true)
 	if rec.Code < 500 || strings.Contains(rec.Body.String(), "blob.example") {
 		t.Errorf("a failed link: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// While direct transfers are off, entity-service answers a link request with a
+// 404. The browser gets that 404 (and then streams the file), and the backend does
+// not log it as an error: the portal asks before every large download.
+func TestDirectDownloadLinkNotAvailableIsNotAnError(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	e := &fakeBlobEntity{directErr: &apierror.Error{StatusCode: http.StatusNotFound}}
+	rec := serveBlob(e, http.MethodGet, "/attachments/download/"+storedAttID+"/link?type=work_item", nil, nil, true)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("a 404 for a link was logged as an error:\n%s", logs.String())
 	}
 }
