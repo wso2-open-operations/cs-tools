@@ -42,7 +42,7 @@ const (
 
 	errMsgGitHubRepoNotMapped = "No GitHub repository is mapped for this product."
 	errMsgGitHubTitleInvalid  = "A title of up to 256 characters is required."
-	errMsgGitHubBodyTooLong   = "The issue description is too long."
+	errMsgGitHubBodyTooLong   = "The issue is too long."
 
 	errMsgGitHubPriorityJustificationInvalid = "Choose a priority justification from the list for this priority."
 	errMsgGitHubHotfixReasonInvalid          = "Choose a hotfix reason from the list."
@@ -71,6 +71,11 @@ const (
 
 // gitHubPriorityJustifications are the reasons the dialog offers for a P1 or P2
 // Discussion, keyed by the priority label they belong to. A P3 has none.
+//
+// This and gitHubHotfixReasons must match the webapp's
+// src/features/csm-cases/utils/githubIssueOptions.json, which the dialog
+// reads: a choice missing here is a 400 for the engineer.
+// TestGitHubIssueChoiceListsMatchTheWebapp fails when the two differ.
 var gitHubPriorityJustifications = map[string][]string{
 	priorityCriticalLabel: {
 		"Immediate Product Team Attention",

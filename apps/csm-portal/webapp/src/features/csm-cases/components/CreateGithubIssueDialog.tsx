@@ -38,6 +38,7 @@ import type {
   BeCreateCaseGithubIssueResponse,
 } from "@api/backend/types";
 import { useGetProductRepoMapping } from "@features/csm-cases/api/useGetProductRepoMapping";
+import githubIssueOptions from "@features/csm-cases/utils/githubIssueOptions.json";
 
 // ---------------------------------------------------------------------------
 // Option lists. Every select starts unset ("" → "-- Select --"). Every issue
@@ -61,29 +62,16 @@ const PRIORITY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: PRIORITY_P3, label: "P3 - Medium" },
 ];
 
-/** Justifications offered per priority. P3 needs none, so it has no entry. */
-const PRIORITY_JUSTIFICATION_OPTIONS: Record<string, string[]> = {
-  [PRIORITY_P1]: [
-    "Immediate Product Team Attention",
-    "Production Outage / Severe Degradation",
-    "Security, Privacy, or Legal Exposure",
-    "Go-Live / Deployment Blocker",
-    "Regression from Recent Release",
-  ],
-  [PRIORITY_P2]: [
-    "Product Bug (ETA-Based Fix)",
-    "Customer Business Escalation",
-    "Major Operational / Dev Blocker",
-    "Project / Production Deadline",
-  ],
-};
+// The justification and hotfix-reason options live in githubIssueOptions.json.
+// The backend refuses any other value, and its copy of the lists
+// (case_github_issue.go) is checked against that file by
+// TestGitHubIssueChoiceListsMatchTheWebapp, so edit both together.
 
-const HOTFIX_REASON_OPTIONS: string[] = [
-  "Customer-Requested Hotfix",
-  "Critical Production Bug / Downtime",
-  "Defect Blocking Operations / Development",
-  "Unable to Upgrade to Latest U2",
-];
+/** Justifications offered per priority label. P3 needs none, so it has no entry. */
+const PRIORITY_JUSTIFICATION_OPTIONS: Record<string, string[]> =
+  githubIssueOptions.priorityJustifications;
+
+const HOTFIX_REASON_OPTIONS: string[] = githubIssueOptions.hotfixReasons;
 
 const toOptions = (values: string[]): Array<{ value: string; label: string }> =>
   values.map((v) => ({ value: v, label: v }));
