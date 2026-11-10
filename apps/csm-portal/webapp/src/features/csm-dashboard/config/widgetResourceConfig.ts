@@ -1396,8 +1396,10 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     searchEndpoint: "/plg/registrations/search",
     buildSearchRequestBody: plgRegistrationSearchBody,
     // `groupBy: {field: "country"}`: one bucket per organisation country,
-    // and "Unknown" (see `bucketQuery`), over the search's own filters and
-    // `unacknowledgedOnly`, sent as the trend sends them.
+    // and "Unknown"; `{field: "playbookAnswer"}`: one per answer to the
+    // widget's `playbookTask`, and "Not answered" (see `bucketQuery`), over
+    // the search's own filters and `unacknowledgedOnly`, sent as the trend
+    // sends them.
     groupByEndpoint: "/plg/registrations/aggregate",
     buildGroupByBody: plgRegistrationTrendFilters,
     itemsKey: "registrations",
@@ -1442,6 +1444,7 @@ const PLG_SCALAR_FILTERS = [
   "registeredEmail",
   "registeredFrom",
   "registeredTo",
+  "playbookTask",
 ] as const;
 
 /** A plain `YYYY-MM-DD`, which the PLG searches' date bounds do not take. */
@@ -1461,7 +1464,7 @@ function plgBoolean(v: unknown): boolean | undefined {
  * (`OrganizationSearchFilters`):
  * - The preview page's URL round trip decodes every filter value as a
  *   comma-split array, so the single-valued keys are unwrapped back, and
- *   `unowned` and `countryUnknown` are turned back into JSON booleans. The preview page's
+ *   `unowned`, `countryUnknown` and `playbookUnanswered` are turned back into JSON booleans. The preview page's
  *   search box adds `searchQuery`, which these searches call `query`.
  * - `registeredFrom` / `registeredTo` are timestamps: a plain date is sent
  *   as the start of that day (UTC) for `registeredFrom` and its end for
@@ -1475,7 +1478,7 @@ function plgSearchFilters(filters: Record<string, unknown>): Record<string, unkn
     const v = flat[key];
     if (Array.isArray(v)) flat[key] = v[0];
   }
-  for (const key of ["unowned", "countryUnknown"]) {
+  for (const key of ["unowned", "countryUnknown", "playbookUnanswered"]) {
     if (!(key in flat)) continue;
     const value = plgBoolean(flat[key]);
     if (value === undefined) delete flat[key];

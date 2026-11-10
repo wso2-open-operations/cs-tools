@@ -516,6 +516,48 @@ describe("useWidgetGroupByData", () => {
     );
   });
 
+  describe("PLG registrations by playbook answer", () => {
+    const BY_ANSWER = {
+      groups: [
+        { key: "unanswered", label: "Not answered", count: 2 },
+        { key: "MONITOR", label: "Monitor", count: 1 },
+      ],
+      othersCount: 0,
+      totalRecords: 3,
+    };
+
+    it("asks the registration aggregate with the widget's task, and opens an answer or Not answered", async () => {
+      postMock.mockResolvedValue(BY_ANSWER);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-outcome",
+            "plg_registration",
+            { playbookTask: ["ELIGIBILITY_ASSESSMENT_OUTCOME"], lifecycleStages: ["REGISTRATION"] },
+            { field: "playbookAnswer", maxGroups: 10 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        {
+          filters: { playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", lifecycleStages: ["REGISTRATION"] },
+          groupBy: "playbookAnswer",
+          maxGroups: 10,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.slices).toEqual([
+        { label: "Not answered", query: { playbookUnanswered: true }, value: 2, linkId: "unanswered" },
+        { label: "Monitor", query: { playbookAnswers: ["MONITOR"] }, value: 1, linkId: "MONITOR" },
+      ]);
+      expect(result.current.total).toBe(3);
+    });
+  });
+
   describe("time card totals", () => {
     const hoursPerUser = {
       groups: [

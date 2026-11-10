@@ -1453,6 +1453,52 @@ describe("DashboardWidgetTile", () => {
     });
   });
 
+  describe("PLG registrations by playbook answer", () => {
+    const outcomeBar = (
+      <DashboardWidgetTile
+        widgetId="by-outcome"
+        displayName="Registrations by assessment outcome"
+        resourceType="plg_registration"
+        shape="bar"
+        filters={{ playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME" }}
+        groupBy={{ field: "playbookAnswer" }}
+      />
+    );
+
+    it.each([
+      ["Monitor:1", "playbookAnswers", "MONITOR"],
+      ["Not answered:2", "playbookUnanswered", "true"],
+    ])("a click on %s opens those registrations, with the widget's task", async (bar, param, value) => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "unanswered", label: "Not answered", count: 2 },
+          { key: "MONITOR", label: "Monitor", count: 1 },
+        ],
+        othersCount: 0,
+        totalRecords: 3,
+      });
+      renderWithRoutes(outcomeBar, "/dashboard/preview/plg-registrations");
+
+      fireEvent.click(await screen.findByText(`bar:${bar}`));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        {
+          filters: { playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME" },
+          groupBy: "playbookAnswer",
+          maxGroups: undefined,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probeText.startsWith("/dashboard/preview/plg-registrations?")).toBe(true);
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get(param)).toBe(value);
+      expect(params.get("playbookTask")).toBe("ELIGIBILITY_ASSESSMENT_OUTCOME");
+    });
+  });
+
   describe("shape line on PLG registrations", () => {
     const TREND = {
       days: 74,

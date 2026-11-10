@@ -829,6 +829,24 @@ describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
     expect(build({ filters: { countryUnknown: ["maybe"] }, offset: 0, limit: 5 }).filters).toEqual({});
   });
 
+  it("unwraps `playbookTask`, turns `playbookUnanswered` back into a boolean and keeps `playbookAnswers` a list", () => {
+    expect(
+      build({
+        filters: { playbookTask: ["ELIGIBILITY_ASSESSMENT_OUTCOME"], playbookUnanswered: ["true"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", playbookUnanswered: true });
+    expect(
+      build({
+        filters: { playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", playbookAnswers: ["MONITOR", "EXCLUDED"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", playbookAnswers: ["MONITOR", "EXCLUDED"] });
+    expect(build({ filters: { playbookUnanswered: ["maybe"] }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
   it("sends the View more search box's searchQuery as the search's query", () => {
     expect(
       build({ filters: { productCodes: ["IAM"], searchQuery: " acme " }, offset: 0, limit: 5 }).filters,
