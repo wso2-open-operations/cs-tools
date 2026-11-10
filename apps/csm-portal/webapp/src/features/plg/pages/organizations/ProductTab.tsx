@@ -954,7 +954,7 @@ function HealthEditor({
           value={draft}
           sx={{ height: 40 }}
           /* next is null when the pressed button was already selected. Ignoring
-             that keeps a value always chosen: health has no "unset". */
+             that keeps a value always chosen; "None" is the unmarked one. */
           onChange={(_, next: HealthState | null) => {
             if (next) setDraft(next);
           }}
@@ -964,7 +964,7 @@ function HealthEditor({
               key={h}
               value={h}
               disabled={patch.isPending}
-              color={h === "AT_RISK" ? "error" : "success"}
+              color={h === "AT_RISK" ? "error" : h === "HEALTHY" ? "success" : "standard"}
             >
               {HEALTH_LABEL[h]}
             </ToggleButton>
@@ -975,6 +975,10 @@ function HealthEditor({
         updatedBy ? (
           <Typography variant="caption" color="text.secondary">
             {HEALTH_LABEL[current]} since {formatDate(enteredOn)}, set by {updatedBy.name}
+          </Typography>
+        ) : current === "NONE" ? (
+          <Typography variant="caption" color="text.secondary">
+            Not marked yet — shown as “—” until an engineer marks it healthy or at risk.
           </Typography>
         ) : (
           <Typography variant="caption" color="text.secondary">

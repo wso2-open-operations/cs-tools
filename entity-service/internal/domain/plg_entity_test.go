@@ -22,6 +22,7 @@ func TestApplicablePlaybookTypes(t *testing.T) {
 		health HealthState
 		want   []PlaybookType
 	}{
+		{HealthNone, []PlaybookType{PlaybookProgressive, PlaybookSustaining}},
 		{HealthHealthy, []PlaybookType{PlaybookProgressive, PlaybookSustaining}},
 		{HealthAtRisk, []PlaybookType{PlaybookRecovery}},
 	}

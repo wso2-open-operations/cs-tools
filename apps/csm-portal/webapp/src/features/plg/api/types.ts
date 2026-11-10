@@ -27,13 +27,14 @@ export type LifecycleStage = (typeof LIFECYCLE_STAGES)[number];
 /**
  * How a pairing is doing, wherever it has got to — the second axis.
  *
- * Set by an engineer, never derived. It decides which kind of playbook the
- * pairing is offered, so changing it changes the whole product tab.
+ * Set by an engineer, never derived; NONE until one marks it, shown as "—". It
+ * decides which kind of playbook the pairing is offered (NONE as HEALTHY).
  */
-export const HEALTH_STATES = ["HEALTHY", "AT_RISK"] as const;
+export const HEALTH_STATES = ["NONE", "HEALTHY", "AT_RISK"] as const;
 export type HealthState = (typeof HEALTH_STATES)[number];
 
 export const HEALTH_LABEL: Record<HealthState, string> = {
+  NONE: "None",
   HEALTHY: "Healthy",
   AT_RISK: "At risk",
 };

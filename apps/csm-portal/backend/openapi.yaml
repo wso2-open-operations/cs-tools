@@ -12096,7 +12096,7 @@ paths:
         - name: health
           in: query
           required: false
-          description: "Repeatable. `HEALTHY` or `AT_RISK`."
+          description: "Repeatable. `NONE`, `HEALTHY` or `AT_RISK`."
           schema:
             type: string
         - name: reason
@@ -31381,7 +31381,7 @@ components:
           type: string
         healthState:
           type: string
-          description: "`HEALTHY` or `AT_RISK`."
+          description: "`NONE` (not yet marked), `HEALTHY` or `AT_RISK`."
         subscriptionTier:
           type: string
           description: "`FREE`, `TRIAL`, `TRIAL_EXTENDED` or `PAYG`."

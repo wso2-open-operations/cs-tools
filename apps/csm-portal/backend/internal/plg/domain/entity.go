@@ -107,22 +107,22 @@ func CanMoveStage(from, to LifecycleStage) bool {
 // HealthState is how a pairing is doing, wherever it has got to.
 //
 // The second axis, and the reason the stage list could shrink from nine to six.
-// Set by an engineer, never derived; defaults to HEALTHY. There is no third
-// "unknown" value, because an engineer who has not looked is not the same as a
-// customer in trouble and the work queue should not treat them alike.
+// Set by an engineer, never derived; NONE until an engineer marks it HEALTHY or
+// AT_RISK, and offers the same playbooks as HEALTHY.
 type HealthState string
 
-// The two health states.
+// The health states.
 const (
+	HealthNone    HealthState = "NONE"
 	HealthHealthy HealthState = "HEALTHY"
 	HealthAtRisk  HealthState = "AT_RISK"
 )
 
 // HealthStateOrder is the display order for filters and tiles.
-var HealthStateOrder = []HealthState{HealthHealthy, HealthAtRisk}
+var HealthStateOrder = []HealthState{HealthNone, HealthHealthy, HealthAtRisk}
 
 // ValidHealthState is the allow-list checked in the service layer.
-var ValidHealthState = map[HealthState]bool{HealthHealthy: true, HealthAtRisk: true}
+var ValidHealthState = map[HealthState]bool{HealthNone: true, HealthHealthy: true, HealthAtRisk: true}
 
 // PlaybookType is what a playbook is trying to do.
 type PlaybookType string

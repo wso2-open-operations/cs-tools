@@ -207,7 +207,8 @@ export function StatusChip({
   kind: ChipKind;
   size?: "small" | "medium";
 }) {
-  if (!value) return <Chip label="—" size={size} variant="outlined" />;
+  // A health nobody has marked yet reads as no value.
+  if (!value || (kind === "health" && value === "NONE")) return <Chip label="—" size={size} variant="outlined" />;
   const color = colorFor(kind, value);
   return <Chip label={humanizeEnum(value)} size={size} color={color} variant={color === "default" ? "outlined" : "filled"} />;
 }
