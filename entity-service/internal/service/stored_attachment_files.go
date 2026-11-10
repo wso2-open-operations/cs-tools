@@ -335,7 +335,7 @@ func (s *storedAttachmentFileService) DirectUploadLinks(ctx context.Context, kin
 	if chunks > maxChunks(target.MaxBytes) {
 		return domain.DirectUploadLinks{}, &apierror.ValidationError{Msg: "The upload is larger than allowed."}
 	}
-	links, expires, err := s.links.UploadLinks(target.StorageKey, chunks, directLinkTTL(target.SizeBytes))
+	links, expires, err := s.links.UploadLinks(s.uploadKey(target), chunks, directLinkTTL(target.SizeBytes))
 	if err != nil {
 		return domain.DirectUploadLinks{}, storeError(ctx, "UploadLinks", id, err, "Failed to prepare the upload.")
 	}
@@ -359,21 +359,6 @@ func (s *storedAttachmentFileService) DirectDownloadLink(ctx context.Context, ki
 	}
 	if err := unavailable(loc); err != nil {
 		return domain.DirectDownloadLink{}, err
-	}
-	// The upload link of a direct upload stays valid for a while after the confirm
-	// and lets its holder overwrite the file, so before a link to it is handed out
-	// the file must still be the size that was confirmed. It catches a changed size,
-	// not a swap to a file of the same size.
-	if want := loc.SizeBytes; want != nil {
-		info, err := s.store.Stat(ctx, loc.StorageKey)
-		if err != nil {
-			return domain.DirectDownloadLink{}, storeError(ctx, "Stat", id, err, "Failed to prepare the download.")
-		}
-		if info.Size != *want {
-			slog.ErrorContext(ctx, "stored file is not the size on record", "attachmentId", id,
-				"correlationId", middleware.CorrelationIDFromContext(ctx), "recorded", *want, "stored", info.Size)
-			return domain.DirectDownloadLink{}, &apierror.ServiceUnavailableError{Msg: "Failed to prepare the download."}
-		}
 	}
 	// An attachment is always an opaque download, whatever type it declares: the
 	// link is signed to answer as one.

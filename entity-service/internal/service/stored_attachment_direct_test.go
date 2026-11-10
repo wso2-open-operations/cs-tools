@@ -119,7 +119,7 @@ func TestDirectUploadLinks(t *testing.T) {
 		if len(got.Links) != 3 || got.ChunkBytes != UploadChunkBytes {
 			t.Errorf("got %d links, chunkBytes %d", len(got.Links), got.ChunkBytes)
 		}
-		if links.uploadKey != workItemKey || links.uploadCount != 3 || links.uploadTTL != directLinkTTL(20*mib) {
+		if links.uploadKey != workItemKey+stagingSuffix || links.uploadCount != 3 || links.uploadTTL != directLinkTTL(20*mib) {
 			t.Errorf("signed %q x%d for %v", links.uploadKey, links.uploadCount, links.uploadTTL)
 		}
 		if !got.ExpiresAt.Equal(saNow.Add(directLinkTTL(20 * mib))) {
@@ -183,7 +183,7 @@ func TestDirectDownloadLink(t *testing.T) {
 		repo := newFakeStoredRepo()
 		repo.rows[saAttID] = completeRow("COMPLETE", &key)
 		links := &fakeLinks{}
-		got, err := newDirectSvcWith(repo, links, storedFile(key, 500)).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
+		got, err := newDirectSvc(repo, links).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		if err != nil {
 			t.Fatalf("DirectDownloadLink: %v", err)
 		}
@@ -193,27 +193,6 @@ func TestDirectDownloadLink(t *testing.T) {
 		// Whatever type the row declares, the link answers as an opaque download.
 		if links.downloadKey != key || links.downloadName != "report.pdf" || links.downloadType != "application/octet-stream" || links.downloadTTL != directLinkTTL(500) {
 			t.Errorf("signed %q %q %q %v", links.downloadKey, links.downloadName, links.downloadType, links.downloadTTL)
-		}
-	})
-	t.Run("a stored file that is not the size on record gets no link", func(t *testing.T) {
-		repo := newFakeStoredRepo()
-		repo.rows[saAttID] = completeRow("COMPLETE", &key)
-		links := &fakeLinks{}
-		// The row says 500 bytes; the file was overwritten with another size.
-		_, err := newDirectSvcWith(repo, links, storedFile(key, 900)).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
-		wantErr[*apierror.ServiceUnavailableError](t, err, "a file of another size")
-		if links.downloadKey != "" {
-			t.Error("a link was signed for a file that is not the size on record")
-		}
-	})
-	t.Run("a stored file that is missing gets no link", func(t *testing.T) {
-		repo := newFakeStoredRepo()
-		repo.rows[saAttID] = completeRow("COMPLETE", &key)
-		links := &fakeLinks{}
-		_, err := newDirectSvc(repo, links).DirectDownloadLink(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
-		wantErr[*apierror.NotFoundError](t, err, "a file that is not in storage")
-		if links.downloadKey != "" {
-			t.Error("a link was signed for a missing file")
 		}
 	})
 	t.Run("a deleted attachment is gone", func(t *testing.T) {
@@ -248,6 +227,88 @@ func storedFile(key string, size int) *fakeBlob {
 	blob := newFakeBlob()
 	blob.committed[key] = make([]byte, size)
 	return blob
+}
+
+// TestDirectLinkTTL: the lifetime of a link grows with the size of the file.
+func TestDirectLinkTTL(t *testing.T) {
+	for size, want := range map[int64]time.Duration{
+		1:          5 * time.Minute,
+		50 * mib:   5 * time.Minute,
+		50*mib + 1: 7 * time.Minute,
+		100 * mib:  7 * time.Minute,
+		250 * mib:  10 * time.Minute,
+		500 * mib:  15 * time.Minute,
+		1024 * mib: 20 * time.Minute,
+	} {
+		if got := directLinkTTL(size); got != want {
+			t.Errorf("directLinkTTL(%d MiB) = %v, want %v", size/mib, got, want)
+		}
+	}
+}
+
+// A file sent straight to Azure may be larger than one sent through the service,
+// up to the direct cap; nothing else gets the larger cap.
+func TestDirectUploadLimits(t *testing.T) {
+	start := func(links LinkStore, kind domain.StoredAttachmentKind, ct string, size int64) (domain.InitiateAttachmentUploadResponse, error) {
+		return newDirectLimitsSvc(newFakeStoredRepo(), links).InitiateUpload(saCtx(t, saEmail),
+			domain.InitiateAttachmentUploadRequest{Kind: kind, ParentID: saParentID, Name: "big.bin", ContentType: ct, SizeBytes: size})
+	}
+	work := domain.StoredAttachmentWorkItem
+	t.Run("a large file is accepted up to the direct cap, which the answer reports", func(t *testing.T) {
+		resp, err := start(&fakeLinks{}, work, "application/zip", 600*mib)
+		if err != nil || resp.MaxBytes != 1024*mib {
+			t.Fatalf("600 MiB: %+v, %v", resp, err)
+		}
+		if _, err := start(&fakeLinks{}, work, "application/zip", 1024*mib); err != nil {
+			t.Errorf("exactly 1 GiB refused: %v", err)
+		}
+	})
+	t.Run("a file over the direct cap is refused", func(t *testing.T) {
+		_, err := start(&fakeLinks{}, work, "application/zip", 1024*mib+1)
+		wantErr[*apierror.ValidationError](t, err, "over 1 GiB")
+	})
+	t.Run("a file that fits the ordinary cap keeps it", func(t *testing.T) {
+		resp, err := start(&fakeLinks{}, work, "application/zip", 60*mib)
+		if err != nil || resp.MaxBytes != 100*mib {
+			t.Errorf("60 MiB: %+v, %v", resp, err)
+		}
+	})
+	t.Run("without direct transfers the ordinary cap stands", func(t *testing.T) {
+		for name, links := range map[string]LinkStore{"off": nil, "cannot sign": &fakeLinks{cannotSign: true}} {
+			_, err := start(links, work, "application/zip", 600*mib)
+			wantErr[*apierror.ValidationError](t, err, "600 MiB with direct "+name)
+		}
+	})
+	t.Run("an inline image never gets the larger cap", func(t *testing.T) {
+		_, err := start(&fakeLinks{}, domain.StoredAttachmentComment, "image/png", 600*mib)
+		wantErr[*apierror.ValidationError](t, err, "a 600 MiB image")
+	})
+	t.Run("a large upload gets a link for every chunk, valid for its size", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 600*mib)
+		links := &fakeLinks{}
+		got, err := newDirectSvc(repo, links).DirectUploadLinks(saCtx(t, saEmail), work, saAttID)
+		if err != nil || len(got.Links) != 75 { // 600 MiB in 8 MiB chunks
+			t.Fatalf("got %d links, %v", len(got.Links), err)
+		}
+		if links.uploadTTL != 20*time.Minute {
+			t.Errorf("ttl = %v, want 20m for 600 MiB", links.uploadTTL)
+		}
+	})
+	t.Run("the real size is held to the cap that applied when the upload started", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 600*mib)
+		svc := newDirectLimitsSvc(repo, &fakeLinks{})
+		size := int64(600 * mib)
+		if _, err := svc.ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"}); err != nil {
+			t.Errorf("confirm of an accepted 600 MiB file: %v", err)
+		}
+		// With direct transfers off the same row is refused: it exceeds the ordinary cap.
+		repo2 := newFakeStoredRepo()
+		pendingUpload(repo2, 600*mib)
+		_, err := newDirectLimitsSvc(repo2, nil).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"})
+		wantErr[*apierror.ValidationError](t, err, "confirm without direct transfers")
+	})
 }
 
 // TestStagedUploads: an upload that may be sent direct is put together under a
@@ -342,94 +403,5 @@ func TestStagedUploads(t *testing.T) {
 		if string(blob.committed[workItemKey]) != "hello" || len(blob.copied) != 0 {
 			t.Errorf("committed = %v, copied = %v", blob.committed, blob.copied)
 		}
-	})
-}
-
-// storedFile is a blob store holding a committed file of size bytes at key.
-func storedFile(key string, size int) *fakeBlob {
-	blob := newFakeBlob()
-	blob.committed[key] = make([]byte, size)
-	return blob
-}
-
-// TestDirectLinkTTL: the lifetime of a link grows with the size of the file.
-func TestDirectLinkTTL(t *testing.T) {
-	for size, want := range map[int64]time.Duration{
-		1:          5 * time.Minute,
-		50 * mib:   5 * time.Minute,
-		50*mib + 1: 7 * time.Minute,
-		100 * mib:  7 * time.Minute,
-		250 * mib:  10 * time.Minute,
-		500 * mib:  15 * time.Minute,
-		1024 * mib: 20 * time.Minute,
-	} {
-		if got := directLinkTTL(size); got != want {
-			t.Errorf("directLinkTTL(%d MiB) = %v, want %v", size/mib, got, want)
-		}
-	}
-}
-
-// A file sent straight to Azure may be larger than one sent through the service,
-// up to the direct cap; nothing else gets the larger cap.
-func TestDirectUploadLimits(t *testing.T) {
-	start := func(links LinkStore, kind domain.StoredAttachmentKind, ct string, size int64) (domain.InitiateAttachmentUploadResponse, error) {
-		return newDirectLimitsSvc(newFakeStoredRepo(), links).InitiateUpload(saCtx(t, saEmail),
-			domain.InitiateAttachmentUploadRequest{Kind: kind, ParentID: saParentID, Name: "big.bin", ContentType: ct, SizeBytes: size})
-	}
-	work := domain.StoredAttachmentWorkItem
-	t.Run("a large file is accepted up to the direct cap, which the answer reports", func(t *testing.T) {
-		resp, err := start(&fakeLinks{}, work, "application/zip", 600*mib)
-		if err != nil || resp.MaxBytes != 1024*mib {
-			t.Fatalf("600 MiB: %+v, %v", resp, err)
-		}
-		if _, err := start(&fakeLinks{}, work, "application/zip", 1024*mib); err != nil {
-			t.Errorf("exactly 1 GiB refused: %v", err)
-		}
-	})
-	t.Run("a file over the direct cap is refused", func(t *testing.T) {
-		_, err := start(&fakeLinks{}, work, "application/zip", 1024*mib+1)
-		wantErr[*apierror.ValidationError](t, err, "over 1 GiB")
-	})
-	t.Run("a file that fits the ordinary cap keeps it", func(t *testing.T) {
-		resp, err := start(&fakeLinks{}, work, "application/zip", 60*mib)
-		if err != nil || resp.MaxBytes != 100*mib {
-			t.Errorf("60 MiB: %+v, %v", resp, err)
-		}
-	})
-	t.Run("without direct transfers the ordinary cap stands", func(t *testing.T) {
-		for name, links := range map[string]LinkStore{"off": nil, "cannot sign": &fakeLinks{cannotSign: true}} {
-			_, err := start(links, work, "application/zip", 600*mib)
-			wantErr[*apierror.ValidationError](t, err, "600 MiB with direct "+name)
-		}
-	})
-	t.Run("an inline image never gets the larger cap", func(t *testing.T) {
-		_, err := start(&fakeLinks{}, domain.StoredAttachmentComment, "image/png", 600*mib)
-		wantErr[*apierror.ValidationError](t, err, "a 600 MiB image")
-	})
-	t.Run("a large upload gets a link for every chunk, valid for its size", func(t *testing.T) {
-		repo := newFakeStoredRepo()
-		pendingUpload(repo, 600*mib)
-		links := &fakeLinks{}
-		got, err := newDirectSvc(repo, links).DirectUploadLinks(saCtx(t, saEmail), work, saAttID)
-		if err != nil || len(got.Links) != 75 { // 600 MiB in 8 MiB chunks
-			t.Fatalf("got %d links, %v", len(got.Links), err)
-		}
-		if links.uploadTTL != 20*time.Minute {
-			t.Errorf("ttl = %v, want 20m for 600 MiB", links.uploadTTL)
-		}
-	})
-	t.Run("the real size is held to the cap that applied when the upload started", func(t *testing.T) {
-		repo := newFakeStoredRepo()
-		pendingUpload(repo, 600*mib)
-		svc := newDirectLimitsSvc(repo, &fakeLinks{})
-		size := int64(600 * mib)
-		if _, err := svc.ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"}); err != nil {
-			t.Errorf("confirm of an accepted 600 MiB file: %v", err)
-		}
-		// With direct transfers off the same row is refused: it exceeds the ordinary cap.
-		repo2 := newFakeStoredRepo()
-		pendingUpload(repo2, 600*mib)
-		_, err := newDirectLimitsSvc(repo2, nil).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"})
-		wantErr[*apierror.ValidationError](t, err, "confirm without direct transfers")
 	})
 }

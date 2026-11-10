@@ -2036,6 +2036,8 @@ needs CORS for the portal origins.
 - `GET /attachments/download/{id}/link?type=` makes the checks of a download (`LocateAttachment`, charged one unit
   of the per-caller allowance) and returns a read-only link valid for the same size-based time (`directLinkTTL`), signed to answer
   as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
+  With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
+  the webapps answer by streaming the file.
 - **Size limit.** While direct transfers are on, an ordinary file (never an inline image) above
   `ATTACHMENT_DIRECT_MIN_MB` may be up to `ATTACHMENT_DIRECT_MAX_MB` (default and at most 1024 MB) instead of
   `ATTACHMENT_MAX_MB` (`limitForSize`). The cap that applied to the size declared at the start is the one the
