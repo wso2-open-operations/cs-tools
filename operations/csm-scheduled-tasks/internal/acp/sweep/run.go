@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,86 @@ const (
 	maxProjectPages = 1000
 	maxSearchPages  = 200
 )
+
+// ineligibleSubscriptionTypes are the project types ACP never evaluates, as
+// the legacy process did not: evaluation, cloud support, cloud evaluation
+// support and internal projects. The values are entity-service's
+// SubscriptionType enum, which the project read carries.
+var ineligibleSubscriptionTypes = map[string]bool{
+	"evaluation_subscription":  true,
+	"cloud_support":            true,
+	"cloud_evaluation_support": true,
+	"internal":                 true,
+}
+
+// skipIneligible reports whether proj is outside ACP's selection (see
+// ineligibleSubscriptionTypes), counting it in result. It logs nothing per
+// project: Run logs the count once.
+func skipIneligible(proj project, result *Result) bool {
+	// The flag is read from the fresh re-read, which is what is decided from.
+	// An absent flag fails closed: an entity-service without it would
+	// otherwise put every exempted project back into the run.
+	if proj.SuspensionProcessOverridden == nil {
+		result.ProjectsFilteredOverrideUnknown++
+		return true
+	}
+	if *proj.SuspensionProcessOverridden {
+		result.ProjectsFilteredOverridden++
+		return true
+	}
+	if proj.SubscriptionType == nil || !ineligibleSubscriptionTypes[strings.ToLower(strings.TrimSpace(*proj.SubscriptionType))] {
+		return false
+	}
+	result.ProjectsFiltered++
+	return true
+}
+
+// skipByAccount reports whether proj is outside ACP's selection by its
+// account, counting it in result: an account whose status is not "Customer"
+// (or has none: the legacy selection required Customer, so a missing status
+// fails closed), or one that is itself a partner. A partner account is
+// skipped whole, before either cascade; this is not hasPrimaryPartner (a
+// customer that has a partner), which the invoice cascade still handles. It
+// runs after the details are read, which is where the account comes from.
+// The status test applies only when the details source read one
+// (salesforceDetails).
+func skipByAccount(proj project, result *Result) bool {
+	if proj.accountStatusRead {
+		status := strings.TrimSpace(stringValue(proj.accountStatus))
+		if status == "" {
+			result.ProjectsFilteredNoStatus++
+			return true
+		}
+		if !strings.EqualFold(status, "Customer") {
+			result.ProjectsFilteredStatus++
+			return true
+		}
+	}
+	if proj.Account != nil && proj.Account.IsPartner != nil && *proj.Account.IsPartner {
+		result.ProjectsFilteredPartner++
+		return true
+	}
+	return false
+}
+
+// logFiltered logs how many projects the selection filter skipped, once.
+func logFiltered(ctx context.Context, result Result) {
+	if result.ProjectsFilteredOverrideUnknown > 0 {
+		slog.WarnContext(ctx, "acp: projects skipped because entity-service did not return suspensionProcessOverridden for them: it must be deployed (with its migration) before this task runs; none of these were evaluated",
+			"projectsSkipped", result.ProjectsFilteredOverrideUnknown)
+	}
+	n := result.ProjectsFilteredOverridden + result.ProjectsFilteredOverrideUnknown + result.ProjectsFiltered + result.ProjectsFilteredStatus + result.ProjectsFilteredNoStatus + result.ProjectsFilteredPartner
+	if n > 0 {
+		slog.InfoContext(ctx, "acp: projects skipped by the selection filter",
+			"projectsFiltered", n,
+			"byProjectType", result.ProjectsFiltered,
+			"byOverrideFlag", result.ProjectsFilteredOverridden,
+			"byMissingOverrideFlag", result.ProjectsFilteredOverrideUnknown,
+			"byAccountStatus", result.ProjectsFilteredStatus,
+			"byMissingAccountStatus", result.ProjectsFilteredNoStatus,
+			"byPartnerAccount", result.ProjectsFilteredPartner)
+	}
+}
 
 // Run performs one full ACP evaluation pass over every open project,
 // paginating through /projects/search. The list comes from CSM (reader),
@@ -114,9 +195,14 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		}
 
 		result.ProjectsEvaluated++
+		if skipIneligible(proj, &result) {
+			logFiltered(ctx, result)
+			return result, nil
+		}
 		// One project: a stop has nothing left to stop, and the failure is
 		// already in result.
 		_ = evaluate(ctx, details, updater, ntf, now, proj, &result)
+		logFiltered(ctx, result)
 
 		return result, nil
 	}
@@ -126,6 +212,7 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		return result, err
 	}
 
+	defer func() { logFiltered(ctx, result) }()
 	for i, listed := range projects {
 		if skipExcluded(ctx, listed.ID, excludedProjectIDs, &result) {
 			continue
@@ -144,6 +231,9 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		if err != nil {
 			slog.ErrorContext(ctx, "processProject failed", "projectID", listed.ID, "err", err)
 			result.Failures = append(result.Failures, ProjectFailure{ProjectID: listed.ID, Err: err})
+			continue
+		}
+		if skipIneligible(proj, &result) {
 			continue
 		}
 		if err := evaluate(ctx, details, updater, ntf, now, proj, &result); err != nil {
@@ -251,6 +341,9 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 // again.
 func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
+	if err == nil && skipByAccount(full, result) {
+		return nil
+	}
 	if err == nil {
 		var acted bool
 		acted, err = processProject(ctx, reader, updater, ntf, now, full)

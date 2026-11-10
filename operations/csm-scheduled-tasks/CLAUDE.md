@@ -561,7 +561,7 @@ both places.
   most overdue first (the list is sorted by end date ascending), so the cap takes those; once it is
   reached the rest are not evaluated, one INFO line logs the counts (never names or addresses), and
   the run is **not** a failure. A dry run counts the same way, so a dry run with the limit shows what a
-  capped real run would do. Projects excluded do not consume it. The `acp: finished`
+  capped real run would do. Projects excluded or filtered out do not consume it. The `acp: finished`
   line carries `projectsActed` and `projectsNotEvaluatedByLimit`. Unlike `AUTOCLOSURE_DAILY_LIMIT`
   there is no per-day ledger: the cap is per run, so a retry the same day acts on up to the cap again
   (the projects already handled are no longer due, so it takes the next ones).
@@ -588,6 +588,38 @@ both places.
   no suspension, no record, and it does not mark the project closed for the other track
   (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
   still resets the event to `open`, which clears this.
+- **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
+  (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
+  - its `suspensionProcessOverridden` flag is true (`Result.ProjectsFilteredOverridden`): the legacy
+    selection never evaluated such a project. The flag is on the CSM project record (set by the data sync or
+    directly in the database) and entity-service returns it on `GET /projects/{id}` and
+    `POST /projects/search`, always present, default false. ACP reads it from the fresh re-read, the
+    record it decides from. **A response without the flag is skipped too** (fail closed, counted in
+    `ProjectsFilteredOverrideUnknown`, with a WARN saying entity-service did not return it), because an
+    entity-service that predates the field would otherwise put every exempted project back into the run.
+    **Deploy order: entity-service with the field (and its migration) before this task runs**, else every
+    project is skipped as unknown: safe, and visible in the count and the WARN;
+  - its `subscriptionType` is `evaluation_subscription`, `cloud_support`, `cloud_evaluation_support` or
+    `internal` (`skipIneligible`, `Result.ProjectsFiltered`; decided from the project read, before the
+    Salesforce read);
+  - its account's status is not `Customer`, trimmed and case-insensitive (`Result.ProjectsFilteredStatus`).
+    The status is the sales-entity `/customer-search` row's `status` (`salesentity.Customer.Status`; the
+    live `isRealTime` query ACP uses selects the account status field), which is what CSM's account life
+    cycle mirrors. **A missing or empty status is skipped too** (fail closed, counted separately in
+    `ProjectsFilteredNoStatus`), since the legacy selection required Customer; a project with no linked
+    account is the same case. Applies only when the details come from Salesforce, as they do in a real run;
+  - its account is itself a partner (`accountClassification == "Partner"`, `Result.ProjectsFilteredPartner`):
+    both cascades are skipped. This is not `hasPrimaryPartner` (a customer that has a partner), which the
+    invoice cascade still handles with its grace-period rule. The invoice cascade's own
+    `isPartner && !hasPrimaryPartner` rule is kept and tested but a partner account is now skipped before
+    the cascades, so Run no longer reaches it.
+
+  The account filters run after the details are read (`skipByAccount`, in `evaluate`), so they apply to a
+  scoped `ACP_TEST_PROJECT_ID` run as well, and an `ACP_TEST_PROJECT_ID` project that is a Prospect or a
+  partner is skipped, not tested. The flag and project-type checks run on the re-read project, before the
+  Salesforce read. `ACP_EXCLUDED_PROJECT_IDS` stays as the manual per-project exclusion (no flag needed).
+  One difference remains: the legacy process evaluated Open and Restricted projects; the list here asks
+  for Open only.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof

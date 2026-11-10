@@ -40,9 +40,9 @@ func threeDueProjects(now time.Time) *mockEntityReader {
 	return &mockEntityReader{
 		searchProjectsFn: func(context.Context, []byte) ([]byte, error) {
 			return []byte(`{"projects":[
-				{"id":"p1","endDate":"` + end + `"},
-				{"id":"p2","endDate":"` + end + `"},
-				{"id":"p3","endDate":"` + end + `"}
+				{"suspensionProcessOverridden": false, "id":"p1","endDate":"` + end + `"},
+				{"suspensionProcessOverridden": false, "id":"p2","endDate":"` + end + `"},
+				{"suspensionProcessOverridden": false, "id":"p3","endDate":"` + end + `"}
 			],"total":3,"hasMore":false}`), nil
 		},
 	}
@@ -151,10 +151,10 @@ func TestRun_DecidesFromAFreshCSMRead(t *testing.T) {
 	end := now.AddDate(0, 0, 89).Format(time.RFC3339)
 	reader := &mockEntityReader{
 		searchProjectsFn: func(context.Context, []byte) ([]byte, error) {
-			return []byte(`{"projects":[{"id":"p1","endDate":"` + end + `"}],"total":1,"hasMore":false}`), nil
+			return []byte(`{"projects":[{"suspensionProcessOverridden": false, "id":"p1","endDate":"` + end + `"}],"total":1,"hasMore":false}`), nil
 		},
 		getProjectFn: func(context.Context, string) ([]byte, error) {
-			return []byte(`{"id":"p1","endDate":"` + end + `","suspensionProcessState":` +
+			return []byte(`{"suspensionProcessOverridden": false, "id":"p1","endDate":"` + end + `","suspensionProcessState":` +
 				`{"based_on_subscription_end_date":{"event_type":"90_days_notice","actionSendEmailNotification":"SUCCESSFUL"}}}`), nil
 		},
 	}

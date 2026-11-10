@@ -93,6 +93,7 @@ func (d salesforceDetails) forProject(ctx context.Context, proj project) (projec
 
 	r := &salesforceReader{sf: d.sf, projectSfID: sfID}
 	customerID := strings.TrimSpace(stringValue(sp.CustomerID))
+	proj.accountStatusRead = true
 	if customerID == "" {
 		proj.Account = nil
 		return proj, r, nil
@@ -105,6 +106,7 @@ func (d salesforceDetails) forProject(ctx context.Context, proj project) (projec
 		return proj, nil, fmt.Errorf("salesforce account: %w", err)
 	}
 	r.customer = &cu
+	proj.accountStatus = cu.Status
 	name := ""
 	if proj.Account != nil {
 		name = proj.Account.Name
