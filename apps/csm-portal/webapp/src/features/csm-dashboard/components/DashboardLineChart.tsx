@@ -43,6 +43,10 @@ interface DashboardLineChartProps {
    * a UTC calendar day), its line, and for a week or month point its last
    * day. Absent, the points are not clickable, as on a system dashboard. */
   onPointClick?: (date: string, series: BeLineSeries, endDate?: string) => void;
+  /** A line's own label, in the legend and the tooltip, in place of
+   * "Opened" / "Closed": a PLG registration trend draws its one series,
+   * "Registered", as the `opened` line. */
+  seriesLabels?: Partial<Record<BeLineSeries, string>>;
 }
 
 /** What recharts hands a function `activeDot` for the hovered point. */
@@ -114,13 +118,14 @@ export default function DashboardLineChart({
   bucket,
   chart,
   onPointClick,
+  seriesLabels,
 }: DashboardLineChartProps): JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
   const shown = ALL_SERIES.filter((s) => !series?.length || series.includes(s));
   const lineStyles = {
-    opened: { label: "Opened", color: theme.palette.info.main },
-    closed: { label: "Closed", color: theme.palette.success.main },
+    opened: { label: seriesLabels?.opened ?? "Opened", color: theme.palette.info.main },
+    closed: { label: seriesLabels?.closed ?? "Closed", color: theme.palette.success.main },
   } as const;
 
   if (isLoading) {

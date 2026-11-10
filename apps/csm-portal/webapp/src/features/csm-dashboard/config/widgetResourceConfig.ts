@@ -96,6 +96,11 @@ export interface WidgetResourceConfig {
    * by an entity-service group-by endpoint carry this — omitted means that
    * resourceType doesn't support `groupBy` widgets at all. */
   groupByEndpoint?: string;
+  /** The `filters` a `groupBy` request sends, from the widget's resolved
+   * filters, when the group-by endpoint reads them the way this resource's
+   * search body does (the PLG aggregate takes the PLG search's `filters`);
+   * omitted, they are sent as they are. */
+  buildGroupByFilters?: (filters: Record<string, unknown>) => Record<string, unknown>;
   /** Key the response's item array is nested under. */
   itemsKey: string;
   /** Primary (bold) line for one list-shape row. */
@@ -1364,6 +1369,10 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   plg_organization: {
     searchEndpoint: "/plg/organizations/search",
     buildSearchRequestBody: plgOrganizationSearchBody,
+    // `groupBy: {field: "owner"}`: one bucket per organisation owner, and
+    // "Unowned" (see `bucketQuery`), over the search's own filters.
+    groupByEndpoint: "/plg/organizations/aggregate",
+    buildGroupByFilters: plgSearchFilters,
     itemsKey: "organizations",
     primaryLabel: (item) => asString(item.organizationName) ?? "—",
     secondaryLabel: (item) => asString(item.registeredEmail),
@@ -1522,6 +1531,19 @@ function plgRegistrationSearchBody({
     filters: plgSearchFilters(rest),
     pagination: { offset, limit },
   };
+  if (plgBoolean(unacknowledgedOnly)) body.unacknowledgedOnly = true;
+  return body;
+}
+
+/**
+ * `POST /plg/registrations/volume-trend`'s body apart from its window: the
+ * widget's filters and `unacknowledgedOnly` exactly as
+ * `plgRegistrationSearchBody` sends them, so a point counts what the
+ * registration search lists for that day.
+ */
+export function plgRegistrationTrendFilters(filters: Record<string, unknown>): Record<string, unknown> {
+  const { unacknowledgedOnly, ...rest } = filters;
+  const body: Record<string, unknown> = { filters: plgSearchFilters(rest) };
   if (plgBoolean(unacknowledgedOnly)) body.unacknowledgedOnly = true;
   return body;
 }

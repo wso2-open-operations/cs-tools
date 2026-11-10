@@ -365,6 +365,77 @@ describe("useWidgetGroupByData", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
   });
 
+  describe("PLG organisations by owner", () => {
+    const BY_OWNER = {
+      groups: [
+        { key: "unowned", label: "Unowned", count: 4 },
+        { key: "5e636a12-0000-4000-8000-000000000001", label: "Alice Perera", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    };
+
+    it("asks the PLG aggregate with the PLG search's filters", async () => {
+      postMock.mockResolvedValue(BY_OWNER);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-owner",
+            "plg_organization",
+            { productCodes: ["IAM"], registeredFrom: "2026-01-01", searchQuery: " acme " },
+            { field: "owner", maxGroups: 10 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        {
+          filters: { productCodes: ["IAM"], registeredFrom: "2026-01-01T00:00:00Z", query: "acme" },
+          groupBy: "owner",
+          maxGroups: 10,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.total).toBe(6);
+    });
+
+    it("opens an owner's organisations from their bar, and the unowned ones from Unowned", async () => {
+      postMock.mockResolvedValue(BY_OWNER);
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("by-owner", "plg_organization", {}, { field: "owner" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.slices).toEqual([
+        { label: "Unowned", query: { unowned: true }, value: 4, linkId: "unowned" },
+        {
+          label: "Alice Perera",
+          query: { ownerIds: ["5e636a12-0000-4000-8000-000000000001"] },
+          value: 2,
+          linkId: "5e636a12-0000-4000-8000-000000000001",
+        },
+      ]);
+    });
+
+    it("says no access on a 403", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("by-owner", "plg_organization", {}, { field: "owner" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5000 });
+      expect(result.current.isForbidden).toBe(true);
+    });
+  });
+
   describe("time card totals", () => {
     const hoursPerUser = {
       groups: [

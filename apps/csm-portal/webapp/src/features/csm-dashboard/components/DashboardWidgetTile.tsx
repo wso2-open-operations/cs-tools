@@ -40,6 +40,7 @@ import { useWidgetPieData, type PieSliceResult } from "@features/csm-dashboard/a
 import { useWidgetGroupByData } from "@features/csm-dashboard/api/useWidgetGroupByData";
 import { useCaseFeedbackTrendData } from "@features/csm-dashboard/api/useCaseFeedbackTrendData";
 import { useCaseVolumeTrendData } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
+import { usePlgRegistrationTrendData } from "@features/csm-dashboard/api/usePlgRegistrationTrendData";
 import {
   isCaseFamilyResourceType,
   isPlgResourceType,
@@ -50,6 +51,7 @@ import GenericColumnList from "@features/csm-dashboard/components/GenericColumnL
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
 import { linePointFilters } from "@features/csm-dashboard/utils/linePointQuery";
+import { plgLinePointFilters } from "@features/csm-dashboard/utils/plgLinePointQuery";
 import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
@@ -563,16 +565,31 @@ function DashboardWidgetTile({
   // /cases/volume-trend`, always exactly two series) — unrelated to
   // slices/groupBy, so this is independent of `pieData` above. Called
   // unconditionally (rules of hooks), gated by its own `enabled` argument.
-  const volumeTrendData = useCaseVolumeTrendData(
+  // A PLG registration line is the same chart over `POST
+  // /plg/registrations/volume-trend` (one series, Registered); the case
+  // trend is never asked for it.
+  const isPlgRegistrationLine = shape === "line" && resourceType === "plg_registration";
+  const caseVolumeTrendData = useCaseVolumeTrendData(
     widgetId,
     filters,
     days,
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
     currentUserId,
-    shape === "line" && isVisible,
+    shape === "line" && !isPlgRegistrationLine && isVisible,
     startDate && endDate ? { startDate, endDate, bucket } : undefined,
   );
+  const plgRegistrationTrendData = usePlgRegistrationTrendData(
+    widgetId,
+    filters,
+    days,
+    selectedTeamCreGroupId,
+    selectedTeamSreGroupId,
+    currentUserId,
+    isPlgRegistrationLine && isVisible,
+    startDate && endDate ? { startDate, endDate, bucket } : undefined,
+  );
+  const volumeTrendData = isPlgRegistrationLine ? plgRegistrationTrendData : caseVolumeTrendData;
   // True while this widget carries a `__current_user__` filter and the
   // signed-in user's profile hasn't loaded yet. `useWidgetData`/
   // `useWidgetPieData` hold their requests in that window (see
@@ -999,12 +1016,14 @@ function DashboardWidgetTile({
     // the trend's own cache already keeps today's point fresh server-side
     // (entity-service's case-volume-trend cache), so a manual refresh here
     // has nothing to accomplish.
+    // A PLG registration point opens that day's (or week's, month's)
+    // registrations instead (`plgLinePointFilters`).
     const handlePointClick = (date: string, lineSeries: BeLineSeries, pointEndDate?: string): void => {
+      const pointFilters = isPlgRegistrationLine
+        ? plgLinePointFilters(filters, date, pointEndDate)
+        : linePointFilters(filters, date, lineSeries, pointEndDate);
       navigate(
-        config.buildHref(
-          resolvePlaceholders(linePointFilters(filters, date, lineSeries, pointEndDate)),
-          { widgetId, displayName: resolvedDisplayName },
-        ),
+        config.buildHref(resolvePlaceholders(pointFilters), { widgetId, displayName: resolvedDisplayName }),
         { state: dashboardReturnState },
       );
     };
@@ -1020,7 +1039,8 @@ function DashboardWidgetTile({
           points={volumeTrendData.points}
           isLoading={volumeTrendData.isLoading}
           isError={volumeTrendData.isError}
-          series={series}
+          series={isPlgRegistrationLine ? ["opened"] : series}
+          seriesLabels={isPlgRegistrationLine ? { opened: "Registered" } : undefined}
           bucket={startDate && endDate ? bucket : undefined}
           chart={chart}
           onPointClick={linePointClickThrough ? handlePointClick : undefined}

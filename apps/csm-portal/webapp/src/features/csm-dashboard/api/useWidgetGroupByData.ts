@@ -58,6 +58,10 @@ import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/
  */
 const GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES = new Set<BeWidgetResourceType>(["incident", "problem"]);
 
+/** The key of the organisations with no owner in a PLG owner grouping
+ * (entity-service's `PlgUnownedGroupKey`); every other key is an owner's id. */
+const PLG_UNOWNED_GROUP_KEY = "unowned";
+
 /**
  * Builds a named bucket's own click-through `query` — the same shape
  * `DashboardWidgetTile`'s slice navigation merges under the widget's base
@@ -112,6 +116,11 @@ function bucketQuery(
       case "day":
         return { startDate: key, endDate: key };
     }
+  }
+  // A PLG organisation owner bucket opens that owner's organisations; the
+  // aggregate's "unowned" bucket opens the ones with no owner.
+  if (resourceType === "plg_organization" && field === "owner") {
+    return key === PLG_UNOWNED_GROUP_KEY ? { unowned: true } : { ownerIds: [key] };
   }
   return { [field]: key };
 }
@@ -213,7 +222,7 @@ export function useWidgetGroupByData(
         >(
           config.groupByEndpoint as string,
           {
-            filters: resolvedFilters,
+            filters: config.buildGroupByFilters ? config.buildGroupByFilters(resolvedFilters) : resolvedFilters,
             groupBy: field,
             maxGroups: groupBy.maxGroups,
             ...measure,
