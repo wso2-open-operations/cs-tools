@@ -67,6 +67,31 @@ Keys are validated: empty, absolute, `.`/`..` folders and backslashes are
 refused with `ErrInvalidKey`. That is a second line of defence. The access
 check belongs to entity-service.
 
+## Direct links for large files
+
+A store that signs in with an account key (or a connection string that carries
+one) can make short-lived links, so a client sends or reads the bytes itself
+instead of passing them through the service:
+
+```go
+if store.CanSignLinks() {
+    // One PUT URL per block index; the client sends block i to links[i].
+    links, expires, err := store.UploadLinks(key, blocks, 30*time.Minute)
+    // ... then, after the client has sent every block:
+    err = store.Commit(ctx, key, blocks, contentType)
+
+    // A GET URL that answers as a download of fileName.
+    link, expires, err := store.DownloadLink(key, fileName, contentType, 10*time.Minute)
+}
+```
+
+A link is signed for one blob, for writing only (upload) or reading only
+(download). Azure checks it when a request starts, so a request that started
+before the expiry finishes after it. A link cannot limit how much is sent, so
+check the real size with `Stat` after an upload. A store that signs in as an
+Entra app cannot sign a link and returns `ErrLinksUnavailable`; the storage
+account also needs CORS for the browsers that use the links.
+
 ## Limits to know
 
 - `PutBlock` reads the whole chunk into memory before sending it, so memory use
@@ -102,10 +127,9 @@ backend and this module. Never commit `go.work`.
 
 ## Releasing a new version
 
-A backend gets the library from a version tag, not from the folder, so a change
-here reaches the backends only after the steps below. Both backends
-(`apps/csm-portal/backend` and `apps/customer-portal/backend-v2`) use this
-module and must be moved to the same version.
+A service gets the library from a version tag, not from the folder, so a change
+here reaches it only after the steps below. Entity-service is the only user
+of this module and must be moved to the new version.
 
 1. **Change and test the library** under `libs/azblobstore` (`go test ./...`;
    the Azurite integration tests need Azurite running).
@@ -120,16 +144,15 @@ module and must be moved to the same version.
    that keeps old callers working, and a major version for a breaking change
    (a major version of 2 or more also changes the module path to
    `.../libs/azblobstore/v2`).
-4. **Move both backends to it.** In each backend folder:
+4. **Move entity-service to it.** In `entity-service`:
    ```
    go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z
    go mod tidy
    ```
-   Commit the `go.mod` and `go.sum` of both, and check that each backend builds
-   and its tests pass.
+   Commit its `go.mod` and `go.sum`, and check that it builds and its tests pass.
 5. **Never move or delete a published tag.** If a version is wrong, publish the
    next patch version. The first build after a new tag may be slower, while the
    Go module proxy fetches it.
 
-A backend change that needs new library code cannot be merged before the tag
-exists, or its build fails. Merge and tag the library first, then the backends.
+A change to entity-service that needs new library code cannot be merged before the tag
+exists, or its build fails. Merge and tag the library first, then entity-service.
