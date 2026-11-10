@@ -108,6 +108,20 @@ func skipByAccount(proj project, result *Result) bool {
 	return false
 }
 
+// logScreening logs what screening did, once, counts only.
+func logScreening(ctx context.Context, result Result, listed int) {
+	if result.ScreenCandidates == nil {
+		return
+	}
+	slog.InfoContext(ctx, "acp: screening done",
+		"projectsListed", listed,
+		"projectsScreenedOut", result.ProjectsScreenedOut,
+		"candidatesByDate", result.ScreenCandidates[reasonDate],
+		"candidatesByRecordedState", result.ScreenCandidates[reasonState],
+		"candidatesByDueInvoice", result.ScreenCandidates[reasonInvoice],
+		"candidatesByFailOpen", result.ScreenCandidates[reasonOpen])
+}
+
 // logFiltered logs how many projects the selection filter skipped, once.
 func logFiltered(ctx context.Context, result Result) {
 	if result.ProjectsFilteredOverrideUnknown > 0 {
@@ -177,7 +191,36 @@ func logFiltered(ctx context.Context, result Result) {
 // evaluated, which is not a failure. A dry run counts the same way, so it
 // shows what a capped real run would do.
 func Run(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, limit int) (Result, error) {
+	return RunWith(ctx, reader, details, updater, ntf, now, projectID, excludedProjectIDs, Options{Limit: limit})
+}
+
+// Options are Run's optional settings.
+type Options struct {
+	// Limit is ACP_DAILY_LIMIT, 0 for no cap.
+	Limit int
+	// Screening skips, before any re-read or Salesforce call, the listed
+	// projects CSM's copy of the data shows the live path cannot act on (see
+	// screen). It never applies to a single-project run.
+	Screening bool
+	// Repair, when set, compares what the live reads show with CSM's copy
+	// and posts an event for each record that drifted (see Repair). It never
+	// changes a decision. nil is off.
+	Repair *Repair
+}
+
+// RunWith is Run with Options.
+func RunWith(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, opts Options) (Result, error) {
+	limit := opts.Limit
 	var result Result
+	snap := &copySnapshot{}
+	rr := newRepairRun(opts.Repair, snap)
+	defer func() { rr.log(ctx) }()
+
+	if prep, ok := details.(preparer); ok {
+		if err := prep.prepare(ctx); err != nil {
+			return result, fmt.Errorf("sweep: prepare details: %w", err)
+		}
+	}
 
 	if projectID != "" {
 		if skipExcluded(ctx, projectID, excludedProjectIDs, &result) {
@@ -201,7 +244,7 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		}
 		// One project: a stop has nothing left to stop, and the failure is
 		// already in result.
-		_ = evaluate(ctx, details, updater, ntf, now, proj, &result)
+		_ = evaluate(ctx, reader, rr, details, updater, ntf, now, proj, &result)
 		logFiltered(ctx, result)
 
 		return result, nil
@@ -213,13 +256,30 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 	}
 
 	defer func() { logFiltered(ctx, result) }()
+	var screened map[string]string
+	if opts.Screening {
+		screened = screen(ctx, reader, projects, now, snap).candidates
+		result.ScreenCandidates = map[string]int{}
+		for _, reason := range screened {
+			result.ScreenCandidates[reason]++
+		}
+		defer func() { logScreening(ctx, result, len(projects)) }()
+	}
 	for i, listed := range projects {
 		if skipExcluded(ctx, listed.ID, excludedProjectIDs, &result) {
 			continue
 		}
+		if screened != nil && screened[listed.ID] == "" {
+			result.ProjectsScreenedOut++
+			continue
+		}
 
 		if limit > 0 && result.ProjectsActed >= limit {
-			result.NotEvaluatedByLimit = len(projects) - i
+			for _, rest := range projects[i:] {
+				if screened == nil || screened[rest.ID] != "" {
+					result.NotEvaluatedByLimit++
+				}
+			}
 			slog.InfoContext(ctx, "acp: daily limit reached, remaining projects not evaluated",
 				"limit", limit, "projectsActed", result.ProjectsActed,
 				"projectsEvaluated", result.ProjectsEvaluated, "projectsNotEvaluated", result.NotEvaluatedByLimit)
@@ -236,7 +296,7 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		if skipIneligible(proj, &result) {
 			continue
 		}
-		if err := evaluate(ctx, details, updater, ntf, now, proj, &result); err != nil {
+		if err := evaluate(ctx, reader, rr, details, updater, ntf, now, proj, &result); err != nil {
 			return result, fmt.Errorf("sweep: stopped at project %s, %d project(s) not evaluated: %w", listed.ID, len(projects)-i-1, err)
 		}
 	}
@@ -339,17 +399,22 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 // (writesFailingError), which stops the run: every later project would send
 // its notice and then fail to record it, so the next run would send it
 // again.
-func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
+func evaluate(ctx context.Context, csmReader entityReader, rr *repairRun, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
 	if err == nil && skipByAccount(full, result) {
 		return nil
 	}
 	if err == nil {
+		// The repair compares what was just read live with CSM's copy
+		// (proj is the fresh CSM read). It runs after the decision for the
+		// invoices, never before it, and cannot change it.
+		rr.project(ctx, proj, full)
 		var acted bool
 		acted, err = processProject(ctx, reader, updater, ntf, now, full)
 		if acted {
 			result.ProjectsActed++
 		}
+		rr.invoices(ctx, csmReader, reader)
 	} else {
 		err = fmt.Errorf("read project details: %w", err)
 	}

@@ -309,6 +309,8 @@ type searchProjectsRequest struct {
 type searchProjectOpportunityLinksRequest struct {
 	Pagination pagination `json:"pagination"`
 	ProjectID  string     `json:"projectId"`
+	// OpportunityID restricts to the links of one opportunity (screening).
+	OpportunityID string `json:"opportunityId,omitempty"`
 }
 
 // searchInvoicesRequest mirrors the fields of csm-integration-service's
@@ -347,6 +349,11 @@ type Result struct {
 	// are decided after the details are read, and are included in
 	// ProjectsEvaluated.
 	ProjectsFilteredStatus, ProjectsFilteredNoStatus, ProjectsFilteredPartner int
+	// ProjectsScreenedOut counts listed projects skipped by screening before
+	// any re-read or Salesforce call; ScreenCandidates counts the others by
+	// reason (zero values when screening did not run).
+	ProjectsScreenedOut int
+	ScreenCandidates    map[string]int
 	// NotEvaluatedByLimit counts listed projects left unevaluated because
 	// the limit was reached.
 	NotEvaluatedByLimit int
