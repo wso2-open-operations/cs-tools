@@ -858,7 +858,8 @@ page's URL round trip (which decodes every value as an array), View more's `sear
 day, so both bounds include it (the searches take timestamps). Relative tokens in those two keys are
 resolved first, like any flat date key (`FLAT_DATE_FILTER_KEYS` in `resolveRelativeDateFilters.ts`), and
 `ownerIds: ["__current_user__"]` ("my PLG organisations") is resolved to the viewer's user id like any
-flat key, the hook waiting for the user first. The organisation search sorts by `sortBy: "name"` or, by
+flat key, the hook waiting for the user first. `ownerEmails` (named owners) is a list key and needs no
+cleaning: it stays a list through the round trip, and an owner bar's click adds `ownerIds` beside it. The organisation search sorts by `sortBy: "name"` or, by
 default, the registration date, with `sortOrder` beside it. The registration search takes a widget's
 `unacknowledgedOnly` **beside** `filters`, not in it, and refuses an unknown field, so
 `plgRegistrationSearchBody` moves it out and sends no `sortBy`. A pie or bar uses `slices` (one search

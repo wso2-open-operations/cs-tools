@@ -29531,6 +29531,16 @@ components:
           type: boolean
           nullable: true
           description: true matches the organisations with no CS owner.
+        ownerEmails:
+          type: array
+          items:
+            type: string
+            maxLength: 254
+          description: >-
+            Matches the organisation's CS owner by email address, any of
+            these, ignoring case; a registration matches by its organisation's
+            owner. entity-service checks each entry (an email address of at
+            most 254 characters). Not with unowned.
         registeredFrom:
           type: string
           format: date-time

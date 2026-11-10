@@ -949,7 +949,10 @@ take the PLG searches' flat filters, and a generated one only those a prompt can
 `lifecycleStages`, `subscriptionTiers` (exact-case values from `plg/domain` and the products seeded in
 `plg_product`), `registeredFrom` / `registeredTo` (a date or a relative date token), `unowned` (a JSON
 boolean), `ownerIds` **only** as `["__current_user__"]` ("my PLG organisations": the webapp resolves it to
-the viewer's user id, which is what an owner is), `countryNames` (1 to 20 names as written, each 1 to 100
+the viewer's user id, which is what an owner is), `ownerEmails` (another person's organisations: 1 to 20
+email addresses, each with text on both sides of an `@` and at most 254 characters, never with `unowned`,
+in one query or a widget's and a slice's together; the catalogue uses only addresses the request gives
+and declines a name without one, as for a case's `createdBy`), `countryNames` (1 to 20 names as written, each 1 to 100
 characters) and `countryUnknown` (a JSON boolean, never with `countryNames`, in one query or a widget's
 and a slice's together), the playbook answer filter `playbookTask` (one task code) with `playbookAnswers`
 (1 to 20 option codes) or `playbookUnanswered` (a JSON boolean; each needs `playbookTask` in the query or
