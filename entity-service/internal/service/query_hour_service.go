@@ -96,7 +96,7 @@ type queryHourService struct {
 	now            func() time.Time
 
 	// projectHoursMu guards projectHoursCursor, the last project the hourly
-	// recompute reached. The next run starts after it, so a run cut short by
+	// recompute finished. The next run starts after it, so a run cut short by
 	// its time budget does not leave the same projects at the end of the list
 	// unprocessed every hour. Process-local: a restart starts from the top.
 	projectHoursMu     sync.Mutex
@@ -260,6 +260,17 @@ func (s *queryHourService) recomputeProjectHoursBy(ctx context.Context, projectI
 	return s.RecomputeProjectHours(ctx, projectID)
 }
 
+// consumesFromSkipped reports the first project consuming from opp that is in
+// skipped.
+func consumesFromSkipped(opp domain.QueryHourOpportunity, skipped map[string]bool) (string, bool) {
+	for _, p := range opp.Projects {
+		if skipped[p.ProjectID] {
+			return p.ProjectID, true
+		}
+	}
+	return "", false
+}
+
 // SiblingProjectIDs implements QueryHourService.
 func (s *queryHourService) SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error) {
 	return s.repo.SiblingProjectIDs(ctx, projectID)
@@ -289,19 +300,30 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 	if deadline, ok := ctx.Deadline(); ok {
 		stopAt = started.Add(time.Duration(float64(deadline.Sub(started)) * projectHoursShare))
 	}
+	// skippedIDs are the projects this run did not recompute because its
+	// budget ran out. Their stored onboarding figures may be stale, so the
+	// opportunities they consume from keep their state until a later run
+	// reaches them (see the state comparison below).
+	skippedIDs := map[string]bool{}
+	budgetSpent := func() bool {
+		return ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt))
+	}
+	skipRest := func(i int) {
+		// Leave the rest for the next run, which starts at the first
+		// project not reached here, and keep the remaining time for the
+		// state comparison.
+		slog.WarnContext(ctx, "query hours: recompute project hours stopped, time budget spent",
+			"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
+		skipped = len(projectIDs) - i
+		for _, id := range projectIDs[i:] {
+			skippedIDs[id] = true
+		}
+	}
 	for i, id := range projectIDs {
-		if ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt)) {
-			// The project hours budget is spent. Leave the rest for the next
-			// run, which starts after the last project reached here, and keep
-			// the remaining time for the state comparison.
-			slog.WarnContext(ctx, "query hours: recompute project hours stopped, time budget spent",
-				"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
-			skipped = len(projectIDs) - i
+		if budgetSpent() {
+			skipRest(i)
 			break
 		}
-		s.projectHoursMu.Lock()
-		s.projectHoursCursor = id
-		s.projectHoursMu.Unlock()
 		t0 := time.Now()
 		err := s.recomputeProjectHoursBy(ctx, id, stopAt)
 		took := time.Since(t0)
@@ -309,6 +331,15 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 			slowestID, slowestTook = id, took
 		}
 		slog.DebugContext(ctx, "query hours: project hours recomputed", "projectId", id, "durationMs", took.Milliseconds(), "ok", err == nil)
+		if err != nil && budgetSpent() {
+			// Cut off by the budget, not a failure of its own: it is
+			// skipped, and the next run starts with it.
+			skipRest(i)
+			break
+		}
+		s.projectHoursMu.Lock()
+		s.projectHoursCursor = id
+		s.projectHoursMu.Unlock()
 		if err != nil {
 			failures++
 			slog.ErrorContext(ctx, "query hours: recompute project hours failed", "projectId", id, "error", err)
@@ -330,6 +361,17 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 
 	var transitions []domain.QueryHourTransition
 	for _, c := range all {
+		if p, ok := consumesFromSkipped(c.opp, skippedIDs); ok {
+			// The comparison would use a skipped project's stored
+			// onboarding figure, which may be stale: neither write a state
+			// nor notify from it. The stored state stands until a run that
+			// reaches the project compares again. A project that FAILED is
+			// not deferred this way, so one that keeps failing cannot
+			// silence its opportunity's notices for good.
+			slog.WarnContext(ctx, "query hours: state comparison deferred, a consuming project was not recomputed",
+				"opportunityId", c.opp.OpportunityID, "projectId", p)
+			continue
+		}
 		before := previous[c.opp.OpportunityID]
 		after := c.opp.State
 
