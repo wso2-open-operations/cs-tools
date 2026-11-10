@@ -189,7 +189,17 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 	}
 
 	keep := make([]string, 0, len(row.LineItems))
+	var moved []string
 	for _, li := range row.LineItems {
+		previous, err := previousIDs(ctx, q, previousLineItemOpportunitiesQuery, li.LineItemSfID)
+		if err != nil {
+			return res, fmt.Errorf("upsert opportunity line item %s: %w", li.LineItemSfID, err)
+		}
+		for _, id := range previous {
+			if id != res.OpportunityID {
+				moved = append(moved, id)
+			}
+		}
 		liArgs := []any{
 			domain.SalesforceSyncActor,
 			res.OpportunityID, li.Name, li.ProductName, li.Quantity,
@@ -216,6 +226,12 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 	}
 	res.LineItemsDeleted = int(tag.RowsAffected())
 
+	if err := deriveOpportunityOnboarding(ctx, q, res.OpportunityID); err != nil {
+		return res, err
+	}
+	if err := deriveMovedLineItemOpportunities(ctx, q, moved, res.OpportunityID); err != nil {
+		return res, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err
 	}

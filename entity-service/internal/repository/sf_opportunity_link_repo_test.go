@@ -34,11 +34,15 @@ type linkQuerier struct {
 	links      map[string]domain.SalesforceOpportunityLinkUpsert
 	statements []string
 	ledger     []string
+	derived    []string // project ids the onboarding rule ran for
 }
 
 func (q *linkQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	q.statements = append(q.statements, sql)
 	switch sql {
+	case deriveOnboardingForProjectQuery:
+		q.derived = append(q.derived, args[1].(string))
+		return pgconn.NewCommandTag("UPDATE 0"), nil
 	case insertSfOpportunityLinkQuery:
 		q.put(args)
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
@@ -58,6 +62,13 @@ func (q *linkQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
 
 func (q *linkQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
+	if sql == previousLinkProjectsQuery {
+		prev := []string{}
+		if l, ok := q.links[args[0].(string)]; ok && l.ProjectID != "" {
+			prev = append(prev, l.ProjectID)
+		}
+		return scanRow{vals: []any{prev}}
+	}
 	if sql == updateSfOpportunityLinkQuery {
 		if _, ok := q.links[args[4].(string)]; !ok {
 			return scanRow{err: pgx.ErrNoRows}
@@ -100,6 +111,10 @@ func TestWriteSfOpportunityLink_InsertThenUpdate(t *testing.T) {
 	}
 	if !strings.Contains(q.statements[0], "pg_advisory_xact_lock") || !reflect.DeepEqual(q.ledger, []string{"CREATED", "UPDATED"}) {
 		t.Errorf("first statement %.40s ledger %v", q.statements[0], q.ledger)
+	}
+	// Insert derives p1; the move to p2 derives p2 and then the previous owner p1.
+	if want := []string{"p1", "p2", "p1"}; !reflect.DeepEqual(q.derived, want) {
+		t.Errorf("derived projects = %v, want %v", q.derived, want)
 	}
 }
 
