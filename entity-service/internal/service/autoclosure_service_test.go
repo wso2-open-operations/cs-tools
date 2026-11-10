@@ -260,6 +260,18 @@ func TestAutoclosureAdvance_SolutionProposedCloseKeepsItsOwnResolution(t *testin
 	}
 }
 
+func TestAutoclosureAdvance_SolutionProposedCloseWithoutResolutionGetsTheDefaultCode(t *testing.T) {
+	repo := &fakeAutoclosureRepo{claimWins: true, candidates: []repository.AutoclosureCandidateRow{dueCandidate(domain.CaseStateSolutionProposed, strp("SECOND_COMMENT"))}}
+	cases := &fakeAutoclosureCases{}
+	if _, err := newACService(repo, cases).Advance(context.Background(), acTestCaseID, domain.AutoclosureAdvanceRequest{Stage: domain.AutoclosureStageClose}); err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+	u := cases.updates[0]
+	if u.ResolutionCode == nil || *u.ResolutionCode != domain.CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness {
+		t.Errorf("a Solution Proposed close with no resolution must get the auto-closure code (UpdateCase refuses a close without one), got %v", u.ResolutionCode)
+	}
+}
+
 func TestAutoclosureAdvance_ASecondCallDoesNothing(t *testing.T) {
 	// Not due any more: whatever listed the ticket is stale.
 	repo := &fakeAutoclosureRepo{claimWins: true}
