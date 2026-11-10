@@ -677,27 +677,33 @@ interface DirectUploadLinks {
   expiresAt: string;
 }
 
-/** True when `links` is a usable answer: a positive whole chunk size and a link for every chunk of `fileSize`. */
-function linksCoverFile(links: DirectUploadLinks | null | undefined, fileSize: number): links is DirectUploadLinks {
-  return (
-    !!links &&
-    Number.isSafeInteger(links.chunkBytes) &&
-    links.chunkBytes > 0 &&
-    Array.isArray(links.links) &&
-    links.links.length >= Math.max(1, Math.ceil(fileSize / links.chunkBytes))
-  );
-}
+/** How many times the links of one upload are replaced when they expire. */
+const MAX_LINK_REFRESHES = 3;
 
-/** Sends one chunk to its signed link, trying again with a short pause when it fails in passing. */
-async function sendChunkToLink(link: string, body: Blob, signal?: AbortSignal): Promise<void> {
+/**
+ * Sends one chunk to its signed link, trying again with a short pause when it
+ * fails in passing. A 403 means the link expired (they last a few minutes): the
+ * links are asked for again and the chunk goes to its new one.
+ */
+async function sendChunkToLink(
+  source: () => { url: string; generation: number },
+  onExpired: (generation: number) => Promise<void>,
+  body: Blob,
+  signal?: AbortSignal,
+): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     if (signal?.aborted) throw new EntityUploadAbortedError();
+    const { url, generation } = source();
     try {
       // No Authorization header: the link itself is the credential.
-      const response = await fetch(link, { method: "PUT", body, signal });
+      const response = await fetch(url, { method: "PUT", body, signal });
       if (response.ok) return;
-      // Azure answers 500/503 when it is busy; any other refusal (a link that
-      // expired or was refused) will not change.
+      if (response.status === 403) {
+        await onExpired(generation); // throws once the links were replaced too often
+        attempt -= 1; // a new link is not a failed try
+        continue;
+      }
+      // Azure answers 500/503 when it is busy; any other refusal will not change.
       if (attempt >= UPLOAD_CHUNK_ATTEMPTS || ![408, 429, 500, 503].includes(response.status)) {
         throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
       }
@@ -716,9 +722,11 @@ async function sendChunkToLink(link: string, body: Blob, signal?: AbortSignal): 
 /**
  * Sends `file` straight to Azure through signed links the backend makes (one per
  * chunk), a few at a time. Returns the number of chunks, which the confirm step
- * needs. Throws when the links cannot be had or a chunk cannot be sent (for
- * example a storage account that does not allow this site); the caller then
- * sends the file through the backend instead, which stages the same chunks.
+ * needs. The links last a few minutes, longer for a bigger file; one that expires
+ * part-way is replaced by asking again, and the chunks already sent stay.
+ * Throws when the links cannot be had or a chunk cannot be sent (for example a
+ * storage account that does not allow this site); the caller then sends the file
+ * through the backend instead, which stages the same chunks.
  */
 export async function sendFileDirect(
   api: BackendApi,
@@ -731,19 +739,38 @@ export async function sendFileDirect(
   },
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = args;
-  const direct = await api.postEmpty<DirectUploadLinks>(
-    `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`,
-  );
+  const path = `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`;
+  const requestLinks = (): Promise<DirectUploadLinks> => api.postEmpty<DirectUploadLinks>(path);
+  let direct = await requestLinks();
   const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
   if (!linksCoverFile(direct, file.size)) {
     throw new Error("The upload links do not cover the file.");
   }
+  // Every chunk in flight may see the expiry at once; one request replaces the links.
+  let generation = 0;
+  let refreshing: Promise<void> | undefined;
+  const onExpired = async (seen: number): Promise<void> => {
+    if (seen !== generation) return; // already replaced
+    if (generation >= MAX_LINK_REFRESHES) throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+    refreshing ??= requestLinks()
+      .then((fresh) => {
+        if (fresh.chunkBytes !== direct.chunkBytes || !Array.isArray(fresh.links) || fresh.links.length < count) {
+          throw new Error("The upload links do not cover the file.");
+        }
+        direct = fresh;
+        generation += 1;
+      })
+      .finally(() => {
+        refreshing = undefined;
+      });
+    await refreshing;
+  };
   await sendChunksInParallel({
     file,
     chunkBytes: direct.chunkBytes,
     count,
     onProgress,
-    send: (index, body) => sendChunkToLink(direct.links[index], body, signal),
+    send: (index, body) => sendChunkToLink(() => ({ url: direct.links[index], generation }), onExpired, body, signal),
   });
   return count;
 }

@@ -24,7 +24,7 @@ export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
 
 /** Ceilings: a configured value above one is ignored and the default is used. */
-export const MAX_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const MAX_ENTITY_ATTACHMENT_MAX_MB = 1024;
 export const MAX_INLINE_IMAGE_MAX_MB = 25;
 
 /** A positive number of megabytes, at most `max`, from a number or numeric string, else `fallback`. */
@@ -39,8 +39,9 @@ function megabytes(raw: unknown, fallback: number, max: number): number {
  *
  * Read from the runtime `window.config.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB`
  * key (a number of megabytes, or a numeric string). A missing, unparseable, zero,
- * negative or above-100 value gives {@link DEFAULT_ENTITY_ATTACHMENT_MAX_MB}. Keep it equal
- * to the entity-service's `ATTACHMENT_MAX_MB`: the server stays the authority,
+ * negative or above-1024 value gives {@link DEFAULT_ENTITY_ATTACHMENT_MAX_MB}. Keep it equal
+ * to the entity-service's `ATTACHMENT_MAX_MB`, or, when it sends large files
+ * straight to Azure, to its `ATTACHMENT_DIRECT_MAX_MB` (up to 1024): the server stays the authority,
  * this only refuses an oversized file before the upload starts.
  *
  * Read at call time (not module load) so a test can set `window.config` per case.
