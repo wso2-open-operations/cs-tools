@@ -20,6 +20,22 @@ validation here without confirming that assumption no longer holds.
 caller. "No app-level auth" means this service performs no authentication check of
 its own; it does not mean 401/403 can't happen.
 
+## Two APIs on one port
+
+`.choreo/component.yaml` declares two endpoints on port 8080: the CSM Integration Service
+API (`openapi.yaml`, every route) and the CSM Cloud Status API
+(`cloud-status.openapi.yaml`: `GET /health` and the five `GET /cloud-status/*` reads).
+Choreo publishes each endpoint as its own API with the operations of the contract it
+names, and a subscription admits an application to that API, so a consumer that needs
+only the public status reads (a status page) subscribes to the cloud status API.
+
+That contract is a copy: a cloud status read is changed in `openapi.yaml` first and
+copied across, and only public reads (GET) belong in it.
+`cmd/server/cloud_status_api_test.go` fails unless the copy's paths are exactly
+`openapi.yaml`'s `/health` and `/cloud-status/*` paths, unchanged and all GET, with every
+`$ref` resolving inside the copy, and unless each endpoint names its contract (Choreo
+would otherwise publish the wildcard route).
+
 ## This service is M2M-only — no end-user identity is ever forwarded
 
 Earlier revisions of this service optionally forwarded a caller-supplied
@@ -318,7 +334,8 @@ make build   # runs tests then compiles ./cmd/server
 ## OpenAPI spec
 
 **`openapi.yaml` must be updated whenever the API changes.** It is the contract
-published to third-party consumers via Choreo's Developer Portal.
+published to third-party consumers via Choreo's Developer Portal. A cloud status read is
+also copied into `cloud-status.openapi.yaml` (see "Two APIs on one port").
 
 - Error responses use `$ref: '#/components/schemas/ErrorResponse'`
 - Path parameters that expect UUIDs must declare `format: uuid` on the schema
