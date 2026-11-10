@@ -69,11 +69,13 @@ func (f *fakeBlobEntity) ListStoredAttachmentChunks(context.Context, string, str
 	return []byte(f.chunks), f.listErr
 }
 
+// DirectStoredAttachmentUploadLinks records the call and answers with one link.
 func (f *fakeBlobEntity) DirectStoredAttachmentUploadLinks(_ context.Context, id, kind string) ([]byte, error) {
 	f.directID, f.directKind = id, kind
 	return []byte(`{"links":["https://blob.example/x?sig=s"],"chunkBytes":8388608}`), f.directErr
 }
 
+// DirectStoredAttachmentDownloadLink records the call and answers with a link.
 func (f *fakeBlobEntity) DirectStoredAttachmentDownloadLink(_ context.Context, id, kind string) ([]byte, error) {
 	f.directID, f.directKind = id, kind
 	return []byte(`{"url":"https://blob.example/x?sig=s","name":"a.pdf"}`), f.directErr
@@ -433,6 +435,7 @@ func TestBlobDirectLinks_AreRelayedAndNeverCached(t *testing.T) {
 	}
 }
 
+// TestBlobDirectLinks_Refusals: a bad id or type, or no caller, never reaches entity-service, and a failure of it shows no link.
 func TestBlobDirectLinks_Refusals(t *testing.T) {
 	for name, tc := range map[string]struct {
 		method, path string
