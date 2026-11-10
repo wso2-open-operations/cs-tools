@@ -441,6 +441,74 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/upload/{id}/direct:
+    post:
+      summary: >-
+        Signed links to send a large file's chunks straight to Azure Blob Storage, one link
+        per chunk, instead of through the portal backend. Only for a file larger than
+        ATTACHMENT_DIRECT_MIN_MB, and only when ATTACHMENT_DIRECT_TRANSFERS_ENABLED is on
+        (the upload start says so with directUpload). The access check, the open parent and
+        the size rules are those of storing a chunk, made once when the links are issued.
+        The client PUTs chunk i (chunkBytes long, the last one shorter) to links[i], then
+        confirms the upload; confirm commits the chunks and checks the real size, and a
+        file that is too large is refused and removed. The links are credentials, valid
+        for the time in expiresAt, and the response is never cached.
+      operationId: createAttachmentDirectUploadLinks
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: "The attachmentId returned by the upload start."
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: "One link per chunk."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectUploadLinks'
+        "400":
+          description: "The type or id is invalid, or this upload cannot be sent directly (send it in chunks)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "x-user-id-token is missing."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such upload, it is not the caller's, or its parent is not visible to the caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "The upload was already confirmed or rejected, or the work item is closed."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: "File storage is unavailable or not configured; try again."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/upload/{id}/confirm:
     post:
       summary: >-
@@ -591,6 +659,78 @@ paths:
           description: "The range is not satisfiable; Content-Range says the file's size."
         "429":
           description: "The caller is over their allowance, or too many file transfers are in progress; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: "File storage is unavailable or not configured; try again."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/download/{id}/link:
+    get:
+      summary: >-
+        A signed link to download an attachment's file straight from Azure Blob Storage, after
+        checking the caller may see the attachment. The link is signed for reading that one
+        file and answers as a download of the file's own name with the opaque type
+        application/octet-stream. Only when ATTACHMENT_DIRECT_TRANSFERS_ENABLED is on. The
+        link is valid for the time in expiresAt: a request that started before then finishes,
+        and a resumed one asks for a new link. Charged one unit of the per-caller allowance.
+        The response is never cached.
+      operationId: getAttachmentDirectDownloadLink
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: "The attachmentId returned by the upload start."
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: "The link."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectDownloadLink'
+        "400":
+          description: "The type or id is invalid, or direct downloads are not available (use the content route)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "x-user-id-token is missing."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "The attachment does not exist, the caller may not see it, or it has no stored file."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: "The attachment was deleted (errorCode attachment_removed)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: "The caller is over their allowance; retry shortly."
           content:
             application/json:
               schema:
@@ -40636,6 +40776,45 @@ components:
         maxBytes:
           type: integer
           format: int64
+        directUpload:
+          type: boolean
+          description: >-
+            True when the file may be sent straight to Azure through POST
+            /attachments/upload/{id}/direct (a file larger than the direct-transfer size, with
+            direct transfers on). False means send it in chunks through the portal backend.
+
+    DirectUploadLinks:
+      type: object
+      required: [links, chunkBytes, expiresAt]
+      properties:
+        links:
+          type: array
+          description: One signed link per chunk. PUT chunk i to links[i].
+          items:
+            type: string
+            format: uri
+        chunkBytes:
+          type: integer
+          format: int64
+          description: The size of every chunk but the last.
+        expiresAt:
+          type: string
+          format: date-time
+          description: A request must start before this time; one that started finishes.
+
+    DirectDownloadLink:
+      type: object
+      required: [url, name, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+        name:
+          type: string
+          description: The file's own name.
+        expiresAt:
+          type: string
+          format: date-time
 
     DeleteStoredAttachmentRequest:
       type: object
