@@ -283,6 +283,16 @@ describe("widget preview URL — filter op round-trip", () => {
     const entries = (parsed.filters as { filters: unknown[] }).filters;
     expect(entries).toEqual(input);
   });
+
+  it("round-trips the states a case entered and the window it entered them in", () => {
+    const input = [
+      { field: "stateEntered", op: "in", values: ["waiting_on_wso2", "awaiting_info"] },
+      { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+      { field: "stateEnteredOn", op: "lte", values: ["2026-11-30"] },
+    ];
+    const entries = (roundTrip(input).filters as { filters: unknown[] }).filters;
+    expect(entries).toEqual(input);
+  });
 });
 
 /**
@@ -443,6 +453,17 @@ describe("describeWidgetFilters", () => {
       { field: "createdOn", op: "gte", value: "30 days ago" },
       { field: "createdOn", op: "lte", value: "Today" },
     ]);
+  });
+
+  it("shows the states a case entered and the window in words", () => {
+    expect(
+      describeWidgetFilters({
+        filters: [
+          { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+          { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+        ],
+      }).map(widgetFilterChipLabel),
+    ).toEqual(["stateEntered: waiting_on_wso2", "stateEnteredOn on or after Today"]);
   });
 
   it("still shows a value-less op (isEmpty/isNotEmpty) rather than silently dropping it", () => {
