@@ -56,6 +56,14 @@ export const SRE_TEAM_FILTER_FIELD = "sreTeam";
  * resourceTypes are SRE-specific, there is no CRE equivalent of this field.
  */
 export const ASSIGNMENT_GROUP_ID_FILTER_FIELD = "assignmentGroupId";
+/**
+ * A `time_card` widget's flat team filter (`POST /time-cards/search` and
+ * `/time-cards/aggregate`'s `filters.teamIds`): the cards of the teams'
+ * current members, as the Team Schedule's team ids (a CRE team's CRE group
+ * id, an SRE team's SRE group id). Its `__current_team__` resolves from
+ * `selectedTeamCreGroupId`, or `selectedTeamSreGroupId` for an SRE team.
+ */
+export const TIME_CARD_TEAM_IDS_FIELD = "teamIds";
 
 /**
  * Substitutes {@link CURRENT_TEAM_PLACEHOLDER} wherever it appears in a
@@ -113,7 +121,8 @@ export const ASSIGNMENT_GROUP_ID_FILTER_FIELD = "assignmentGroupId";
  * here" and doesn't.
  *
  * Every other filter entry, and every other resourceType's filters shape
- * that does not carry `assignmentTeamIds`, passes through unchanged.
+ * that does not carry `assignmentTeamIds` or a time card's `teamIds`, passes
+ * through unchanged.
  *
  * As of 2026-08-18 this also resolves the placeholder on the other filter
  * shape a non-case resourceType can carry it in: a flat `assignmentTeamIds`
@@ -134,6 +143,11 @@ export const ASSIGNMENT_GROUP_ID_FILTER_FIELD = "assignmentGroupId";
  * see the reasoning above, which applies unchanged. A literal team id
  * already present in `assignmentTeamIds` (i.e. not the placeholder) is left
  * alone, same as a literal value alongside the placeholder in the case DSL.
+ *
+ * A time card widget's flat `teamIds` is resolved the same way, from the
+ * selected team's CRE group id or, for an SRE team (which has none), its SRE
+ * group id, except that "All ABTs" expands to every team of the family
+ * instead of dropping it (see `resolveTimeCardTeamIdsPlaceholder`).
  */
 export function resolveTeamPlaceholder(
   filters: Record<string, unknown>,
@@ -150,7 +164,11 @@ export function resolveTeamPlaceholder(
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
   );
-  return resolveAssignmentTeamIdsPlaceholder(withCaseFieldFiltersResolved, selectedTeamCreGroupId);
+  return resolveTimeCardTeamIdsPlaceholder(
+    resolveAssignmentTeamIdsPlaceholder(withCaseFieldFiltersResolved, selectedTeamCreGroupId),
+    selectedTeamCreGroupId,
+    selectedTeamSreGroupId,
+  );
 }
 
 function resolveCaseFieldFilterPlaceholder(
@@ -232,6 +250,40 @@ function resolveAssignmentTeamIdsPlaceholder(
 }
 
 /**
+ * Resolves {@link CURRENT_TEAM_PLACEHOLDER} in a time card widget's flat
+ * `teamIds` ({@link TIME_CARD_TEAM_IDS_FIELD}). The selected team's Team
+ * Schedule id is its CRE group id, or its SRE group id on an SRE dashboard
+ * (an SRE team has no CRE group). Unlike the other team filters, "All ABTs"
+ * (arrays) does not drop it: the placeholder becomes every team of the
+ * family, so a widget grouped by team shows one bar per ABT and a total over
+ * the ABTs counts only their members' cards. With no team (a dashboard that
+ * is not team-based, or no group configured) the key is dropped, as for the
+ * other filters: every engineer's cards.
+ */
+function resolveTimeCardTeamIdsPlaceholder(
+  filters: Record<string, unknown>,
+  selectedTeamCreGroupId: string | string[] | undefined,
+  selectedTeamSreGroupId: string | string[] | undefined,
+): Record<string, unknown> {
+  const teamIds = filters[TIME_CARD_TEAM_IDS_FIELD];
+  if (!Array.isArray(teamIds) || !teamIds.includes(CURRENT_TEAM_PLACEHOLDER)) {
+    return filters;
+  }
+  const asList = (groupIds: string | string[] | undefined): string[] =>
+    typeof groupIds === "string" ? [groupIds] : (groupIds ?? []);
+  const creGroupIds = asList(selectedTeamCreGroupId);
+  const replacement = creGroupIds.length > 0 ? creGroupIds : asList(selectedTeamSreGroupId);
+  const resolved = [
+    ...new Set(teamIds.flatMap((v) => (v === CURRENT_TEAM_PLACEHOLDER ? replacement : [v]))),
+  ];
+  if (resolved.length === 0) {
+    const { [TIME_CARD_TEAM_IDS_FIELD]: _dropped, ...rest } = filters;
+    return rest;
+  }
+  return { ...filters, [TIME_CARD_TEAM_IDS_FIELD]: resolved };
+}
+
+/**
  * Whether `filters` carries {@link CURRENT_TEAM_PLACEHOLDER} anywhere
  * {@link resolveTeamPlaceholder} would actually resolve it — a `creTeam`,
  * `sreTeam`, or `assignmentGroupId` case-field-filter entry's `values`, or a
@@ -263,5 +315,8 @@ export function hasTeamPlaceholder(filters: Record<string, unknown>): boolean {
   }
 
   const assignmentTeamIds = filters.assignmentTeamIds;
-  return Array.isArray(assignmentTeamIds) && assignmentTeamIds.includes(CURRENT_TEAM_PLACEHOLDER);
+  if (Array.isArray(assignmentTeamIds) && assignmentTeamIds.includes(CURRENT_TEAM_PLACEHOLDER)) return true;
+
+  const teamIds = filters[TIME_CARD_TEAM_IDS_FIELD];
+  return Array.isArray(teamIds) && teamIds.includes(CURRENT_TEAM_PLACEHOLDER);
 }

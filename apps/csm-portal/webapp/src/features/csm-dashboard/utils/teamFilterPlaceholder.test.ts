@@ -458,6 +458,75 @@ describe("resolveTeamPlaceholder", () => {
       expect(resolveTeamPlaceholder(filters, undefined, undefined)).toBe(filters);
     });
   });
+
+  describe("a time card widget's flat teamIds", () => {
+    const rigel = "391737f4-0588-2f9f-9bdd-b18d39f83d9a";
+    const sirius = "542b0b7d-e52c-b6e9-a210-d06e57990c7d";
+
+    it("becomes the selected team's creGroupId, other ids and filters kept", () => {
+      const filters = { teamIds: [CURRENT_TEAM_PLACEHOLDER, sirius], states: ["approved"] };
+
+      expect(resolveTeamPlaceholder(filters, rigel, "sre-group")).toEqual({
+        teamIds: [rigel, sirius],
+        states: ["approved"],
+      });
+    });
+
+    it("becomes every team of the family under All ABTs, each once", () => {
+      const filters = { teamIds: [sirius, CURRENT_TEAM_PLACEHOLDER] };
+
+      expect(resolveTeamPlaceholder(filters, [rigel, sirius], undefined)).toEqual({ teamIds: [sirius, rigel] });
+    });
+
+    it("is dropped with no team, or a family with no groups", () => {
+      const filters = { teamIds: [CURRENT_TEAM_PLACEHOLDER], startDate: "2026-11-01" };
+
+      expect(resolveTeamPlaceholder(filters, undefined, undefined)).toEqual({ startDate: "2026-11-01" });
+      expect(resolveTeamPlaceholder(filters, [], [])).toEqual({ startDate: "2026-11-01" });
+    });
+
+    it("becomes an SRE team's SRE group id on an SRE dashboard (an SRE team has no CRE group)", () => {
+      const apollo = "f9e9df56-1215-e316-c6f2-ce9180c0af64";
+      const filters = { teamIds: [CURRENT_TEAM_PLACEHOLDER], states: ["approved"] };
+
+      expect(resolveTeamPlaceholder(filters, undefined, apollo)).toEqual({ teamIds: [apollo], states: ["approved"] });
+    });
+
+    it("becomes every SRE ABT under All ABTs on an SRE dashboard", () => {
+      const apollo = "f9e9df56-1215-e316-c6f2-ce9180c0af64";
+      const artemis = "f62f24d9-9df0-8b7e-6a21-1e7457cf77a1";
+
+      expect(resolveTeamPlaceholder({ teamIds: [CURRENT_TEAM_PLACEHOLDER] }, [], [apollo, artemis])).toEqual({
+        teamIds: [apollo, artemis],
+      });
+    });
+
+    it("prefers the CRE group id when the team has both", () => {
+      expect(resolveTeamPlaceholder({ teamIds: [CURRENT_TEAM_PLACEHOLDER] }, rigel, "sre-group")).toEqual({
+        teamIds: [rigel],
+      });
+      expect(resolveTeamPlaceholder({ teamIds: [CURRENT_TEAM_PLACEHOLDER] }, [rigel], ["sre-group"])).toEqual({
+        teamIds: [rigel],
+      });
+    });
+
+    it("keeps the other ids when the placeholder has no team", () => {
+      expect(resolveTeamPlaceholder({ teamIds: [sirius, CURRENT_TEAM_PLACEHOLDER] }, undefined, undefined)).toEqual({
+        teamIds: [sirius],
+      });
+    });
+
+    it("leaves resolved ids as they are", () => {
+      const filters = { teamIds: [rigel] };
+
+      expect(resolveTeamPlaceholder(filters, sirius, undefined)).toBe(filters);
+    });
+
+    it("is detected by hasTeamPlaceholder", () => {
+      expect(hasTeamPlaceholder({ teamIds: [CURRENT_TEAM_PLACEHOLDER] })).toBe(true);
+      expect(hasTeamPlaceholder({ teamIds: [rigel] })).toBe(false);
+    });
+  });
 });
 
 describe("hasTeamPlaceholder", () => {
