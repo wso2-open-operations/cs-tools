@@ -63,6 +63,8 @@ var (
 	pathItemOther = []string{"summary", "description", "parameters", "servers"}
 )
 
+// TestCloudStatusSpecIsReadOnly fails on any operation in cloud-status.openapi.yaml
+// other than a GET, and on a path item key that could hide one.
 func TestCloudStatusSpecIsReadOnly(t *testing.T) {
 	var s openAPISpec
 	readYAML(t, cloudStatusSpec, &s)
@@ -89,6 +91,9 @@ func isCloudStatusPath(path string) bool {
 	return path == "/health" || strings.HasPrefix(path, "/cloud-status/")
 }
 
+// TestCloudStatusSpecCopiesTheMainSpec fails unless the copy holds exactly
+// openapi.yaml's /health and /cloud-status/* paths, and each of its paths and
+// components equals openapi.yaml's.
 func TestCloudStatusSpecCopiesTheMainSpec(t *testing.T) {
 	var main, cloudStatus openAPISpec
 	readYAML(t, mainSpec, &main)
@@ -142,6 +147,8 @@ func collectRefs(v any, out *[]string) {
 	}
 }
 
+// TestCloudStatusSpecRefsResolve fails on a $ref in cloud-status.openapi.yaml
+// that does not resolve inside it, since Choreo publishes that file on its own.
 func TestCloudStatusSpecRefsResolve(t *testing.T) {
 	var doc map[string]any
 	readYAML(t, cloudStatusSpec, &doc)
@@ -164,6 +171,9 @@ func TestCloudStatusSpecRefsResolve(t *testing.T) {
 	}
 }
 
+// TestChoreoEndpointsNameTheirContracts fails unless component.yaml declares
+// exactly the two endpoints, each on the service's port with its own
+// contract; an endpoint without one would publish the wildcard route.
 func TestChoreoEndpointsNameTheirContracts(t *testing.T) {
 	var descriptor struct {
 		Endpoints []struct {
