@@ -393,9 +393,9 @@ Work notes on an incident often reference the alert or smart alert that
 triggered it. Those references render as an inline **View alert** / **View
 smart alert** link in the Activities timeline — click one to open a read-only
 detail popup (severity, source, environment, and a link to the incident it's
-tied to, if any) without leaving the page. A reference to an alert that's
-since been removed shows a "could no longer be found" message in the popup
-instead of an error.
+tied to, if any) without leaving the page. A reference whose details can't
+be loaded (removed, or not available yet) shows an "details are not available"
+note with the reference in the popup instead of an error.
 
 ## Problem management
 
