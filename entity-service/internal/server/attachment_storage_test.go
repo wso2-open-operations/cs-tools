@@ -17,10 +17,15 @@
 package server
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
 // TestAttachmentRequestTimeout pins which routes get a longer limit than the
@@ -47,5 +52,28 @@ func TestAttachmentRequestTimeout(t *testing.T) {
 		if long != tc.long || got != tc.want {
 			t.Errorf("%s %s = %v, %v; want %v, %v", tc.method, tc.path, got, long, tc.want, tc.long)
 		}
+	}
+}
+
+// TestWarnAttachmentSizeSettings: a warning is logged for a size gap or an
+// ignored direct maximum, and none for the defaults.
+func TestWarnAttachmentSizeSettings(t *testing.T) {
+	const mib = 1 << 20
+	warned := func(max, above, directMax int64) string {
+		var buf bytes.Buffer
+		old := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		defer slog.SetDefault(old)
+		warnAttachmentSizeSettings(&config.Config{AttachmentMaxBytes: max * mib, AttachmentDirectMinBytes: above * mib, AttachmentDirectMaxBytes: directMax * mib})
+		return buf.String()
+	}
+	if got := warned(10, 8, 1024); got != "" {
+		t.Errorf("defaults warned: %s", got)
+	}
+	if got := warned(5, 8, 1024); !strings.Contains(got, "ATTACHMENT_VIA_PORTAL_MAX_MB and ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB") {
+		t.Errorf("no warning for a size gap: %q", got)
+	}
+	if got := warned(10, 8, 10); !strings.Contains(got, "does not raise the limit for large files") {
+		t.Errorf("no warning for an ignored direct maximum: %q", got)
 	}
 }

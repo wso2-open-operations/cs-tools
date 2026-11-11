@@ -65,7 +65,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `ATTACHMENT_VIA_PORTAL_MAX_MB` | no | 10 | Largest file sent through the portal backend, in megabytes (named `ATTACHMENT_MAX_MB` before, which still works) (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
@@ -1966,8 +1966,12 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
 
-**Direct transfers (large files, off by default).** With `ATTACHMENT_DIRECT_TRANSFERS_ENABLED=true` a file above
-`ATTACHMENT_DIRECT_MIN_MB` (default 8) can go between the browser and Azure through short-lived signed links, so
+**Direct transfers (large files, off by default).** The settings are `ATTACHMENT_DIRECT_UPLOAD_ENABLED`, `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` and
+`ATTACHMENT_DIRECT_UPLOAD_MAX_MB`; the older names (`ATTACHMENT_DIRECT_TRANSFERS_ENABLED`, `ATTACHMENT_DIRECT_MIN_MB`, `ATTACHMENT_DIRECT_MAX_MB`) still work
+with a logged warning, and the new name wins when both are set. At startup a warning (`warnAttachmentSizeSettings`) names a
+size gap (`ATTACHMENT_VIA_PORTAL_MAX_MB` below `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`: a file in between is refused) or an
+`ATTACHMENT_DIRECT_UPLOAD_MAX_MB` that does not raise the limit (not above the portal limit). With `ATTACHMENT_DIRECT_UPLOAD_ENABLED=true` a file above
+`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` (default 8) can go between the browser and Azure through short-lived signed links, so
 its bytes pass through neither a portal backend nor this service (`WithDirectTransfers`, `LinkStore`,
 `azblobstore.UploadLinks` / `DownloadLink`). Smaller files and every inline image keep the path above, where each
 chunk and read is checked. Links are signed with the account key, so this needs `AZURE_STORAGE_KEY` or a
@@ -1983,7 +1987,7 @@ stays off and logs why (`directTransferOptions`). The storage account needs CORS
   size**: a link cannot cap how much is sent, so an oversize file is refused there and removed. Both paths stage the
   same block ids, so a browser that cannot reach Azure falls back to the chunk route for the same upload.
 - **Staged is decided when the upload starts.** `InitiateUpload` sets `staged` on the upload row (migration 0283) for
-  an ordinary file above `ATTACHMENT_DIRECT_MIN_MB` while links can be signed (`startsStaged`), answers
+  an ordinary file above `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` while links can be signed (`startsStaged`), answers
   `directUpload` from it, and every later step reads the row, never the current config. So the key and the size cap
   of an upload in progress stay the same if the flag is switched, rolled back or differs between replicas.
 - **The links never write the file readers use.** A write link is for a whole blob and stays valid after the confirm, so
@@ -2004,11 +2008,11 @@ stays off and logs why (`directTransferOptions`). The storage account needs CORS
   as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
   With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
   the webapps answer by streaming the file.
-- **Size limit.** A staged upload may be up to `ATTACHMENT_DIRECT_MAX_MB` (default and at most 1024 MB) instead of
-  `ATTACHMENT_MAX_MB` (`limitForUpload`); the confirm holds the file to it and the answer of the upload start reports
-  it as `maxBytes`. **The chunk route stays at `ATTACHMENT_MAX_MB`** (`ChunkRouteMaxBytes`): a file above it is refused
+- **Size limit.** A staged upload may be up to `ATTACHMENT_DIRECT_UPLOAD_MAX_MB` (default and at most 1024 MB) instead of
+  `ATTACHMENT_VIA_PORTAL_MAX_MB` (`limitForUpload`); the confirm holds the file to it and the answer of the upload start reports
+  it as `maxBytes`. **The chunk route stays at `ATTACHMENT_VIA_PORTAL_MAX_MB`** (`ChunkRouteMaxBytes`): a file above it is refused
   there with a message, so the portal backends and the gateway never carry more than they are built for. The browser's
-  fallback to the chunk route therefore works for a file up to `ATTACHMENT_MAX_MB` only; a larger one must go direct.
+  fallback to the chunk route therefore works for a file up to `ATTACHMENT_VIA_PORTAL_MAX_MB` only; a larger one must go direct.
 - **Expiry.** A link that expires part-way is not a failure: `POST .../upload-links` can be called again for a PENDING
   upload and returns fresh links, and the browser carries on with the chunks it has not sent (the staged blocks stay).
 - Links are credentials: the answers carry `Cache-Control: no-store` and nothing logs a link.
