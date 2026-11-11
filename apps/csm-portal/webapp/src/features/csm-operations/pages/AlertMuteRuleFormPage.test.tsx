@@ -35,8 +35,7 @@ function Detail(): JSX.Element {
 }
 
 function pickDuration(name: string): void {
-  fireEvent.mouseDown(screen.getByRole("combobox", { name: "Duration" }));
-  fireEvent.click(screen.getByRole("option", { name }));
+  fireEvent.click(within(screen.getByRole("radiogroup", { name: "Duration" })).getByRole("radio", { name }));
 }
 
 function renderAt(path: string): void {
@@ -72,13 +71,11 @@ describe("AlertMuteRuleFormPage", () => {
 
   it("defaults to 1 h from Create, with no date or time to pick, and offers 30 min, 2 h and Custom", () => {
     renderAt("/operations/alert-mute-rules/new");
-    const duration = screen.getByRole("combobox", { name: "Duration" });
-    expect(duration).toHaveTextContent("1 h");
-    fireEvent.mouseDown(duration);
+    const duration = within(screen.getByRole("radiogroup", { name: "Duration" }));
     for (const name of ["30 min", "1 h", "2 h", "Custom"]) {
-      expect(screen.getByRole("option", { name })).toBeInTheDocument();
+      expect(duration.getByRole("radio", { name })).toBeInTheDocument();
     }
-    fireEvent.click(screen.getByRole("option", { name: "1 h" }));
+    expect(duration.getByRole("radio", { name: "1 h" })).toBeChecked();
     expect(screen.queryByRole("combobox", { name: "Time zone" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Date" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/from when you create the rule until about/);

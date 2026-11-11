@@ -85,6 +85,7 @@ import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage"
 import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
 import AlertMuteRuleFormPage from "@features/csm-operations/pages/AlertMuteRuleFormPage";
 import AlertMuteRuleDetailPage from "@features/csm-operations/pages/AlertMuteRuleDetailPage";
+import AlertMuteRuleMutedAlertsPage from "@features/csm-operations/pages/AlertMuteRuleMutedAlertsPage";
 import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
 import StandardChangeTemplateDetailPage from "@features/csm-operations/pages/StandardChangeTemplateDetailPage";
 import StandardChangeProposalPage from "@features/csm-operations/pages/StandardChangeProposalPage";
@@ -612,6 +613,7 @@ export default function App(): JSX.Element {
                       }
                     />
                     <Route path="alert-mute-rules/:id" element={<AlertMuteRuleDetailPage />} />
+                    <Route path="alert-mute-rules/:id/muted-alerts" element={<AlertMuteRuleMutedAlertsPage />} />
                     <Route
                       path="alert-mute-rules/:id/edit"
                       element={

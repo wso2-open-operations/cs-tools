@@ -16,12 +16,8 @@
 
 import {
   Box,
-  Button,
   Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
+  Paper,
   Skeleton,
   Table,
   TableBody,
@@ -42,6 +38,7 @@ import type {
 } from "@features/csm-operations/types/alertMuteRules";
 import {
   MUTED_ALERTS_ROWS_PER_PAGE_OPTIONS,
+  mutedAlertsSummaryText,
 } from "@features/csm-operations/utils/alertMuteRules";
 
 const OUTCOME_LABELS: Record<MutedAlertOutcome, string> = {
@@ -93,9 +90,8 @@ function OutcomeCell({
 }
 
 interface Props {
-  open: boolean;
-  onClose: () => void;
-  title: string;
+  /** A rule that hasn't started has muted nothing yet. */
+  scheduled: boolean;
   data: AlertMuteRuleMutedAlertsResponse | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -105,11 +101,9 @@ interface Props {
   onRowsPerPageChange: (rows: number) => void;
 }
 
-/** The rule page's "Muted alerts" dialog: one row per group of alerts the rule muted, and what became of it. */
+/** The rule page's "Muted alerts" section: one row per group of alerts the rule muted, and what became of it. */
 export default function AlertMuteRuleMutedAlerts({
-  open,
-  onClose,
-  title,
+  scheduled,
   data,
   isLoading,
   error,
@@ -119,15 +113,25 @@ export default function AlertMuteRuleMutedAlerts({
   onRowsPerPageChange,
 }: Props): JSX.Element {
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth aria-labelledby="muted-alerts-title">
-      <DialogTitle id="muted-alerts-title">
-        {title}
+    <Paper
+      variant="outlined"
+      component="section"
+      aria-labelledby="muted-alerts-title"
+      sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}
+    >
+      <Box>
+        <Typography variant="subtitle2" id="muted-alerts-title">
+          {`Muted alerts${data && data.total > 0 ? ` · ${mutedAlertsSummaryText(data)}` : ""}`}
+        </Typography>
         <Typography variant="caption" color="text.secondary" component="div">
           Alerts are grouped by fingerprint. Kept by the alerting service for 30 days.
         </Typography>
-      </DialogTitle>
-      <DialogContent dividers>
-      {error ? (
+      </Box>
+      {scheduled ? (
+        <Typography variant="body2" color="text.secondary">
+          Nothing is muted until the rule starts.
+        </Typography>
+      ) : error ? (
         <QueryErrorState
           message={error.message || "Couldn't load muted alerts."}
           error={error}
@@ -231,10 +235,6 @@ export default function AlertMuteRuleMutedAlerts({
           />
         </>
       )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
-    </Dialog>
+    </Paper>
   );
 }
