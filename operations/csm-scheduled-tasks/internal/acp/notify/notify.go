@@ -108,8 +108,10 @@ type Notice struct {
 	// distinct in the log.
 	ResolvedVia recipients.ResolvedVia
 	// StandingAsCC puts the notifier's standing recipients in "cc" instead
-	// of "to", for a notice addressed to one person (the end-date mismatch
-	// warning). When nobody is left in "to" they take its place.
+	// of "to", for a notice addressed to named people (the end-date mismatch
+	// warning). "to" and "cc" are each de-duplicated, and an address in "to"
+	// is not repeated in "cc". When nobody is left in "to" the standing
+	// recipients take its place.
 	StandingAsCC bool
 }
 

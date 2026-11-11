@@ -632,11 +632,11 @@ both places.
   (the same `closure.Decide` test as the cascade, so a window already notified, a completed suspension or a date
   far out does nothing and warns nobody), the end-date track does nothing this run: no notice, no suspension,
   no state write and no renewal reset (decided in `processProject` before any cascade runs). The invoice track
-  is unaffected. The Account Manager is sent a short warning asking to correct the end date in Salesforce, **only
+  is unaffected. The Account Manager and the Renewal Manager (not the Technical Owner) are sent a short warning asking to correct the end date in Salesforce, **only
   on `ACP_SCREENING_FULL_SWEEP_WEEKDAY`** (Colombo), screening on or off, so it repeats at most weekly with no new
-  persisted state; on other days the project is skipped with an INFO line. To = the Account Manager, Cc =
-  `ACP_STANDING_CC_RECIPIENTS` (`Notice.StandingAsCC`); with no Account Manager email the standing lists are To;
-  with neither, a WARN and nothing is sent. It goes through the same notifier as every notice, so emails off,
+  persisted state; on other days the project is skipped with an INFO line. To = the Account Manager and the Renewal Manager (each address once, case-insensitive, empty ones dropped), Cc =
+  `ACP_STANDING_CC_RECIPIENTS` (`Notice.StandingAsCC`); with neither person's email the standing lists are To;
+  with no standing lists either, a WARN and nothing is sent. It goes through the same notifier as every notice, so emails off,
   the `debug` redirect and the WSO2-only filter apply. It does not count toward `ACP_DAILY_LIMIT` (a project that
   only warns is not "acted"), so warnings cannot crowd out real notices. A project with a CSM date past
   the screening horizon is screened out on a screened day and reaches this guard on the full-sweep day. With

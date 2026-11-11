@@ -58,11 +58,18 @@ func mismatchProject(csmDays, sfDays *int, warnDay bool) project {
 
 func ip(i int) *int { return &i }
 
-func mismatchReader(amEmail string) *mockEntityReader {
-	account := `{"hasPrimaryPartner":false}`
+func mismatchReader(amEmail string, rmEmail ...string) *mockEntityReader {
+	account := `{"hasPrimaryPartner":false`
 	if amEmail != "" {
-		account = `{"hasPrimaryPartner":false,"accountManager":{"id":"u1","name":"Jane Doe","email":"` + amEmail + `"}}`
+		account += `,"accountManager":{"id":"u1","name":"Jane Doe","email":"` + amEmail + `"}`
 	}
+	if len(rmEmail) > 0 && rmEmail[0] != "" {
+		account += `,"renewalAccountManager":{"id":"u2","name":"Jane Doe","email":"` + rmEmail[0] + `"}`
+	}
+	if len(rmEmail) > 1 {
+		account += `,"technicalOwner":{"id":"u3","name":"Jane Doe","email":"` + rmEmail[1] + `"}`
+	}
+	account += `}`
 	return &mockEntityReader{getAccountFn: func(context.Context, string) ([]byte, error) { return []byte(account), nil }}
 }
 
@@ -147,7 +154,7 @@ func TestProcessProject_EndDateMismatch_WarningContent(t *testing.T) {
 	if n.Subject != "[ACP] End Date Mismatch for Project Example Project of Example Corp" {
 		t.Errorf("subject = %q", n.Subject)
 	}
-	for _, want := range []string{"Example Project", "EXAMPLESUB", "2026-12-18", "2026-06-08", "No notice or suspension was sent", "Dear Jane Doe"} {
+	for _, want := range []string{"Example Project", "EXAMPLESUB", "2026-12-18", "2026-06-08", "No notice or suspension was sent", "Dear Account Manager and Renewal Manager"} {
 		if !strings.Contains(n.Body, want) {
 			t.Errorf("body lacks %q:\n%s", want, n.Body)
 		}
@@ -166,28 +173,34 @@ func TestProcessProject_EndDateMismatch_WarningContent(t *testing.T) {
 // standing lists; no Account Manager: the standing lists are To; neither:
 // nothing is sent.
 func TestProcessProject_EndDateMismatch_Recipients(t *testing.T) {
+	lists := []string{"lists@example.com"}
 	tests := []struct {
 		name       string
-		am         string
+		am, rm, to string // to: the technical owner's address, never a recipient
 		standing   []string
 		wantTo     []string
 		wantCc     []string
-		wantNoMail bool
 	}{
-		{"account manager and standing lists", "am@example.com", []string{"lists@example.com"}, []string{"am@example.com"}, []string{"lists@example.com"}, false},
-		{"account manager only", "am@example.com", nil, []string{"am@example.com"}, nil, false},
-		{"no account manager: standing lists are to", "", []string{"lists@example.com", "more@example.com"}, []string{"lists@example.com", "more@example.com"}, nil, false},
-		{"no account manager and no standing lists", "", nil, nil, nil, true},
+		{"both people and standing lists", "am@example.com", "rm@example.com", "", lists, []string{"am@example.com", "rm@example.com"}, lists},
+		{"shared address once, any case", "am@example.com", "AM@Example.com", "", lists, []string{"am@example.com"}, lists},
+		{"only the renewal manager", "", "rm@example.com", "", lists, []string{"rm@example.com"}, lists},
+		{"only the account manager", "am@example.com", "", "", lists, []string{"am@example.com"}, lists},
+		{"both people, no standing lists", "am@example.com", "rm@example.com", "", nil, []string{"am@example.com", "rm@example.com"}, nil},
+		{"technical owner is not added", "am@example.com", "rm@example.com", "to@example.com", lists, []string{"am@example.com", "rm@example.com"}, lists},
+		{"a person also in the standing lists is not repeated in cc", "am@example.com", "", "", []string{"AM@example.com", "lists@example.com"}, []string{"am@example.com"}, lists},
+		{"neither person: standing lists are to", "", "", "", []string{"lists@example.com", "more@example.com"}, []string{"lists@example.com", "more@example.com"}, nil},
+		{"technical owner alone is not a recipient", "", "", "to@example.com", lists, lists, nil},
+		{"neither person and no standing lists: nothing", "", "", "", nil, nil, nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sender := &captureSender{}
 			ntf := &notify.EmailNotifier{Sender: sender, Logger: discardSlog(), AllowNonWSO2Recipients: true, StandingRecipients: tc.standing}
 			proj := mismatchProject(ip(200), ip(7), true)
-			if _, err := processProject(context.Background(), mismatchReader(tc.am), &mockProjectUpdater{}, ntf, mismatchNow, proj); err != nil {
+			if _, err := processProject(context.Background(), mismatchReader(tc.am, tc.rm, tc.to), &mockProjectUpdater{}, ntf, mismatchNow, proj); err != nil {
 				t.Fatal(err)
 			}
-			if tc.wantNoMail {
+			if tc.wantTo == nil {
 				if len(sender.mails) != 0 {
 					t.Fatalf("mails = %+v, want none", sender.mails)
 				}

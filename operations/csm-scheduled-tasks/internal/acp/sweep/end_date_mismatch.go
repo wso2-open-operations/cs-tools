@@ -24,7 +24,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/closure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/recipients"
 )
 
 // A project's end date is decided from Salesforce's (see salesforceDetails),
@@ -57,28 +56,25 @@ func endDateMismatchSubject(projectName, accountName string) string {
 	return fmt.Sprintf("[ACP] End Date Mismatch for Project %s", projectOfAccount(projectName, accountName))
 }
 
-const endDateMismatchBodyTemplate = `Dear %[1]s
+const endDateMismatchBodyTemplate = `Dear Account Manager and Renewal Manager
 
 The end date of the following project is later in CSM than in Salesforce.
 
-Project Name: %[2]s
+Project Name: %[1]s
 
-Project Key: %[3]s
+Project Key: %[2]s
 
-CSM End Date: %[4]s
+CSM End Date: %[3]s
 
-Salesforce End Date: %[5]s
+Salesforce End Date: %[4]s
 
 No notice or suspension was sent for this project because of the mismatch. Please correct the end date in Salesforce so that it matches CSM. If the dates still differ, you may receive this message again next week.
 
 Best Regards,
 WSO2 Team`
 
-func endDateMismatchBody(proj project, accountManagerName string) string {
-	if accountManagerName == "" {
-		accountManagerName = "Account Manager"
-	}
-	return fmt.Sprintf(endDateMismatchBodyTemplate, accountManagerName, proj.Name, proj.ProjectKey,
+func endDateMismatchBody(proj project) string {
+	return fmt.Sprintf(endDateMismatchBodyTemplate, proj.Name, proj.ProjectKey,
 		formatDate(proj.csmEndDate), formatDate(proj.EndDate))
 }
 
@@ -108,8 +104,9 @@ func warnEndDateMismatch(ctx context.Context, reader entityReader, ntf notifier,
 	notice := baseNotice(proj, decision.Window)
 	notice.EndDate = timeValue(proj.EndDate)
 	notice.Subject = endDateMismatchSubject(proj.Name, accountName(proj))
-	notice.Body = endDateMismatchBody(proj, contacts.AccountOwner.Name)
-	notice.Recipients = notify.Recipients{AccountOwner: recipients.Contact{Name: contacts.AccountOwner.Name, Email: contacts.AccountOwner.Email}}
+	notice.Body = endDateMismatchBody(proj)
+	// The Account Manager and the Renewal Manager; not the Technical Owner.
+	notice.Recipients = notify.Recipients{AccountOwner: contacts.AccountOwner, RenewalManager: contacts.RenewalManager}
 	notice.StandingAsCC = true
 
 	delivered, err := ntf.Send(ctx, notice)

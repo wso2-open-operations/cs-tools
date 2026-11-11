@@ -694,3 +694,29 @@ func TestEmailNotifier_Send_StandingAsCC(t *testing.T) {
 		})
 	}
 }
+
+// StandingAsCC with two people: both are To once, an address shared by them or
+// repeated in the standing lists is not listed twice, empty ones are dropped.
+func TestEmailNotifier_Send_StandingAsCC_TwoPeopleDeduplicated(t *testing.T) {
+	sender := &mockEmailSender{}
+	n := &EmailNotifier{Sender: sender, Logger: discardLogger(), AllowNonWSO2Recipients: true,
+		StandingRecipients: []string{"Jane.Doe@example.com", "lists@example.com"}}
+	_, err := n.Send(context.Background(), Notice{
+		Subject: "s", Body: "b", StandingAsCC: true,
+		Recipients: Recipients{
+			AccountOwner:   recipients.Contact{Email: "jane.doe@example.com"},
+			RenewalManager: recipients.Contact{Email: "JANE.DOE@example.com"},
+			TechnicalOwner: recipients.Contact{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(sender.calls))
+	}
+	c := sender.calls[0]
+	if strings.Join(c.to, ",") != "jane.doe@example.com" || strings.Join(c.cc, ",") != "lists@example.com" {
+		t.Errorf("to=%v cc=%v, want to=[jane.doe@example.com] cc=[lists@example.com]", c.to, c.cc)
+	}
+}

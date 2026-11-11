@@ -247,8 +247,9 @@ func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	// be recorded as sent, and the project suspended on day 0 untold.
 	customerReached := customerFacing && len(n.filterRecipients(to)) > 0
 	if notice.StandingAsCC {
-		to = n.filterRecipients(to)
+		to = uniqueEmails(n.filterRecipients(to))
 		cc = n.filterRecipients(append(cc, n.StandingRecipients...))
+		cc = uniqueEmails(withoutEmails(cc, to))
 		if len(to) == 0 {
 			to, cc = cc, nil
 		}
@@ -312,6 +313,29 @@ func recipientsToToCC(r Recipients) (to, cc []string) {
 	}
 	to = appendIfNonEmpty(to, r.AccountOwner.Email, r.RenewalManager.Email, r.TechnicalOwner.Email)
 	return to, nil
+}
+
+// uniqueEmails lists each address once (compared case-insensitively), in order.
+func uniqueEmails(list []string) []string {
+	return withoutEmails(list, nil)
+}
+
+// withoutEmails returns list without the addresses in drop, and without
+// repeats, compared case-insensitively.
+func withoutEmails(list, drop []string) []string {
+	seen := map[string]bool{}
+	for _, d := range drop {
+		seen[strings.ToLower(d)] = true
+	}
+	var out []string
+	for _, e := range list {
+		k := strings.ToLower(e)
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func appendIfNonEmpty(list []string, emails ...string) []string {
