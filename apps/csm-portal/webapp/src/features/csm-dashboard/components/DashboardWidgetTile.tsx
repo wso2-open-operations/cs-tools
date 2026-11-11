@@ -64,6 +64,13 @@ import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieCh
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
 import { formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
 import DashboardLineChart from "@features/csm-dashboard/components/DashboardLineChart";
+import { TASKS_FEATURE_ENABLED } from "@constants/featureFlags";
+
+/** Backend answers that mean "this resource's search does not exist yet" rather
+ * than "something broke": the widget shows a calm unavailable note for these,
+ * not the generic load-failure text. */
+const UNAVAILABLE_STATUSES = new Set([404, 503]);
+const TASKS_UNAVAILABLE_MESSAGE = "Tasks are not available yet";
 
 // Hides the per-widget refresh button by default and reveals it on hover or
 // keyboard focus of the ancestor Card carrying the matching
@@ -471,14 +478,22 @@ function DashboardWidgetTile({
   // instead — skip this one's own network call rather than wasting it, but
   // still call the hook unconditionally (rules of hooks; a widget's shape
   // never changes across this component's lifetime).
-  const { data, isLoading: isWidgetDataLoading, isError } = useWidgetData({
+  // Tasks search is not served yet: while the flag is off the request is never
+  // issued at all (see `enabled` below).
+  const tasksFlagOff = resourceType === "task" && !TASKS_FEATURE_ENABLED;
+  const {
+    data,
+    isLoading: isWidgetDataLoading,
+    isError,
+    error: widgetDataError,
+  } = useWidgetData({
     widgetId,
     resourceType,
     filters,
     shape,
     distinctBy,
     listLimit,
-    enabled: shape !== "pie" && shape !== "bar" && shape !== "line" && isVisible,
+    enabled: shape !== "pie" && shape !== "bar" && shape !== "line" && isVisible && !tasksFlagOff,
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
     sortBy,
@@ -574,6 +589,18 @@ function DashboardWidgetTile({
   // shape "pie"/"bar" reads `pieData.isLoading` instead, which already
   // folds in the same `isVisible` gate via the `enabled` argument above.
   const isLoading = isWidgetDataLoading || awaitingCurrentUser || !isVisible;
+  // The flag, or (once it is flipped) the backend itself saying the search is
+  // not there: a task widget then shows the unavailable note, never the
+  // load-failure text.
+  const isUnavailable =
+    resourceType === "task" &&
+    (tasksFlagOff ||
+      (isError && UNAVAILABLE_STATUSES.has((widgetDataError as { status?: number } | null)?.status ?? 0)));
+  const unavailableNote = (
+    <Typography variant="body2" color="text.secondary" role="status">
+      {TASKS_UNAVAILABLE_MESSAGE}
+    </Typography>
+  );
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   // Thousands separators for shape "count"'s big number -- used both in the
   // visible Typography and the tile's aria-label, so both stay in sync.
@@ -737,8 +764,10 @@ function DashboardWidgetTile({
             DEFAULT_LIST_LIMIT) — this badge next to the title is the only
             place the widget's own full count is visible, since "View more"
             only appears once `total` exceeds that cap. */}
-        {renderHeader(!isLoading && !isError ? total : undefined)}
-        {isLoading ? (
+        {renderHeader(!isLoading && !isError && !isUnavailable ? total : undefined)}
+        {isUnavailable ? (
+          <Box sx={{ mt: 1 }}>{unavailableNote}</Box>
+        ) : isLoading ? (
           <Skeleton variant="rounded" height={28 * (listLimit ?? 4) + 40} sx={{ mt: 1 }} />
         ) : isError ? (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -1009,7 +1038,9 @@ function DashboardWidgetTile({
   }
 
   let body: ReactNode;
-  if (isLoading) {
+  if (isUnavailable) {
+    body = unavailableNote;
+  } else if (isLoading) {
     body = <Skeleton variant="rounded" height={48} />;
   } else if (isError) {
     body = (
@@ -1119,7 +1150,7 @@ function DashboardWidgetTile({
         // layer above this anchor, not inside it as descendant text anymore
         // (that's the whole point -- see the comment above), so it needs its
         // own accessible name instead of inheriting one from its content.
-        aria-label={`${resolvedDisplayName}: ${formattedCount}`}
+        aria-label={`${resolvedDisplayName}: ${isUnavailable ? TASKS_UNAVAILABLE_MESSAGE : formattedCount}`}
         sx={{
           position: "absolute",
           inset: 0,

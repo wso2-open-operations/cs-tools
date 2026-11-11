@@ -59,7 +59,7 @@ export default function AlertDetailModal({
         {isLoading ? (
           <SnLinkLoadingState />
         ) : !data || isError ? (
-          <SnLinkNotFoundState kind="alert" />
+          <SnLinkNotFoundState kind="alert" reference={alertId} />
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>

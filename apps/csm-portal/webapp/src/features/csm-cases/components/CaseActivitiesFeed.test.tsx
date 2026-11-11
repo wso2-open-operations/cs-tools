@@ -561,7 +561,7 @@ describe("CaseActivitiesFeed — alert/smart-alert link in a comment", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "View smart alert" }));
-    expect(screen.getByText(/could no longer be found/)).toBeInTheDocument();
+    expect(screen.getByText("Smart alert details are not available")).toBeInTheDocument();
     expect(mockedUseGetSmartAlert).toHaveBeenCalledWith(SMART_ALERT_UUID);
   });
 });

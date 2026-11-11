@@ -341,6 +341,59 @@ describe("DashboardWidgetTile", () => {
     );
   });
 
+  it("task list widget shows the unavailable note without issuing any request while tasks are off", async () => {
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_tasks"
+        displayName="My Tasks"
+        resourceType="task"
+        shape="list"
+        filters={{}}
+      />,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Tasks are not available yet");
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("task count widget shows the unavailable note, and says so in its link name, without a request", async () => {
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_tasks_count"
+        displayName="My Tasks"
+        resourceType="task"
+        shape="count"
+        filters={{}}
+      />,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Tasks are not available yet");
+    expect(screen.getByRole("link", { name: "My Tasks: Tasks are not available yet" })).toBeInTheDocument();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it.each([404, 503])(
+    "task widget shows the unavailable note, not the load-failure text, when tasks are on and search answers %i",
+    async (status) => {
+      vi.resetModules();
+      vi.doMock("@constants/featureFlags", () => ({ TASKS_FEATURE_ENABLED: true }));
+      const { default: Tile } = await import("@features/csm-dashboard/components/DashboardWidgetTile");
+      postMock.mockRejectedValue(Object.assign(new Error("not available"), { status }));
+
+      renderWithClient(
+        <Tile widgetId="my_tasks" displayName="My Tasks" resourceType="task" shape="list" filters={{}} />,
+      );
+
+      expect(await screen.findByRole("status", {}, { timeout: 5000 })).toHaveTextContent(
+        "Tasks are not available yet",
+      );
+      expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+      vi.doUnmock("@constants/featureFlags");
+    },
+    10000,
+  );
+
   it("issues no search at all while the signed-in user's profile is still loading, rather than one without the user filter", async () => {
     mockCurrentUserId = undefined;
     postMock.mockResolvedValue({ total: 999, cases: [], limit: 1, offset: 0, hasMore: false });
