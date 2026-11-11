@@ -23,15 +23,25 @@
 -- reminder, no suspension. This migration backfills the NULLs and sets the
 -- column DEFAULT so any insert that omits the columns gets OPEN.
 --
+-- Backfill order matters. The three sub-states (end date, invoice due date,
+-- compliance violation) go NULL -> OPEN first. wso2_closure_state is then
+-- derived from them where it is NULL, with the same rule the application uses
+-- (wso2ClosureStateRule in project_repo.go): SUSPENDED when the end date state
+-- is CLOSED or SUSPENDED, the invoice state starts with SUSPENDED, or the
+-- compliance state is SUSPENDED; else RESTRICTED when the end date state is
+-- RESTRICTED or the invoice state starts with RESTRICTED; else OPEN. A
+-- constant OPEN would wrongly reopen a project whose sub-states say it is
+-- closed or suspended. Keep the CASE below in step with that constant.
+--
 -- The columns stay nullable on purpose: existing readers already treat NULL
 -- as "not restricted" (project_repo.go, deployed_product_repo.go), and a
 -- NOT NULL would make any writer that sets an explicit NULL fail.
 --
--- Idempotent: the UPDATE touches only rows whose column IS NULL (a non-NULL
+-- Idempotent: every UPDATE touches only rows whose column IS NULL (a non-NULL
 -- value is never changed), and SET DEFAULT can be repeated. updated_on and
 -- updated_by are left alone, so the backfill does not look like a user edit.
 --
--- Locking and size: the project table has about 2200 rows. The UPDATE is one
+-- Locking and size: the project table has about 2200 rows. Each UPDATE is one
 -- statement that takes row locks only on rows it changes, in well under a
 -- second. SET DEFAULT is a catalog-only change (no table rewrite). Each
 -- ALTER TABLE needs an ACCESS EXCLUSIVE lock for an instant, so the
@@ -41,10 +51,6 @@
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
-
-UPDATE project
-SET wso2_closure_state = 'OPEN'
-WHERE wso2_closure_state IS NULL;
 
 UPDATE project
 SET end_date_closure_state = 'OPEN'
@@ -57,6 +63,16 @@ WHERE invoice_due_date_closure_state IS NULL;
 UPDATE project
 SET compliance_violation_closure_state = 'OPEN'
 WHERE compliance_violation_closure_state IS NULL;
+
+UPDATE project
+SET wso2_closure_state = (CASE
+	WHEN end_date_closure_state::TEXT IN ('CLOSED', 'SUSPENDED')
+	  OR invoice_due_date_closure_state::TEXT LIKE 'SUSPENDED%'
+	  OR compliance_violation_closure_state::TEXT = 'SUSPENDED' THEN 'SUSPENDED'
+	WHEN end_date_closure_state::TEXT = 'RESTRICTED'
+	  OR invoice_due_date_closure_state::TEXT LIKE 'RESTRICTED%' THEN 'RESTRICTED'
+	ELSE 'OPEN' END)::wso2_closure_state_enum
+WHERE wso2_closure_state IS NULL;
 
 ALTER TABLE project
     ALTER COLUMN wso2_closure_state SET DEFAULT 'OPEN',
