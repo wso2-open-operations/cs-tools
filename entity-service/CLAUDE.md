@@ -4804,8 +4804,21 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
 - **Validation is the ServiceNow service's, restated** (`validateCaseTypeTransfer`): type
   aliases resolved first; nothing else rides along but the transfer's own companions;
   `case` needs severity AND issue type, `engagement` needs both engagement fields,
-  `service_request` needs a catalog, a catalog item and at least one answer (the answers are
-  not stored on plain Postgres, as on create), `security_report_analysis` takes none.
+  `service_request` needs a catalog, a catalog item and at least one answer,
+  `security_report_analysis` takes none.
+- **A service request keeps its catalog request in `service_request.json_data`** (no
+  migration; `ServiceRequestCatalogData` in `service_request_catalog.go` is the only author):
+  `{"catalogId": "<uuid>", "catalogItemId": "<uuid>", "variables": {"<variable uuid>": "<answer>"}}`.
+  The keys do not start with `u_`, so they share the object with the flat `u_*` template
+  fields of records raised from GitHub; readers must ignore keys they do not know. Bounds:
+  200 answers, 8 KiB per answer, 64 KiB of answers in all, no repeated variable, no NUL.
+  They are checked in `validateCaseTypeTransfer`, before any other system is asked, and again
+  by the repository. `GetCaseByID` reads them back as `catalog`, `catalogItem` and
+  `variables` (names from `sr_category`/`catalog_item`/`catalog_variable`, ordered by the
+  question's `order`; a variable no longer in the catalog keeps its id as its name). Natively
+  created service requests do not store a catalog request yet. A GitHub issue edit rewrites
+  `json_data` whole (`github_mutation_repo.go`), so it would drop these keys from a record
+  that is both transferred and GitHub-linked.
   `announcement` and the `hosting_*` types are never a source or a target; the same type is
   refused.
 - **Attachments needed a migration.** `case_attachment.case_id` referenced `"case"(id)` with

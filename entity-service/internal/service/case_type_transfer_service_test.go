@@ -222,6 +222,18 @@ func TestValidateCaseTypeTransfer(t *testing.T) {
 			wantErr: "catalogId",
 		},
 		{
+			name: "service request answers must not repeat a variable",
+			req: domain.UpdateCaseRequest{Type: transferStr("service_request"), CatalogID: &catalog, CatalogItemID: &item,
+				Variables: []domain.Variable{{ID: "0c1c1c1e-0000-4000-8000-000000000009", Value: "x"}, {ID: "0C1C1C1E-0000-4000-8000-000000000009", Value: "y"}}},
+			wantErr: "repeats a variable",
+		},
+		{
+			name: "service request answers are bounded in size",
+			req: domain.UpdateCaseRequest{Type: transferStr("service_request"), CatalogID: &catalog, CatalogItemID: &item,
+				Variables: []domain.Variable{{ID: "0c1c1c1e-0000-4000-8000-000000000009", Value: strings.Repeat("x", repository.MaxServiceRequestVariableValueBytes+1)}}},
+			wantErr: "longer than",
+		},
+		{
 			name:    "security report analysis takes no severity",
 			req:     domain.UpdateCaseRequest{Type: transferStr("security_report_analysis"), Severity: transferSev(domain.CaseSeverityLow)},
 			wantErr: "severity may only accompany",
@@ -606,4 +618,31 @@ func TestServiceNowTransferContext(t *testing.T) {
 			t.Errorf("a context with no deadline should be returned as is")
 		}
 	})
+}
+
+// A transfer into a service request hands the repository the catalog item and
+// the answers to store; every other target leaves them empty.
+func TestCaseService_UpdateCase_ServiceRequestTransferCarriesTheCatalogRequest(t *testing.T) {
+	repo := newTransferStubRepo(repository.CaseTypeTransferResult{PreviousType: "case"})
+	svc := WithCaseTypeTransfer(NewCaseService(repo, transferUsers(), nil, alwaysUnrestrictedAccess{}, nil), repo)
+	catalog, item := "0c1c1c1e-0000-4000-8000-000000000007", "0c1c1c1e-0000-4000-8000-000000000008"
+	vars := []domain.Variable{{ID: "0c1c1c1e-0000-4000-8000-000000000009", Value: "answer"}}
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: transferCaseID, Type: transferStr("service_request"), CatalogID: &catalog, CatalogItemID: &item, Variables: vars}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := svc.UpdateCase(ctx, engagementTransfer()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.plans) != 2 {
+		t.Fatalf("want 2 transfers, got %d", len(repo.plans))
+	}
+	sr := repo.plans[0]
+	if sr.TargetType != "service_request" || sr.CatalogID != catalog || sr.CatalogItemID != item || len(sr.Variables) != 1 || sr.Variables[0] != vars[0] {
+		t.Errorf("service request plan = %+v", sr)
+	}
+	if eng := repo.plans[1]; eng.CatalogID != "" || eng.CatalogItemID != "" || eng.Variables != nil {
+		t.Errorf("an engagement plan carries catalog data: %+v", eng)
+	}
 }

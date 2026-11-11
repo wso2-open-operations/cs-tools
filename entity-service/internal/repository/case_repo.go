@@ -1966,6 +1966,17 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		lower := strings.ToLower(*caseType)
 		cv.Type = &lower
 	}
+	// A service request keeps the catalog item it was raised from, and the
+	// answers given, in service_request.json_data (see ServiceRequestCatalogData).
+	// Decoration, not identity: a failure to read it is logged and the case is
+	// still returned without it.
+	if cv.Type != nil && *cv.Type == "service_request" {
+		sr, srErr := r.readServiceRequestCatalog(ctx, cv.ID)
+		if srErr != nil {
+			slog.WarnContext(ctx, "get case by id: could not read the service request's catalog data", "caseId", cv.ID, "error", srErr)
+		}
+		cv.Catalog, cv.CatalogItem, cv.Variables = sr.catalog, sr.catalogItem, sr.variables
+	}
 	// engagement_type_enum is UPPER_SNAKE_CASE ("MIGRATION"); CaseView.EngagementType
 	// carries the lowercase domain value ("migration"), matching SearchCases' own
 	// identical conversion (this column, this same lower-casing) and what
