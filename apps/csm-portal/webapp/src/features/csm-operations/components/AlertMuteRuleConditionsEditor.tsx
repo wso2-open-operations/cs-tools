@@ -38,6 +38,7 @@ import {
   ALERT_MUTE_RULE_VALUE_SUGGESTIONS,
   MAX_ALERT_MUTE_RULE_CONDITION_VALUE,
   REQUIRED_ALERT_MUTE_RULE_FIELDS,
+  environmentAliasText,
 } from "@features/csm-operations/utils/alertMuteRules";
 
 interface ValueFieldProps {
@@ -169,8 +170,10 @@ export default function AlertMuteRuleConditionsEditor({
               </MenuItem>
             ))}
           </Select>
-          {environmentIndex >= 0 && rowErrors?.[environmentIndex] && (
+          {environmentIndex >= 0 && rowErrors?.[environmentIndex] ? (
             <FormHelperText>{rowErrors[environmentIndex]}</FormHelperText>
+          ) : (
+            environmentAliasText(environment) && <FormHelperText>{environmentAliasText(environment)}</FormHelperText>
           )}
         </FormControl>
       </Box>

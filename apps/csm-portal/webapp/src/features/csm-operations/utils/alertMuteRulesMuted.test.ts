@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  environmentAliasText,
   mutedAlertsSummaryText,
   pickerInstant,
   SKIPPED_WALL_TIME,
@@ -60,5 +61,13 @@ describe("pickerInstant", () => {
       true,
     );
     expect(errors.startOn).toMatch(/doesn't exist in this time zone/);
+  });
+});
+
+describe("environmentAliasText", () => {
+  it("names the other spellings an environment matches", () => {
+    expect(environmentAliasText("qa")).toBe("Also matches alerts whose environment is test and testing.");
+    expect(environmentAliasText("production")).toBe("Also matches alerts whose environment is prod, prd and live.");
+    expect(environmentAliasText("uat")).toBe("");
   });
 });
