@@ -389,6 +389,27 @@ func TestStagedUploads(t *testing.T) {
 			t.Fatalf("second confirm: %v", err)
 		}
 	})
+	t.Run("a copy that is not the size that was checked is not confirmed", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 9*mib)
+		blob := newFakeBlob()
+		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", mib))}
+		blob.copyShort = true
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		req := domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 2}
+		_, err := svc.CompleteUpload(ctx(), req)
+		wantErr[*apierror.ServiceUnavailableError](t, err, "a short copy")
+		if _, ok := blob.committed[workItemKey]; ok {
+			t.Error("a short copy was left at the key")
+		}
+		if repo.rows[saAttID].Status != "PENDING" {
+			t.Errorf("the row is %s: a short copy must not be recorded", repo.rows[saAttID].Status)
+		}
+		blob.copyShort = false
+		if _, err := svc.CompleteUpload(ctx(), req); err != nil {
+			t.Fatalf("confirm again: %v", err)
+		}
+	})
 	t.Run("a small upload is put and confirmed at its own key, as before", func(t *testing.T) {
 		repo := newFakeStoredRepo()
 		pendingUpload(repo, 5)

@@ -38,6 +38,7 @@ type fakeBlob struct {
 	putErr     error
 	opened     []string
 	copyErr    error
+	copyShort  bool        // Copy carries only part of the file
 	copied     [][2]string // {from, to}
 	discarded  []string
 	discardErr error
@@ -135,6 +136,9 @@ func (b *fakeBlob) Copy(_ context.Context, from, to string) error {
 	data, ok := b.committed[from]
 	if !ok {
 		return azblobstore.ErrNotFound
+	}
+	if b.copyShort {
+		data = data[:len(data)/2]
 	}
 	b.committed[to], b.types[to] = append([]byte(nil), data...), b.types[from]
 	b.copied = append(b.copied, [2]string{from, to})
