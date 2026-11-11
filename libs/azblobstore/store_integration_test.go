@@ -446,3 +446,37 @@ func TestStore_DirectRoundTripThroughLinks(t *testing.T) {
 		t.Errorf("Content-Disposition = %q, want an attachment", cd)
 	}
 }
+
+// Discard removes the blocks of an upload that was never committed, which Delete
+// cannot reach, and is harmless on a key with nothing at it.
+func TestStore_DiscardRemovesUncommittedBlocks(t *testing.T) {
+	s := integrationStore(t)
+	ctx := context.Background()
+	key := "abandoned/file.bin.upload"
+
+	if err := s.PutBlock(ctx, key, 0, strings.NewReader("part"), 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Discard(ctx, key); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if staged, err := s.UncommittedBlocks(ctx, key); err != nil || len(staged) != 0 {
+		t.Fatalf("after Discard: %v blocks, %v", staged, err)
+	}
+	if _, err := s.Stat(ctx, key); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Stat after Discard = %v, want ErrNotFound", err)
+	}
+	// A committed file is removed too, and a key with nothing is fine.
+	if err := s.PutBlock(ctx, "done/f.bin", 0, strings.NewReader("x"), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Commit(ctx, "done/f.bin", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Discard(ctx, "done/f.bin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Discard(ctx, "never/there.bin"); err != nil {
+		t.Fatalf("Discard of nothing: %v", err)
+	}
+}

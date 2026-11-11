@@ -102,6 +102,9 @@ the blocks there, then `Copy` the result to the final key and delete the staging
 blob: a link that is still valid can then only write a file nothing reads. `Copy`
 works inside Azure (Copy Blob, read through a short-lived link of its own), so no
 byte passes through the caller, and it waits for a copy Azure has not finished.
+For an upload that was abandoned, use `Discard` on both keys: it drops blocks that
+were put and never committed, which `Delete` cannot reach (Azure keeps them for
+about a week).
 
 A store that signs in as an Entra app cannot sign a link and returns
 `ErrLinksUnavailable` (`Copy` too); the storage account also needs CORS for the
