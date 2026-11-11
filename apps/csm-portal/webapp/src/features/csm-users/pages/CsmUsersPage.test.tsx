@@ -169,7 +169,9 @@ describe("CsmUsersPage", () => {
     // server-side — not split across separate requests per filter.
     expect(authFetchMock).toHaveBeenCalledTimes(1);
     const [url, requestInit] = authFetchMock.mock.calls[0];
-    expect(url).toContain("/users/search");
+    // The user-management screen lists external users too, so it uses the
+    // admin route, not the internal-only picker route.
+    expect(url).toBe("https://example.test/admin/users/search");
     const body = JSON.parse(requestInit.body as string);
     expect(body.filters).toEqual({
       searchQuery: "jane",
@@ -177,6 +179,19 @@ describe("CsmUsersPage", () => {
       teamIds: ["alpha"],
       active: true,
     });
+  });
+
+  it("shows the server's message in the page's error state when the admin route returns 403", async () => {
+    authFetchMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      text: async () => JSON.stringify({ message: "Insufficient permissions" }),
+    } as unknown as Response);
+    renderPage("/admin/users");
+
+    expect(await screen.findByText("Insufficient permissions")).toBeInTheDocument();
+    expect(screen.queryByText("No users found.")).not.toBeInTheDocument();
   });
 
   it("omits every filter key when nothing is selected", async () => {

@@ -49,7 +49,7 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useSearchGroups } from "@api/useSearchGroups";
-import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
+import { useAdminSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import { useSearchTeams } from "@features/csm-admin/api/useSearchTeams";
 import RefreshButton from "@components/RefreshButton";
 import AddUserDialog from "@features/csm-users/components/AddUserDialog";
@@ -138,7 +138,7 @@ export default function CsmUsersPage(): JSX.Element {
   );
 
   const { data, isLoading, isFetching, isError, error, refetch, dataUpdatedAt } =
-    useSearchUsers(request);
+    useAdminSearchUsers(request);
 
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
     setFilters({ ...filters, search: e.target.value });
