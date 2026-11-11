@@ -63,6 +63,9 @@ func TestParseCaseFieldFilters_StateEntered(t *testing.T) {
 	}
 }
 
+// TestParseCaseFieldFilters_StateEnteredRejections: each malformed
+// stateEntered / stateEnteredOn filter is a validation error naming the
+// problem, while a window of one day or one instant is accepted.
 func TestParseCaseFieldFilters_StateEnteredRejections(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -34,6 +34,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
+// stateEnteredID is the work item id of the fixture case with that suffix
+// (SE-<suffix>).
 func stateEnteredID(suffix string) string {
 	return "93000000-0000-0000-0000-00000000000" + suffix
 }
@@ -73,6 +75,9 @@ var stateEnteredFixture = []struct {
 	}},
 }
 
+// seedStateEnteredFixture inserts the fixture's cases and their activity
+// rows, removing any left over from an earlier run first and again when the
+// test ends.
 func seedStateEnteredFixture(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := repository.WithSystemIdentity(context.Background())
@@ -114,6 +119,7 @@ func stateEnteredRequest(p domain.ParsedCaseFilters) domain.SearchCasesRequest {
 		SortBy: domain.CaseSort{Field: domain.CaseSortFieldCreatedOn, Order: domain.CaseSortOrderDesc}}
 }
 
+// at parses an RFC3339 instant for a test window, panicking on a typo.
 func at(s string) *time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
@@ -122,6 +128,10 @@ func at(s string) *time.Time {
 	return &t
 }
 
+// TestStateEnteredIntegration_MatchesTheLoggedChangesIntoTheState: against
+// a real database, a case matches when its state history has a change into
+// one of the states inside the window, whether it is still there, once
+// however many times it entered, and only from state rows.
 func TestStateEnteredIntegration_MatchesTheLoggedChangesIntoTheState(t *testing.T) {
 	pool := caseStatsPool(t)
 	seedStateEnteredFixture(t, pool)
