@@ -90,7 +90,7 @@ func (h *AlertMuteRuleHandler) CreateAlertMuteRule(w http.ResponseWriter, r *htt
 
 // UpdateAlertMuteRule handles PATCH /alert-mute-rules/{id}.
 func (h *AlertMuteRuleHandler) UpdateAlertMuteRule(w http.ResponseWriter, r *http.Request) {
-	var req domain.SaveAlertMuteRuleRequest
+	var req domain.PatchAlertMuteRuleRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}

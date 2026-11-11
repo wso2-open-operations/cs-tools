@@ -41,6 +41,7 @@ type fakeAlertMuteRuleRepo struct {
 	deleted  bool
 	created  domain.AlertMuteRuleWrite
 	extendTo time.Time
+	updated  domain.AlertMuteRuleWrite
 	calls    int
 }
 
@@ -52,8 +53,9 @@ func (f *fakeAlertMuteRuleRepo) Create(_ context.Context, _ string, w domain.Ale
 	f.calls++
 	return domain.AlertMuteRule{}, nil
 }
-func (f *fakeAlertMuteRuleRepo) Update(context.Context, string, string, domain.AlertMuteRuleWrite, time.Time) (*domain.AlertMuteRule, error) {
+func (f *fakeAlertMuteRuleRepo) Update(_ context.Context, _, _ string, w domain.AlertMuteRuleWrite, _ time.Time) (*domain.AlertMuteRule, error) {
 	f.calls++
+	f.updated = w
 	return f.written, nil
 }
 func (f *fakeAlertMuteRuleRepo) Extend(_ context.Context, _, _ string, endOn, _ time.Time) (*domain.AlertMuteRule, error) {
@@ -176,7 +178,12 @@ func TestAlertMuteRuleGuardedWrites_NotFoundVersusWrongState(t *testing.T) {
 	stored := &domain.AlertMuteRule{ID: alertMuteRuleTestID, StartOn: alertMuteRuleTestNow.Add(-time.Hour), EndOn: alertMuteRuleTestNow.Add(time.Hour)}
 	calls := map[string]func(*alertMuteRuleService) error{
 		"update": func(s *alertMuteRuleService) error {
-			_, err := s.Update(ctx, alertMuteRuleTestID, validAlertMuteRuleRequest())
+			full := validAlertMuteRuleRequest()
+			full.StartOn, full.EndOn = "2026-11-06T11:00:00Z", "2026-11-06T12:00:00Z"
+			_, err := s.Update(ctx, alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{
+				Name: &full.Name, Description: &full.Description, TimeZone: &full.TimeZone,
+				StartOn: &full.StartOn, EndOn: &full.EndOn, Conditions: &full.Conditions,
+			})
 			return err
 		},
 		"end":    func(s *alertMuteRuleService) error { _, err := s.End(ctx, alertMuteRuleTestID); return err },
@@ -256,5 +263,33 @@ func TestSNAlertMuteRuleService_RefusesWith400(t *testing.T) {
 	}
 	if err := svc.Delete(ctx, alertMuteRuleTestID); !isValidation(err) {
 		t.Errorf("Delete: got %v, want ValidationError", err)
+	}
+}
+
+func TestAlertMuteRuleUpdate_MergesAPartialPatchOntoTheStoredRule(t *testing.T) {
+	stored := &domain.AlertMuteRule{
+		ID: alertMuteRuleTestID, Name: "Gateway upgrade", Description: "CR-1", TimeZone: "Asia/Colombo",
+		StartOn: alertMuteRuleTestNow.Add(time.Hour), EndOn: alertMuteRuleTestNow.Add(2 * time.Hour),
+		Conditions: []domain.AlertMuteRuleCondition{{Field: "service", Value: "gw"}, {Field: "environment", Value: "prod"}},
+	}
+	repo := &fakeAlertMuteRuleRepo{stored: stored, written: stored}
+	name := "Gateway upgrade (moved)"
+	if _, err := newTestAlertMuteRuleService(repo).Update(context.Background(), alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{Name: &name}); err != nil {
+		t.Fatalf("Update with only a name: %v", err)
+	}
+	w := repo.updated
+	if w.Name != name || w.Description != "CR-1" || w.TimeZone != "Asia/Colombo" || !w.StartOn.Equal(stored.StartOn) ||
+		!w.EndOn.Equal(stored.EndOn) || len(w.Conditions) != 2 {
+		t.Fatalf("merged write = %+v, want only the name changed", w)
+	}
+}
+
+func TestAlertMuteRuleExtend_LostRaceOnAStillExtendableRule(t *testing.T) {
+	active := &domain.AlertMuteRule{ID: alertMuteRuleTestID, StartOn: alertMuteRuleTestNow.Add(-time.Hour), EndOn: alertMuteRuleTestNow.Add(time.Hour)}
+	repo := &fakeAlertMuteRuleRepo{stored: active} // written nil: the guarded UPDATE matched nothing
+	_, err := newTestAlertMuteRuleService(repo).Extend(context.Background(), alertMuteRuleTestID, domain.ExtendAlertMuteRuleRequest{EndOn: "2026-11-06T12:00:00Z"})
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) || ce.Msg != "the alert mute rule changed while it was being extended; reload it and try again" {
+		t.Fatalf("got %v, want the changed-while-extending conflict", err)
 	}
 }

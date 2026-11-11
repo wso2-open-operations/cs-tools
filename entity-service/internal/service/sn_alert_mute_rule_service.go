@@ -52,7 +52,7 @@ func (snAlertMuteRuleService) Create(context.Context, domain.SaveAlertMuteRuleRe
 	return domain.AlertMuteRule{}, snAlertMuteRulesUnsupported()
 }
 
-func (snAlertMuteRuleService) Update(context.Context, string, domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
+func (snAlertMuteRuleService) Update(context.Context, string, domain.PatchAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
 	return domain.AlertMuteRule{}, snAlertMuteRulesUnsupported()
 }
 
