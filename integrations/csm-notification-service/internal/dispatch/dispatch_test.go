@@ -990,7 +990,7 @@ type mockSLAEngine struct {
 	pauseWorkaroundErr error
 	recalculateCalls   int
 	recalculateErr     error
-	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }
+	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string }
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _, _ string) {
@@ -1025,10 +1025,10 @@ func (m *mockSLAEngine) RecalculateFromEntity(_ context.Context) error {
 	return m.recalculateErr
 }
 
-func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string) {
+func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType})
+	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType})
 }
 
 // TestDispatcher_Handle_CaseCreated_RegistersSLAClocksWhenConfigured verifies
@@ -1317,6 +1317,7 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementA
 	}}
 	d := NewDispatcher(&mockEmailSender{}, chat, &mockCallSender{}, links, true, false, nil, true, "", nil).
 		WithFrustrationDetection(detector)
+	d.now = func() time.Time { return weekdayDaytime }
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001","caseTitle":"Migration stalled","caseComment":"this is unacceptable, still no update","commentId":"C-1","recipients":["test-recipient@example.com"],"authorEmail":"customer@acme.com","product":"WSO2 API Manager","team":"Castor","caseType":"ENGAGEMENT","engagementType":"migration"}}`)}
 

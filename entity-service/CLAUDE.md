@@ -2674,6 +2674,18 @@ as "onboarding." Every other field this method resolves (`AssigneeName`/
 `AssigneeEmail`, and the clock state itself) is unaffected by onboarding
 status.
 
+**`SearchActiveSLAStatuses` also resolves `EngagementType`** (`eng.type::TEXT`,
+lowercased — `caseLikeJoins`' own `engagement` table, already joined for every
+other case-like field here) — added for `csm-notification-service`'s
+`Engine.Reconcile`, its startup rebuild of Redis from this bulk endpoint, so a
+migration engagement's clock metadata survives a Redis wipe/restart instead
+of being rebuilt with `EngagementType` dropped to `""` (a CodeRabbit-caught
+follow-up on the fix above: `ClockMeta.EngagementType` also needs a LIVE
+refresh path, not just a durable one — see `events.CaseTypeChangedPayload`'s
+own new `NewEngagementType` field and `case_type_transfer_service.go`'s
+`publishCaseTypeChanged`, which populates it from a fresh `GetCaseByID` the
+same way `Product`/`Team` already are, for the event-driven half of this).
+
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
 of the same name/reasoning) — `AccessService.ResolveScope`'s scope must be
@@ -4891,9 +4903,18 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   ServiceNow and another in the portal because of a timeout. The transaction (and a row lock on
   that one work item) stays open for the length of the ServiceNow call.
 - **After the commit, best-effort, never undoing it:** an activity entry ("Type: Case ->
-  Engagement") and the SLA clocks above. No event is published (there is no `case.type_changed`).
-  A GitHub-linked service request still gets the one "record created" notice its insert
-  trigger always sends.
+  Engagement") and the SLA clocks above. **`case.type_changed` (`publishCaseTypeChanged`) now
+  also publishes here, but only when `"case"` is the previous or the new type** (`result.Type ==
+  "case"` or `result.PreviousType == "case"`) — a transfer between two non-`"case"` types (e.g.
+  `service_request` straight to `engagement`) still publishes nothing, so
+  `csm-notification-service`'s own `Engine.ReviseClocks` never hears about those. This stayed
+  undocumented here after it was added; see that repo's own `CLAUDE.md`, "SLA breach-alerting
+  engine", for what it's actually for — keeping a clock's Redis-held `CaseType`/`EngagementType`
+  current after a transfer (confirmed live, not hypothetical: entity-service's clock
+  re-evaluation has no `case_type` gate at creation time's own `slaClockEligibleCreateTypes`
+  does, so a case's clock can survive a transfer into an engagement and keep running under
+  stale metadata without this). A GitHub-linked service request still gets the one "record
+  created" notice its insert trigger always sends.
 - **`GetCaseByID` now returns `engagementType` too** (fixed; previously a known gap, not caused
   by the transfer itself) — it used to select only the list search's own `eng.type` and leave
   the detail read's `CaseView.EngagementType` nil, so anything keyed on it from the detail read

@@ -8772,7 +8772,16 @@ type SLAStatus struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle,omitempty"`
 	CaseType   string `json:"caseType,omitempty"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CaseCreatedPayload.EngagementType's own
+	// convention (engagement.engagement_type, lowercased, e.g. "migration";
+	// "" for every non-engagement case-like type) -- exists so
+	// csm-notification-service's startup reconciliation (Engine.Reconcile,
+	// GetActiveCSMSLAClocks) can rebuild a clock's Redis-held EngagementType
+	// from this same durable source instead of silently dropping it to ""
+	// on every restart, the identical reasoning CaseType itself already has
+	// here.
+	EngagementType string `json:"engagementType,omitempty"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (account.cre_team_id
 	// joined to "group") -- "" when the case has no account, or the account
 	// has no CRE team assigned.

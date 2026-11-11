@@ -414,6 +414,14 @@ type CaseTypeChangedPayload struct {
 	Priority     string `json:"priority,omitempty"`
 	PreviousType string `json:"previousType,omitempty"`
 	NewType      string `json:"newType,omitempty"`
+	// NewEngagementType is cv.EngagementType's own lowercase value (e.g.
+	// "migration") when NewType is "engagement", "" otherwise -- lets
+	// csm-notification-service's ReviseClocks keep a transferred clock's
+	// Redis-held EngagementType current the same way it already does for
+	// NewType/CaseType, so slaengine.Engine.sendBreachAlert's migration
+	// suppression check (CaseType=="ENGAGEMENT" && EngagementType=="migration")
+	// doesn't keep reading the case's stale pre-transfer value forever.
+	NewEngagementType string `json:"newEngagementType,omitempty"`
 }
 
 // CaseCreatedPayload is the Payload shape for TypeCaseCreated — mirrors

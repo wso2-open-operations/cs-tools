@@ -1911,7 +1911,18 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 // itself stores) -- comparing a lowercase "service_request" against the
 // guard's uppercase "SERVICE_REQUEST" would silently never match, which is
 // just as wrong as never updating the type at all.
-func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string) {
+//
+// newEngagementType is events.CaseTypeChangedPayload.NewEngagementType
+// (entity-service's raw, lowercase engagement type, e.g. "migration") --
+// NOT uppercased, matching EngagementType's own convention everywhere else
+// in this engine (unlike CaseType). Threaded through exactly the same way
+// as newType/CaseType just above, for the identical reason (a CodeRabbit-
+// caught gap in the first version of the migration-breach-suppression
+// fix): without this, a case transferring INTO a migration engagement kept
+// its stale pre-transfer EngagementType ("" from when it was plain "case")
+// forever, so sendBreachAlert's CaseType=="ENGAGEMENT" &&
+// EngagementType=="migration" guard never caught it either.
+func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string) {
 	if e.entity == nil {
 		return
 	}
@@ -1929,9 +1940,11 @@ func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber,
 		c := display
 		c.ClockType = clockType
 		c.CaseType = strings.ToUpper(newType)
+		c.EngagementType = newEngagementType
 		if oldMeta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
 			if newType == "" {
 				c.CaseType = oldMeta.CaseType
+				c.EngagementType = oldMeta.EngagementType
 			}
 			c.State = oldMeta.State
 		}
@@ -2016,16 +2029,17 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	}
 
 	meta := ClockMeta{
-		CaseNumber: c.CaseNumber,
-		WSO2CaseID: c.WSO2CaseID,
-		CaseTitle:  c.CaseTitle,
-		CaseType:   c.CaseType,
-		Product:    c.Product,
-		Team:       c.Team,
-		Priority:   c.Priority,
-		State:      c.State,
-		StartedAt:  startedAt,
-		Schedule:   c.Schedule,
+		CaseNumber:     c.CaseNumber,
+		WSO2CaseID:     c.WSO2CaseID,
+		CaseTitle:      c.CaseTitle,
+		CaseType:       c.CaseType,
+		EngagementType: c.EngagementType,
+		Product:        c.Product,
+		Team:           c.Team,
+		Priority:       c.Priority,
+		State:          c.State,
+		StartedAt:      startedAt,
+		Schedule:       c.Schedule,
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)

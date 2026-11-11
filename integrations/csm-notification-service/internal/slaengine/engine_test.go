@@ -2712,7 +2712,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForATerminalClock(t *testing
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockResponse, 50)]; stillThere {
 		t.Error("stale wake entry survived ReviseClocks for a clock that had already reached a terminal stage")
@@ -2752,7 +2752,7 @@ func TestEngine_ReviseClocks_RebuildsFromNewSeverity(t *testing.T) {
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2787,7 +2787,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForAClockTypeNoLongerCovered
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockWorkaround, 50)]; stillThere {
 		t.Error("stale workaround wake entry survived ReviseClocks despite the new severity having no policy for it")
@@ -2810,7 +2810,7 @@ func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *test
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2846,7 +2846,7 @@ func TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata(t *testing
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Need an upgrade", "api-manager", "Phoenix", "service_request")
+	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Need an upgrade", "api-manager", "Phoenix", "service_request", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2857,6 +2857,68 @@ func TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata(t *testing
 	}
 	if meta.CaseType != "SERVICE_REQUEST" {
 		t.Errorf("meta.CaseType = %q, want %q -- the transfer's own new type must override the stale pre-transfer value", meta.CaseType, "SERVICE_REQUEST")
+	}
+}
+
+// TestEngine_ReviseClocks_EngagementTypeTransfer_UpdatesEngagementTypeMetadata
+// is the regression test for the CodeRabbit-caught follow-up gap: a case
+// transferring INTO a migration engagement must have its Redis-held
+// EngagementType updated the same way CaseType already is just above --
+// otherwise sendBreachAlert's CaseType=="ENGAGEMENT" &&
+// EngagementType=="migration" suppression check keeps reading the stale
+// pre-transfer value ("") forever, and never actually suppresses anything
+// for the exact case this feature exists for.
+func TestEngine_ReviseClocks_EngagementTypeTransfer_UpdatesEngagementTypeMetadata(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "CASE", EngagementType: "", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Migrate us", "api-manager", "Phoenix", "engagement", "migration")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "ENGAGEMENT" || meta.EngagementType != "migration" {
+		t.Errorf("meta = {CaseType: %q, EngagementType: %q}, want {ENGAGEMENT, migration} -- the transfer's own new engagement type must override the stale pre-transfer value", meta.CaseType, meta.EngagementType)
+	}
+}
+
+// TestEngine_ReviseClocks_SeverityChangeOnly_PreservesEngagementType confirms
+// a plain severity change (newType/newEngagementType both "") never resets
+// an already-set EngagementType back to "" -- the same preservation
+// CaseType already gets via TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta.
+func TestEngine_ReviseClocks_SeverityChangeOnly_PreservesEngagementType(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "ENGAGEMENT", EngagementType: "migration", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Migrate us", "api-manager", "Phoenix", "", "")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "ENGAGEMENT" || meta.EngagementType != "migration" {
+		t.Errorf("meta = {CaseType: %q, EngagementType: %q}, want {ENGAGEMENT, migration} -- a plain severity change must not reset the engagement type", meta.CaseType, meta.EngagementType)
 	}
 }
 

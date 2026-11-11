@@ -218,10 +218,16 @@ type activeSLAClock struct {
 	WSO2CaseID string `json:"wso2CaseId"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Product    string `json:"product"`
-	Team       string `json:"team"`
-	Priority   string `json:"priority"`
-	State      string `json:"state"`
+	// EngagementType mirrors entity-service's own domain.SLAStatus.EngagementType
+	// (lowercase, e.g. "migration"; "" for every non-engagement case-like
+	// type) -- reconcileClock carries it into ClockMeta the same way
+	// CaseType already is, so a Redis wipe/restart rebuilds a migration
+	// engagement's clock metadata correctly instead of dropping it to "".
+	EngagementType string `json:"engagementType"`
+	Product        string `json:"product"`
+	Team           string `json:"team"`
+	Priority       string `json:"priority"`
+	State          string `json:"state"`
 }
 
 type searchActiveSLAStatusResponse struct {

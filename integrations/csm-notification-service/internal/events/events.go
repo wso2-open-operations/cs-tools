@@ -535,6 +535,12 @@ type CaseTypeChangedPayload struct {
 	Priority     string `json:"priority,omitempty"`
 	PreviousType string `json:"previousType,omitempty"`
 	NewType      string `json:"newType,omitempty"`
+	// NewEngagementType mirrors entity-service's own CaseTypeChangedPayload
+	// field of the same name -- see that repo's own events.go doc comment
+	// for why this exists (keeping a transferred clock's Redis-held
+	// EngagementType current for slaengine.Engine.sendBreachAlert's
+	// migration suppression check).
+	NewEngagementType string `json:"newEngagementType,omitempty"`
 }
 
 // IncidentCreatedPayload is TypeIncidentCreated's payload. This event has

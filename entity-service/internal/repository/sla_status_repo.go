@@ -214,7 +214,7 @@ func nullIfEmpty(s string) *string {
 func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error) {
 	var s domain.SLAStatus
 	var target, severity, caseType string
-	var caseNumber, wso2CaseID, caseTitle, productName, state, teamName, onboardingStatus *string
+	var caseNumber, wso2CaseID, caseTitle, engagementType, productName, state, teamName, onboardingStatus *string
 	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
 	var stage, schedule string
 	var isEvaluation bool
@@ -224,7 +224,7 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	err := row.Scan(
 		&s.CaseID, &target, &s.BusinessElapsedPercent, &s.HasBreached, &stage, &s.StartedOn,
 		&s.PausedOn, &pauseDurationSeconds, &durationSeconds, &schedule, &businessPauseSeconds,
-		&caseNumber, &wso2CaseID, &caseTitle, &caseType,
+		&caseNumber, &wso2CaseID, &caseTitle, &caseType, &engagementType,
 		&productName, &severity, &state, &teamName, &onboardingStatus, &isEvaluation,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
 	)
@@ -255,6 +255,10 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	s.WSO2CaseID = stringOrEmpty(wso2CaseID)
 	s.CaseTitle = stringOrEmpty(caseTitle)
 	s.CaseType = caseType
+	// engagement_type_enum is UPPER_SNAKE_CASE ("MIGRATION"); SLAStatus.EngagementType
+	// carries the lowercase domain value ("migration"), same convention as
+	// CaseView.EngagementType (case_repo.go) and CaseCreatedPayload.EngagementType.
+	s.EngagementType = strings.ToLower(stringOrEmpty(engagementType))
 	s.Product = stringOrEmpty(productName)
 	s.State = stringOrEmpty(state)
 	s.Team = stringOrEmpty(teamName)
@@ -401,7 +405,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM als.duration), 0)::BIGINT,
 		       als.schedule, COALESCE(EXTRACT(EPOCH FROM als.business_pause_duration), 0),
-		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
+		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT, eng.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
 		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $1, FALSE),
