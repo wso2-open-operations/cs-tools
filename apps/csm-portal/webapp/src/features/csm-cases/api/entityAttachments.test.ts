@@ -923,7 +923,7 @@ describe("direct transfers of large files", () => {
     const postEmpty = vi.fn().mockResolvedValue(linksFor(3));
     const putBinary = vi.fn();
     await uploadEntityAttachment(apiFor({ post, postEmpty, putBinary }), args(bigFile(2 * CHUNK + 5)));
-    expect(postEmpty).toHaveBeenCalledWith("/attachments/upload/att-1/direct?type=work_item");
+    expect(postEmpty).toHaveBeenCalledWith("/attachments/att-1/upload-links?type=work_item");
     expect(putBinary).not.toHaveBeenCalled();
     const sent = fetchMock.mock.calls.map((c) => String(c[0])).sort();
     expect(sent).toEqual([0, 1, 2].map((i) => `https://blob.example/x?sig=s&comp=block&blockid=${i}`));
@@ -1049,10 +1049,10 @@ describe("direct transfers of large files", () => {
       const clicked = click();
       const fetchMock = vi.fn().mockResolvedValue(new Response("0", { status: 206 }));
       vi.stubGlobal("fetch", fetchMock);
-      const get = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
+      const postEmpty = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
       const getResponse = vi.fn();
       const onSaved = vi.fn();
-      const done = await downloadEntityAttachment(apiFor({ get, getResponse }), {
+      const done = await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), {
         type: "work_item",
         id: ID,
         name: "big.bin",
@@ -1060,7 +1060,7 @@ describe("direct transfers of large files", () => {
         onSaved,
       });
       expect(done).toBe(true);
-      expect(get).toHaveBeenCalledWith(`/attachments/download/${ID}/link?type=work_item`);
+      expect(postEmpty).toHaveBeenCalledWith(`/attachments/${ID}/download-links?type=work_item`);
       // The link is checked with a one-byte read before the browser is handed it.
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0][0]).toBe("https://blob.example/x?sig=s");
@@ -1077,11 +1077,11 @@ describe("direct transfers of large files", () => {
           status: 206,
           headers: { "Content-Range": "bytes 0-9/10", "Content-Disposition": 'attachment; filename="big.bin"' },
         });
-      for (const get of [vi.fn().mockResolvedValue(null), vi.fn().mockRejectedValue(apiError(400, "off"))]) {
+      for (const postEmpty of [vi.fn().mockResolvedValue(null), vi.fn().mockRejectedValue(apiError(404, "off"))]) {
         const getResponse = vi.fn().mockResolvedValue(body());
         const save = vi.fn();
         const done = await downloadEntityAttachment(
-          apiFor({ get, getResponse }),
+          apiFor({ postEmpty, getResponse }),
           { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
           save,
         );
@@ -1101,10 +1101,10 @@ describe("direct transfers of large files", () => {
       const refusals = [() => Promise.resolve(new Response("<Error/>", { status: 403 })), () => Promise.reject(new TypeError("blocked by CORS"))];
       for (const refuse of refusals) {
         vi.stubGlobal("fetch", vi.fn(refuse));
-        const get = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
+        const postEmpty = vi.fn().mockResolvedValue({ url: "https://blob.example/x?sig=s", name: "big.bin" });
         const getResponse = vi.fn().mockResolvedValue(body());
         const done = await downloadEntityAttachment(
-          apiFor({ get, getResponse }),
+          apiFor({ postEmpty, getResponse }),
           { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
           vi.fn(),
         );
@@ -1117,12 +1117,12 @@ describe("direct transfers of large files", () => {
     it("does not ask for a link for a small file, or when the size is not known", async () => {
       click();
       for (const size of [DIRECT_TRANSFER_MIN_BYTES, undefined]) {
-        const get = vi.fn();
+        const postEmpty = vi.fn();
         const getResponse = vi.fn().mockResolvedValue(
           new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } }),
         );
-        await downloadEntityAttachment(apiFor({ get, getResponse }), { type: "work_item", id: ID, size }, vi.fn());
-        expect(get).not.toHaveBeenCalled();
+        await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), { type: "work_item", id: ID, size }, vi.fn());
+        expect(postEmpty).not.toHaveBeenCalled();
       }
     });
   });

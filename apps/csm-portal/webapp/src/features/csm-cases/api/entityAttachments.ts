@@ -455,8 +455,8 @@ async function startDirectDownload(
   args: { type: EntityAttachmentType; id: string; name?: string; signal?: AbortSignal },
 ): Promise<boolean> {
   try {
-    const link = await api.get<{ url?: string; name?: string }>(
-      `/attachments/download/${encodeURIComponent(args.id)}/link?type=${encodeURIComponent(args.type)}`,
+    const link = await api.postEmpty<{ url?: string; name?: string }>(
+      `/attachments/${encodeURIComponent(args.id)}/download-links?type=${encodeURIComponent(args.type)}`,
     );
     if (!link?.url || !(await linkWorks(link.url, args.signal))) return false;
     startBrowserDownload(link.url, args.name || link.name || "attachment");
@@ -670,7 +670,7 @@ export async function sendFileInChunks(
  */
 export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
 
-/** The links `POST /attachments/upload/{id}/direct` returns: one per chunk. */
+/** The links `POST /attachments/{id}/upload-links` returns: one per chunk. */
 interface DirectUploadLinks {
   links: string[];
   chunkBytes: number;
@@ -750,7 +750,7 @@ export async function sendFileDirect(
   },
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = args;
-  const path = `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`;
+  const path = `/attachments/${encodeURIComponent(attachmentId)}/upload-links?type=${encodeURIComponent(type)}`;
   const requestLinks = (): Promise<DirectUploadLinks> => api.postEmpty<DirectUploadLinks>(path);
   let direct = await requestLinks();
   // An answer that does not make sense is refused here, so the caller falls back to the backend.
