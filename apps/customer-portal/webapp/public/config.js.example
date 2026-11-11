@@ -142,10 +142,12 @@ window.config = {
   // storage address is exposed to the browser.
   //
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
-  //   Largest case or deployment file offered for upload, in MB. Set it to match
-  //   entity-service's ATTACHMENT_VIA_PORTAL_MAX_MB; the service stays authoritative and
+  //   Largest case or deployment file offered for upload, in MB. Set it to
+  //   entity-service's ATTACHMENT_DIRECT_UPLOAD_MAX_MB when direct uploads are on and
+  //   that is above ATTACHMENT_VIA_PORTAL_MAX_MB (up to 1024), and to
+  //   ATTACHMENT_VIA_PORTAL_MAX_MB otherwise; the service stays authoritative and
   //   this only refuses a file early. A number or numeric string; anything else
-  //   (zero, negative, text) or above 100 uses the default.
+  //   (zero, negative, text) or above 1024 uses the default.
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
 
   // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB  (optional — default: 1)
