@@ -458,7 +458,7 @@ Attachment files live in Azure Blob Storage, and **entity-service is the only se
 
 | Route | Permission | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no storage address comes back, only `attachmentId`, `maxBytes` and `directUpload` (true for a large file that may go straight to Azure through the signed links of `POST /attachments/upload/{id}/direct`). For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it) |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no storage address comes back, only `attachmentId`, `maxBytes` and `directUpload` (true for a large file that may go straight to Azure through the signed links of `POST /attachments/{id}/upload-links`). For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it) |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | `PermWrite` | checks the id, index, `type` and a declared length of at most 8 MiB, then forwards the bytes to entity-service (`PutStoredAttachmentChunk`); entity-service checks access again for every chunk |
 | `GET /attachments/upload/{id}/chunks?type=` | `PermWrite` | the stored chunks, to resume (entity-service's answer, as it is) |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | `PermWrite` | forwards only `type` and `chunks`: entity-service commits the blocks, reads the real size, runs the checks and removes a file it refuses |
@@ -470,8 +470,8 @@ Attachment files live in Azure Blob Storage, and **entity-service is the only se
 
 **Direct links for large files.** When entity-service has direct transfers on, the upload start answers
 `directUpload: true` for a large file, and two more routes relay entity-service's signed links untouched:
-`POST /attachments/upload/{id}/direct?type=` (one write-only link per chunk) and
-`GET /attachments/download/{id}/link?type=` (a read-only download link). The permission is PermWrite to get upload links, PermDownloadAttachment for a download link; entity-service does the access
+`POST /attachments/{id}/upload-links?type=` (one write-only link per chunk) and
+`POST /attachments/{id}/download-links?type=` (a read-only download link). The permission is PermWrite to get upload links, PermDownloadAttachment for a download link; entity-service does the access
 check. The links are credentials: the answers are never cached and neither the links nor the answers are logged
 (a failed call logs only a summary of the error). The chunk route and the content route stay, as the fallback.
 

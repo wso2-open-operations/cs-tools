@@ -1176,15 +1176,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/download/{id}/link:
-    get:
-      summary: Get a signed link to download a large file straight from Azure Blob Storage.
+  /attachments/{id}/download-links:
+    post:
+      summary: Create a signed link to download a large file straight from Azure Blob Storage.
       description: >-
         A read-only link that answers as a download of the file's own name. It expires at
         expiresAt (a download that started before then finishes; a resumed one asks for a new
         link), and the answer is never cacheable. If the link cannot be used, download through
         the content route instead.
-      operationId: getAttachmentsDownloadIdLink
+      operationId: createAttachmentDownloadLink
       parameters:
         - name: id
           in: path
@@ -1463,7 +1463,7 @@ paths:
                   format: int64
       responses:
         "201":
-          description: The attachment id and number, expiresAt (when an unconfirmed upload may be cleaned up), maxBytes and directUpload (true when the file may go straight to Azure through POST /attachments/upload/{id}/direct); never cacheable.
+          description: The attachment id and number, expiresAt (when an unconfirmed upload may be cleaned up), maxBytes and directUpload (true when the file may go straight to Azure through POST /attachments/{id}/upload-links); never cacheable.
           content:
             application/json:
               schema:
@@ -1678,7 +1678,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /attachments/upload/{id}/direct:
+  /attachments/{id}/upload-links:
     post:
       summary: Get signed links to send a large file straight to Azure Blob Storage.
       description: >-
@@ -1687,7 +1687,7 @@ paths:
         usual; confirm checks the real size. The links are credentials that expire at
         expiresAt (a request that started before then finishes), and the answer is never
         cacheable. If a link cannot be used, send the chunks through the chunk route instead.
-      operationId: postAttachmentsUploadIdDirect
+      operationId: createAttachmentUploadLinks
       parameters:
         - name: id
           in: path
