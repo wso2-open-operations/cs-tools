@@ -24,12 +24,7 @@ import {
   DEFAULT_INLINE_IMAGE_MAX_MB,
 } from "@config/attachmentLimitsConfig";
 
-/**
- * The attachment sizes entity-service enforces (`GET /attachments/limits`).
- * The server sends them cacheable for five minutes, so they are kept as long.
- * `enabled` lets the app shell start the request once the caller is allowed in,
- * so the upload dialogs usually find the answer already cached.
- */
+/** The attachment limits from `GET /attachments/limits`, kept for 5 minutes. */
 export function useGetAttachmentLimits(enabled = true): UseQueryResult<BeAttachmentLimits, Error> {
   const api = useBackendApi();
   return useQuery<BeAttachmentLimits, Error>({
@@ -51,11 +46,7 @@ export interface AttachmentLimits {
   maxInlineImagesBytes: number;
 }
 
-/**
- * The limits to check against: the server's once loaded, the built-in defaults
- * while loading or if the request failed. The server enforces the real limit
- * either way; this only decides the early check and the text shown.
- */
+/** The server's limits, or the built-in defaults while loading or on error. */
 export function useAttachmentLimits(): AttachmentLimits {
   const { data } = useGetAttachmentLimits();
   return {
