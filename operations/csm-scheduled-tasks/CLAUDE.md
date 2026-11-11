@@ -39,6 +39,9 @@ either it's fixed or its own next period supersedes it.
    `Complete` (success) or `Fail` (failure —
    sets `nextRetryOn`, never a permanent give-up state).
 
+A denied claim (not this task's window, or the period already done) is logged at debug only, so a
+tick's info output is the tasks that ran plus one `tick complete` summary line.
+
 There is deliberately no second "sweep" pass here: an earlier design had one whose job was to
 rescue an old failed period after the calendar moved past it, but once the rule became "only ever
 chase the newest period," there is nothing left to rescue — an unresolved old period is meant to be
