@@ -30,9 +30,7 @@ import {
 import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
-import { useSearchItServices } from "@api/useSearchItServices";
-import type { BeItService } from "@api/backend/types";
-import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import { useAlertFieldValues } from "@features/csm-operations/api/useAlertMuteRules";
 import type { AlertMuteRuleCondition, AlertMuteRuleField } from "@features/csm-operations/types/alertMuteRules";
 import {
   ALERT_MUTE_RULE_ENVIRONMENTS,
@@ -47,17 +45,26 @@ interface ValueFieldProps {
   value: string;
   error?: string;
   onChange: (value: string) => void;
+  /** Shown as the field's label; the key/value rows use "Value". */
+  label?: string;
+  required?: boolean;
+  sx?: object;
 }
 
-/** Free text with suggestions; service names come from the CSM service list. */
-function ValueField({ field, value, error, onChange }: ValueFieldProps): JSX.Element {
+/**
+ * Free text with suggestions: the values real alerts carry in this field (from
+ * the alerting service), then the usual ones for the field. A rule matches the
+ * alert's own text, so a CSM service name would not match anything.
+ */
+function ValueField({ field, value, error, onChange, label, required = true, sx }: ValueFieldProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const query = useDebouncedValue(value, 300);
-  const services = useSearchItServices(query, open && field === "service");
-  const options =
-    field === "service"
-      ? (services.data ?? []).map((s) => s.name ?? "").filter(Boolean)
-      : [...(ALERT_MUTE_RULE_VALUE_SUGGESTIONS[field] ?? [])];
+  const seen = useAlertFieldValues(field, query, open);
+  const options = [...(seen.data ?? [])];
+  const have = new Set(options.map((o) => o.toLowerCase()));
+  for (const s of ALERT_MUTE_RULE_VALUE_SUGGESTIONS[field] ?? []) {
+    if (!have.has(s.toLowerCase())) options.push(s);
+  }
 
   return (
     <Autocomplete
@@ -69,16 +76,20 @@ function ValueField({ field, value, error, onChange }: ValueFieldProps): JSX.Ele
       open={open && options.length > 0}
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}
-      sx={{ flex: "1 1 260px" }}
+      sx={sx ?? { flex: "1 1 260px" }}
       renderInput={(params) => (
         <TextField
           {...params}
-          label="Value"
-          required
+          label={label ?? "Value"}
+          required={required}
           error={!!error}
           helperText={error}
           slotProps={{
-            htmlInput: { ...params.inputProps, maxLength: MAX_ALERT_MUTE_RULE_CONDITION_VALUE, "aria-label": `${field} value` },
+            htmlInput: {
+              ...params.inputProps,
+              maxLength: MAX_ALERT_MUTE_RULE_CONDITION_VALUE,
+              ...(label ? {} : { "aria-label": `${field} value` }),
+            },
           }}
         />
       )}
@@ -95,10 +106,10 @@ interface AlertMuteRuleConditionsEditorProps {
 }
 
 /**
- * "What to mute": a Service picker and an Environment list, which every rule
+ * "What to mute": a Service field and an Environment list, which every rule
  * has, then optional key/value rows (like CloudWatch's tag editor) for the
  * alert's other fields, each usable once. An alert is muted only when every
- * condition matches. The service's name is what is stored and matched.
+ * condition matches. Service suggests the services alerts actually report.
  */
 export default function AlertMuteRuleConditionsEditor({
   conditions,
@@ -131,22 +142,14 @@ export default function AlertMuteRuleConditionsEditor({
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-        <Box sx={{ flex: "1 1 320px" }}>
-          <AsyncEntitySelect<BeItService>
-            id="alert-mute-rule-service"
-            label="Service"
-            placeholder="Search services…"
-            value={service}
-            knownLabel={service || undefined}
-            onChange={(next, item) => setRequired("service", item?.name ?? next)}
-            useSearch={useSearchItServices}
-            getId={(s) => s.name ?? s.id}
-            getLabel={(s) => s.name ?? s.id}
-            required
-            error={serviceIndex >= 0 && !!rowErrors?.[serviceIndex]}
-            helperText={serviceIndex >= 0 ? rowErrors?.[serviceIndex] : undefined}
-          />
-        </Box>
+        <ValueField
+          field="service"
+          label="Service"
+          value={service}
+          onChange={(next) => setRequired("service", next)}
+          error={serviceIndex >= 0 ? rowErrors?.[serviceIndex] : undefined}
+          sx={{ flex: "1 1 320px" }}
+        />
         <FormControl
           size="small"
           required

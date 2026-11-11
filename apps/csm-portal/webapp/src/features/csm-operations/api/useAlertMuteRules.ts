@@ -26,8 +26,11 @@ import {
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
+  AlertFieldValuesResponse,
+  AlertMuteRuleField,
   AlertMuteRuleInput,
   AlertMuteRule,
+  AlertMuteRuleMutedAlertsResponse,
   AlertMuteRuleSearchPayload,
   AlertMuteRuleSearchResponse,
   AlertMuteRuleStateFilter,
@@ -70,6 +73,38 @@ export function useAlertMuteRuleCounts(searchQuery: string): Record<AlertMuteRul
   if (results.some((r) => r.data === undefined)) return undefined;
   const [active, scheduled, expired] = results.map((r) => r.data?.total ?? 0);
   return { all: active + scheduled + expired, active, scheduled, expired };
+}
+
+/**
+ * One page of the alerts a rule muted (`GET /alert-mute-rules/{id}/muted-alerts`), newest first. They live in
+ * alert-core's database, which keeps them for its retention period (30 days by default). `live` polls every 30 s,
+ * for a rule that is still muting.
+ */
+export function useAlertMuteRuleMutedAlerts(
+  id: string | undefined,
+  page: { limit: number; offset: number },
+  live = false,
+): UseQueryResult<AlertMuteRuleMutedAlertsResponse, Error> {
+  const api = useBackendApi();
+  return useQuery<AlertMuteRuleMutedAlertsResponse, Error>({
+    queryKey: [
+      ApiQueryKeys.ALERT_MUTE_RULES,
+      "muted-alerts",
+      id ?? "",
+      page.limit,
+      page.offset,
+    ],
+    queryFn: async () => {
+      const res = await api.get<AlertMuteRuleMutedAlertsResponse>(
+        `/alert-mute-rules/${encodeURIComponent(id as string)}/muted-alerts?limit=${page.limit}&offset=${page.offset}`,
+      );
+      if (!res) throw new Error("No muted alerts response.");
+      return res;
+    },
+    enabled: Boolean(id),
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? 30_000 : false,
+  });
 }
 
 export function useGetAlertMuteRule(id: string | undefined): UseQueryResult<AlertMuteRule, Error> {
@@ -136,5 +171,31 @@ export function useDeleteAlertMuteRule(): UseMutationResult<void, Error, string>
   return useMutation<void, Error, string>({
     mutationFn: (id) => api.delete(path(id)),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * The values real alerts carry in `field` that contain `query`, most recently
+ * seen first (`GET /alert-field-values`, read from the alerting service). A
+ * rule matches these strings, so the form suggests them; when the alerting
+ * service can't be reached the field stays free text.
+ */
+export function useAlertFieldValues(
+  field: AlertMuteRuleField,
+  query: string,
+  enabled: boolean,
+): UseQueryResult<string[], Error> {
+  const api = useBackendApi();
+  return useQuery<string[], Error>({
+    queryKey: [ApiQueryKeys.ALERT_MUTE_RULES, "field-values", field, query],
+    queryFn: async () => {
+      const params = new URLSearchParams({ field, q: query, limit: "20" });
+      const res = await api.get<AlertFieldValuesResponse>(`/alert-field-values?${params.toString()}`);
+      return res?.values ?? [];
+    },
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
   });
 }

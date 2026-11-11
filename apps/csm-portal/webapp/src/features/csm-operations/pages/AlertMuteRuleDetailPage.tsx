@@ -15,19 +15,22 @@
 // under the License.
 
 import { Box, Button, Paper, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import type { JSX, ReactNode } from "react";
+import { ArrowLeft, BellOff } from "@wso2/oxygen-ui-icons-react";
+import { useState, type JSX, type ReactNode } from "react";
 import { useLocation, useParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
-import { useGetAlertMuteRule } from "@features/csm-operations/api/useAlertMuteRules";
+import { useAlertMuteRuleMutedAlerts, useGetAlertMuteRule } from "@features/csm-operations/api/useAlertMuteRules";
 import {
   alertMuteRuleState,
   formatDuration,
+  mutedAlertsSummaryText,
   timeZoneLabel,
+  useMutedAlertsPaging,
   useNow,
 } from "@features/csm-operations/utils/alertMuteRules";
+import AlertMuteRuleMutedAlerts from "@features/csm-operations/components/AlertMuteRuleMutedAlerts";
 import AlertMuteRuleStateChip from "@features/csm-operations/components/AlertMuteRuleStateChip";
 import AlertMuteRuleActions from "@features/csm-operations/components/AlertMuteRuleActions";
 
@@ -67,6 +70,14 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
   const backTarget = (location.state as { from?: string } | undefined)?.from ?? LIST_PATH;
   const now = useNow();
   const { data: rule, isLoading, isError, error } = useGetAlertMuteRule(id);
+  const paging = useMutedAlertsPaging();
+  const [mutedOpen, setMutedOpen] = useState(false);
+  const ruleState = rule ? alertMuteRuleState(rule, now) : undefined;
+  const muted = useAlertMuteRuleMutedAlerts(
+    rule ? id : undefined,
+    { limit: paging.rowsPerPage, offset: paging.page * paging.rowsPerPage },
+    ruleState === "active",
+  );
 
   const back = (
     <Button
@@ -98,7 +109,7 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
     );
   }
 
-  const state = alertMuteRuleState(rule, now);
+  const state = ruleState ?? alertMuteRuleState(rule, now);
   const length = Date.parse(rule.endOn) - Date.parse(rule.startOn);
 
   return (
@@ -114,13 +125,25 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
             {rule.number}
           </Typography>
         </Box>
-        <AlertMuteRuleActions
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<BellOff size={16} />}
+            onClick={() => setMutedOpen(true)}
+            disabled={state === "scheduled"}
+            title={state === "scheduled" ? "Nothing is muted before the rule starts" : undefined}
+          >
+            {`Muted alerts${muted.data ? ` (${muted.data.total})` : ""}`}
+          </Button>
+          <AlertMuteRuleActions
           rule={rule}
           state={state}
           variant="buttons"
           returnTo={`${location.pathname}${location.search}`}
           onDeleted={() => navigate(backTarget, { replace: true })}
         />
+        </Box>
       </Box>
 
       <Section
@@ -146,9 +169,17 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
           ...(rule.endedOn ? ([["Ended early", `${formatDateTime(rule.endedOn)} by ${rule.endedBy ?? "—"}`]] as Array<[string, ReactNode]>) : []),
         ]}
       />
-      <Section
-        title="Muted alerts"
-        rows={[["Alerts", "Muted alerts are kept by the alerting service; listing them here is not built yet."]]}
+      <AlertMuteRuleMutedAlerts
+        open={mutedOpen}
+        onClose={() => setMutedOpen(false)}
+        title={`Muted alerts · ${rule.number}${muted.data ? ` · ${mutedAlertsSummaryText(muted.data)}` : ""}`}
+        data={muted.data}
+        isLoading={muted.isLoading}
+        error={muted.error}
+        page={paging.page}
+        rowsPerPage={paging.rowsPerPage}
+        onPageChange={paging.setPage}
+        onRowsPerPageChange={paging.setRowsPerPage}
       />
     </Box>
   );

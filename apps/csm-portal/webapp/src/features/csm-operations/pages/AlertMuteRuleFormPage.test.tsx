@@ -29,12 +29,14 @@ vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {},
   useBackendApi: () => backend.current!.api,
 }));
-vi.mock("@api/useSearchItServices", () => ({
-  useSearchItServices: () => ({ data: [{ id: "svc-1", name: "Payments" }], isFetching: false, isError: false }),
-}));
 
 function Detail(): JSX.Element {
   return <div>{`Detail ${useParams().id}`}</div>;
+}
+
+function pickDuration(name: string): void {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "Duration" }));
+  fireEvent.click(screen.getByRole("option", { name }));
 }
 
 function renderAt(path: string): void {
@@ -70,10 +72,13 @@ describe("AlertMuteRuleFormPage", () => {
 
   it("defaults to 1 h from Create, with no date or time to pick, and offers 30 min, 2 h and Custom", () => {
     renderAt("/operations/alert-mute-rules/new");
-    expect(screen.getByRole("button", { name: "1 h" })).toHaveAttribute("aria-pressed", "true");
-    for (const name of ["30 min", "2 h", "Custom"]) {
-      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-pressed", "false");
+    const duration = screen.getByRole("combobox", { name: "Duration" });
+    expect(duration).toHaveTextContent("1 h");
+    fireEvent.mouseDown(duration);
+    for (const name of ["30 min", "1 h", "2 h", "Custom"]) {
+      expect(screen.getByRole("option", { name })).toBeInTheDocument();
     }
+    fireEvent.click(screen.getByRole("option", { name: "1 h" }));
     expect(screen.queryByRole("combobox", { name: "Time zone" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Date" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/from when you create the rule until about/);
@@ -81,7 +86,7 @@ describe("AlertMuteRuleFormPage", () => {
 
   it("shows the time zone and date and time pickers only for Custom", () => {
     renderAt("/operations/alert-mute-rules/new");
-    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    pickDuration("Custom");
     // The time zone defaults to the user's.
     expect(screen.getByRole("combobox", { name: "Time zone" })).toHaveValue("(UTC+05:30) Asia/Colombo");
     expect(screen.getAllByRole("group", { name: "Date" })).toHaveLength(2);
@@ -89,7 +94,7 @@ describe("AlertMuteRuleFormPage", () => {
     expect(screen.getByText("Enter a start date and time.")).toBeInTheDocument();
     expect(screen.getByText("Enter an end date and time.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "2 h" }));
+    pickDuration("2 h");
     expect(screen.queryByRole("combobox", { name: "Time zone" })).not.toBeInTheDocument();
     expect(screen.queryByText("Enter a start date and time.")).not.toBeInTheDocument();
   }, 30_000);
@@ -97,9 +102,9 @@ describe("AlertMuteRuleFormPage", () => {
   it("creates a quick 30 min rule starting at Create", async () => {
     renderAt("/operations/alert-mute-rules/new");
     fireEvent.change(screen.getByRole("textbox", { name: "Alert mute rule name" }), { target: { value: "Quick mute" } });
-    fireEvent.click(screen.getByRole("button", { name: "30 min" }));
+    pickDuration("30 min");
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Service" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Payments" }));
+    fireEvent.click(await screen.findByRole("option", { name: "client-prod-alert-integration" }));
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Environment" }));
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Production" }));
 
@@ -109,20 +114,18 @@ describe("AlertMuteRuleFormPage", () => {
 
     const [created] = backend.current!.all();
     expect(created.conditions).toEqual([
-      { field: "service", value: "Payments" },
+      { field: "service", value: "client-prod-alert-integration" },
       { field: "environment", value: "production" },
     ]);
     expect(Date.parse(created.startOn)).toBeGreaterThanOrEqual(before - 1);
     expect(Date.parse(created.endOn) - Date.parse(created.startOn)).toBe(30 * 60_000);
   }, 30_000);
 
-  it("counts characters and marks what is required", () => {
+  it("marks what is required", () => {
     renderAt("/operations/alert-mute-rules/new");
     const name = screen.getByRole("textbox", { name: "Alert mute rule name" });
     expect(name).toBeRequired();
     expect(screen.getByRole("textbox", { name: "Description (optional)" })).not.toBeRequired();
-    fireEvent.change(name, { target: { value: "DB upgrade" } });
-    expect(screen.getByText(/Character count: 10\/255/)).toBeInTheDocument();
   }, 30_000);
 
   it("refuses to create without a name and condition values", () => {

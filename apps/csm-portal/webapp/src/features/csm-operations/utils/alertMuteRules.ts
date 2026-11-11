@@ -21,6 +21,7 @@ import type {
   AlertMuteRuleField,
   AlertMuteRuleInput,
   AlertMuteRule,
+  AlertMuteRuleMutedAlertsResponse,
   AlertMuteRuleState,
   AlertMuteRuleStateFilter,
 } from "@features/csm-operations/types/alertMuteRules";
@@ -260,4 +261,46 @@ export function useNow(intervalMs = 30_000): number {
     return () => window.clearInterval(timer);
   }, [intervalMs]);
   return now;
+}
+
+export const MUTED_ALERTS_ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
+
+/** "12 alerts muted · 1 still muted · 2 became incidents · 9 closed quietly"; empty parts are left out. */
+export function mutedAlertsSummaryText(
+  data: Pick<AlertMuteRuleMutedAlertsResponse, "total" | "summary">,
+): string {
+  if (data.total === 0) return "No alerts muted";
+  const parts = [`${data.total} muted alert${data.total === 1 ? "" : "s"}`];
+  const s = data.summary;
+  if (s.muted) parts.push(`${s.muted} still muted`);
+  if (s.incident)
+    parts.push(`${s.incident} became incident${s.incident === 1 ? "" : "s"}`);
+  if (s.closed_quietly) parts.push(`${s.closed_quietly} closed quietly`);
+  if (s.delivering)
+    parts.push(
+      `${s.delivering} creating incident${s.delivering === 1 ? "" : "s"}`,
+    );
+  return parts.join(" · ");
+}
+
+/** Page state for the muted alerts table, kept by the rule page so the summary and the table share one query. */
+export function useMutedAlertsPaging(): {
+  page: number;
+  rowsPerPage: number;
+  setPage: (page: number) => void;
+  setRowsPerPage: (rows: number) => void;
+} {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRows] = useState(
+    MUTED_ALERTS_ROWS_PER_PAGE_OPTIONS[0],
+  );
+  return {
+    page,
+    rowsPerPage,
+    setPage,
+    setRowsPerPage: (rows: number) => {
+      setRows(rows);
+      setPage(0);
+    },
+  };
 }
