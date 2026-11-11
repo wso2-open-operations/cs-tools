@@ -787,6 +787,23 @@ func main() {
 	route("POST /skills/me", handler.PermWrite, skillHandler.AddMySkill)
 	route("PUT /skills/me/{skillId}", handler.PermWrite, skillHandler.SetMySkillLevel)
 	route("DELETE /skills/me/{skillId}", handler.PermWrite, skillHandler.RemoveMySkill)
+	// Skill management: who may use the directory, review requests or manage
+	// the catalogue is entity-service's decision (each is a capability held by
+	// admins plus a configured role list); these floors only keep the routes
+	// from a caller who could use none of them.
+	route("GET /skills/me/capabilities", handler.PermView, skillHandler.GetMySkillCapabilities)
+	route("POST /skills/categories", handler.PermWrite, skillHandler.CreateSkillCategory)
+	route("PATCH /skills/categories/{id}", handler.PermWrite, skillHandler.UpdateSkillCategory)
+	route("POST /skills/requests/check", handler.PermView, skillHandler.CheckSkillRequest)
+	route("POST /skills/requests", handler.PermWrite, skillHandler.CreateSkillRequest)
+	route("GET /skills/requests/mine", handler.PermView, skillHandler.ListMySkillRequests)
+	route("POST /skills/requests/search", handler.PermView, skillHandler.SearchSkillRequests)
+	route("POST /skills/requests/{id}/withdraw", handler.PermWrite, skillHandler.WithdrawSkillRequest)
+	route("POST /skills/requests/{id}/approve", handler.PermWrite, skillHandler.ApproveSkillRequest)
+	route("POST /skills/requests/{id}/reject", handler.PermWrite, skillHandler.RejectSkillRequest)
+	route("POST /skills/directory/search", handler.PermView, skillHandler.SearchSkillDirectory)
+	route("GET /skills/users/{userId}", handler.PermView, skillHandler.GetUserSkillProfile)
+	route("GET /skills/users/{userId}/history", handler.PermView, skillHandler.GetUserSkillHistory)
 
 	route("GET /team-schedule/rota-access", handler.PermView, rotaAccessHandler.GetRotaAccess)
 	route("PUT /team-schedule/rota-access/admins/{family}/{userId}", handler.PermWrite, rotaAccessHandler.PutRotaAdmin)

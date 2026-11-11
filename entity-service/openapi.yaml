@@ -21910,6 +21910,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create a skill category (catalogue manager).
+      description: >
+        Needs skills.catalogue.manage. A sub-category goes under an active parent with no skills filed directly under it, and the parent stops being a leaf. Sibling names are unique ignoring case; a name cannot contain "/".
+      operationId: createSkillCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillCategoryRequest'
+      responses:
+        "201":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategory'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /skills/search:
     post:
       summary: Search the skill catalogue.
@@ -22412,7 +22466,7 @@ paths:
     post:
       summary: Everybody's skills (skill manager).
       description: >
-        A CSM admin (a token role listed in AUTH_ADMIN_ROLES) or a lead of a CRE or SRE team. One row is one person's one
+        Needs skills.directory.view (AUTH_ADMIN_ROLES or AUTH_SKILL_DIRECTORY_ROLES). One row is one person's one
         active skill; a row must satisfy every filter given. Lists active internal staff and active skills only.
         Filters are applied in SQL. Ordered by person then skill. Default limit 50, at most 200.
       operationId: searchUserSkills
@@ -22442,13 +22496,629 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: "Not a CSM admin or a CRE or SRE team lead, or no user token."
+          description: "Without skills.directory.view, or no user token."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /skills/me/capabilities:
+    get:
+      summary: The caller's skills capabilities.
+      description: >
+        Which gated skills tasks the caller holds, so the page builds its tabs from them. Capabilities: skills.directory.view (AUTH_ADMIN_ROLES or AUTH_SKILL_DIRECTORY_ROLES), skills.requests.review (AUTH_ADMIN_ROLES or AUTH_SKILL_REQUEST_REVIEWER_ROLES), skills.catalogue.manage (AUTH_ADMIN_ROLES or AUTH_SKILL_CATALOGUE_MANAGER_ROLES). Each configured list is empty by default, so only admins hold them. pendingRequestCount is set for a request reviewer. A service credential holds none.
+      operationId: getMySkillCapabilities
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCapabilities'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/categories/{id}:
+    patch:
+      summary: Edit a skill category (catalogue manager).
+      description: >
+        Rename (rewrites the stored path of the category and everything under it), describe, deactivate or activate. Deactivating is refused (409) while an active sub-category or active skill is filed under it; activating is refused under an inactive parent. Sibling names are unique ignoring case. Needs skills.catalogue.manage.
+      operationId: updateSkillCategory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillCategoryRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategory'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/check:
+    post:
+      summary: Duplicate preview for a skill request.
+      description: >
+        Any internal caller. An exact match (active or not), similar names (inactive ones only for a catalogue manager), and a pending request for the same name. Names match ignoring case and repeated spaces.
+      operationId: checkSkillRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckSkillRequestRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckSkillRequestResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests:
+    post:
+      summary: Request a skill the catalogue lacks.
+      description: >
+        An internal user with a user record. levelId (a level of the default scale) is required: on approval the skill is added to the requester's profile at it. 409 when an active skill already has the name or a pending request asks for it.
+      operationId: createSkillRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequestRequest'
+      responses:
+        "201":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/mine:
+    get:
+      summary: The caller's own skill requests.
+      description: >
+        Pending first, then the newest 50.
+      operationId: listMySkillRequests
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequestsResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/search:
+    post:
+      summary: The skill request queue (request reviewer).
+      description: >
+        Needs skills.requests.review. Pending requests first (oldest first), then decided ones, newest first.
+      operationId: searchSkillRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillRequestsRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequestsResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/{id}/withdraw:
+    post:
+      summary: Withdraw one's own pending skill request.
+      description: >
+        The requester only; another person's request is 404. 409 once decided.
+      operationId: withdrawSkillRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/{id}/approve:
+    post:
+      summary: Approve a skill request (request reviewer).
+      description: >
+        Needs skills.requests.review. One transaction: create the skill (mode create, on the default scale, in an active leaf category), reactivate an inactive one (reactivate) or point at an active one (existing); mark the request approved; and add the skill to the requester's profile at the requested level mapped onto the skill's scale, or at levelId. 409 when the request was already decided (naming who decided it), the name is taken, or the mode does not fit the skill.
+      operationId: approveSkillRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveSkillRequestRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/{id}/reject:
+    post:
+      summary: Reject a skill request (request reviewer).
+      description: >
+        Needs skills.requests.review. A reason is required and shown to the requester. 409 when already decided.
+      operationId: rejectSkillRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectSkillRequestRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/directory/search:
+    post:
+      summary: "The skill directory: one row per person."
+      description: >
+        Needs skills.directory.view. Criteria are (skill, minimum level value) pairs; match ALL (default) keeps people who meet every criterion, ANY those who meet at least one, best matches first. Optional name search, team keys and categories (a category includes its descendants). Each person comes with all their active skills. Default limit 25, at most 100.
+      operationId: searchSkillDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillDirectoryRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSkillDirectoryResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/users/{userId}:
+    get:
+      summary: One person's skills (directory).
+      description: >
+        Needs skills.directory.view. 404 when no internal user has the id.
+      operationId: getUserSkillProfile
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkillProfileResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/users/{userId}/history:
+    get:
+      summary: One person's skill history (directory).
+      description: >
+        Needs skills.directory.view. Newest first; each entry carries its action (ADDED, LEVEL_CHANGED, REMOVED, READDED).
+      operationId: getUserSkillHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: skillId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          schema: {type: integer}
+        - name: offset
+          in: query
+          schema: {type: integer}
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillHistoryResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
           content:
             application/json:
               schema:
@@ -22489,6 +23159,157 @@ components:
         do not carry this requirement.
 
   schemas:
+    SkillCapabilities:
+      type: object
+      required: [canViewDirectory, canReviewRequests, canManageCatalogue]
+      properties:
+        canViewDirectory: {type: boolean}
+        canReviewRequests: {type: boolean}
+        canManageCatalogue: {type: boolean}
+        pendingRequestCount: {type: integer, description: Set for a request reviewer.}
+    CreateSkillCategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 255}
+        parentId: {type: string, format: uuid, nullable: true}
+        description: {type: string, nullable: true}
+    UpdateSkillCategoryRequest:
+      type: object
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, description: An empty string clears it.}
+        active: {type: boolean}
+    SkillRef:
+      type: object
+      required: [id, name, active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        active: {type: boolean}
+    SkillPersonRef:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, nullable: true}
+        email: {type: string, nullable: true}
+    SkillRequest:
+      type: object
+      required: [id, requestedName, status, requestedBy, createdOn]
+      properties:
+        id: {type: string, format: uuid}
+        requestedName: {type: string}
+        description: {type: string, nullable: true}
+        category: {type: object, nullable: true, description: "{id, name, categoryPath}"}
+        suggestedCategory: {type: string, nullable: true}
+        requestedLevel: {type: object, nullable: true, description: A skill level.}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN]}
+        requestedBy: {$ref: '#/components/schemas/SkillPersonRef'}
+        createdOn: {type: string, format: date-time}
+        reviewedBy: {allOf: [{$ref: '#/components/schemas/SkillPersonRef'}], nullable: true}
+        reviewedOn: {type: string, format: date-time, nullable: true}
+        reviewComment: {type: string, nullable: true, description: The approval comment or the rejection reason.}
+        resolution: {type: string, nullable: true, enum: [CREATED, REACTIVATED, EXISTING]}
+        resolvedSkill: {allOf: [{$ref: '#/components/schemas/SkillRef'}], nullable: true}
+        autoAddedLevel: {type: object, nullable: true, description: The level the requester was given on approval.}
+        autoAddNote: {type: string, nullable: true, enum: [ADDED, READDED, ALREADY_HELD, LEVEL_ADJUSTED, SKIPPED_INACTIVE_USER, SKIPPED_NO_SCALE]}
+    CheckSkillRequestRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+    CheckSkillRequestResponse:
+      type: object
+      required: [similar]
+      properties:
+        exactMatch: {allOf: [{$ref: '#/components/schemas/SkillRef'}], nullable: true}
+        similar: {type: array, items: {$ref: '#/components/schemas/SkillRef'}}
+        pendingRequest: {allOf: [{$ref: '#/components/schemas/SkillRequest'}], nullable: true}
+    CreateSkillRequestRequest:
+      type: object
+      required: [name, levelId]
+      properties:
+        name: {type: string, maxLength: 255}
+        categoryId: {type: string, format: uuid, nullable: true, description: An active leaf category.}
+        suggestedCategory: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        levelId: {type: string, format: uuid, description: A level of the default scale.}
+    SearchSkillRequestsRequest:
+      type: object
+      properties:
+        statuses: {type: array, items: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN]}}
+        pagination: {type: object, properties: {limit: {type: integer}, offset: {type: integer}}}
+    SkillRequestsResponse:
+      type: object
+      required: [requests, total, limit, offset]
+      properties:
+        requests: {type: array, items: {$ref: '#/components/schemas/SkillRequest'}}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    ApproveSkillRequestRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [create, reactivate, existing]}
+        name: {type: string, description: "mode create: defaults to the requested name."}
+        categoryId: {type: string, format: uuid, description: "mode create or reactivate: an active leaf category; create defaults to the request's."}
+        description: {type: string}
+        keywords: {type: string}
+        skillId: {type: string, format: uuid, description: "mode reactivate (an inactive skill) or existing (an active one)."}
+        levelId: {type: string, format: uuid, description: "Overrides the level the requester is given; a level of the approved skill's scale."}
+        comment: {type: string, description: Shown to the requester.}
+    RejectSkillRequestRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, maxLength: 2000}
+    SearchSkillDirectoryRequest:
+      type: object
+      properties:
+        searchQuery: {type: string}
+        teamKeys: {type: array, items: {type: string}}
+        categoryIds: {type: array, items: {type: string, format: uuid}}
+        criteria:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [skillId]
+            properties:
+              skillId: {type: string, format: uuid}
+              minLevelValue: {type: integer, minimum: 0, description: 0 or absent means any level.}
+        match: {type: string, enum: [ALL, ANY]}
+        pagination: {type: object, properties: {limit: {type: integer}, offset: {type: integer}}}
+    SearchSkillDirectoryResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [userId, teamKeys, matchedCount, skills]
+            properties:
+              userId: {type: string, format: uuid}
+              userName: {type: string, nullable: true}
+              userEmail: {type: string, nullable: true}
+              teamKeys: {type: array, items: {type: string}}
+              matchedCount: {type: integer}
+              skills: {type: array, items: {type: object, description: A UserSkill.}}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    UserSkillProfileResponse:
+      type: object
+      required: [userId, teamKeys, skills]
+      properties:
+        userId: {type: string, format: uuid}
+        userName: {type: string, nullable: true}
+        userEmail: {type: string, nullable: true}
+        teamKeys: {type: array, items: {type: string}}
+        skills: {type: array, items: {type: object, description: A UserSkill.}}
     GenerateRotaMonthRequest:
       type: object
       required: [month]
@@ -43407,6 +44228,9 @@ components:
         categoryPath: {type: string, nullable: true}
         isLowestCategory: {type: boolean}
         parentId: {type: string, format: uuid, nullable: true}
+        active: {type: boolean, description: "Inactive categories (and everything under one) are listed only to a catalogue manager."}
+        description: {type: string, nullable: true}
+        skillCount: {type: integer, description: Active skills filed directly under it.}
     SkillCategoriesResponse:
       type: object
       required: [categories]
@@ -43528,12 +44352,17 @@ components:
       required: [id, skillId, skillName, changedOn]
       properties:
         id: {type: string, format: uuid}
+        action:
+          type: string
+          enum: [ADDED, LEVEL_CHANGED, REMOVED, READDED, ""]
+          description: What the row records; empty only for a migrated row that recorded neither level.
+        skillRequestId: {type: string, format: uuid, nullable: true, description: Set when an approved skill request made the change.}
         skillId: {type: string, format: uuid}
         skillName: {type: string}
         levelFrom:
           allOf: [{$ref: '#/components/schemas/SkillLevel'}]
           nullable: true
-          description: Null the first time the skill was set.
+          description: Null when the skill was (re)added.
         levelTo:
           allOf: [{$ref: '#/components/schemas/SkillLevel'}]
           nullable: true

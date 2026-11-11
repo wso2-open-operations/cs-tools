@@ -44,8 +44,8 @@ func TestSkillRoutesDoNotShadowEachOther(t *testing.T) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(pattern)) })
 		n++
 	}
-	if n != 12 {
-		t.Fatalf("found %d skills routes in routes.go, want 12", n)
+	if n != 25 {
+		t.Fatalf("found %d skills routes in routes.go, want 25", n)
 	}
 	for _, c := range []struct{ method, path, want string }{
 		{"GET", "/skills/me", "GET /skills/me"},
@@ -60,6 +60,19 @@ func TestSkillRoutesDoNotShadowEachOther(t *testing.T) {
 		{"PUT", "/skills/me/5e1e0000-0000-4000-8000-0000000000d1", "PUT /skills/me/{skillId}"},
 		{"DELETE", "/skills/me/5e1e0000-0000-4000-8000-0000000000d1", "DELETE /skills/me/{skillId}"},
 		{"POST", "/skills", "POST /skills"},
+		{"GET", "/skills/me/capabilities", "GET /skills/me/capabilities"},
+		{"POST", "/skills/categories", "POST /skills/categories"},
+		{"PATCH", "/skills/categories/5e1e0000-0000-4000-8000-0000000000d1", "PATCH /skills/categories/{id}"},
+		{"POST", "/skills/requests", "POST /skills/requests"},
+		{"POST", "/skills/requests/check", "POST /skills/requests/check"},
+		{"POST", "/skills/requests/search", "POST /skills/requests/search"},
+		{"GET", "/skills/requests/mine", "GET /skills/requests/mine"},
+		{"POST", "/skills/requests/5e1e0000-0000-4000-8000-0000000000d1/approve", "POST /skills/requests/{id}/approve"},
+		{"POST", "/skills/requests/5e1e0000-0000-4000-8000-0000000000d1/reject", "POST /skills/requests/{id}/reject"},
+		{"POST", "/skills/requests/5e1e0000-0000-4000-8000-0000000000d1/withdraw", "POST /skills/requests/{id}/withdraw"},
+		{"POST", "/skills/directory/search", "POST /skills/directory/search"},
+		{"GET", "/skills/users/5e1e0000-0000-4000-8000-0000000000d1", "GET /skills/users/{userId}"},
+		{"GET", "/skills/users/5e1e0000-0000-4000-8000-0000000000d1/history", "GET /skills/users/{userId}/history"},
 	} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
