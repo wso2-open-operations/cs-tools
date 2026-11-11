@@ -1422,18 +1422,18 @@ describe("DashboardWidgetTile", () => {
           displayName="Bob's PLG organisations"
           resourceType="plg_organization"
           shape="count"
-          filters={{ ownerEmails: ["bob@wso2.com"] }}
+          filters={{ ownerEmails: ["bob@example.com"] }}
         />,
       );
 
       await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
       expect(postMock).toHaveBeenCalledWith(
         "/plg/organizations/search",
-        { filters: { ownerEmails: ["bob@wso2.com"] }, pagination: { offset: 0, limit: 1 } },
+        { filters: { ownerEmails: ["bob@example.com"] }, pagination: { offset: 0, limit: 1 } },
         { signal: expect.any(AbortSignal) },
       );
       const params = new URLSearchParams((screen.getByRole("link").getAttribute("href") ?? "").split("?")[1]);
-      expect(params.get("ownerEmails")).toBe("bob@wso2.com");
+      expect(params.get("ownerEmails")).toBe("bob@example.com");
     });
 
     it("a click on an owner's bar opens that owner's organisations, with the named owners kept", async () => {
@@ -1448,7 +1448,7 @@ describe("DashboardWidgetTile", () => {
           displayName="Bob and Alice by owner"
           resourceType="plg_organization"
           shape="bar"
-          filters={{ ownerEmails: ["bob@wso2.com", "alice@wso2.com"] }}
+          filters={{ ownerEmails: ["bob@example.com", "alice@example.com"] }}
           groupBy={{ field: "owner" }}
         />,
         "/dashboard/preview/plg-organizations",
@@ -1458,14 +1458,14 @@ describe("DashboardWidgetTile", () => {
 
       expect(postMock).toHaveBeenCalledWith(
         "/plg/organizations/aggregate",
-        { filters: { ownerEmails: ["bob@wso2.com", "alice@wso2.com"] }, groupBy: "owner", maxGroups: undefined },
+        { filters: { ownerEmails: ["bob@example.com", "alice@example.com"] }, groupBy: "owner", maxGroups: undefined },
         { signal: expect.any(AbortSignal) },
       );
       await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
       const probeText = screen.getByTestId("location-probe").textContent ?? "";
       const params = new URLSearchParams(probeText.split("?")[1]);
       expect(params.get("ownerIds")).toBe(ALICE);
-      expect(params.get("ownerEmails")).toBe("bob@wso2.com,alice@wso2.com");
+      expect(params.get("ownerEmails")).toBe("bob@example.com,alice@example.com");
     });
   });
 

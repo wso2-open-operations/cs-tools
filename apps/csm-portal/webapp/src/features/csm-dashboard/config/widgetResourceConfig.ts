@@ -1467,8 +1467,10 @@ function plgBoolean(v: unknown): boolean | undefined {
  *   `unowned`, `countryUnknown` and `playbookUnanswered` are turned back into JSON booleans. The preview page's
  *   search box adds `searchQuery`, which these searches call `query`.
  * - `registeredFrom` / `registeredTo` are timestamps: a plain date is sent
- *   as the start of that day (UTC) for `registeredFrom` and its end for
- *   `registeredTo`, so both bounds include the day.
+ *   as the start of that day (UTC) for `registeredFrom` and its last
+ *   microsecond for `registeredTo` (entity-service compares it with `<=`, and
+ *   Postgres keeps microseconds), so both bounds include the whole day, as the
+ *   trend's half-open `< next day` does.
  */
 function plgSearchFilters(filters: Record<string, unknown>): Record<string, unknown> {
   const { searchQuery, ...rest } = filters;
@@ -1486,7 +1488,7 @@ function plgSearchFilters(filters: Record<string, unknown>): Record<string, unkn
   }
   for (const [key, time] of [
     ["registeredFrom", "T00:00:00Z"],
-    ["registeredTo", "T23:59:59Z"],
+    ["registeredTo", "T23:59:59.999999Z"],
   ] as const) {
     const v = flat[key];
     if (typeof v === "string" && PLAIN_DATE.test(v)) flat[key] = `${v}${time}`;

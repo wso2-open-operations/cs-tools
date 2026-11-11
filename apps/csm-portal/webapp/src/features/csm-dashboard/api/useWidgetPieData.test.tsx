@@ -148,14 +148,14 @@ describe("useWidgetPieData", () => {
       "/plg/registrations/search",
       {
         unacknowledgedOnly: true,
-        filters: { registeredFrom: "2026-10-01T00:00:00Z", registeredTo: "2026-10-31T23:59:59Z" },
+        filters: { registeredFrom: "2026-10-01T00:00:00Z", registeredTo: "2026-10-31T23:59:59.999999Z" },
         pagination: { offset: 0, limit: 1 },
       },
       { signal: expect.any(AbortSignal) },
     );
     const relative = postMock.mock.calls[1][1] as { filters: Record<string, string> };
     expect(relative.filters.registeredFrom).toMatch(/^\d{4}-\d{2}-01T00:00:00Z$/);
-    expect(relative.filters.registeredTo).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59Z$/);
+    expect(relative.filters.registeredTo).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59\.999999Z$/);
   });
 
   it("reports isForbidden when a PLG slice answers 403", async () => {

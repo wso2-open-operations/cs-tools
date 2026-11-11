@@ -19106,7 +19106,11 @@ paths:
         it), the registrations with no answer one group keyed "unanswered"
         ("Not answered"); with filters.playbookAnswers, only those answers
         are groups. A checklist registration counts once per ticked option,
-        so totalRecords (the groups' sum) counts ticks.
+        and a registration whose runs of several playbooks answer the same
+        task differently counts once in each of those answers, so
+        totalRecords (the groups' sum) can be more than the registrations;
+        each group is still the registrations filters.playbookAnswers of
+        that code matches.
       operationId: plgAggregateRegistrations
       requestBody:
         required: true

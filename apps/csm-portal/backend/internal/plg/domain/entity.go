@@ -399,23 +399,28 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// The filters below are newer than entity-service's first PLG search and
+	// are left out of the body when unset (omitempty), so a search that does
+	// not use them is the body an entity-service without them accepts (it
+	// refuses unknown fields).
+	//
 	// OwnerEmails matches the organisation's PLG CS owner by email address,
 	// any of them, ignoring case; a registration matches by its
 	// organisation's owner. entity-service checks it.
-	OwnerEmails []string `json:"ownerEmails"`
+	OwnerEmails []string `json:"ownerEmails,omitempty"`
 	// CountryNames matches the organisation's country, any of them, ignoring
 	// case; CountryUnknown true matches the organisations with no country.
 	// A registration matches by its organisation's country. entity-service
 	// checks both.
-	CountryNames   []string `json:"countryNames"`
-	CountryUnknown *bool    `json:"countryUnknown"`
+	CountryNames   []string `json:"countryNames,omitempty"`
+	CountryUnknown *bool    `json:"countryUnknown,omitempty"`
 	// PlaybookTask names a playbook task by its code; PlaybookAnswers matches
 	// the registrations that answered it with any of these option codes,
 	// PlaybookUnanswered true the ones with no answer. An organisation
 	// matches when any of its registrations does. entity-service checks them.
-	PlaybookTask       string   `json:"playbookTask"`
-	PlaybookAnswers    []string `json:"playbookAnswers"`
-	PlaybookUnanswered *bool    `json:"playbookUnanswered"`
+	PlaybookTask       string   `json:"playbookTask,omitempty"`
+	PlaybookAnswers    []string `json:"playbookAnswers,omitempty"`
+	PlaybookUnanswered *bool    `json:"playbookUnanswered,omitempty"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.

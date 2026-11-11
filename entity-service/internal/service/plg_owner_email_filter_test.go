@@ -33,19 +33,19 @@ func TestValidateOrganizationFiltersChecksOwnerEmails(t *testing.T) {
 		filters domain.OrganizationSearchFilters
 		want    string // "" for accepted
 	}{
-		{"emails", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@wso2.com", " Alice@WSO2.com "}}, ""},
-		{"emails, unowned false", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@wso2.com"}, Unowned: &no}, ""},
-		{"emails and owner ids", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@wso2.com"}, OwnerIDs: []string{"0f0e9d4c-6a3b-4c2d-9e8f-7a6b5c4d3e2f"}}, ""},
+		{"emails", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@example.com", " Alice@Example.com "}}, ""},
+		{"emails, unowned false", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@example.com"}, Unowned: &no}, ""},
+		{"emails and owner ids", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@example.com"}, OwnerIDs: []string{"0f0e9d4c-6a3b-4c2d-9e8f-7a6b5c4d3e2f"}}, ""},
 		{"a 254-character email", domain.OrganizationSearchFilters{OwnerEmails: []string{long}}, ""},
 		{"a 254-character email with spaces around it", domain.OrganizationSearchFilters{OwnerEmails: []string{"  " + long + " "}}, ""},
 		{"an empty email", domain.OrganizationSearchFilters{OwnerEmails: []string{""}}, "ownerEmails entries must be email addresses of at most 254 characters"},
-		{"a blank email", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@wso2.com", "  "}}, "ownerEmails entries must be email addresses"},
+		{"a blank email", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@example.com", "  "}}, "ownerEmails entries must be email addresses"},
 		{"a name, not an email", domain.OrganizationSearchFilters{OwnerEmails: []string{"Bob"}}, "ownerEmails entries must be email addresses"},
 		{"an @ alone", domain.OrganizationSearchFilters{OwnerEmails: []string{" @ "}}, "ownerEmails entries must be email addresses"},
-		{"no name before the @", domain.OrganizationSearchFilters{OwnerEmails: []string{"@wso2.com"}}, "ownerEmails entries must be email addresses"},
+		{"no name before the @", domain.OrganizationSearchFilters{OwnerEmails: []string{"@example.com"}}, "ownerEmails entries must be email addresses"},
 		{"no domain after the @", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@"}}, "ownerEmails entries must be email addresses"},
 		{"a 255-character email", domain.OrganizationSearchFilters{OwnerEmails: []string{"a" + long}}, "ownerEmails entries must be email addresses"},
-		{"emails and unowned", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@wso2.com"}, Unowned: &yes}, "ownerEmails and filters.unowned cannot be combined"},
+		{"emails and unowned", domain.OrganizationSearchFilters{OwnerEmails: []string{"bob@example.com"}, Unowned: &yes}, "ownerEmails and filters.unowned cannot be combined"},
 	} {
 		err := validateOrganizationFilters(&c.filters)
 		switch {

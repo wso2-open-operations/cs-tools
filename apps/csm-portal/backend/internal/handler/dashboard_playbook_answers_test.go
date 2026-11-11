@@ -131,6 +131,25 @@ func TestPlaybookAnswerFields_StopAtTheAIServicesCaps(t *testing.T) {
 	}
 }
 
+// TestPlaybookAnswerFields_CapWhatOneTaskAddsToThePrompt: a name or label
+// over 100 characters is cut to 100 (counted in characters, not bytes),
+// ending in "…"; a task or answer code over 100 characters is left out, a
+// code of exactly 100 kept.
+func TestPlaybookAnswerFields_CapWhatOneTaskAddsToThePrompt(t *testing.T) {
+	long := strings.Repeat("é", 150)
+	code100, code101 := strings.Repeat("C", 100), strings.Repeat("C", 101)
+	fields := playbookAnswerFields([]plgdomain.Playbook{{Name: "Long", Active: true, Tasks: []plgdomain.PlaybookTask{
+		answerTask("LONG_TEXT", long, plgdomain.ValueSingleSelect, "A", long, code101, "Too long a code", code100, "Kept"),
+		answerTask(code101, "Too long a task code", plgdomain.ValueSingleSelect, "A", "A"),
+	}}})
+	cut := strings.Repeat("é", 99) + "…"
+	want := []csmai.PlaybookAnswerField{{Code: "LONG_TEXT", Name: cut, ValueType: "SINGLE_SELECT", Options: []csmai.PlaybookAnswerOption{
+		{Code: "A", Label: cut}, {Code: code100, Label: "Kept"}}}}
+	if !reflect.DeepEqual(fields, want) {
+		t.Errorf("playbookAnswerFields =\n%+v\nwant\n%+v", fields, want)
+	}
+}
+
 func plgGenerated(widgets ...string) string {
 	return `{"displayName":"PLG","type":"cs","isDefault":false,"targetTeam":"","isTeamBased":false,"widgets":[` + strings.Join(widgets, ",") + `]}`
 }
@@ -151,6 +170,11 @@ func TestCheckPlaybookAnswers(t *testing.T) {
 		{"slices with their own tasks", reg(`"shape":"bar","query":{},
 			"slices":[{"label":"M","query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookAnswers":["MONITOR"]}},
 			          {"label":"D","query":{"playbookTask":"REGISTERED_EMAIL_CLASSIFICATION","playbookAnswers":["DISPOSABLE"]}}]`), ""},
+		{"a slice on another task with its own answers, under the widget's", reg(`"shape":"pie","query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookAnswers":["MONITOR"]},
+			"slices":[{"label":"D","query":{"playbookTask":"REGISTERED_EMAIL_CLASSIFICATION","playbookAnswers":["DISPOSABLE"]}}]`), ""},
+		{"a slice on another task under the widget's answers", reg(`"shape":"pie","query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookAnswers":["MONITOR"]},
+			"slices":[{"label":"E","query":{"playbookAnswers":["ELIGIBLE"]}},{"label":"D","query":{"playbookTask":"REGISTERED_EMAIL_CLASSIFICATION"}}]`),
+			`slices[1]: "MONITOR" (the widget's playbookAnswers) is not an answer to REGISTERED_EMAIL_CLASSIFICATION`},
 		{"an unknown task", reg(`"shape":"count","query":{"playbookTask":"OUTCOME","playbookAnswers":["MONITOR"]}`),
 			`unknown playbook task "OUTCOME" (known tasks: DISQUALIFY_REASONS, ELIGIBILITY_ASSESSMENT_OUTCOME, REGISTERED_EMAIL_CLASSIFICATION)`},
 		{"a number task", reg(`"shape":"bar","query":{"playbookTask":"INITIAL_SESSION_DURATION_MINUTES"},"groupBy":{"field":"playbookAnswer"}`),

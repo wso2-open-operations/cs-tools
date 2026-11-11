@@ -512,7 +512,7 @@ describe("plg_organization list", () => {
         isNew: false,
       },
     ],
-    owner: { id: "u-1", email: "o@wso2.com", name: "Olivia Owner" },
+    owner: { id: "u-1", email: "o@example.com", name: "Olivia Owner" },
   };
 
   function renderAt(items: Record<string, unknown>[], state: unknown = { from: "/dashboard/my/d-1" }) {

@@ -161,13 +161,16 @@ describe("resolveRelativeDateFilters", () => {
       ).toEqual({ onboardingStatus: ["In-Progress"], endDateFrom: "2026-07-01", endDateTo: "2026-09-30" });
     });
 
-    it("resolves a PLG widget's registeredFrom / registeredTo the same way", () => {
+    it("resolves a PLG widget's registeredFrom / registeredTo against the UTC date", () => {
+      // 23:30 UTC on Aug 31 is already Sep 1 for a viewer east of UTC (05:00
+      // in Colombo); the bounds are UTC days, as the trend's window is, so
+      // "this month" and "today" are still August's, in any local timezone.
       expect(
         resolveRelativeDateFilters(
           { productCodes: ["IAM"], registeredFrom: "__startOfMonth:0__", registeredTo: "__today__" },
-          NOW,
+          new Date(Date.UTC(2026, 7, 31, 23, 30)),
         ),
-      ).toEqual({ productCodes: ["IAM"], registeredFrom: "2026-08-01", registeredTo: "2026-08-15" });
+      ).toEqual({ productCodes: ["IAM"], registeredFrom: "2026-08-01", registeredTo: "2026-08-31" });
     });
 
     it("does not touch a case_feedback widget's own dateFrom / dateTo", () => {

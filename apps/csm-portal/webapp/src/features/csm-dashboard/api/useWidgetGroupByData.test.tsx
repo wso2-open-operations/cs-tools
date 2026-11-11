@@ -487,7 +487,7 @@ describe("useWidgetGroupByData", () => {
       expect(postMock).toHaveBeenCalledWith(
         "/plg/registrations/aggregate",
         {
-          filters: { productCodes: ["IAM"], registeredTo: "2026-11-01T23:59:59Z" },
+          filters: { productCodes: ["IAM"], registeredTo: "2026-11-01T23:59:59.999999Z" },
           unacknowledgedOnly: true,
           groupBy: "country",
           maxGroups: 10,

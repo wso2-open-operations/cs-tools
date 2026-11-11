@@ -854,9 +854,12 @@ Separately, `CsmProjectsPage.tsx`'s `onboardingStatus` used to be seeded from th
 line. Both searches take the same `filters` (`OrganizationSearchFilters`), so `plgSearchFilters` cleans
 them in one place: the single-valued keys (`playbookTask` among them), `unowned`, `countryUnknown` and `playbookUnanswered` are unwrapped after the preview
 page's URL round trip (which decodes every value as an array), View more's `searchQuery` is sent as
-`query`, and a plain `registeredFrom` / `registeredTo` date is sent as `T00:00:00Z` / `T23:59:59Z` of that
-day, so both bounds include it (the searches take timestamps). Relative tokens in those two keys are
-resolved first, like any flat date key (`FLAT_DATE_FILTER_KEYS` in `resolveRelativeDateFilters.ts`), and
+`query`, and a plain `registeredFrom` / `registeredTo` date is sent as `T00:00:00Z` / `T23:59:59.999999Z` of that
+day, so both bounds include all of it (the searches take timestamps, entity-service compares `registeredTo`
+with `<=`, and Postgres keeps microseconds). Relative tokens in those two keys are
+resolved first, like any flat date key (`FLAT_DATE_FILTER_KEYS` in `resolveRelativeDateFilters.ts`), but
+against the UTC date (`UTC_DATE_FILTER_KEYS`), as the registration trend's window is (`windowDate`): the
+bounds are UTC days, so a local "today" east of UTC would be a day ahead of the trend before UTC midnight. And
 `ownerIds: ["__current_user__"]` ("my PLG organisations") is resolved to the viewer's user id like any
 flat key, the hook waiting for the user first. `ownerEmails` (named owners) is a list key and needs no
 cleaning: it stays a list through the round trip, and an owner bar's click adds `ownerIds` beside it. The organisation search sorts by `sortBy: "name"` or, by
@@ -871,8 +874,10 @@ each) or `groupBy` on the server through `useWidgetGroupByData`: `groupByEndpoin
 into `unowned: true`; a country into `countryNames: [key]` and "unknown" into `countryUnknown: true`; an
 answer into `playbookAnswers: [code]` and "unanswered" into `playbookUnanswered: true` (the widget's
 `playbookTask` comes with the merge). A
-country with a comma in its name opens an empty preview list, because the preview URL comma-splits every
-value. A registration `line` is `usePlgRegistrationTrendData` (`POST /plg/registrations/volume-trend`, the
+country with a comma in its name ("Korea, Republic of") stays one country in the preview URL: a list
+param is its values joined by ",", with a comma inside a value written `\,` and a backslash `\\`
+(`joinParamValues` / `splitParamValues` in `widgetPreviewUrl.ts`, for every resource type and for a
+single string value too), so a URL written before, with nothing escaped, reads as it did. A registration `line` is `usePlgRegistrationTrendData` (`POST /plg/registrations/volume-trend`, the
 case line's `days` or fixed window and `chart`): one series drawn as "Registered", never `series`; with
 `linePointClickThrough`, a point opens that period's registrations (`plgLinePointFilters` in
 `utils/plgLinePointQuery.ts` sets `registeredFrom` / `registeredTo`, keeping a tighter plain-date bound

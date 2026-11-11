@@ -830,13 +830,13 @@ describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
   });
 
   it("keeps `ownerEmails` a list through View more's URL round trip", () => {
-    const ownerEmails = ["bob@wso2.com", "Alice.Perera@wso2.com"];
+    const ownerEmails = ["bob@example.com", "Alice.Perera@example.com"];
     const href = config.buildHref({ ownerEmails, productCodes: ["IAM"] }, { widgetId: "w", displayName: "W" });
     expect(href.startsWith("/dashboard/preview/plg-organizations?")).toBe(true);
     const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
     expect(build({ filters, offset: 0, limit: 5 }).filters).toEqual({ ownerEmails, productCodes: ["IAM"] });
-    expect(build({ filters: { ownerEmails: ["bob@wso2.com"] }, offset: 0, limit: 5 }).filters).toEqual({
-      ownerEmails: ["bob@wso2.com"],
+    expect(build({ filters: { ownerEmails: ["bob@example.com"] }, offset: 0, limit: 5 }).filters).toEqual({
+      ownerEmails: ["bob@example.com"],
     });
   });
 
@@ -872,7 +872,7 @@ describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
         offset: 0,
         limit: 5,
       }).filters,
-    ).toEqual({ registeredFrom: "2026-01-01T00:00:00Z", registeredTo: "2026-03-31T23:59:59Z" });
+    ).toEqual({ registeredFrom: "2026-01-01T00:00:00Z", registeredTo: "2026-03-31T23:59:59.999999Z" });
   });
 
   it("passes a registration timestamp through unchanged", () => {
@@ -956,7 +956,7 @@ describe("WIDGET_RESOURCE_CONFIG.plg_registration", () => {
   });
 
   it("keeps `ownerEmails` a list through View more's URL round trip", () => {
-    const ownerEmails = ["bob@wso2.com", "alice@wso2.com"];
+    const ownerEmails = ["bob@example.com", "alice@example.com"];
     const href = config.buildHref({ ownerEmails, unacknowledgedOnly: true }, { widgetId: "w", displayName: "W" });
     const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
     expect(build({ filters, offset: 0, limit: 5 })).toEqual({

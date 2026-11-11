@@ -95,7 +95,7 @@ Do not use any other dashboard field.
 | Shape | Shows | Extra fields |
 |---|---|---|
 | `count` | One number: how many records match. | none |
-| `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
+| `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Set `sortBy`** (section 6), except on the lists section 6 says have none. |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
 | `line` | Cases opened vs closed per day, week or month; or PLG sign-ups per day, week or month (section 5e). | **Only with `resourceType: "case"` or `"plg_registration"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series` (cases only): `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
@@ -532,8 +532,10 @@ sign-ups per month.
 Fields: `createdOn`, `updatedOn`, `severity`, `state`, `assignee`. For `time_card`: `workDate` or
 `updatedOn` only ("recent time cards" means `workDate` `desc`). For operations see section 5b (a
 problem list has no `sortBy`); an `account` list has no `sortBy`; a `project` list sorts by `endDate` only; a `case_feedback`
-list has no `sortBy`.
-"Recent" means `{"field": "createdOn", "order": "desc"}`; "recently updated" means `updatedOn`.
+list has no `sortBy`. A `plg_organization` list sorts by `name` or `registeredOn` only, and a
+`plg_registration` list has no `sortBy` (section 5e).
+"Recent" means `{"field": "createdOn", "order": "desc"}`, and for PLG organisations `registeredOn` `desc`;
+"recently updated" means `updatedOn`.
 
 ---
 
@@ -666,7 +668,7 @@ Never set both `slices` and `groupBy`.
 | "about to breach", "near SLA" | `taskSLABusinessElapsedPercent gte ["80"]` plus `slaBreached eq ["false"]` |
 | "P1" / "S1" / "critical" | `severity in ["critical"]` ("catastrophic" only when asked for) |
 | "high and above" | `severity in ["catastrophic", "critical", "high"]` |
-| "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 |
+| "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 (PLG: section 6) |
 | "last N days/weeks" | `createdOn gte __daysAgo:N__` (weeks x 7) |
 | "trend", "over time", "opened vs closed" | a `line` widget, no `series` (both lines) |
 | "new cases per day", "cases opened per day", "case intake trend" | a `line` widget with `series: ["opened"]` |

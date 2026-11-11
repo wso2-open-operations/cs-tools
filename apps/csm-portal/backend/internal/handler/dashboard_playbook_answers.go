@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
@@ -37,9 +38,10 @@ var errDashboardPlaybook = errors.New("invalid playbook answer filter")
 // active playbooks, one per code (several products' playbooks ask the same
 // task), sorted by code. A code's name and type are the first playbook's
 // (in the list's order); its answers every playbook's, first seen first. A
-// code holding a character the AI service's table cannot hold is left out,
-// and one in a name or label becomes a space, so an admin's wording never
-// fails a generate request. For the same reason the list stops at the AI
+// code holding a character the AI service's table cannot hold, or longer than
+// maxPlaybookCode, is left out, and such a character in a name or label
+// becomes a space and a name or label is cut at maxPlaybookText, so an
+// admin's wording never fails a generate request or grows the prompt. For the same reason the list stops at the AI
 // service's caps: the first maxPlaybookAnswerFields codes, each with its
 // first maxPlaybookAnswerOptions answers; a filter on one left out is then
 // refused by checkPlaybookAnswers (a 422 naming the known ones), not by the
@@ -56,7 +58,7 @@ func playbookAnswerFields(playbooks []plgdomain.Playbook) []csmai.PlaybookAnswer
 				continue
 			}
 			code := strings.TrimSpace(t.Code)
-			if code == "" || strings.ContainsAny(code, tableBreakers) {
+			if code == "" || !fitsTable(code) {
 				continue
 			}
 			f, ok := byCode[code]
@@ -67,7 +69,7 @@ func playbookAnswerFields(playbooks []plgdomain.Playbook) []csmai.PlaybookAnswer
 			}
 			for _, o := range t.Options {
 				oc := strings.TrimSpace(o.Code)
-				if oc == "" || strings.ContainsAny(oc, tableBreakers) || hasOption(*f, oc) || len(f.Options) >= maxPlaybookAnswerOptions {
+				if oc == "" || !fitsTable(oc) || hasOption(*f, oc) || len(f.Options) >= maxPlaybookAnswerOptions {
 					continue
 				}
 				f.Options = append(f.Options, csmai.PlaybookAnswerOption{Code: oc, Label: tableText(o.Label, oc)})
@@ -96,8 +98,22 @@ const (
 // answer field (they would break its markdown table).
 const tableBreakers = "|\n\r`"
 
-// tableText is s with every tableBreakers character a space, trimmed, or
-// fallback when that leaves nothing.
+// maxPlaybookCode and maxPlaybookText bound what one task or answer adds to
+// the model's prompt: a code is matched as it is, so a longer one is left
+// out; a name or label is only read, so a longer one is cut.
+const (
+	maxPlaybookCode = 100
+	maxPlaybookText = 100
+)
+
+// fitsTable reports whether a task or answer code can be sent as it is.
+func fitsTable(code string) bool {
+	return !strings.ContainsAny(code, tableBreakers) && utf8.RuneCountInString(code) <= maxPlaybookCode
+}
+
+// tableText is s with every tableBreakers character a space, trimmed, cut at
+// maxPlaybookText characters (ending in "…"), or fallback when that leaves
+// nothing.
 func tableText(s, fallback string) string {
 	s = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if strings.ContainsRune(tableBreakers, r) {
@@ -105,6 +121,9 @@ func tableText(s, fallback string) string {
 		}
 		return r
 	}, s))
+	if r := []rune(s); len(r) > maxPlaybookText {
+		s = strings.TrimSpace(string(r[:maxPlaybookText-1])) + "…"
+	}
 	if s == "" {
 		return fallback
 	}
@@ -146,7 +165,10 @@ func checkPlaybookAnswers(d dashboard.Dashboard, fields []csmai.PlaybookAnswerFi
 }
 
 // checkPlaybookQuery checks one query's playbook answer filter; a slice's
-// query takes the widget's (base) task when it names none of its own.
+// query takes the widget's (base) task, and the widget's answers, when it
+// names none of its own, as the webapp merges a slice over its widget key by
+// key. So a slice that names another task under the widget's answers is
+// checked against its own task, not left to count nothing.
 func checkPlaybookQuery(where string, query, base map[string]any, byCode map[string]csmai.PlaybookAnswerField, fields []csmai.PlaybookAnswerField) error {
 	task, _ := query["playbookTask"].(string)
 	if _, own := query["playbookTask"]; !own {
@@ -168,6 +190,11 @@ func checkPlaybookQuery(where string, query, base map[string]any, byCode map[str
 		return fmt.Errorf("%w: %s: unknown playbook task %q (known tasks: %s)", errDashboardPlaybook, where, task, strings.Join(known, ", "))
 	}
 	answers, _ := query["playbookAnswers"].([]any)
+	inherited := ""
+	if _, own := query["playbookAnswers"]; !own {
+		answers, _ = base["playbookAnswers"].([]any)
+		inherited = " (the widget's playbookAnswers)"
+	}
 	for _, a := range answers {
 		code, _ := a.(string)
 		if !hasOption(f, strings.TrimSpace(code)) {
@@ -175,7 +202,7 @@ func checkPlaybookQuery(where string, query, base map[string]any, byCode map[str
 			for i, o := range f.Options {
 				names[i] = o.Code
 			}
-			return fmt.Errorf("%w: %s: %q is not an answer to %s (answers: %s)", errDashboardPlaybook, where, code, task, strings.Join(names, ", "))
+			return fmt.Errorf("%w: %s: %q%s is not an answer to %s (answers: %s)", errDashboardPlaybook, where, code, inherited, task, strings.Join(names, ", "))
 		}
 	}
 	return nil

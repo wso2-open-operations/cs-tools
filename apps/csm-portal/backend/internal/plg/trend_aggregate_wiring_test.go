@@ -149,11 +149,11 @@ func TestTrendAndAggregateAreForwarded(t *testing.T) {
 			`{"groups":[{"key":"India","label":"India","count":1}],"othersCount":0,"totalRecords":1}`,
 			func(s string) any { return decodeAs[domain.AggregateOrganizationsRequest](t, s) }},
 		{"/plg/organizations/aggregate", "/plg/organizations/aggregate",
-			`{"filters":{"ownerEmails":["bob@wso2.com","alice@wso2.com"]},"groupBy":"owner"}`,
+			`{"filters":{"ownerEmails":["bob@example.com","alice@example.com"]},"groupBy":"owner"}`,
 			`{"groups":[{"key":"11111111-1111-1111-1111-111111111111","label":"Bob Owner","count":2}],"othersCount":0,"totalRecords":2}`,
 			func(s string) any { return decodeAs[domain.AggregateOrganizationsRequest](t, s) }},
 		{"/plg/registrations/volume-trend", "/plg/registrations/volume-trend",
-			`{"filters":{"ownerEmails":["bob@wso2.com"]},"days":30}`,
+			`{"filters":{"ownerEmails":["bob@example.com"]},"days":30}`,
 			`{"days":30,"series":[{"label":"Registered","points":[]}]}`,
 			func(s string) any { return decodeAs[domain.RegistrationVolumeTrendRequest](t, s) }},
 		{"/plg/registrations/volume-trend", "/plg/registrations/volume-trend",
@@ -228,7 +228,7 @@ func TestEntityServiceRefusalsComeBackAsTheirMessage(t *testing.T) {
 		{"/plg/registrations/aggregate", `{"groupBy":"playbookAnswer"}`, "groupBy playbookAnswer needs filters.playbookTask"},
 		{"/plg/registrations/search", `{"filters":{"playbookAnswers":["MONITOR"]}}`, "filters.playbookAnswers and filters.playbookUnanswered need filters.playbookTask"},
 		{"/plg/organizations/search", `{"filters":{"ownerEmails":["Bob"]}}`, "filters.ownerEmails entries must be email addresses of at most 254 characters"},
-		{"/plg/registrations/aggregate", `{"filters":{"ownerEmails":["bob@wso2.com"],"unowned":true},"groupBy":"country"}`, "filters.ownerEmails and filters.unowned cannot be combined"},
+		{"/plg/registrations/aggregate", `{"filters":{"ownerEmails":["bob@example.com"],"unowned":true},"groupBy":"country"}`, "filters.ownerEmails and filters.unowned cannot be combined"},
 	} {
 		answer, _ := json.Marshal(map[string]any{"code": 400, "message": c.message})
 		entity := &fakeEntity{status: http.StatusBadRequest, body: string(answer)}
@@ -237,6 +237,45 @@ func TestEntityServiceRefusalsComeBackAsTheirMessage(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &got)
 		if w.Code != http.StatusBadRequest || got.Message != c.message {
 			t.Errorf("%s: %d %s, want 400 with %q", c.path, w.Code, w.Body.String(), c.message)
+		}
+	}
+}
+
+// TestSearchLeavesUnsetNewFiltersOut: a PLG search that uses none of the
+// filters added with the dashboards (an existing PLG page's search) reaches
+// entity-service without their keys, so an entity-service that does not know
+// them (it refuses unknown fields) still answers it; one that uses them sends
+// them.
+func TestSearchLeavesUnsetNewFiltersOut(t *testing.T) {
+	newKeys := []string{"ownerEmails", "countryNames", "countryUnknown", "playbookTask", "playbookAnswers", "playbookUnanswered"}
+	for _, path := range []string{"/plg/organizations/search", "/plg/registrations/search"} {
+		for _, c := range []struct {
+			name, body string
+			want       bool
+		}{
+			{"unused", `{"filters":{"productCodes":["IAM"]}}`, false},
+			{"used", `{"filters":{"ownerEmails":["owner@example.com"],"countryUnknown":true,"playbookTask":"T","playbookAnswers":["A"],"playbookUnanswered":false}}`, true},
+		} {
+			entity := &fakeEntity{status: http.StatusOK, body: `{}`}
+			postAs(t, trendAggregateMux(t, entity), path, c.body)
+			calls := entity.recorded()
+			if len(calls) != 1 {
+				t.Fatalf("%s %s: entity-service calls = %q, want one", path, c.name, calls)
+			}
+			var sent struct {
+				Filters map[string]any `json:"filters"`
+			}
+			if err := json.Unmarshal([]byte(calls[0][strings.Index(calls[0], "{"):]), &sent); err != nil {
+				t.Fatalf("%s %s: decode %q: %v", path, c.name, calls[0], err)
+			}
+			for _, k := range newKeys {
+				if k == "countryNames" && c.want {
+					continue // the "used" case leaves it out: it cannot be combined with countryUnknown
+				}
+				if _, has := sent.Filters[k]; has != c.want {
+					t.Errorf("%s %s: filters.%s sent = %v, want %v (body %s)", path, c.name, k, has, c.want, calls[0])
+				}
+			}
 		}
 	}
 }

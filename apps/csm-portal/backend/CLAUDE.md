@@ -961,7 +961,10 @@ another owner id or free text. Shapes: `count`; `list` (an organisation list sor
 list has one order and takes no `sortBy`); `pie` / `bar` with `slices` (each slice's query held to the
 same filters) or `groupBy` on the server, organisations by `owner` or `country`
 (`POST /plg/organizations/aggregate`) and registrations by `country` or `playbookAnswer` (with
-`playbookTask` in the widget's query; `POST /plg/registrations/aggregate`), on a pie or bar only; and, on registrations only, `line` (`POST /plg/registrations/volume-trend`: one
+`playbookTask` in the widget's query; `POST /plg/registrations/aggregate`; a registration is counted in
+each answer it holds, a checklist's every ticked option and every answer its runs of several playbooks
+asking the same task gave, so the groups can add up to more than the registrations, while each group
+still matches its own click-through), on a pie or bar only; and, on registrations only, `line` (`POST /plg/registrations/volume-trend`: one
 line, "Registered", with the case line's `days` or fixed window and `chart`, never `series`; the
 registry allows a line on `case` or `plg_registration`). The three routes are `PermUsePlg` passthroughs in
 `internal/plg` that check the filters as the searches do and leave the grouping, `maxGroups` and the
@@ -971,10 +974,14 @@ playbooks, not by `ParseGenerated`: `handler.WithPlaybooks` (`dashboard_playbook
 service generator read every PLG playbook on each message (`plg.NewPlaybookLister`, PLG's own
 entity-service configuration, which `cmd/server/main.go` shares with `plg.Mount`), send the AI service
 `playbookAnswers` (`playbookAnswerFields`: the active playbooks' active, non-bookend single choice and
-checklist tasks with options, one per code, sorted, table characters cleaned, at most the AI service's
+checklist tasks with options, one per code, sorted, table characters cleaned, a name or label cut at 100
+characters and a code over 100 left out, so an admin's wording cannot grow the prompt, at most the AI service's
 200 codes of 100 answers each; left out when none), and
 refuse a dashboard naming a task or an answer they do not have (`errDashboardPlaybook`: 422,
-`generate_playbook`, the reason and the known codes); when the playbooks cannot be read, none are sent
+`generate_playbook`, the reason and the known codes). A slice is checked as the webapp runs it, merged
+over its widget key by key: a slice that names its own `playbookTask` but no answers runs with the
+widget's `playbookAnswers`, so those are checked against the slice's task (an answer of another task
+would count nothing). When the playbooks cannot be read, none are sent
 and any playbook answer filter is refused. **Deploy the AI integration service first**: it refuses a
 request field it does not know. The AI integration service's catalogue (section 5e)
 teaches the model these widgets, and `TestParseGenerated_TheCataloguePlgExamplesAreValid` runs its
