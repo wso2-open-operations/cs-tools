@@ -16,10 +16,21 @@
 
 -- CUTOVER RUNBOOK STEP. Not a migration: never place this under migrations/.
 --
--- Moves every native number sequence (migration 0180's number_series) and
--- every project's wso2_id_counter past the highest number already allocated
--- by the source system, so native allocation never reissues an existing
--- number.
+-- Moves every native number sequence and every project's wso2_id_counter past
+-- the highest number already allocated by the source system, so native
+-- allocation never reissues an existing number. The sequences are those of
+-- migration 0180's number_series PLUS the extra sequences listed in the
+-- seed_seq list below, which the code allocates from instead of the
+-- number_series entry:
+--   * portal_deployment_number_seq (migration 0222): native deployment create
+--     calls next_portal_deployment_number() = 'DEP' || 9 digits. number_series
+--     lists dep_number_seq for DEP, but nothing allocates from it. It is still
+--     advanced so the two stay consistent (harmless, and correct if a caller
+--     ever switches to it).
+--   * project_number_seq (a later migration, present only where it has been
+--     applied): trigger trg_project_number_fill allocates 'CSPRJ' || 7 digits
+--     from it, not from number_series' csprj_number_seq. Skipped (and not
+--     shown) when the sequence does not exist.
 --
 -- WHEN: after the FINAL sync from the source system, with that sync stopped.
 -- The source system keeps allocating numbers until then; anything it
@@ -29,7 +40,9 @@
 -- ALSO STOP every native allocator while it runs: the entity-service API and
 -- its background workers (for example the incident report drainer, which
 -- creates TASK-numbered tasks), and anything else that calls
--- next_work_item_number() / next_series_number() / next_wso2_id(). Wait for
+-- next_work_item_number() / next_series_number() / next_wso2_id() /
+-- next_portal_deployment_number(), or inserts a project (project_number_next()).
+-- Wait for
 -- in-flight work to finish and keep them stopped until the script has
 -- committed. setval() is not atomic with the maximum it was computed from, so
 -- an allocation in between can be overwritten and a number issued twice.
@@ -37,12 +50,14 @@
 -- USAGE (dry run is the default and only reads):
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed_native_numbering.sql
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v apply=1 -f seed_native_numbering.sql
--- The role needs USAGE (or SELECT) on every number_series sequence; without it
+-- The role needs USAGE (or SELECT) on every number_series sequence and every
+-- extra sequence listed in :seed_seq; without it
 -- the script stops before changing anything and names the sequences.
 --
 -- Rules:
 --   * A series' maximum is taken only from values matching exactly
---     ^PREFIX[0-9]+$ in that series' own column(s). Portal/GitHub marker
+--     ^PREFIX[0-9]+$ in that series' own column(s). Malformed values (a stray
+--     leading prefix, too few or no digits) never count. Portal/GitHub marker
 --     numbers (CS-PORTAL-, CHG-GH-, SR-GH-) contain hyphens and so never
 --     match; neither does a longer prefix (CSTASK never counts towards CS).
 --   * setval(seq, max, true): the next value issued is max + 1. A sequence
@@ -77,6 +92,14 @@ BEGIN READ ONLY;
 \endif
 SET LOCAL app.is_internal = 'true';
 
+-- Every sequence this script seeds: number_series plus the extra sequences the
+-- code really allocates from (see the header). Several sequences may share a
+-- series prefix (DEP): each is advanced past the same column maximum. Extras
+-- that do not exist in this database are dropped (to_regclass), so the guard
+-- and the report only ever see real sequences. Kept as a psql variable, used
+-- by both statements, because a READ ONLY transaction refuses even temp tables.
+\set seed_seq 'SELECT series, digits, sequence_name, ''''::text AS used_by FROM number_series UNION ALL SELECT * FROM (VALUES (''DEP'', 9, ''portal_deployment_number_seq'', ''native deployment create''), (''CSPRJ'', 7, ''project_number_seq'', ''native project create (trigger)'')) AS extra(series, digits, sequence_name, used_by) WHERE to_regclass(extra.sequence_name) IS NOT NULL'
+
 -- A sequence this role may not read shows last_value NULL in pg_sequences,
 -- which the plan below would take for "never used" (start_value - 1). Its
 -- real value can be far ahead (TASK starts at 1000000), so the setval() would
@@ -85,7 +108,7 @@ SET LOCAL app.is_internal = 'true';
 -- too, whose figures would be just as wrong.
 SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_unreadable_sequences,
        count(*) > 0 AS seed_has_unreadable_sequences
-FROM number_series ns
+FROM (:seed_seq) ns
 WHERE NOT (has_sequence_privilege(ns.sequence_name, 'SELECT')
         OR has_sequence_privilege(ns.sequence_name, 'USAGE')) \gset
 \if :seed_has_unreadable_sequences
@@ -157,12 +180,12 @@ maxima AS (
     GROUP BY ss.series
 ),
 plan AS (
-    SELECT ns.series, ns.digits, ns.sequence_name,
+    SELECT ns.series, ns.digits, ns.sequence_name, ns.used_by,
            COALESCE(m.sources, '(no source column)') AS sources,
            m.source_max,
            -- Highest value already issued (or reserved) by the sequence.
            COALESCE(sq.last_value, sq.start_value - 1) AS seq_before
-    FROM number_series ns
+    FROM (:seed_seq) ns
     JOIN pg_sequences sq ON sq.schemaname = current_schema() AND sq.sequencename = ns.sequence_name
     LEFT JOIN maxima m ON m.series = ns.series
 ),
@@ -174,14 +197,14 @@ applied AS (
            END AS seq_after
     FROM plan
 )
-SELECT series, sequence_name, sources, source_max, seq_before, seq_after,
+SELECT series, sequence_name, used_by, sources, source_max, seq_before, seq_after,
        CASE WHEN source_max IS NULL THEN 'unchanged (no matching rows)'
             WHEN source_max > seq_before THEN CASE WHEN :'apply'::boolean THEN 'ADVANCED' ELSE 'would advance' END
             ELSE 'unchanged (sequence already ahead)'
        END AS action,
        series || LPAD((seq_after + 1)::text, GREATEST(digits, LENGTH((seq_after + 1)::text)), '0') AS next_number
 FROM applied
-ORDER BY series;
+ORDER BY series, sequence_name;
 
 \echo ''
 \echo '--- wso2_id counters (projects whose counter changes) ---'
