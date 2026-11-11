@@ -113,6 +113,15 @@ const BANNER_FORBID_TAGS = [
 ];
 
 /**
+ * Attributes a banner may not carry. A popover is drawn in the browser's top
+ * layer, which neither overflow nor paint containment can clip, so a button
+ * with popovertarget could open a panel over the whole portal (and a manual
+ * popover stays open until the page is reloaded). DOMPurify keeps these by
+ * default.
+ */
+const BANNER_FORBID_ATTRS = ["popover", "popovertarget", "popovertargetaction"];
+
+/**
  * Sanitize a banner's HTML, both when an admin pastes it in and every time a
  * stored banner is shown. The display side matters because a banner can also
  * be saved straight through the API, which stores it as sent, so the policy
@@ -122,6 +131,7 @@ export function sanitizeBannerHtml(html: string): string {
   return htmlWithNewTabLinksOnly(
     DOMPurify.sanitize(html, {
       ADD_ATTR: ["target"],
+      FORBID_ATTR: BANNER_FORBID_ATTRS,
       FORBID_TAGS: BANNER_FORBID_TAGS,
       RETURN_DOM_FRAGMENT: true,
     }),
