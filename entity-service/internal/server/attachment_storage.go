@@ -97,8 +97,22 @@ func directTransferOptions(cfg *config.Config, store service.FileStore) []servic
 		slog.Warn("direct attachment transfers are off: they need AZURE_STORAGE_KEY or a connection string with a key (signing as an Entra app is not supported yet)")
 		return nil
 	}
+	warnAttachmentSizeSettings(cfg)
 	slog.Info("direct attachment transfers are on", "aboveBytes", cfg.AttachmentDirectMinBytes)
 	return []service.FileServiceOption{service.WithDirectTransfers(links)}
+}
+
+// warnAttachmentSizeSettings logs size settings that leave a gap or are ignored
+// while direct transfers are on.
+func warnAttachmentSizeSettings(cfg *config.Config) {
+	if cfg.AttachmentMaxBytes < cfg.AttachmentDirectMinBytes {
+		slog.Warn("a file between ATTACHMENT_VIA_PORTAL_MAX_MB and ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB is refused: it is too big for the portal and too small to go direct; keep ATTACHMENT_VIA_PORTAL_MAX_MB at least ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB",
+			"portalMaxBytes", cfg.AttachmentMaxBytes, "directAboveBytes", cfg.AttachmentDirectMinBytes)
+	}
+	if cfg.AttachmentDirectMaxBytes <= cfg.AttachmentMaxBytes {
+		slog.Warn("ATTACHMENT_DIRECT_UPLOAD_MAX_MB is not above ATTACHMENT_VIA_PORTAL_MAX_MB, so it has no effect",
+			"directMaxBytes", cfg.AttachmentDirectMaxBytes, "portalMaxBytes", cfg.AttachmentMaxBytes)
+	}
 }
 
 // attachmentRequestTimeout gives the routes that move a file the longer limit

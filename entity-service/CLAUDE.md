@@ -2012,7 +2012,9 @@ in the upload, locate and delete paths. The three tables have no row-level id de
 
 **Direct transfers (large files, off by default).** The settings are `ATTACHMENT_DIRECT_UPLOAD_ENABLED`, `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` and
 `ATTACHMENT_DIRECT_UPLOAD_MAX_MB`; the older names (`ATTACHMENT_DIRECT_TRANSFERS_ENABLED`, `ATTACHMENT_DIRECT_MIN_MB`, `ATTACHMENT_DIRECT_MAX_MB`) still work
-with a logged warning, and the new name wins when both are set. With `ATTACHMENT_DIRECT_UPLOAD_ENABLED=true` a file above
+with a logged warning, and the new name wins when both are set. At startup a warning (`warnAttachmentSizeSettings`) names a
+size gap (`ATTACHMENT_VIA_PORTAL_MAX_MB` below `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`: a file in between is refused) or an ignored
+`ATTACHMENT_DIRECT_UPLOAD_MAX_MB` (not above the portal limit). With `ATTACHMENT_DIRECT_UPLOAD_ENABLED=true` a file above
 `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` (default 8) can go between the browser and Azure through short-lived signed links, so
 its bytes pass through neither a portal backend nor this service (`WithDirectTransfers`, `LinkStore`,
 `azblobstore.UploadLinks` / `DownloadLink`). Smaller files and every inline image keep the path above, where each
