@@ -242,7 +242,7 @@ window.config = {
   // portal backend), in megabytes. Optional:
   // leave unset for the defaults below (10 MB file, 1 MB images), which match the entity-service's own
   // defaults. Set them to the same values as the entity-service's
-  // ATTACHMENT_MAX_MB and its inline image limit; the server stays the
+  // ATTACHMENT_VIA_PORTAL_MAX_MB and its inline image limit; the server stays the
   // authority, these only refuse an oversized file before the upload starts.
   // CSM_PORTAL_INLINE_IMAGE_MAX_MB is the most image megabytes one comment or
   // description may hold in total (also the largest single image); each may
