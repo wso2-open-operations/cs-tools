@@ -33,6 +33,10 @@ type mockReportsClient struct {
 	csErr        error
 	gotProjectID string
 	gotPeriod    TimeLogPeriod
+	slaReport    viewer.SLAReportDetails
+	slaErr       error
+	gotSLAFrom   string
+	gotSLATo     string
 }
 
 func (m *mockReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string, period TimeLogPeriod) (viewer.TimeLogBreakdownDetails, error) {

@@ -304,6 +304,15 @@ func (c *CustomerEntityClient) GetProject(ctx context.Context, id string) ([]byt
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s", url.PathEscape(id)), nil)
 }
 
+// GetProjectSLAReport calls GET /projects/{id}/slas/report on the entity service.
+// from and to are YYYY-MM-DD dates; the response is returned as raw JSON.
+func (c *CustomerEntityClient) GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error) {
+	q := url.Values{}
+	q.Set("from", from)
+	q.Set("to", to)
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s/slas/report?%s", url.PathEscape(id), q.Encode()), nil)
+}
+
 // GetProjectMetadata calls GET /projects/{id}/metadata on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) GetProjectMetadata(ctx context.Context, id string) ([]byte, error) {

@@ -962,13 +962,14 @@ func main() {
 	// health/* plus the GET /products and GET /abt-teams lists its filters
 	// read), which use PermViewCustomerHealth so a cs_engineer or admin
 	// reaches them without also holding Viewer, and the project reports
-	// (GET /report-details and GET /generate-timelogs-breakdown-report),
-	// which use PermView.
+	// (GET /report-details, GET /generate-timelogs-breakdown-report and
+	// GET /generate-sla-report), which use PermView.
 	route("GET /accounts/{accountId}/escalations", handler.PermViewerAccess, viewerHandlers.accountEsc.GetAccountEscalations)
 	route("GET /products", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetProducts)
 	route("GET /abt-teams", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetABTTeams)
 	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
 	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
+	route("GET /generate-sla-report", handler.PermView, viewerHandlers.reports.GenerateSLAReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)
 	route("GET /files/search", handler.PermViewerAccess, viewerHandlers.files.SearchFolder)

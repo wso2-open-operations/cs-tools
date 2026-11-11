@@ -12756,6 +12756,80 @@ paths:
   # PermUsageMetricsViewer rather than the blanket PermViewerAccess gate --
   # see that permission's own doc comment in internal/handler/access.go.
 
+  /generate-sla-report:
+    get:
+      summary: Generate a project's SLA report.
+      description: >-
+        The SLA clocks of the cases the project opened between from and to
+        (both inclusive; every case is listed, newest first). Each case shows
+        its latest response, workaround and resolution clock: the elapsed time
+        and whether it was met, missed (finished late, or still running and
+        already past the target), is running or paused, or was cancelled. The
+        summary has one row per case type (Incident, or Query for a question)
+        and severity that has a case. For each target it gives the 95th
+        percentile of the elapsed time of the clocks that finished, the policy
+        target, and how many clocks were met, missed or still running.
+        Durations are display strings such as "2 Days 3 Hours".
+      operationId: generateSlaReport
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          description: The project's id or its key.
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          description: First case creation date to include (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: Last case creation date to include (YYYY-MM-DD, the whole day). Must not be before from.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAReportDetails'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /usage-metrics/projects:
     get:
       summary: List projects for the usage-metrics dashboard, optionally filtered by name.
@@ -33024,6 +33098,97 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Comment'
+
+    SLAReportMetric:
+      type: object
+      description: One clock target for one case type and severity.
+      required: [elapsed, target, met, missed, running]
+      properties:
+        elapsed:
+          type: string
+          description: 95th percentile of the elapsed time of the finished clocks, or "—" when none finished.
+        target:
+          type: string
+          description: The policy duration the clocks run against, or "Not applicable".
+        met:
+          type: integer
+        missed:
+          type: integer
+        running:
+          type: integer
+    SLAReportSummaryRow:
+      type: object
+      required: [label, caseType, severity, cases, response, workaround, resolution]
+      properties:
+        label:
+          type: string
+        caseType:
+          type: string
+          enum: [incident, query]
+        severity:
+          type: string
+        cases:
+          type: integer
+        response:
+          $ref: '#/components/schemas/SLAReportMetric'
+        workaround:
+          $ref: '#/components/schemas/SLAReportMetric'
+        resolution:
+          $ref: '#/components/schemas/SLAReportMetric'
+    SLAReportClock:
+      type: object
+      required: [elapsed, status]
+      properties:
+        elapsed:
+          type: string
+        status:
+          type: string
+          enum: ["", Met, Missed, Running, Paused, Cancelled]
+    SLAReportCase:
+      type: object
+      required: [caseId, caseNumber, caseType, severity, state, opened, response, workaround, resolution]
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+        caseType:
+          type: string
+        severity:
+          type: string
+        state:
+          type: string
+        opened:
+          type: string
+          format: date-time
+        response:
+          $ref: '#/components/schemas/SLAReportClock'
+        workaround:
+          $ref: '#/components/schemas/SLAReportClock'
+        resolution:
+          $ref: '#/components/schemas/SLAReportClock'
+    SLAReportDetails:
+      type: object
+      required: [projectName, projectKey, periodStart, periodEnd, summary, cases]
+      properties:
+        projectName:
+          type: string
+        projectKey:
+          type: string
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        summary:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAReportSummaryRow'
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAReportCase'
 
     TimeLogBreakdownDetails:
       type: object

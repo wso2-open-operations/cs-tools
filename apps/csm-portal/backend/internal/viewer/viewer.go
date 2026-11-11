@@ -109,6 +109,63 @@ type EscalationDetail struct {
 	EscalatedOn string `json:"escalatedOn"`
 }
 
+// SLAReportMetric is one clock target (response, workaround or resolution) for
+// one case type and severity. Elapsed is the 95th percentile of the finished
+// clocks (or "—"), Target the policy duration (or "Not applicable"). Met,
+// Missed and Running count the cases' latest clocks: finished within the
+// target, past it, or still inside it.
+type SLAReportMetric struct {
+	Elapsed string `json:"elapsed"`
+	Target  string `json:"target"`
+	Met     int    `json:"met"`
+	Missed  int    `json:"missed"`
+	Running int    `json:"running"`
+}
+
+// SLAReportSummaryRow is one case type and severity with at least one case.
+type SLAReportSummaryRow struct {
+	Label      string          `json:"label"`
+	CaseType   string          `json:"caseType"`
+	Severity   string          `json:"severity"`
+	Cases      int             `json:"cases"`
+	Response   SLAReportMetric `json:"response"`
+	Workaround SLAReportMetric `json:"workaround"`
+	Resolution SLAReportMetric `json:"resolution"`
+}
+
+// SLAReportClock is the latest clock of one target on one case. Status is
+// Met, Missed, Running, Paused or Cancelled, empty when the case has no clock
+// for the target.
+type SLAReportClock struct {
+	Elapsed string `json:"elapsed"`
+	Status  string `json:"status"`
+}
+
+// SLAReportCase is one case opened in the report window.
+type SLAReportCase struct {
+	CaseID     string         `json:"caseId"`
+	CaseNumber string         `json:"caseNumber"`
+	CaseType   string         `json:"caseType"`
+	Severity   string         `json:"severity"`
+	State      string         `json:"state"`
+	Opened     string         `json:"opened"`
+	Response   SLAReportClock `json:"response"`
+	Workaround SLAReportClock `json:"workaround"`
+	Resolution SLAReportClock `json:"resolution"`
+}
+
+// SLAReportDetails is the project SLA report: the clocks of the cases the
+// project opened between PeriodStart and PeriodEnd. Both lists are initialised,
+// so an empty report serialises as [] and never null.
+type SLAReportDetails struct {
+	ProjectName string                `json:"projectName"`
+	ProjectKey  string                `json:"projectKey"`
+	PeriodStart string                `json:"periodStart"`
+	PeriodEnd   string                `json:"periodEnd"`
+	Summary     []SLAReportSummaryRow `json:"summary"`
+	Cases       []SLAReportCase       `json:"cases"`
+}
+
 // TimeLogBreakdownDetails is the time-log breakdown report for a project.
 type TimeLogBreakdownDetails struct {
 	ProjectName         string `json:"projectName"`
@@ -138,7 +195,7 @@ type TimeLogBreakdownCase struct {
 }
 
 // CSReportDetails is the customer-success report for one project over a date range.
-// SLA clocks stay empty: Postgres does not store them yet.
+// Its SLA block stays empty: the CS report does not read SLA clocks (the SLA report is SLAReportDetails).
 type CSReportDetails struct {
 	SubscriptionDetails SubscriptionDetail  `json:"subscriptionDetails"`
 	CasesRecords        []CaseRecordDetail  `json:"casesRecords"`
@@ -176,7 +233,7 @@ type CaseRecordDetail struct {
 	ProductName    string `json:"productName"`
 }
 
-// SlaStats is the SLA block. Records stay empty until SLA clocks live in Postgres.
+// SlaStats is the SLA block. Records stay empty: the CS report does not read SLA clocks.
 // An empty performance object is omitted so the page shows that nothing is available.
 type SlaStats struct {
 	SlaRecords          []SlaRecordDetail   `json:"slaRecords"`
