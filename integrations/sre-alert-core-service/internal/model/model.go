@@ -81,7 +81,8 @@ type Incident struct {
 	FirstSeen       time.Time `json:"first_seen" db:"first_seen"`
 	LastSeen        time.Time `json:"last_seen" db:"last_seen"`
 
-	// UniqueIdentifier and SeverityLabel are the first alert's raw values, kept so alert mute rules can match on them.
+	// UniqueIdentifier is the first alert's raw value and SeverityLabel the most severe label any of its alerts carried
+	// (a later, more severe duplicate raises it), kept so alert mute rules can match on them.
 	UniqueIdentifier string `json:"unique_identifier" db:"unique_identifier"`
 	SeverityLabel    string `json:"severity_label" db:"severity_label"`
 	// Muted is set while an active alert mute rule matches an incident that was never delivered; nothing is sent while it is.
@@ -258,6 +259,25 @@ func SeverityToNumeric(label string) (n int, recognized bool) {
 		return n, true
 	}
 	return 1, false
+}
+
+// MoreSevere reports whether severity label a is strictly more severe than b (critical > major > minor > warning).
+// Only a recognized, non-resolving a counts: an unknown or OK label never raises an incident's severity, and an unknown
+// b counts as critical, as SeverityToNumeric treats it.
+func MoreSevere(a, b string) bool {
+	na, okA := numericSeverity[strings.ToLower(strings.TrimSpace(a))]
+	if !okA || IsResolving(na) {
+		return false
+	}
+	b = strings.ToLower(strings.TrimSpace(b))
+	if b == "" {
+		return true
+	}
+	nb, okB := numericSeverity[b]
+	if !okB {
+		return false // an unknown label is treated as critical (see SeverityToNumeric), so nothing outranks it
+	}
+	return IsResolving(nb) || na < nb
 }
 
 // IsResolving reports whether severityNum is a recovery signal (OK=5 or Clear=0).

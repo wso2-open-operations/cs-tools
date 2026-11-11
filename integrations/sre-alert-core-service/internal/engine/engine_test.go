@@ -80,6 +80,9 @@ func (f *fakeIncidents) Fold(_ context.Context, fp string, alertIDs []string, de
 		if inc.Category == "" {
 			inc.Category = c.Category
 		}
+		if c.SeverityLabel != "" {
+			inc.SeverityLabel = c.SeverityLabel
+		}
 		inc.FoldVersion++
 		f.due[c.ID] = &now
 		f.addNotes(c.ID, c.Notes)
@@ -704,5 +707,24 @@ func TestDeliverDue_CSMConfirmingInsideGracePeriodNeverUsesChat(t *testing.T) {
 	inc := incidents.byFingerprint(fpOf(item("ALT1", 0, "")))[0]
 	if !inc.CSMConfirmed || n.chatCalls != 0 || inc.Fallback {
 		t.Fatalf("confirmed = %v chat = %d, want CSM to win without any Chat post", inc.CSMConfirmed, n.chatCalls)
+	}
+}
+
+func TestFoldRaisesSeverityLabelToTheWorstSeen(t *testing.T) {
+	e, incidents := newTestEngine(&fakeNotifier{}, testConfig())
+	// In one batch: warning, then a critical duplicate.
+	handle(t, e, item("a1", 0, "warning"), item("a2", time.Second, "critical"))
+	incs := incidents.byFingerprint(fpOf(item("a1", 0, "warning")))
+	if len(incs) != 1 || incs[0].SeverityLabel != "critical" {
+		t.Fatalf("same batch: incidents = %+v, want one with severity_label critical", incs)
+	}
+
+	e2, incidents2 := newTestEngine(&fakeNotifier{}, testConfig())
+	handle(t, e2, item("b1", 0, "warning"))
+	handle(t, e2, item("b2", time.Second, "major"))   // later batch, more severe
+	handle(t, e2, item("b3", 2*time.Second, "minor")) // less severe: no change
+	incs = incidents2.byFingerprint(fpOf(item("b1", 0, "warning")))
+	if len(incs) != 1 || incs[0].SeverityLabel != "major" || incs[0].AlertCount != 3 {
+		t.Fatalf("later batches: incidents = %+v, want one with severity_label major and 3 alerts", incs)
 	}
 }
