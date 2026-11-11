@@ -29687,6 +29687,9 @@ components:
           example: {CRE_MORNING: true, CRE_WEEKEND_NIGHT: false}
         copyTo:
           type: array
+          description: >-
+            Copied (Cc) on the reminder emails (the weekday reminders and the weekend summary),
+            never with the calendar invitation attached.
           maxItems: 20
           items:
             type: string
@@ -29694,8 +29697,18 @@ components:
         weekendCopyTo:
           type: array
           description: >-
-            Copied (Cc) on the weekend summary email only; copyTo is copied on every reminder.
+            Copied (Cc) on the weekend summary email only, beside copyTo.
             Optional on a save: when absent, the stored value is kept.
+          maxItems: 20
+          items:
+            type: string
+            format: email
+        inviteCopyTo:
+          type: array
+          description: >-
+            Copied (Cc) on the emails that carry a calendar invitation or its cancellation, and on
+            no other; never added as a guest. Optional on a save: when absent, the stored value is
+            kept.
           maxItems: 20
           items:
             type: string

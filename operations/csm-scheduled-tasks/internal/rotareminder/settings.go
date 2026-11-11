@@ -97,6 +97,7 @@ func withSettings(ctx context.Context, cfg Config, weekend bool) (Config, bool, 
 	}
 	cfg.Copy = without(append(append([]string{}, cfg.Copy...), s.CopyTo...), nil)
 	cfg.WeekendCopy = without(append(append([]string{}, cfg.WeekendCopy...), s.WeekendCopyTo...), nil)
+	cfg.InviteCopy = without(append(append([]string{}, cfg.InviteCopy...), s.InviteCopyTo...), nil)
 	return cfg, true, nil
 }
 
