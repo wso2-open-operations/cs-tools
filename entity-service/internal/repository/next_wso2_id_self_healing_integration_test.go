@@ -23,6 +23,12 @@
 // do not). Connect as a role that does NOT bypass RLS; skipped without
 // CASE_CREATE_RLS_TEST_DSN.
 //
+// Apply migration 0290 as a NON-superuser role that owns the tables (no
+// BYPASSRLS, no GRANT SET ON PARAMETER), like the real migration role, and
+// connect the tests as a separate non-bypassing login. A superuser applying
+// it hides the class of bug where the migration needs a privilege the real
+// migrator lacks (a function-level SET of a custom setting did exactly that).
+//
 //	CASE_CREATE_RLS_TEST_DSN=postgres://... go test ./internal/repository/ -run NextWSO2ID
 
 package repository_test
@@ -217,20 +223,20 @@ func TestNextWSO2IDCallerVisibilityUnchanged(t *testing.T) {
 	h.seed(ccmOtherProj, "CCMPROJ-2") // hidden from the customer
 	type snap struct {
 		visible  int
-		setting  string
+		internal bool // effective: only the exact value 'true' elevates; NULL and '' both mean not internal
 		ownedIDs string
 	}
 	read := func(tx pgx.Tx) snap {
 		var s snap
 		if err := tx.QueryRow(context.Background(),
-			`SELECT (SELECT count(*) FROM work_item), current_setting('app.is_internal', true),
+			`SELECT (SELECT count(*) FROM work_item), coalesce(current_setting('app.is_internal', true), '') = 'true',
 			        coalesce((SELECT string_agg(wso2_id, ',' ORDER BY wso2_id) FROM work_item), '')`).
-			Scan(&s.visible, &s.setting, &s.ownedIDs); err != nil {
+			Scan(&s.visible, &s.internal, &s.ownedIDs); err != nil {
 			t.Fatalf("snapshot: %v", err)
 		}
 		return s
 	}
-	var before, after, inside snap
+	var before, after snap
 	var id string
 	err := h.scoped.InTx(h.customer, func(tx pgx.Tx) error {
 		before = read(tx)
@@ -238,7 +244,6 @@ func TestNextWSO2IDCallerVisibilityUnchanged(t *testing.T) {
 			return err
 		}
 		after = read(tx)
-		inside = after
 		return nil
 	})
 	if err != nil {
@@ -250,10 +255,97 @@ func TestNextWSO2IDCallerVisibilityUnchanged(t *testing.T) {
 	if before != after {
 		t.Fatalf("visibility changed across the call: before %+v after %+v", before, after)
 	}
-	if before.visible != 1 || before.ownedIDs != "CCMPROJ-1" || before.setting == "true" {
+	if before.visible != 1 || before.ownedIDs != "CCMPROJ-1" || before.internal {
 		t.Fatalf("customer snapshot unexpected (RLS not in force?): %+v", before)
 	}
-	_ = inside
+}
+
+// A caught exception from the function (missing project, raised inside a
+// PL/pgSQL EXCEPTION block, i.e. a subtransaction that is rolled back) must
+// not leave the caller elevated, and neither must a SAVEPOINT rollback. The
+// function raises for a missing project before it elevates, so the elevation
+// itself is also exercised by a successful call followed by a rolled-back
+// savepoint. Reaching the iteration-cap exception is not cheap (the first
+// collision jumps past every existing suffix), so that path is not driven
+// here; its restore is the same set_config line as the normal exit.
+func TestNextWSO2IDCaughtExceptionLeavesCallerNotElevated(t *testing.T) {
+	h := newWSO2IDHarness(t)
+	h.reset(0, 0)
+	h.seed(ccmOtherProj, "CCMPROJ-1") // hidden from the customer
+	const missing = "c7000000-0000-0000-0000-0000000000ff"
+	err := h.scoped.InTx(h.customer, func(tx pgx.Tx) error {
+		ctx := context.Background()
+		internal := func(when string) bool {
+			var on bool
+			if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('app.is_internal', true), '') = 'true'`).Scan(&on); err != nil {
+				t.Fatalf("%s: %v", when, err)
+			}
+			return on
+		}
+		hidden := func(when string) int {
+			var n int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM work_item WHERE wso2_id = 'CCMPROJ-1'`).Scan(&n); err != nil {
+				t.Fatalf("%s: %v", when, err)
+			}
+			return n
+		}
+		if internal("start") || hidden("start") != 0 {
+			t.Fatal("fixture invalid: customer starts elevated or sees the hidden row")
+		}
+		// 1. Exception caught by a PL/pgSQL EXCEPTION block.
+		if _, err := tx.Exec(ctx, `DO $$ BEGIN PERFORM next_wso2_id('`+missing+`'::uuid);
+			EXCEPTION WHEN raise_exception THEN NULL; END $$`); err != nil {
+			return err
+		}
+		if internal("after caught exception") || hidden("after caught exception") != 0 {
+			t.Fatal("caller elevated after a caught exception")
+		}
+		// 2. A successful (elevating) call whose subtransaction is rolled back.
+		if _, err := tx.Exec(ctx, `SAVEPOINT s`); err != nil {
+			return err
+		}
+		var id string
+		if err := tx.QueryRow(ctx, `SELECT next_wso2_id($1::uuid)`, ccmProjectID).Scan(&id); err != nil {
+			return err
+		}
+		if id != "CCMPROJ-2" {
+			t.Fatalf("id = %q, want CCMPROJ-2", id)
+		}
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT s`); err != nil {
+			return err
+		}
+		if internal("after savepoint rollback") || hidden("after savepoint rollback") != 0 {
+			t.Fatal("caller elevated after a rolled-back savepoint")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("tx: %v", err)
+	}
+}
+
+// A caller that is already internal stays internal (the saved value is
+// restored, not blanked).
+func TestNextWSO2IDInternalCallerStaysInternal(t *testing.T) {
+	h := newWSO2IDHarness(t)
+	h.reset(0, 0)
+	err := h.scoped.InTx(h.internal, func(tx pgx.Tx) error {
+		var id string
+		var on bool
+		if err := tx.QueryRow(context.Background(), `SELECT next_wso2_id($1::uuid)`, ccmProjectID).Scan(&id); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(context.Background(), `SELECT current_setting('app.is_internal', true) = 'true'`).Scan(&on); err != nil {
+			return err
+		}
+		if !on {
+			t.Fatal("internal caller lost its elevation after the call")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNextWSO2IDConcurrentCreatesGetDistinctIDs(t *testing.T) {
