@@ -214,7 +214,7 @@ func (h *StoredAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Requ
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
-// DirectUploadLinks handles POST /attachments/upload/{id}/direct?type=: one signed
+// DirectUploadLinks handles POST /attachments/{id}/upload-links?type=: one signed
 // link per chunk, so a large file goes from the browser straight to Azure. The
 // links are credentials, so the answer is never cached.
 func (h *StoredAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +231,7 @@ func (h *StoredAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *ht
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
-// DirectDownloadLink handles GET /attachments/download/{id}/link?type=: a signed
+// DirectDownloadLink handles POST /attachments/{id}/download-links?type=: a signed
 // link the browser downloads the file from, straight from Azure. The answer is
 // never cached.
 func (h *StoredAttachmentHandler) DirectDownloadLink(w http.ResponseWriter, r *http.Request) {

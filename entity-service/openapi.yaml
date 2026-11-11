@@ -572,7 +572,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments/upload/{id}/direct:
+  /attachments/{id}/upload-links:
     post:
       summary: >-
         Signed links to send a large file's chunks straight to Azure Blob Storage, one link
@@ -590,7 +590,7 @@ paths:
         again for an upload still pending returns fresh links, which is how a client carries on after
         its links expired. A file above ATTACHMENT_MAX_MB may be sent this way, up to
         ATTACHMENT_DIRECT_MAX_MB (default 1024).
-      operationId: createAttachmentDirectUploadLinks
+      operationId: createAttachmentUploadLinks
       security:
         - clientAssertion: []
           userIdToken: []
@@ -807,8 +807,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments/download/{id}/link:
-    get:
+  /attachments/{id}/download-links:
+    post:
       summary: >-
         A signed link to download an attachment's file straight from Azure Blob Storage, after
         checking the caller may see the attachment. The link is signed for reading that one
@@ -817,7 +817,7 @@ paths:
         link is valid for the time in expiresAt: a request that started before then finishes,
         and a resumed one asks for a new link. Charged one unit of the per-caller allowance.
         The response is never cached.
-      operationId: getAttachmentDirectDownloadLink
+      operationId: createAttachmentDownloadLink
       security:
         - clientAssertion: []
           userIdToken: []
@@ -43229,7 +43229,7 @@ components:
           type: boolean
           description: >-
             True when the file may be sent straight to Azure through POST
-            /attachments/upload/{id}/direct (a file larger than the direct-transfer size, with
+            /attachments/{id}/upload-links (a file larger than the direct-transfer size, with
             direct transfers on). False means send it in chunks through the portal backend.
 
     DirectUploadLinks:
