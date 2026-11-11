@@ -81,8 +81,8 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0 h1:/UamurK/FjbUy72dVxhPmkYcKc6BGHAGUEe6lON30Qc=
-github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0/go.mod h1:JL513tV9RHUSWMerneNXq8dbq48gTHhSeQr2urb0Fhc=
+github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.2.0 h1:wgyanZTWFRWvnlQfV8ELQ2GL8IeCOuly9/NTE8EQeIs=
+github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.2.0/go.mod h1:JL513tV9RHUSWMerneNXq8dbq48gTHhSeQr2urb0Fhc=
 github.com/xdg-go/pbkdf2 v1.0.0 h1:Su7DPu48wXMwC3bs7MCNG+z4FhcyEuz5dlvchbq0B0c=
 github.com/xdg-go/pbkdf2 v1.0.0/go.mod h1:jrpuAogTd400dnrH08LKmI/xc1MbPOebTwRqcT5RDeI=
 github.com/xdg-go/scram v1.1.2 h1:FHX5I5B4i4hKRVRBCFRxq1iQRej7WO3hhBuJf+UUySY=
