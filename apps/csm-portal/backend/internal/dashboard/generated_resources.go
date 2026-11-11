@@ -146,8 +146,8 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		sortBy: []string{"createdOn", "updatedOn"},
 	},
 	// Accounts and projects take flat filters only and cannot group on the
-	// server; neither search takes a widget sortBy (projects only sort by end
-	// date). An account's abtTeam is a team name: the generator writes the
+	// server; neither search takes a widget sortBy (projects sort by a small whitelist
+	// of date fields). An account's abtTeam is a team name: the generator writes the
 	// registry key and the team resolver turns it into the name.
 	ResourceAccount: {
 		noun:   "account",
@@ -166,14 +166,25 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		noun:   "project",
 		shapes: opsShapes,
 		flat: map[string]valueRule{
-			"onboardingStatus":     {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable"}},
-			"closureStatus":        {kind: valuesScalarEnum, values: []string{"Open", "Suspended", "Restricted"}},
-			"excludeClosureStates": {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
-			"endDateFrom":          aDate,
-			"endDateTo":            aDate,
+			"onboardingStatus":                      {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable"}},
+			"closureStatus":                         {kind: valuesScalarEnum, values: []string{"Open", "Suspended", "Restricted"}},
+			"excludeClosureStates":                  {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
+			"closureStates":                         {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
+			"endDateFrom":                           aDate,
+			"endDateTo":                             aDate,
+			"onboardingStartDateFrom":               aDate,
+			"onboardingStartDateTo":                 aDate,
+			"goLivePlanDateFrom":                    aDate,
+			"goLivePlanDateTo":                      aDate,
+			"goLiveDateFrom":                        aDate,
+			"goLiveDateTo":                          aDate,
+			"onboardingExpiryDateFrom":              aDate,
+			"onboardingExpiryDateTo":                aDate,
+			"productionReadinessCompletionDateFrom": aDate,
+			"productionReadinessCompletionDateTo":   aDate,
 		},
-		dateKeys:  map[string]bool{"endDateFrom": true, "endDateTo": true},
-		sortBy:    []string{"endDate"},
+		dateKeys:  map[string]bool{"endDateFrom": true, "endDateTo": true, "onboardingStartDateFrom": true, "onboardingStartDateTo": true, "goLivePlanDateFrom": true, "goLivePlanDateTo": true, "goLiveDateFrom": true, "goLiveDateTo": true, "onboardingExpiryDateFrom": true, "onboardingExpiryDateTo": true, "productionReadinessCompletionDateFrom": true, "productionReadinessCompletionDateTo": true},
+		sortBy:    []string{"endDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"},
 		slicesVia: "group with slices",
 	},
 	// Case feedback (CSAT): a flat rating and submission dates; grouped on the

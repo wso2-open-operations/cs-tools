@@ -122,10 +122,11 @@ func hasProjectUpdateKey(keys []string, name string) bool {
 }
 
 // projectOnboardingKeys are the PATCH /projects/{id} request keys gated by
-// PermManageOnboarding: status, owner and the four onboarding dates.
+// PermManageOnboarding: status, owner and the five onboarding dates.
 var projectOnboardingKeys = []string{
 	"onboardingStatus", "onboardingOwner",
 	"onboardingStartDate", "onboardingGoLivePlanDate", "onboardingGoLiveDate", "onboardingExpiryDate",
+	"onboardingProductionReadinessCompletionDate",
 }
 
 // projectUpdateTargets reports whether a PATCH /projects/{id} body sets any

@@ -61,11 +61,28 @@ export function resolveRelativeDateFilters(
 /**
  * The flat date keys a non-case resourceType's filters may carry a
  * relative-date placeholder in: a time card search's `startDate` / `endDate`
- * (work date) and a project search's `endDateFrom` / `endDateTo` (the
- * project's end date), all whole days and inclusive. They resolve to a plain
- * local `YYYY-MM-DD`, not an instant: both searches compare dates.
+ * (work date) and a project search's `<date>From` / `<date>To` bounds (the
+ * project's end date and its onboarding start, go-live plan, go-live,
+ * onboarding expiry and production readiness completion dates), all whole days
+ * and inclusive. They resolve to a plain local `YYYY-MM-DD`, not an instant:
+ * both searches compare dates.
  */
-const FLAT_DATE_FILTER_KEYS = ["startDate", "endDate", "endDateFrom", "endDateTo"] as const;
+const FLAT_DATE_FILTER_KEYS = [
+  "startDate",
+  "endDate",
+  "endDateFrom",
+  "endDateTo",
+  "onboardingStartDateFrom",
+  "onboardingStartDateTo",
+  "goLivePlanDateFrom",
+  "goLivePlanDateTo",
+  "goLiveDateFrom",
+  "goLiveDateTo",
+  "onboardingExpiryDateFrom",
+  "onboardingExpiryDateTo",
+  "productionReadinessCompletionDateFrom",
+  "productionReadinessCompletionDateTo",
+] as const;
 
 /**
  * Resolves relative date placeholders in the flat date filters

@@ -39,7 +39,6 @@ import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadat
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import DeploymentsTab from "@features/csm-projects/components/DeploymentsTab";
 import EditProjectClosureStateDialog from "@features/csm-projects/components/EditProjectClosureStateDialog";
-import EditProjectOnboardingDialog from "@features/csm-projects/components/EditProjectOnboardingDialog";
 import ProjectMetaCell from "@features/csm-projects/components/ProjectMetaCell";
 import ProjectOnboardingOwnerValue from "@features/csm-projects/components/ProjectOnboardingOwnerValue";
 import ProjectClosureTab from "@features/csm-projects/components/ProjectClosureTab";
@@ -181,13 +180,10 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const patchClosureState = usePatchProjectClosureState(id);
   const [editClosureStateOpen, setEditClosureStateOpen] = useState(false);
   const patchOnboarding = usePatchProjectOnboarding(id);
-  const [editOnboardingOpen, setEditOnboardingOpen] = useState(false);
-  // One dialog for both entry points (overview pencil, Onboarding tab Edit).
-  // Drops a stale error from a previous session with the dialog.
-  const openEditOnboarding = (): void => {
-    patchOnboarding.reset();
-    setEditOnboardingOpen(true);
-  };
+  // The overview pencil jumps to the Onboarding tab already in edit mode; the
+  // fields are edited in place there (no dialog). Opening the tab by any other
+  // route (tab click, ?tab=) starts read-only.
+  const [onboardingEditRequested, setOnboardingEditRequested] = useState(false);
   // Prefer wherever the caller came from (e.g. a case's Overview panel) over
   // the hardcoded projects list, so Back returns to that page instead of
   // skipping past it — same convention as CsmCaseDetailPage's own back path.
@@ -215,6 +211,11 @@ export default function CsmProjectDetailPage(): JSX.Element {
     "overview",
     { clearParamsOnChange: PROJECT_TAB_CHANGE_CLEARS },
   );
+  const openEditOnboarding = (): void => {
+    patchOnboarding.reset();
+    setOnboardingEditRequested(true);
+    setActiveTab("onboarding");
+  };
   const [createMenuAnchor, setCreateMenuAnchor] = useState<HTMLElement | null>(
     null,
   );
@@ -381,7 +382,10 @@ export default function CsmProjectDetailPage(): JSX.Element {
       </Box>
 
       <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
+        <Tabs value={activeTab} onChange={(_, v) => {
+            setOnboardingEditRequested(false);
+            setActiveTab(v as ProjectTabId);
+          }}>
           <Tab value="overview" label="Overview" />
           <Tab value="onboarding" label="Onboarding" />
           <Tab value="closure" label="Closure" />
@@ -494,7 +498,19 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <ProjectOnboardingTab
           project={p}
           canEdit={canEditProjectOnboarding}
-          onEdit={openEditOnboarding}
+          initialEditing={onboardingEditRequested}
+          isSaving={patchOnboarding.isPending}
+          saveError={
+            patchOnboarding.isError
+              ? onboardingSaveErrorMessage(patchOnboarding.error)
+              : null
+          }
+          onResetError={patchOnboarding.reset}
+          onSave={(patch, onSuccess) =>
+            // No onError handler: the tab's own inline alert (saveError
+            // above) already surfaces the failure.
+            patchOnboarding.mutate(patch, { onSuccess })
+          }
         />
       )}
 
@@ -507,30 +523,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
       {activeTab === "contacts" && <ProjectContactsTab projectId={p.id} />}
 
       {activeTab === "workItems" && <WorkItemsTab projectId={p.id} />}
-
-      {editOnboardingOpen && (
-        <EditProjectOnboardingDialog
-          currentStatus={p.onboardingStatus}
-          currentOwner={p.onboardingOwner}
-          currentDates={p}
-          isSaving={patchOnboarding.isPending}
-          saveError={
-            patchOnboarding.isError
-              ? onboardingSaveErrorMessage(patchOnboarding.error)
-              : null
-          }
-          onClose={() => {
-            if (!patchOnboarding.isPending) setEditOnboardingOpen(false);
-          }}
-          onSave={(patch) =>
-            // No onError handler: the dialog's own inline alert (saveError
-            // above) already surfaces the failure.
-            patchOnboarding.mutate(patch, {
-              onSuccess: () => setEditOnboardingOpen(false),
-            })
-          }
-        />
-      )}
 
       {editClosureStateOpen && (
         <EditProjectClosureStateDialog

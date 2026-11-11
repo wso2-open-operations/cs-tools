@@ -40,10 +40,11 @@ export type ProjectOnboardingStatusValue = (typeof PROJECT_ONBOARDING_STATUSES)[
  * one must be sent. `onboardingOwner` is the id of an active internal user.
  * The backend has no way to clear the owner or any of the dates (omitted or
  * `null` means unchanged), so a caller must never send `null`/an empty value
- * expecting that. The four date fields are calendar dates as `YYYY-MM-DD`;
- * the backend rejects a plan/go-live/expiry date earlier than the start date.
+ * expecting that. The five date fields are calendar dates as `YYYY-MM-DD`;
+ * the backend rejects a plan/go-live/expiry/readiness date earlier than the start date.
  * Note the read side names two of them differently (`goLivePlanDate`,
- * `goLiveDate`, see `ProjectDetails`).
+ * `goLiveDate`, see `ProjectDetails`), and the readiness date is
+ * `productionReadinessCompletionDate`.
  */
 export interface ProjectOnboardingPatch {
   onboardingStatus?: ProjectOnboardingStatusValue;
@@ -52,6 +53,7 @@ export interface ProjectOnboardingPatch {
   onboardingGoLivePlanDate?: string;
   onboardingGoLiveDate?: string;
   onboardingExpiryDate?: string;
+  onboardingProductionReadinessCompletionDate?: string;
 }
 
 interface ProjectOnboardingPatchResponse {
@@ -64,6 +66,7 @@ interface ProjectOnboardingPatchResponse {
     goLivePlanDate?: string | null;
     goLiveDate?: string | null;
     onboardingExpiryDate?: string | null;
+    productionReadinessCompletionDate?: string | null;
   };
 }
 

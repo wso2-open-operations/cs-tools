@@ -28,7 +28,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, ChevronDown, ChevronUp, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
@@ -47,7 +47,20 @@ import { useNavTransition } from "@hooks/useNavTransition";
 import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import ProjectOnboardingStatusChip from "@features/csm-projects/components/ProjectOnboardingStatusChip";
+import ProjectsAdvancedFilters, {
+  ProjectFilterChips,
+} from "@features/csm-projects/components/ProjectsAdvancedFilters";
+import { ONBOARDING_STATUS_OPTIONS } from "@features/csm-projects/utils/projectAdvancedFields";
+import {
+  countActiveProjectFilters,
+  EMPTY_PROJECT_FILTERS,
+  projectFiltersToRequest,
+  readProjectFilters,
+  writeProjectFilters,
+  type ProjectFilters,
+} from "@features/csm-projects/utils/projectFilters";
 import RefreshButton from "@components/RefreshButton";
+import { formatUtcDateForDisplay } from "@utils/dateTime";
 import type { Project, SearchProjectsRequest } from "@features/csm-projects/types/csmProjects";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 
@@ -55,7 +68,18 @@ const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
 const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
 
-type ProjectColumnId = "name" | "key" | "closureState" | "startDate" | "endDate" | "onboardingStatus" | "onboardingOwner";
+type ProjectColumnId =
+  | "name"
+  | "key"
+  | "closureState"
+  | "startDate"
+  | "endDate"
+  | "onboardingStatus"
+  | "onboardingOwner"
+  | "goLivePlanDate"
+  | "goLiveDate"
+  | "onboardingExpiryDate"
+  | "productionReadinessCompletionDate";
 
 const PROJECT_COLUMNS: { id: ProjectColumnId; label: string }[] = [
   { id: "name", label: "Name" },
@@ -65,12 +89,17 @@ const PROJECT_COLUMNS: { id: ProjectColumnId; label: string }[] = [
   { id: "endDate", label: "End" },
   { id: "onboardingStatus", label: "Onboarding status" },
   { id: "onboardingOwner", label: "Onboarding owner" },
+  { id: "goLivePlanDate", label: "Go-live plan date" },
+  { id: "goLiveDate", label: "Go-live date" },
+  { id: "onboardingExpiryDate", label: "Onboarding expiry date" },
+  { id: "productionReadinessCompletionDate", label: "Production readiness completion date" },
 ];
 
 // Matches the table's original, always-shown set. Onboarding status/owner are
 // opt-in, same as the accounts table's own account manager/technical owner/CRE
 // team columns — most projects have no onboarding engagement at all, so they'd
-// show as a bare dash for the common case.
+// show as a bare dash for the common case. The four onboarding date columns
+// are opt-in for the same reason.
 const DEFAULT_PROJECT_COLUMN_IDS: ProjectColumnId[] = [
   "name",
   "key",
@@ -78,6 +107,12 @@ const DEFAULT_PROJECT_COLUMN_IDS: ProjectColumnId[] = [
   "startDate",
   "endDate",
 ];
+
+/** The onboarding dates are calendar days stored at midnight UTC, so show the
+ *  UTC day (not the viewer's local one, which can be the day before). */
+function formatOnboardingDate(value?: string | null): string {
+  return formatUtcDateForDisplay(value) ?? "—";
+}
 
 function renderProjectCell(id: ProjectColumnId, p: Project): ReactNode {
   switch (id) {
@@ -95,6 +130,14 @@ function renderProjectCell(id: ProjectColumnId, p: Project): ReactNode {
       return formatDate(p.startDate);
     case "endDate":
       return formatDate(p.endDate);
+    case "goLivePlanDate":
+      return formatOnboardingDate(p.goLivePlanDate);
+    case "goLiveDate":
+      return formatOnboardingDate(p.goLiveDate);
+    case "onboardingExpiryDate":
+      return formatOnboardingDate(p.onboardingExpiryDate);
+    case "productionReadinessCompletionDate":
+      return formatOnboardingDate(p.productionReadinessCompletionDate);
     case "onboardingStatus":
       return <ProjectOnboardingStatusChip onboardingStatus={p.onboardingStatus} emptyFallback="—" />;
     case "onboardingOwner":
@@ -120,25 +163,6 @@ function renderProjectCell(id: ProjectColumnId, p: Project): ReactNode {
   }
 }
 
-// Matches Project["onboardingStatus"]'s own value set, minus "Not-Applicable"
-// (not a real onboarding state to filter *for* — it means the project has no
-// onboarding engagement at all). This is also the exact vocabulary a
-// dashboard widget's `resourceType: "project"` tile sends — see
-// `widgetResourceConfig.ts`'s `project.buildHref`, which is what sends this
-// page the `?onboardingStatus=` param this page reads back below.
-const ONBOARDING_STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "In-Progress", label: "In Progress" },
-  { value: "Completed", label: "Completed" },
-  { value: "Not-Started", label: "Not Started" },
-  { value: "Expired", label: "Expired" },
-  { value: "Cancelled", label: "Cancelled" },
-  { value: "OnHold", label: "On Hold" },
-];
-
-function parseOnboardingStatusParam(raw: string | null): string[] {
-  return raw ? raw.split(",").filter(Boolean) : [];
-}
-
 function formatDate(value?: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -161,54 +185,48 @@ export default function CsmProjectsPage(): JSX.Element {
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // Derived straight from the URL on every render (not a `useState`
-  // initializer, which only runs once at mount) — a same-route navigation
-  // that doesn't remount this page (e.g. one dashboard tile's click-through
-  // followed by another, both landing on /customers/projects, or browser
-  // back/forward) still reads the URL's current `?onboardingStatus=` instead
-  // of whatever the first mount saw. `handleOnboardingStatusChange` below
-  // writes the control's choice to the URL rather than to separate local
-  // state, so there is only one source of truth and nothing to re-sync.
-  const onboardingStatusParam = searchParams.get("onboardingStatus");
-  const onboardingStatus = useMemo(
-    () => parseOnboardingStatusParam(onboardingStatusParam),
-    [onboardingStatusParam],
+  // initializer, which only runs once at mount): a same-route navigation that
+  // doesn't remount this page (one dashboard tile's click-through followed by
+  // another, both landing on /customers/projects, or browser back/forward)
+  // still reads the URL's current filters. `handleFiltersChange` writes the
+  // controls' choices to the URL rather than to separate local state, so there
+  // is only one source of truth and nothing to re-sync.
+  const searchParamsKey = searchParams.toString();
+  const filters = useMemo(
+    () => readProjectFilters(new URLSearchParams(searchParamsKey)),
+    [searchParamsKey],
   );
-  // Resets pagination whenever the URL's onboardingStatus changes for any
-  // reason, including a same-route external navigation
-  // `handleOnboardingStatusChange` below didn't cause (and so didn't already
-  // reset itself) — syncing page state to that external source is exactly
-  // what the QuickNav.tsx precedent below disables this rule for.
+  const activeFilterCount = countActiveProjectFilters(filters);
+  // Resets pagination whenever the URL's filters change for any reason,
+  // including a same-route external navigation `handleFiltersChange` below
+  // didn't cause (and so didn't already reset itself) — syncing page state to
+  // that external source is exactly what the QuickNav.tsx precedent below
+  // disables this rule for.
+  const filtersKey = useMemo(
+    () => writeProjectFilters(new URLSearchParams(), filters).toString(),
+    [filters],
+  );
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs page state to an external source, the URL's onboardingStatus param, same pattern as QuickNav.tsx's initial q/goto sync
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs page state to an external source, the URL's filter params, same pattern as QuickNav.tsx's initial q/goto sync
     setPage(0);
-  }, [onboardingStatusParam]);
+  }, [filtersKey]);
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
-  const handleOnboardingStatusChange = (next: string[]): void => {
+  const handleFiltersChange = (next: ProjectFilters): void => {
     setPage(0);
-    setSearchParams(
-      (prev) => {
-        const params = new URLSearchParams(prev);
-        if (next.length > 0) {
-          params.set("onboardingStatus", next.join(","));
-        } else {
-          params.delete("onboardingStatus");
-        }
-        return params;
-      },
-      { replace: true },
-    );
+    setSearchParams((prev) => writeProjectFilters(prev, next), { replace: true });
   };
 
   const request = useMemo<SearchProjectsRequest>(
     () => ({
       pagination: { limit: rowsPerPage, offset: page * rowsPerPage },
       searchQuery: debouncedSearch.trim() || undefined,
-      onboardingStatus: onboardingStatus.length > 0 ? onboardingStatus : undefined,
+      ...projectFiltersToRequest(filters),
     }),
-    [debouncedSearch, onboardingStatus, page, rowsPerPage],
+    [debouncedSearch, filters, page, rowsPerPage],
   );
 
   const { data, isLoading, isFetching, isError, error, refetch, dataUpdatedAt } =
@@ -292,12 +310,36 @@ export default function CsmProjectsPage(): JSX.Element {
           <MultiSelectField
             id="projects-filter-onboarding-status"
             label="Onboarding status"
-            values={onboardingStatus}
+            values={filters.onboardingStatus}
             options={ONBOARDING_STATUS_OPTIONS}
-            onChange={handleOnboardingStatusChange}
+            onChange={(next) => handleFiltersChange({ ...filters, onboardingStatus: next })}
           />
         </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => setFiltersOpen((o) => !o)}
+          aria-expanded={filtersOpen}
+          startIcon={<ListFilter size={16} />}
+          endIcon={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        >
+          {activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
+        </Button>
+        {activeFilterCount > 0 && (
+          <Button
+            variant="text"
+            size="small"
+            startIcon={<X size={16} />}
+            onClick={() => handleFiltersChange(EMPTY_PROJECT_FILTERS)}
+          >
+            Clear filters
+          </Button>
+        )}
       </Box>
+
+      <ProjectFilterChips filters={filters} panelOpen={filtersOpen} onChange={handleFiltersChange} />
+
+      {filtersOpen && <ProjectsAdvancedFilters filters={filters} onChange={handleFiltersChange} />}
 
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>

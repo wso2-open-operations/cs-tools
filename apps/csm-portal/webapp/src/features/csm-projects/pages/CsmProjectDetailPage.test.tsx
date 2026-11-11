@@ -488,13 +488,16 @@ describe("CsmProjectDetailPage — onboarding edit", () => {
     expect(screen.queryByRole("button", { name: "Edit onboarding" })).not.toBeInTheDocument();
   });
 
-  it("shows the edit control for an authorized caller and opens the dialog with controls", () => {
+  it("shows the edit control for an authorized caller; it opens the Onboarding tab with the fields as inputs, no dialog", () => {
     mockCanEditProjectOnboarding = true;
     renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit onboarding" }));
 
-    expect(screen.getByText("Edit onboarding", { selector: "h2" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/customers/projects/proj-1?tab=onboarding",
+    );
     expect(screen.getByRole("combobox", { name: /onboarding status/i })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /onboarding owner/i })).toBeInTheDocument();
     // The owner can be changed but never cleared.
@@ -556,7 +559,24 @@ describe("CsmProjectDetailPage — onboarding edit", () => {
     );
   });
 
-  it("shows the save error inside the dialog", () => {
+  it("submits only the changed new readiness date under its request key", () => {
+    mockCanEditProjectOnboarding = true;
+    renderPage("/customers/projects/proj-1?tab=onboarding");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const group = screen.getByRole("group", { name: "Production readiness completion date" });
+    fireEvent.change(group.parentElement!.querySelector("input")!, {
+      target: { value: "06/30/2026" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockPatchOnboardingMutate).toHaveBeenCalledWith(
+      { onboardingProductionReadinessCompletionDate: "2026-06-30" },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("shows the save error inline in the Onboarding tab", () => {
     mockCanEditProjectOnboarding = true;
     mockPatchOnboardingIsError = true;
     renderPage();
@@ -628,15 +648,27 @@ describe("CsmProjectDetailPage — Onboarding tab", () => {
     expect(screen.getByText("Project key")).toBeInTheDocument();
   });
 
-  it("opens the same onboarding dialog from the tab's Edit button for an editor", () => {
+  it("edits in place from the tab's Edit button for an editor, with no dialog", () => {
     mockCanEditProjectOnboarding = true;
     renderPage("/customers/projects/proj-1?tab=onboarding");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(screen.getByText("Edit onboarding", { selector: "h2" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Go-live date" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
-  it("opens the same dialog, with the dates, from the overview pencil", () => {
+  it("opens the tab read-only when reached by clicking the tab, even after the pencil was used", () => {
+    mockCanEditProjectOnboarding = true;
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Edit onboarding" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Onboarding" }));
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+
+  it("shows the dates as inputs after the overview pencil", () => {
     mockCanEditProjectOnboarding = true;
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Edit onboarding" }));

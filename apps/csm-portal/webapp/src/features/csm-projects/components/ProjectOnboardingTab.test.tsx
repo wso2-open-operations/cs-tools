@@ -32,6 +32,16 @@ vi.mock("@api/backend/client", () => ({
 vi.mock("@config/apiConfig", () => ({
   apiConfig: { backendUrl: "https://example.test" },
 }));
+// The owner picker's directory search is covered by its own hook test.
+vi.mock("@features/csm-projects/api/useSearchInternalUsers", () => ({
+  useSearchInternalUsers: () => ({
+    data: [
+      { id: "11111111-1111-1111-1111-111111111111", name: "John Roe", email: "john.roe@example.com" },
+    ],
+    isFetching: false,
+    isError: false,
+  }),
+}));
 
 function render(ui: ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -54,31 +64,58 @@ const PROJECT = {
   goLivePlanDate: "2026-04-15T00:00:00Z",
   goLiveDate: null,
   onboardingExpiryDate: "2026-12-31T00:00:00Z",
+  productionReadinessCompletionDate: "2026-05-20T00:00:00Z",
 } as unknown as ProjectDetails;
+
+const DATE_LABELS = [
+  "Onboarding start date",
+  "Go-live plan date",
+  "Go-live date",
+  "Onboarding expiry date",
+  "Production readiness completion date",
+];
+
+/** The picker's field is a group of sections; its value lives in a hidden
+ *  input beside it, which is what accepts a typed/pasted full date. */
+function dateInput(label: string): HTMLInputElement {
+  const group = screen.getByRole("group", { name: label });
+  const input = group.parentElement?.querySelector("input");
+  if (!input) throw new Error(`no input for ${label}`);
+  return input;
+}
+
+function typeDate(label: string, value: string): void {
+  fireEvent.change(dateInput(label), { target: { value } });
+}
 
 describe("ProjectOnboardingTab", () => {
   it("is read-only without edit rights: no Edit button", () => {
-    render(<ProjectOnboardingTab project={PROJECT} canEdit={false} onEdit={() => {}} />);
+    render(<ProjectOnboardingTab project={PROJECT} canEdit={false} onSave={() => {}} />);
     expect(screen.getByText("In Progress")).toBeInTheDocument();
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
-  it("shows an Edit button that calls onEdit when the caller can edit", () => {
-    const onEdit = vi.fn();
-    render(<ProjectOnboardingTab project={PROJECT} canEdit onEdit={onEdit} />);
+  it("shows an Edit button for an editor that switches the fields to inputs in place", () => {
+    render(<ProjectOnboardingTab project={PROJECT} canEdit onSave={() => {}} />);
+    expect(screen.queryByRole("combobox", { name: /onboarding status/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("combobox", { name: /onboarding status/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /onboarding owner/i })).toBeInTheDocument();
+    for (const label of DATE_LABELS) expect(dateInput(label)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
   it("renders each date as its UTC calendar day and a dash when empty", () => {
-    render(<ProjectOnboardingTab project={PROJECT} canEdit={false} onEdit={() => {}} />);
+    render(<ProjectOnboardingTab project={PROJECT} canEdit={false} onSave={() => {}} />);
     const valueOf = (label: string): string | null | undefined =>
       screen.getByText(label).nextElementSibling?.textContent;
     expect(valueOf("Onboarding start date")).toBe("Mar 1, 2026");
     expect(valueOf("Go-live plan date")).toBe("Apr 15, 2026");
     expect(valueOf("Go-live date")).toBe("—");
     expect(valueOf("Onboarding expiry date")).toBe("Dec 31, 2026");
+    expect(valueOf("Production readiness completion date")).toBe("May 20, 2026");
   });
 
   it("shows dashes for a project with no onboarding data", () => {
@@ -86,15 +123,16 @@ describe("ProjectOnboardingTab", () => {
       <ProjectOnboardingTab
         project={{ id: "proj-2" } as unknown as ProjectDetails}
         canEdit={false}
-        onEdit={() => {}}
+        onSave={() => {}}
       />,
     );
-    expect(screen.getAllByText("—")).toHaveLength(5);
+    // Status chip fallback plus the five dates.
+    expect(screen.getAllByText("—")).toHaveLength(6);
   });
 
   describe("onboarding owner visibility", () => {
     const show = (p: ProjectDetails, canEdit = false) =>
-      render(<ProjectOnboardingTab project={p} canEdit={canEdit} onEdit={() => {}} />);
+      render(<ProjectOnboardingTab project={p} canEdit={canEdit} onSave={() => {}} />);
 
     it.each(["Not-Applicable", undefined, null])(
       "hides the owner cell when status is %s, keeping Edit for editors",
@@ -117,7 +155,7 @@ describe("ProjectOnboardingTab", () => {
     const withHours = (hours: Partial<ProjectDetails>): ProjectDetails =>
       ({ ...PROJECT, ...hours }) as ProjectDetails;
     const show = (p: ProjectDetails) =>
-      render(<ProjectOnboardingTab project={p} canEdit={false} onEdit={() => {}} />);
+      render(<ProjectOnboardingTab project={p} canEdit={false} onSave={() => {}} />);
 
     it("renders total, consumed, remaining and a progress bar when set", () => {
       show(
@@ -165,6 +203,164 @@ describe("ProjectOnboardingTab", () => {
       unmount();
       show(withHours({ totalOnboardingHours: null, consumedOnboardingHours: 3 }));
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("inline editing", () => {
+    const edit = (onSave = vi.fn(), extra: Partial<Parameters<typeof ProjectOnboardingTab>[0]> = {}) => {
+      render(<ProjectOnboardingTab project={PROJECT} canEdit onSave={onSave} {...extra} />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      return onSave;
+    };
+    const save = (): void => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    };
+
+    it("seeds each date picker from the UTC calendar day of the stored value", () => {
+      edit();
+      expect(dateInput("Onboarding start date")).toHaveValue("03/01/2026");
+      expect(dateInput("Go-live plan date")).toHaveValue("04/15/2026");
+      expect(dateInput("Go-live date")).toHaveValue("");
+      expect(dateInput("Onboarding expiry date")).toHaveValue("12/31/2026");
+      expect(dateInput("Production readiness completion date")).toHaveValue("05/20/2026");
+    });
+
+    it("sends only the changed date, and hands over a leave-edit-mode callback", () => {
+      const onSave = edit();
+      typeDate("Go-live date", "06/15/2026");
+      save();
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect(onSave).toHaveBeenCalledWith(
+        { onboardingGoLiveDate: "2026-06-15" },
+        expect.any(Function),
+      );
+      // Still in edit mode until the caller reports success.
+      expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+      onSave.mock.calls[0][1]();
+    });
+
+    it("leaves edit mode when the save succeeds", async () => {
+      const onSave = vi.fn((_patch, onSuccess: () => void) => onSuccess());
+      edit(onSave);
+      typeDate("Go-live date", "06/15/2026");
+      save();
+      expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    });
+
+    it("sends the new production readiness completion date under its request key", () => {
+      const onSave = edit();
+      typeDate("Production readiness completion date", "06/30/2026");
+      save();
+      expect(onSave).toHaveBeenCalledWith(
+        { onboardingProductionReadinessCompletionDate: "2026-06-30" },
+        expect.any(Function),
+      );
+    });
+
+    it("sends only a changed status", () => {
+      const onSave = edit();
+      fireEvent.mouseDown(screen.getByRole("combobox", { name: /onboarding status/i }));
+      fireEvent.click(screen.getByRole("option", { name: "On Hold" }));
+      save();
+      expect(onSave).toHaveBeenCalledWith({ onboardingStatus: "On-Hold" }, expect.any(Function));
+    });
+
+    it("sends a newly picked owner by id", () => {
+      const onSave = edit();
+      fireEvent.mouseDown(screen.getByRole("combobox", { name: /onboarding owner/i }));
+      fireEvent.click(screen.getByRole("option", { name: "John Roe" }));
+      save();
+      expect(onSave).toHaveBeenCalledWith(
+        { onboardingOwner: "11111111-1111-1111-1111-111111111111" },
+        expect.any(Function),
+      );
+    });
+
+    it("cancel discards the draft, restores the stored values and sends nothing", () => {
+      const onSave = vi.fn();
+      const onResetError = vi.fn();
+      edit(onSave, { onResetError });
+      typeDate("Go-live date", "06/15/2026");
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(onSave).not.toHaveBeenCalled();
+      expect(onResetError).toHaveBeenCalled();
+      expect(screen.queryByRole("group", { name: "Go-live date" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(dateInput("Go-live date")).toHaveValue("");
+    });
+
+    it("blocks Save when a changed date is earlier than the stored start date", () => {
+      edit();
+      typeDate("Go-live date", "02/15/2026");
+      expect(screen.getByText(/earlier than the onboarding start date/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("applies the start-date order rule to the readiness date too", () => {
+      edit();
+      typeDate("Production readiness completion date", "02/15/2026");
+      expect(screen.getByText(/earlier than the onboarding start date/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("treats an emptied date as unchanged and never sends it", () => {
+      const onSave = edit();
+      typeDate("Go-live plan date", "");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      typeDate("Go-live date", "06/15/2026");
+      save();
+      expect(onSave).toHaveBeenCalledWith({ onboardingGoLiveDate: "2026-06-15" }, expect.any(Function));
+    });
+
+    it("offers no clear buttons", () => {
+      edit();
+      expect(screen.queryByRole("button", { name: /clear/i })).not.toBeInTheDocument();
+    });
+
+    it("surfaces the server's message inline and keeps the draft", () => {
+      edit(vi.fn(), { saveError: "go-live plan date must not be earlier than the onboarding start date" });
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "go-live plan date must not be earlier than the onboarding start date",
+      );
+      expect(screen.getByRole("group", { name: "Go-live date" })).toBeInTheDocument();
+    });
+
+    it("disables the inputs and shows Saving while the save is in flight", () => {
+      edit(vi.fn(), { isSaving: true });
+      expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    });
+
+    it("keeps the open-time baseline when the project refreshes under the edit", () => {
+      const onSave = vi.fn();
+      const { rerender } = render(<ProjectOnboardingTab project={PROJECT} canEdit onSave={onSave} />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      rerender(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <ProjectOnboardingTab
+              project={{ ...PROJECT, goLivePlanDate: "2026-09-09T00:00:00Z" } as ProjectDetails}
+              canEdit
+              onSave={onSave}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(dateInput("Go-live plan date")).toHaveValue("04/15/2026");
+    });
+
+    it("can open already in edit mode for an editor", () => {
+      render(<ProjectOnboardingTab project={PROJECT} canEdit initialEditing onSave={() => {}} />);
+      expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    });
+
+    it("never enters edit mode without edit rights, even if asked to", () => {
+      render(
+        <ProjectOnboardingTab project={PROJECT} canEdit={false} initialEditing onSave={() => {}} />,
+      );
+      expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Go-live date" })).not.toBeInTheDocument();
     });
   });
 });

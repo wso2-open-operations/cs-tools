@@ -22152,8 +22152,11 @@ components:
           description: Only projects with this overall closure state.
         sortBy:
           type: string
-          enum: [endDate]
-          description: Sort field. Postgres puts projects with no end date last.
+          enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
+          description: >-
+            Sort field. Projects with no value for it are last. Only endDate is
+            supported on every data source; the others are Postgres only and a 400
+            elsewhere.
         sortOrder:
           type: string
           enum: [asc, desc]
@@ -22225,6 +22228,96 @@ components:
             Postgres; applied in Go on ServiceNow by paging through every
             match (503 if that exceeds the page bound), and a project the
             ServiceNow response carries no sfId for is never returned.
+        onboardingStartDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding start date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        onboardingStartDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding start date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching From bound. Postgres only; a 400 on any other data
+            source.
+        goLivePlanDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a planned go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        goLivePlanDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a planned go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching From bound. Postgres only; a 400 on any other data
+            source.
+        goLiveDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a actual go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        goLiveDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a actual go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching From bound. Postgres only; a 400 on any other data
+            source.
+        onboardingExpiryDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding expiry date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        onboardingExpiryDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding expiry date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching From bound. Postgres only; a 400 on any other data
+            source.
+        productionReadinessCompletionDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a production-readiness completion date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        productionReadinessCompletionDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a production-readiness completion date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching From bound. Postgres only; a 400 on any other data
+            source.
+        closureStates:
+          type: array
+          items:
+            type: string
+            enum: [Open, Suspended, Restricted]
+          description: >-
+            Only projects whose closure state is any of the given values (the
+            include-side counterpart of excludeClosureStates; a project with no
+            recorded closure state matches none). Postgres only; a 400 on any
+            other data source.
 
     ProjectAccountRef:
       type: object
@@ -22313,6 +22406,11 @@ components:
           format: date-time
           nullable: true
           description: Onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+        productionReadinessCompletionDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
         onboardingStatus:
           type: string
           nullable: true
@@ -22487,6 +22585,26 @@ components:
           description: >
             project.onboarding_go_live_date. Null when the project hasn't
             gone live (or the date isn't tracked).
+        goLivePlanDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Planned go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+        onboardingExpiryDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date the onboarding entitlement expires (midnight UTC). Postgres data sources only; null elsewhere.
+        onboardingStartDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+        productionReadinessCompletionDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
         verificationEnabled:
           type: boolean
           description: Whether the Pending Verification feature is enabled for this project.
@@ -22636,6 +22754,17 @@ components:
             (Postgres data sources only). A malformed date, or one earlier
             than the start date (supplied or stored), is a 400. Clearing is
             not supported.
+        onboardingProductionReadinessCompletionDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Sets the date the project's onboarding production-readiness work
+            was completed, as YYYY-MM-DD (Postgres data sources only; a 400 on
+            any other data source). Read back as
+            productionReadinessCompletionDate. A malformed date, or one
+            earlier than the start date (supplied or stored), is a 400.
+            Clearing is not supported.
 
     ProjectUpdateResponse:
       type: object
@@ -22704,6 +22833,11 @@ components:
           nullable: true
           description: Present on Postgres data sources only (midnight UTC).
         onboardingExpiryDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present on Postgres data sources only (midnight UTC).
+        productionReadinessCompletionDate:
           type: string
           format: date-time
           nullable: true
