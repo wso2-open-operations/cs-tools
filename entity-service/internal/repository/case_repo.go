@@ -4570,6 +4570,22 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 	caseArgs := []any{req.ID}
 	idx := 2
 	if req.RelatedCaseID != nil {
+		// related_case_id is a column of "case" alone: a service request,
+		// engagement, security report analysis or announcement has nowhere to
+		// keep it, and the UPDATE below would match no row and answer 404 "case
+		// not found" for a ticket that exists. Refuse it by name instead,
+		// dispatching on the extension row that exists, as UpdateCase does.
+		workItemType, err := readCaseLikeType(ctx, tx, "update case fields", req.ID, false)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, &apierror.NotFoundError{Msg: "case not found"}
+		}
+		if err != nil {
+			return time.Time{}, fmt.Errorf("update case fields: read type: %w", err)
+		}
+		if workItemType != "CASE" {
+			return time.Time{}, &apierror.ValidationError{Msg: "relatedCaseId can only be set on a case, not on a " +
+				strings.ToLower(strings.ReplaceAll(workItemType, "_", " "))}
+		}
 		// The key now points at work_item, which holds every kind of ticket; a case
 		// is related only to another case-like ticket (never an incident, a change
 		// request, an announcement...), as the old key to "case" guaranteed.
