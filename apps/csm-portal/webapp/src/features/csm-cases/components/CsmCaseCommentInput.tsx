@@ -46,11 +46,11 @@ import {
 import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
 import { imagePasteRefusalMessage, type ImagePasteRefusal } from "@components/rich-text-editor/inlineImageLimits";
 import {
   attachmentLimitMessage,
   COMMENT_MAX_ATTACHMENTS,
-  entityAttachmentMaxBytes,
 } from "@config/attachmentLimitsConfig";
 import {
   dropFailedImages,
@@ -263,6 +263,7 @@ export default function CsmCaseCommentInput({
 }: CsmCaseCommentInputProps): JSX.Element {
   const [html, setHtml] = useDraftState(draftHtml, onDraftHtmlChange, "");
   const api = useBackendApi();
+  const { maxFileBytes: maxBytes, maxInlineImagesBytes } = useAttachmentLimits();
   const onImageUpload = useMemo(
     () =>
       imageUploadParentId ? (file: File) => queueInlineImage(file) : undefined,
@@ -320,8 +321,8 @@ export default function CsmCaseCommentInput({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
   const onPasteError = useCallback((reason: ImagePasteRefusal) => {
-    setError(imagePasteRefusalMessage(reason));
-  }, []);
+    setError(imagePasteRefusalMessage(reason, maxInlineImagesBytes));
+  }, [maxInlineImagesBytes]);
 
   // Dropping files directly onto the composer, as an alternative to the
   // paperclip button's naming-modal flow (see CsmUploadAttachmentModal) —
@@ -376,7 +377,6 @@ export default function CsmCaseCommentInput({
     // (matching submit()'s own single-message pattern below) but still
     // attach whichever dropped files DO pass, rather than rejecting the
     // whole drop over one oversized file.
-    const maxBytes = entityAttachmentMaxBytes();
     const tooLarge = incoming.find((f) => f.size > maxBytes);
     const accepted = incoming.filter((f) => f.size <= maxBytes);
 
@@ -411,7 +411,7 @@ export default function CsmCaseCommentInput({
           ? attachmentLimitMessage(COMMENT_MAX_ATTACHMENTS)
           : null,
     );
-  }, [attachments, setAttachments]);
+  }, [attachments, setAttachments, maxBytes]);
 
   const onDrop = useCallback(
     (e: DragEvent) => {
@@ -471,7 +471,6 @@ export default function CsmCaseCommentInput({
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
     // the comment and then failing on the upload (which would double-post on retry).
-    const maxBytes = entityAttachmentMaxBytes();
     const tooLarge = attachments.find((a) => a.file.size > maxBytes);
     if (tooLarge) {
       setError(
@@ -581,6 +580,7 @@ export default function CsmCaseCommentInput({
     submitting,
     api,
     imageUploadParentId,
+    maxBytes,
   ]);
 
   // Customer replies are blocked for this case state. The composer is locked to
