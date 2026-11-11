@@ -31,6 +31,9 @@
 --     applied): trigger trg_project_number_fill allocates 'CSPRJ' || 7 digits
 --     from it, not from number_series' csprj_number_seq. Skipped (and not
 --     shown) when the sequence does not exist.
+-- portal_deployment_number_seq is REQUIRED: the script aborts if it is missing
+-- (migration 0222 not applied), rather than silently leaving the live
+-- deployment allocator unseeded.
 --
 -- WHEN: after the FINAL sync from the source system, with that sync stopped.
 -- The source system keeps allocating numbers until then; anything it
@@ -56,9 +59,16 @@
 -- being switched without reaching the first native number. It does not apply
 -- to the wso2_id counters (see below). Size it from the source system's
 -- allocation rate times the length of the switch window.
--- The role needs USAGE (or SELECT) on every number_series sequence and every
--- extra sequence listed in :seed_seq; without it
--- the script stops before changing anything and names the sequences.
+-- The role needs SELECT on every number_series sequence and every extra
+-- sequence listed in :seed_seq (the real last_value / is_called are read from
+-- the sequence itself), and in apply mode also UPDATE (setval() needs it).
+-- Without them the script stops before changing anything and names the
+-- sequences. Sequence names are resolved once through the search_path
+-- (to_regclass), the same way setval() resolves them.
+-- The extra sequences (not number_series') are formatted by an allocator that
+-- LEFT-TRUNCATES past its digit width (lpad), so the script also aborts, in a
+-- dry run too, if max + gap would exceed that width (9 digits for DEP, 7 for
+-- CSPRJ); lower gap or fix the formatter first.
 --
 -- Rules:
 --   * A series' maximum is taken only from values matching exactly
@@ -115,49 +125,26 @@ BEGIN READ ONLY;
 \endif
 SET LOCAL app.is_internal = 'true';
 
--- Every sequence this script seeds: number_series plus the extra sequences the
--- code really allocates from (see the header). Several sequences may share a
--- series prefix (DEP): each is advanced past the same column maximum. Extras
--- that do not exist in this database are dropped (to_regclass), so the guard
--- and the report only ever see real sequences. Kept as a psql variable, used
--- by both statements, because a READ ONLY transaction refuses even temp tables.
-\set seed_seq 'SELECT series, digits, sequence_name, ''''::text AS used_by FROM number_series UNION ALL SELECT * FROM (VALUES (''DEP'', 9, ''portal_deployment_number_seq'', ''native deployment create''), (''CSPRJ'', 7, ''project_number_seq'', ''native project create (trigger)'')) AS extra(series, digits, sequence_name, used_by) WHERE to_regclass(extra.sequence_name) IS NOT NULL'
-
--- A sequence this role may not read shows last_value NULL in pg_sequences,
--- which the plan below would take for "never used" (start_value - 1). Its
--- real value can be far ahead (TASK starts at 1000000), so the setval() would
--- move it backwards and reissue numbers already allocated, and a rollback does
--- not undo setval(). Refuse before anything is read or changed, in a dry run
--- too, whose figures would be just as wrong.
-SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_unreadable_sequences,
-       count(*) > 0 AS seed_has_unreadable_sequences
-FROM (:seed_seq) ns
-WHERE NOT (has_sequence_privilege(ns.sequence_name, 'SELECT')
-        OR has_sequence_privilege(ns.sequence_name, 'USAGE')) \gset
-\if :seed_has_unreadable_sequences
-\echo 'ABORTED: this role cannot read these sequences, so their current values are unknown:' :'seed_unreadable_sequences'
-\echo 'Grant USAGE (or SELECT) on them, or run as a role that has it. Nothing was changed.'
-DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: the role cannot read every number sequence (listed above)'; END $$;
+-- portal_deployment_number_seq is mandatory: refuse before to_regclass()
+-- could silently drop it from the seed set below.
+SELECT to_regclass('portal_deployment_number_seq') IS NULL AS seed_dep_seq_missing \gset
+\if :seed_dep_seq_missing
+\echo 'ABORTED: sequence portal_deployment_number_seq does not exist (migration 0222 not applied?). Nothing was changed.'
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: portal_deployment_number_seq is missing'; END $$;
 \endif
 
-\echo ''
-\echo '--- rows visible per source column (cross-check against expected totals) ---'
-SELECT 'work_item.number'                    AS source, count(*) AS rows FROM work_item
-UNION ALL SELECT 'customer_call.number',              count(*) FROM customer_call
-UNION ALL SELECT 'project.number',                    count(*) FROM project
-UNION ALL SELECT 'account.number',                    count(*) FROM account
-UNION ALL SELECT 'communication_plan.number',         count(*) FROM communication_plan
-UNION ALL SELECT 'knowledge_article.number',          count(*) FROM knowledge_article
-UNION ALL SELECT 'outage.number',                     count(*) FROM outage
-UNION ALL SELECT 'deployed_product.number',           count(*) FROM deployed_product
-UNION ALL SELECT 'deployment.number',                 count(*) FROM deployment
-UNION ALL SELECT 'incident_alert.number',             count(*) FROM incident_alert
-UNION ALL SELECT 'alert_incident_mapping.alert_number', count(*) FROM alert_incident_mapping;
+-- Every sequence this script seeds: number_series plus the extra sequences the
+-- code really allocates from (see the header). Several sequences may share a
+-- series prefix (DEP): each is advanced past the same column maximum. strict
+-- marks the extras, whose formatter truncates on overflow. project_number_seq
+-- is optional and dropped (to_regclass) where it does not exist. Kept as a
+-- psql variable, used by several statements, because a READ ONLY transaction
+-- refuses even temp tables.
+\set seed_seq 'SELECT series, digits, sequence_name, ''''::text AS used_by, false AS strict FROM number_series UNION ALL SELECT ''DEP'', 9, ''portal_deployment_number_seq'', ''native deployment create'', true UNION ALL SELECT ''CSPRJ'', 7, ''project_number_seq'', ''native project create (trigger)'', true WHERE to_regclass(''project_number_seq'') IS NOT NULL'
 
-\echo ''
-\echo '--- number series ---'
--- One statement for both modes: in a dry run the setval() branch is never
--- reached (and would be refused by the READ ONLY transaction if it were).
+-- Per-series source maximum (see the rules in the header), shared by the
+-- overflow check and the report.
+SELECT $q$
 WITH series_source(series, source) AS (
     VALUES ('CS',    'work_item.number'), ('INC',   'work_item.number'),
            ('PRB',   'work_item.number'), ('CHG',   'work_item.number'),
@@ -193,29 +180,89 @@ parsed AS (
     -- One regex per row: prefix and digits of a strictly PREFIX+digits value.
     SELECT source, m[1] AS prefix, m[2]::numeric AS n
     FROM numbers, regexp_match(number, '^([A-Z]+)([0-9]+)$') AS m
-),
-maxima AS (
-    SELECT ss.series,
-           string_agg(DISTINCT ss.source, ', ') AS sources,
-           max(p.n) AS source_max
-    FROM series_source ss
-    LEFT JOIN parsed p ON p.source = ss.source AND p.prefix = ss.series
-    GROUP BY ss.series
-),
+)
+SELECT ss.series,
+       string_agg(DISTINCT ss.source, ', ') AS sources,
+       max(p.n) AS source_max
+FROM series_source ss
+LEFT JOIN parsed p ON p.source = ss.source AND p.prefix = ss.series
+GROUP BY ss.series
+$q$ AS seed_maxima \gset
+
+-- A sequence this role may not read shows last_value NULL in pg_sequences,
+-- which would be taken for "never used" (start_value - 1). Its
+-- real value can be far ahead (TASK starts at 1000000), so the setval() would
+-- move it backwards and reissue numbers already allocated, and a rollback does
+-- not undo setval(). Refuse before anything is read or changed, in a dry run
+-- too, whose figures would be just as wrong. SELECT is needed (not just USAGE)
+-- because the real is_called flag is read from the sequence relation; apply
+-- mode also needs UPDATE for setval().
+SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_unreadable_sequences,
+       count(*) > 0 AS seed_has_unreadable_sequences
+FROM (:seed_seq) ns
+WHERE NOT (has_sequence_privilege(ns.sequence_name, 'SELECT')
+           AND (NOT :'apply'::boolean OR has_sequence_privilege(ns.sequence_name, 'UPDATE'))) \gset
+\if :seed_has_unreadable_sequences
+\echo 'ABORTED: this role lacks SELECT (and, in apply mode, UPDATE) on these sequences:' :'seed_unreadable_sequences'
+\echo 'Grant the privileges, or run as a role that has them. Nothing was changed.'
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: the role lacks the sequence privileges needed (listed above)'; END $$;
+\endif
+
+-- The extra sequences' allocators left-truncate past their digit width, so a
+-- target beyond it would issue truncated (duplicate) numbers. Refuse first.
+SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_overflow_sequences,
+       count(*) > 0 AS seed_has_overflow
+FROM (:seed_seq) ns
+JOIN (:seed_maxima) m ON m.series = ns.series
+WHERE ns.strict AND m.source_max + :gap > power(10, ns.digits) - 1 \gset
+\if :seed_has_overflow
+\echo 'ABORTED: max + gap would exceed the allocator digit width for:' :'seed_overflow_sequences'
+\echo 'Its formatter would truncate (and so repeat) numbers. Lower gap or fix the formatter first. Nothing was changed.'
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: max + gap overflows the digit width of a sequence (listed above)'; END $$;
+\endif
+
+\echo ''
+\echo '--- rows visible per source column (cross-check against expected totals) ---'
+SELECT 'work_item.number'                    AS source, count(*) AS rows FROM work_item
+UNION ALL SELECT 'customer_call.number',              count(*) FROM customer_call
+UNION ALL SELECT 'project.number',                    count(*) FROM project
+UNION ALL SELECT 'account.number',                    count(*) FROM account
+UNION ALL SELECT 'communication_plan.number',         count(*) FROM communication_plan
+UNION ALL SELECT 'knowledge_article.number',          count(*) FROM knowledge_article
+UNION ALL SELECT 'outage.number',                     count(*) FROM outage
+UNION ALL SELECT 'deployed_product.number',           count(*) FROM deployed_product
+UNION ALL SELECT 'deployment.number',                 count(*) FROM deployment
+UNION ALL SELECT 'incident_alert.number',             count(*) FROM incident_alert
+UNION ALL SELECT 'alert_incident_mapping.alert_number', count(*) FROM alert_incident_mapping;
+
+\echo ''
+\echo '--- number series ---'
+-- One statement for both modes: in a dry run the setval() branch is never
+-- reached (and would be refused by the READ ONLY transaction if it were).
+WITH maxima AS (:seed_maxima),
 plan AS (
     SELECT ns.series, ns.digits, ns.sequence_name, ns.used_by,
            COALESCE(m.sources, '(no source column)') AS sources,
            m.source_max,
-           -- Highest value already issued (or reserved) by the sequence.
-           COALESCE(sq.last_value, sq.start_value - 1) AS seq_before
+           -- Highest value already issued (or reserved) by the sequence. Read
+           -- from the sequence itself: pg_sequences.last_value is NULL when
+           -- is_called is false (e.g. after setval(seq, n, false)), which would
+           -- be misread as "start_value - 1" and could lower the sequence.
+           CASE WHEN st.is_called THEN st.last_value ELSE st.last_value - 1 END AS seq_before
     FROM (:seed_seq) ns
-    JOIN pg_sequences sq ON sq.schemaname = current_schema() AND sq.sequencename = ns.sequence_name
+    -- Resolve the name once, as setval() and the privilege checks do.
+    JOIN pg_class seq ON seq.oid = to_regclass(ns.sequence_name) AND seq.relkind = 'S'
+    CROSS JOIN LATERAL (
+        SELECT (xpath('/row/last_value/text()', x))[1]::text::bigint AS last_value,
+               (xpath('/row/is_called/text()', x))[1]::text::boolean AS is_called
+        FROM (SELECT query_to_xml(format('SELECT last_value, is_called FROM %s', seq.oid::regclass), false, true, '') AS x) q
+    ) st
     LEFT JOIN maxima m ON m.series = ns.series
 ),
 applied AS (
     SELECT plan.*,
            CASE WHEN :'apply'::boolean AND source_max + :gap > seq_before
-                THEN setval(sequence_name::regclass, (source_max + :gap)::bigint, true)
+                THEN setval(to_regclass(sequence_name), (source_max + :gap)::bigint, true)
                 ELSE GREATEST(seq_before, COALESCE(source_max + :gap, seq_before))
            END AS seq_after
     FROM plan
