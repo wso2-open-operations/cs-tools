@@ -61,6 +61,10 @@ function setSidebarCollapsed(collapsed: boolean): void {
   }
 }
 
+/** How long `isSignedIn` must stay false before the sidebar and header project
+ * controls are hidden. Longer than the auth SDK's transient re-check window. */
+const SIGN_OUT_DEBOUNCE_MS = 10_000;
+
 interface AppLayoutProps {
   children?: ReactNode;
   /** Forces the header's project controls (search, pin, recent views, sidebar
@@ -94,6 +98,24 @@ export default function AppLayout({
   const { isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
   const { isErrorPageDisplayed } = useErrorPageContext();
   useSyncRecentViewsIdentity();
+
+  // The auth SDK transiently reports `isSignedIn: false` while it re-checks
+  // the session after the tab regains focus (a failed token refresh or a
+  // failed sign-in check flips it false, and a 1s poll flips it back a few
+  // seconds later). Reading it live unmounted the sidebar and the header's
+  // project controls for that window. Treat the session as still active until
+  // `isSignedIn` has stayed false for SIGN_OUT_DEBOUNCE_MS; a genuine sign-out
+  // redirects away, so the short delay is invisible there.
+  const [sessionLatched, setSessionLatched] = useState(isSignedIn);
+  if (isSignedIn && !sessionLatched) {
+    setSessionLatched(true);
+  }
+  useEffect(() => {
+    if (isSignedIn) return;
+    const timer = setTimeout(() => setSessionLatched(false), SIGN_OUT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [isSignedIn]);
+  const isSessionActive = isSignedIn || sessionLatched;
 
   // Resets the top-level scroll region on every route change — including a
   // switch between two open case tabs (both are `location.pathname`
@@ -174,11 +196,11 @@ export default function AppLayout({
               <Header
                 onToggleSidebar={shellActions.toggleSidebar}
                 collapsed={shellState.sidebarCollapsed}
-                hideProjectControls={!isSignedIn || !hasInitialized || minimalHeader}
+                hideProjectControls={!isSessionActive ||!hasInitialized || minimalHeader}
               />
             }
             sidebar={
-              hasInitialized && isSignedIn && !isErrorPageDisplayed && !minimalHeader ? (
+              hasInitialized && isSessionActive && !isErrorPageDisplayed && !minimalHeader ? (
                 <CsmSideBar
                   collapsed={shellState.sidebarCollapsed}
                   expandedMenus={shellState.expandedMenus}
