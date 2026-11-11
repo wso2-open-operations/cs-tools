@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -1067,19 +1069,47 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 // case's own created_on, leaves updated_on alone. An announcement is skipped
 // (its description is already shown, and the mirror drops ServiceNow's
 // repeat of it), as is a blank description. Best effort: the case already
-// exists, so a failure is logged and the create still succeeds.
+// exists, so a failure is logged and the create still succeeds. The write
+// gets its own deadline (descriptionCommentTimeout) so a slow insert cannot
+// use up the request's and leave the steps after it (SLA clocks, case.created)
+// without time to run.
 func (s *caseService) addDescriptionAsFirstComment(ctx context.Context, c domain.Case, req domain.CreateCaseRequest) {
 	if req.Type == "announcement" || strings.TrimSpace(req.Description) == "" {
 		return
 	}
+	writeCtx, cancel := context.WithTimeout(ctx, descriptionCommentTimeout)
+	defer cancel()
 	createdOn := c.CreatedOn
-	if _, err := s.repo.CreateCaseCommentAsSystem(ctx, domain.CreateCaseCommentRequest{
+	if _, err := s.repo.CreateCaseCommentAsSystem(writeCtx, domain.CreateCaseCommentRequest{
 		CaseID:    c.ID,
 		Type:      domain.CommentTypeComment,
 		Content:   req.Description,
 		CreatedBy: c.CreatedBy,
 	}, &createdOn); err != nil {
-		slog.ErrorContext(ctx, "create case: writing the description as the first comment failed", "caseId", c.ID, "error", err)
+		slog.ErrorContext(ctx, "create case: writing the description as the first comment failed", "caseId", c.ID, "reason", dbFailureReason(err))
+	}
+}
+
+// descriptionCommentTimeout bounds addDescriptionAsFirstComment's insert, the
+// same 5s the other best-effort steps after a create get
+// (publishCaseCreatedTimeout and its siblings).
+const descriptionCommentTimeout = 5 * time.Second
+
+// dbFailureReason summarises a repository error for a log line without
+// repeating its text: a pgx connection error names the database host, user
+// and database. A PostgreSQL error is reported by its SQLSTATE, a deadline or
+// cancellation by name, anything else only as a database error.
+func dbFailureReason(err error) string {
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.As(err, &pgErr):
+		return "database error, SQLSTATE " + pgErr.Code
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "database error"
 	}
 }
 
