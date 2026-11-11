@@ -107,7 +107,7 @@ type escalationDetector interface {
 // already logs their failures and never returns an error to call sites, so
 // there is nothing for this dispatcher to join/propagate for them.
 type slaEngineService interface {
-	RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string)
+	RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, engagementType, product, team string)
 	ApplyStateEffects(ctx context.Context, caseID, newStatus string)
 	CompleteResponseClock(ctx context.Context, caseID string)
 	// PauseWorkaroundClock is called from handleWorkaroundProvided — the one
@@ -1337,7 +1337,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 		if err != nil {
 			slog.WarnContext(ctx, "dispatch: case.created createdAt not RFC3339, sla clocks not registered", "caseId", p.CaseID, "createdAt", p.CreatedAt, "err", err)
 		} else {
-			d.slaEngine.RegisterClocks(ctx, p.CaseID, p.Priority, createdAt, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.CaseType, p.Product, p.Team)
+			d.slaEngine.RegisterClocks(ctx, p.CaseID, p.Priority, createdAt, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.CaseType, p.EngagementType, p.Product, p.Team)
 		}
 	}
 
@@ -1565,10 +1565,11 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 // others (errors.Join, same as sendBreachAlert), each logged individually.
 //
 // One exception: isMigrationEngagementComment (case type "engagement",
-// engagement type "migration") routes to chataudience.Migration instead of
-// calling chataudience.Resolve at all — a migration engagement's frustration
-// alert always goes to the Migration audience alone, never the case's own
-// team/Incident Monitor, by explicit product direction.
+// engagement type "migration") ALSO adds chataudience.Migration on top of
+// chataudience.Resolve's own decision — a migration engagement's frustration
+// alert goes to both the case's own team/Incident Monitor (plus any
+// Onboarding/Evaluation/Americas/weekend overlay) and the Migration
+// audience, by explicit product direction.
 //
 // Deliberately best-effort and entirely independent of handleCommentAdded's
 // own email-sending return value: a failure here (entity-service's role
@@ -1645,16 +1646,24 @@ func (d *Dispatcher) checkFrustration(ctx context.Context, record eventbus.Recor
 	}
 
 	caseLink := d.links.CSMLink(p.CaseID)
-	var audiences []string
+	audiences := chataudience.Resolve(p.Team, p.IsEvaluationAccount, p.ProjectOnboardingStatus, d.clock(), d.googleChat.HasAudienceSpace)
 	if isMigrationEngagementComment(p) {
-		// A migration engagement's frustration alert goes to the Migration
-		// audience instead of the usual team/Incident Monitor routing --
-		// the one case this routes by engagement type rather than by team,
-		// so it replaces chataudience.Resolve's decision entirely rather
-		// than adding to it.
-		audiences = []string{chataudience.Migration}
-	} else {
-		audiences = chataudience.Resolve(p.Team, p.IsEvaluationAccount, p.ProjectOnboardingStatus, d.clock(), d.googleChat.HasAudienceSpace)
+		// A migration engagement's frustration alert ALSO goes to the
+		// Migration audience, on top of whatever chataudience.Resolve
+		// already decided (the case's own team/Incident Monitor, plus any
+		// Onboarding/Evaluation/Americas/weekend overlay) -- by explicit
+		// product direction, both the team actually working the case and
+		// whoever is watching migration engagements should see the alert.
+		found := false
+		for _, a := range audiences {
+			if a == chataudience.Migration {
+				found = true
+				break
+			}
+		}
+		if !found {
+			audiences = append(audiences, chataudience.Migration)
+		}
 	}
 	for _, audience := range audiences {
 		if err := d.googleChat.SendFrustrationAlert(ctx, audience, p.CaseNumber, p.WSO2CaseID, p.Product, result.Reason, result.FrustratedLevel, caseLink); err != nil {

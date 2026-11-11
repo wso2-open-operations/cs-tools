@@ -424,7 +424,7 @@ type holdingSLA struct {
 	once             sync.Once
 }
 
-func (h *holdingSLA) RegisterClocks(context.Context, string, string, time.Time, string, string, string, string, string, string) {
+func (h *holdingSLA) RegisterClocks(context.Context, string, string, time.Time, string, string, string, string, string, string, string) {
 	first := false
 	h.once.Do(func() { first = true })
 	if first {

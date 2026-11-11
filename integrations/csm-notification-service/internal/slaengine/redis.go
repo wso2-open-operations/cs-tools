@@ -80,9 +80,16 @@ type ClockMeta struct {
 	WSO2CaseID string
 	CaseTitle  string
 	CaseType   string
-	Product    string
-	Team       string
-	Priority   string
+	// EngagementType mirrors events.CaseCreatedPayload.EngagementType (e.g.
+	// "migration"; "" for every non-engagement case-like type, and for any
+	// clock registered before this field existed). Lets sendBreachAlert
+	// suppress the Chat/email reaction for a migration engagement the same
+	// way it already does for CaseType == "SERVICE_REQUEST" — see that
+	// check's own doc comment.
+	EngagementType string
+	Product        string
+	Team           string
+	Priority       string
 	// State is the case's own display-label status (e.g. "Work In
 	// Progress"), refreshed by ApplyStateEffects on every case.status_changed
 	// — "" until the first status change, since case.created carries no
@@ -215,7 +222,7 @@ end
 redis.call('HSET', KEYS[1],
 	'caseNumber', ARGV[1], 'wso2CaseId', ARGV[2], 'caseTitle', ARGV[3],
 	'caseType', ARGV[4], 'product', ARGV[5], 'team', ARGV[6], 'priority', ARGV[7],
-	'startedAt', ARGV[8], 'schedule', ARGV[11])
+	'startedAt', ARGV[8], 'schedule', ARGV[11], 'engagementType', ARGV[12])
 redis.call('HSETNX', KEYS[1], 'state', ARGV[9])
 redis.call('HSETNX', KEYS[1], 'paused', '0')
 redis.call('HSETNX', KEYS[1], 'alertedTier', '0')
@@ -245,7 +252,7 @@ func (s *Store) SetClock(ctx context.Context, caseID, clockType string, meta Clo
 	return setClockScript.Run(ctx, s.rdb, []string{key},
 		meta.CaseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType,
 		meta.Product, meta.Team, meta.Priority, meta.StartedAt.UnixNano(),
-		meta.State, int(clockTTL.Seconds()), meta.Schedule,
+		meta.State, int(clockTTL.Seconds()), meta.Schedule, meta.EngagementType,
 	).Err()
 }
 
@@ -263,16 +270,17 @@ func (s *Store) GetClock(ctx context.Context, caseID, clockType string) (meta Cl
 		return ClockMeta{}, false, nil
 	}
 	meta = ClockMeta{
-		CaseNumber: res["caseNumber"],
-		WSO2CaseID: res["wso2CaseId"],
-		CaseTitle:  res["caseTitle"],
-		CaseType:   res["caseType"],
-		Product:    res["product"],
-		Team:       res["team"],
-		Priority:   res["priority"],
-		State:      res["state"],
-		Paused:     res["paused"] == "1",
-		Schedule:   res["schedule"],
+		CaseNumber:     res["caseNumber"],
+		WSO2CaseID:     res["wso2CaseId"],
+		CaseTitle:      res["caseTitle"],
+		CaseType:       res["caseType"],
+		EngagementType: res["engagementType"],
+		Product:        res["product"],
+		Team:           res["team"],
+		Priority:       res["priority"],
+		State:          res["state"],
+		Paused:         res["paused"] == "1",
+		Schedule:       res["schedule"],
 	}
 	if v, err := strconv.ParseInt(res["startedAt"], 10, 64); err == nil {
 		meta.StartedAt = time.Unix(0, v)

@@ -433,7 +433,14 @@ type CaseCreatedPayload struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Priority   string `json:"priority"`
+	// EngagementType mirrors CommentAddedPayload.EngagementType's own
+	// convention (cv.EngagementType's lowercase value, e.g. "migration"; ""
+	// for every non-engagement case-like type) -- added so
+	// csm-notification-service's SLA engine can tell a migration engagement
+	// apart from any other, the same way dispatch.checkFrustration already
+	// can from CommentAddedPayload's own copy of this field.
+	EngagementType string `json:"engagementType,omitempty"`
+	Priority       string `json:"priority"`
 	// Product is the case's deployed product's display name (e.g. "WSO2 API
 	// Manager") — cv.DeployedProductDetails.Product.Name, "" when the case
 	// has no deployed product. Doubles as csm-notification-service's Google

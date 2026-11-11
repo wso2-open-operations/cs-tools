@@ -49,10 +49,9 @@ func TestResolve(t *testing.T) {
 		{"unrecognized team falls back", "Polaris", false, "", weekdayNoon, noneConfigured, []string{IncidentMonitor}},
 		{"no team falls back", "", false, "", weekdayNoon, noneConfigured, []string{IncidentMonitor}},
 		{"evaluation overrides team and onboarding", "Castor", true, "IN_PROGRESS", weekdayNoon, configuredTeamAndOnboarding, []string{Evaluation}},
-		{"onboarding IN_PROGRESS routes to Onboarding alone", "Castor", false, "IN_PROGRESS", weekdayNoon, configuredTeamAndOnboarding, []string{Onboarding}},
-		{"onboarding NOT_STARTED routes to Onboarding alone", "Castor", false, "NOT_STARTED", weekdayNoon, configuredTeamAndOnboarding, []string{Onboarding}},
-		{"onboarding COMPLETED does not route to Onboarding", "Castor", false, "COMPLETED", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor"}},
-		{"onboarding IN_PROGRESS but no Onboarding space configured falls back to team", "Castor", false, "IN_PROGRESS", weekdayNoon, configuredTeam, []string{"Castor"}},
+		{"onboarding IN_PROGRESS adds Onboarding alongside the team", "Castor", false, "IN_PROGRESS", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor", Onboarding}},
+		{"onboarding NOT_STARTED adds Onboarding alongside the team", "Castor", false, "NOT_STARTED", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor", Onboarding}},
+		{"onboarding COMPLETED does not add Onboarding", "Castor", false, "COMPLETED", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor"}},
 		{
 			"9pm IST is inside the Americas window", "Castor", false, "",
 			time.Date(2026, time.January, 5, 15, 30, 0, 0, time.UTC), // 21:00 IST

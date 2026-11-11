@@ -993,7 +993,7 @@ type mockSLAEngine struct {
 	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }
 }
 
-func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _ string) {
+func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _, _ string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.registerCalls = append(m.registerCalls, struct{ caseID, priority, caseNumber string }{caseID, priority, caseNumber})
@@ -1303,12 +1303,13 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetected_SendsChatAlert(t *te
 	}
 }
 
-// TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementRoutesToMigrationAudience
-// verifies isMigrationEngagementComment's own routing override: a frustration
+// TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementAddsMigrationAudience
+// verifies isMigrationEngagementComment's own routing addition: a frustration
 // alert on a migration engagement (caseType "ENGAGEMENT", engagementType
-// "migration") goes to chataudience.Migration alone, even though the payload
-// carries a real Team that would otherwise resolve via chataudience.Resolve.
-func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementRoutesToMigrationAudience(t *testing.T) {
+// "migration") goes to BOTH whatever chataudience.Resolve itself decides for
+// the payload's Team (here, Incident Monitor, since the mock has no
+// configured space for "Castor") AND the Migration audience.
+func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementAddsMigrationAudience(t *testing.T) {
 	chat := &mockGoogleChatSender{}
 	links := &mockLinkResolver{isCustomer: true}
 	detector := &mockEscalationDetector{result: escalation.Result{
@@ -1322,11 +1323,12 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementR
 	if err := d.Handle(context.Background(), record); err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(chat.frustrationCalls) != 1 {
-		t.Fatalf("expected 1 frustration Chat alert, got %d", len(chat.frustrationCalls))
+	if len(chat.frustrationCalls) != 2 {
+		t.Fatalf("expected 2 frustration Chat alerts (team/Incident Monitor + Migration), got %d", len(chat.frustrationCalls))
 	}
-	if got := chat.frustrationCalls[0].audience; got != chataudience.Migration {
-		t.Errorf("audience = %q, want %q (migration engagement overrides team routing)", got, chataudience.Migration)
+	gotAudiences := map[string]bool{chat.frustrationCalls[0].audience: true, chat.frustrationCalls[1].audience: true}
+	if !gotAudiences[chataudience.IncidentMonitor] || !gotAudiences[chataudience.Migration] {
+		t.Errorf("audiences = %v, want both %q and %q", gotAudiences, chataudience.IncidentMonitor, chataudience.Migration)
 	}
 }
 

@@ -470,7 +470,7 @@ func parseWakeMember(member string) (caseID, clockType string, tier int, ok bool
 // ever runs from case.created — so it simply never gets SLA tracking. A
 // one-off script reading existing cases and calling this per case would
 // close that, not built here.
-func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string) {
+func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, engagementType, product, team string) {
 	if e.entity == nil {
 		slog.WarnContext(ctx, "slaengine: no entity-service client configured, sla clocks not registered", "caseId", caseID)
 		return
@@ -495,15 +495,16 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 		dueAt, tierDuration := dueAtAndTierDuration(startedAt, duration, state.Schedule, resolutionAvoidWeekend)
 
 		meta := ClockMeta{
-			CaseNumber: caseNumber,
-			WSO2CaseID: wso2CaseID,
-			CaseTitle:  caseTitle,
-			CaseType:   caseType,
-			Product:    product,
-			Team:       team,
-			Priority:   priority,
-			StartedAt:  startedAt,
-			Schedule:   state.Schedule,
+			CaseNumber:     caseNumber,
+			WSO2CaseID:     wso2CaseID,
+			CaseTitle:      caseTitle,
+			CaseType:       caseType,
+			EngagementType: engagementType,
+			Product:        product,
+			Team:           team,
+			Priority:       priority,
+			StartedAt:      startedAt,
+			Schedule:       state.Schedule,
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
@@ -1212,8 +1213,10 @@ func (e *Engine) alertTier(ctx context.Context, meta ClockMeta, caseID, clockTyp
 // retargeted to chataudience.SLADefault right before sending (see that
 // constant's own doc comment) — a different webhook into the same Chat
 // space, not a different space; this retargeting never applies to the
-// Onboarding/Evaluation audiences, both of which Resolve now returns
-// exclusively (see that function's own doc comment).
+// Onboarding/Evaluation audiences — Onboarding is added on top of the
+// team/Incident Monitor fallback rather than replacing it, and Evaluation
+// is returned exclusively (see chataudience.Resolve's own doc comment for
+// both).
 //
 // A failed send to one audience is logged (naming that Chat space) and NOT
 // retried — same explicit product decision, and same reasoning, as the
@@ -1257,6 +1260,24 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 	// reached) -- only the Chat card and the two breach emails are skipped.
 	if meta.CaseType == "SERVICE_REQUEST" {
 		slog.InfoContext(ctx, "slaengine: service request SLA breach, UI-only, skipping chat and email alert", "caseId", caseID, "clockType", clockType, "tier", tier)
+		return
+	}
+
+	// A migration engagement's only notification channel is frustration
+	// detection (dispatch.checkFrustration, routed to both the case's own
+	// team and the Migration audience) — by explicit product direction, an
+	// SLA breach on one must not also page the case's team Chat space/inbox
+	// the normal way. This can only ever fire in practice because
+	// entity-service's clock re-evaluation (ReviseCaseClocks/
+	// ApplyCaseStateEffects) has no case_type gate the way clock
+	// REGISTRATION at creation does — a case can be created as type "case",
+	// get a clock registered, and later transfer to a migration engagement
+	// without that clock ever being cancelled. The tier is still claimed/
+	// advanced and sla.tier_reached still publishes, same as the
+	// SERVICE_REQUEST skip above — only the Chat card and the two breach
+	// emails are suppressed.
+	if meta.CaseType == "ENGAGEMENT" && strings.EqualFold(meta.EngagementType, "migration") {
+		slog.InfoContext(ctx, "slaengine: migration engagement SLA breach, frustration-detection-only, skipping chat and email alert", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return
 	}
 

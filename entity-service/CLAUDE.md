@@ -1367,6 +1367,18 @@ revisited.
   `csm-notification-service`'s `events.Validate` would reject anyway for an
   empty `recipients` list.
 
+  **`CaseCreatedPayload.EngagementType`** mirrors `CommentAddedPayload.EngagementType`'s
+  own convention (`cv.EngagementType`'s lowercase value, e.g. `"migration"`; `""`
+  for every non-engagement case-like type) — added so `csm-notification-service`'s
+  SLA engine can tell a migration engagement apart from any other the same way
+  `dispatch.checkFrustration` already can from `CommentAddedPayload`'s own copy
+  of this field (see that repo's own `CLAUDE.md`, "SLA breach-alerting engine",
+  for what this closes: a clock can get attached to an engagement via clock
+  re-evaluation, which has no `case_type` gate the way registration at creation
+  does, and its breach must be suppressed the same way a service request's is).
+  Deploy `csm-notification-service` before this field starts being sent, or its
+  strict decode rejects every `case.created` event outright.
+
   **Only `type: "case"` requires a severity to publish at all.**
   `CaseCreatedPayload.Priority` has no `omitempty` (a consumer always
   expects a real value) and `""` is not a real priority, so a nil severity
@@ -2633,9 +2645,10 @@ payload instead, never had this gap). `csm-notification-service`'s
 `Engine.sendBreachAlert` now reads both straight off this same `GetClockState`
 call — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine", and
 `internal/chataudience`'s own doc comments for the routing side of this fix
-(onboarding now routes to the Onboarding Chat audience alone, not on top of
-the case's own team space, mirroring how an Evaluation Subscription case
-already routes to Evaluation alone).
+(onboarding now adds the Onboarding Chat audience on top of the case's own
+team space, so both the team actually working the case and whoever is
+running the onboarding see the alert — unlike an Evaluation Subscription
+case, which routes to Evaluation alone).
 
 **`GetClockState`'s `TeamEmail`/`TeamLeadName` themselves also switch to the
 Customer Onboarding team (`team.key = "customer_onboarding_team"`), not the

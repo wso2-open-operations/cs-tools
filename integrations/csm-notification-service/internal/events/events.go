@@ -254,8 +254,15 @@ type CaseCreatedPayload struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Priority   string `json:"priority"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CommentAddedPayload.EngagementType's own
+	// convention (entity-service's cv.EngagementType, lowercase, e.g.
+	// "migration"; "" for every non-engagement case-like type) — lets
+	// slaengine.Engine tell a migration engagement apart from any other the
+	// same way dispatch.checkFrustration already can from
+	// CommentAddedPayload's own copy of this field.
+	EngagementType string `json:"engagementType,omitempty"`
+	Priority       string `json:"priority"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (e.g. "Castor") —
 	// displayed in Chat cards; purely a display value, no routing role
 	// (unlike Product).
