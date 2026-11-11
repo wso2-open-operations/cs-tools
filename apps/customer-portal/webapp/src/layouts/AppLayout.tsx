@@ -35,6 +35,7 @@ import PortalBanners from "@components/portal-banners/PortalBanners";
 import Footer from "@components/footer/Footer";
 import Header from "@components/header/Header";
 import SideBar from "@components/side-nav-bar/SideBar";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import PortalAccessRequiredPage from "@/components/access-control/PortalAccessRequiredPage";
 import { isForbiddenError, isUnauthorizedError } from "@utils/ApiError";
@@ -62,6 +63,8 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const { error: userDetailsError, isLoading: isUserDetailsLoading } =
     useGetUserDetails();
   const { isErrorPageDisplayed } = useErrorPageContext();
+  // Starts the request now so the upload dialogs usually have the limits already.
+  useAttachmentLimits();
 
   // Scroll to top on route change
   useEffect(() => {

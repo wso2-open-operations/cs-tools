@@ -19,6 +19,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import {
   confirmStoredUpload,
   deleteStoredAttachment,
@@ -131,6 +132,7 @@ export interface StoredUploadVariables {
 export function useStoredAttachmentUpload() {
   const authFetch = useAuthApiClient();
   const queryClient = useQueryClient();
+  const limits = useAttachmentLimits();
 
   const invalidate = (vars: { caseId?: string; deploymentId?: string }) => {
     if (vars.caseId) {
@@ -168,6 +170,7 @@ export function useStoredAttachmentUpload() {
           parentId,
           file,
           name: body.name,
+          maxBytes: type === "comment" ? limits.maxInlineImagesTotalBytes : limits.maxFileBytes,
           onStep: (step) => {
             // Once the file is sent, the upload is being finished: too late to cancel.
             if (step === "finishing") tracked?.lockCancel();

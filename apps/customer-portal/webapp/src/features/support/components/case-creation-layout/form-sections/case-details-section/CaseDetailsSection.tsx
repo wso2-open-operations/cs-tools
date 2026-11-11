@@ -34,9 +34,9 @@ import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/u
 import Editor from "@components/rich-text-editor/Editor";
 import {
   CREATE_FORM_MAX_ATTACHMENTS,
-  entityAttachmentMaxBytes,
   formatLimit,
 } from "@config/attachmentLimitsConfig";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
@@ -81,6 +81,7 @@ export function CaseDetailsSection({
   children,
 }: CaseDetailsSectionProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { maxFileBytes, maxInlineImagesTotalBytes } = useAttachmentLimits();
   const titleReadOnly = isTitleDisabled;
   const titleLength = title.trim().length;
   const isTitleTooLong = titleLength > 160;
@@ -275,7 +276,7 @@ export function CaseDetailsSection({
                   ? ERROR_UNSUPPORTED_TYPE
                   : reason === "count"
                     ? imageCountExceededMessage()
-                    : imageSizeExceededMessage(),
+                    : imageSizeExceededMessage(maxInlineImagesTotalBytes),
               )
             }
           />
@@ -369,7 +370,7 @@ export function CaseDetailsSection({
                     sx={{ mt: 1, display: "block" }}
                   >
                     PDF, DOCX, TXT, CSV or other formats • Max{" "}
-                    {formatLimit(entityAttachmentMaxBytes())} per file
+                    {formatLimit(maxFileBytes)} per file
                   </Typography>
                 </Box>
               </Box>

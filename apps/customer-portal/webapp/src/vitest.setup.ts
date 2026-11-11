@@ -17,6 +17,29 @@
 import { vi } from "vitest";
 import "@testing-library/jest-dom";
 
+// public/config.js is generated per environment and absent in CI/test runs, but
+// modules such as src/config/apiConfig.ts read window.config at import time and
+// throw when it is missing. Provide dummy loopback values; individual tests can
+// still override window.config.
+window.config = window.config ?? {
+  CUSTOMER_PORTAL_AUTH_BASE_URL: "http://localhost:9000/auth",
+  CUSTOMER_PORTAL_AUTH_CLIENT_ID: "test-client-id",
+  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3000",
+  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3000",
+  CUSTOMER_PORTAL_BACKEND_BASE_URL: "http://localhost:9000/api",
+  CUSTOMER_PORTAL_THEME: "default",
+  CUSTOMER_PORTAL_LOG_LEVEL: "error",
+  CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
+};
+
+// The attachment limits come from the server through a query. Most tests render
+// components that read them without a QueryClientProvider, so they get the
+// built-in defaults here. A test that needs other limits mocks this module
+// itself; the hook's own test calls `vi.unmock` to use the real one.
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("dompurify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("dompurify")>();
   return {

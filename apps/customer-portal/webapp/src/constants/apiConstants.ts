@@ -62,6 +62,7 @@ export const ApiQueryKeys = {
   REGISTRY_TOKENS_SEARCH: "registry-tokens-search",
   INTEGRATION_USERS: "integration-users",
   METADATA: "metadata",
+  ATTACHMENT_LIMITS: "attachment-limits",
   PROJECT_USAGE_STATS: "project-usage-stats",
   DEPLOYMENT_INSTANCES_SEARCH: "deployment-instances-search",
   DEPLOYED_PRODUCT_INSTANCES_SEARCH: "deployed-product-instances-search",
