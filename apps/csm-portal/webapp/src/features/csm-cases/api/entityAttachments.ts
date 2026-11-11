@@ -530,6 +530,14 @@ export const UPLOAD_CANCELLED_MESSAGE = "The upload was cancelled.";
 /** Shown when a chunk could not be stored and the retries ran out. */
 export const UPLOAD_INTERRUPTED_MESSAGE = "The upload was interrupted. Please try again.";
 
+/** An upload that gave up for good (retries ran out, or a link cannot be used). */
+export class UploadInterruptedError extends Error {
+  constructor() {
+    super(UPLOAD_INTERRUPTED_MESSAGE);
+    this.name = "UploadInterruptedError";
+  }
+}
+
 /** The user (or the app) aborted an upload. */
 export class EntityUploadAbortedError extends Error {
   constructor() {
@@ -588,7 +596,7 @@ async function sendChunk(
         throw new EntityUploadAbortedError();
       }
       if (attempt >= UPLOAD_CHUNK_ATTEMPTS || !chunkFailureIsTransient(err)) {
-        throw err instanceof BackendApiError ? err : new Error(UPLOAD_INTERRUPTED_MESSAGE);
+        throw err instanceof BackendApiError ? err : new UploadInterruptedError();
       }
       await pause(500 * 2 ** (attempt - 1), args.signal);
     }
@@ -712,14 +720,14 @@ async function sendChunkToLink(
       }
       // Azure answers 500/503 when it is busy; any other refusal will not change.
       if (attempt >= UPLOAD_CHUNK_ATTEMPTS || ![408, 429, 500, 503].includes(response.status)) {
-        throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+        throw new UploadInterruptedError();
       }
     } catch (err) {
       if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
         throw new EntityUploadAbortedError();
       }
-      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || (err instanceof Error && err.message === UPLOAD_INTERRUPTED_MESSAGE)) {
-        throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || err instanceof UploadInterruptedError) {
+        throw new UploadInterruptedError();
       }
     }
     await pause(500 * 2 ** (attempt - 1), signal);
@@ -757,7 +765,7 @@ export async function sendFileDirect(
   let refreshing: Promise<void> | undefined;
   const onExpired = async (seen: number): Promise<void> => {
     if (seen !== generation) return; // already replaced
-    if (generation >= MAX_LINK_REFRESHES) throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+    if (generation >= MAX_LINK_REFRESHES) throw new UploadInterruptedError();
     refreshing ??= requestLinks()
       .then((fresh) => {
         if (!linksCoverFile(fresh, file.size) || fresh.chunkBytes !== direct.chunkBytes) {
