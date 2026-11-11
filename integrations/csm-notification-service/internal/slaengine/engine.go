@@ -1312,14 +1312,16 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 
 // sendBreachEmails sends the same tier crossing sendBreachAlert just posted
 // to Chat as two separate emails — one to the case's assigned engineer, one
-// to the case's team email group — on top of (not instead of) the Chat
+// to the case's team email group(s) — on top of (not instead of) the Chat
 // alert. A no-op when e.email is nil (no SLA breach email reaction
 // configured for this deployment). Either recipient is skipped silently
-// (logged at INFO, not WARN/ERROR) when entity-service couldn't resolve it
-// (state.AssigneeEmail/TeamEmail empty) — a case with no assignee, or a
-// team with no configured group_email, is a normal state, not a
-// misconfiguration this engine can fix; production has no real address to
-// send to in that case regardless.
+// (logged at INFO, not WARN/ERROR) when entity-service couldn't resolve any
+// address for it (state.AssigneeEmail/TeamEmail+OnboardingTeamEmail all
+// empty) — a case with no assignee, or a team with no configured
+// group_email, is a normal state, not a misconfiguration this engine can
+// fix; production has no real address to send to in that case regardless.
+// The "team" email's own "to" list can carry two addresses, not one — see
+// its call site's own doc comment just below for why.
 //
 // Unlike sendBreachAlert's own per-audience Chat sends, there is no
 // separate Redis claim guarding this against a duplicate send: the one
@@ -1361,15 +1363,20 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	subject := notifications.SLABreachEmailSubject(clockType, data.Tier, meta.Priority, caseNumber, meta.WSO2CaseID)
 
 	// unresolvedLabel, when non-empty, names who this recipient WOULD have
-	// been (e.g. the team name) even though real is empty -- production has
+	// been (e.g. the team name) even though reals is empty -- production has
 	// nowhere to send regardless, but a debug deployment can still show it:
 	// sent to the configured debug recipients, with the body's "Sent to"
 	// line naming unresolvedLabel directly, so testing whether team routing
 	// itself resolved correctly doesn't depend on this environment also
 	// having that team's group_email configured. Assignee passes "" here --
 	// an unassigned case has no name worth surfacing this way.
-	send := func(recipientRole, real, unresolvedLabel string, render func(intendedFor string) string) {
-		if real == "" {
+	//
+	// reals can carry more than one address -- the "team" recipient below
+	// sends to BOTH the case's real CRE team and, for an onboarding-stage
+	// case, the Customer Onboarding team as well, in one email's "to" list,
+	// rather than picking one in place of the other.
+	send := func(recipientRole string, reals []string, unresolvedLabel string, render func(intendedFor string) string) {
+		if len(reals) == 0 {
 			if !e.emailDebugMode || unresolvedLabel == "" {
 				slog.InfoContext(ctx, "slaengine: sla breach email recipient not resolved, skipping", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
 				return
@@ -1387,7 +1394,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 			slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole, "unresolvedLabel", unresolvedLabel)
 			return
 		}
-		to := []string{real}
+		to := reals
 		var intendedFor string
 		if e.emailDebugMode {
 			if len(e.emailDebugRecipients) == 0 {
@@ -1395,7 +1402,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 					"caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
 				return
 			}
-			intendedFor = real
+			intendedFor = strings.Join(reals, ", ")
 			to = e.emailDebugRecipients
 		}
 		body := render(intendedFor)
@@ -1406,16 +1413,42 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
 	}
 
-	send("assignee", state.AssigneeEmail, "", func(intendedFor string) string {
+	assigneeEmails := nonEmptyUnique(state.AssigneeEmail)
+	send("assignee", assigneeEmails, "", func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
 		return notifications.RenderSLABreachAssigneeEmail(state.AssigneeName, d)
 	})
-	send("team", state.TeamEmail, meta.Team, func(intendedFor string) string {
+	// TeamEmail is always the case's real CRE team, never swapped for the
+	// onboarding team (see entity-service's own GetClockState doc comment)
+	// -- OnboardingTeamEmail is a genuinely additional address, present
+	// only when the project is onboarding, so an onboarding-stage case's
+	// breach email reaches both inboxes rather than losing the CRE team's
+	// one. TeamLeadName/meta.Team (the greeting and displayed team name)
+	// stay the CRE team's own throughout -- the email never claims the
+	// onboarding team's lead leads the team actually working the case (a
+	// CodeRabbit-caught gap in an earlier version of this fix).
+	teamEmails := nonEmptyUnique(state.TeamEmail, state.OnboardingTeamEmail)
+	send("team", teamEmails, meta.Team, func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
 		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
 	})
+}
+
+// nonEmptyUnique returns values with blanks dropped and duplicates removed,
+// order preserved -- shared by sendBreachEmails' two recipient lists.
+func nonEmptyUnique(values ...string) []string {
+	var out []string
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // entityActiveClocksClient abstracts EntityClient.GetActiveCSMSLAClocks for

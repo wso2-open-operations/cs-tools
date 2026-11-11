@@ -521,15 +521,19 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // route through chataudience.Resolve with the case's real team/onboarding/
 // evaluation facts instead of the hardcoded false/"" it used before this.
 //
-// TeamEmail/TeamLeadName themselves come from the Customer Onboarding team
-// (onboardingTeamKey), not the case's real CRE team (cre_team), whenever
-// p.onboarding_status is one of slaClockStateOnboardingStatuses -- by
-// explicit request: an onboarding-stage case's breach EMAIL should land in
-// the same team's inbox its breach CHAT card now posts to (see
-// chataudience.Resolve's own equivalent routing), not the case's own CRE
-// team, which may have nothing to do with onboarding. Every other field
-// (AssigneeName/AssigneeEmail, and the Stage/HasBreached/etc. clock state
-// itself) is completely unaffected by onboarding status.
+// OnboardingTeamEmail is a SEPARATE field from TeamEmail, not a swap of it:
+// TeamEmail/TeamLeadName always stay the case's real CRE team (cre_team),
+// unaffected by onboarding status. OnboardingTeamEmail additionally resolves
+// the Customer Onboarding team's own group_email (onboardingTeamKey)
+// whenever p.onboarding_status is one of slaClockStateOnboardingStatuses,
+// "" otherwise -- by explicit request, an onboarding-stage case's breach
+// EMAIL should reach BOTH inboxes (the team actually working the case, and
+// whoever is running the onboarding), the same two-audience shape its
+// breach CHAT card now posts to (see chataudience.Resolve's own doc
+// comment) -- csm-notification-service sends to both addresses together
+// rather than this service picking one. Every other field (AssigneeName/
+// AssigneeEmail, and the Stage/HasBreached/etc. clock state itself) is
+// completely unaffected by onboarding status.
 //
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
@@ -570,13 +574,11 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
-		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE cre_team.group_email END,
-		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[])
-		            THEN COALESCE(onboarding_teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', onboarding_teamlead.first_name, onboarding_teamlead.last_name)), ''))
-		            ELSE COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), ''))
-		       END,
+		       cre_team.group_email,
+		       COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
-		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE)
+		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -594,14 +596,6 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		LEFT JOIN project p ON p.id = wi.project_id
 		LEFT JOIN project_type pt ON pt.id = p.project_type_id
 		LEFT JOIN team onboarding_team ON onboarding_team.key = $4
-		LEFT JOIN LATERAL (
-			SELECT tm.user_id
-			FROM team_member tm
-			WHERE tm.team_id = onboarding_team.id AND tm.role = 'lead'
-			ORDER BY tm.created_on, tm.user_id
-			LIMIT 1
-		) onboarding_lead_tm ON TRUE
-		LEFT JOIN "user" onboarding_teamlead ON onboarding_teamlead.id = onboarding_lead_tm.user_id
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
@@ -618,14 +612,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail *string
 	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
-		&onboardingStatus, &isEvaluation,
+		&onboardingStatus, &isEvaluation, &onboardingTeamEmail,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -648,6 +642,7 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	state.AssigneeEmail = stringOrEmpty(assigneeEmail)
 	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
 	state.IsEvaluationAccount = isEvaluation
+	state.OnboardingTeamEmail = stringOrEmpty(onboardingTeamEmail)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

@@ -9034,6 +9034,17 @@ type SLAClockState struct {
 	// case.created no longer carries either fact itself.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
 	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// OnboardingTeamEmail is the Customer Onboarding team's own group_email
+	// (team.key = "customer_onboarding_team"), populated only when
+	// ProjectOnboardingStatus is IN_PROGRESS/NOT_STARTED -- "" otherwise,
+	// including when that team has no group_email configured. TeamEmail
+	// above is always the case's real CRE team, never swapped for this one
+	// -- csm-notification-service's breach email is meant to reach BOTH
+	// inboxes for an onboarding-stage case (the team actually working the
+	// case, and whoever is running the onboarding), not one in place of the
+	// other, so it sends to TeamEmail and OnboardingTeamEmail together
+	// rather than this service picking one.
+	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

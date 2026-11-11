@@ -1516,6 +1516,51 @@ func TestTick_BreachEmail_SendsToAssigneeAndTeam(t *testing.T) {
 	}
 }
 
+// TestTick_BreachEmail_OnboardingSendsToBothCRETeamAndOnboardingTeam is the
+// regression test for a CodeRabbit-caught gap in an earlier version of the
+// onboarding fix: that version swapped TeamEmail/TeamLeadName to the
+// Customer Onboarding team entirely for an onboarding-stage case, which
+// paired the ONBOARDING team's lead with the CRE team's own displayed name
+// (meta.Team/the Chat card) -- a real, confirmed mismatch. TeamEmail/
+// TeamLeadName must always stay the case's real CRE team; OnboardingTeamEmail
+// is a genuinely additional "to" address, present only for an onboarding
+// project, with no lead-name swap of its own.
+func TestTick_BreachEmail_OnboardingSendsToBothCRETeamAndOnboardingTeam(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.email = email
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", TeamLeadName: "CRE Lead",
+			OnboardingTeamEmail: "onboarding@example.com", ProjectOnboardingStatus: "IN_PROGRESS",
+			BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(email.calls) != 2 {
+		t.Fatalf("email calls = %+v, want exactly 2 (assignee + team)", email.calls)
+	}
+	gotTeamTo := map[string]bool{}
+	for _, addr := range email.calls[1].to {
+		gotTeamTo[addr] = true
+	}
+	if len(email.calls[1].to) != 2 || !gotTeamTo["team-nova@example.com"] || !gotTeamTo["onboarding@example.com"] {
+		t.Errorf("team email to = %v, want exactly [team-nova@example.com onboarding@example.com]", email.calls[1].to)
+	}
+}
+
 // TestTick_BreachEmail_UnresolvedRecipientsAreSkipped confirms a case with
 // no assignee and a team with no configured group_email sends no email at
 // all -- a normal state, not an error.

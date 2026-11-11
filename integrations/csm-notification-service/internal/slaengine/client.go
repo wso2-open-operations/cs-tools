@@ -340,6 +340,15 @@ type clockState struct {
 	// entity-service's GetClockState started resolving these.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
 	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// OnboardingTeamEmail mirrors entity-service's own
+	// domain.SLAClockState.OnboardingTeamEmail — the Customer Onboarding
+	// team's own group_email, populated only when ProjectOnboardingStatus
+	// qualifies. A SEPARATE address from TeamEmail (the case's real CRE
+	// team, unaffected by onboarding status) — sendBreachEmails sends the
+	// team breach email to both together rather than one in place of the
+	// other, so the real CRE team is never dropped just because the
+	// project happens to be onboarding.
+	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
 }
 
 // GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>

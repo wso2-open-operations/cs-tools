@@ -2650,21 +2650,29 @@ team space, so both the team actually working the case and whoever is
 running the onboarding see the alert — unlike an Evaluation Subscription
 case, which routes to Evaluation alone).
 
-**`GetClockState`'s `TeamEmail`/`TeamLeadName` themselves also switch to the
-Customer Onboarding team (`team.key = "customer_onboarding_team"`), not the
-case's real CRE team, whenever `ProjectOnboardingStatus` is `IN_PROGRESS`/
-`NOT_STARTED`** — by explicit request, so the breach EMAIL lands in the same
-team's inbox its breach CHAT card now posts to, rather than the case's own
-CRE team, which has nothing to do with running that onboarding. Matched by
-`team.key` (UNIQUE), not `team.name` (`team.name` carries no uniqueness
-constraint) — same reasoning `evaluationSubscriptionProjectTypeName`'s own
-doc comment gives for matching `project_type` by name instead of id.
-`slaClockStateOnboardingStatuses` (`sla_status_repo.go`) mirrors
-`csm-notification-service`'s own `chataudience.onboardingStatuses` by hand —
-keep the two in sync, or the Chat card and the email end up disagreeing on
-whether a given case counts as "onboarding." Every other field this method
-resolves (`AssigneeName`/`AssigneeEmail`, and the clock state itself) is
-unaffected by onboarding status.
+**`GetClockState` also resolves `OnboardingTeamEmail`, a SEPARATE field from
+`TeamEmail`, not a swap of it** — the Customer Onboarding team's own
+`group_email` (`team.key = "customer_onboarding_team"`), populated only when
+`ProjectOnboardingStatus` is `IN_PROGRESS`/`NOT_STARTED`, `""` otherwise.
+`TeamEmail`/`TeamLeadName` always stay the case's real CRE team, completely
+unaffected by onboarding status — an earlier version of this fix swapped
+them to the onboarding team entirely, which a CodeRabbit review caught
+pairing the Customer Onboarding team's lead with the CRE team's own name on
+the displayed Chat card/email (`meta.Team`), a real mismatch. By explicit
+request, an onboarding-stage case's breach EMAIL should reach BOTH inboxes —
+`csm-notification-service`'s `sendBreachEmails` sends to `TeamEmail` and
+`OnboardingTeamEmail` together in one email's "to" list, the same two-
+audience shape its breach CHAT card now posts to — never one in place of
+the other. Matched by `team.key` (UNIQUE), not `team.name` (`team.name`
+carries no uniqueness constraint) — same reasoning
+`evaluationSubscriptionProjectTypeName`'s own doc comment gives for matching
+`project_type` by name instead of id. `slaClockStateOnboardingStatuses`
+(`sla_status_repo.go`) mirrors `csm-notification-service`'s own
+`chataudience.onboardingStatuses` by hand — keep the two in sync, or the
+Chat card and the email end up disagreeing on whether a given case counts
+as "onboarding." Every other field this method resolves (`AssigneeName`/
+`AssigneeEmail`, and the clock state itself) is unaffected by onboarding
+status.
 
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
