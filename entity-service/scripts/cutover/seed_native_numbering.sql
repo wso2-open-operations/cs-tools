@@ -37,6 +37,8 @@
 -- USAGE (dry run is the default and only reads):
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed_native_numbering.sql
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v apply=1 -f seed_native_numbering.sql
+-- The role needs USAGE (or SELECT) on every number_series sequence; without it
+-- the script stops before changing anything and names the sequences.
 --
 -- Rules:
 --   * A series' maximum is taken only from values matching exactly
@@ -74,6 +76,23 @@ LOCK TABLE project IN SHARE ROW EXCLUSIVE MODE;
 BEGIN READ ONLY;
 \endif
 SET LOCAL app.is_internal = 'true';
+
+-- A sequence this role may not read shows last_value NULL in pg_sequences,
+-- which the plan below would take for "never used" (start_value - 1). Its
+-- real value can be far ahead (TASK starts at 1000000), so the setval() would
+-- move it backwards and reissue numbers already allocated, and a rollback does
+-- not undo setval(). Refuse before anything is read or changed, in a dry run
+-- too, whose figures would be just as wrong.
+SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_unreadable_sequences,
+       count(*) > 0 AS seed_has_unreadable_sequences
+FROM number_series ns
+WHERE NOT (has_sequence_privilege(ns.sequence_name, 'SELECT')
+        OR has_sequence_privilege(ns.sequence_name, 'USAGE')) \gset
+\if :seed_has_unreadable_sequences
+\echo 'ABORTED: this role cannot read these sequences, so their current values are unknown:' :'seed_unreadable_sequences'
+\echo 'Grant USAGE (or SELECT) on them, or run as a role that has it. Nothing was changed.'
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: the role cannot read every number sequence (listed above)'; END $$;
+\endif
 
 \echo ''
 \echo '--- rows visible per source column (cross-check against expected totals) ---'
