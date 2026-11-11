@@ -93,7 +93,7 @@ export interface CustomerPortalWindowConfig {
   /**
    * Largest work item or deployment file offered for upload, in MB (a number or
    * numeric string). Defaults to 100, entity-service's own default; set it to
-   * match the service's `ATTACHMENT_MAX_MB`. The service stays authoritative.
+   * match the service's `ATTACHMENT_VIA_PORTAL_MAX_MB`. The service stays authoritative.
    */
   CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
   /**

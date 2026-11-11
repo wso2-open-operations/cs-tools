@@ -143,7 +143,7 @@ window.config = {
   //
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
   //   Largest case or deployment file offered for upload, in MB. Set it to match
-  //   entity-service's ATTACHMENT_MAX_MB; the service stays authoritative and
+  //   entity-service's ATTACHMENT_VIA_PORTAL_MAX_MB; the service stays authoritative and
   //   this only refuses a file early. A number or numeric string; anything else
   //   (zero, negative, text) or above 100 uses the default.
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
