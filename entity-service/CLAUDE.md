@@ -1966,6 +1966,38 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
 
+**Direct transfers (large files, off by default).** With `ATTACHMENT_DIRECT_TRANSFERS_ENABLED=true` a file above
+`ATTACHMENT_DIRECT_MIN_MB` (default 8) can go between the browser and Azure through short-lived signed links, so
+its bytes pass through neither a portal backend nor this service (`WithDirectTransfers`, `LinkStore`,
+`azblobstore.UploadLinks` / `DownloadLink`). Smaller files and every inline image keep the path above, where each
+chunk and read is checked. A link cannot be signed by an Entra app, so this needs `AZURE_STORAGE_KEY` or a
+connection string with a key; without one it stays off and logs why (`directTransferOptions`). The storage account
+needs CORS for the portal origins.
+
+- `POST /attachments/upload` answers `directUpload: true` when the declared size is above the threshold.
+  `POST /attachments/upload/{id}/direct?type=` then makes the checks of a chunk once (the caller's own `PENDING`
+  upload, its work item open, the size within the largest file allowed) and returns one write-only link per chunk
+  (`links[i]` for chunk `i`, `chunkBytes` long, the last shorter), valid 30 minutes (`directUploadTTL`). The browser
+  PUTs each chunk to its link and calls the ordinary confirm, which commits the staged blocks and **reads the real
+  size**: a link cannot cap how much is sent, so an oversize file is refused there and removed. Both paths stage the
+  same block ids, so a browser that cannot reach Azure falls back to the chunk route for the same upload.
+- **The links never write the file readers use.** A write link is for a whole blob and stays valid after the confirm, so
+  an upload that may be sent direct (`stagedUpload`: declared size above the threshold, links on) is put together under
+  a staging key, `<key>.upload` (`uploadKey`): the links, `PutChunk` and `ListChunks` all use it. Confirm commits and
+  checks the blocks there, `Copy`s the file to its own key inside Azure (`azblobstore.Copy`, one request), records it,
+  and deletes the staging file; a refusal deletes both. A leftover link can then only write a file nothing reads. A
+  smaller upload has no links and is put at its own key as before. An abandoned upload's staging blocks are not removed
+  by the cleanup job (it does not know the key); Azure discards uncommitted blocks about a week after the last write.
+- `GET /attachments/download/{id}/link?type=` makes the checks of a download (`LocateAttachment`, charged one unit
+  of the per-caller allowance) and returns a read-only link valid 10 minutes (`directDownloadTTL`), signed to answer
+  as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
+  With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
+  the webapps answer by streaming the file.
+- Links are credentials: the answers carry `Cache-Control: no-store` and nothing logs a link.
+- **What is lost against the proxy:** access removed after the links are issued does not stop that upload or
+  download, and the `nosniff` / CSP headers of the proxy are not sent by Azure (the signed `attachment` disposition
+  and octet-stream type are what keep a download from being rendered).
+
 **Inline comment images** are uploaded against the work item before the comment exists, so a new image
 is a `comment_attachment` row with `comment_id` NULL and `work_item_id` set (migration 0150), visible
 only to its uploader. The portals upload a pasted image when the comment is sent, and the comment's

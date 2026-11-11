@@ -46,6 +46,13 @@ const (
 	// defaultMaxTransfers is the number of chunks and downloads moved at once when
 	// the configuration gives no limit.
 	defaultMaxTransfers = 32
+	// directUploadTTL is how long the links of a direct upload last. Azure checks a
+	// link when a request starts, so it must cover the start of the last chunk of
+	// the slowest allowed upload (a 100 MiB file is 13 chunks).
+	directUploadTTL = 30 * time.Minute
+	// directDownloadTTL is how long a download link lasts. A download that started
+	// before then finishes after it; a resumed one asks for a new link.
+	directDownloadTTL = 10 * time.Minute
 )
 
 // FileStore is the part of azblobstore.Store the file routes use. It is nil when no
@@ -57,6 +64,15 @@ type FileStore interface {
 	Stat(ctx context.Context, key string) (azblobstore.Info, error)
 	Open(ctx context.Context, key string, rng *azblobstore.Range) (*azblobstore.Object, error)
 	Delete(ctx context.Context, key string) error
+	Copy(ctx context.Context, srcKey, dstKey string) error
+}
+
+// LinkStore is the part of azblobstore.Store that signs the short-lived links of a
+// direct transfer. Only a store signed in with an account key can.
+type LinkStore interface {
+	CanSignLinks() bool
+	UploadLinks(key string, count int, ttl time.Duration) ([]string, time.Time, error)
+	DownloadLink(key, fileName, contentType string, ttl time.Duration) (string, time.Time, error)
 }
 
 // FileDownload is a file opened for reading. The caller must close Object.Body.
@@ -104,6 +120,18 @@ type StoredAttachmentFileService interface {
 	// caller is not filtered by any access rule, so without this check a reference
 	// to someone else's image would be read and sent).
 	OpenInlineImage(ctx context.Context, id, workItemID string) (*FileDownload, error)
+	// DirectUploadAllowed reports whether a file of sizeBytes may be sent straight
+	// to Azure through DirectUploadLinks.
+	DirectUploadAllowed(sizeBytes int64) bool
+	// DirectUploadLinks returns one signed link per chunk of a started upload, for
+	// the client to send its chunks to Azure itself. The access check, the open
+	// parent and the size rules are those of PutChunk, made once when the links are
+	// issued. The upload is then confirmed with CompleteUpload, which commits the
+	// chunks and checks the real size.
+	DirectUploadLinks(ctx context.Context, kind domain.StoredAttachmentKind, id string) (domain.DirectUploadLinks, error)
+	// DirectDownloadLink returns a signed link to read an attachment from, for a
+	// caller who may see it, as a download of the file's own name.
+	DirectDownloadLink(ctx context.Context, kind domain.StoredAttachmentKind, id string) (domain.DirectDownloadLink, error)
 	// DeleteAttachment deletes an attachment (the row first, as StoredAttachmentService
 	// does, then the file, best effort: a file that cannot be removed now is left to
 	// the orphan cleanup).
@@ -115,16 +143,38 @@ type storedAttachmentFileService struct {
 	store       FileStore
 	// slots bounds the transfers in flight; a transfer that finds it full is refused.
 	slots chan struct{}
+	// links signs direct-transfer links; nil keeps every file going through this
+	// service. directMinBytes is the size above which a file goes direct.
+	links          LinkStore
+	directMinBytes int64
+}
+
+// FileServiceOption changes how a StoredAttachmentFileService is built.
+type FileServiceOption func(*storedAttachmentFileService)
+
+// WithDirectTransfers lets a file larger than minBytes go between the browser and
+// Azure through links links signs. A nil links, or one that cannot sign, leaves
+// every file going through this service.
+func WithDirectTransfers(links LinkStore, minBytes int64) FileServiceOption {
+	return func(s *storedAttachmentFileService) {
+		if links != nil && links.CanSignLinks() {
+			s.links, s.directMinBytes = links, minBytes
+		}
+	}
 }
 
 // NewStoredAttachmentFileService constructs a StoredAttachmentFileService.
 // store may be nil (no storage configured). maxTransfers bounds the chunks and
 // downloads in flight (0 means the default).
-func NewStoredAttachmentFileService(attachments StoredAttachmentService, store FileStore, maxTransfers int) StoredAttachmentFileService {
+func NewStoredAttachmentFileService(attachments StoredAttachmentService, store FileStore, maxTransfers int, opts ...FileServiceOption) StoredAttachmentFileService {
 	if maxTransfers <= 0 {
 		maxTransfers = defaultMaxTransfers
 	}
-	return &storedAttachmentFileService{attachments: attachments, store: store, slots: make(chan struct{}, maxTransfers)}
+	s := &storedAttachmentFileService{attachments: attachments, store: store, slots: make(chan struct{}, maxTransfers)}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // acquire takes a transfer slot, or refuses with a 429 the portal retries.
@@ -169,6 +219,27 @@ func maxChunks(maxBytes int64) int {
 	return int((maxBytes + UploadChunkBytes - 1) / UploadChunkBytes)
 }
 
+// stagingSuffix is added to a file's key for the place its chunks are first put.
+const stagingSuffix = ".upload"
+
+// stagedUpload reports whether an upload of this declared size is put together
+// under a staging key and copied to its final key at confirm. That is every upload
+// that may be sent direct: its links write to the staging key only, so a link that
+// is still valid after the confirm can change a file nothing reads, never the one
+// that was confirmed. A smaller upload has no links and goes straight to its key.
+func (s *storedAttachmentFileService) stagedUpload(target domain.AttachmentUploadTarget) bool {
+	return s.DirectUploadAllowed(target.SizeBytes)
+}
+
+// uploadKey is where the chunks of this upload are put: the staging key of a
+// staged upload, else the file's own key.
+func (s *storedAttachmentFileService) uploadKey(target domain.AttachmentUploadTarget) string {
+	if s.stagedUpload(target) {
+		return target.StorageKey + stagingSuffix
+	}
+	return target.StorageKey
+}
+
 // PutChunk implements StoredAttachmentFileService.
 func (s *storedAttachmentFileService) PutChunk(ctx context.Context, kind domain.StoredAttachmentKind, id string, index int, size int64, body io.Reader) error {
 	if err := s.requireStore(); err != nil {
@@ -199,7 +270,7 @@ func (s *storedAttachmentFileService) PutChunk(ctx context.Context, kind domain.
 		return err
 	}
 	defer release()
-	if err := s.store.PutBlock(ctx, target.StorageKey, index, body, size); err != nil {
+	if err := s.store.PutBlock(ctx, s.uploadKey(target), index, body, size); err != nil {
 		return storeError(ctx, "PutBlock", id, err, "Failed to store the chunk.")
 	}
 	return nil
@@ -214,7 +285,7 @@ func (s *storedAttachmentFileService) ListChunks(ctx context.Context, kind domai
 	if err != nil {
 		return domain.UploadChunkList{}, err
 	}
-	blocks, err := s.store.UncommittedBlocks(ctx, target.StorageKey)
+	blocks, err := s.store.UncommittedBlocks(ctx, s.uploadKey(target))
 	if err != nil {
 		return domain.UploadChunkList{}, storeError(ctx, "UncommittedBlocks", id, err, "Failed to list the stored chunks.")
 	}
@@ -223,6 +294,65 @@ func (s *storedAttachmentFileService) ListChunks(ctx context.Context, kind domai
 		out.Chunks = append(out.Chunks, domain.UploadChunk{Index: b.Index, Size: b.Size})
 	}
 	return out, nil
+}
+
+// DirectUploadAllowed implements StoredAttachmentFileService.
+func (s *storedAttachmentFileService) DirectUploadAllowed(sizeBytes int64) bool {
+	return s.store != nil && s.links != nil && sizeBytes > s.directMinBytes
+}
+
+// DirectUploadLinks implements StoredAttachmentFileService.
+func (s *storedAttachmentFileService) DirectUploadLinks(ctx context.Context, kind domain.StoredAttachmentKind, id string) (domain.DirectUploadLinks, error) {
+	if err := s.requireStore(); err != nil {
+		return domain.DirectUploadLinks{}, err
+	}
+	target, err := s.attachments.AuthorizeUpload(ctx, domain.AuthorizeAttachmentUploadRequest{Kind: kind, ID: id})
+	if err != nil {
+		return domain.DirectUploadLinks{}, err
+	}
+	// Only the files that are big enough to be worth it: the rest keep going
+	// through this service, where every chunk is checked.
+	if !s.DirectUploadAllowed(target.SizeBytes) {
+		return domain.DirectUploadLinks{}, &apierror.ValidationError{Msg: "This upload cannot be sent directly; send it in chunks."}
+	}
+	// One link for each chunk the declared size needs. The real size is checked
+	// when the upload is confirmed.
+	chunks := int((target.SizeBytes + UploadChunkBytes - 1) / UploadChunkBytes)
+	if chunks > maxChunks(target.MaxBytes) {
+		return domain.DirectUploadLinks{}, &apierror.ValidationError{Msg: "The upload is larger than allowed."}
+	}
+	links, expires, err := s.links.UploadLinks(s.uploadKey(target), chunks, directUploadTTL)
+	if err != nil {
+		return domain.DirectUploadLinks{}, storeError(ctx, "UploadLinks", id, err, "Failed to prepare the upload.")
+	}
+	return domain.DirectUploadLinks{Links: links, ChunkBytes: UploadChunkBytes, ExpiresAt: expires}, nil
+}
+
+// DirectDownloadLink implements StoredAttachmentFileService.
+func (s *storedAttachmentFileService) DirectDownloadLink(ctx context.Context, kind domain.StoredAttachmentKind, id string) (domain.DirectDownloadLink, error) {
+	if err := s.requireStore(); err != nil {
+		return domain.DirectDownloadLink{}, err
+	}
+	if s.links == nil {
+		// Not an error: the portal asks before every large download and falls
+		// back to the streamed route on this answer, so it is a plain 404 that the
+		// backends do not log.
+		return domain.DirectDownloadLink{}, &apierror.NotFoundError{Msg: "Direct downloads are not available."}
+	}
+	loc, err := s.attachments.LocateAttachment(ctx, domain.LocateAttachmentRequest{Kind: kind, ID: id})
+	if err != nil {
+		return domain.DirectDownloadLink{}, err
+	}
+	if err := unavailable(loc); err != nil {
+		return domain.DirectDownloadLink{}, err
+	}
+	// An attachment is always an opaque download, whatever type it declares: the
+	// link is signed to answer as one.
+	link, expires, err := s.links.DownloadLink(loc.StorageKey, loc.Name, "application/octet-stream", directDownloadTTL)
+	if err != nil {
+		return domain.DirectDownloadLink{}, storeError(ctx, "DownloadLink", id, err, "Failed to prepare the download.")
+	}
+	return domain.DirectDownloadLink{URL: link, Name: loc.Name, ExpiresAt: expires}, nil
 }
 
 // discard removes a file that must not stay, best effort: one that cannot be
@@ -274,19 +404,29 @@ func (s *storedAttachmentFileService) CompleteUpload(ctx context.Context, req do
 	if req.Chunks < 1 || req.Chunks > maxChunks(target.MaxBytes) {
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "chunks is out of range."}
 	}
-	if err := s.store.Commit(ctx, target.StorageKey, req.Chunks, target.ContentType); err != nil {
+	// The chunks are where uploadKey put them: for a staged upload, a key that no
+	// reader uses. The checks below are made there; the file reaches its own key
+	// only when they pass, by a copy inside Azure that no upload link can reach.
+	putKey := s.uploadKey(target)
+	staged := putKey != target.StorageKey
+	if err := s.store.Commit(ctx, putKey, req.Chunks, target.ContentType); err != nil {
 		if errors.Is(err, azblobstore.ErrMissingBlocks) {
 			return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: "Some chunks have not been uploaded."}
 		}
 		return domain.ConfirmAttachmentUploadResponse{}, storeError(ctx, "Commit", req.ID, err, "Failed to finish the upload.")
 	}
-	info, err := s.store.Stat(ctx, target.StorageKey)
+	info, err := s.store.Stat(ctx, putKey)
 	if err != nil {
 		return domain.ConfirmAttachmentUploadResponse{}, storeError(ctx, "Stat", req.ID, err, "Failed to finish the upload.")
 	}
 	if info.Size > target.MaxBytes {
-		s.discard(ctx, req.ID, target.StorageKey)
+		s.discardUpload(ctx, req.ID, target.StorageKey, staged)
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "The upload is larger than allowed."}
+	}
+	if staged {
+		if err := s.store.Copy(ctx, putKey, target.StorageKey); err != nil {
+			return domain.ConfirmAttachmentUploadResponse{}, storeError(ctx, "Copy", req.ID, err, "Failed to finish the upload.")
+		}
 	}
 	size := info.Size
 	resp, err := s.attachments.ConfirmUpload(ctx, domain.ConfirmAttachmentUploadRequest{
@@ -294,11 +434,24 @@ func (s *storedAttachmentFileService) CompleteUpload(ctx context.Context, req do
 	})
 	if err != nil {
 		if refusalIsFinal(err) {
-			s.discard(ctx, req.ID, target.StorageKey)
+			s.discardUpload(ctx, req.ID, target.StorageKey, staged)
 		}
 		return domain.ConfirmAttachmentUploadResponse{}, err
 	}
+	if staged {
+		// The staging file is no use now; one that cannot be removed is harmless.
+		s.discard(ctx, req.ID, putKey)
+	}
 	return resp, nil
+}
+
+// discardUpload removes a refused upload's file and, for a staged upload, the
+// staging file too (the final key has a file only once the copy was made).
+func (s *storedAttachmentFileService) discardUpload(ctx context.Context, id, key string, staged bool) {
+	s.discard(ctx, id, key)
+	if staged {
+		s.discard(ctx, id, key+stagingSuffix)
+	}
 }
 
 // unavailable is the refusal for an attachment whose file cannot be read.

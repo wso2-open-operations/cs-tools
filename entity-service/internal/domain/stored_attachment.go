@@ -72,6 +72,27 @@ type InitiateAttachmentUploadResponse struct {
 	Number       string    `json:"number"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	MaxBytes     int64     `json:"maxBytes"`
+	// DirectUpload says the file may be sent straight to Azure through the links of
+	// POST /attachments/upload/{id}/direct instead of chunk by chunk through the
+	// portal backend. It is only true for a file above the direct-transfer size.
+	DirectUpload bool `json:"directUpload"`
+}
+
+// DirectUploadLinks is the answer of POST /attachments/upload/{id}/direct: one
+// link per chunk. The client sends chunk i (ChunkBytes long, the last one
+// shorter) with a PUT to Links[i], then confirms the upload as usual.
+type DirectUploadLinks struct {
+	Links      []string  `json:"links"`
+	ChunkBytes int64     `json:"chunkBytes"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+}
+
+// DirectDownloadLink is the answer of GET /attachments/download/{id}/link: a
+// link the client reads the file from, as a download named Name.
+type DirectDownloadLink struct {
+	URL       string    `json:"url"`
+	Name      string    `json:"name"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // ConfirmAttachmentUploadRequest is the body of

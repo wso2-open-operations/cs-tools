@@ -47,3 +47,5 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 )
+
+replace github.com/wso2-open-operations/cs-tools/libs/azblobstore => ../libs/azblobstore

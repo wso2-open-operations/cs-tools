@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
 )
@@ -49,6 +50,8 @@ const attachmentChunkDeadline = 10 * time.Minute
 type blobEntityClient interface {
 	PutStoredAttachmentChunk(ctx context.Context, id, kind string, index int, size int64, body io.Reader) error
 	ListStoredAttachmentChunks(ctx context.Context, id, kind string) ([]byte, error)
+	DirectStoredAttachmentUploadLinks(ctx context.Context, id, kind string) ([]byte, error)
+	DirectStoredAttachmentDownloadLink(ctx context.Context, id, kind string) ([]byte, error)
 	DownloadStoredAttachment(ctx context.Context, kind, id, rangeHeader string) (*entity.FileResponse, error)
 	InlineImageContent(ctx context.Context, id string) (*entity.FileResponse, error)
 }
@@ -149,6 +152,55 @@ func (h *BlobAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ListStoredAttachmentChunks failed", "attachmentID", id, "err", summarizeErr(err))
 		mapStoredAttachmentError(w, err, "Failed to list the stored chunks.")
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, out)
+}
+
+// DirectUploadLinks handles POST /attachments/upload/{id}/direct?type=: one signed
+// link per chunk, so a large file goes from the browser straight to Azure. The
+// links are credentials, so the answer is never cached or logged.
+func (h *BlobAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	kind, ok := h.typeFromQuery(w, r, middleware.ActionCreate)
+	if !ok {
+		return
+	}
+	out, err := h.entity.DirectStoredAttachmentUploadLinks(r.Context(), id, kind)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity DirectStoredAttachmentUploadLinks failed", "attachmentID", id, "err", summarizeErr(err))
+		mapStoredAttachmentError(w, err, "Failed to prepare the upload.")
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, out)
+}
+
+// DirectDownloadLink handles GET /attachments/download/{id}/link?type=: a signed
+// link the browser downloads the file from, straight from Azure. The link is a
+// credential, so the answer is never cached or logged.
+func (h *BlobAttachmentHandler) DirectDownloadLink(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	kind, ok := h.typeFromQuery(w, r, middleware.ActionRead)
+	if !ok {
+		return
+	}
+	out, err := h.entity.DirectStoredAttachmentDownloadLink(r.Context(), id, kind)
+	if err != nil {
+		// A 404 is the expected answer while direct transfers are off (the webapp asks
+		// before every large download and then streams it): not an error to log.
+		var apiErr *apierror.Error
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+			slog.ErrorContext(r.Context(), "entity DirectStoredAttachmentDownloadLink failed", "attachmentID", id, "err", summarizeErr(err))
+		}
+		mapStoredAttachmentError(w, err, "Failed to prepare the download.")
 		return
 	}
 	writeStoredAttachmentJSON(w, http.StatusOK, out)
