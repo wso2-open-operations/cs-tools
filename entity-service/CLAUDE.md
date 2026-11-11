@@ -12227,7 +12227,8 @@ everybody's skills, and the catalogue admin, over migration 0079's tables (`skil
   add as `AddMySkill` (`addUserSkillLocked`), at the reviewer's `levelId`, else the requested level mapped onto
   the skill's scale (same level, else the same value or the closest lower, else the lowest); `auto_add_note`
   says what happened. Reject needs a reason. Every decision is conditional on the request still being PENDING,
-  so a second reviewer gets a 409 naming who decided. Deleting a user cascades their requests.
+  so a second reviewer gets a 409 naming who decided. Deleting a user cascades their requests. A reviewer may
+  approve their own request on purpose: there are few reviewers, so requiring a second one would block requests.
 - **Categories.** A sub-category goes only under an active parent with no skills filed directly under it, and
   turns the parent into a non-leaf; a rename rewrites the stored `category_path` of the subtree; deactivation is
   refused while an active child or skill is under it. Skills are filed only under active leaves.

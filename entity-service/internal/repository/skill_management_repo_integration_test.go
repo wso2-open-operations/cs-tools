@@ -306,6 +306,16 @@ func TestSkillIntegration_DirectoryAllAndAny(t *testing.T) {
 			if len(p.Skills) == 0 {
 				t.Fatalf("%s listed without skills", p.UserID)
 			}
+			// The page's skills are read in one batch: each person gets exactly their own.
+			own, err := repo.ListUserSkills(ctx, p.UserID)
+			if err != nil || len(own) != len(p.Skills) {
+				t.Fatalf("%s: directory skills %d, profile skills %d (%v)", p.UserID, len(p.Skills), len(own), err)
+			}
+			for i := range own {
+				if own[i].SkillID != p.Skills[i].SkillID {
+					t.Fatalf("%s: directory skill %d = %s, profile has %s", p.UserID, i, p.Skills[i].SkillID, own[i].SkillID)
+				}
+			}
 		}
 		return out
 	}

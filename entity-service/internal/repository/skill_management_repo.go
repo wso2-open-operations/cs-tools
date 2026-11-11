@@ -980,12 +980,19 @@ func (r *skillRepository) SearchSkillDirectory(ctx context.Context, req domain.S
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate skill directory: %w", err)
 	}
+	ids := make([]string, len(out))
 	for i := range out {
-		skills, err := listUserSkills(ctx, r.db, out[i].UserID, "")
-		if err != nil {
-			return nil, 0, err
+		ids[i] = out[i].UserID
+	}
+	byUser, err := listSkillsOfUsers(ctx, r.db, ids, "")
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range out {
+		out[i].Skills = byUser[out[i].UserID]
+		if out[i].Skills == nil {
+			out[i].Skills = []domain.UserSkill{}
 		}
-		out[i].Skills = skills
 	}
 	return out, total, nil
 }

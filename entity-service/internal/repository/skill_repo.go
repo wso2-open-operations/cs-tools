@@ -382,54 +382,76 @@ func scanLevel(id *string, name *string, value *int, description, color *string)
 
 // listUserSkills reads a person's active skills, or just one of them.
 func listUserSkills(ctx context.Context, q skillQuerier, userID, skillID string) ([]domain.UserSkill, error) {
+	byUser, err := listSkillsOfUsers(ctx, q, []string{userID}, skillID)
+	if err != nil {
+		return nil, err
+	}
+	if out, ok := byUser[userID]; ok {
+		return out, nil
+	}
+	return []domain.UserSkill{}, nil
+}
+
+// listSkillsOfUsers reads the active skills of several people in one query
+// (plus one for their categories), keyed by user id. A person with no skills
+// has no entry. skillID, when set, narrows it to that one skill.
+func listSkillsOfUsers(ctx context.Context, q skillQuerier, userIDs []string, skillID string) (map[string][]domain.UserSkill, error) {
+	byUser := map[string][]domain.UserSkill{}
+	if len(userIDs) == 0 {
+		return byUser, nil
+	}
 	rows, err := q.Query(ctx, `
-		SELECT us.skill_id::text, s.name, s.active, s.level_type_id::text, `+levelColumns+`,
+		SELECT us.user_id::text, us.skill_id::text, s.name, s.active, s.level_type_id::text, `+levelColumns+`,
 		       us.inherited, us.inherited_from_group_id::text, us.updated_on
 		  FROM user_skill us
 		  JOIN skill s ON s.id = us.skill_id
 		  LEFT JOIN skill_level sl ON sl.id = us.skill_level_id
-		 WHERE us.user_id = $1::uuid
+		 WHERE us.user_id = ANY($1::uuid[])
 		   AND us.active
 		   AND ($2 = '' OR us.skill_id = NULLIF($2, '')::uuid)
 		   AND `+userSkillCanonical+`
-		 ORDER BY lower(s.name), us.skill_id`, userID, skillID)
+		 ORDER BY lower(s.name), us.skill_id`, userIDs, skillID)
 	if err != nil {
 		return nil, fmt.Errorf("query user skills: %w", err)
 	}
 	defer rows.Close()
-	out := []domain.UserSkill{}
+	seen := map[string]bool{}
+	var skillIDs []string
 	for rows.Next() {
+		var userID string
 		var u domain.UserSkill
 		var lID, lName, lDesc, lColor *string
 		var lValue *int
-		if err := rows.Scan(&u.SkillID, &u.SkillName, &u.SkillActive, &u.LevelTypeID, &lID, &lName, &lValue, &lDesc, &lColor,
+		if err := rows.Scan(&userID, &u.SkillID, &u.SkillName, &u.SkillActive, &u.LevelTypeID, &lID, &lName, &lValue, &lDesc, &lColor,
 			&u.Inherited, &u.InheritedFromGroupID, &u.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("scan user skill: %w", err)
 		}
 		u.Level = scanLevel(lID, lName, lValue, lDesc, lColor)
 		u.Categories = []domain.SkillCategoryRef{}
-		out = append(out, u)
+		byUser[userID] = append(byUser[userID], u)
+		if !seen[u.SkillID] {
+			seen[u.SkillID] = true
+			skillIDs = append(skillIDs, u.SkillID)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate user skills: %w", err)
 	}
-	if len(out) == 0 {
-		return out, nil
+	if len(skillIDs) == 0 {
+		return byUser, nil
 	}
-	ids := make([]string, len(out))
-	for i, u := range out {
-		ids[i] = u.SkillID
-	}
-	cats, err := categoriesBySkill(ctx, q, ids)
+	cats, err := categoriesBySkill(ctx, q, skillIDs)
 	if err != nil {
 		return nil, err
 	}
-	for i := range out {
-		if refs, ok := cats[out[i].SkillID]; ok {
-			out[i].Categories = refs
+	for _, list := range byUser {
+		for i := range list {
+			if refs, ok := cats[list[i].SkillID]; ok {
+				list[i].Categories = refs
+			}
 		}
 	}
-	return out, nil
+	return byUser, nil
 }
 
 // ListUserSkills implements SkillRepository.

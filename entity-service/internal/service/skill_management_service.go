@@ -309,7 +309,7 @@ func requestDecisionError(outcome domain.SkillOutcome, req *domain.SkillRequest)
 		}
 		return &apierror.ConflictError{Msg: msg}
 	case domain.SkillOutcomeNameTaken:
-		return &apierror.ConflictError{Msg: "another skill already has this name: approve it as an existing skill instead"}
+		return &apierror.ConflictError{Msg: "a skill with this name already exists: approve it as an existing skill, or reactivate it if it is inactive"}
 	case domain.SkillOutcomeNoDefaultScale:
 		return &apierror.ConflictError{Msg: "no level scale is marked as the default, so a new skill can't be created from a request"}
 	case domain.SkillOutcomeCategoryInvalid:
@@ -383,6 +383,10 @@ func (s *skillService) reviewer(ctx context.Context) (string, string, error) {
 }
 
 // ApproveSkillRequest implements SkillManagementService.
+//
+// A reviewer may approve their own request. This is deliberate: few people
+// hold the reviewer roles, so requiring a second reviewer would leave their
+// own requests stuck. Add a requester != reviewer check here if that changes.
 func (s *skillService) ApproveSkillRequest(ctx context.Context, id string, req domain.ApproveSkillRequestRequest) (domain.SkillRequest, error) {
 	actor, reviewerID, err := s.reviewer(ctx)
 	if err != nil {
