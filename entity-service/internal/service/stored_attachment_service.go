@@ -324,20 +324,16 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 }
 
 const (
-	// maxPendingLargeUploads is how many uploads that may be sent straight to
-	// storage one caller may have started and not finished.
+	// maxPendingLargeUploads is how many unfinished direct-sized uploads one caller may have.
 	maxPendingLargeUploads = 10
-	// pendingLargeUploadWindow is how far back a started upload still counts. An
-	// upload that was never finished stops counting after it, long before the
-	// cleanup marks it failed, so a caller who gave up on some is not locked out.
+	// pendingLargeUploadWindow is how far back an unfinished upload counts, so a
+	// caller who gave up on some is not blocked until the cleanup runs.
 	pendingLargeUploadWindow = 6 * time.Hour
 )
 
-// checkPendingLargeUploads refuses a new upload that may be sent straight to
-// storage when its caller already has maxPendingLargeUploads of them waiting. A
-// link cannot limit how much is sent, so what a caller can leave in storage
-// unconfirmed is limited by how many such uploads they can start. Without direct
-// transfers (DirectMinBytes is 0) nothing is checked.
+// checkPendingLargeUploads limits how much unconfirmed data a caller can leave in
+// storage, since a link cannot cap how much is sent. Nothing is checked while
+// direct transfers are off (DirectMinBytes is 0).
 func (s *storedAttachmentService) checkPendingLargeUploads(ctx context.Context, email string, size int64) error {
 	if s.limits.DirectMinBytes <= 0 || size <= s.limits.DirectMinBytes {
 		return nil

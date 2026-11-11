@@ -201,18 +201,16 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 	return res, nil
 }
 
-// discardAbandonedFiles removes what an abandoned upload left in storage: the
-// chunks put under its staging key, and anything at its own key (a copy made by a
-// confirm that was never recorded). It reports whether the upload may be marked
-// FAILED: false means the files could not be removed now, and the upload is tried
-// again on a later run. Without a store there is nothing this service can remove,
-// and a key it cannot work out is logged and left to expire on its own.
+// discardAbandonedFiles removes the chunks an abandoned upload left under its
+// staging key, and any file at its own key (a copy whose confirm never finished).
+// It reports whether the row may be marked FAILED; false means try again next run.
 func (s *attachmentUploadCleanupService) discardAbandonedFiles(ctx, sys context.Context, u domain.AbandonedUpload) bool {
 	if s.store == nil {
 		return true
 	}
 	key, err := s.abandonedKey(sys, u)
 	if err != nil {
+		// Without the key the chunks expire on their own, so do not hold the row back.
 		slog.WarnContext(ctx, "could not work out where an abandoned upload's files are", "attachmentId", u.ID, "error", err)
 		return true
 	}
@@ -225,8 +223,7 @@ func (s *attachmentUploadCleanupService) discardAbandonedFiles(ctx, sys context.
 	return true
 }
 
-// abandonedKey is the key the file of an abandoned upload would have had, worked
-// out the way the upload did.
+// abandonedKey works out the key an abandoned upload's file would have had.
 func (s *attachmentUploadCleanupService) abandonedKey(sys context.Context, u domain.AbandonedUpload) (string, error) {
 	rows, err := s.repo.GetByIDs(sys, u.Kind, []string{u.ID})
 	if err != nil {
