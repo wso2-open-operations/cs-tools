@@ -52,6 +52,28 @@ export const ALERT_MUTE_RULE_ENVIRONMENTS: ReadonlyArray<{ value: string; label:
   { value: "stress", label: "Stress" },
 ];
 
+/**
+ * The spellings each environment also matches, as alert-core groups them
+ * (integrations/sre-alert-core-service/internal/muterule: environmentGroups).
+ * Keep the two in step.
+ */
+export const ALERT_MUTE_RULE_ENVIRONMENT_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  production: ["prod", "prd", "live"],
+  staging: ["stg", "stage"],
+  development: ["dev", "develop"],
+  qa: ["test", "testing"],
+  uat: [],
+  stress: ["perf", "performance"],
+};
+
+/** "Also matches prod, prd and live", for the environment picked; "" when it has no other spellings. */
+export function environmentAliasText(environment: string): string {
+  const aliases = ALERT_MUTE_RULE_ENVIRONMENT_ALIASES[environment.trim().toLowerCase()] ?? [];
+  if (aliases.length === 0) return "";
+  const list = aliases.length === 1 ? aliases[0] : `${aliases.slice(0, -1).join(", ")} and ${aliases[aliases.length - 1]}`;
+  return `Also matches alerts whose environment is ${list}.`;
+}
+
 /** Every rule must name these, so one rule can't mute everything. */
 export const REQUIRED_ALERT_MUTE_RULE_FIELDS: readonly AlertMuteRuleField[] = ["service", "environment"];
 

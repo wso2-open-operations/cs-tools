@@ -14,11 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, ArrowRight, BellOff, ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, Card, Skeleton, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft, ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { useLocation, useParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { useQueryParamTabs } from "@hooks/useSectionTabs";
 import QueryErrorState from "@components/QueryErrorState";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useAlertMuteRuleMutedAlerts, useGetAlertMuteRule } from "@features/csm-operations/api/useAlertMuteRules";
@@ -27,12 +28,17 @@ import {
   alertMuteRuleState,
   formatDuration,
   timeZoneLabel,
+  useMutedAlertsPaging,
   useNow,
 } from "@features/csm-operations/utils/alertMuteRules";
+import AlertMuteRuleMutedAlerts from "@features/csm-operations/components/AlertMuteRuleMutedAlerts";
 import AlertMuteRuleStateChip from "@features/csm-operations/components/AlertMuteRuleStateChip";
 import AlertMuteRuleActions from "@features/csm-operations/components/AlertMuteRuleActions";
 
 const LIST_PATH = "/operations/alert-mute-rules";
+
+const RULE_TAB_IDS = ["overview", "muted-alerts"] as const;
+type RuleTabId = (typeof RULE_TAB_IDS)[number];
 
 /** Condition fields as the overview labels them; every condition must match for an alert to be muted. */
 const CONDITION_LABELS: Record<string, string> = Object.fromEntries(
@@ -139,16 +145,14 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
   const now = useNow();
   const { data: rule, isLoading, isError, error } = useGetAlertMuteRule(id);
   const ruleState = rule ? alertMuteRuleState(rule, now) : undefined;
-  // Only the count, for the Overview's Muted alerts cell; the list has its own page.
+  // Kept in the URL (`?tab=`) so a link to a rule's muted alerts opens on that tab.
+  const { activeTab, setActiveTab } = useQueryParamTabs<RuleTabId>(RULE_TAB_IDS, "overview");
+  const paging = useMutedAlertsPaging();
   const muted = useAlertMuteRuleMutedAlerts(
     rule && ruleState !== "scheduled" ? id : undefined,
-    { limit: 1, offset: 0 },
+    { limit: paging.rowsPerPage, offset: paging.page * paging.rowsPerPage },
     ruleState === "active",
   );
-  const openMutedAlerts = (): void =>
-    navigate(`${LIST_PATH}/${id}/muted-alerts`, {
-      state: { from: `${location.pathname}${location.search}`, parentState: location.state ?? null },
-    });
 
   const back = (
     <Button
@@ -191,21 +195,6 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
             <Typography variant="h5">{rule.name}</Typography>
             <AlertMuteRuleStateChip state={state} />
-            {state === "scheduled" ? (
-              <Typography variant="body2" color="text.secondary">
-                No muted alerts until the rule starts
-              </Typography>
-            ) : (
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<BellOff size={14} />}
-                endIcon={<ArrowRight size={14} />}
-                onClick={openMutedAlerts}
-              >
-                {`Muted alerts${muted.data ? ` (${muted.data.total})` : ""}`}
-              </Button>
-            )}
           </Box>
           <Typography variant="body2" color="text.secondary">
             {rule.number}
@@ -223,6 +212,18 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
         </Box>
       </Box>
 
+      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as RuleTabId)} variant="scrollable" scrollButtons="auto">
+          <Tab value="overview" label="Overview" sx={{ minHeight: 44, textTransform: "none" }} />
+          <Tab
+            value="muted-alerts"
+            label={`Muted alerts${muted.data ? ` (${muted.data.total})` : ""}`}
+            sx={{ minHeight: 44, textTransform: "none" }}
+          />
+        </Tabs>
+      </Box>
+
+      {activeTab === "overview" && (
       <OverviewCard
         summary={[
           ...rule.conditions.map((c) => c.value),
@@ -243,6 +244,19 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
           ["Description", rule.description || "—"],
         ]}
       />
+      )}
+      {activeTab === "muted-alerts" && (
+        <AlertMuteRuleMutedAlerts
+          scheduled={state === "scheduled"}
+          data={muted.data}
+          isLoading={muted.isLoading}
+          error={muted.error}
+          page={paging.page}
+          rowsPerPage={paging.rowsPerPage}
+          onPageChange={paging.setPage}
+          onRowsPerPageChange={paging.setRowsPerPage}
+        />
+      )}
     </Box>
   );
 }
