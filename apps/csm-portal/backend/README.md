@@ -511,12 +511,6 @@ Notes:
 > (`onboardingStatusEnabled`) and its unit test make it on unless `false`. This README documents the
 > implemented behavior.
 
-### App config (`GET /app-config`)
-
-| Variable | Default | Description |
-|---|---|---|
-| `CSM_PORTAL_REPORT_ISSUE_URL` | `""` (unset) | Destination for the header's "Report an issue" control. Served read-only via `GET /app-config` (`PermAuthenticated` — resolves even for a signed-in caller not yet granted a portal role, since that's part of the audience the control is shown to). Empty means the webapp hides the control entirely rather than offering a link with nowhere to go. A future second static value is a new field on the same response, not a new route. |
-
 ### Directory vocabularies
 
 Curated lists supplied as configuration, so adding a team or role is a restart, not a release.
@@ -639,7 +633,6 @@ main service plus the `/plg/*` routes). Main areas:
 | Area | Example routes |
 |---|---|
 | Health | `GET /health` (liveness, always `200`, no dependency calls: use for restart probes), `GET /health/dependencies` (aggregates SCIM, updates, and the optional notification, integration and engineering services; `200`, or `503` if any checked dependency is down; do not use as a liveness probe). Neither requires a token |
-| App config | `GET /app-config` (`PermAuthenticated` — small, static, env-var-configured values for webapp chrome; see "App config" above) |
 | Cases | `POST /cases`, `GET`/`PATCH /cases/{id}`, `POST /cases/search`, `/cases/aggregate`, `/cases/volume-trend`, comments, activities, escalations, call requests, tags, GitHub issues |
 | Attachments | `POST /attachments/search`, `POST /attachments/upload` with chunked upload, confirm, download and delete (see Attachment storage) |
 | Accounts, projects, products, deployments | `/accounts/*`, `/projects/*` (contacts, metadata), `/products/*`, `/deployments/*` and deployed products |

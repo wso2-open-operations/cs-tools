@@ -16,23 +16,24 @@
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import ReportIssueButton from "@components/header/ReportIssueButton";
 
-let mockReportIssueUrl: string | undefined;
-vi.mock("@api/useGetAppConfig", () => ({
-  useGetAppConfig: () => ({ data: { reportIssueUrl: mockReportIssueUrl ?? "" } }),
-}));
+afterEach(() => {
+  window.config = {} as typeof window.config;
+});
 
 describe("ReportIssueButton", () => {
-  it("renders nothing when the backend has no report-issue URL configured", () => {
-    mockReportIssueUrl = "";
+  it("renders nothing when CSM_PORTAL_REPORT_ISSUE_URL isn't configured", () => {
+    window.config = {} as typeof window.config;
     const { container } = render(<ReportIssueButton />);
     expect(container).toBeEmptyDOMElement();
   });
 
   it("opens the configured URL in a new tab when clicked", () => {
-    mockReportIssueUrl = "https://github.com/example/example-repo/issues/new";
+    window.config = {
+      CSM_PORTAL_REPORT_ISSUE_URL: "https://github.com/example/example-repo/issues/new",
+    } as typeof window.config;
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 
     render(<ReportIssueButton />);

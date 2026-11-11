@@ -712,32 +712,6 @@ total}` untouched.
   `TestGetChangeRequestApprovals_PassesAssignmentGroupThrough` (`groups_test.go`) and
   `TestGetGroupSendsGetToGroupsID` (`internal/entity/customer_client_test.go`).
 
-## App config endpoint (`GET /app-config`)
-
-The first — and, as of this writing, only — generic "serve a small static
-value the webapp needs for chrome with no page/resource of its own" route.
-It is deliberately a growable response struct, so a second static value
-later is a new field on `appConfigResponse` (`internal/handler/app_config.go`),
-not a new route.
-
-- **Registered on `PermAuthenticated`, not a portal-role permission** — like
-  `GET /users/me` — because the webapp's header control this backs
-  (`ReportIssueButton.tsx`'s "Report an issue") is shown even to a signed-in
-  caller not yet granted a portal role (AuthGuard's "not yet entitled"
-  screen). A portal-role gate here would 403 exactly that audience.
-- **`reportIssueUrl`** is `AppConfigHandler.reportIssueURL`, resolved once at
-  startup from `CSM_PORTAL_REPORT_ISSUE_URL` (`loadReportIssueURL`,
-  `cmd/server/main.go`) via plain `os.Getenv` — no `mustEnv`, so the backend
-  starts fine with it unset. Empty is a normal, supported state: the webapp
-  hides its "Report an issue" control rather than offering a link with
-  nowhere to go, the same "no entry means not wired up yet" posture this
-  file's other optional config already takes (e.g. `ASGARDEO_ROLE_IDS`).
-- A value belongs on this endpoint only when it is genuinely static
-  (resolved once at startup, never changes per-request/per-caller) and has
-  no more natural home of its own — a value that varies by caller or
-  resource should be a field on that resource's own response instead, not
-  bolted onto this one.
-
 ## Health endpoints
 
 Two, registered directly on the mux in `cmd/server/main.go` (not through `route()`) and both exempt

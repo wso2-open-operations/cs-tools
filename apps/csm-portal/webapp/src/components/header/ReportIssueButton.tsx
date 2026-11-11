@@ -17,7 +17,7 @@
 import { Button, Divider, Tooltip } from "@wso2/oxygen-ui";
 import { Bug } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { useGetAppConfig } from "@api/useGetAppConfig";
+import { getReportIssueUrl } from "@config/reportIssueConfig";
 
 /**
  * Carries a visible text label (not just the icon) so the control reads at a
@@ -25,13 +25,11 @@ import { useGetAppConfig } from "@api/useGetAppConfig";
  * live that a bare icon tucked among the other header icon buttons went
  * unnoticed. Its own trailing divider sets it apart from the icon-only
  * cluster next to it, rather than reading as one more icon in that group.
- * Renders nothing (divider included) while the URL hasn't loaded yet or
- * isn't configured (CSM_PORTAL_REPORT_ISSUE_URL unset on the backend),
- * rather than offering a control with nowhere to go.
+ * Renders nothing (divider included) when CSM_PORTAL_REPORT_ISSUE_URL isn't
+ * configured, rather than offering a control with nowhere to go.
  */
 export default function ReportIssueButton(): JSX.Element | null {
-  const { data } = useGetAppConfig();
-  const reportIssueUrl = data?.reportIssueUrl;
+  const reportIssueUrl = getReportIssueUrl();
 
   if (!reportIssueUrl) return null;
 

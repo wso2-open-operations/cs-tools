@@ -2418,17 +2418,6 @@ export interface BeExcludedProjectKeysResponse {
   excludedProjectKeys: string[];
 }
 
-/**
- * `GET /app-config` response: small, static, env-var-configured values the
- * webapp needs for chrome with no page/resource of its own — today just
- * reportIssueUrl (CSM_PORTAL_REPORT_ISSUE_URL on the backend). Empty string
- * when unset, never omitted — the webapp hides the "Report an issue"
- * control in that case. A future second value is a new field here.
- */
-export interface BeAppConfigResponse {
-  reportIssueUrl: string;
-}
-
 /** `POST /cases/{id}/call-requests/search` request body. */
 export interface BeSearchCallRequestsPayload {
   filters?: {
