@@ -67,7 +67,7 @@ type SlaReportCase struct {
 	CaseType   string         `json:"caseType"`
 	Severity   string         `json:"severity"`
 	State      string         `json:"state"`
-	Opened     string         `json:"opened"`
+	OpenedOn   string         `json:"openedOn"`
 	Response   SlaReportClock `json:"response"`
 	Workaround SlaReportClock `json:"workaround"`
 	Resolution SlaReportClock `json:"resolution"`

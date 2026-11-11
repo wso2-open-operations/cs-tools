@@ -84,7 +84,8 @@ reflect this moment.
   missed: its elapsed time keeps growing, so it would otherwise push the percentile up for as long as it stays open.
 - **Case rows.** Each case shows the elapsed time and status (`Met`, `Missed`, `Running`, `Paused`, `Cancelled`) of its
   three clocks.
-- **Not available** when `SLA_DATA_SOURCE=servicenow` (400): the Postgres clocks are not the source of truth then.
+- **Not available** when `SLA_DATA_SOURCE=servicenow` or `DATA_SOURCE=servicenow` (400): the Postgres clocks, or the local
+  project and case rows, are not complete or the source of truth then.
 
 ## Caveats
 

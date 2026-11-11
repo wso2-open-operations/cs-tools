@@ -49,14 +49,15 @@ func NewSlaReportService(repo repository.SlaReportRepository) SlaReportService {
 type slaReportUnsupportedService struct{}
 
 // NewSlaReportUnsupportedService is used when SLA data is read from
-// ServiceNow (SLA_DATA_SOURCE=servicenow): the report reads the Postgres
-// clocks, which are not the source of truth then.
+// ServiceNow (SLA_DATA_SOURCE=servicenow), or when the cases themselves are
+// (DATA_SOURCE=servicenow): the report reads the Postgres clocks, projects and
+// cases, which are not complete or the source of truth then.
 func NewSlaReportUnsupportedService() SlaReportService {
 	return slaReportUnsupportedService{}
 }
 
 func (slaReportUnsupportedService) GetProjectSlaReport(context.Context, string, string, string) (domain.SlaReportResponse, error) {
-	return domain.SlaReportResponse{}, &apierror.ValidationError{Msg: "the SLA report is not supported when SLA_DATA_SOURCE=servicenow"}
+	return domain.SlaReportResponse{}, &apierror.ValidationError{Msg: "the SLA report is not supported when DATA_SOURCE or SLA_DATA_SOURCE is servicenow"}
 }
 
 func (s *slaReportService) GetProjectSlaReport(ctx context.Context, projectID, fromRaw, toRaw string) (domain.SlaReportResponse, error) {
@@ -205,7 +206,7 @@ func buildSlaReport(rows []repository.SlaReportClockRow) ([]domain.SlaReportSumm
 			CaseType:   slaCaseTypeLabel(c.issue),
 			Severity:   slaReportSeverityLabel(c.severity),
 			State:      slaReportStateLabel(c.state),
-			Opened:     c.opened.UTC().Format(time.RFC3339),
+			OpenedOn:   c.opened.UTC().Format(time.RFC3339),
 			Response:   slaCaseClock(c.clocks["response"]),
 			Workaround: slaCaseClock(c.clocks["workaround"]),
 			Resolution: slaCaseClock(c.clocks["resolution"]),

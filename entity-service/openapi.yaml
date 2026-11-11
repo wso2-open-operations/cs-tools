@@ -6513,14 +6513,12 @@ paths:
           required: true
           schema:
             type: string
-            format: date
           description: First case creation date to include (yyyy-MM-dd, or an RFC 3339 timestamp).
         - name: to
           in: query
           required: true
           schema:
             type: string
-            format: date
           description: Last case creation date to include (yyyy-MM-dd covers the whole day, or an RFC 3339 timestamp). Must not be before from.
       responses:
         "200":
@@ -6532,7 +6530,7 @@ paths:
         "400":
           description: >-
             Bad request: id is not a UUID, from or to is missing or not a date,
-            from is after to, or SLA data is read from ServiceNow.
+            from is after to, or cases or SLA data are read from ServiceNow.
           content:
             application/json:
               schema:
@@ -38558,7 +38556,7 @@ components:
           description: Empty when the case has no clock for the target.
     SlaReportCase:
       type: object
-      required: [caseId, caseNumber, caseType, severity, state, opened, response, workaround, resolution]
+      required: [caseId, caseNumber, caseType, severity, state, openedOn, response, workaround, resolution]
       properties:
         caseId:
           type: string
@@ -38574,7 +38572,7 @@ components:
         state:
           type: string
           description: The case state label, for example "Work In Progress".
-        opened:
+        openedOn:
           type: string
           format: date-time
         response:
