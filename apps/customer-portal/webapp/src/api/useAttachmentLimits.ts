@@ -39,14 +39,7 @@ export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
   maxInlineImagesTotalBytes: DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB * MIB,
 };
 
-/**
- * The attachment size limits the backend enforces (from entity-service). They
- * rarely change, so they are kept for 5 minutes. Until they load, or if the
- * request fails, the defaults are returned: the server still enforces the real
- * limit, so the defaults only affect the early check and the text shown.
- *
- * @returns {AttachmentLimits} The limits in bytes.
- */
+/** The server's limits, kept for 5 minutes, or the defaults while loading or on error. */
 export default function useAttachmentLimits(): AttachmentLimits {
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
