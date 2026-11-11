@@ -39,9 +39,11 @@ describe("mutedAlertsSummaryText", () => {
 describe("pickerInstant", () => {
   it("refuses a wall time daylight saving skips", () => {
     // 2027-03-14 02:30 doesn't exist in New York: clocks jump from 02:00 to 03:00.
+    // The time picker's value is built on an ordinary day: pickerInstant reads only its hours and minutes, and a
+    // test host in New York would turn a 02:30 on March 14 into 03:30 before pickerInstant saw it.
     const day = new Date(2027, 2, 14);
-    expect(pickerInstant(day, new Date(2027, 2, 14, 2, 30), "America/New_York")).toBe(SKIPPED_WALL_TIME);
-    expect(pickerInstant(day, new Date(2027, 2, 14, 3, 30), "America/New_York")).toBe("2027-03-14T07:30:00.000Z");
+    expect(pickerInstant(day, new Date(2027, 0, 1, 2, 30), "America/New_York")).toBe(SKIPPED_WALL_TIME);
+    expect(pickerInstant(day, new Date(2027, 0, 1, 3, 30), "America/New_York")).toBe("2027-03-14T07:30:00.000Z");
   });
 
   it("names the skipped time when validating", () => {

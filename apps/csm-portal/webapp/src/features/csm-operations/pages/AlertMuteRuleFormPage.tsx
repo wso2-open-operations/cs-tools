@@ -203,6 +203,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
       size="small"
       startIcon={<ArrowLeft size={16} />}
       onClick={() => navigate(backTarget, { state: backState })}
+      disabled={saving}
       sx={{ alignSelf: "flex-start" }}
     >
       Back
