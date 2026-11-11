@@ -383,6 +383,7 @@ func (s *stubCaseRepo) RecordCaseFieldChangeActivity(ctx context.Context, caseID
 type stubUserRepo struct {
 	getUserByEmail       func(ctx context.Context, email string) (domain.User, error)
 	searchUsers          func(ctx context.Context, req domain.SearchUsersRequest) ([]domain.User, int, error)
+	searchUserContacts   func(ctx context.Context, emails, projectIDs []string) ([]domain.UserContact, error)
 	getUserDetail        func(ctx context.Context, id string) (domain.UserDetail, error)
 	getUserRoles         func(ctx context.Context, id string) ([]string, error)
 	getUserGroups        func(ctx context.Context, id string) ([]domain.UserGroupRef, error)
@@ -414,6 +415,13 @@ func (s stubUserRepo) GetUserDetail(ctx context.Context, id string) (domain.User
 func (s stubUserRepo) GetUserProjectAccess(ctx context.Context, email string) ([]domain.UserContactAccess, error) {
 	if s.getUserProjectAccess != nil {
 		return s.getUserProjectAccess(ctx, email)
+	}
+	panic("not implemented")
+}
+
+func (s stubUserRepo) SearchUserContactsByEmail(ctx context.Context, emails, projectIDs []string) ([]domain.UserContact, error) {
+	if s.searchUserContacts != nil {
+		return s.searchUserContacts(ctx, emails, projectIDs)
 	}
 	panic("not implemented")
 }
