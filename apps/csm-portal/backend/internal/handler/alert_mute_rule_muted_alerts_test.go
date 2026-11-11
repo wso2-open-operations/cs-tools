@@ -160,8 +160,8 @@ func TestListMutedCounts(t *testing.T) {
 	h := NewAlertMuteRuleMutedAlertsHandler(core)
 	w := callMutedCounts(h, "/alert-mute-rules/muted-counts?ids="+mutedRuleID+","+mutedRuleID, true)
 	assertStatus(t, w, http.StatusOK)
-	if len(core.gotIDs) != 2 || core.gotIDs[0] != mutedRuleID {
-		t.Errorf("forwarded ids = %v", core.gotIDs)
+	if len(core.gotIDs) != 1 || core.gotIDs[0] != mutedRuleID {
+		t.Errorf("forwarded ids = %v, want the duplicate dropped", core.gotIDs)
 	}
 	assertStatus(t, callMutedCounts(h, "/alert-mute-rules/muted-counts?ids="+mutedRuleID, false), http.StatusUnauthorized)
 	for _, q := range []string{"", "ids=", "ids=nope", "ids=" + mutedRuleID + ",x"} {

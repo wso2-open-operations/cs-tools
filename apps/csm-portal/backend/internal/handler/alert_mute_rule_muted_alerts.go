@@ -21,7 +21,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -103,9 +102,6 @@ func (h *AlertMuteRuleMutedAlertsHandler) ListMutedAlerts(w http.ResponseWriter,
 // mutedCountsMaxIDs matches the rules list's largest page.
 const mutedCountsMaxIDs = 100
 
-// mutedCountsIDPattern is a UUID, which entity-service gives every alert mute rule.
-var mutedCountsIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
 // ListMutedCounts handles GET /alert-mute-rules/muted-counts?ids=a,b,c: how many alert groups each rule on a list page
 // muted, in one alert-core call instead of one per row.
 func (h *AlertMuteRuleMutedAlertsHandler) ListMutedCounts(w http.ResponseWriter, r *http.Request) {
@@ -115,16 +111,26 @@ func (h *AlertMuteRuleMutedAlertsHandler) ListMutedCounts(w http.ResponseWriter,
 		return
 	}
 	raw := r.URL.Query().Get("ids")
-	ids := strings.Split(raw, ",")
-	if raw == "" || len(ids) > mutedCountsMaxIDs {
+	if raw == "" {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
-	for _, id := range ids {
-		if !mutedCountsIDPattern.MatchString(id) {
+	// Each id once, in the order given; alert mute rules have UUIDs.
+	var ids []string
+	seen := map[string]bool{}
+	for _, id := range strings.Split(raw, ",") {
+		if !uuidRe.MatchString(id) {
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > mutedCountsMaxIDs {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
 	}
 	if h.alertCore == nil {
 		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsNotConfigured)
