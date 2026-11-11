@@ -8253,6 +8253,13 @@ paths:
   /deployed-products:
     post:
       summary: Create a new deployed product.
+      description: >-
+        On the PostgreSQL data source the deployed product is written there and
+        numbered from the IBITM series (IBITM + 7 digits, past every IBITM number
+        already stored). The deployment must belong to `projectId` and the version
+        to `productId` (400 otherwise); a customer can create only in a project
+        they are a registered contact of. Under dual-write it is created in
+        ServiceNow first and takes ServiceNow's id and number.
       operationId: createDeployedProduct
       requestBody:
         required: true
