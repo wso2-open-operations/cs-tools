@@ -44,7 +44,14 @@ export function createFakeAlertMuteRulesApi(actor = "engineer@example.test") {
   const stamp = (): string => new Date().toISOString();
 
   const api = {
-    get: async <T,>(path: string): Promise<T | null> => find(path) as T,
+    get: async <T,>(path: string): Promise<T | null> => {
+      if (path.startsWith("/alert-field-values")) {
+        const field = new URLSearchParams(path.split("?")[1]).get("field");
+        return { field, values: field === "service" ? ["client-prod-alert-integration"] : [] } as T;
+      }
+      if (path.includes("/muted-alerts")) return { items: [], total: 0, limit: 20, offset: 0, summary: {} } as T;
+      return find(path) as T;
+    },
     post: async <TReq, TRes>(path: string, body: TReq): Promise<TRes> => {
       if (path === "/alert-mute-rules/search") {
         const { filters, pagination } = body as AlertMuteRuleSearchPayload;

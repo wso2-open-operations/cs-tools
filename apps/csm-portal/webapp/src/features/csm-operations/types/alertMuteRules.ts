@@ -87,3 +87,42 @@ export interface AlertMuteRuleSearchResponse {
   offset: number;
   limit: number;
 }
+
+/** What happened to an alert a rule muted (alert-core's view of it). */
+export type MutedAlertOutcome =
+  "muted" | "incident" | "closed_quietly" | "delivering";
+
+/** One incident (a group of alerts sharing a fingerprint) that an alert mute rule muted. */
+export interface AlertMuteRuleMutedAlert {
+  id: number;
+  service: string;
+  environment: string;
+  source: string;
+  metricName: string;
+  category: string;
+  severity: string;
+  uniqueIdentifier: string;
+  alertCount: number;
+  firstSeen: string;
+  lastSeen: string;
+  mutedAt: string | null;
+  unmutedAt: string | null;
+  outcome: MutedAlertOutcome;
+  /** The CSM incident number once the outcome is "incident"; empty otherwise. */
+  incidentNumber: string;
+}
+
+/** One page of a rule's muted alerts, plus counts by outcome over all of them. */
+export interface AlertMuteRuleMutedAlertsResponse {
+  items: AlertMuteRuleMutedAlert[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: Partial<Record<MutedAlertOutcome, number>>;
+}
+
+/** `GET /alert-field-values`: distinct values alerts carry in one field. */
+export interface AlertFieldValuesResponse {
+  field: AlertMuteRuleField;
+  values: string[];
+}

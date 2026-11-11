@@ -20,9 +20,12 @@ import {
   Autocomplete,
   Box,
   Button,
-  Chip,
   DatePickers,
+  FormControl,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Skeleton,
   TextField,
   Typography,
@@ -42,7 +45,6 @@ import { useGetAlertMuteRule, usePatchAlertMuteRule, usePostAlertMuteRule } from
 import type { AlertMuteRuleCondition, AlertMuteRuleInput, AlertMuteRule } from "@features/csm-operations/types/alertMuteRules";
 import {
   MAX_ALERT_MUTE_RULE_DESCRIPTION,
-  MAX_ALERT_MUTE_RULE_HOURS,
   MAX_ALERT_MUTE_RULE_NAME,
   REQUIRED_ALERT_MUTE_RULE_FIELDS,
   alertMuteRuleState,
@@ -290,13 +292,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       {back}
-      <Box>
-        <Typography variant="h5">{isEdit ? "Edit alert mute rule" : "Create alert mute rule"}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Set up a one-time schedule during which matching alerts are muted. Muted alerts are still recorded but create
-          no incident and page nobody; any still firing when it ends become incidents then.
-        </Typography>
-      </Box>
+      <Typography variant="h5">{isEdit ? "Edit alert mute rule" : "Create alert mute rule"}</Typography>
 
       <Section title="Alert mute rule details">
         <TextField
@@ -307,10 +303,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
           size="small"
           fullWidth
           error={!!errors.name}
-          helperText={
-            errors.name ??
-            `Alert mute rule name must be 1 to ${MAX_ALERT_MUTE_RULE_NAME} characters. Character count: ${form.name.length}/${MAX_ALERT_MUTE_RULE_NAME}.`
-          }
+          helperText={errors.name}
           slotProps={{ htmlInput: { maxLength: MAX_ALERT_MUTE_RULE_NAME } }}
         />
         <TextField
@@ -322,35 +315,31 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
           fullWidth
           placeholder="Add context to help you remember what this alert mute rule is for."
           error={!!errors.description}
-          helperText={
-            errors.description ??
-            `Description can be up to ${MAX_ALERT_MUTE_RULE_DESCRIPTION} characters long. Character count: ${form.description.length}/${MAX_ALERT_MUTE_RULE_DESCRIPTION}.`
-          }
+          helperText={errors.description}
           slotProps={{ htmlInput: { maxLength: MAX_ALERT_MUTE_RULE_DESCRIPTION } }}
         />
       </Section>
 
-      <Section title="Schedule" subtitle={`One-time, for at most ${MAX_ALERT_MUTE_RULE_HOURS} hours.`}>
-        <Box>
-          <Typography variant="subtitle2" id="alert-mute-rule-duration-label">
-            Duration
-          </Typography>
-          <Box role="group" aria-labelledby="alert-mute-rule-duration-label" sx={{ display: "flex", gap: 1, flexWrap: "wrap", mt: 1 }}>
+      <Section title="Schedule">
+        <FormControl size="small" sx={{ maxWidth: 240 }}>
+          <InputLabel id="alert-mute-rule-duration-label">Duration</InputLabel>
+          <Select
+            labelId="alert-mute-rule-duration-label"
+            label="Duration"
+            value={String(form.duration)}
+            onChange={(e) => {
+              const v = String(e.target.value);
+              set("duration", v === "custom" ? "custom" : (Number(v) as (typeof QUICK_DURATIONS_MIN)[number]));
+              setErrors((er) => ({ ...er, startOn: undefined, endOn: undefined }));
+            }}
+          >
             {[...QUICK_DURATIONS_MIN, "custom" as const].map((d) => (
-              <Chip
-                key={d}
-                label={d === "custom" ? "Custom" : formatDuration(d * 60_000)}
-                color={form.duration === d ? "primary" : "default"}
-                variant={form.duration === d ? "filled" : "outlined"}
-                aria-pressed={form.duration === d}
-                onClick={() => {
-                  set("duration", d);
-                  setErrors((e) => ({ ...e, startOn: undefined, endOn: undefined }));
-                }}
-              />
+              <MenuItem key={d} value={String(d)}>
+                {d === "custom" ? "Custom" : formatDuration(d * 60_000)}
+              </MenuItem>
             ))}
-          </Box>
-        </Box>
+          </Select>
+        </FormControl>
         {form.duration === "custom" ? (
           <>
             <Autocomplete

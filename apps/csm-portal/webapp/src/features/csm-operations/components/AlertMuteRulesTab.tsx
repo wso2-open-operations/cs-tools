@@ -40,7 +40,11 @@ import QueryErrorState from "@components/QueryErrorState";
 import RefreshButton from "@components/RefreshButton";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
-import { useAlertMuteRuleCounts, useSearchAlertMuteRules } from "@features/csm-operations/api/useAlertMuteRules";
+import {
+  useAlertMuteRuleCounts,
+  useAlertMuteRuleMutedAlerts,
+  useSearchAlertMuteRules,
+} from "@features/csm-operations/api/useAlertMuteRules";
 import type { AlertMuteRuleSearchPayload, AlertMuteRuleStateFilter } from "@features/csm-operations/types/alertMuteRules";
 import {
   ALERT_MUTE_RULE_STATE_FILTERS,
@@ -66,6 +70,33 @@ function formatDateTime(value: string): string {
  * search box, and one row per rule with its actions in a ⋮ menu. Searching,
  * filtering and paging run on the backend (`POST /alert-mute-rules/search`).
  */
+/** How many alert groups a rule muted: one one-row page from alert-core. A scheduled rule has muted nothing yet. */
+function MutedCount({
+  ruleId,
+  enabled,
+  live,
+}: {
+  ruleId: string;
+  enabled: boolean;
+  live: boolean;
+}): JSX.Element {
+  const { data, isError } = useAlertMuteRuleMutedAlerts(
+    enabled ? ruleId : undefined,
+    { limit: 1, offset: 0 },
+    live,
+  );
+  const text = !enabled ? "—" : isError ? "?" : data ? String(data.total) : "…";
+  return (
+    <Typography
+      variant="body2"
+      color={data?.total ? "text.primary" : "text.secondary"}
+      title={isError ? "Couldn't load muted alerts" : undefined}
+    >
+      {text}
+    </Typography>
+  );
+}
+
 export default function AlertMuteRulesTab(): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
@@ -247,9 +278,7 @@ export default function AlertMuteRulesTab(): JSX.Element {
                       <AlertMuteRuleStateChip state={state} />
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary" title="Shown once alert-core uses these rules">
-                        —
-                      </Typography>
+                      <MutedCount ruleId={rule.id} enabled={state !== "scheduled"} live={state === "active"} />
                     </TableCell>
                     <TableCell sx={{ maxWidth: 200 }}>
                       <Typography variant="body2" noWrap title={rule.createdBy}>
