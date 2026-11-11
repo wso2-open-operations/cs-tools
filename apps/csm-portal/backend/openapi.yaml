@@ -17,7 +17,7 @@ info:
     | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
     | `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
-    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
+    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the five onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
     | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
@@ -3111,8 +3111,9 @@ paths:
         the integration service validates this and rejects an empty update.
         Reachable by cs_engineer, onboarding_lead and admin; which fields a
         caller may set is then decided per field. onboardingStatus and
-        onboardingOwner and the four onboarding dates (onboardingStartDate,
-        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
+        onboardingOwner and the five onboarding dates (onboardingStartDate,
+        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate,
+        onboardingProductionReadinessCompletionDate)
         need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
         alone gets 403); closureState and suspensionProcessOverridden need admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
@@ -23197,6 +23198,97 @@ components:
               - cloud_support
               - professional_services
           description: Excludes projects whose subscriptionType matches any of these values.
+        onboardingStartDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding start date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        onboardingStartDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding start date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        goLivePlanDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a planned go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        goLivePlanDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a planned go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        goLiveDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a actual go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        goLiveDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a actual go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        onboardingExpiryDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding expiry date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        onboardingExpiryDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding expiry date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        productionReadinessCompletionDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a production-readiness completion date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        productionReadinessCompletionDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a production-readiness completion date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        closureStates:
+          type: array
+          items:
+            type: string
+            enum:
+              - Open
+              - Suspended
+              - Restricted
+          description: >
+            Only projects whose overall closure state is any of these values (the
+            include-side counterpart of excludeClosureStates; a project with no
+            recorded closure state matches none). Postgres data sources only.
+        sortBy:
+          type: string
+          enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
+          description: >
+            Sort field. Projects with no value for it are last. Only endDate is
+            supported on every data source; the others are Postgres only.
+        sortOrder:
+          type: string
+          enum: [asc, desc]
 
     ProjectSearchResponse:
       type: object
@@ -23458,6 +23550,31 @@ components:
               format: date-time
               nullable: true
               description: End of the project's current renewed period.
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC). Postgres data sources only; null elsewhere.
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
             createdOn:
               type: string
               format: date-time
@@ -23579,6 +23696,11 @@ components:
               format: date-time
               nullable: true
               description: The project's onboarding expiry date (midnight UTC).
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC).
 
     ProjectAccountRef:
       type: object
@@ -23612,7 +23734,7 @@ components:
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
         suspensionProcessOverridden requires the admin role;
-        onboardingStatus, onboardingOwner and the four onboarding dates
+        onboardingStatus, onboardingOwner and the five onboarding dates
         require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
       properties:
@@ -23664,6 +23786,15 @@ components:
             onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
             applicable to projects sourced from the database; cannot be
             cleared; an invalid date, or dates out of order, is a 400.
+        onboardingProductionReadinessCompletionDate:
+          type: string
+          format: date
+          description: >
+            Sets the date the project's onboarding production-readiness work was
+            completed (YYYY-MM-DD). Requires onboarding_lead or admin -- a 403
+            for a cs_engineer alone. Only applicable to projects sourced from the
+            database; read back as productionReadinessCompletionDate; cannot be
+            cleared; an invalid date, or one earlier than the start date, is a 400.
         hasAgent:
           type: boolean
         hasKbReferences:
@@ -23764,6 +23895,11 @@ components:
               format: date-time
               nullable: true
               description: The project's onboarding expiry date (midnight UTC). Present on Postgres data sources only.
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC). Present on Postgres data sources only.
 
     DeploymentCreatePayload:
       type: object
