@@ -809,7 +809,9 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 10, at most 100).
+	// AttachmentMaxBytes caps a file sent through the portal backend
+	// (ATTACHMENT_VIA_PORTAL_MAX_MB, default 10, at most 100; the older name
+	// ATTACHMENT_MAX_MB still works).
 	// The declared size is checked when an upload starts and the real size when
 	// it is confirmed. Provisional default, to be set from the real size
 	// distribution.
@@ -837,7 +839,7 @@ type Config struct {
 	// burst of large uploads cannot take every connection from the rest of the API.
 	// A transfer over the limit is refused with a 429 and retried by the portal.
 	AttachmentMaxConcurrentTransfers int
-	// AttachmentDirectTransfers (ATTACHMENT_DIRECT_TRANSFERS_ENABLED=true) lets a
+	// AttachmentDirectTransfers (ATTACHMENT_DIRECT_UPLOAD_ENABLED=true) lets a
 	// file larger than AttachmentDirectMinBytes go between the browser and Azure
 	// directly, through short-lived links this service signs, instead of through
 	// it. Off by default. It needs a storage account key or connection string
@@ -845,11 +847,11 @@ type Config struct {
 	// account; without a key it stays off and logs why.
 	AttachmentDirectTransfers bool
 	// AttachmentDirectMinBytes is the size above which a file uses a direct link
-	// (ATTACHMENT_DIRECT_MIN_MB, default 8 MiB, one chunk).
+	// (ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB, default 8 MiB, one chunk).
 	AttachmentDirectMinBytes int64
 	// AttachmentDirectMaxBytes is the largest file that may be sent that way
-	// (ATTACHMENT_DIRECT_MAX_MB, default and at most 1024 MB). Only used while
-	// direct transfers are on; ATTACHMENT_MAX_MB still caps every other file.
+	// (ATTACHMENT_DIRECT_UPLOAD_MAX_MB, default and at most 1024 MB). Only used while
+	// direct transfers are on; ATTACHMENT_VIA_PORTAL_MAX_MB still caps every other file.
 	AttachmentDirectMaxBytes int64
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
 	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1, at most 25), and so also one image.
@@ -1108,7 +1110,7 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10, maxAttachmentMB)
+	cfg.AttachmentMaxBytes = envMegabytesRenamed("ATTACHMENT_VIA_PORTAL_MAX_MB", "ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10, maxAttachmentMB)
 	cfg.AzureStorageAccount = strings.TrimSpace(os.Getenv("AZURE_STORAGE_ACCOUNT"))
 	cfg.AzureStorageContainer = strings.TrimSpace(os.Getenv("AZURE_STORAGE_CONTAINER"))
 	cfg.AzureTenantID = strings.TrimSpace(os.Getenv("AZURE_TENANT_ID"))
@@ -1119,9 +1121,9 @@ func Load() *Config {
 	cfg.AzureStorageEndpoint = strings.TrimSpace(os.Getenv("AZURE_STORAGE_ENDPOINT"))
 	cfg.AzureStorageCreateContainer = strings.EqualFold(strings.TrimSpace(os.Getenv("AZURE_STORAGE_CREATE_CONTAINER")), "true")
 	cfg.AttachmentMaxConcurrentTransfers = envPositiveInt("ATTACHMENT_MAX_CONCURRENT_TRANSFERS", 32)
-	cfg.AttachmentDirectTransfers = strings.EqualFold(strings.TrimSpace(os.Getenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED")), "true")
-	cfg.AttachmentDirectMinBytes = envMegabytes("ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES", 8, 100)
-	cfg.AttachmentDirectMaxBytes = envMegabytes("ATTACHMENT_DIRECT_MAX_MB", "ATTACHMENT_DIRECT_MAX_BYTES", maxAttachmentDirectMB, maxAttachmentDirectMB)
+	cfg.AttachmentDirectTransfers = strings.EqualFold(strings.TrimSpace(envRenamed("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "ATTACHMENT_DIRECT_TRANSFERS_ENABLED")), "true")
+	cfg.AttachmentDirectMinBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES", 8, 100)
+	cfg.AttachmentDirectMaxBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_MAX_MB", "ATTACHMENT_DIRECT_MAX_MB", "ATTACHMENT_DIRECT_MAX_BYTES", maxAttachmentDirectMB, maxAttachmentDirectMB)
 	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()
 	return cfg
@@ -1767,7 +1769,7 @@ func envDuration(key string, def time.Duration) time.Duration {
 const (
 	maxAttachmentMB = 100
 	// maxAttachmentDirectMB is the largest file that may be sent straight to Azure
-	// (1 GiB), and the default of ATTACHMENT_DIRECT_MAX_MB.
+	// (1 GiB), and the default of ATTACHMENT_DIRECT_UPLOAD_MAX_MB.
 	maxAttachmentDirectMB  = 1024
 	maxInlineImagesTotalMB = 25
 )
@@ -1794,6 +1796,31 @@ func envMegabytes(mbKey, bytesKey string, defMB, maxMB int64) int64 {
 		}
 	}
 	return def
+}
+
+// envRenamed reads newKey, or, when it is unset, the older name oldKey (logging
+// a warning so the operator switches to the new name).
+func envRenamed(newKey, oldKey string) string {
+	if v := os.Getenv(newKey); strings.TrimSpace(v) != "" {
+		return v
+	}
+	v := os.Getenv(oldKey)
+	if strings.TrimSpace(v) != "" {
+		slog.Warn("configuration name is deprecated; use the new name", "old", oldKey, "new", newKey)
+	}
+	return v
+}
+
+// envMegabytesRenamed is envMegabytes for a setting that has a new name: newKey
+// wins; when it is unset the older oldKey (and its bytes form oldBytesKey) is read.
+func envMegabytesRenamed(newKey, oldKey, oldBytesKey string, defMB, maxMB int64) int64 {
+	if strings.TrimSpace(os.Getenv(newKey)) != "" {
+		return envMegabytes(newKey, "", defMB, maxMB)
+	}
+	if strings.TrimSpace(os.Getenv(oldKey)) != "" || strings.TrimSpace(os.Getenv(oldBytesKey)) != "" {
+		slog.Warn("configuration name is deprecated; use the new name", "old", oldKey, "new", newKey)
+	}
+	return envMegabytes(oldKey, oldBytesKey, defMB, maxMB)
 }
 
 // envPositiveInt64 reads a positive integer, falling back to def when unset,

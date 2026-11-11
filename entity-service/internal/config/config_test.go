@@ -1629,3 +1629,38 @@ func TestLoad_AttachmentDirectMax(t *testing.T) {
 		}
 	}
 }
+
+// TestLoad_AttachmentSettingNames: the four attachment settings have clear
+// names; the older names still work, and the new name wins when both are set.
+func TestLoad_AttachmentSettingNames(t *testing.T) {
+	t.Run("new names", func(t *testing.T) {
+		t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "20")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "true")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "16")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_MAX_MB", "512")
+		c := Load()
+		if c.AttachmentMaxBytes != 20<<20 || !c.AttachmentDirectTransfers || c.AttachmentDirectMinBytes != 16<<20 || c.AttachmentDirectMaxBytes != 512<<20 {
+			t.Errorf("new names = %d, %v, %d, %d", c.AttachmentMaxBytes, c.AttachmentDirectTransfers, c.AttachmentDirectMinBytes, c.AttachmentDirectMaxBytes)
+		}
+	})
+	t.Run("older names still work", func(t *testing.T) {
+		t.Setenv("ATTACHMENT_MAX_MB", "30")
+		t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "true")
+		t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "12")
+		t.Setenv("ATTACHMENT_DIRECT_MAX_MB", "256")
+		c := Load()
+		if c.AttachmentMaxBytes != 30<<20 || !c.AttachmentDirectTransfers || c.AttachmentDirectMinBytes != 12<<20 || c.AttachmentDirectMaxBytes != 256<<20 {
+			t.Errorf("older names = %d, %v, %d, %d", c.AttachmentMaxBytes, c.AttachmentDirectTransfers, c.AttachmentDirectMinBytes, c.AttachmentDirectMaxBytes)
+		}
+	})
+	t.Run("the new name wins over the older one", func(t *testing.T) {
+		t.Setenv("ATTACHMENT_MAX_MB", "30")
+		t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "40")
+		t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "true")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "false")
+		c := Load()
+		if c.AttachmentMaxBytes != 40<<20 || c.AttachmentDirectTransfers {
+			t.Errorf("both set = %d, %v; want the new names to win", c.AttachmentMaxBytes, c.AttachmentDirectTransfers)
+		}
+	})
+}
