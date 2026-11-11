@@ -68,6 +68,12 @@ type CaseTypeTransfer struct {
 	// "engagement" and ignored otherwise.
 	EngagementType        *domain.EngagementType
 	EngagementPaymentType *domain.EngagementPaymentType
+	// CatalogID, CatalogItemID and Variables are required for TargetType
+	// "service_request" and ignored otherwise. They are stored in the new row's
+	// json_data (see ServiceRequestCatalogData for the shape and the bounds).
+	CatalogID     string
+	CatalogItemID string
+	Variables     []domain.Variable
 	// ActorEmail is the calling user, resolved by the service from the caller's
 	// token. It is optional: a caller that cannot be resolved still transfers, it
 	// is simply not named on work_item.updated_by.
@@ -141,8 +147,8 @@ var caseTypeExtensions = map[string]caseTypeExtension{
 
 // carriedCaseFields is what every case-like extension row has in common, i.e.
 // what survives a transfer. Everything type-specific (severity and issue type
-// of a "case", the type and payment type of an engagement, the catalog of a
-// service request) is dropped or supplied afresh.
+// of a "case", the type and payment type of an engagement, the catalog request of
+// a service request) is dropped or supplied afresh.
 type carriedCaseFields struct {
 	state              *string
 	closeNotes         *string
@@ -189,6 +195,9 @@ func insertTransferredCaseSQL(target string) string {
 	case "engagement":
 		return fmt.Sprintf(`INSERT INTO %s (%s, type, payment_type)
 	VALUES (%s, $12::engagement_type_enum, $13::engagement_payment_type_enum)`, ext.table, commonCols, common)
+	case "service_request":
+		return fmt.Sprintf(`INSERT INTO %s (%s, json_data)
+	VALUES (%s, $12::jsonb)`, ext.table, commonCols, common)
 	default:
 		return fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, ext.table, commonCols, common)
 	}
@@ -249,6 +258,15 @@ func (r *caseRepo) TransferCaseType(ctx context.Context, plan CaseTypeTransfer, 
 		}
 		targetEngagementType = strings.ToUpper(string(*plan.EngagementType))
 		targetPaymentType = strings.ToUpper(string(*plan.EngagementPaymentType))
+	}
+
+	var serviceRequestData []byte
+	if plan.TargetType == "service_request" {
+		data, err := ServiceRequestCatalogData(plan.CatalogID, plan.CatalogItemID, plan.Variables)
+		if err != nil {
+			return CaseTypeTransferResult{}, err
+		}
+		serviceRequestData = data
 	}
 
 	var result CaseTypeTransferResult
@@ -363,6 +381,8 @@ func (r *caseRepo) TransferCaseType(ctx context.Context, plan CaseTypeTransfer, 
 			insertArgs = append(insertArgs, targetSeverity, targetIssueType)
 		case "engagement":
 			insertArgs = append(insertArgs, targetEngagementType, targetPaymentType)
+		case "service_request":
+			insertArgs = append(insertArgs, serviceRequestData)
 		}
 		if _, err := tx.Exec(ctx, insertTransferredCaseSQL(plan.TargetType), insertArgs...); err != nil {
 			return fmt.Errorf("transfer case type: insert %s row: %w", plan.TargetType, err)

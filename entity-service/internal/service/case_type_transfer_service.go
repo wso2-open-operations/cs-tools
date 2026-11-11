@@ -175,6 +175,12 @@ func validateCaseTypeTransfer(req domain.UpdateCaseRequest) (string, error) {
 				return "", err
 			}
 		}
+		// What the transfer will store, built here so a request that cannot be
+		// stored (a repeated variable, an oversized answer) is refused before any
+		// other system is asked to move the case.
+		if _, err := repository.ServiceRequestCatalogData(*req.CatalogID, *req.CatalogItemID, req.Variables); err != nil {
+			return "", err
+		}
 	case "case":
 		if hasEngagement || hasCatalog {
 			return "", &apierror.ValidationError{Msg: "engagementType and engagementPaymentType are only accepted when type is \"engagement\"; catalogId, catalogItemId, and variables are only accepted when type is \"service_request\""}
@@ -262,6 +268,12 @@ func (s *caseService) transferCaseType(ctx context.Context, req domain.UpdateCas
 		EngagementType:        req.EngagementType,
 		EngagementPaymentType: req.EngagementPaymentType,
 		ActorEmail:            actorEmail,
+	}
+	if target == "service_request" {
+		// validateCaseTypeTransfer has already required both ids for this target.
+		plan.CatalogID = *req.CatalogID
+		plan.CatalogItemID = *req.CatalogItemID
+		plan.Variables = req.Variables
 	}
 
 	var snResp *domain.UpdateCaseResponse
