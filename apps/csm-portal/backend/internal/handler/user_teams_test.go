@@ -84,14 +84,14 @@ func TestSearchUsers_EmptyTeamFilterIsDropped(t *testing.T) {
 	}
 }
 
-// A body with no filters must go upstream byte-for-byte, so this rewrite can
-// never be the cause of an unrelated regression.
-func TestSearchUsers_UnfilteredBodyIsForwardedVerbatim(t *testing.T) {
-	body := `{"pagination":{"limit":10,"offset":20},"sortBy":{"field":"name"}}`
-	captured, w := capturedSearch(t, body)
+// A body with no filters keeps every other field untouched: the only change the
+// general search makes is the forced internal userType filter.
+func TestSearchUsers_UnfilteredBodyOnlyGainsInternalUserType(t *testing.T) {
+	captured, w := capturedSearch(t, `{"pagination":{"limit":10,"offset":20},"sortBy":{"field":"name"}}`)
 	assertStatus(t, w, http.StatusOK)
-	if captured != body {
-		t.Errorf("forwarded body = %s, want it unchanged (%s)", captured, body)
+	want := `{"filters":{"userType":"internal"},"pagination":{"limit":10,"offset":20},"sortBy":{"field":"name"}}`
+	if captured != want {
+		t.Errorf("forwarded body = %s, want %s", captured, want)
 	}
 }
 

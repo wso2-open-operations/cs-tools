@@ -2772,7 +2772,71 @@ paths:
         Returns a paginated list of users. When the entity-service data source is
         ServiceNow the response uses SNUser (name, timeZone, active, roles); for
         the postgres data source it uses User (firstName, lastName, userType).
+
+        Lists internal users only, for every caller: the backend overrides
+        filters.userType to internal, so a request that omits it or asks for
+        another type gets internal users all the same. Listing external users is
+        POST /admin/users/search.
       operationId: postUsersSearch
+      requestBody:
+        description: User search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Users matching the supplied filters.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/UserSearchResponse'
+                  - $ref: '#/components/schemas/SNUserSearchResponse'
+        "400":
+          description: Bad request — invalid filter value, sort field, or pagination limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /admin/users/search:
+    post:
+      summary: Search users of any type, for the user-management screens.
+      description: >
+        Same request and response as POST /users/search, except that
+        filters.userType is passed through as sent instead of being forced to
+        internal, so external (customer or partner) users can be listed. It is
+        the only user search that can list them: it backs the user-management
+        users page and the role, group and team member lists. Requires the write
+        permission (cs_engineer or admin). Every user picker uses POST
+        /users/search instead.
+      operationId: postAdminUsersSearch
       requestBody:
         description: User search payload
         content:
@@ -25733,6 +25797,11 @@ components:
           items:
             type: string
           description: Filter to specific email addresses (exact match).
+        userType:
+          $ref: '#/components/schemas/UserType'
+          description: >
+            Restrict to one user type. Honoured on POST /admin/users/search only;
+            POST /users/search overrides it to internal.
         active:
           type: boolean
           nullable: true

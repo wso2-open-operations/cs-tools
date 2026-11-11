@@ -545,8 +545,55 @@ func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, raw)
 }
 
-// SearchUsers handles POST /users/search.
+// userTypeInternal is the entity service's user type for staff. It is the
+// value forced into filters.userType on the general user search.
+const userTypeInternal = "internal"
+
+// forceInternalUserType returns body with filters.userType set to the internal
+// user type, whatever the caller sent. Every other field is preserved. A body
+// with no filters object gains one. A body that is not a JSON object, or whose
+// filters is not an object, is rejected rather than forwarded: forwarding it
+// would let the entity service interpret it without the restriction.
+func forceInternalUserType(body []byte) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope == nil {
+		return nil, errors.New(ErrMsgBadRequest)
+	}
+
+	filters := map[string]json.RawMessage{}
+	if raw, ok := envelope["filters"]; ok && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &filters); err != nil || filters == nil {
+			return nil, errors.New(ErrMsgBadRequest)
+		}
+	}
+	filters["userType"] = json.RawMessage(`"` + userTypeInternal + `"`)
+
+	encoded, err := json.Marshal(filters)
+	if err != nil {
+		return nil, fmt.Errorf("encode user search filters: %w", err)
+	}
+	envelope["filters"] = encoded
+	return json.Marshal(envelope)
+}
+
+// SearchUsers handles POST /users/search, the user search every picker and
+// directory lookup uses. It only ever lists internal users: filters.userType is
+// overridden to internal for every caller, so omitting or changing it cannot
+// widen the result. Listing external users is SearchUsersAdmin's job.
 func (h *UsersHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
+	h.searchUsers(w, r, true)
+}
+
+// SearchUsersAdmin handles POST /admin/users/search: the same request and
+// response as POST /users/search, but it does not restrict the user type, so it
+// can list external users. It backs the user-management screens only; the route
+// is registered behind PermWrite.
+func (h *UsersHandler) SearchUsersAdmin(w http.ResponseWriter, r *http.Request) {
+	h.searchUsers(w, r, false)
+}
+
+// searchUsers is the shared body of the two user search routes.
+func (h *UsersHandler) searchUsers(w http.ResponseWriter, r *http.Request, internalOnly bool) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
@@ -575,6 +622,14 @@ func (h *UsersHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if internalOnly {
+		body, err = forceInternalUserType(body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	result, err := h.entity.SearchUsers(r.Context(), body)
