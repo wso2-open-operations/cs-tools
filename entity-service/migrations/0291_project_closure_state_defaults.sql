@@ -44,13 +44,16 @@
 -- Locking and size: the project table has about 2200 rows. Each UPDATE is one
 -- statement that takes row locks only on rows it changes, in well under a
 -- second. SET DEFAULT is a catalog-only change (no table rewrite). Each
--- ALTER TABLE needs an ACCESS EXCLUSIVE lock for an instant, so the
--- transaction runs with a short lock_timeout: it gives up after 5s instead of
--- queueing every later read and write of project behind a long transaction.
--- Nothing is left half-done; re-run it when the table is quiet.
+-- ALTER TABLE needs an ACCESS EXCLUSIVE lock for an instant, so the file runs
+-- with a short session lock_timeout: it gives up after 5s instead of queueing
+-- every later read and write of project behind it.
+--
+-- Applied with plain autocommit, like every file here: each statement is its
+-- own transaction. If one fails (for example on lock_timeout), the earlier
+-- statements stay applied; that is safe because every statement is idempotent,
+-- so re-run the file when the table is quiet.
 
-BEGIN;
-SET LOCAL lock_timeout = '5s';
+SET lock_timeout = '5s';
 
 UPDATE project
 SET end_date_closure_state = 'OPEN'
@@ -80,4 +83,4 @@ ALTER TABLE project
     ALTER COLUMN invoice_due_date_closure_state SET DEFAULT 'OPEN',
     ALTER COLUMN compliance_violation_closure_state SET DEFAULT 'OPEN';
 
-COMMIT;
+RESET lock_timeout;
