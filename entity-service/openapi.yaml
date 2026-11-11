@@ -8293,7 +8293,8 @@ paths:
         "404":
           description: >-
             The insert policy refused the caller. A fallback: a caller outside the project
-            cannot see its deployment and gets the 400 above first.
+            cannot see its deployment and gets the 400 above first. A missing database
+            privilege (for example on the number sequence) is a 500, not a 404.
           content:
             application/json:
               schema:
