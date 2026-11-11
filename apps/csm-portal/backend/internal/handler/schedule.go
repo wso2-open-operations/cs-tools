@@ -280,7 +280,7 @@ func (h *ScheduleHandler) holidayConfirmation(w http.ResponseWriter, r *http.Req
 	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity "+verb+" failed", "userID", user.UserID, "err", err)
-		mapAbsenceKindWriteError(w, err, msg)
+		mapScheduleRefusalError(w, err, msg)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -758,12 +758,14 @@ func mapScheduleWriteError(w http.ResponseWriter, err error, fallbackMsg string)
 	mapUpstreamErrorGeneric(w, err, fallbackMsg)
 }
 
-// mapAbsenceKindWriteError is mapScheduleWriteError plus the 400: entity-service
-// refuses a new tag in words written for the lead who typed it (the name is
-// taken or too long, a leave tag cannot exclude from the timesheet, which
-// family the tag is for), and the form can only show what is wrong if it gets
-// that reason. Read only from the JSON envelope, never a raw body.
-func mapAbsenceKindWriteError(w http.ResponseWriter, err error, fallbackMsg string) {
+// mapScheduleRefusalError is mapScheduleWriteError plus the 400, for the Team
+// Schedule writes whose 400 is written for the person acting: a new tag (the
+// name is taken or too long, a leave tag cannot exclude from the timesheet,
+// which family the tag is for) and a holiday availability confirm or withdraw
+// (the day is not a date, the holiday has passed). The form can only show what
+// is wrong if it gets that reason. Read only from the JSON envelope, never a
+// raw body.
+func mapScheduleRefusalError(w http.ResponseWriter, err error, fallbackMsg string) {
 	var apiErr *apierror.Error
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
 		writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
@@ -835,7 +837,7 @@ func (h *ScheduleHandler) CreateScheduleAbsenceKind(w http.ResponseWriter, r *ht
 	result, err := h.entity.CreateScheduleAbsenceKind(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateScheduleAbsenceKind failed", "userID", userID, "err", err)
-		mapAbsenceKindWriteError(w, err, "Failed to add the tag.")
+		mapScheduleRefusalError(w, err, "Failed to add the tag.")
 		return
 	}
 

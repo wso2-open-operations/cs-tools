@@ -1664,6 +1664,25 @@ describe("MonthRoster: public holidays", () => {
     expect(container.querySelector("tbody td.clash")).toBeNull();
   });
 
+  it("shows a Public holiday tag over a turn as an uncovered turn, like leave", () => {
+    // The tag takes its person off the rota (Case Alerts does not call them),
+    // so a turn they hold that day needs cover until a lead removes the tag.
+    const PH = {
+      id: "k-ph", code: "PH", shortCode: "PH", label: "Public holiday", bucket: "ALLOCATION" as const,
+      colourToken: "EXC", sortOrder: 74, excludesFromTimesheet: true,
+    };
+    const { container } = renderRoster({
+      absenceKinds: [ANNUAL_LEAVE, PH],
+      absences: [absence({ name: "Asela", startsOn: "2026-09-21", endsOn: "2026-09-21", kindCode: "PH" })],
+      publicHolidays: [poya],
+    });
+    const td = container.querySelector("tbody td.clash");
+    expect(td).not.toBeNull();
+    expect(td?.querySelector(".chip:not(.gone)")).toHaveTextContent("PH");
+    expect(td?.querySelector(".chip.gone")).toHaveTextContent("6-9p");
+    expect(td).toHaveAttribute("title", expect.stringContaining("needs cover"));
+  });
+
   it("draws nothing extra without holidays", () => {
     const { container } = renderRoster();
     expect(container.querySelector("tbody td.ph")).toBeNull();

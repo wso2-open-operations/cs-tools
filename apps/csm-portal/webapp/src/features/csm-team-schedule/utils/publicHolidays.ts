@@ -18,6 +18,13 @@
 
 import type { SchedulePublicHoliday } from "../types";
 
+/**
+ * The "Public holiday" tag the Team Schedule places on a CRE member (entity
+ * migration 0283). An allocation, but it takes its person off the rota that
+ * day, as leave does: a turn under it is uncovered.
+ */
+export const PUBLIC_HOLIDAY_KIND = "PH";
+
 /** A person's public holiday on a day, keyed `${userId}|${YYYY-MM-DD}`. */
 export function holidaysByPersonAndDay(holidays: readonly SchedulePublicHoliday[]): Map<string, SchedulePublicHoliday> {
   const out = new Map<string, SchedulePublicHoliday>();

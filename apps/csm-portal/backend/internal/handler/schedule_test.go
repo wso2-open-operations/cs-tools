@@ -1005,6 +1005,19 @@ func TestHolidayAvailability(t *testing.T) {
 		}
 	})
 
+	t.Run("a confirm refused with a 400 keeps entity-service's words", func(t *testing.T) {
+		const words = "the holiday on 2026-11-16 has passed"
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"message":"` + words + `"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.ConfirmHolidayAvailability(w, withUser(confirmReq(http.MethodPut)))
+		assertStatus(t, w, http.StatusBadRequest)
+		if !strings.Contains(w.Body.String(), words) {
+			t.Fatalf("body %s", w.Body.String())
+		}
+	})
+
 	t.Run("refuses a blank team or a malformed day before calling upstream", func(t *testing.T) {
 		called := false
 		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {

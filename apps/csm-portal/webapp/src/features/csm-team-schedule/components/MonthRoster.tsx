@@ -44,7 +44,7 @@ import {
   dayMarkerTitle,
 } from "../utils/engagementAllocations";
 import { ordinaryDayCode, REGULAR_HOURS_CODE } from "../utils/standingDay";
-import { holidaysByPersonAndDay, withHolidayNote } from "../utils/publicHolidays";
+import { holidaysByPersonAndDay, PUBLIC_HOLIDAY_KIND, withHolidayNote } from "../utils/publicHolidays";
 import { useTeamColour, useTeamName } from "../utils/teamColourContext";
 import { OFF_TIMESHEET_NOTE, tagHoverText, tagSideText } from "../utils/tagHover";
 
@@ -742,9 +742,13 @@ export default function MonthRoster({
           // turn that day shows on its own. Moves to another team are not
           // allocations here and keep their own rule above.
           if (kind?.bucket === "ALLOCATION" && !kind.movesToTeamKey && weekendDay) continue;
+          // Leave, and the Public holiday tag, take the person off the rota:
+          // the tag is the cell and a turn under it is uncovered. Any other
+          // allocation is drawn beside the turn, which the person still works.
+          const offRota = kind?.bucket === "LEAVE" || ab.kindCode === PUBLIC_HOLIDAY_KIND;
           const target =
-            kind?.bucket === "ALLOCATION" && holdsTurn(row, iso) ? row.allocs : row.days;
-          if (kind?.bucket === "LEAVE" && iso >= ab.startsOn && !row.clash.has(iso)) {
+            kind?.bucket === "ALLOCATION" && !offRota && holdsTurn(row, iso) ? row.allocs : row.days;
+          if (offRota && iso >= ab.startsOn && !row.clash.has(iso)) {
             const turns = turnsOn(row, iso);
             if (turns.length > 0) row.clash.set(iso, turns);
           }
