@@ -32,16 +32,18 @@ func TestAlertMuteRuleRoutePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"POST /alert-mute-rules/search":      "handler.PermViewOperations",
-		"GET /alert-mute-rules/{id}":         "handler.PermViewOperations",
-		"POST /alert-mute-rules":             "handler.PermWrite",
-		"PATCH /alert-mute-rules/{id}":       "handler.PermWrite",
-		"POST /alert-mute-rules/{id}/extend": "handler.PermWrite",
-		"POST /alert-mute-rules/{id}/end":    "handler.PermWrite",
-		"DELETE /alert-mute-rules/{id}":      "handler.PermWrite",
+		"POST /alert-mute-rules/search":           "handler.PermViewOperations",
+		"GET /alert-mute-rules/{id}":              "handler.PermViewOperations",
+		"GET /alert-mute-rules/{id}/muted-alerts": "handler.PermViewOperations",
+		"GET /alert-field-values":                 "handler.PermViewOperations",
+		"POST /alert-mute-rules":                  "handler.PermWrite",
+		"PATCH /alert-mute-rules/{id}":            "handler.PermWrite",
+		"POST /alert-mute-rules/{id}/extend":      "handler.PermWrite",
+		"POST /alert-mute-rules/{id}/end":         "handler.PermWrite",
+		"DELETE /alert-mute-rules/{id}":           "handler.PermWrite",
 	}
 	got := map[string]string{}
-	for _, m := range regexp.MustCompile(`(?m)^\s*route\("([A-Z]+ /alert-mute-rules[^"]*)", ([\w.]+),`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`(?m)^\s*route\("([A-Z]+ /alert-(?:mute-rules|field-values)[^"]*)", ([\w.]+),`).FindAllStringSubmatch(string(src), -1) {
 		got[m[1]] = m[2]
 	}
 	for route, perm := range want {
