@@ -351,6 +351,8 @@ export function translateCaseDashboardFiltersChecked(
   if (types && types.length > 0) out.caseTypes = types as CasesFilters["caseTypes"];
   const productNames = read.first("product", "in")?.values;
   if (productNames && productNames.length > 0) out.productNames = productNames;
+  const projects = read.first("projectId", "in")?.values;
+  if (projects && projects.length > 0) out.projects = projects;
   const assignedUserIds = read.first("assignedUserId", "in")?.values;
   if (assignedUserIds && assignedUserIds.length > 0) out.assignees = ["@me"];
   const engagementTypes = read.first("engagementType", "in")?.values;

@@ -56,12 +56,36 @@ describe("generateErrorMessage", () => {
   });
 
   it.each([
-    ["the model declining", "A cases-per-month line chart can cover at most 24 months."],
-    ["a refusal", "This request can't be turned into a dashboard. Try rephrasing it."],
-    ["a team it cannot filter by", "Team \"Orion\" is not one of the teams a dashboard can filter by."],
-  ])("says the input did not work for a 422 (%s), not the backend's sentence", (_name, message) => {
-    expect(generateErrorMessage(backend(422, message), false)).toBe("The dashboard cannot be generated from the input.");
-    expect(generateErrorMessage(backend(422, message), true)).toBe("This dashboard cannot be modified with your input.");
+    ["the model declining", "generate_declined", "A cases-per-month line chart can cover at most 24 months."],
+    ["a refusal", "generate_refused", "This request can't be turned into a dashboard. Try rephrasing it."],
+    ["a team it cannot filter by", "generate_team", "Team \"Orion\" is not one of the teams a dashboard can filter by."],
+    ["a product that names none", "generate_product", 'No product is named like "Orion".'],
+    ["a version its product does not have", "generate_product", 'WSO2 API Manager has no version "3.9" (its versions: 4.3.0).'],
+  ])("says the input did not work for a 422 (%s), then why on the next line", (_name, errorCode, message) => {
+    expect(generateErrorMessage(backend(422, message, errorCode), false)).toBe(
+      `The dashboard cannot be generated from the input.\n${message}`,
+    );
+    expect(generateErrorMessage(backend(422, message, errorCode), true)).toBe(
+      `This dashboard cannot be modified with your input.\n${message}`,
+    );
+  });
+
+  it("trims the backend's reason", () => {
+    expect(generateErrorMessage(backend(422, "  Revenue is not in the portal. \n", "generate_declined"), false)).toBe(
+      "The dashboard cannot be generated from the input.\nRevenue is not in the portal.",
+    );
+  });
+
+  it.each([
+    ["no body", new BackendApiError(422, "Unprocessable Entity")],
+    ["a proxy's JSON message without a code", new BackendApiError(422, "x", { message: "upstream said no" })],
+    ["a message with a code of its own", new BackendApiError(422, "x", { message: "upstream said no", errorCode: "UPSTREAM" })],
+    ["the backend's code without a message", new BackendApiError(422, "x", { errorCode: "generate_declined" })],
+    ["an empty message", backend(422, "  ", "generate_declined")],
+    ["a message that is not text", new BackendApiError(422, "x", { message: { text: "no" }, errorCode: "generate_declined" } as unknown as BeErrorPayload)],
+  ])("says only that the input did not work for a 422 without the backend's reason (%s)", (_name, err) => {
+    expect(generateErrorMessage(err, false)).toBe("The dashboard cannot be generated from the input.");
+    expect(generateErrorMessage(err, true)).toBe("This dashboard cannot be modified with your input.");
   });
 
   it("says too slow for a proxy's own 504 (its error page, no JSON message)", () => {

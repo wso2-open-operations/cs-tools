@@ -595,3 +595,29 @@ describe("widget preview URL — non-case resourceType's own filters array (chan
     expect(filters.filters).toEqual([{ field: "approval", op: "eq", values: ["approved"] }]);
   });
 });
+
+describe("a case widget on one product's versions", () => {
+  const filters = [
+    { field: "product", op: "in", values: ["WSO2 API Manager"] },
+    { field: "productVersion", op: "in", values: ["4.3.0", "4.3.1"] },
+  ];
+
+  it("round-trips the product and its versions through the preview URL", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      widgetId: "w1",
+      displayName: "W",
+      filters: { filters },
+      resourceType: "case",
+    });
+
+    expect(parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters).toEqual({ filters });
+  });
+
+  it("shows the product and its versions as chips", () => {
+    expect(describeWidgetFilters({ filters }).map(widgetFilterChipLabel)).toEqual([
+      "product: WSO2 API Manager",
+      "productVersion: 4.3.0, 4.3.1",
+    ]);
+  });
+});
