@@ -10733,6 +10733,31 @@ by always checking every table regardless of the request's own type filter
 compensate for a handful of rows a separate sync-side data-quality issue
 produced, not something every case search should pay for indefinitely.
 
+## Case search and aggregate: products, versions and projects (AI dashboards)
+
+The CSM portal's generated dashboards filter and group cases by product, product version and project
+(the backend turns the names the user wrote into what these match; its `CLAUDE.md`, "Custom dashboards",
+has that side). Everything here is new to these fields, so no request that worked before changes.
+
+- **`product` `in` / `notIn`.** `in` matches the deployed product's catalog name exactly (`prod.name`,
+  every catalog row of that name). `notIn` (`ParsedCaseFilters.ExcludeProductNames`) keeps the cases
+  whose product is none of them, a case without a deployed product included, as `projectId notIn` does.
+  Neither is allowed in an `anyOf` branch. The ServiceNow data source has no exclusion and refuses
+  `notIn` (`refuseSNProductFilters`) rather than drop it and count every product.
+- **`productVersion` `in`** matches `product_version.version` exactly ("4.3.0"). A version is shared by
+  many products, so it needs a product filter naming exactly one product in the same search
+  (`checkProductVersionFilters`; only `product in` counts, a `notIn` names no product); never in an
+  `anyOf` branch; refused by the ServiceNow data source.
+- **`groupBy`** (`POST /cases/aggregate`, `caseAggregateColumns`): `product` (key and label the name,
+  as the product filter takes it), `productVersion` (needs one product, as above) and `project` (key the
+  project's id, as `projectId` takes it; label its name, else its key). A case without one is in no
+  bucket. The ServiceNow data source refuses all three. Each bucket's count is the matching filter's
+  total: the real-database tests (`case_product_aggregate_integration_test.go`,
+  `case_product_version_integration_test.go`, `case_project_aggregate_integration_test.go`) check it
+  bucket by bucket.
+- `projectId` and `accountId` (`in` / `notIn`) are unchanged; the dashboards use them for projects and
+  customers named by the user.
+
 ## Announcement requests
 
 `announcement_requests` (migration `0042`, `internal/domain/entity.go`'s

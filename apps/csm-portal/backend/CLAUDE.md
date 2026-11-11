@@ -954,6 +954,42 @@ everything else goes through `mapUpstreamErrorGeneric`. `sharedViaLink` on both 
 the caller has the dashboard only through its link. The routes are in
 `cmd/server/custom_dashboard_routes_test.go`'s must-exist list.
 
+**Why a dashboard cannot be generated.** A 422 carries a reason the webapp shows under its lead line.
+The model's own sentence (`{"error": ...}`, catalogue section 1: why, and what to ask instead) goes through
+`declineMessage` (`dashboard_generate_errors.go`): control characters dropped, whitespace collapsed, cut at
+`maxDeclineRunes` (300) on a word with "…", and `errMsgGenerateRefused` when nothing is left. The name
+resolvers below give their own reasons.
+
+**Names in a generated case filter become what the case search matches.** The model only knows what the
+user wrote, so wrappers around the generator (`cmd/server/main.go`, in this order) resolve it once, right
+after generation; from then on the dashboard holds what the search matches, so the reply, Save, a share
+and every read need nothing more:
+
+- `WithDashboardTeams`: a `creTeam` / `sreTeam` key or name becomes the team's group id.
+- `WithDashboardProducts` (`dashboard_products.go`): each `product` value (`in` or `notIn`) becomes the
+  product's catalog name ("API Manager" -> "WSO2 API Manager": the search matches it exactly), and a
+  `productVersion` value becomes that product's recorded versions ("4.3" every 4.3.x, "4.x" every 4.*).
+- `WithDashboardProjects` / `WithDashboardAccounts` (`dashboard_projects.go`, `dashboard_accounts.go`,
+  one shared `namedResolver` in `dashboard_named_filters.go`): a `project` (key or name) or `account`
+  (name or account number) filter becomes `projectId` / `accountId` with the same op, on the record's
+  id, so a renamed project still matches. An exact key / number wins, then one exact name, then the only
+  match of the caller's own search (`/projects/search`, `/accounts/search`, scoped to what they may see).
+
+A value that names nothing, or several, is a 422 (`generate_product`, `generate_project`,
+`generate_account`) naming the candidates, e.g. `"quartz labs" matches several projects (Quartz Labs
+(QRTZ-PROJ1), Quartz Labs (QRTZ-PROJ2)); name the one you mean.`; a search that fails is a 502 (`_lookup`). Never
+dropped: a `notIn` that left out nothing would count every product or project under a title that says
+otherwise. `ParseGenerated` checks the shapes first (`generated_product_version.go`,
+`generated_project.go`): `product`, `project` and `account` are `in` or `notIn` with names, the last two
+never in an `anyOf` branch; `productVersion` is `in`, never in an `anyOf` branch, and needs exactly one
+product kept (`in`) in the same search (a slice's product filter of any op replaces its widget's, as the
+webapp merges a slice by field); a grouping by `productVersion` needs it in the widget's own query.
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project}ExamplesAreValid` run the catalogue's
+section 7 examples through the same check. An edit sends the resolved ids back to the model; the
+catalogue tells it to keep `projectId` / `accountId` filters as they are. Nothing saved before these
+filters had them, so no saved dashboard changes. Deploy entity-service first (product `notIn`,
+`productVersion`, grouping by `project` and `productVersion`), then this backend, then the AI service.
+
 **What one user can spend on model calls.** Every `POST /dashboards/generate` that passes the prompt
 checks counts against the caller's `handler.GenerateRateLimiter` (keyed by the token's user id):
 `DASHBOARD_GENERATE_LIMIT_PER_MINUTE` (default 10) in any minute and `DASHBOARD_GENERATE_LIMIT_PER_DAY`

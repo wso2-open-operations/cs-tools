@@ -4905,12 +4905,19 @@ paths:
         backend: the draft's id when it is a UUID, else a new one); without
         it, a sample dashboard is returned for every valid request. A team named in a
         creTeam / sreTeam filter (its team registry key) is turned into that
-        team's group id before the reply. 422 when the model declines (the
-        message says why), refuses, or names a team that cannot be filtered
-        (unknown, in the wrong field, or with no group configured; the message
-        says which); 502 when its answer is not
-        a usable dashboard, was cut off (its own message), or the model cannot
-        be reached; 504 when it takes too long; 503 when generation is
+        team's group id before the reply; a product filter's names become the
+        products' catalog names and a productVersion filter's versions that
+        product's recorded versions; a project or account filter (a key, name
+        or account number) becomes a projectId / accountId filter on the
+        record's id, with the same op. 422 when the model declines (the
+        message says why, at most 300 characters), refuses, or names a team
+        that cannot be filtered (unknown, in the wrong field, or with no group
+        configured), or a product, version, project or account that names
+        nothing or several (generate_product, generate_project,
+        generate_account; the message names the candidates); 502 when its
+        answer is not a usable dashboard, was cut off (its own message), the
+        model cannot be reached, or a product, project or account search
+        fails; 504 when it takes too long; 503 when generation is
         unavailable (no sample loaded, or the AI integration service has no
         model key), or when the AI side's usage limit is reached (the model
         gateway's 429; its own message, unlike the caller's limit below). 413 when the dashboard being edited is over
