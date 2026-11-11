@@ -39,8 +39,14 @@ func (f *fakeIncidents) Mute(_ context.Context, id int64, ruleID, ruleNumber str
 	})
 }
 
-func (f *fakeIncidents) Unmute(_ context.Context, id int64) error {
-	return f.update(id, func(i *model.Incident) {
+func (f *fakeIncidents) Unmute(_ context.Context, id, foldVersion int64) (bool, error) {
+	f.mu.Lock()
+	stale := f.incidents[id].FoldVersion != foldVersion
+	f.mu.Unlock()
+	if stale {
+		return false, nil
+	}
+	return true, f.update(id, func(i *model.Incident) {
 		now := time.Now()
 		i.Muted, i.UnmutedAt = false, &now
 	})

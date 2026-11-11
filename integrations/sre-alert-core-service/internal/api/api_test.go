@@ -40,6 +40,18 @@ type fakeStore struct {
 	gotField, gotQ    string
 }
 
+func (f *fakeStore) MutedCounts(_ context.Context, ids []string) (map[string]int, error) {
+	counts := map[string]int{}
+	for _, inc := range f.incs {
+		for _, id := range ids {
+			if inc.MuteRuleID == id {
+				counts[id]++
+			}
+		}
+	}
+	return counts, f.err
+}
+
 func (f *fakeStore) FieldValues(_ context.Context, field, q string, limit int) ([]string, bool, error) {
 	f.gotField, f.gotQ, f.gotLimit = field, q, limit
 	if field != "service" {
@@ -78,6 +90,7 @@ func serve(t *testing.T, store MutedStore, target string) *httptest.ResponseReco
 	h := New(slog.New(slog.NewTextHandler(io.Discard, nil)), store)
 	mux.HandleFunc("GET /alert-mute-rules/{id}/muted-incidents", h.MutedIncidents)
 	mux.HandleFunc("GET /alert-field-values", h.FieldValues)
+	mux.HandleFunc("GET /alert-mute-rules/muted-counts", h.MutedCounts)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, nil))
 	return w
@@ -174,5 +187,26 @@ func TestFieldValuesRejectsBadInput(t *testing.T) {
 	}
 	if w := serve(t, &fakeStore{err: errors.New("db down")}, "/alert-field-values?field=service"); w.Code != http.StatusInternalServerError {
 		t.Errorf("store error: status = %d, want 500", w.Code)
+	}
+}
+
+func TestMutedCounts(t *testing.T) {
+	const other = "11111111-2222-3333-4444-555555555555"
+	store := &fakeStore{incs: []model.Incident{{ID: 1, MuteRuleID: ruleID}, {ID: 2, MuteRuleID: ruleID}}}
+	w := serve(t, store, "/alert-mute-rules/muted-counts?ids="+ruleID+","+other)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", w.Code, w.Body)
+	}
+	var got MutedCountsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Counts[ruleID] != 2 || got.Counts[other] != 0 || len(got.Counts) != 2 {
+		t.Fatalf("counts = %v", got.Counts)
+	}
+	for _, target := range []string{"/alert-mute-rules/muted-counts", "/alert-mute-rules/muted-counts?ids=nope"} {
+		if w := serve(t, store, target); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", target, w.Code)
+		}
 	}
 }

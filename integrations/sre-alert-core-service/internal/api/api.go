@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"alert-core-service/internal/model"
@@ -44,6 +45,7 @@ type MutedStore interface {
 	MutedByRule(ctx context.Context, ruleID string, limit, offset int) ([]model.Incident, int, error)
 	MutedByRuleSummary(ctx context.Context, ruleID string) (map[string]int, error)
 	FieldValues(ctx context.Context, field, query string, limit int) (values []string, ok bool, err error)
+	MutedCounts(ctx context.Context, ruleIDs []string) (map[string]int, error)
 }
 
 // Handler serves the api routes.
@@ -119,6 +121,43 @@ func (h *Handler) MutedIncidents(w http.ResponseWriter, r *http.Request) {
 	resp := MutedIncidentsResponse{Items: make([]MutedIncident, 0, len(incs)), Total: total, Limit: limit, Offset: offset, Summary: summary}
 	for _, inc := range incs {
 		resp.Items = append(resp.Items, toMutedIncident(inc))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// MutedCountsResponse maps each requested rule id to how many incidents it muted (0 when none).
+type MutedCountsResponse struct {
+	Counts map[string]int `json:"counts"`
+}
+
+// MutedCounts handles GET /alert-mute-rules/muted-counts?ids=a,b,c: how many incidents each rule muted, for a page of
+// up to 100 rules in one call.
+func (h *Handler) MutedCounts(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("ids")
+	if raw == "" {
+		writeError(w, http.StatusBadRequest, "ids is required")
+		return
+	}
+	ids := strings.Split(raw, ",")
+	if len(ids) > maxLimit {
+		writeError(w, http.StatusBadRequest, "at most 100 ids")
+		return
+	}
+	for _, id := range ids {
+		if !ruleIDPattern.MatchString(id) {
+			writeError(w, http.StatusBadRequest, "invalid alert mute rule id")
+			return
+		}
+	}
+	counts, err := h.store.MutedCounts(r.Context(), ids)
+	if err != nil {
+		h.logger.Error("api: failed to count muted incidents", "rules", len(ids), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to count muted incidents")
+		return
+	}
+	resp := MutedCountsResponse{Counts: make(map[string]int, len(ids))}
+	for _, id := range ids {
+		resp.Counts[id] = counts[id]
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
