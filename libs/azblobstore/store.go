@@ -369,6 +369,29 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// Discard removes the blob at key together with any blocks that were put for it
+// and never committed, which Delete leaves behind: a blob that was never committed
+// does not exist for Delete, and Azure keeps its uncommitted blocks for about a
+// week. It is for the key of an upload that was abandoned. A blob that is already
+// gone, with no blocks, is not an error.
+func (s *Store) Discard(ctx context.Context, key string) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	staged, err := s.UncommittedBlocks(ctx, key)
+	if err != nil {
+		return err
+	}
+	if len(staged) > 0 {
+		// Committing an empty list drops every uncommitted block and leaves an
+		// empty blob, which Delete then removes.
+		if _, err := s.container.NewBlockBlobClient(key).CommitBlockList(ctx, nil, nil); err != nil {
+			return fmt.Errorf("azblobstore: discard %s: %w", key, err)
+		}
+	}
+	return s.Delete(ctx, key)
+}
+
 // isNotFound reports a missing blob. A missing container is not that: it means
 // the store is misconfigured, and treating it as an absent blob would let Delete
 // report success and UncommittedBlocks an empty list for a container that is not
