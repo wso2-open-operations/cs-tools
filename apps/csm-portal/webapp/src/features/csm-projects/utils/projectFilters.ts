@@ -203,8 +203,7 @@ function dateRangeLabel(label: string, from: string, to: string): string {
   return from ? `${label}: from ${from}` : `${label}: until ${to}`;
 }
 
-/** One removable chip per active filter the quick bar does not show itself
- *  (onboarding status has its own control there). `withBuilderRows` false
+/** One removable chip per active filter. `withBuilderRows` false
  *  limits it to the two filters the builder has no row for, since with the
  *  builder open a chip would duplicate its row. */
 export function buildProjectFilterChips(filters: ProjectFilters, withBuilderRows: boolean): ProjectFilterChip[] {
@@ -224,6 +223,13 @@ export function buildProjectFilterChips(filters: ProjectFilters, withBuilderRows
     });
   }
   if (!withBuilderRows) return chips;
+  if (filters.onboardingStatus.length > 0) {
+    chips.push({
+      key: "onboardingStatus",
+      label: `Onboarding status: ${filters.onboardingStatus.join(", ")}`,
+      onRemove: (f) => ({ ...f, onboardingStatus: [] }),
+    });
+  }
   if (filters.closureStates.length > 0) {
     chips.push({
       key: "closureStates",

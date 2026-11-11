@@ -180,10 +180,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const patchClosureState = usePatchProjectClosureState(id);
   const [editClosureStateOpen, setEditClosureStateOpen] = useState(false);
   const patchOnboarding = usePatchProjectOnboarding(id);
-  // The overview pencil jumps to the Onboarding tab already in edit mode; the
-  // fields are edited in place there (no dialog). Opening the tab by any other
-  // route (tab click, ?tab=) starts read-only.
-  const [onboardingEditRequested, setOnboardingEditRequested] = useState(false);
   // Prefer wherever the caller came from (e.g. a case's Overview panel) over
   // the hardcoded projects list, so Back returns to that page instead of
   // skipping past it — same convention as CsmCaseDetailPage's own back path.
@@ -211,11 +207,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
     "overview",
     { clearParamsOnChange: PROJECT_TAB_CHANGE_CLEARS },
   );
-  const openEditOnboarding = (): void => {
-    patchOnboarding.reset();
-    setOnboardingEditRequested(true);
-    setActiveTab("onboarding");
-  };
   const [createMenuAnchor, setCreateMenuAnchor] = useState<HTMLElement | null>(
     null,
   );
@@ -382,10 +373,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
       </Box>
 
       <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={activeTab} onChange={(_, v) => {
-            setOnboardingEditRequested(false);
-            setActiveTab(v as ProjectTabId);
-          }}>
+        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
           <Tab value="overview" label="Overview" />
           <Tab value="onboarding" label="Onboarding" />
           <Tab value="closure" label="Closure" />
@@ -463,33 +451,16 @@ export default function CsmProjectDetailPage(): JSX.Element {
             <ProjectMetaCell label={endDateLabel(p.endDate)}>
               <Typography variant="body2">{formatDate(p.endDate)}</Typography>
             </ProjectMetaCell>
-            {(onboardingEnabled || canEditProjectOnboarding) && (
+            {onboardingEnabled && (
               <ProjectMetaCell label="Onboarding Status">
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  {onboardingEnabled ? (
-                    <ProjectOnboardingStatusChip onboardingStatus={p.onboardingStatus} />
-                  ) : (
-                    <Typography variant="body2">—</Typography>
-                  )}
-                  {canEditProjectOnboarding && (
-                    <IconButton
-                      size="small"
-                      aria-label="Edit onboarding"
-                      className="csm-print-hide"
-                      onClick={openEditOnboarding}
-                    >
-                      <Pencil size={14} />
-                    </IconButton>
-                  )}
-                </Box>
+                <ProjectOnboardingStatusChip onboardingStatus={p.onboardingStatus} />
               </ProjectMetaCell>
             )}
-            {(onboardingEnabled || canEditProjectOnboarding) &&
-              (p.onboardingOwner || canEditProjectOnboarding) && (
-                <ProjectMetaCell label="Onboarding Owner">
-                  <ProjectOnboardingOwnerValue owner={p.onboardingOwner} />
-                </ProjectMetaCell>
-              )}
+            {onboardingEnabled && p.onboardingOwner && (
+              <ProjectMetaCell label="Onboarding Owner">
+                <ProjectOnboardingOwnerValue owner={p.onboardingOwner} />
+              </ProjectMetaCell>
+            )}
           </Box>
         </Card>
       )}
@@ -498,7 +469,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <ProjectOnboardingTab
           project={p}
           canEdit={canEditProjectOnboarding}
-          initialEditing={onboardingEditRequested}
           isSaving={patchOnboarding.isPending}
           saveError={
             patchOnboarding.isError

@@ -33,7 +33,6 @@ import { useEffect, useMemo, useState, type ChangeEvent, type JSX, type Keyboard
 import { useLocation, useSearchParams } from "react-router";
 import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
 import QueryErrorState from "@components/QueryErrorState";
-import MultiSelectField from "@components/MultiSelectField";
 import UserRefLink from "@components/UserRefLink";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
@@ -50,7 +49,6 @@ import ProjectOnboardingStatusChip from "@features/csm-projects/components/Proje
 import ProjectsAdvancedFilters, {
   ProjectFilterChips,
 } from "@features/csm-projects/components/ProjectsAdvancedFilters";
-import { ONBOARDING_STATUS_OPTIONS } from "@features/csm-projects/utils/projectAdvancedFields";
 import {
   countActiveProjectFilters,
   EMPTY_PROJECT_FILTERS,
@@ -306,15 +304,6 @@ export default function CsmProjectsPage(): JSX.Element {
           slotProps={{ htmlInput: { "aria-label": "Search projects by name, key, or subscription type" } }}
           sx={{ maxWidth: 480, flex: "1 1 320px" }}
         />
-        <Box sx={{ width: 240 }}>
-          <MultiSelectField
-            id="projects-filter-onboarding-status"
-            label="Onboarding status"
-            values={filters.onboardingStatus}
-            options={ONBOARDING_STATUS_OPTIONS}
-            onChange={(next) => handleFiltersChange({ ...filters, onboardingStatus: next })}
-          />
-        </Box>
         <Button
           variant="outlined"
           size="small"

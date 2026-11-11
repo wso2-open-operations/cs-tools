@@ -116,12 +116,18 @@ describe("CsmProjectsPage — onboardingStatus filter from the URL", () => {
     }
   });
 
-  it("shows the filter control, reflecting the status read from the URL", async () => {
+  it("has no quick onboarding-status control: status is filtered only through the advanced filters", async () => {
     mockResult({ data: { projects: [], total: 0, limit: 20, offset: 0, hasMore: false } });
 
     render(<CsmProjectsPage />, "/customers/projects?onboardingStatus=In-Progress");
 
-    expect(await screen.findByText("In Progress")).toBeInTheDocument();
+    expect(await screen.findByText("Onboarding status: In-Progress")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /onboarding status/i })).not.toBeInTheDocument();
+    // With the builder open, the same URL state is an editable row.
+    fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
+    expect(screen.getByRole("combobox", { name: "Field" })).toHaveTextContent("Onboarding status");
+    expect(screen.getByRole("combobox", { name: /value\(s\)/i })).toHaveTextContent("In Progress");
+    expect(screen.queryByText("Onboarding status: In-Progress")).not.toBeInTheDocument();
   });
 
   // The onboardingStatus state used to be seeded only in a useState
@@ -173,7 +179,7 @@ describe("CsmProjectsPage — onboardingStatus filter from the URL", () => {
         expect.objectContaining({ onboardingStatus: ["Completed"] }),
       );
     });
-    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(await screen.findByText("Onboarding status: Completed")).toBeInTheDocument();
   });
 });
 

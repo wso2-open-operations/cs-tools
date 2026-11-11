@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildProjectFilterChips,
   countActiveProjectFilters,
   EMPTY_PROJECT_FILTERS,
   projectFiltersToRequest,
@@ -122,5 +123,19 @@ describe("countActiveProjectFilters", () => {
         goLivePlanDateTo: "2026-03-31",
       }),
     ).toBe(3);
+  });
+});
+
+describe("buildProjectFilterChips", () => {
+  const f: ProjectFilters = { ...EMPTY_PROJECT_FILTERS, onboardingStatus: ["In-Progress", "OnHold"] };
+
+  it("chips the onboarding status (it has no quick control) when the builder is closed, and removes it on its own", () => {
+    const chips = buildProjectFilterChips(f, true);
+    expect(chips.map((c) => c.label)).toEqual(["Onboarding status: In-Progress, OnHold"]);
+    expect(chips[0].onRemove(f).onboardingStatus).toEqual([]);
+  });
+
+  it("leaves it to the builder row when the builder is open", () => {
+    expect(buildProjectFilterChips(f, false)).toEqual([]);
   });
 });
