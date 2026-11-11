@@ -8765,8 +8765,11 @@ allocation in between can be overwritten and a number issued twice.
 `<key>-<n>` against `work_item.wso2_id` (the unique index) and advances `project.wso2_id_counter`
 past any existing id, never lowering it, so the counter seed is no longer required for `wso2_id`
 correctness and precondition (2) no longer applies to it (`CS` numbers and the other series still
-need the seed). The check runs with `app.is_internal = 'true'` set on the function only, so a
-customer-initiated create also sees ids it cannot read; the caller's own visibility is unchanged.
+need the seed). The check runs with `app.is_internal = 'true'` set by `set_config` inside the body
+around the `work_item` reads only (saved and restored before return or raise), so a
+customer-initiated create also sees ids it cannot read; the caller's own visibility is unchanged. Not
+a function-level `SET app.is_internal`: that needs superuser or `GRANT SET ON PARAMETER`, which the
+migration role lacks.
 
 > **Historical.** The rest of this section, down to the `CaseRepository.CreateCase` paragraph, describes
 > migration `0140`'s `CS-PORTAL-` / `<key>-PORTAL-<n>` generators as they were introduced. Everything it

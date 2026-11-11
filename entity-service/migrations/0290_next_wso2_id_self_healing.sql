@@ -38,15 +38,23 @@
 --
 -- Row-level security: work_item is FORCE ROW LEVEL SECURITY and a customer
 -- only sees their projects' rows, so an existence check run as the caller
--- would miss ids it cannot see and hand out a duplicate. The function-level
--- SET gives the body the internal-staff branch of every visibility policy
--- (app.is_internal = 'true') for the duration of the call only: PostgreSQL
--- restores the caller's value when the function returns, normally or by
--- exception, so nothing after the call sees more than before. SECURITY
--- DEFINER would not help here: FORCE applies the policies to the table owner
--- too. The function exposes nothing but the id it returns: the lookups are
--- existence tests and an integer maximum, never row data. project has no
--- row-level security, so the counter UPDATE is unaffected by the setting.
+-- would miss ids it cannot see and hand out a duplicate. The body therefore
+-- sets app.is_internal = 'true' (the internal-staff branch of every
+-- visibility policy) around the two work_item reads only, remembers the
+-- caller's value first and restores it before it returns or raises, so the
+-- rest of the caller's transaction sees exactly what it saw before.
+-- set_config(..., true) is transaction-local, so an exception that escapes
+-- (or a caught one, which rolls back its subtransaction) cannot leave the
+-- elevation behind either. A function-level "SET app.is_internal" clause is
+-- NOT used: attaching a custom setting to a function needs superuser or
+-- GRANT SET ON PARAMETER, which the migration role does not have, whereas
+-- set_config() at run time needs neither. SECURITY DEFINER would not help:
+-- FORCE applies the policies to the table owner too. The function exposes
+-- nothing but the id it returns: the lookups are existence tests and an
+-- integer maximum, never row data. project has no row-level security, so
+-- the counter UPDATE is unaffected by the setting.
+-- A caller that never set the setting reads NULL before and '' after; every
+-- policy treats both as "not internal", so effective visibility is identical.
 
 SET lock_timeout = '5s';
 
@@ -65,6 +73,7 @@ DECLARE
     v_highest      INTEGER;
     v_attempts     INTEGER := 0;
     v_jumped       BOOLEAN := FALSE;
+    v_prev         TEXT;
 BEGIN
     UPDATE project
     SET wso2_id_counter = wso2_id_counter + 1
@@ -78,9 +87,14 @@ BEGIN
     v_start  := v_counter;
     v_prefix := v_project_key || '-';
 
+    -- Elevate only for the work_item reads below; restored on every exit.
+    v_prev := current_setting('app.is_internal', true);
+    PERFORM set_config('app.is_internal', 'true', true);
+
     WHILE EXISTS (SELECT 1 FROM work_item WHERE wso2_id = v_prefix || v_counter::TEXT) LOOP
         v_attempts := v_attempts + 1;
         IF v_attempts > c_max_attempts THEN
+            PERFORM set_config('app.is_internal', COALESCE(v_prev, ''), true);
             RAISE EXCEPTION 'next_wso2_id: no free wso2_id for project % after % attempts (counter %, key %)',
                 p_project_id, c_max_attempts, v_counter, v_project_key;
         END IF;
@@ -103,13 +117,14 @@ BEGIN
         v_counter := v_counter + 1;
     END LOOP;
 
+    PERFORM set_config('app.is_internal', COALESCE(v_prev, ''), true);
+
     IF v_counter <> v_start THEN
         UPDATE project SET wso2_id_counter = v_counter WHERE id = p_project_id;
     END IF;
 
     RETURN v_prefix || v_counter::TEXT;
 END;
-$$ LANGUAGE plpgsql
-SET app.is_internal = 'true';
+$$ LANGUAGE plpgsql;
 
 RESET lock_timeout;
