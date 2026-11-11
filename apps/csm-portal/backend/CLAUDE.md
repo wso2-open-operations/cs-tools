@@ -891,7 +891,9 @@ those states in that window ("moved to Waiting on WSO2 today"), whatever their s
 `checkGeneratedStateEntered` (`internal/dashboard/generated_state_entered.go`) checks just these two at
 generation, where the model can retry, rather than leaving a tile to fail on load: `in` with case states,
 `gte` / `lte` with one date, a window only with a `stateEntered` in the widget (a slice's window may lean on
-the widget's own `stateEntered`, as the webapp merges slices by field), and neither in an `anyOf` branch. A
+the widget's own `stateEntered`, as the webapp merges slices by field), a window of two plain dates or
+instants that does not end before it starts (read as entity-service reads it: the last bound wins, a
+date-only `lte` covers its day; a relative date is not compared), and neither in an `anyOf` branch. A
 widget without them is not touched, so no saved dashboard changes. The catalogue (sections 5, 8 and 9)
 teaches the model these widgets, and `TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid` runs
 every section 5 example that uses them through `ParseGenerated`. Deploy entity-service (which must accept

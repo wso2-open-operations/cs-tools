@@ -126,3 +126,53 @@ func TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid(t *testing.T) {
 		}
 	}
 }
+
+// TestParseGenerated_StateEnteredWindowBounds: a window of two plain dates (or
+// instants) that ends before it starts is refused at generation, read as
+// entity-service reads it (the last bound wins, a date-only lte covers its
+// day, a slice's window replaces the widget's); a window with a relative date
+// is not compared.
+func TestParseGenerated_StateEnteredWindowBounds(t *testing.T) {
+	const wow = `{"field":"stateEntered","op":"in","values":["waiting_on_wso2"]}`
+	bound := func(op, v string) string {
+		return `{"field":"stateEnteredOn","op":"` + op + `","values":["` + v + `"]}`
+	}
+	count := func(filters ...string) string {
+		return stateEnteredDashboard(`{"id":"w","displayName":"W","resourceType":"case","shape":"count","gridWidth":3,"query":{"filters":[` +
+			strings.Join(append([]string{wow}, filters...), ",") + `]}}`)
+	}
+	pie := func(base []string, slice ...string) string {
+		return stateEnteredDashboard(`{"id":"w","displayName":"W","resourceType":"case","shape":"pie","gridWidth":6,"query":{"filters":[` +
+			strings.Join(append([]string{wow}, base...), ",") + `]},"slices":[{"label":"A","query":{"filters":[` + strings.Join(slice, ",") + `]}}]}`)
+	}
+	for name, raw := range map[string]string{
+		"one day":                                count(bound("gte", "2026-03-01"), bound("lte", "2026-03-01")),
+		"an instant then the rest of its day":    count(bound("gte", "2026-03-01T10:00:00Z"), bound("lte", "2026-03-01")),
+		"the last gte wins":                      count(bound("gte", "2026-03-20"), bound("gte", "2026-03-01"), bound("lte", "2026-03-10")),
+		"a relative date is not compared":        count(bound("gte", "2026-03-20"), bound("lte", "__today__")),
+		"a slice's window replaces the widget's": pie([]string{bound("gte", "2026-03-01"), bound("lte", "2026-03-10")}, bound("gte", "2026-03-20")),
+		"a slice without a window keeps the widget's": pie([]string{bound("gte", "2026-03-01"), bound("lte", "2026-03-10")},
+			`{"field":"severity","op":"in","values":["high"]}`),
+	} {
+		if _, err := ParseGenerated([]byte(raw)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, tc := range []struct{ name, raw, want string }{
+		{"two dates the wrong way round", count(bound("gte", "2026-03-15"), bound("lte", "2026-03-01")),
+			`widgets[0] ("w").query: stateEnteredOn ends (lte 2026-03-01) before it starts (gte 2026-03-15)`},
+		{"the last gte is after the end", count(bound("gte", "2026-03-01"), bound("gte", "2026-03-20"), bound("lte", "2026-03-10")),
+			"stateEnteredOn ends (lte 2026-03-10) before it starts (gte 2026-03-20)"},
+		{"two instants the wrong way round", count(bound("gte", "2026-03-01T10:00:00Z"), bound("lte", "2026-03-01T09:00:00Z")),
+			"stateEnteredOn ends"},
+		{"a slice's own window", pie(nil, bound("gte", "2026-03-15"), bound("lte", "2026-03-01")),
+			`widgets[0] ("w").slices[0].query: stateEnteredOn ends`},
+		{"a slice under the widget's reversed window", pie([]string{bound("gte", "2026-03-15"), bound("lte", "2026-03-01")},
+			`{"field":"severity","op":"in","values":["high"]}`), "stateEnteredOn ends"},
+	} {
+		_, err := ParseGenerated([]byte(tc.raw))
+		if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want ErrGeneratedInvalid mentioning %q", tc.name, err, tc.want)
+		}
+	}
+}

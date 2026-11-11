@@ -19,6 +19,7 @@ package dashboard
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // caseStates are the values entity-service's case search takes for a
@@ -31,19 +32,78 @@ var caseStates = []string{"open", "work_in_progress", "waiting_on_wso2", "awaiti
 // loads: stateEntered is "in" with case states, stateEnteredOn is "gte" or
 // "lte" with one date, needs a stateEntered in the same search (a slice's
 // filters merged over the widget's, as the webapp merges them), and neither
-// sits in an anyOf branch. A widget without them is not touched.
+// sits in an anyOf branch. A window of two plain dates must not end before it
+// starts (checkStateEnteredWindow). A widget without them is not touched.
 func checkGeneratedStateEntered(i int, w WidgetTemplate) error {
 	at := fmt.Sprintf("widgets[%d] (%q)", i, w.ID)
 	base := filterFields(w.Query)
 	if err := checkStateEnteredFilters(at+".query", w.Query, base, nil); err != nil {
 		return err
 	}
+	if err := checkStateEnteredWindow(at+".query", w.Query); err != nil {
+		return err
+	}
 	for j, sl := range w.Slices {
-		if err := checkStateEnteredFilters(fmt.Sprintf("%s.slices[%d].query", at, j), sl.Query, filterFields(sl.Query), base); err != nil {
+		sliceAt := fmt.Sprintf("%s.slices[%d].query", at, j)
+		if err := checkStateEnteredFilters(sliceAt, sl.Query, filterFields(sl.Query), base); err != nil {
+			return err
+		}
+		// The webapp merges a slice over the widget by field: a slice with
+		// its own stateEnteredOn replaces the widget's whole window, and one
+		// without keeps the widget's, checked above.
+		if err := checkStateEnteredWindow(sliceAt, sl.Query); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// checkStateEnteredWindow refuses a stateEnteredOn window whose end is before
+// its start, which entity-service would refuse when the tile loads. It reads
+// the bounds as entity-service does: the last gte and the last lte win, and a
+// date-only lte covers its whole day. A window with a relative date (or only
+// one bound) is not compared: it moves with the day it is read.
+func checkStateEnteredWindow(at string, query map[string]any) error {
+	var start, end string
+	filters, _ := query["filters"].([]any)
+	for _, f := range filters {
+		entry, _ := f.(map[string]any)
+		if field, _ := entry["field"].(string); field != "stateEnteredOn" {
+			continue
+		}
+		values, _ := stringList(entry["values"])
+		if len(values) != 1 {
+			continue
+		}
+		switch op, _ := entry["op"].(string); op {
+		case "gte":
+			start = values[0]
+		case "lte":
+			end = values[0]
+		}
+	}
+	from, okFrom := literalBound(start, false)
+	to, okTo := literalBound(end, true)
+	if okFrom && okTo && to.Before(from) {
+		return fmt.Errorf("%w: %s: stateEnteredOn ends (lte %s) before it starts (gte %s)", ErrGeneratedInvalid, at, end, start)
+	}
+	return nil
+}
+
+// literalBound parses a plain date or an RFC3339 instant; a date-only upper
+// bound is the end of that day. ok is false for anything else, a relative
+// date included.
+func literalBound(s string, upper bool) (t time.Time, ok bool) {
+	if d, err := time.Parse("2006-01-02", s); err == nil {
+		if upper {
+			return d.Add(24*time.Hour - time.Nanosecond), true
+		}
+		return d, true
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
 }
 
 // checkStateEnteredFilters checks one query's stateEntered / stateEnteredOn
