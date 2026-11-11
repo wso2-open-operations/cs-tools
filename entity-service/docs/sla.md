@@ -73,6 +73,9 @@ reflect this moment.
 - **Target and elapsed.** The target is `sla_policy.duration`, never the clock's own `duration`. Elapsed is
   `live_business_duration`; a running `WSO2 Business days` clock is corrected in Go (`businessDayCorrectedLiveState`)
   exactly as the case SLA tab does, so the two never disagree. No `sla.source` filter: that column is gone.
+  A finished clock whose stored elapsed time is missing (some rows never had `business_duration` written) is derived from
+  its own `start_on` and `end_on`: business days (less its business pause) for a `WSO2 Business days` clock, wall-clock
+  less its pause otherwise. If either timestamp is missing the elapsed time stays empty and the UI says "Not recorded".
 - **Summary.** One row per case type (Incident, or Query for a `QUESTION` case) and severity that has a case. Per target:
   the 95th percentile (`percentile_cont`, linear interpolation) of the elapsed time of the clocks that **finished**
   (`ACHIEVED` or `COMPLETED`), the most common policy duration among the clocks, and three counts. **Met** finished within

@@ -24,6 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/businessdays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -102,7 +103,9 @@ const slaReportClocksQuery = `
 			EXTRACT(EPOCH FROM sp.duration) AS target_seconds,
 			COALESCE(s.schedule, '') AS schedule,
 			s.start_on,
-			COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0) AS business_pause_seconds
+			s.end_on,
+			COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0) AS business_pause_seconds,
+			COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0) AS pause_seconds
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE sp.target IS NOT NULL
@@ -123,7 +126,9 @@ const slaReportClocksQuery = `
 		clocks.target_seconds,
 		clocks.schedule,
 		clocks.start_on,
-		clocks.business_pause_seconds
+		clocks.end_on,
+		clocks.business_pause_seconds,
+		clocks.pause_seconds
 	FROM window_cases wc
 	JOIN work_item wi ON wi.id = wc.id
 	JOIN "case" c ON c.id = wi.id
@@ -143,16 +148,19 @@ func (r *slaReportRepo) Clocks(ctx context.Context, projectID string, from, to t
 			row          SlaReportClockRow
 			schedule     *string
 			startOn      *time.Time
+			endOn        *time.Time
 			pauseSeconds *float64
+			flatPause    *float64
 		)
 		if err := rows.Scan(
 			&row.CaseID, &row.CaseNumber, &row.IssueType, &row.Severity, &row.State, &row.Opened,
 			&row.Target, &row.Stage, &row.HasBreached, &row.ElapsedSeconds, &row.TargetSeconds,
-			&schedule, &startOn, &pauseSeconds,
+			&schedule, &startOn, &endOn, &pauseSeconds, &flatPause,
 		); err != nil {
 			return nil, fmt.Errorf("sla report: scan clock: %w", err)
 		}
 		correctSlaReportBusinessDay(&row, schedule, startOn, pauseSeconds)
+		fillSlaReportFinishedElapsed(&row, schedule, startOn, endOn, pauseSeconds, flatPause)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
@@ -183,5 +191,39 @@ func correctSlaReportBusinessDay(row *SlaReportClockRow, schedule *string, start
 	seconds := elapsed.Seconds()
 	row.Stage = &stage
 	row.HasBreached = &breached
+	row.ElapsedSeconds = &seconds
+}
+
+// fillSlaReportFinishedElapsed derives the elapsed time of a finished clock
+// whose stored figure is missing (sla_live reads it from the row's own
+// business_duration, which some finished clocks never had written). Without it
+// such a clock shows as Met or Missed with no time next to it. The time comes
+// from the clock's own start_on and end_on: business days for a 'WSO2 Business
+// days' clock, less its business pause, and wall-clock time less its pause
+// otherwise. A clock that has a stored figure, is not finished, or lacks either
+// timestamp is left alone.
+func fillSlaReportFinishedElapsed(row *SlaReportClockRow, schedule *string, startOn, endOn *time.Time, businessPause, flatPause *float64) {
+	if row.ElapsedSeconds != nil || row.Stage == nil || startOn == nil || endOn == nil {
+		return
+	}
+	if *row.Stage != "ACHIEVED" && *row.Stage != "COMPLETED" {
+		return
+	}
+	var elapsed time.Duration
+	if schedule != nil && *schedule == slaScheduleWSO2BusinessDays {
+		elapsed = businessdays.Elapsed(*startOn, *endOn)
+		if businessPause != nil {
+			elapsed -= time.Duration(*businessPause * float64(time.Second))
+		}
+	} else {
+		elapsed = endOn.Sub(*startOn)
+		if flatPause != nil {
+			elapsed -= time.Duration(*flatPause * float64(time.Second))
+		}
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	seconds := elapsed.Seconds()
 	row.ElapsedSeconds = &seconds
 }

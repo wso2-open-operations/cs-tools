@@ -112,3 +112,45 @@ func TestCorrectSlaReportBusinessDay_NoClockOrTargetIsLeftAlone(t *testing.T) {
 		t.Fatalf("a clock without a target must stay as read: %+v", row)
 	}
 }
+
+func TestFillSlaReportFinishedElapsed(t *testing.T) {
+	start := time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC) // a Monday
+	end := start.Add(5 * time.Hour)
+	flat := "24x7"
+	business := slaScheduleWSO2BusinessDays
+	pause := 3600.0
+	zero := 0.0
+
+	t.Run("flat clock uses end minus start less its pause", func(t *testing.T) {
+		row := slaReportTestRow("ACHIEVED", false, 0, 3600)
+		row.ElapsedSeconds = nil
+		fillSlaReportFinishedElapsed(&row, &flat, &start, &end, &zero, &pause)
+		if row.ElapsedSeconds == nil || *row.ElapsedSeconds != 4*3600 {
+			t.Fatalf("got %v, want 14400", row.ElapsedSeconds)
+		}
+	})
+	t.Run("business clock uses business time", func(t *testing.T) {
+		row := slaReportTestRow("COMPLETED", false, 0, 3600)
+		row.ElapsedSeconds = nil
+		fillSlaReportFinishedElapsed(&row, &business, &start, &end, &zero, &zero)
+		if row.ElapsedSeconds == nil || *row.ElapsedSeconds <= 0 || *row.ElapsedSeconds > 5*3600 {
+			t.Fatalf("got %v, want within (0, 18000]", row.ElapsedSeconds)
+		}
+	})
+	t.Run("stored figure, unfinished stage or missing end are left alone", func(t *testing.T) {
+		stored := slaReportTestRow("ACHIEVED", false, 99, 3600)
+		fillSlaReportFinishedElapsed(&stored, &flat, &start, &end, &zero, &zero)
+		if *stored.ElapsedSeconds != 99 {
+			t.Fatalf("stored figure changed to %v", *stored.ElapsedSeconds)
+		}
+		running := slaReportTestRow("IN_PROGRESS", false, 0, 3600)
+		running.ElapsedSeconds = nil
+		fillSlaReportFinishedElapsed(&running, &flat, &start, &end, &zero, &zero)
+		noEnd := slaReportTestRow("ACHIEVED", false, 0, 3600)
+		noEnd.ElapsedSeconds = nil
+		fillSlaReportFinishedElapsed(&noEnd, &flat, &start, nil, &zero, &zero)
+		if running.ElapsedSeconds != nil || noEnd.ElapsedSeconds != nil {
+			t.Fatal("an unfinished clock or one with no end time must stay empty")
+		}
+	})
+}
