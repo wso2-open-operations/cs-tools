@@ -40,7 +40,7 @@ export default function ReportIssueButton(): JSX.Element | null {
       <Button
         size="small"
         variant="outlined"
-        color="inherit"
+        color="primary"
         startIcon={<Bug size={16} />}
         onClick={() =>
           window.open(reportIssueUrl, "_blank", "noopener,noreferrer")
