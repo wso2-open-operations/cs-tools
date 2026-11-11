@@ -171,7 +171,7 @@ func (h *BlobAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, out)
 }
 
-// DirectUploadLinks handles POST /attachments/upload/{id}/direct?type=: one signed
+// DirectUploadLinks handles POST /attachments/{id}/upload-links?type=: one signed
 // link per chunk, so a large file goes from the browser straight to Azure. The
 // links are credentials, so the answer is never cached or logged.
 func (h *BlobAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +194,7 @@ func (h *BlobAttachmentHandler) DirectUploadLinks(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, out)
 }
 
-// DirectDownloadLink handles GET /attachments/download/{id}/link?type=: a signed
+// DirectDownloadLink handles POST /attachments/{id}/download-links?type=: a signed
 // link the browser downloads the file from, straight from Azure. The link is a
 // credential, so the answer is never cached or logged.
 func (h *BlobAttachmentHandler) DirectDownloadLink(w http.ResponseWriter, r *http.Request) {

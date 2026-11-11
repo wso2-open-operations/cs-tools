@@ -1027,7 +1027,7 @@ startup on an ambiguous pair.
 
 | Route | Module / action | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId`, `maxBytes` and `directUpload` (true for a large file that may go straight to Azure through the signed links of `POST /attachments/upload/{id}/direct`) come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it); the body is forwarded untouched |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId`, `maxBytes` and `directUpload` (true for a large file that may go straight to Azure through the signed links of `POST /attachments/{id}/upload-links`) come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it); the body is forwarded untouched |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | checks the id, index, `type` and a declared length of at most 8 MiB, then forwards the bytes to entity-service (`PutStoredAttachmentChunk`); entity-service checks access again for every chunk |
 | `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume (entity-service's answer, as it is) |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | forwards only `type` and `chunks`: entity-service commits the blocks, reads the real size, runs the checks and removes a file it refuses |
@@ -1058,8 +1058,8 @@ startup on an ambiguous pair.
 
 **Direct links for large files.** When entity-service has direct transfers on, the upload start answers
 `directUpload: true` for a large file, and two more routes relay entity-service's signed links untouched:
-`POST /attachments/upload/{id}/direct?type=` (one write-only link per chunk) and
-`GET /attachments/download/{id}/link?type=` (a read-only download link). The permission is the create action of the attachment type's module to get upload links, its read action for a download link; entity-service does the access
+`POST /attachments/{id}/upload-links?type=` (one write-only link per chunk) and
+`POST /attachments/{id}/download-links?type=` (a read-only download link). The permission is the create action of the attachment type's module to get upload links, its read action for a download link; entity-service does the access
 check. The links are credentials: the answers are never cached and neither the links nor the answers are logged
 (a failed call logs only a summary of the error). The chunk route and the content route stay, as the fallback.
 

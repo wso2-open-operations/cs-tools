@@ -120,9 +120,9 @@ func serveBlob(e *fakeBlobEntity, method, target string, body io.Reader, hdr map
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
-	mux.HandleFunc("POST /attachments/upload/{id}/direct", h.DirectUploadLinks)
+	mux.HandleFunc("POST /attachments/{id}/upload-links", h.DirectUploadLinks)
 	mux.HandleFunc("GET /attachments/download/{id}/content", h.Download)
-	mux.HandleFunc("GET /attachments/download/{id}/link", h.DirectDownloadLink)
+	mux.HandleFunc("POST /attachments/{id}/download-links", h.DirectDownloadLink)
 	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImage)
 	r := httptest.NewRequest(method, target, body)
 	for k, v := range hdr {
@@ -420,8 +420,8 @@ func TestBlobDirectLinks_AreRelayedAndNeverCached(t *testing.T) {
 	for name, tc := range map[string]struct {
 		method, path, want string
 	}{
-		"upload":   {http.MethodPost, "/attachments/upload/" + storedAttID + "/direct?type=work_item", `"links":["https://blob.example/x?sig=s"]`},
-		"download": {http.MethodGet, "/attachments/download/" + storedAttID + "/link?type=work_item", `"url":"https://blob.example/x?sig=s"`},
+		"upload":   {http.MethodPost, "/attachments/" + storedAttID + "/upload-links?type=work_item", `"links":["https://blob.example/x?sig=s"]`},
+		"download": {http.MethodPost, "/attachments/" + storedAttID + "/download-links?type=work_item", `"url":"https://blob.example/x?sig=s"`},
 	} {
 		e := &fakeBlobEntity{}
 		rec := serveBlob(e, tc.method, tc.path, nil, nil, true)
@@ -444,12 +444,12 @@ func TestBlobDirectLinks_Refusals(t *testing.T) {
 		user         bool
 		want         int
 	}{
-		"upload, bad id":      {http.MethodPost, "/attachments/upload/not-a-uuid/direct?type=work_item", true, http.StatusBadRequest},
-		"upload, bad type":    {http.MethodPost, "/attachments/upload/" + storedAttID + "/direct?type=case", true, http.StatusBadRequest},
-		"upload, no caller":   {http.MethodPost, "/attachments/upload/" + storedAttID + "/direct?type=work_item", false, http.StatusUnauthorized},
-		"download, bad id":    {http.MethodGet, "/attachments/download/not-a-uuid/link?type=work_item", true, http.StatusBadRequest},
-		"download, bad type":  {http.MethodGet, "/attachments/download/" + storedAttID + "/link?type=case", true, http.StatusBadRequest},
-		"download, no caller": {http.MethodGet, "/attachments/download/" + storedAttID + "/link?type=work_item", false, http.StatusUnauthorized},
+		"upload, bad id":      {http.MethodPost, "/attachments/not-a-uuid/upload-links?type=work_item", true, http.StatusBadRequest},
+		"upload, bad type":    {http.MethodPost, "/attachments/" + storedAttID + "/upload-links?type=case", true, http.StatusBadRequest},
+		"upload, no caller":   {http.MethodPost, "/attachments/" + storedAttID + "/upload-links?type=work_item", false, http.StatusUnauthorized},
+		"download, bad id":    {http.MethodPost, "/attachments/not-a-uuid/download-links?type=work_item", true, http.StatusBadRequest},
+		"download, bad type":  {http.MethodPost, "/attachments/" + storedAttID + "/download-links?type=case", true, http.StatusBadRequest},
+		"download, no caller": {http.MethodPost, "/attachments/" + storedAttID + "/download-links?type=work_item", false, http.StatusUnauthorized},
 	} {
 		e := &fakeBlobEntity{}
 		if rec := serveBlob(e, tc.method, tc.path, nil, nil, tc.user); rec.Code != tc.want {
@@ -462,7 +462,7 @@ func TestBlobDirectLinks_Refusals(t *testing.T) {
 	// Whatever entity-service refuses reaches the browser through the usual mapping,
 	// and never with a link in it.
 	e := &fakeBlobEntity{directErr: errors.New("down")}
-	rec := serveBlob(e, http.MethodGet, "/attachments/download/"+storedAttID+"/link?type=work_item", nil, nil, true)
+	rec := serveBlob(e, http.MethodPost, "/attachments/"+storedAttID+"/download-links?type=work_item", nil, nil, true)
 	if rec.Code < 500 || strings.Contains(rec.Body.String(), "blob.example") {
 		t.Errorf("a failed link: %d %s", rec.Code, rec.Body.String())
 	}
@@ -478,7 +478,7 @@ func TestDirectDownloadLinkNotAvailableIsNotAnError(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	e := &fakeBlobEntity{directErr: &apierror.Error{StatusCode: http.StatusNotFound}}
-	rec := serveBlob(e, http.MethodGet, "/attachments/download/"+storedAttID+"/link?type=work_item", nil, nil, true)
+	rec := serveBlob(e, http.MethodPost, "/attachments/"+storedAttID+"/download-links?type=work_item", nil, nil, true)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
