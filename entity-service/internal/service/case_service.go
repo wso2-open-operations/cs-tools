@@ -817,6 +817,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		return domain.CreateCaseResponse{}, err
 	}
 	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
+	s.addDescriptionAsFirstComment(ctx, c, req)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered
@@ -1051,6 +1052,35 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 			State:      responseState,
 		},
 	}, nil
+}
+
+// addDescriptionAsFirstComment gives a case created on the plain PostgreSQL
+// data source the first comment ServiceNow's case-creation rules write: the
+// description itself, as a COMMENT by the creator at the case's creation time.
+// Under dual-write that comment comes from ServiceNow (mirrorInitialSNComments);
+// with no ServiceNow behind the create nothing wrote it, so the case's activity
+// started without its description.
+//
+// Written straight to the repository, like the mirror: it is the case's own
+// history, not a new reply, so it publishes no case.comment_added, counts as
+// no support engineer response, subscribes no watcher and, carrying the
+// case's own created_on, leaves updated_on alone. An announcement is skipped
+// (its description is already shown, and the mirror drops ServiceNow's
+// repeat of it), as is a blank description. Best effort: the case already
+// exists, so a failure is logged and the create still succeeds.
+func (s *caseService) addDescriptionAsFirstComment(ctx context.Context, c domain.Case, req domain.CreateCaseRequest) {
+	if req.Type == "announcement" || strings.TrimSpace(req.Description) == "" {
+		return
+	}
+	createdOn := c.CreatedOn
+	if _, err := s.repo.CreateCaseCommentAsSystem(ctx, domain.CreateCaseCommentRequest{
+		CaseID:    c.ID,
+		Type:      domain.CommentTypeComment,
+		Content:   req.Description,
+		CreatedBy: c.CreatedBy,
+	}, &createdOn); err != nil {
+		slog.ErrorContext(ctx, "create case: writing the description as the first comment failed", "caseId", c.ID, "error", err)
+	}
 }
 
 // mirrorInitialSNComments copies the comments ServiceNow's own case-creation
