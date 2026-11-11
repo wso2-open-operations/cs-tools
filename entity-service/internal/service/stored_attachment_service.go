@@ -293,6 +293,10 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ConflictError{Msg: closedParentMessage}
 	}
 
+	if err := s.checkPendingLargeUploads(ctx, email, req.SizeBytes); err != nil {
+		return domain.InitiateAttachmentUploadResponse{}, err
+	}
+
 	// Charged before the row is written, so a refused call leaves nothing behind.
 	if err := s.reserveShares(ctx, 1); err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
@@ -317,6 +321,35 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		ExpiresAt:    s.now().Add(abandonedUploadAge),
 		MaxBytes:     limit,
 	}, nil
+}
+
+const (
+	// maxPendingLargeUploads is how many uploads that may be sent straight to
+	// storage one caller may have started and not finished.
+	maxPendingLargeUploads = 10
+	// pendingLargeUploadWindow is how far back a started upload still counts. An
+	// upload that was never finished stops counting after it, long before the
+	// cleanup marks it failed, so a caller who gave up on some is not locked out.
+	pendingLargeUploadWindow = 6 * time.Hour
+)
+
+// checkPendingLargeUploads refuses a new upload that may be sent straight to
+// storage when its caller already has maxPendingLargeUploads of them waiting. A
+// link cannot limit how much is sent, so what a caller can leave in storage
+// unconfirmed is limited by how many such uploads they can start. Without direct
+// transfers (DirectMinBytes is 0) nothing is checked.
+func (s *storedAttachmentService) checkPendingLargeUploads(ctx context.Context, email string, size int64) error {
+	if s.limits.DirectMinBytes <= 0 || size <= s.limits.DirectMinBytes {
+		return nil
+	}
+	n, err := s.repo.CountPendingLargeUploads(ctx, email, s.limits.DirectMinBytes, s.now().Add(-pendingLargeUploadWindow))
+	if err != nil {
+		return err
+	}
+	if n >= maxPendingLargeUploads {
+		return &apierror.TooManyRequestsError{Msg: "Too many large uploads are waiting to finish. Finish or cancel some, or wait a few hours, and try again."}
+	}
+	return nil
 }
 
 // ConfirmUpload implements StoredAttachmentService.

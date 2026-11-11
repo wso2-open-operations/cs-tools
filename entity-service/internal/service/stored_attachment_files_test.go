@@ -30,15 +30,17 @@ import (
 
 // fakeBlob is an in-memory FileStore.
 type fakeBlob struct {
-	staged    map[string]map[int][]byte // key -> index -> bytes
-	committed map[string][]byte
-	types     map[string]string
-	deleted   []string
-	commitErr error
-	putErr    error
-	opened    []string
-	copyErr   error
-	copied    [][2]string // {from, to}
+	staged     map[string]map[int][]byte // key -> index -> bytes
+	committed  map[string][]byte
+	types      map[string]string
+	deleted    []string
+	commitErr  error
+	putErr     error
+	opened     []string
+	copyErr    error
+	copied     [][2]string // {from, to}
+	discarded  []string
+	discardErr error
 }
 
 func newFakeBlob() *fakeBlob {
@@ -111,6 +113,17 @@ func (b *fakeBlob) Delete(_ context.Context, key string) error {
 	if !had {
 		return azblobstore.ErrNotFound
 	}
+	return nil
+}
+
+// Discard removes a file and any chunks put for it and never committed.
+func (b *fakeBlob) Discard(_ context.Context, key string) error {
+	if b.discardErr != nil {
+		return b.discardErr
+	}
+	b.discarded = append(b.discarded, key)
+	delete(b.committed, key)
+	delete(b.staged, key)
 	return nil
 }
 

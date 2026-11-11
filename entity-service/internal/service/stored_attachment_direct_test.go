@@ -405,3 +405,51 @@ func TestStagedUploads(t *testing.T) {
 		}
 	})
 }
+
+// TestPendingLargeUploads: a caller can only have a few uploads that may go
+// straight to storage waiting at once, which bounds what they can leave there
+// unconfirmed.
+func TestPendingLargeUploads(t *testing.T) {
+	start := func(repo *fakeStoredRepo, links LinkStore, size int64) error {
+		_, err := newDirectLimitsSvc(repo, links).InitiateUpload(saCtx(t, saEmail), domain.InitiateAttachmentUploadRequest{
+			Kind: domain.StoredAttachmentWorkItem, ParentID: saParentID, Name: "big.bin", ContentType: "application/zip", SizeBytes: size,
+		})
+		return err
+	}
+	t.Run("the next large upload is refused at the limit", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.pendingLarge = maxPendingLargeUploads
+		wantErr[*apierror.TooManyRequestsError](t, start(repo, &fakeLinks{}, 20*mib), "a caller at the limit")
+	})
+	t.Run("one below the limit is accepted, and the count is of recent large uploads by the caller", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.pendingLarge = maxPendingLargeUploads - 1
+		if err := start(repo, &fakeLinks{}, 20*mib); err != nil {
+			t.Fatalf("below the limit: %v", err)
+		}
+		if repo.pendingAsked.email != saEmail || repo.pendingAsked.minBytes != directMinMB ||
+			!repo.pendingAsked.since.Equal(saNow.Add(-pendingLargeUploadWindow)) {
+			t.Errorf("counted %+v", repo.pendingAsked)
+		}
+	})
+	t.Run("a small upload is never counted", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.pendingLarge = 1000
+		if err := start(repo, &fakeLinks{}, 5*mib); err != nil {
+			t.Fatalf("small upload: %v", err)
+		}
+		if repo.pendingAsked.email != "" {
+			t.Error("a small upload was counted")
+		}
+	})
+	t.Run("nothing is counted while direct transfers are off", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.pendingLarge = 1000
+		if err := start(repo, nil, 20*mib); err != nil {
+			t.Fatalf("direct off: %v", err)
+		}
+		if repo.pendingAsked.email != "" {
+			t.Error("an upload was counted with direct transfers off")
+		}
+	})
+}

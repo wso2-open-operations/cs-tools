@@ -79,6 +79,7 @@ type FileStore interface {
 	Open(ctx context.Context, key string, rng *azblobstore.Range) (*azblobstore.Object, error)
 	Delete(ctx context.Context, key string) error
 	Copy(ctx context.Context, srcKey, dstKey string) error
+	Discard(ctx context.Context, key string) error
 }
 
 // LinkStore is the part of azblobstore.Store that signs the short-lived links of a

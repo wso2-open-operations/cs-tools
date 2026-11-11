@@ -1987,8 +1987,14 @@ needs CORS for the portal origins.
   a staging key, `<key>.upload` (`uploadKey`): the links, `PutChunk` and `ListChunks` all use it. Confirm commits and
   checks the blocks there, `Copy`s the file to its own key inside Azure (`azblobstore.Copy`, one request), records it,
   and deletes the staging file; a refusal deletes both. A leftover link can then only write a file nothing reads. A
-  smaller upload has no links and is put at its own key as before. An abandoned upload's staging blocks are not removed
-  by the cleanup job (it does not know the key); Azure discards uncommitted blocks about a week after the last write.
+  smaller upload has no links and is put at its own key as before. The upload cleanup removes an abandoned upload's
+  staging chunks and anything at its own key (`azblobstore.Discard`, which also drops chunks that were never committed:
+  `Delete` cannot reach them) before it marks the row FAILED; if they cannot be removed the row stays PENDING and is
+  tried again on a later run.
+- **Pending large uploads are limited.** A link cannot cap how much is sent, so each caller may have at most 10
+  uploads that may go direct started and not finished (`maxPendingLargeUploads`, counted over the last 6 hours,
+  `pendingLargeUploadWindow`): the next one at the start is refused with a 429. Smaller uploads, and everything while
+  direct transfers are off, are not counted.
 - `GET /attachments/download/{id}/link?type=` makes the checks of a download (`LocateAttachment`, charged one unit
   of the per-caller allowance) and returns a read-only link valid for the same size-based time (`directLinkTTL`), signed to answer
   as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.

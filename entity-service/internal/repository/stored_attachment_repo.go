@@ -68,6 +68,10 @@ type StoredAttachmentRepository interface {
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
 	ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error)
+	// CountPendingLargeUploads returns how many uploads by email, across the three
+	// tables, are still PENDING, were created after since and declared more than
+	// minBytes: the uploads that may be sent straight to storage.
+	CountPendingLargeUploads(ctx context.Context, email string, minBytes int64, since time.Time) (int, error)
 	// LinkInlineImages attaches to a comment the images in ids that are stored,
 	// unlinked, on that work item and uploaded by email, and returns the ids it
 	// linked (repeating the call for an already linked image returns it again).
@@ -549,6 +553,25 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 		}
 	}
 	return out, nil
+}
+
+// CountPendingLargeUploads implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) CountPendingLargeUploads(ctx context.Context, email string, minBytes int64, since time.Time) (int, error) {
+	total := 0
+	for _, kind := range []domain.StoredAttachmentKind{domain.StoredAttachmentWorkItem, domain.StoredAttachmentComment, domain.StoredAttachmentDeployment} {
+		t, err := storedAttachmentTableFor(kind)
+		if err != nil {
+			return 0, err
+		}
+		var n int
+		if err := r.db.QueryRow(ctx, `SELECT count(*) FROM `+t.table+`
+			WHERE status = 'PENDING' AND lower(created_by) = lower($1) AND size_bytes > $2 AND created_on > $3`,
+			email, minBytes, since).Scan(&n); err != nil {
+			return 0, fmt.Errorf("count pending large uploads: %w", err)
+		}
+		total += n
+	}
+	return total, nil
 }
 
 // LinkInlineImages implements StoredAttachmentRepository.

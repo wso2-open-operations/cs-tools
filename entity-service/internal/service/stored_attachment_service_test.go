@@ -65,15 +65,22 @@ type fakeStoredRepo struct {
 		id, from, to string
 		sys          bool
 	}
-	deleted      map[string]string // id -> deleted_by
-	deleteCtx    []bool            // whether each MarkDeleted ran as the system
-	deleteOK     bool
-	completed    map[string]string // id -> storage key
-	completeCtx  []bool            // whether each MarkComplete ran as the system
-	completeOK   bool
-	failed       map[string]string // id -> detail
-	abandoned    []domain.AbandonedUpload
-	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
+	deleted     map[string]string // id -> deleted_by
+	deleteCtx   []bool            // whether each MarkDeleted ran as the system
+	deleteOK    bool
+	completed   map[string]string // id -> storage key
+	completeCtx []bool            // whether each MarkComplete ran as the system
+	completeOK  bool
+	failed      map[string]string // id -> detail
+	abandoned   []domain.AbandonedUpload
+	abandonedAt time.Time // the cutoff ListAbandoned was asked for
+	// pendingLarge is what CountPendingLargeUploads answers; pendingAsked is what it was asked.
+	pendingLarge int
+	pendingAsked struct {
+		email    string
+		minBytes int64
+		since    time.Time
+	}
 	abandonedSys bool
 	linkWant     []string          // ids LinkInlineImages will report as linked
 	linkedTo     map[string]string // image id -> comment it is already linked to
@@ -196,6 +203,16 @@ func (f *fakeStoredRepo) ListAbandoned(ctx context.Context, olderThan time.Time,
 	f.abandonedSys = ok && scope.Unrestricted
 	f.abandonedAt = olderThan
 	return f.abandoned, nil
+}
+
+// CountPendingLargeUploads answers with the configured count and records what was asked.
+func (f *fakeStoredRepo) CountPendingLargeUploads(_ context.Context, email string, minBytes int64, since time.Time) (int, error) {
+	f.pendingAsked = struct {
+		email    string
+		minBytes int64
+		since    time.Time
+	}{email, minBytes, since}
+	return f.pendingLarge, nil
 }
 
 func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error) {
