@@ -32,6 +32,14 @@ window.config = window.config ?? {
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
 };
 
+// The attachment limits come from the server through a query. Most tests render
+// components that read them without a QueryClientProvider, so they get the
+// built-in defaults here. A test that needs other limits mocks this module
+// itself; the hook's own test calls `vi.unmock` to use the real one.
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("dompurify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("dompurify")>();
   return {

@@ -18,6 +18,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ServiceRequestDetailContent from "@features/operations/components/service-requests/ServiceRequestDetailContent";
 
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("@api/useGetProjectFilters", () => ({
   default: () => ({ data: {}, isLoading: false }),
 }));

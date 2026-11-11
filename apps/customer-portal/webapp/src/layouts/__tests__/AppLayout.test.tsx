@@ -34,6 +34,10 @@ const mockShellState = {
 };
 
 // AppLayout reads the user details query; stub it so no QueryClient/Logger provider is needed.
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("@features/settings/api/useGetUserDetails", () => ({
   default: () => ({ data: undefined, error: null, isLoading: false }),
 }));

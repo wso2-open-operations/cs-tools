@@ -19,6 +19,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("@api/useStoredAttachments", () => ({
   useStoredAttachmentUpload: () => ({
     upload: { mutate: vi.fn(), isPending: false },

@@ -31,10 +31,8 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
-import {
-  entityAttachmentMaxBytes,
-  formatLimit,
-} from "@config/attachmentLimitsConfig";
+import { formatLimit } from "@config/attachmentLimitsConfig";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import {
   isAbortError,
@@ -98,7 +96,7 @@ export default function UploadAttachmentModal({
     chunks: number;
   } | null>(null);
   const isDeploymentMode = !!deploymentId && !caseId;
-  const maxBytes = entityAttachmentMaxBytes();
+  const { maxFileBytes: maxBytes } = useAttachmentLimits();
   const maxLabel = formatLimit(maxBytes);
   const isPending = storedUpload.isPending || storedConfirm.isPending;
   const fileInputRef = useRef<HTMLInputElement>(null);

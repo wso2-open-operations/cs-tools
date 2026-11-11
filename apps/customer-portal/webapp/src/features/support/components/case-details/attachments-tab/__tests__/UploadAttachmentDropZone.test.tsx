@@ -16,8 +16,11 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import UploadAttachmentDropZone from "../UploadAttachmentDropZone";
+
+const limits = vi.hoisted(() => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }));
+vi.mock("@api/useAttachmentLimits", () => ({ default: () => limits }));
 
 describe("UploadAttachmentDropZone", () => {
   it("calls choose file handler when button is clicked", () => {
@@ -38,8 +41,8 @@ describe("UploadAttachmentDropZone", () => {
   });
 
   describe("maximum file size", () => {
-    afterEach(() => {
-      delete window.config?.CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB;
+    beforeEach(() => {
+      limits.maxFileBytes = 10 * 1024 * 1024;
     });
 
     const renderZone = () =>
@@ -55,16 +58,13 @@ describe("UploadAttachmentDropZone", () => {
         </ThemeProvider>,
       );
 
-    it("shows the portal default when nothing is configured", () => {
+    it("shows the default limit until the server's is known", () => {
       renderZone();
       expect(screen.getByText("Maximum file size: 10 MB.")).toBeInTheDocument();
     });
 
-    it("shows the configured limit", () => {
-      window.config = {
-        ...window.config,
-        CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 50,
-      } as typeof window.config;
+    it("shows the server's limit", () => {
+      limits.maxFileBytes = 50 * 1024 * 1024;
       renderZone();
       expect(screen.getByText("Maximum file size: 50 MB.")).toBeInTheDocument();
     });

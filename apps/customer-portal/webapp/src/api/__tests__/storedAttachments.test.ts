@@ -28,13 +28,12 @@ import {
   UPLOAD_CHUNK_BYTES,
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
-import {
-  downloadParallelism,
-  entityAttachmentMaxBytes,
-  inlineImageMaxBytes,
-} from "@config/attachmentLimitsConfig";
+import { downloadParallelism } from "@config/attachmentLimitsConfig";
 
 const BASE = "https://api.test";
+// The limits the caller passes in (the server's, read through useAttachmentLimits).
+const FILE_MAX = 100 * 1024 * 1024;
+const IMAGES_MAX = 25 * 1024 * 1024;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -53,9 +52,6 @@ describe("storedAttachments", () => {
     vi.stubGlobal("fetch", rawFetch);
     (window as unknown as { config: unknown }).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-      // The limits a deployment sets (the built-in defaults are 10 MB / 1 MB).
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
-      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
     };
   });
   afterEach(() => {
@@ -67,7 +63,7 @@ describe("storedAttachments", () => {
     const file = new File(["hello"], "a.txt", { type: "text/plain" });
     const started = {
       attachmentId: "att-1",
-      maxBytes: entityAttachmentMaxBytes(),
+      maxBytes: FILE_MAX,
     };
     const confirmed = { id: "att-1", name: "a.txt", sizeBytes: 5, status: "COMPLETE" };
     const chunkCalls = () =>
@@ -135,53 +131,44 @@ describe("storedAttachments", () => {
     });
 
     it("refuses a file over the limit before anything is sent", async () => {
-      const big = { size: entityAttachmentMaxBytes() + 1, name: "big.bin", type: "" } as File;
+      const big = { size: FILE_MAX + 1, name: "big.bin", type: "" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
           type: "work_item",
           parentId: "case-1",
           file: big,
           name: "big.bin",
+          maxBytes: FILE_MAX,
         }),
       ).rejects.toThrow("File size exceeds 100 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
-    it("uses the configured limits, and says the configured number", async () => {
-      (window as unknown as { config?: unknown }).config = {
-        CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: "25",
-        CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 4,
-      };
-      try {
-        const bigFile = { size: 25 * 1024 * 1024 + 1, name: "b.bin", type: "" } as File;
-        await expect(
-          uploadStoredAttachment(authFetch, { type: "work_item", parentId: "case-1", file: bigFile, name: "b.bin" }),
-        ).rejects.toThrow("File size exceeds 25 MB limit.");
-        const bigImage = { size: 4 * 1024 * 1024 + 1, name: "p.png", type: "image/png" } as File;
-        await expect(
-          uploadStoredAttachment(authFetch, { type: "comment", parentId: "case-1", file: bigImage, name: "p.png" }),
-        ).rejects.toThrow("File size exceeds 4 MB limit.");
-        expect(authFetch).not.toHaveBeenCalled();
-      } finally {
-        (window as unknown as { config?: unknown }).config = undefined;
-      }
-    });
-
-    it("refuses a comment image over the configured 25 MB limit before anything is sent", async () => {
-      const big = { size: inlineImageMaxBytes() + 1, name: "p.png", type: "image/png" } as File;
+    it("says the limit it was given", async () => {
+      const bigImage = { size: 4 * 1024 * 1024 + 1, name: "p.png", type: "image/png" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
           type: "comment",
           parentId: "case-1",
-          file: big,
+          file: bigImage,
           name: "p.png",
+          maxBytes: 4 * 1024 * 1024,
         }),
-      ).rejects.toThrow("File size exceeds 25 MB limit.");
+      ).rejects.toThrow("File size exceeds 4 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
+    it("leaves the size check to the server when no limit is given", async () => {
+      const big = { size: FILE_MAX * 2, name: "p.png", type: "image/png" } as File;
+      authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: IMAGES_MAX }, 201));
+      await expect(
+        uploadStoredAttachment(authFetch, { type: "comment", parentId: "case-1", file: big, name: "p.png" }),
+      ).rejects.toThrow(/exceeds the 25 MB limit/);
+      expect(authFetch).toHaveBeenCalledTimes(1);
+    });
+
     it("does not apply the image limit to a work item file (only the server's limit)", async () => {
-      const mid = { size: inlineImageMaxBytes() * 3, name: "a.bin", type: "" } as File;
+      const mid = { size: IMAGES_MAX * 3, name: "a.bin", type: "" } as File;
       authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 5 * 1024 * 1024 }, 201));
       await expect(
         uploadStoredAttachment(authFetch, {
@@ -245,7 +232,6 @@ describe("storedAttachments", () => {
     const withMode = () => {
       (window as unknown as { config: unknown }).config = {
         CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-        CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
       };
     };
     const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };

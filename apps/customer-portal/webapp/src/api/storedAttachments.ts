@@ -14,12 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  downloadParallelism,
-  entityAttachmentMaxBytes,
-  formatLimit,
-  inlineImageMaxBytes,
-} from "@config/attachmentLimitsConfig";
+import { downloadParallelism, formatLimit } from "@config/attachmentLimitsConfig";
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 import { openDiskTarget, type DiskSink } from "@api/downloadToDisk";
 
@@ -805,21 +800,19 @@ export async function uploadStoredAttachment(
     file: File;
     name: string;
     onStep?: (step: StoredUploadStep) => void;
+    /** Largest file to start; a bigger one is refused before any request. Left out, only the server checks. */
+    maxBytes?: number;
     /** Cancels the upload. */
     signal?: AbortSignal;
     /** Bytes stored so far. */
     onProgress?: (bytesSent: number, bytesTotal: number) => void;
   },
 ): Promise<StoredAttachmentConfirmed> {
-  const { type, parentId, projectId, file, name, onStep, signal, onProgress } = input;
+  const { type, parentId, projectId, file, name, maxBytes, onStep, signal, onProgress } = input;
   // Only an early refusal: entity-service enforces its own limit, and the
   // `maxBytes` of the upload response is checked below too.
-  const localMaxBytes =
-    type === "comment" ? inlineImageMaxBytes() : entityAttachmentMaxBytes();
-  if (file.size > localMaxBytes) {
-    throw new Error(
-      `File size exceeds ${formatLimit(localMaxBytes)} limit.`,
-    );
+  if (maxBytes !== undefined && file.size > maxBytes) {
+    throw new Error(`File size exceeds ${formatLimit(maxBytes)} limit.`);
   }
   onStep?.("preparing");
   let start: StoredAttachmentUploadStart;
