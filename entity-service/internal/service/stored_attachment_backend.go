@@ -113,8 +113,11 @@ func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domai
 		Name:         row.Name,
 		ContentType:  contentType,
 		SizeBytes:    sizeOrZero(row.SizeBytes),
-		MaxBytes:     s.limitForSize(req.Kind, sizeOrZero(row.SizeBytes)),
+		MaxBytes:     s.limitForUpload(req.Kind, row.Staged),
 		StorageKey:   storageKeyFor(req.Kind, row, parent),
+
+		Staged:             row.Staged,
+		ChunkRouteMaxBytes: s.limitFor(req.Kind),
 	}, nil
 }
 
@@ -138,8 +141,8 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "sizeBytes is required"}
 	}
 	size := *req.SizeBytes
-	// The cap is the one that applied to the size declared when the upload started.
-	if limit := s.limitForSize(req.Kind, sizeOrZero(row.SizeBytes)); size > limit {
+	// The cap is the one that applied when the upload started.
+	if limit := s.limitForUpload(req.Kind, row.Staged); size > limit {
 		msg := "the file is larger than the " + formatByteLimit(limit) + " limit"
 		s.failQuietly(ctx, req.Kind, row.ID, msg)
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ValidationError{Msg: msg}

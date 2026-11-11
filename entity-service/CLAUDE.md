@@ -2014,9 +2014,9 @@ in the upload, locate and delete paths. The three tables have no row-level id de
 `ATTACHMENT_DIRECT_MIN_MB` (default 8) can go between the browser and Azure through short-lived signed links, so
 its bytes pass through neither a portal backend nor this service (`WithDirectTransfers`, `LinkStore`,
 `azblobstore.UploadLinks` / `DownloadLink`). Smaller files and every inline image keep the path above, where each
-chunk and read is checked. A link cannot be signed by an Entra app, so this needs `AZURE_STORAGE_KEY` or a
-connection string with a key; without one it stays off and logs why (`directTransferOptions`). The storage account
-needs CORS for the portal origins.
+chunk and read is checked. Links are signed with the account key, so this needs `AZURE_STORAGE_KEY` or a
+connection string with a key; signing as an Entra app (a user delegation key) is not supported yet. Without a key it
+stays off and logs why (`directTransferOptions`). The storage account needs CORS for the portal origins.
 
 - `POST /attachments/upload` answers `directUpload: true` when the declared size is above the threshold.
   `POST /attachments/{id}/upload-links?type=` then makes the checks of a chunk once (the caller's own `PENDING`
@@ -2026,30 +2026,33 @@ needs CORS for the portal origins.
   PUTs each chunk to its link and calls the ordinary confirm, which commits the staged blocks and **reads the real
   size**: a link cannot cap how much is sent, so an oversize file is refused there and removed. Both paths stage the
   same block ids, so a browser that cannot reach Azure falls back to the chunk route for the same upload.
+- **Staged is decided when the upload starts.** `InitiateUpload` sets `staged` on the upload row (migration 0283) for
+  an ordinary file above `ATTACHMENT_DIRECT_MIN_MB` while links can be signed (`startsStaged`), answers
+  `directUpload` from it, and every later step reads the row, never the current config. So the key and the size cap
+  of an upload in progress stay the same if the flag is switched, rolled back or differs between replicas.
 - **The links never write the file readers use.** A write link is for a whole blob and stays valid after the confirm, so
-  an upload that may be sent direct (`stagedUpload`: declared size above the threshold, links on) is put together under
-  a staging key, `<key>.upload` (`uploadKey`): the links, `PutChunk` and `ListChunks` all use it. Confirm commits and
-  checks the blocks there, `Copy`s the file to its own key inside Azure (`azblobstore.Copy`, one request), records it,
-  and deletes the staging file; a refusal deletes both. A leftover link can then only write a file nothing reads. A
-  smaller upload has no links and is put at its own key as before. The upload cleanup removes an abandoned upload's
+  a staged upload is put together under a staging key, `<key>.upload` (`uploadKey`): the links, `PutChunk` and
+  `ListChunks` all use it. Confirm commits and checks the blocks there, `Copy`s the file to its own key inside Azure
+  (`azblobstore.Copy`, pinned to the ETag of the file that was checked, so one replaced since is refused with a 400 and
+  removed), checks the copy has the size that was checked, records it, and deletes the staging file; a refusal deletes
+  both. A leftover link can then only write a file nothing reads. A smaller upload has no links and is put at its
+  own key as before. The upload cleanup removes an abandoned upload's
   staging chunks and anything at its own key (`azblobstore.Discard`, which also drops chunks that were never committed:
   `Delete` cannot reach them) before it marks the row FAILED; if they cannot be removed the row stays PENDING and is
   tried again on a later run.
-- **Pending large uploads are limited.** A link cannot cap how much is sent, so each caller may have at most 10
-  uploads that may go direct started and not finished (`maxPendingLargeUploads`, counted over the last 6 hours,
-  `pendingLargeUploadWindow`): the next one at the start is refused with a 429. Smaller uploads, and everything while
-  direct transfers are off, are not counted.
+- **Pending staged uploads are limited.** A link cannot cap how much is sent, so each caller may have at most 10
+  staged uploads started and not finished (`maxPendingStagedUploads`, counted over the last 6 hours,
+  `pendingStagedUploadWindow`): the next one at the start is refused with a 429. Other uploads are not counted.
 - `POST /attachments/{id}/download-links?type=` makes the checks of a download (`LocateAttachment`, charged one unit
   of the per-caller allowance) and returns a read-only link valid for the same size-based time (`directLinkTTL`), signed to answer
   as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
   With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
   the webapps answer by streaming the file.
-- **Size limit.** While direct transfers are on, an ordinary file (never an inline image) above
-  `ATTACHMENT_DIRECT_MIN_MB` may be up to `ATTACHMENT_DIRECT_MAX_MB` (default and at most 1024 MB) instead of
-  `ATTACHMENT_MAX_MB` (`limitForSize`). The cap that applied to the size declared at the start is the one the
-  chunks and the confirm hold the file to, and the answer of the upload start reports it as `maxBytes`. Off, or
-  without a key to sign with, `ATTACHMENT_MAX_MB` stands. The chunk route accepts such a file too, so the browser's
-  fallback still works, only through the backend.
+- **Size limit.** A staged upload may be up to `ATTACHMENT_DIRECT_MAX_MB` (default and at most 1024 MB) instead of
+  `ATTACHMENT_MAX_MB` (`limitForUpload`); the confirm holds the file to it and the answer of the upload start reports
+  it as `maxBytes`. **The chunk route stays at `ATTACHMENT_MAX_MB`** (`ChunkRouteMaxBytes`): a file above it is refused
+  there with a message, so the portal backends and the gateway never carry more than they are built for. The browser's
+  fallback to the chunk route therefore works for a file up to `ATTACHMENT_MAX_MB` only; a larger one must go direct.
 - **Expiry.** A link that expires part-way is not a failure: `POST .../upload-links` can be called again for a PENDING
   upload and returns fresh links, and the browser carries on with the chunks it has not sent (the staged blocks stay).
 - Links are credentials: the answers carry `Cache-Control: no-store` and nothing logs a link.

@@ -80,12 +80,15 @@ var newInlineImageTypes = map[string]string{
 type StoredAttachmentLimits struct {
 	// MaxBytes caps one file.
 	MaxBytes int64
-	// DirectMaxBytes, when above MaxBytes, is the cap of an ordinary file (not an
-	// inline image) above DirectMinBytes, which is sent straight to Azure through
-	// signed links and so does not pass through this service. 0 means no larger cap.
+	// DirectTransfers is true when links can be signed, so a new upload of an
+	// ordinary file (not an inline image) above DirectMinBytes is sent straight to
+	// Azure. It is decided when the upload starts and recorded on the upload, so a
+	// later change here does not affect an upload in progress.
+	DirectTransfers bool
+	DirectMinBytes  int64
+	// DirectMaxBytes is the cap of such an upload. It does not pass through this
+	// service, so it may be above MaxBytes.
 	DirectMaxBytes int64
-	// DirectMinBytes is the size above which a file may be sent that way.
-	DirectMinBytes int64
 	// InlineTotalMaxBytes caps the images of ONE comment or description together
 	// (0 means DefaultInlineImagesTotalMaxBytes). One image can be at most this
 	// big too.
@@ -263,10 +266,11 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	} else if !strings.Contains(req.ContentType, "/") || len(req.ContentType) > 255 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "contentType must look like type/subtype"}
 	}
-	limit := s.limitForSize(req.Kind, req.SizeBytes)
 	if req.SizeBytes <= 0 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than 0"}
 	}
+	staged := s.startsStaged(req.Kind, req.SizeBytes)
+	limit := s.limitForUpload(req.Kind, staged)
 	if req.SizeBytes > limit {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "the file is larger than the " + formatByteLimit(limit) + " limit"}
 	}
@@ -293,8 +297,10 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ConflictError{Msg: closedParentMessage}
 	}
 
-	if err := s.checkPendingLargeUploads(ctx, email, req.SizeBytes); err != nil {
-		return domain.InitiateAttachmentUploadResponse{}, err
+	if staged {
+		if err := s.checkPendingStagedUploads(ctx, email); err != nil {
+			return domain.InitiateAttachmentUploadResponse{}, err
+		}
 	}
 
 	// Charged before the row is written, so a refused call leaves nothing behind.
@@ -303,7 +309,7 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	}
 	row, err := s.repo.InsertPending(ctx, req.Kind, domain.StoredAttachmentInsert{
 		ParentID: parentID, Name: req.Name, ContentType: req.ContentType,
-		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft,
+		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft, Staged: staged,
 	})
 	if err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
@@ -320,29 +326,26 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		Number:       row.Number,
 		ExpiresAt:    s.now().Add(abandonedUploadAge),
 		MaxBytes:     limit,
+		DirectUpload: staged,
 	}, nil
 }
 
 const (
-	// maxPendingLargeUploads is how many unfinished direct-sized uploads one caller may have.
-	maxPendingLargeUploads = 10
-	// pendingLargeUploadWindow is how far back an unfinished upload counts, so a
+	// maxPendingStagedUploads is how many unfinished direct uploads one caller may have.
+	maxPendingStagedUploads = 10
+	// pendingStagedUploadWindow is how far back an unfinished upload counts, so a
 	// caller who gave up on some is not blocked until the cleanup runs.
-	pendingLargeUploadWindow = 6 * time.Hour
+	pendingStagedUploadWindow = 6 * time.Hour
 )
 
-// checkPendingLargeUploads limits how much unconfirmed data a caller can leave in
-// storage, since a link cannot cap how much is sent. Nothing is checked while
-// direct transfers are off (DirectMinBytes is 0).
-func (s *storedAttachmentService) checkPendingLargeUploads(ctx context.Context, email string, size int64) error {
-	if s.limits.DirectMinBytes <= 0 || size <= s.limits.DirectMinBytes {
-		return nil
-	}
-	n, err := s.repo.CountPendingLargeUploads(ctx, email, s.limits.DirectMinBytes, s.now().Add(-pendingLargeUploadWindow))
+// checkPendingStagedUploads limits how much unconfirmed data a caller can leave in
+// storage, since a link cannot cap how much is sent.
+func (s *storedAttachmentService) checkPendingStagedUploads(ctx context.Context, email string) error {
+	n, err := s.repo.CountPendingStagedUploads(ctx, email, s.now().Add(-pendingStagedUploadWindow))
 	if err != nil {
 		return err
 	}
-	if n >= maxPendingLargeUploads {
+	if n >= maxPendingStagedUploads {
 		return &apierror.TooManyRequestsError{Msg: "Too many large uploads are waiting to finish. Finish or cancel some, or wait a few hours, and try again."}
 	}
 	return nil
@@ -866,16 +869,19 @@ func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int
 	return s.limits.MaxBytes
 }
 
-// limitForSize is the cap that applies to a file of the declared size: the
-// ordinary cap, or, for an ordinary file big enough to be sent straight to Azure,
-// the larger direct cap. An inline image never gets the larger one.
-func (s *storedAttachmentService) limitForSize(kind domain.StoredAttachmentKind, sizeBytes int64) int64 {
-	limit := s.limitFor(kind)
-	if kind != domain.StoredAttachmentComment && sizeBytes > limit &&
-		sizeBytes > s.limits.DirectMinBytes && s.limits.DirectMaxBytes > limit {
+// startsStaged reports whether a new upload is sent straight to Azure. An inline
+// image never is.
+func (s *storedAttachmentService) startsStaged(kind domain.StoredAttachmentKind, sizeBytes int64) bool {
+	return s.limits.DirectTransfers && kind != domain.StoredAttachmentComment && sizeBytes > s.limits.DirectMinBytes
+}
+
+// limitForUpload is the cap of an upload: the larger direct cap for a staged
+// upload, else the ordinary one.
+func (s *storedAttachmentService) limitForUpload(kind domain.StoredAttachmentKind, staged bool) int64 {
+	if staged && s.limits.DirectMaxBytes > s.limitFor(kind) {
 		return s.limits.DirectMaxBytes
 	}
-	return limit
+	return s.limitFor(kind)
 }
 
 // failQuietly marks a row FAILED as the system. A failure to do so is logged

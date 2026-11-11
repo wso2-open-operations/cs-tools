@@ -840,9 +840,9 @@ type Config struct {
 	// AttachmentDirectTransfers (ATTACHMENT_DIRECT_TRANSFERS_ENABLED=true) lets a
 	// file larger than AttachmentDirectMinBytes go between the browser and Azure
 	// directly, through short-lived links this service signs, instead of through
-	// it. Off by default. It needs a storage account key or connection string (a
-	// link cannot be signed by an Entra app) and CORS on the storage account;
-	// without a key it stays off and logs why.
+	// it. Off by default. It needs a storage account key or connection string
+	// (signing as an Entra app is not supported yet) and CORS on the storage
+	// account; without a key it stays off and logs why.
 	AttachmentDirectTransfers bool
 	// AttachmentDirectMinBytes is the size above which a file uses a direct link
 	// (ATTACHMENT_DIRECT_MIN_MB, default 8 MiB, one chunk).

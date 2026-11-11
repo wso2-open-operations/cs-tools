@@ -68,10 +68,10 @@ type StoredAttachmentRepository interface {
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
 	ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error)
-	// CountPendingLargeUploads returns how many uploads by email, across the three
-	// tables, are still PENDING, were created after since and declared more than
-	// minBytes: the uploads that may be sent straight to storage.
-	CountPendingLargeUploads(ctx context.Context, email string, minBytes int64, since time.Time) (int, error)
+	// CountPendingStagedUploads returns how many uploads by email, across the three
+	// tables, are still PENDING and were created after since, among the uploads
+	// that may be sent straight to storage.
+	CountPendingStagedUploads(ctx context.Context, email string, since time.Time) (int, error)
 	// LinkInlineImages attaches to a comment the images in ids that are stored,
 	// unlinked, on that work item and uploaded by email, and returns the ids it
 	// linked (repeating the call for an already linked image returns it again).
@@ -218,12 +218,12 @@ func (r *storedAttachmentRepo) GetParent(ctx context.Context, kind domain.Stored
 // storedAttachmentColumns is the column list every query returning a row uses,
 // kept next to scanStoredAttachment so the two cannot drift apart.
 func storedAttachmentColumns(t storedAttachmentTable) string {
-	return `id::TEXT, number, name, content_type, size_bytes, status::TEXT, storage_key, created_by, ` + t.parentExpr + `, ` + t.draftExpr
+	return `id::TEXT, number, name, content_type, size_bytes, status::TEXT, storage_key, created_by, ` + t.parentExpr + `, ` + t.draftExpr + `, staged`
 }
 
 func scanStoredAttachment(row pgx.Row) (domain.StoredAttachmentRow, error) {
 	var a domain.StoredAttachmentRow
-	err := row.Scan(&a.ID, &a.Number, &a.Name, &a.ContentType, &a.SizeBytes, &a.Status, &a.StorageKey, &a.CreatedBy, &a.ParentID, &a.Draft)
+	err := row.Scan(&a.ID, &a.Number, &a.Name, &a.ContentType, &a.SizeBytes, &a.Status, &a.StorageKey, &a.CreatedBy, &a.ParentID, &a.Draft, &a.Staged)
 	return a, err
 }
 
@@ -246,10 +246,10 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		parentCol = "project_id"
 	}
 	row := r.db.QueryRow(ctx, `
-		INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`)
-		VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5)
+		INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`, staged)
+		VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5, $6)
 		RETURNING `+storedAttachmentColumns(t),
-		in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID)
+		in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID, in.Staged)
 	a, err := scanStoredAttachment(row)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -555,8 +555,8 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 	return out, nil
 }
 
-// CountPendingLargeUploads implements StoredAttachmentRepository.
-func (r *storedAttachmentRepo) CountPendingLargeUploads(ctx context.Context, email string, minBytes int64, since time.Time) (int, error) {
+// CountPendingStagedUploads implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) CountPendingStagedUploads(ctx context.Context, email string, since time.Time) (int, error) {
 	total := 0
 	for _, kind := range []domain.StoredAttachmentKind{domain.StoredAttachmentWorkItem, domain.StoredAttachmentComment, domain.StoredAttachmentDeployment} {
 		t, err := storedAttachmentTableFor(kind)
@@ -565,9 +565,9 @@ func (r *storedAttachmentRepo) CountPendingLargeUploads(ctx context.Context, ema
 		}
 		var n int
 		if err := r.db.QueryRow(ctx, `SELECT count(*) FROM `+t.table+`
-			WHERE status = 'PENDING' AND lower(created_by) = lower($1) AND size_bytes > $2 AND created_on > $3`,
-			email, minBytes, since).Scan(&n); err != nil {
-			return 0, fmt.Errorf("count pending large uploads: %w", err)
+			WHERE status = 'PENDING' AND staged AND lower(created_by) = lower($1) AND created_on > $2`,
+			email, since).Scan(&n); err != nil {
+			return 0, fmt.Errorf("count pending staged uploads: %w", err)
 		}
 		total += n
 	}

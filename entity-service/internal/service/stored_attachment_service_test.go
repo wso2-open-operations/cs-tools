@@ -74,12 +74,11 @@ type fakeStoredRepo struct {
 	failed      map[string]string // id -> detail
 	abandoned   []domain.AbandonedUpload
 	abandonedAt time.Time // the cutoff ListAbandoned was asked for
-	// pendingLarge is what CountPendingLargeUploads answers; pendingAsked is what it was asked.
-	pendingLarge int
-	pendingAsked struct {
-		email    string
-		minBytes int64
-		since    time.Time
+	// pendingStaged is what CountPendingStagedUploads answers; pendingAsked is what it was asked.
+	pendingStaged int
+	pendingAsked  struct {
+		email string
+		since time.Time
 	}
 	abandonedSys bool
 	linkWant     []string          // ids LinkInlineImages will report as linked
@@ -151,7 +150,7 @@ func (f *fakeStoredRepo) InsertPending(_ context.Context, _ domain.StoredAttachm
 	ct := in.ContentType
 	row := domain.StoredAttachmentRow{
 		ID: saAttID, Number: "WIA0000042", Name: in.Name, ContentType: &ct, SizeBytes: &size,
-		Status: "PENDING", CreatedBy: in.CreatedBy, ParentID: in.ParentID,
+		Status: "PENDING", CreatedBy: in.CreatedBy, ParentID: in.ParentID, Staged: in.Staged,
 	}
 	f.rows[row.ID] = row
 	return row, nil
@@ -205,14 +204,13 @@ func (f *fakeStoredRepo) ListAbandoned(ctx context.Context, olderThan time.Time,
 	return f.abandoned, nil
 }
 
-// CountPendingLargeUploads answers with the configured count and records what was asked.
-func (f *fakeStoredRepo) CountPendingLargeUploads(_ context.Context, email string, minBytes int64, since time.Time) (int, error) {
+// CountPendingStagedUploads answers with the configured count and records what was asked.
+func (f *fakeStoredRepo) CountPendingStagedUploads(_ context.Context, email string, since time.Time) (int, error) {
 	f.pendingAsked = struct {
-		email    string
-		minBytes int64
-		since    time.Time
-	}{email, minBytes, since}
-	return f.pendingLarge, nil
+		email string
+		since time.Time
+	}{email, since}
+	return f.pendingStaged, nil
 }
 
 func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error) {

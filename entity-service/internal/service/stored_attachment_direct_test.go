@@ -72,16 +72,17 @@ func newDirectSvc(repo *fakeStoredRepo, links LinkStore) StoredAttachmentFileSer
 
 // newDirectSvcWith is newDirectSvc over the given blob store.
 func newDirectSvcWith(repo *fakeStoredRepo, links LinkStore, blob FileStore) StoredAttachmentFileService {
-	return NewStoredAttachmentFileService(newDirectLimitsSvc(repo, links), blob, 2, WithDirectTransfers(links, directMinMB))
+	return NewStoredAttachmentFileService(newDirectLimitsSvc(repo, links), blob, 2, WithDirectTransfers(links))
 }
 
 // newDirectLimitsSvc is the stored attachment service under the limits routes.go
-// gives it: 100 MiB for a file sent through the service, and, only when links can
-// be signed, 1 GiB for one sent straight to Azure.
+// gives it: 100 MiB for a file sent through the service, and 1 GiB for an upload
+// that starts out staged, which only happens when links can be signed.
 func newDirectLimitsSvc(repo *fakeStoredRepo, links LinkStore) *storedAttachmentService {
-	limits := StoredAttachmentLimits{MaxBytes: 100 * mib, InlineTotalMaxBytes: 100}
-	if links != nil && links.CanSignLinks() {
-		limits.DirectMinBytes, limits.DirectMaxBytes = directMinMB, 1024*mib
+	limits := StoredAttachmentLimits{
+		MaxBytes: 100 * mib, InlineTotalMaxBytes: 100,
+		DirectTransfers: links != nil && links.CanSignLinks(),
+		DirectMinBytes:  directMinMB, DirectMaxBytes: 1024 * mib,
 	}
 	svc := NewStoredAttachmentService(repo, limits).(*storedAttachmentService)
 	svc.now = func() time.Time { return saNow }
@@ -89,20 +90,40 @@ func newDirectLimitsSvc(repo *fakeStoredRepo, links LinkStore) *storedAttachment
 	return svc
 }
 
-// TestDirectUploadAllowed: only a file above the threshold goes direct, and only when links can be signed.
-func TestDirectUploadAllowed(t *testing.T) {
-	repo := newFakeStoredRepo()
-	on := newDirectSvc(repo, &fakeLinks{})
+// pendingStagedUpload is a pending upload that started out staged, as one above the threshold does.
+func pendingStagedUpload(repo *fakeStoredRepo, size int64) {
+	pendingUpload(repo, size)
+	row := repo.rows[saAttID]
+	row.Staged = true
+	repo.rows[saAttID] = row
+}
+
+// TestUploadStartDecidesStaging: only a file above the threshold starts staged, only
+// when links can be signed, never an inline image, and the decision is recorded.
+func TestUploadStartDecidesStaging(t *testing.T) {
+	start := func(links LinkStore, kind domain.StoredAttachmentKind, contentType string, size int64) (bool, bool) {
+		repo := newFakeStoredRepo()
+		resp, err := newDirectLimitsSvc(repo, links).InitiateUpload(saCtx(t, saEmail), domain.InitiateAttachmentUploadRequest{
+			Kind: kind, ParentID: saParentID, Name: "f.bin", ContentType: contentType, SizeBytes: size,
+		})
+		if err != nil {
+			t.Fatalf("InitiateUpload: %v", err)
+		}
+		return resp.DirectUpload, repo.inserted[0].Staged
+	}
+	work := domain.StoredAttachmentWorkItem
 	for size, want := range map[int64]bool{1: false, directMinMB: false, directMinMB + 1: true, 100 * mib: true} {
-		if got := on.DirectUploadAllowed(size); got != want {
-			t.Errorf("DirectUploadAllowed(%d) = %v, want %v", size, got, want)
+		if got, recorded := start(&fakeLinks{}, work, "application/zip", size); got != want || recorded != want {
+			t.Errorf("%d bytes: directUpload %v, recorded %v, want %v", size, got, recorded, want)
 		}
 	}
-	// Off when no link store is given, or when it cannot sign (an Entra app).
 	for name, links := range map[string]LinkStore{"none": nil, "cannot sign": &fakeLinks{cannotSign: true}} {
-		if newDirectSvc(repo, links).DirectUploadAllowed(100 * mib) {
-			t.Errorf("%s: direct upload is allowed", name)
+		if got, recorded := start(links, work, "application/zip", 100*mib); got || recorded {
+			t.Errorf("%s: a large upload was staged", name)
 		}
+	}
+	if got, _ := start(&fakeLinks{}, domain.StoredAttachmentComment, "image/png", 100); got {
+		t.Error("an inline image was staged")
 	}
 }
 
@@ -110,7 +131,7 @@ func TestDirectUploadAllowed(t *testing.T) {
 func TestDirectUploadLinks(t *testing.T) {
 	t.Run("one link per chunk, signed for the upload's own key", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 20*mib) // 8 + 8 + 4 MiB: 3 chunks
+		pendingStagedUpload(repo, 20*mib) // 8 + 8 + 4 MiB: 3 chunks
 		links := &fakeLinks{}
 		got, err := newDirectSvc(repo, links).DirectUploadLinks(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		if err != nil {
@@ -138,13 +159,13 @@ func TestDirectUploadLinks(t *testing.T) {
 	})
 	t.Run("a file larger than allowed gets no links", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 2048*mib) // above the 1 GiB direct cap
+		pendingStagedUpload(repo, 2048*mib) // above the 1 GiB direct cap
 		_, err := newDirectSvc(repo, &fakeLinks{}).DirectUploadLinks(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		wantErr[*apierror.ValidationError](t, err, "a file over the limit")
 	})
 	t.Run("only the uploader gets links", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 20*mib)
+		pendingStagedUpload(repo, 20*mib)
 		links := &fakeLinks{}
 		_, err := newDirectSvc(repo, links).DirectUploadLinks(saCtx(t, "someone-else@example.com"), domain.StoredAttachmentWorkItem, saAttID)
 		wantErr[*apierror.NotFoundError](t, err, "another user")
@@ -161,13 +182,13 @@ func TestDirectUploadLinks(t *testing.T) {
 	})
 	t.Run("off when direct transfers are not configured", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 20*mib)
+		pendingStagedUpload(repo, 20*mib)
 		_, err := newDirectSvc(repo, nil).DirectUploadLinks(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		wantErr[*apierror.ValidationError](t, err, "direct transfers off")
 	})
 	t.Run("a signing failure says nothing about storage", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 20*mib)
+		pendingStagedUpload(repo, 20*mib)
 		_, err := newDirectSvc(repo, &fakeLinks{err: errors.New("account key secret detail")}).DirectUploadLinks(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID)
 		wantErr[*apierror.ServiceUnavailableError](t, err, "a signing failure")
 		if err != nil && strings.Contains(err.Error(), "secret") {
@@ -267,10 +288,10 @@ func TestDirectUploadLimits(t *testing.T) {
 		_, err := start(&fakeLinks{}, work, "application/zip", 1024*mib+1)
 		wantErr[*apierror.ValidationError](t, err, "over 1 GiB")
 	})
-	t.Run("a file that fits the ordinary cap keeps it", func(t *testing.T) {
-		resp, err := start(&fakeLinks{}, work, "application/zip", 60*mib)
-		if err != nil || resp.MaxBytes != 100*mib {
-			t.Errorf("60 MiB: %+v, %v", resp, err)
+	t.Run("a file at or below the threshold keeps the ordinary cap", func(t *testing.T) {
+		resp, err := start(&fakeLinks{}, work, "application/zip", directMinMB)
+		if err != nil || resp.MaxBytes != 100*mib || resp.DirectUpload {
+			t.Errorf("8 MiB: %+v, %v", resp, err)
 		}
 	})
 	t.Run("without direct transfers the ordinary cap stands", func(t *testing.T) {
@@ -285,7 +306,7 @@ func TestDirectUploadLimits(t *testing.T) {
 	})
 	t.Run("a large upload gets a link for every chunk, valid for its size", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 600*mib)
+		pendingStagedUpload(repo, 600*mib)
 		links := &fakeLinks{}
 		got, err := newDirectSvc(repo, links).DirectUploadLinks(saCtx(t, saEmail), work, saAttID)
 		if err != nil || len(got.Links) != 75 { // 600 MiB in 8 MiB chunks
@@ -297,17 +318,25 @@ func TestDirectUploadLimits(t *testing.T) {
 	})
 	t.Run("the real size is held to the cap that applied when the upload started", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 600*mib)
+		pendingStagedUpload(repo, 600*mib)
 		svc := newDirectLimitsSvc(repo, &fakeLinks{})
 		size := int64(600 * mib)
 		if _, err := svc.ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"}); err != nil {
 			t.Errorf("confirm of an accepted 600 MiB file: %v", err)
 		}
-		// With direct transfers off the same row is refused: it exceeds the ordinary cap.
+		// The cap was recorded with the upload: switching direct transfers off meanwhile does not take it away.
 		repo2 := newFakeStoredRepo()
-		pendingUpload(repo2, 600*mib)
-		_, err := newDirectLimitsSvc(repo2, nil).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"})
-		wantErr[*apierror.ValidationError](t, err, "confirm without direct transfers")
+		pendingStagedUpload(repo2, 600*mib)
+		if _, err := newDirectLimitsSvc(repo2, nil).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"}); err != nil {
+			t.Errorf("confirm after direct transfers were switched off: %v", err)
+		}
+	})
+	t.Run("an upload that did not start staged is held to the ordinary cap even if direct is on now", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 600*mib) // started while direct transfers were off
+		size := int64(600 * mib)
+		_, err := newDirectLimitsSvc(repo, &fakeLinks{}).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: work, ID: saAttID, SizeBytes: &size, ContentType: "application/pdf"})
+		wantErr[*apierror.ValidationError](t, err, "an unstaged 600 MiB file")
 	})
 }
 
@@ -321,7 +350,7 @@ func TestStagedUploads(t *testing.T) {
 
 	t.Run("a chunk sent through the service lands under the staging key", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 20*mib)
+		pendingStagedUpload(repo, 20*mib)
 		blob := newFakeBlob()
 		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
 		if err := svc.PutChunk(ctx(), work, saAttID, 0, 5, strings.NewReader("hello")); err != nil {
@@ -337,7 +366,7 @@ func TestStagedUploads(t *testing.T) {
 	})
 	t.Run("a confirmed staged upload ends with the file at its key and no staging file", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 9*mib) // direct-sized
+		pendingStagedUpload(repo, 9*mib) // direct-sized
 		blob := newFakeBlob()
 		big := strings.Repeat("x", 9*mib)
 		blob.staged[staging] = map[int][]byte{0: []byte(big[:8*mib]), 1: []byte(big[8*mib:])}
@@ -357,7 +386,7 @@ func TestStagedUploads(t *testing.T) {
 	})
 	t.Run("a refused upload leaves neither file", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 9*mib)
+		pendingStagedUpload(repo, 9*mib)
 		blob := newFakeBlob()
 		// Bigger than declared: the real size does not match, so confirm refuses it.
 		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", 2*mib))}
@@ -373,7 +402,7 @@ func TestStagedUploads(t *testing.T) {
 	})
 	t.Run("a copy that fails can be confirmed again", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 9*mib)
+		pendingStagedUpload(repo, 9*mib)
 		blob := newFakeBlob()
 		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", mib))}
 		blob.copyErr = errors.New("storage down")
@@ -391,7 +420,7 @@ func TestStagedUploads(t *testing.T) {
 	})
 	t.Run("a copy that is not the size that was checked is not confirmed", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		pendingUpload(repo, 9*mib)
+		pendingStagedUpload(repo, 9*mib)
 		blob := newFakeBlob()
 		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", mib))}
 		blob.copyShort = true
@@ -408,6 +437,54 @@ func TestStagedUploads(t *testing.T) {
 		blob.copyShort = false
 		if _, err := svc.CompleteUpload(ctx(), req); err != nil {
 			t.Fatalf("confirm again: %v", err)
+		}
+	})
+	t.Run("the chunk route refuses a file above the ordinary limit", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingStagedUpload(repo, 600*mib)
+		blob := newFakeBlob()
+		err := newDirectSvcWith(repo, &fakeLinks{}, blob).PutChunk(ctx(), work, saAttID, 0, 5, strings.NewReader("hello"))
+		wantErr[*apierror.ValidationError](t, err, "a 600 MiB file through the chunk route")
+		if len(blob.staged) != 0 {
+			t.Error("a chunk of a file above the ordinary limit was stored")
+		}
+	})
+	t.Run("an upload started staged stays staged when direct transfers are switched off", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingStagedUpload(repo, 9*mib)
+		blob := newFakeBlob()
+		svc := newDirectSvcWith(repo, nil, blob) // no links now
+		if err := svc.PutChunk(ctx(), work, saAttID, 0, 8*mib, strings.NewReader(strings.Repeat("x", 8*mib))); err != nil {
+			t.Fatalf("PutChunk: %v", err)
+		}
+		if err := svc.PutChunk(ctx(), work, saAttID, 1, mib, strings.NewReader(strings.Repeat("x", mib))); err != nil {
+			t.Fatalf("PutChunk: %v", err)
+		}
+		if blob.staged[staging] == nil || blob.staged[workItemKey] != nil {
+			t.Fatalf("chunks are at %v, want only %q", blob.staged, staging)
+		}
+		if _, err := svc.CompleteUpload(ctx(), domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 2}); err != nil {
+			t.Fatalf("CompleteUpload: %v", err)
+		}
+		if len(blob.committed[workItemKey]) != 9*mib {
+			t.Errorf("the file at its key has %d bytes", len(blob.committed[workItemKey]))
+		}
+	})
+	t.Run("a staging file replaced after it was checked is not copied", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingStagedUpload(repo, 9*mib)
+		blob := newFakeBlob()
+		blob.staged[staging] = map[int][]byte{0: []byte(strings.Repeat("x", 8*mib)), 1: []byte(strings.Repeat("x", mib))}
+		// Someone with a still valid upload link commits another file of the same size in between.
+		blob.beforeCopy = func() { blob.versions[staging]++ }
+		svc := newDirectSvcWith(repo, &fakeLinks{}, blob)
+		_, err := svc.CompleteUpload(ctx(), domain.CompleteAttachmentUploadRequest{Kind: work, ID: saAttID, Chunks: 2})
+		wantErr[*apierror.ValidationError](t, err, "a replaced staging file")
+		if _, ok := blob.committed[workItemKey]; ok {
+			t.Error("a replaced file was copied to the key")
+		}
+		if _, ok := blob.committed[staging]; ok {
+			t.Error("the replaced staging file was left")
 		}
 	})
 	t.Run("a small upload is put and confirmed at its own key, as before", func(t *testing.T) {
@@ -427,10 +504,10 @@ func TestStagedUploads(t *testing.T) {
 	})
 }
 
-// TestPendingLargeUploads: a caller can only have a few uploads that may go
+// TestPendingStagedUploads: a caller can only have a few uploads that may go
 // straight to storage waiting at once, which bounds what they can leave there
 // unconfirmed.
-func TestPendingLargeUploads(t *testing.T) {
+func TestPendingStagedUploads(t *testing.T) {
 	start := func(repo *fakeStoredRepo, links LinkStore, size int64) error {
 		_, err := newDirectLimitsSvc(repo, links).InitiateUpload(saCtx(t, saEmail), domain.InitiateAttachmentUploadRequest{
 			Kind: domain.StoredAttachmentWorkItem, ParentID: saParentID, Name: "big.bin", ContentType: "application/zip", SizeBytes: size,
@@ -439,23 +516,22 @@ func TestPendingLargeUploads(t *testing.T) {
 	}
 	t.Run("the next large upload is refused at the limit", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		repo.pendingLarge = maxPendingLargeUploads
+		repo.pendingStaged = maxPendingStagedUploads
 		wantErr[*apierror.TooManyRequestsError](t, start(repo, &fakeLinks{}, 20*mib), "a caller at the limit")
 	})
-	t.Run("one below the limit is accepted, and the count is of recent large uploads by the caller", func(t *testing.T) {
+	t.Run("one below the limit is accepted, and the count is of the caller's recent staged uploads", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		repo.pendingLarge = maxPendingLargeUploads - 1
+		repo.pendingStaged = maxPendingStagedUploads - 1
 		if err := start(repo, &fakeLinks{}, 20*mib); err != nil {
 			t.Fatalf("below the limit: %v", err)
 		}
-		if repo.pendingAsked.email != saEmail || repo.pendingAsked.minBytes != directMinMB ||
-			!repo.pendingAsked.since.Equal(saNow.Add(-pendingLargeUploadWindow)) {
+		if repo.pendingAsked.email != saEmail || !repo.pendingAsked.since.Equal(saNow.Add(-pendingStagedUploadWindow)) {
 			t.Errorf("counted %+v", repo.pendingAsked)
 		}
 	})
 	t.Run("a small upload is never counted", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		repo.pendingLarge = 1000
+		repo.pendingStaged = 1000
 		if err := start(repo, &fakeLinks{}, 5*mib); err != nil {
 			t.Fatalf("small upload: %v", err)
 		}
@@ -465,7 +541,7 @@ func TestPendingLargeUploads(t *testing.T) {
 	})
 	t.Run("nothing is counted while direct transfers are off", func(t *testing.T) {
 		repo := newFakeStoredRepo()
-		repo.pendingLarge = 1000
+		repo.pendingStaged = 1000
 		if err := start(repo, nil, 20*mib); err != nil {
 			t.Fatalf("direct off: %v", err)
 		}
