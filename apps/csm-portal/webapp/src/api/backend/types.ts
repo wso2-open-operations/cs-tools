@@ -4390,6 +4390,16 @@ export interface BeUpdateTimeCardPayload {
   timePatching?: number;
 }
 
+/**
+ * Billable-only PATCH on an already-APPROVED card (admin). Sent with exactly
+ * this one key — the backend treats any other key alongside it as a different
+ * (submitter content / decide) PATCH, so this is a distinct type from
+ * {@link BeUpdateTimeCardPayload} on purpose.
+ */
+export interface BeUpdateTimeCardBillablePayload {
+  isBillable: boolean;
+}
+
 export interface BeTimeCardMutationResponse {
   message?: string;
   timeCard: BeTimeCardView;

@@ -272,6 +272,78 @@ func TestUpdateTimeCard(t *testing.T) {
 		}
 	})
 
+	t.Run("isBillable-only body", func(t *testing.T) {
+		const billableBody = `{"isBillable":true}`
+		run := func(t *testing.T, roles []string, body string) (int, bool) {
+			t.Helper()
+			called := false
+			h := NewTimeCardHandler(&mockEntityTimeCardClient{
+				updateTimeCardFn: func(context.Context, string, []byte) ([]byte, error) {
+					called = true
+					return []byte(`{}`), nil
+				},
+			}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+			r := httptest.NewRequest(http.MethodPatch, "/time-cards/"+testTCID, strings.NewReader(body))
+			r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{Email: "jane.doe@example.com", UserID: "00000000-0000-0000-0000-000000000000", Roles: roles}))
+			r.SetPathValue("id", testTCID)
+			w := httptest.NewRecorder()
+			h.UpdateTimeCard(w, r)
+			return w.Code, called
+		}
+
+		if code, called := run(t, []string{"test-admin"}, billableBody); code != http.StatusOK || !called {
+			t.Errorf("admin: code=%d called=%v, want 200 and forwarded", code, called)
+		}
+		for _, role := range []string{"test-cs-engineer", "test-timecard-approver"} {
+			if code, called := run(t, []string{role}, billableBody); code != http.StatusForbidden || called {
+				t.Errorf("%s: code=%d called=%v, want 403 and not forwarded", role, code, called)
+			}
+		}
+		if code, called := run(t, nil, billableBody); code != http.StatusForbidden || called {
+			t.Errorf("no roles: code=%d called=%v, want 403 and not forwarded", code, called)
+		}
+		for _, denied := range []string{
+			`{"ISBILLABLE":true}`,
+			`{"isbillable":false}`,
+			`{"isBillable":true,"foo":1}`,
+			`{"isBillable":true,"date":null}`,
+			`{"isBillable":true,"approverIds":null}`,
+		} {
+			if code, called := run(t, []string{"test-cs-engineer"}, denied); code != http.StatusForbidden || called {
+				t.Errorf("non-admin %s: code=%d called=%v, want 403 and not forwarded", denied, code, called)
+			}
+			if code, called := run(t, []string{"test-admin"}, denied); code != http.StatusOK || !called {
+				t.Errorf("admin %s: code=%d called=%v, want 200 and forwarded", denied, code, called)
+			}
+		}
+		for _, allowed := range []string{
+			`{"isBillable":true,"approverIds":[]}`,
+			`{"isBillable":true,"date":"2026-01-02"}`,
+			`{"isBillable":true,"timeAnalyzing":0}`,
+		} {
+			if code, called := run(t, []string{"test-cs-engineer"}, allowed); code != http.StatusOK || !called {
+				t.Errorf("non-admin %s: code=%d called=%v, want 200 and forwarded", allowed, code, called)
+			}
+		}
+		full := `{"date":"2026-01-02","isBillable":true,"workLogComment":"x","timeAnalyzing":10}`
+		if code, called := run(t, []string{"test-cs-engineer"}, full); code != http.StatusOK || !called {
+			t.Errorf("non-admin full-field edit: code=%d called=%v, want 200 and forwarded", code, called)
+		}
+		if code, called := run(t, []string{"test-cs-engineer"}, `{bad`); code != http.StatusBadRequest || called {
+			t.Errorf("malformed body: code=%d called=%v, want unchanged 400 and not forwarded", code, called)
+		}
+	})
+
+	t.Run("denied isBillable-only body carries the standard forbidden message", func(t *testing.T) {
+		h := NewTimeCardHandler(&mockEntityTimeCardClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/time-cards/"+testTCID, strings.NewReader(`{"isBillable":false}`)))
+		r.SetPathValue("id", testTCID)
+		w := httptest.NewRecorder()
+		h.UpdateTimeCard(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		assertErrorMessage(t, w, ErrMsgForbidden)
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to update time card.") {
 			t.Run(tc.name, func(t *testing.T) {

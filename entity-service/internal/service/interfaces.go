@@ -1098,6 +1098,11 @@ type TimeCardService interface {
 	CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest) (domain.TimeCardMutationResponse, error)
 	// UpdateTimeCard edits an editable (submitted) time card, or transitions its
 	// state (approve/reject) when req.State is set. SN enforces authorization.
+	// The Postgres-backed implementation also lets a request carrying only
+	// isBillable change that flag on an already approved card (no external
+	// mirror write; project hours refreshed; audit logged). It performs no role
+	// check for that override: the caller must already have restricted it to
+	// admins. The SN-backed implementation does not support the override.
 	UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error)
 	// SearchCaseTimeCards returns a paginated list of time cards grouped and
 	// rolled up by case, using the same filters as SearchTimeCards.

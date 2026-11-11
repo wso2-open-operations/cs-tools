@@ -23,9 +23,11 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -37,6 +39,7 @@ type stubTimeCardRepo struct {
 	updateTimeCardFields    func(ctx context.Context, req domain.UpdateTimeCardRequest, actorID string) (domain.TimeCardView, error)
 	transitionTimeCardState func(ctx context.Context, id string, state domain.TimeCardState, leadComment *string, actorID string) (domain.TimeCardView, error)
 	deleteTimeCard          func(ctx context.Context, id, submitterID string) error
+	overrideBillable        func(ctx context.Context, id string, isBillable bool, actorID string) (domain.TimeCardView, bool, bool, error)
 	setTimeCardSNSysID      func(ctx context.Context, id, snSysID string) error
 	getTimeCardSNSysID      func(ctx context.Context, id string) (*string, error)
 	aggregateTimeCards      func(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error)
@@ -74,6 +77,14 @@ func (s *stubTimeCardRepo) TransitionTimeCardState(ctx context.Context, id strin
 		return s.transitionTimeCardState(ctx, id, state, leadComment, actorID)
 	}
 	panic("not implemented")
+}
+func (s *stubTimeCardRepo) OverrideApprovedTimeCardBillable(ctx context.Context, id string, isBillable bool, actorID string) (domain.TimeCardView, bool, bool, error) {
+	if s.overrideBillable != nil {
+		return s.overrideBillable(ctx, id, isBillable, actorID)
+	}
+	// Not applied: the card is treated as not approved, so the regular edit
+	// path runs -- what every pre-existing test of that path expects.
+	return domain.TimeCardView{}, false, false, nil
 }
 func (s *stubTimeCardRepo) DeleteTimeCard(ctx context.Context, id, submitterID string) error {
 	if s.deleteTimeCard != nil {
@@ -855,5 +866,164 @@ func TestTimeCardService_UpdateTimeCard_NoProjectHoursRecomputer(t *testing.T) {
 	svc, _ := projectHoursTestService(t, nil, nil, nil)
 	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// overrideTestService wires a dual-write time card service (so a mirror
+// dispatch would be observable) whose repository reports the card as approved
+// for the billable override. mirrorCalls counts every time the mirror's sys_id
+// lookup or UpdateTimeCard ran.
+func overrideTestService(t *testing.T, hours ProjectHoursRecomputer, applied bool) (TimeCardService, *stubTimeCardRepo, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+	var mirrorCalls, overrideCalls atomic.Int32
+	repo := &stubTimeCardRepo{
+		overrideBillable: func(_ context.Context, id string, isBillable bool, actorID string) (domain.TimeCardView, bool, bool, error) {
+			overrideCalls.Add(1)
+			if actorID != testUUID || !isBillable {
+				t.Errorf("override got actor %q billable %v, want %q true", actorID, isBillable, testUUID)
+			}
+			return domain.TimeCardView{ID: id, Project: &domain.TimeCardRef{ID: testHoursProjectUUID}}, false, applied, nil
+		},
+		updateTimeCardFields: func(context.Context, domain.UpdateTimeCardRequest, string) (domain.TimeCardView, error) {
+			return domain.TimeCardView{ID: testUUID}, nil
+		},
+		getTimeCardSNSysID: func(context.Context, string) (*string, error) {
+			mirrorCalls.Add(1)
+			return nil, nil
+		},
+	}
+	mirror := &stubMirrorTimeCardService{
+		updateTimeCard: func(context.Context, domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
+			mirrorCalls.Add(1)
+			return domain.TimeCardMutationResponse{}, nil
+		},
+	}
+	users := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+	svc := NewTimeCardServiceWithSNWriteback(repo, users, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror)
+	return WithTimeCardProjectHours(svc, hours), repo, &mirrorCalls, &overrideCalls
+}
+
+// isBillable-only on an approved card: applied in Postgres, project hours
+// refreshed, audit line written (who, from, to), and NO mirror dispatch.
+func TestTimeCardService_UpdateTimeCard_ApprovedBillableOverride(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	logs := captureSlog(t)
+	hours := &recordingProjectHours{}
+	isBillable := true
+	svc, _, mirrorCalls, overrideCalls := overrideTestService(t, hours, true)
+
+	resp, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, IsBillable: &isBillable})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.TimeCard == nil || resp.TimeCard.ID != testUUID {
+		t.Errorf("response time card = %+v, want the overridden card", resp.TimeCard)
+	}
+	if got := overrideCalls.Load(); got != 1 {
+		t.Errorf("override calls = %d, want 1", got)
+	}
+	if got := hours.calls(); !reflect.DeepEqual(got, []string{testHoursProjectUUID}) {
+		t.Errorf("recomputed = %v, want [%s]", got, testHoursProjectUUID)
+	}
+	out := logs.String()
+	for _, want := range []string{"audit=true", "action=time-card-billable-override", "callerId=" + testUUID, "timeCardId=" + testUUID, "from=false", "to=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("audit log %q missing %q", out, want)
+		}
+	}
+	time.Sleep(200 * time.Millisecond) // the mirror dispatcher is asynchronous
+	if got := mirrorCalls.Load(); got != 0 {
+		t.Errorf("mirror touched %d times, want 0 (override is Postgres only)", got)
+	}
+}
+
+// isBillable-only on a card that is not approved falls through to the regular
+// edit, mirror included.
+func TestTimeCardService_UpdateTimeCard_BillableOnlyOnSubmittedCardUsesRegularEdit(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	hours := &recordingProjectHours{}
+	isBillable := true
+	svc, _, mirrorCalls, overrideCalls := overrideTestService(t, hours, false)
+
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, IsBillable: &isBillable}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := overrideCalls.Load(); got != 1 {
+		t.Errorf("override attempts = %d, want 1", got)
+	}
+	if got := hours.calls(); len(got) != 0 {
+		t.Errorf("recomputed = %v, want none for a regular field edit", got)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for mirrorCalls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mirrorCalls.Load() == 0 {
+		t.Error("mirror was not dispatched for a regular submitted-card edit")
+	}
+}
+
+// isBillable alongside any other field, or a state, never reaches the
+// override: an approved card stays uneditable (the repository's own conflict
+// is returned unchanged).
+func TestTimeCardService_UpdateTimeCard_ApprovedWithOtherFieldsRejected(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	isBillable := true
+	approved := domain.TimeCardStateApproved
+	minutes := 30
+	conflict := &apierror.ConflictError{Msg: "time card is not editable"}
+
+	for name, req := range map[string]domain.UpdateTimeCardRequest{
+		"comment":  {ID: testUUID, IsBillable: &isBillable, WorkLogComment: strPtrTC("x")},
+		"minutes":  {ID: testUUID, IsBillable: &isBillable, TimeAnalyzing: &minutes},
+		"date":     {ID: testUUID, IsBillable: &isBillable, Date: strPtrTC("2026-01-02")},
+		"approver": {ID: testUUID, IsBillable: &isBillable, ApproverIDs: []string{testApproverUUID}},
+		"state":    {ID: testUUID, IsBillable: &isBillable, State: &approved},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &stubTimeCardRepo{
+				overrideBillable: func(context.Context, string, bool, string) (domain.TimeCardView, bool, bool, error) {
+					t.Error("override must not be attempted when other fields are present")
+					return domain.TimeCardView{}, false, false, nil
+				},
+				updateTimeCardFields: func(context.Context, domain.UpdateTimeCardRequest, string) (domain.TimeCardView, error) {
+					return domain.TimeCardView{}, conflict
+				},
+				transitionTimeCardState: func(context.Context, string, domain.TimeCardState, *string, string) (domain.TimeCardView, error) {
+					return domain.TimeCardView{}, conflict
+				},
+			}
+			svc := NewTimeCardService(repo, stubUserRepo{
+				getUserByEmail: func(context.Context, string) (domain.User, error) {
+					return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+				},
+			})
+			if _, err := svc.UpdateTimeCard(ctx, req); !errors.Is(err, conflict) {
+				t.Errorf("error = %v, want the repository conflict", err)
+			}
+		})
+	}
+}
+
+func TestIsBillableOnlyUpdate(t *testing.T) {
+	b := true
+	n := 5
+	if !isBillableOnlyUpdate(domain.UpdateTimeCardRequest{IsBillable: &b}) {
+		t.Error("isBillable alone must qualify")
+	}
+	for name, req := range map[string]domain.UpdateTimeCardRequest{
+		"empty":           {},
+		"empty approvers": {IsBillable: &b, ApproverIDs: []string{}},
+		"lead comment":    {IsBillable: &b, LeadComment: strPtrTC("x")},
+		"complexity":      {IsBillable: &b, IssueComplexity: strPtrTC("high")},
+		"patching":        {IsBillable: &b, TimePatching: &n},
+	} {
+		if isBillableOnlyUpdate(req) {
+			t.Errorf("%s must not qualify", name)
+		}
 	}
 }

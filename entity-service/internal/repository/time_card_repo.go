@@ -102,6 +102,20 @@ type TimeCardRepository interface {
 	// ConflictError if the card is not currently "submitted" (already
 	// approved/rejected/processed/recalled).
 	TransitionTimeCardState(ctx context.Context, id string, state domain.TimeCardState, leadComment *string, actorID string) (domain.TimeCardView, error)
+	// OverrideApprovedTimeCardBillable sets is_billable on the time card
+	// identified by id to isBillable, but only while the card is in the
+	// "approved" state, recording actorID as updated_by. It is the one edit an
+	// approved card accepts (UpdateTimeCardFields refuses anything outside the
+	// "submitted" state). Unlike UpdateTimeCardFields it does not require
+	// actorID to be the card's submitter: authorization (admin-only) is the
+	// caller's responsibility and is not checked here. The state check and the
+	// write happen in one transaction (SELECT ... FOR UPDATE then UPDATE) so a
+	// concurrent state change cannot slip between them. Returns applied=false,
+	// with no error and no write, when the card does not exist or is not
+	// approved, so the caller can fall back to the regular edit path. On
+	// success returns the refreshed view and the previous is_billable value
+	// (a NULL column reads as false) for the caller's audit record.
+	OverrideApprovedTimeCardBillable(ctx context.Context, id string, isBillable bool, actorID string) (view domain.TimeCardView, previous bool, applied bool, err error)
 	// DeleteTimeCard permanently deletes the time card identified by id, but
 	// only if it belongs to submitterID and is still in the "submitted"
 	// state. Returns a ConflictError otherwise (including if id does not
@@ -1093,6 +1107,47 @@ func (r *timeCardRepo) TransitionTimeCardState(ctx context.Context, id string, s
 	}
 
 	return r.getTimeCardByID(ctx, returnedID)
+}
+
+// OverrideApprovedTimeCardBillable implements TimeCardRepository.
+func (r *timeCardRepo) OverrideApprovedTimeCardBillable(ctx context.Context, id string, isBillable bool, actorID string) (domain.TimeCardView, bool, bool, error) {
+	var previous, applied bool
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		var current *bool
+		var state *string
+		err := tx.QueryRow(ctx, `SELECT is_billable, state::TEXT FROM time_card WHERE id = $1 FOR UPDATE`, id).Scan(&current, &state)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read time card for billable override: %w", err)
+		}
+		// time_card_state_enum is UPPER_SNAKE_CASE; domain.TimeCardStateApproved
+		// is lowercase.
+		if state == nil || !strings.EqualFold(*state, string(domain.TimeCardStateApproved)) {
+			return nil
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE time_card SET is_billable = $2, updated_on = NOW(), updated_by = $3 WHERE id = $1`,
+			id, isBillable, actorID,
+		); err != nil {
+			return fmt.Errorf("override approved time card billable: %w", err)
+		}
+		previous = current != nil && *current
+		applied = true
+		return nil
+	})
+	if err != nil {
+		return domain.TimeCardView{}, false, false, err
+	}
+	if !applied {
+		return domain.TimeCardView{}, false, false, nil
+	}
+	view, err := r.getTimeCardByID(ctx, id)
+	if err != nil {
+		return domain.TimeCardView{}, false, false, err
+	}
+	return view, previous, true, nil
 }
 
 // DeleteTimeCard implements TimeCardRepository.

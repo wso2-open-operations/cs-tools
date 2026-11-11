@@ -266,3 +266,43 @@ func TestTimeCardIntegration_TransitionAllowsAdminWithoutApproverRow(t *testing.
 		t.Errorf("TransitionTimeCardState() state = %v, want %q", view.State, domain.TimeCardStateApproved)
 	}
 }
+
+// TestTimeCardIntegration_OverrideApprovedBillable exercises the real SQL of
+// OverrideApprovedTimeCardBillable: a submitted card is left untouched
+// (applied=false), an approved card's is_billable flips and reports the
+// previous value, and a missing card is not an error.
+func TestTimeCardIntegration_OverrideApprovedBillable(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedTimeCardWithNullDurations(t, pool) // one SUBMITTED, is_billable=true card
+
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewTimeCardRepository(scoped)
+
+	_, _, applied, err := repo.OverrideApprovedTimeCardBillable(ctx, timeCardTestNullCardID, false, timeCardTestUserID)
+	if err != nil || applied {
+		t.Fatalf("submitted card: applied = %v, err = %v; want applied=false, no error", applied, err)
+	}
+	_, _, applied, err = repo.OverrideApprovedTimeCardBillable(ctx, "46666666-0000-0000-0000-0000000000ff", false, timeCardTestUserID)
+	if err != nil || applied {
+		t.Fatalf("missing card: applied = %v, err = %v; want applied=false, no error", applied, err)
+	}
+
+	if _, err := scoped.Exec(ctx, `UPDATE time_card SET state = 'APPROVED' WHERE id = $1`, timeCardTestNullCardID); err != nil {
+		t.Fatalf("approve seed card: %v", err)
+	}
+	view, previous, applied, err := repo.OverrideApprovedTimeCardBillable(ctx, timeCardTestNullCardID, false, timeCardTestUserID)
+	if err != nil || !applied {
+		t.Fatalf("approved card: applied = %v, err = %v; want applied=true", applied, err)
+	}
+	if !previous {
+		t.Error("previous = false, want true (seed card was billable)")
+	}
+	if view.HasBillable {
+		t.Error("returned view still billable, want false")
+	}
+	var stored bool
+	if err := scoped.QueryRow(ctx, `SELECT is_billable FROM time_card WHERE id = $1`, timeCardTestNullCardID).Scan(&stored); err != nil || stored {
+		t.Errorf("stored is_billable = %v (err %v), want false", stored, err)
+	}
+}

@@ -14,6 +14,7 @@ info:
     | `view_operations` | the same reads under `/incidents`, `/change-requests`, `/problems`, `/incident-tasks`, `/outages`, `/alerts`, `/smart-alerts` | cs-engineer, admin |
     | `time_cards_and_updates` | every `/time-cards` route and `GET /updates/product-update-levels`, `POST /updates/levels/search` | cs-engineer, time-card-approver, admin |
     | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state` (approve/reject) | time-card-approver, admin |
+    | `override_approved_time_card_billable` | `PATCH /time-cards/{id}` when the body is `isBillable` and nothing else | admin |
     | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
     | `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
@@ -9208,7 +9209,10 @@ paths:
         Update a time card (ServiceNow data source only). Carries either editable
         fields (submitter, while submitted) or a state transition:
         {"state":"approved"} or {"state":"rejected","leadComment":"..."} (an
-        eligible approver). The entity service enforces authorization.
+        eligible approver). An admin may also send `isBillable` alone to change
+        the billable flag of an already approved time card; any other caller
+        sending that body gets 403. The entity service enforces the rest of
+        the authorization.
       operationId: updateTimeCard
       security:
         - bearerAuth: []
@@ -20010,7 +20014,9 @@ components:
         Either editable fields (no `state`), or a state transition: `state`
         = `approved`, or `state` = `rejected` with a `leadComment`. The two are
         mutually exclusive and an empty body is rejected; the entity service
-        enforces this.
+        enforces this. A body carrying `isBillable` and no other field changes
+        the billable flag of an already approved time card, and is accepted
+        from an admin only (403 for any other caller).
       properties:
         state:
           type: string

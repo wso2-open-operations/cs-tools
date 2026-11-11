@@ -5564,6 +5564,13 @@ type CreateTimeCardRequest struct {
 // card is submitted) OR a state transition: State="approved", or State="rejected"
 // with LeadComment. SN enforces authorization (submitter for edits, an eligible
 // approver in approver_list for transitions).
+//
+// Exception (Postgres data source only): a request carrying IsBillable and no
+// other field overrides that flag on an already APPROVED card, whoever the
+// submitter is. It is not mirrored to the external data source. The service
+// does not check the caller's role for it: the caller must have restricted it
+// to admins. Any other field alongside IsBillable keeps the rule above: an
+// approved card is not editable.
 type UpdateTimeCardRequest struct {
 	ID                       string         `json:"-"`
 	State                    *TimeCardState `json:"state,omitempty"`

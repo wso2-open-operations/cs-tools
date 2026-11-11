@@ -28039,7 +28039,14 @@ components:
         Carries either editable fields (submitter, while the card is submitted),
         or a state transition: state=approved, or state=rejected with leadComment.
         The two are mutually exclusive and an empty body is rejected (400); the
-        entity service enforces this and authorization.
+        entity service enforces this and authorization. Exception (Postgres data
+        source only): a body with isBillable and no other field overrides that
+        flag on an already approved card, whoever submitted it. The change is
+        not mirrored to any external data source, project hours are refreshed
+        and an audit log line is written. The entity service does not check the
+        caller's role for this override; the calling service must restrict it
+        to admins. Any other field in the body keeps an approved card
+        uneditable (409).
       properties:
         state:
           type: string
