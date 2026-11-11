@@ -14,11 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { hasVisibleContent, isBlankHtml, sanitizeBannerHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 
 /**
- * An image banner is a picture. A text banner is a message, in one of the
- * four maintenance colours or in colours the engineer chooses.
+ * An image banner is a picture. A text banner is a message in one of the four
+ * maintenance colours. A custom banner is HTML the engineer pastes in, which
+ * brings its own colours and layout.
  * The kind is written into the HTML, not into its own column.
  */
 export const TEXT_BANNER_TYPES = ["info", "warning", "error", "success", "custom"] as const;
@@ -79,7 +80,10 @@ export interface BannerContent {
   type: BannerType;
   /** The name shown on the banner card. Stored in the HTML, not in its own column. */
   title: string;
-  /** Rich text from the banner editor, stored as HTML. */
+  /**
+   * Rich text from the banner editor, stored as HTML. For a custom banner it is
+   * the HTML the engineer pasted in, kept exactly as pasted until it is built.
+   */
   message: string;
   textColor: string;
   backgroundColor: string;
@@ -183,6 +187,7 @@ function safeUrl(value: string): string {
  * text and lives in [data-banner-text], so Edit can put it back in the editor.
  */
 export function buildBannerHtml(content: BannerContent, id = ""): string {
+  if (content.type === "custom") return buildCustomBannerHtml(content, id);
   const message = content.message.trim();
   const textColor = safeColor(content.textColor, EMPTY_BANNER_CONTENT.textColor);
   const backgroundColor = safeColor(content.backgroundColor, EMPTY_BANNER_CONTENT.backgroundColor);
@@ -220,17 +225,74 @@ export function buildBannerHtml(content: BannerContent, id = ""): string {
   );
 }
 
+/**
+ * A custom banner is the HTML the engineer pasted, inside the one element every
+ * banner needs: `data-banner` is what stamps the id used to remember a closed
+ * banner and what Edit reads the banner back from. The pasted HTML sits in
+ * [data-banner-custom], so Edit gets it back as pasted instead of as the
+ * wrapper's own markup. The wrapper adds no colours or layout of its own, and
+ * a strip is 3rem tall in the portal, so what does not fit is cut off.
+ */
+function buildCustomBannerHtml(content: BannerContent, id: string): string {
+  const closeable = content.closeable;
+  const bannerId = id.trim();
+  const pasted = sanitizeBannerHtml(content.message.trim());
+  const close = closeable
+    ? `<button type="button" data-close-banner="true" aria-label="Close banner" style="position:absolute;top:50%;right:12px;transform:translateY(-50%);background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.6);color:#fff;width:24px;height:24px;cursor:pointer;border-radius:4px;z-index:1;">×</button>`
+    : "";
+  return (
+    `<div data-banner="1"${bannerId ? ` data-id="${escapeText(bannerId)}"` : ""} data-banner-type="custom" data-closeable="${closeable ? "true" : "false"}" ` +
+    `style="box-sizing:border-box;position:relative;width:100%;height:3rem;overflow:hidden;">` +
+    `<div data-banner-custom style="height:100%;width:100%">${pasted}</div>${close}</div>`
+  );
+}
+
+/**
+ * True when pasted custom HTML would show something once it is sanitised: text,
+ * or a picture (an image, an SVG, a picture, a video or a canvas). Markup that
+ * shows nothing, such as an empty div, a lone script or only whitespace, would
+ * save as a blank strip, so it does not count.
+ */
+export function hasVisibleBannerHtml(html: string): boolean {
+  const clean = sanitizeBannerHtml(html.trim());
+  return hasVisibleContent(clean) || /<(svg|picture|video|canvas)\b/i.test(clean);
+}
+
+/**
+ * What a custom banner saved before it was pasted HTML looked like, as HTML to
+ * edit: the chosen colours and the message, centred in the strip. Opening such
+ * a banner in Edit keeps its look instead of dropping the colours.
+ */
+function legacyCustomHtml(message: string, textColor: string, backgroundColor: string): string {
+  return `<div style="height:100%;display:flex;align-items:center;justify-content:center;padding:0 48px;box-sizing:border-box;background-color:${textColorSafe(backgroundColor)};color:${textColorSafe(textColor)};font:14px/1.2 -apple-system,BlinkMacSystemFont,Roboto,sans-serif;text-align:center">${message}</div>`;
+}
+
+function textColorSafe(value: string): string {
+  return normalizeHex(value) || "#000000";
+}
+
 /** Reads a banner saved by buildBannerHtml. Anything else comes back blank. */
 export function parseBannerHtml(html: string): BannerContent {
   const root = new DOMParser().parseFromString(html, "text/html").querySelector("[data-banner]");
   if (!root) return { ...EMPTY_BANNER_CONTENT };
   const text = root.querySelector("[data-banner-text]");
+  const pasted = root.querySelector("[data-banner-custom]");
   const backgroundColor = safeColor(root.getAttribute("data-bg") ?? "", EMPTY_BANNER_CONTENT.backgroundColor);
+  const type = bannerTypeOf(root.getAttribute("data-banner-type"), backgroundColor);
+  const textColor = safeColor(root.getAttribute("data-text-color") ?? "", EMPTY_BANNER_CONTENT.textColor);
+  const message = text ? text.innerHTML : (root.getAttribute("data-message") ?? "");
   return {
-    type: bannerTypeOf(root.getAttribute("data-banner-type"), backgroundColor),
+    type,
     title: (root.getAttribute("data-title") ?? "").trim(),
-    message: text ? text.innerHTML : (root.getAttribute("data-message") ?? ""),
-    textColor: safeColor(root.getAttribute("data-text-color") ?? "", EMPTY_BANNER_CONTENT.textColor),
+    message:
+      type !== "custom"
+        ? message
+        : pasted
+          ? pasted.innerHTML
+          : message.trim()
+            ? legacyCustomHtml(message, textColor, backgroundColor)
+            : "",
+    textColor,
     backgroundColor,
     iconColor: "",
     imageUrl: root.getAttribute("data-image") ?? "",
