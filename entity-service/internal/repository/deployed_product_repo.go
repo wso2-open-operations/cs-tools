@@ -965,6 +965,9 @@ func (r *deployedProductRepo) CreateDeployedProduct(ctx context.Context, req dom
 			if !versionOfProduct {
 				return domain.CreatedDeployedProduct{}, &apierror.ValidationError{Msg: "versionId is not a version of productId"}
 			}
+			if beforeDeployedProductInsert != nil {
+				beforeDeployedProductInsert(ctx)
+			}
 
 			var c domain.CreatedDeployedProduct
 			err := tx.QueryRow(ctx, createDeployedProductQuery,
@@ -991,8 +994,14 @@ func (r *deployedProductRepo) CreateDeployedProduct(ctx context.Context, req dom
 					field = "one or more referenced fields"
 				}
 				return domain.CreatedDeployedProduct{}, &apierror.ValidationError{Msg: field + " does not refer to an existing record"}
-			case "42501": // insufficient_privilege: the insert policy refused the caller
-				return domain.CreatedDeployedProduct{}, &apierror.NotFoundError{Msg: "project not found"}
+			case "42501": // insufficient_privilege
+				// The insert policy refusing the caller is the caller's answer. The same
+				// code also means the role lacks USAGE on ibitm_number_seq
+				// (next_series_number runs in this transaction): a deployment problem,
+				// left to fall through as a 500 rather than read as "project not found".
+				if isRowSecurityRefusal(pgErr) {
+					return domain.CreatedDeployedProduct{}, &apierror.NotFoundError{Msg: "project not found"}
+				}
 			}
 		}
 		var ve *apierror.ValidationError
@@ -1002,6 +1011,21 @@ func (r *deployedProductRepo) CreateDeployedProduct(ctx context.Context, req dom
 		return domain.CreatedDeployedProduct{}, fmt.Errorf("create deployed product: %w", err)
 	}
 }
+
+// isRowSecurityRefusal reports whether an insufficient_privilege (42501) error
+// is a row-level security policy refusing the row, as opposed to a missing
+// privilege on an object (PostgreSQL says "permission denied for ..." then).
+// Both share the SQLSTATE, so only the message tells them apart.
+func isRowSecurityRefusal(pgErr *pgconn.PgError) bool {
+	return pgErr.Code == "42501" && strings.Contains(pgErr.Message, "row-level security policy")
+}
+
+// beforeDeployedProductInsert, when set, runs inside CreateDeployedProduct's
+// transaction after the sequence advance and the reference checks, right
+// before the insert. Always nil in the service; only tests set it (through
+// export_test.go), to commit a row that takes the next number in between and
+// so exercise the retry.
+var beforeDeployedProductInsert func(ctx context.Context)
 
 // parseUpdateDeployedProductDescription reports whether req.Description (a
 // json.RawMessage, see that field's own doc comment) was provided at all,
