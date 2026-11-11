@@ -22,10 +22,11 @@ import {
   Button,
   DatePickers,
   FormControl,
-  InputLabel,
-  MenuItem,
+  FormControlLabel,
+  FormLabel,
   Paper,
-  Select,
+  Radio,
+  RadioGroup,
   Skeleton,
   TextField,
   Typography,
@@ -329,24 +330,44 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
       </Section>
 
       <Section title="Schedule">
-        <FormControl size="small" sx={{ maxWidth: 240 }}>
-          <InputLabel id="alert-mute-rule-duration-label">Duration</InputLabel>
-          <Select
-            labelId="alert-mute-rule-duration-label"
-            label="Duration"
+        <FormControl component="fieldset" fullWidth>
+          <FormLabel component="legend" id="alert-mute-rule-duration-label" sx={{ mb: 1 }}>
+            Duration
+          </FormLabel>
+          <RadioGroup
+            aria-labelledby="alert-mute-rule-duration-label"
             value={String(form.duration)}
             onChange={(e) => {
-              const v = String(e.target.value);
+              const v = e.target.value;
               set("duration", v === "custom" ? "custom" : (Number(v) as (typeof QUICK_DURATIONS_MIN)[number]));
               setErrors((er) => ({ ...er, startOn: undefined, endOn: undefined }));
             }}
+            sx={{ gap: 1, maxWidth: 420 }}
           >
-            {[...QUICK_DURATIONS_MIN, "custom" as const].map((d) => (
-              <MenuItem key={d} value={String(d)}>
-                {d === "custom" ? "Custom" : formatDuration(d * 60_000)}
-              </MenuItem>
-            ))}
-          </Select>
+            {[...QUICK_DURATIONS_MIN, "custom" as const].map((d) => {
+              const selected = String(form.duration) === String(d);
+              return (
+                <FormControlLabel
+                  key={d}
+                  value={String(d)}
+                  control={<Radio size="small" />}
+                  label={d === "custom" ? "Custom" : formatDuration(d * 60_000)}
+                  sx={{
+                    m: 0,
+                    width: "100%",
+                    pr: 2,
+                    pl: 1,
+                    py: 0.75,
+                    border: 1,
+                    borderRadius: 1,
+                    borderColor: selected ? "primary.main" : "divider",
+                    bgcolor: selected ? "action.selected" : "transparent",
+                    "&:hover": { borderColor: selected ? "primary.main" : "text.secondary" },
+                  }}
+                />
+              );
+            })}
+          </RadioGroup>
         </FormControl>
         {form.duration === "custom" ? (
           <>
