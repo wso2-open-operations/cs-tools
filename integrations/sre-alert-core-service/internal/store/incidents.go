@@ -60,7 +60,10 @@ type CurrentFold struct {
 	LastSeen time.Time
 	// Category fills the incident's category only if it is still empty.
 	Category string
-	Notes    []model.Note
+	// SeverityLabel, when set, replaces the incident's severity_label: a later alert of the same fingerprint was more
+	// severe, so alert mute rules match the incident's worst severity, not its first.
+	SeverityLabel string
+	Notes         []model.Note
 }
 
 // NewIncident starts a new incident with its notes, the first being its creation note.
@@ -76,6 +79,7 @@ const (
 	selectCurrentQuery = `SELECT ` + incidentColumns + ` FROM incidents_processed WHERE fingerprint = $1 ORDER BY first_seen DESC LIMIT 1`
 	updateCurrentQuery = `UPDATE incidents_processed SET alert_count = alert_count + $2, last_seen = greatest(last_seen, $3),
 	category = CASE WHEN category = '' THEN $4 ELSE category END,
+	severity_label = CASE WHEN $5 <> '' THEN $5 ELSE severity_label END,
 	fold_version = fold_version + 1, delivery_due_at = least(coalesce(delivery_due_at, now()), now())
 	WHERE id = $1`
 	insertNotesQuery = `INSERT INTO incident_notes (incident, alert_id, kind, note, chat_pending)
@@ -122,7 +126,7 @@ func (r *IncidentRepo) Fold(ctx context.Context, fp string, alertIDs []string, d
 	plan = decide(current, recorded)
 	writes := &pgx.Batch{}
 	if c := plan.Current; c != nil {
-		writes.Queue(updateCurrentQuery, c.ID, c.Added, c.LastSeen, c.Category)
+		writes.Queue(updateCurrentQuery, c.ID, c.Added, c.LastSeen, c.Category, c.SeverityLabel)
 		if len(c.Notes) > 0 {
 			writes.Queue(insertNotesQuery, append([]any{c.ID}, noteArrays(c.Notes)...)...)
 		}
@@ -426,6 +430,12 @@ var fieldValueColumns = map[string]string{
 	"category": "category", "severity": "severity_label", "unique_identifier": "unique_identifier",
 }
 
+// fieldValuesWindow bounds a field-values search to recently seen incidents.
+const fieldValuesWindow = "30 days"
+
+// minUniqueIdentifierQuery is how many characters a unique_identifier search needs before it runs.
+const minUniqueIdentifierQuery = 3
+
 // likeEscaper escapes LIKE wildcards so a search matches them literally.
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
@@ -437,9 +447,15 @@ func (r *IncidentRepo) FieldValues(ctx context.Context, field, query string, lim
 	if !ok {
 		return nil, false, nil
 	}
+	// unique_identifier is close to one value per alert, so it is only searched, never listed whole.
+	if field == "unique_identifier" && len([]rune(query)) < minUniqueIdentifierQuery {
+		return []string{}, true, nil
+	}
+	// Bounded to recently seen incidents so a longer retention never makes a keystroke group the whole table. The
+	// portal debounces typing (300 ms) and only asks while the field's list is open.
 	rows, err := r.pool.Query(ctx, `SELECT `+col+` FROM incidents_processed
-		WHERE `+col+` <> '' AND `+col+` ILIKE '%' || $1 || '%'
-		GROUP BY `+col+` ORDER BY max(last_seen) DESC, `+col+` LIMIT $2`, likeEscaper.Replace(query), limit)
+		WHERE last_seen > now() - $3::interval AND `+col+` <> '' AND `+col+` ILIKE '%' || $1 || '%'
+		GROUP BY `+col+` ORDER BY max(last_seen) DESC, `+col+` LIMIT $2`, likeEscaper.Replace(query), limit, fieldValuesWindow)
 	if err != nil {
 		return nil, true, fmt.Errorf("list %s values: %w", field, err)
 	}

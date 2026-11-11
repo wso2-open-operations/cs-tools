@@ -165,11 +165,17 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 	add := func(it Item, kind, label string) {
 		note := model.Note{AlertID: it.ID, Kind: kind, Text: model.BuildWorkNote(label, it.ID, it.Alert.MetricName, it.Alert.Source), ChatPending: true}
 		at := it.Alert.EventTime()
+		// A duplicate that is more severe (warning -> critical) raises the incident's severity label, so an alert mute
+		// rule on severity=warning stops matching once the incident has escalated. An OK never lowers it.
+		escalate := kind == model.NoteDuplicate
 		if newIdx >= 0 {
 			n := &p.New[newIdx]
 			n.Notes = append(n.Notes, note)
 			n.Incident.AlertCount++
 			n.Incident.LastSeen = latest(n.Incident.LastSeen, at)
+			if escalate && model.MoreSevere(it.Alert.Severity, n.Incident.SeverityLabel) {
+				n.Incident.SeverityLabel = it.Alert.Severity
+			}
 			return
 		}
 		if p.Current == nil {
@@ -179,6 +185,15 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 		p.Current.LastSeen = latest(p.Current.LastSeen, at)
 		if p.Current.Category == "" {
 			p.Current.Category = it.Alert.Category
+		}
+		if escalate {
+			worst := current.SeverityLabel
+			if p.Current.SeverityLabel != "" {
+				worst = p.Current.SeverityLabel
+			}
+			if model.MoreSevere(it.Alert.Severity, worst) {
+				p.Current.SeverityLabel = it.Alert.Severity
+			}
 		}
 		p.Current.Notes = append(p.Current.Notes, note)
 	}

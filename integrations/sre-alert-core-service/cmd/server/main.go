@@ -223,6 +223,10 @@ func main() {
 	case len(apiToken) < auth.MinWakeTokenLen:
 		logger.Error("ALERT_CORE_API_TOKEN is too short; generate one with openssl rand -hex 32", "min_length", auth.MinWakeTokenLen)
 		os.Exit(1)
+	case apiToken == wakeToken:
+		// Alert senders hold the wake token; the same value would also open the read API to them.
+		logger.Error("ALERT_CORE_API_TOKEN must differ from ALERT_CORE_WAKE_TOKEN; generate a separate one with openssl rand -hex 32")
+		os.Exit(1)
 	}
 	apiHandler := api.New(base.With("component", "api"), incidents)
 	requireAPIToken := auth.RequireToken(apiToken, "api token", base.With("component", "auth"))
