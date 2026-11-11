@@ -161,7 +161,7 @@ function summarySheet(data: SlaReportDetails): HTMLElement {
 function caseRow(row: SlaReportCase): string {
   return `<tr>
     <td>${display(row.caseNumber)}</td><td>${display(row.caseType)}</td><td>${display(row.severity)}</td>
-    <td>${display(row.state)}</td><td>${display(formatPeriodDate(row.opened))}</td>
+    <td>${display(row.state)}</td><td>${display(formatPeriodDate(row.openedOn))}</td>
     ${clockCell(row.response)}${clockCell(row.workaround)}${clockCell(row.resolution)}
   </tr>`;
 }

@@ -287,7 +287,7 @@ function CasesCard({
                   <TableCell>{display(row.caseType)}</TableCell>
                   <TableCell>{display(row.severity)}</TableCell>
                   <TableCell>{row.state && row.state !== "—" ? <Chip size="small" variant="outlined" label={row.state} /> : "—"}</TableCell>
-                  <TableCell>{display(formatPeriodDate(row.opened))}</TableCell>
+                  <TableCell>{display(formatPeriodDate(row.openedOn))}</TableCell>
                   <ClockCell clock={row.response} />
                   <ClockCell clock={row.workaround} />
                   <ClockCell clock={row.resolution} />

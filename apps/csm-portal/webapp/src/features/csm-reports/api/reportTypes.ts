@@ -186,7 +186,7 @@ export interface SlaReportCase {
   severity: string;
   state: string;
   /** RFC 3339. */
-  opened: string;
+  openedOn: string;
   response: SlaReportClock;
   workaround: SlaReportClock;
   resolution: SlaReportClock;

@@ -45,7 +45,7 @@ function caseRow(n: number, over: Partial<SlaReportCase> = {}): SlaReportCase {
     caseType: "Incident",
     severity: "Critical (P1)",
     state: "Work In Progress",
-    opened: "2026-10-05T08:00:00Z",
+    openedOn: "2026-10-05T08:00:00Z",
     response: { elapsed: "1 Hour", status: "Met" },
     workaround: { elapsed: "—", status: "" },
     resolution: { elapsed: "3 Days", status: "Missed" },
