@@ -122,18 +122,25 @@ const updateSalesforceProjectQuery = `
 // backing system already uses for the project (row.InsertID); NULL, as in
 // plain postgres mode, gets a random one. is_active starts TRUE, the only
 // value a live Salesforce project can have; number stays NULL (ServiceNow's
-// record number has no Salesforce source).
+// record number has no Salesforce source). The four closure states start
+// OPEN: the Account Closure Process only lists projects whose
+// wso2_closure_state is OPEN, so a NULL here would exempt the project from
+// every reminder and suspension. Only the INSERT sets them; UPDATE never does.
 const insertSalesforceProjectQuery = `
 	INSERT INTO project (
 		id, created_on, updated_on, created_by, updated_by,
 		sf_id, key, name, account_id, start_date, end_date, description,
 		project_type_id, compliance_violation_date, onboarding_go_live_date, is_active,
-		onboarding_status
+		onboarding_status,
+		wso2_closure_state, end_date_closure_state, invoice_due_date_closure_state,
+		compliance_violation_closure_state
 	) VALUES (
 		COALESCE($12::uuid, gen_random_uuid()), now(), now(), $1, $1,
 		$2, $3, $4, $5::uuid, $6, $7, $8,
 		$9::uuid, $10, $11, TRUE,
-		'NOT_APPLICABLE'::onboarding_status_enum
+		'NOT_APPLICABLE'::onboarding_status_enum,
+		'OPEN'::wso2_closure_state_enum, 'OPEN'::end_date_closure_state_enum,
+		'OPEN'::invoice_due_date_closure_state_enum, 'OPEN'::compliance_violation_closure_state_enum
 	)
 	RETURNING id::text`
 

@@ -880,6 +880,12 @@ ignored). Code: `internal/service/salesforce_project_ingest.go` (`WithProjectIng
   writes it to Salesforce, decision D4, so this mirrors it back), plus `updated_on`/`updated_by`.
   Closure states, `wso2_closure_state`, hour counters, onboarding fields, credentials,
   `number`, `is_active` are never in the UPDATE (`TestSalesforceProjectSQL_ColumnList`).
+  The INSERT (only) sets `wso2_closure_state`, `end_date_closure_state`,
+  `invoice_due_date_closure_state` and `compliance_violation_closure_state` to `OPEN`: the
+  Account Closure Process lists projects with `wso2_closure_state = 'OPEN'`, so a NULL would
+  exempt the project from every reminder and suspension. Migration 0291 backfilled existing NULLs
+  and made `OPEN` the column DEFAULT too (columns stay nullable);
+  `salesforce_project_closure_states_integration_test.go` covers it (needs `CASE_STATS_TEST_DSN`).
 - **Update-only by default:** with `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` off a
   project CSM does not have is `NotFoundError` "project not found for sfId ..." plus a FAILED
   ledger row, which the delayed-retry job re-runs. On, it is inserted with
