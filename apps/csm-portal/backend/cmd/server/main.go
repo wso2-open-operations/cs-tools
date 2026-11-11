@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/alertcore"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
@@ -201,6 +202,18 @@ func main() {
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
 	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
+	// Muted alerts live in sre-alert-core-service's database; without both values the route answers 503.
+	var alertCoreClient *alertcore.Client
+	if base, token := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")), strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")); base != "" && token != "" {
+		alertCoreClient = alertcore.NewClient(alertcore.Config{BaseURL: base, Token: token})
+	} else {
+		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set; the muted-alerts and alert-field-values routes answer 503")
+	}
+	// Pass an untyped nil rather than a nil *alertcore.Client, so the handler's nil check sees it.
+	alertMuteRuleMutedAlertsHandler := handler.NewAlertMuteRuleMutedAlertsHandler(nil)
+	if alertCoreClient != nil {
+		alertMuteRuleMutedAlertsHandler = handler.NewAlertMuteRuleMutedAlertsHandler(alertCoreClient)
+	}
 	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
@@ -912,6 +925,8 @@ func main() {
 	// deliberately not exposed here; alert-core reads it via csm-integration-service.
 	route("POST /alert-mute-rules/search", handler.PermViewOperations, alertMuteRuleHandler.SearchAlertMuteRules)
 	route("GET /alert-mute-rules/{id}", handler.PermViewOperations, alertMuteRuleHandler.GetAlertMuteRule)
+	route("GET /alert-mute-rules/{id}/muted-alerts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedAlerts)
+	route("GET /alert-field-values", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListAlertFieldValues)
 	route("POST /alert-mute-rules", handler.PermWrite, alertMuteRuleHandler.CreateAlertMuteRule)
 	route("PATCH /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.PatchAlertMuteRule)
 	route("POST /alert-mute-rules/{id}/extend", handler.PermWrite, alertMuteRuleHandler.ExtendAlertMuteRule)

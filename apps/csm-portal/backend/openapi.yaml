@@ -10776,6 +10776,146 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /alert-mute-rules/{id}/muted-alerts:
+    get:
+      summary: List the alerts an alert mute rule muted.
+      description: >-
+        Read from sre-alert-core-service, not entity-service. One row per incident (alerts grouped by fingerprint),
+        newest first, with its outcome (muted, incident, closed_quietly or delivering) and counts by outcome over all of
+        them. Rows the alerting service's retention purged are gone.
+      operationId: getAlertMuteRuleMutedAlerts
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  summary:
+                    type: object
+                    additionalProperties:
+                      type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /alert-field-values:
+    get:
+      summary: List the values real alerts carry in one field.
+      description: >-
+        Read from sre-alert-core-service. Distinct values of the field among the alerts it still keeps that contain q,
+        most recently seen first. The alert mute rule form suggests them, since a rule matches these strings.
+      operationId: getAlertFieldValues
+      parameters:
+        - name: field
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        - name: q
+          in: query
+          description: Case-insensitive substring to match.
+          schema:
+            type: string
+            maxLength: 255
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  values:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /outages:
     post:
