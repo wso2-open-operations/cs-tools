@@ -22021,6 +22021,7 @@ components:
           type: string
         description:
           type: string
+          nullable: true
         severity:
           type: string
           enum:
