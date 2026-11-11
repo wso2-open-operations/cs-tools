@@ -181,7 +181,7 @@ func TestPostgresGetSLAReport_ReshapesTheEntityResponse(t *testing.T) {
 					"workaround":{"elapsed":"—","target":"Not applicable","met":0,"missed":0,"running":0},
 					"resolution":{"elapsed":"—","target":"Not applicable","met":0,"missed":0,"running":0}}],
 				"cases":[{"caseId":"c1","caseNumber":"CS1","caseType":"Incident","severity":"Critical (P1)","state":"Open",
-					"opened":"2026-01-05T08:00:00Z",
+					"openedOn":"2026-01-05T08:00:00Z",
 					"response":{"elapsed":"1 Hour","status":"Met"},
 					"workaround":{"elapsed":"—","status":""},
 					"resolution":{"elapsed":"—","status":""}}]}`), nil

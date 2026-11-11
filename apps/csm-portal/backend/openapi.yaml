@@ -12829,6 +12829,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /usage-metrics/projects:
     get:
@@ -33146,7 +33152,7 @@ components:
           enum: ["", Met, Missed, Running, Paused, Cancelled]
     SLAReportCase:
       type: object
-      required: [caseId, caseNumber, caseType, severity, state, opened, response, workaround, resolution]
+      required: [caseId, caseNumber, caseType, severity, state, openedOn, response, workaround, resolution]
       properties:
         caseId:
           type: string
@@ -33158,7 +33164,7 @@ components:
           type: string
         state:
           type: string
-        opened:
+        openedOn:
           type: string
           format: date-time
         response:
