@@ -422,8 +422,8 @@ async function startDirectDownload(
 ): Promise<boolean> {
   try {
     const response = await authFetch(
-      `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(input.id)}/link?type=${encodeURIComponent(input.type)}`,
-      { method: "GET", ...(input.signal ? { signal: input.signal } : {}) },
+      `${getBackendBaseUrl()}/attachments/${encodeURIComponent(input.id)}/download-links?type=${encodeURIComponent(input.type)}`,
+      { method: "POST", ...(input.signal ? { signal: input.signal } : {}) },
     );
     if (!response.ok) return false;
     const link = (await response.json()) as { url?: string; name?: string };
@@ -668,7 +668,7 @@ export async function sendFileInChunks(
  */
 export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
 
-/** The links `POST /attachments/upload/{id}/direct` returns: one per chunk. */
+/** The links `POST /attachments/{id}/upload-links` returns: one per chunk. */
 interface DirectUploadLinks {
   links: string[];
   chunkBytes: number;
@@ -750,7 +750,7 @@ export async function sendFileDirect(
   } & ChunkUploadOptions,
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = input;
-  const path = `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`;
+  const path = `/attachments/${encodeURIComponent(attachmentId)}/upload-links?type=${encodeURIComponent(type)}`;
   const requestLinks = async (): Promise<DirectUploadLinks> =>
     (await (await postJson(authFetch, path, {}, signal)).json()) as DirectUploadLinks;
   let direct = await requestLinks();
