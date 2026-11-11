@@ -3285,6 +3285,14 @@ type ParsedCaseFilters struct {
 	WorkStates      []CaseWorkState
 	AssignedUserIDs []string
 	ProductNames    []string
+	// ProductVersions (productVersion in) keeps the cases whose deployed
+	// product has one of these versions, exactly as product_version records
+	// them ("4.3.0"). Only with ProductNames naming one product.
+	ProductVersions []string
+	// ExcludeProductNames (product notIn) keeps the cases whose deployed
+	// product's name is none of these, including cases without a deployed
+	// product. Inverse of ProductNames.
+	ExcludeProductNames []string
 	// ExcludeStates filters to cases whose state is NOT one of these values
 	// (optional). Inverse of States, and the two are independent: a request may
 	// carry either, both, or neither. Only the backing data source that models

@@ -41,7 +41,7 @@ var caseFilterFieldSet = map[string]bool{
 	"type": true, "state": true, "severity": true, "engagementType": true,
 	"issueType": true, "workState": true, "tag": true, "projectId": true,
 	"deploymentId": true, "assignedUserId": true, "createdBy": true,
-	"createdOn": true, "updatedOn": true, "closedOn": true, "resolvedOn": true, "product": true,
+	"createdOn": true, "updatedOn": true, "closedOn": true, "resolvedOn": true, "product": true, "productVersion": true,
 	"projectOnboardingStatus": true, "projectType": true, "creTeam": true, "sreTeam": true,
 	"resolutionNotes": true, "parentId": true, "taskSLABusinessElapsedPercent": true,
 	"escalationLevel": true, "escalation": true, "number": true, "internalId": true,
@@ -68,6 +68,39 @@ func requireCaseFilterValues(f domain.CaseFieldFilter) error {
 // badCaseFilterCombo reports a field/op combination that is not supported.
 func badCaseFilterCombo(f domain.CaseFieldFilter) error {
 	return &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q does not support op %q", f.Field, f.Op)}
+}
+
+// checkProductVersionFilters refuses a productVersion filter without a
+// product filter naming exactly one product: a version ("4.0.0") is shared
+// by several products, so it only means something with its product. Only a
+// product "in" filter names its product; a notIn one leaves products out.
+func checkProductVersionFilters(filters []domain.CaseFieldFilter) error {
+	hasVersion := false
+	var products []string
+	for _, f := range filters {
+		switch f.Field {
+		case "productVersion":
+			hasVersion = true
+		case "product":
+			if f.Op == "in" {
+				products = append(products, f.Values...)
+			}
+		}
+	}
+	if hasVersion && !oneProductName(products) {
+		return &apierror.ValidationError{Msg: "filters: productVersion needs a product filter naming exactly one product"}
+	}
+	return nil
+}
+
+// oneProductName reports whether names (a request's product filter values)
+// name exactly one product.
+func oneProductName(names []string) bool {
+	distinct := map[string]bool{}
+	for _, n := range names {
+		distinct[n] = true
+	}
+	return len(distinct) == 1
 }
 
 // relativeDatePlaceholderPattern matches the shape of every relative-date
@@ -306,6 +339,9 @@ func parseCaseFilterDate(f domain.CaseFieldFilter, value string, now time.Time) 
 func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string, callerEmailErr error, now time.Time) (domain.ParsedCaseFilters, error) {
 	var p domain.ParsedCaseFilters
 
+	if err := checkProductVersionFilters(filters); err != nil {
+		return domain.ParsedCaseFilters{}, err
+	}
 	for _, f := range filters {
 		if !caseFilterFieldSet[f.Field] {
 			return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: unsupported field: " + f.Field}
@@ -548,14 +584,27 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
 
-		case "product":
+		case "productVersion":
 			if f.Op != "in" {
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
 			if err := requireCaseFilterValues(f); err != nil {
 				return domain.ParsedCaseFilters{}, err
 			}
-			p.ProductNames = append(p.ProductNames, f.Values...)
+			p.ProductVersions = append(p.ProductVersions, f.Values...)
+
+		case "product":
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			switch f.Op {
+			case "in":
+				p.ProductNames = append(p.ProductNames, f.Values...)
+			case "notIn":
+				p.ExcludeProductNames = append(p.ExcludeProductNames, f.Values...)
+			default:
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
 
 		case "projectOnboardingStatus":
 			if err := requireCaseFilterValues(f); err != nil {
@@ -841,6 +890,8 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"projectId\" (notIn) is not supported inside an OR group"}
 	case len(parsed.ExcludeAccountIDs) > 0:
 		return &apierror.ValidationError{Msg: "anyOf: field \"accountId\" (notIn) is not supported inside an OR group"}
+	case len(parsed.ExcludeProductNames) > 0:
+		return &apierror.ValidationError{Msg: "anyOf: field \"product\" (notIn) is not supported inside an OR group"}
 	case len(parsed.ExcludeStates) > 0:
 		// state+in is supported inside a branch (CaseFilterGroup.States);
 		// state+notIn is not modeled there.

@@ -4601,6 +4601,19 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 	}
 }
 
+// refuseSNProductFilters refuses a productVersion filter and a product notIn
+// filter, which ServiceNow's case search has no field for: refused rather
+// than dropped, which would widen the result to every version or product.
+func refuseSNProductFilters(parsed domain.ParsedCaseFilters) error {
+	if len(parsed.ProductVersions) > 0 {
+		return &apierror.ValidationError{Msg: `field "productVersion" is not supported by this data source`}
+	}
+	if len(parsed.ExcludeProductNames) > 0 {
+		return &apierror.ValidationError{Msg: `field "product" (notIn) is not supported by this data source`}
+	}
+	return nil
+}
+
 // SearchCases implements CaseService by calling the Choreo POST /cases/search endpoint.
 func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {
@@ -4614,6 +4627,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	callerEmail, callerEmailErr := resolveCaseFilterCallerEmail(token)
 	parsed, err := ParseCaseFieldFilters(req.Filters.Filters, callerEmail, callerEmailErr, time.Now().UTC())
 	if err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := refuseSNProductFilters(parsed); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
 	req.Parsed = parsed
@@ -4934,6 +4950,12 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if !validCaseAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
+	// ServiceNow's aggregate has no product, version or project grouping;
+	// refuse it here rather than pass on a groupBy it would not answer as
+	// this one does.
+	if req.GroupBy == "product" || req.GroupBy == "productVersion" || req.GroupBy == "project" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy %q is not supported by this data source", req.GroupBy)}
+	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.AggregateResponse{}, err
 	}
@@ -4942,6 +4964,9 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	callerEmail, callerEmailErr := resolveCaseFilterCallerEmail(token)
 	parsed, err := ParseCaseFieldFilters(req.Filters.Filters, callerEmail, callerEmailErr, time.Now().UTC())
 	if err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := refuseSNProductFilters(parsed); err != nil {
 		return domain.AggregateResponse{}, err
 	}
 

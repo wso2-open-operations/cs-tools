@@ -24281,6 +24281,7 @@ components:
             - closedOn
             - resolvedOn
             - product
+            - productVersion
             - projectOnboardingStatus
             - projectType
             - creTeam
@@ -24378,7 +24379,19 @@ components:
           match.
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
-          product. Only applied by the ServiceNow data source.
+          product. The Postgres data source matches the deployed product's
+          catalog name exactly as recorded (e.g. "WSO2 API Manager"); the
+          ServiceNow data source takes the family names. Not supported inside
+          an anyOf branch.
+        - **product** (notIn): cases whose deployed product is none of the
+          named products, including cases without a deployed product. Not
+          supported inside an anyOf branch, or by the ServiceNow data source
+          (400).
+        - **productVersion** (in): versions of the case's deployed product,
+          exactly as recorded (e.g. "4.3.0"). Needs a product filter naming
+          exactly one product, as a version is shared by several products.
+          Not supported inside an anyOf branch, or by the ServiceNow data
+          source (400).
         - **projectOnboardingStatus** (in / notIn): free-text SN choice labels
           for the parent project's onboarding status (e.g. "Completed",
           "In-Progress", "Not-Applicable" -- not a closed enum at this
@@ -24548,8 +24561,18 @@ components:
           $ref: '#/components/schemas/SearchCasesFilters'
         groupBy:
           type: string
-          enum: [account, state, severity, type]
-          description: The field to aggregate case counts by.
+          enum: [account, state, severity, type, product, productVersion, project]
+          description: >-
+            The field to aggregate case counts by. product groups by the
+            deployed product's name (the value the product filter takes);
+            cases without a deployed product are in no bucket, as for
+            account. productVersion groups by the deployed product's version
+            (the value the productVersion filter takes) and needs a product
+            filter naming exactly one product; cases without a version are in
+            no bucket. project groups by the case's project: the key is the
+            project's id (the value the projectId filter takes) and the label
+            its name, else its key. product, productVersion and project are
+            not supported by the ServiceNow data source.
         maxGroups:
           type: integer
           description: >-
