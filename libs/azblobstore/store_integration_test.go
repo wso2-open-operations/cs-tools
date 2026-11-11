@@ -376,7 +376,7 @@ func TestStore_CopyDuplicatesABlobInsideAzure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.Copy(ctx, src, dst); err != nil {
+	if err := s.Copy(ctx, src, dst, ""); err != nil {
 		t.Fatalf("Copy: %v", err)
 	}
 	info, err := s.Stat(ctx, dst)
@@ -393,7 +393,7 @@ func TestStore_CopyDuplicatesABlobInsideAzure(t *testing.T) {
 		t.Fatal("the copy is not the same bytes")
 	}
 
-	if err := s.Copy(ctx, "no/such/blob", "final/other.bin"); !errors.Is(err, ErrNotFound) {
+	if err := s.Copy(ctx, "no/such/blob", "final/other.bin", ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Copy of a missing source = %v, want ErrNotFound", err)
 	}
 }
@@ -485,5 +485,39 @@ func TestStore_DiscardRemovesUncommittedBlocks(t *testing.T) {
 	}
 	if err := s.Discard(ctx, "never/there.bin"); err != nil {
 		t.Fatalf("Discard of nothing: %v", err)
+	}
+}
+
+// A copy pinned to an ETag is refused when the source was replaced after that
+// ETag was read, and goes through when it was not.
+func TestStore_CopyPinnedToTheCheckedFile(t *testing.T) {
+	s := integrationStore(t)
+	ctx := context.Background()
+	src, dst := "stage/pinned.bin.upload", "final/pinned.bin"
+	put := func(data string) {
+		t.Helper()
+		if err := s.PutBlock(ctx, src, 0, strings.NewReader(data), int64(len(data))); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Commit(ctx, src, 1, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	put("checked")
+	info, err := s.Stat(ctx, src)
+	if err != nil || info.ETag == "" {
+		t.Fatalf("Stat = %+v, %v: want an ETag", info, err)
+	}
+	if err := s.Copy(ctx, src, dst, info.ETag); err != nil {
+		t.Fatalf("Copy of the checked file: %v", err)
+	}
+
+	put("replaced") // same length as another file would be: only the ETag tells them apart
+	if err := s.Copy(ctx, src, "final/other.bin", info.ETag); !errors.Is(err, ErrSourceChanged) {
+		t.Fatalf("Copy of a replaced file = %v, want ErrSourceChanged", err)
+	}
+	if _, err := s.Stat(ctx, "final/other.bin"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a refused copy left a file: %v", err)
 	}
 }
