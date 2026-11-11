@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -865,6 +866,145 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			want: `widget "w": "days" is 91; it must be between 1 and 90`,
 		},
 		{
+			name: "line widget with an empty series",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": []}`,
+			want: `widget "w": "series" is empty; leave it out to draw both lines`,
+		},
+		{
+			name: "line widget with an unknown series",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": ["resolved"]}`,
+			want: `widget "w": unknown "series" value "resolved" (want "opened" or "closed")`,
+		},
+		{
+			name: "line widget with a series twice",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": ["opened", "opened"]}`,
+			want: `widget "w": "series" lists "opened" twice`,
+		},
+		{
+			name: "line widget with an unknown chart",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "chart": "column"}`,
+			want: `widget "w": unknown "chart" "column" (want "line" or "bar")`,
+		},
+		{
+			name: "chart on a bar widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "state"}, "chart": "bar"}`,
+			want: `widget "w": "chart" is only meaningful for shape "line", got "bar"`,
+		},
+		{
+			name: "chart on a count widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "count", "gridWidth": 3,
+			 "query": {}, "chart": "line"}`,
+			want: `widget "w": "chart" is only meaningful for shape "line", got "count"`,
+		},
+		{
+			name: "series on a bar widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "state"}, "series": ["opened"]}`,
+			want: `widget "w": "series" is only meaningful for shape "line", got "bar"`,
+		},
+		{
+			name: "line window dates on a bar widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "state"}, "startDate": "2025-12-01", "endDate": "2025-12-31"}`,
+			want: `widget "w": "startDate", "endDate" and "bucket" are only meaningful for shape "line", got "bar"`,
+		},
+		{
+			name: "line widget with a bucket but no dates",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "bucket": "week"}`,
+			want: `widget "w": "bucket" needs "startDate" and "endDate"`,
+		},
+		{
+			name: "line widget with days and dates",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "days": 30, "startDate": "2025-12-01", "endDate": "2025-12-31"}`,
+			want: `widget "w": "days" cannot be combined with "startDate" and "endDate"`,
+		},
+		{
+			name: "line widget with only a start date",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-12-01"}`,
+			want: `widget "w": "startDate" and "endDate" are both needed`,
+		},
+		{
+			name: "line widget with an unknown bucket",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2025-12-31", "bucket": "quarter"}`,
+			want: `widget "w": unknown "bucket" "quarter" (want "day", "week" or "month")`,
+		},
+		{
+			name: "line widget with a timestamp for a date",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-12-01T00:00:00Z", "endDate": "2025-12-31"}`,
+			want: `widget "w": "startDate" and "endDate" must be plain dates (YYYY-MM-DD) or relative dates`,
+		},
+		{
+			name: "line widget with the dates out of order",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-12-31", "endDate": "2025-12-01"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with 91 days by day",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2026-01-01", "endDate": "2026-04-01"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with 55 weeks by week",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2026-01-12", "bucket": "week"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 54 weeks`,
+		},
+		{
+			name: "line widget with 25 months by month",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2027-01-01", "bucket": "month"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 24 months`,
+		},
+		{
+			name: "line widget with one plain and one relative date",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2026-01-01", "endDate": "__today__", "bucket": "month"}`,
+			want: `widget "w": "startDate" and "endDate" must be two plain dates or two relative dates, not one of each`,
+		},
+		{
+			name: "line widget with a relative window too long on some days",
+			// This year so far by day: within 90 days until the end of March.
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfYear:0__", "endDate": "__today__"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with a relative window too long only in some years",
+			// Last week to the end of this year by week: at most 54 weeks on
+			// every day of 2024-2027, but 55 in some years (from the last
+			// days of a leap year that starts on a Sunday, such as 2039 into
+			// 2040), which a check of a few sample years did not meet.
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfWeek:-1__", "endDate": "__endOfYear:0__", "bucket": "week"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 54 weeks`,
+		},
+		{
+			name: "line widget with a relative window out of order on some days",
+			// From the start of this year to the week after 52 weeks ago:
+			// in order on most days, but not early in some years.
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfWeek:-52__", "endDate": "__startOfYear:0__", "bucket": "month"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 24 months`,
+		},
+		{
+			name: "line widget with a relative date the dashboard cannot resolve",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfMonth__", "endDate": "__today__"}`,
+			want: `widget "w": "startDate" or "endDate" is not a relative date the dashboard can resolve`,
+		},
+		{
 			name: "groupBy with an unknown linkResourceType",
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
 			 "query": {}, "groupBy": {"field": "account", "linkResourceType": "bogus"}}`,
@@ -968,6 +1108,146 @@ func TestLoadDir_AcceptsLineWidget(t *testing.T) {
 	}
 	if w.Days != 30 {
 		t.Errorf("days = %d, want 30", w.Days)
+	}
+	if w.Series != nil {
+		t.Errorf("series = %v, want nil (both lines) when omitted", w.Series)
+	}
+}
+
+// A "line" widget may name the lines it draws: one of them, or both.
+func TestLoadDir_AcceptsLineWidgetSeries(t *testing.T) {
+	for _, tc := range []struct {
+		series string
+		want   []LineSeries
+	}{
+		{`["opened"]`, []LineSeries{LineSeriesOpened}},
+		{`["closed"]`, []LineSeries{LineSeriesClosed}},
+		{`["closed", "opened"]`, []LineSeries{LineSeriesClosed, LineSeriesOpened}},
+	} {
+		t.Run(tc.series, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDefinition(t, dir, "d.json", `{
+			  "id": "d", "displayName": "D", "type": "cs",
+			  "widgets": [
+			    {"id": "trend", "displayName": "Trend", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			     "query": {}, "series": `+tc.series+`}
+			  ]
+			}`)
+			dashboards, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir returned error: %v", err)
+			}
+			if got := dashboards[0].Widgets[0].Series; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("series = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A "line" widget may draw its points as bars ("chart": "bar"), with the
+// trailing days or a fixed window; "line" and no chart at all draw lines.
+func TestLoadDir_AcceptsLineWidgetChart(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields string
+		want         LineChart
+	}{
+		{"no chart", `"days": 30`, ""},
+		{"line", `"days": 30, "chart": "line"`, LineChartLine},
+		{"bar over the trailing days", `"days": 30, "chart": "bar"`, LineChartBar},
+		{"bar over this year by month", `"startDate": "__startOfYear:0__", "endDate": "__today__", "bucket": "month", "series": ["opened"], "chart": "bar"`, LineChartBar},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDefinition(t, dir, "d.json", `{
+			  "id": "d", "displayName": "D", "type": "cs",
+			  "widgets": [
+			    {"id": "trend", "displayName": "Trend", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			     "query": {}, `+tc.fields+`}
+			  ]
+			}`)
+			dashboards, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir returned error: %v", err)
+			}
+			if got := dashboards[0].Widgets[0].Chart; got != tc.want {
+				t.Errorf("chart = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A "line" widget may take a fixed window instead of days: plain dates for a
+// named period, relative dates for one counted from today, by day, week or
+// month, up to each bucket's limit.
+func TestLoadDir_AcceptsLineWidgetWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, window string
+		want         WidgetTemplate
+	}{
+		{"December 2025 by day", `"startDate": "2025-12-01", "endDate": "2025-12-31"`,
+			WidgetTemplate{StartDate: "2025-12-01", EndDate: "2025-12-31"}},
+		{"90 days by day", `"startDate": "2026-01-01", "endDate": "2026-03-31", "bucket": "day"`,
+			WidgetTemplate{StartDate: "2026-01-01", EndDate: "2026-03-31", Bucket: LineBucketDay}},
+		// 2026 runs from the week of Monday 29 December 2025 to the week of
+		// Monday 28 December 2026: 53 weeks.
+		{"2026 by week", `"startDate": "2026-01-01", "endDate": "2026-12-31", "bucket": "week"`,
+			WidgetTemplate{StartDate: "2026-01-01", EndDate: "2026-12-31", Bucket: LineBucketWeek}},
+		// 2040 is a leap year starting on a Sunday: from the week of Monday
+		// 26 December 2039 to the week of Monday 31 December 2040, 54 weeks.
+		{"2040 by week", `"startDate": "2040-01-01", "endDate": "2040-12-31", "bucket": "week"`,
+			WidgetTemplate{StartDate: "2040-01-01", EndDate: "2040-12-31", Bucket: LineBucketWeek}},
+		{"24 months by month", `"startDate": "2025-01-01", "endDate": "2026-12-31", "bucket": "month"`,
+			WidgetTemplate{StartDate: "2025-01-01", EndDate: "2026-12-31", Bucket: LineBucketMonth}},
+		{"last month by day", `"startDate": "__startOfMonth:-1__", "endDate": "__endOfMonth:-1__"`,
+			WidgetTemplate{StartDate: "__startOfMonth:-1__", EndDate: "__endOfMonth:-1__"}},
+		{"this year by week", `"startDate": "__startOfYear:0__", "endDate": "__endOfYear:0__", "bucket": "week"`,
+			WidgetTemplate{StartDate: "__startOfYear:0__", EndDate: "__endOfYear:0__", Bucket: LineBucketWeek}},
+		{"this year so far by month", `"startDate": "__startOfYear:0__", "endDate": "__today__", "bucket": "month"`,
+			WidgetTemplate{StartDate: "__startOfYear:0__", EndDate: "__today__", Bucket: LineBucketMonth}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDefinition(t, dir, "d.json", `{
+			  "id": "d", "displayName": "D", "type": "cs",
+			  "widgets": [
+			    {"id": "trend", "displayName": "Trend", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			     "query": {}, `+tc.window+`}
+			  ]
+			}`)
+			dashboards, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir returned error: %v", err)
+			}
+			w := dashboards[0].Widgets[0]
+			if w.StartDate != tc.want.StartDate || w.EndDate != tc.want.EndDate || w.Bucket != tc.want.Bucket || w.Days != 0 {
+				t.Errorf("window = %q to %q by %q (days %d), want %q to %q by %q", w.StartDate, w.EndDate, w.Bucket, w.Days,
+					tc.want.StartDate, tc.want.EndDate, tc.want.Bucket)
+			}
+		})
+	}
+}
+
+// relativeLinePoints gives the fewest and most points a relative window makes
+// on any day: this year by week is 53 weeks, or 54 in a leap year that starts
+// on a Sunday; last month by day is 28 to 31 days. Its answer is kept.
+func TestRelativeLinePoints(t *testing.T) {
+	for _, tc := range []struct {
+		start, end string
+		bucket     LineBucket
+		want       linePointRange
+	}{
+		{"__startOfYear:0__", "__endOfYear:0__", LineBucketWeek, linePointRange{min: 53, max: 54, resolves: true}},
+		{"__startOfMonth:-1__", "__endOfMonth:-1__", LineBucketDay, linePointRange{min: 28, max: 31, resolves: true}},
+		{"__startOfQuarter:0__", "__endOfQuarter:0__", LineBucketMonth, linePointRange{min: 3, max: 3, resolves: true}},
+		{"__startOfMonth__", "__today__", LineBucketDay, linePointRange{}},
+	} {
+		got := relativeLinePoints(tc.start, tc.end, tc.bucket)
+		if got != tc.want {
+			t.Errorf("relativeLinePoints(%s, %s, %s) = %+v, want %+v", tc.start, tc.end, tc.bucket, got, tc.want)
+		}
+		if cached, ok := lineWindowCache.get(tc.start + "|" + tc.end + "|" + string(tc.bucket)); !ok || cached != got {
+			t.Errorf("relativeLinePoints(%s, %s, %s) not kept: %+v %v", tc.start, tc.end, tc.bucket, cached, ok)
+		}
 	}
 }
 

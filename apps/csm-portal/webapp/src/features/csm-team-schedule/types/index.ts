@@ -107,6 +107,11 @@ export interface ScheduleAbsenceKind {
   /** The standing window a span of this kind is drawn as on the roster: on
    *  the team it moves someone to, they work its normal hours (NLK, LK). */
   showsAsShiftCode?: string;
+  /** The tag's days take a person off the worklog timesheet (an SRE
+   *  rotation, a customer allocation). Never set on leave. */
+  excludesFromTimesheet?: boolean;
+  /** What the tag is for, shown when hovering it. */
+  description?: string;
 }
 
 /** One team the rota is run for, served so no client holds the list. */
@@ -272,6 +277,10 @@ export interface EngagementAllocation {
   modeOfDelivery?: string;
   /** Percent of the engineer's time, e.g. 50. */
   utilization?: number;
+  /** Days in the window a lead or rota admin took this allocation off the
+   *  person's roster (YYYY-MM-DD). The roster leaves them out and the cell
+   *  picker offers to restore them. */
+  dismissedDates?: string[];
 }
 
 export interface EngagementAllocationsResponse {

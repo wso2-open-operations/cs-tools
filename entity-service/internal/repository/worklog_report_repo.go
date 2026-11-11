@@ -79,10 +79,10 @@ type WorklogTimeRow struct {
 //     customer allocations are recorded as ALLO_EXT. Matching ENG alone
 //     meant the exclusion never fired for a single team in scope.
 //
-// The remaining ALLOCATION kinds -- RnD, Migration, ALLO_INT -- are NOT
-// excluded: they are internal work, not a customer engagement, so they
-// have no counterpart in either ServiceNow mechanism, and blanking them
-// would understate everyone who does that work. We hold no
+// Which ALLOCATION kinds are excluded is the tag's own
+// excludes_from_timesheet (ENG, ALLO_EXT and ALLO_INT among the built-in
+// ones; see worklogLeaveQuery). RnD and Migration are not: they are working
+// time, and blanking them would understate everyone who does that work. We hold no
 // utilization figure, so every ENG absence is treated as a full
 // allocation; ServiceNow would keep a member allocated at less than 100%.
 type WorklogLeaveRow struct {
@@ -92,6 +92,23 @@ type WorklogLeaveRow struct {
 	Bucket    string
 	StartsOn  time.Time
 	// EndsOn is zero for an open-ended absence.
+	EndsOn time.Time
+}
+
+// WorklogMoveRow is one Team Schedule span that moves a person to another
+// team: a tag whose kind has moves_to_team_key (Brazil rotation onto
+// Americas, Migration, India team), or leave filed under such a team (leave
+// taken during the move). The person stays a member of their own
+// team (migrations 0202, 0274), so the roster alone
+// files them under the team they were moved away from. TeamKey, TeamName
+// and TeamType describe the team the span moves them to.
+type WorklogMoveRow struct {
+	UserID   string
+	TeamKey  string
+	TeamName string
+	TeamType string
+	StartsOn time.Time
+	// EndsOn is zero for an open-ended span.
 	EndsOn time.Time
 }
 
@@ -165,6 +182,10 @@ type WorklogReportRepository interface {
 	// from Roster because Roster collapses to one row per person, which
 	// would lose a team whose every member was attributed elsewhere.
 	TeamContacts(ctx context.Context, teamTypes, excludedTeamKeys []string) ([]WorklogTeamContacts, error)
+	// MoveSpans returns the spans overlapping [from, to] that move a person
+	// to another team, whatever that team's type; the service decides
+	// which of them it reports under.
+	MoveSpans(ctx context.Context, from, to time.Time) ([]WorklogMoveRow, error)
 }
 
 // WorklogTeamContacts is one team's derived audience. Members and leads
@@ -299,14 +320,17 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 //
 // WHICH ALLOCATION KINDS REMOVE SOMEBODY FROM THE REPORT.
 //
-// ALLO_INT and ALLO_EXT are a pair -- "Allocated — internal" and
-// "Allocated — external" (migration 0154) -- and ENG is the customer
-// engagement added by 0215. Someone allocated is not available for
-// support either way, so all three count. Listing EXT without INT was an
-// oversight: it inflated every team's member count and its average's
-// divisor, which is what the CS leads reported against the 27 Oct mail.
+// The ones whose tag says so: excludes_from_timesheet (migration 0281). A
+// lead sets it when adding a tag (an SRE rotation tag does, a work-from-home
+// tag does not), and 0281 set it on the three kinds this report used to name
+// by code: ALLO_INT and ALLO_EXT, a pair -- "Allocated — internal" and
+// "Allocated — external" (migration 0154) -- and ENG, the customer
+// engagement added by 0215. Someone allocated is not available for support
+// either way, so all three count. Listing EXT without INT was an oversight:
+// it inflated every team's member count and its average's divisor, which is
+// what the CS leads reported against the 27 Oct mail.
 //
-// The other active ALLOCATION kinds are deliberately NOT here:
+// The other built-in ALLOCATION kinds deliberately do not have it:
 //
 //	MIGRATION  -- the CS Migrations Team's own work. The delivered mail
 //	              lists those people with real approved hours, so
@@ -319,6 +343,11 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 // Add one only with evidence from a delivered mail that it should be
 // absent; the cost of guessing wrong is a person silently vanishing from
 // their team's figures.
+//
+// An allocation's days that a rota admin or lead took off the person's Team
+// Schedule roster (team_schedule_allocation_dismissal) are not allocated:
+// the allocation is returned one row per remaining day in the range, so the
+// roster and the timesheet agree.
 //
 // CONFIRMED ENGAGEMENT ALLOCATIONS are read straight from
 // customer_engagement_allocation_resource and returned as ALLOCATION rows
@@ -339,7 +368,7 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
       FROM team_schedule_absence a
       JOIN team_schedule_absence_kind k ON k.id = a.kind_id
      WHERE (k.bucket IN ('LEAVE', 'EXCLUDED')
-            OR (k.bucket = 'ALLOCATION' AND k.code IN ('ENG', 'ALLO_EXT', 'ALLO_INT')))
+            OR (k.bucket = 'ALLOCATION' AND k.excludes_from_timesheet))
        AND a.starts_on <= $2
        AND (a.ends_on IS NULL OR a.ends_on >= $1)
     UNION ALL
@@ -347,9 +376,11 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
            'ENG_ALLOC',
            'Engagement allocation',
            'ALLOCATION',
-           ar.start_date,
-           ar.end_date
+           d::date,
+           d::date
       FROM customer_engagement_allocation_resource ar
+     CROSS JOIN LATERAL generate_series(GREATEST(ar.start_date, $1::date),
+                                        LEAST(ar.end_date, $2::date), interval '1 day') d
      WHERE ar.resource_id IS NOT NULL
        AND ar.state = 'CONFIRMED'
        AND ar.utilization >= 100
@@ -357,8 +388,38 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
        AND ar.end_date IS NOT NULL
        AND ar.start_date <= $2
        AND ar.end_date >= $1
+       AND NOT EXISTS (SELECT 1 FROM team_schedule_allocation_dismissal x
+                        WHERE x.allocation_resource_id = ar.id
+                          AND x.rota_date = d::date)
   ) x
  ORDER BY user_id, starts_on`
+
+// The destination is the kind's moves_to_team_key, the team the tag moves
+// people to (0202 files the span itself under that team as well).
+//
+// Leave taken during a move counts as part of it. The Team Schedule keeps one
+// tag per person per day, so leave entered inside a move cuts the move for
+// those days, and files the leave under the team the person is on: the move's
+// team. A leave span filed under a team some move kind moves people to is
+// therefore returned as a span on that team, so the person stays listed under
+// it on their leave days instead of falling back to their own team.
+const worklogMoveSpansQuery = `
+SELECT a.user_id::text,
+       t.key,
+       COALESCE(t.name, ''),
+       COALESCE(t.type, ''),
+       a.starts_on,
+       a.ends_on
+  FROM team_schedule_absence a
+  JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+  JOIN team t ON LOWER(t.key) = LOWER(COALESCE(k.moves_to_team_key, a.team_key))
+ WHERE (k.moves_to_team_key IS NOT NULL
+        OR (k.bucket = 'LEAVE'
+            AND EXISTS (SELECT 1 FROM team_schedule_absence_kind mk
+                         WHERE LOWER(mk.moves_to_team_key) = LOWER(a.team_key))))
+   AND a.starts_on <= $2
+   AND (a.ends_on IS NULL OR a.ends_on >= $1)
+ ORDER BY a.user_id, a.starts_on, t.key`
 
 const worklogTeamContactsQuery = `
 SELECT t.key,
@@ -477,6 +538,33 @@ func (r *worklogReportRepo) Leave(ctx context.Context, from, to time.Time) ([]Wo
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate worklog leave: %w", err)
+	}
+	return out, nil
+}
+
+// MoveSpans implements WorklogReportRepository: every span overlapping
+// [from, to] whose kind moves people to another team, with that team.
+func (r *worklogReportRepo) MoveSpans(ctx context.Context, from, to time.Time) ([]WorklogMoveRow, error) {
+	rows, err := r.db.Query(ctx, worklogMoveSpansQuery, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("query worklog move spans: %w", err)
+	}
+	defer rows.Close()
+
+	var out []WorklogMoveRow
+	for rows.Next() {
+		var x WorklogMoveRow
+		var ends *time.Time
+		if err := rows.Scan(&x.UserID, &x.TeamKey, &x.TeamName, &x.TeamType, &x.StartsOn, &ends); err != nil {
+			return nil, fmt.Errorf("scan worklog move span: %w", err)
+		}
+		if ends != nil {
+			x.EndsOn = *ends
+		}
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate worklog move spans: %w", err)
 	}
 	return out, nil
 }

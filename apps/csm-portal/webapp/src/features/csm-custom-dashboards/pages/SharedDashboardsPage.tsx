@@ -59,7 +59,7 @@ function SharedDashboardView({ id }: { id: string }): JSX.Element {
   }
   return (
     <Box sx={frame}>
-      <DashboardWidgetGrid widgets={shared.data.dashboard.widgets} />
+      <DashboardWidgetGrid widgets={shared.data.dashboard.widgets} linePointClickThrough />
     </Box>
   );
 }

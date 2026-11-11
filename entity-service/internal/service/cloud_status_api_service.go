@@ -26,27 +26,15 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// cloudStatusClouds are the clouds the dashboard serves, and the only values
-// the endpoints accept.
-//
-// The ServiceNow monitors script validates against five and rejects the rest
-// with a 400. This accepts SEVEN: the common backend already serves
-// choreo-eu (17 monitors) and agent-manager (14), and has never been able to
-// receive anything for them because the flow's URL script has no branch for
-// either. Refusing them here would reproduce a limitation that exists nowhere
-// except in that one script.
-var cloudStatusClouds = map[string]string{
-	"asgardeo":      "ASGARDEO",
-	"choreo":        "CHOREO",
-	"bijira":        "BIJIRA",
-	"devant":        "DEVANT",
-	"moesif":        "MOESIF",
-	"choreo-eu":     "CHOREO_EU",
-	"agent-manager": "AGENT_MANAGER",
-}
-
+// The clouds the dashboard serves, and the only values the endpoints accept,
+// are the active rows of the cloud registry (cloud_registry); see
+// migration 0282. Seven are seeded: asgardeo, choreo, bijira, devant, moesif,
+// choreo-eu and agent-manager. The previous backend's monitors script knew
+// five and answered the rest with a 400; this one serves every registered
+// cloud, so adding a cloud is data, not code.
 type cloudStatusDashboardService struct {
-	repo repository.CloudStatusDashboardRepository
+	repo     repository.CloudStatusDashboardRepository
+	registry *cloudRegistry
 	// now is injectable so the incident window can be tested without
 	// freezing a clock.
 	now func() time.Time
@@ -54,16 +42,23 @@ type cloudStatusDashboardService struct {
 
 // NewCloudStatusDashboardService constructs the dashboard read service.
 func NewCloudStatusDashboardService(repo repository.CloudStatusDashboardRepository) CloudStatusDashboardService {
-	return &cloudStatusDashboardService{repo: repo, now: time.Now}
+	return &cloudStatusDashboardService{repo: repo, registry: newCloudRegistry(repo.Clouds), now: time.Now}
 }
 
-// validateCloud maps a dashboard cloud slug to its stored enum value.
-func validateCloud(cloud string) (string, error) {
-	enum, ok := cloudStatusClouds[strings.ToLower(strings.TrimSpace(cloud))]
-	if !ok {
-		return "", &apierror.ValidationError{Msg: "cloud must be one of asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager"}
+// validateCloud resolves a dashboard cloud slug against the registry. An
+// unknown or inactive cloud is a validation error listing the valid slugs.
+func (s *cloudStatusDashboardService) validateCloud(ctx context.Context, cloud string) (domain.CloudDefinition, error) {
+	catalog, err := s.registry.Catalog(ctx)
+	if err != nil {
+		return domain.CloudDefinition{}, err
 	}
-	return enum, nil
+	def, ok := catalog.Lookup(cloud)
+	if !ok {
+		return domain.CloudDefinition{}, &apierror.ValidationError{
+			Msg: "cloud must be one of " + strings.Join(catalog.Slugs(), ", "),
+		}
+	}
+	return def, nil
 }
 
 // Monitors assembles the dashboard's monitor view for one cloud.
@@ -72,12 +67,12 @@ func validateCloud(cloud string) (string, error) {
 // then their availability and any ongoing outages batched by offering. On the
 // busiest cloud that is 3 queries where ServiceNow issued 73.
 func (s *cloudStatusDashboardService) Monitors(ctx context.Context, cloud string) (domain.CloudStatusMonitorsResponse, error) {
-	enum, err := validateCloud(cloud)
+	def, err := s.validateCloud(ctx, cloud)
 	if err != nil {
 		return nil, err
 	}
 
-	monitors, err := s.repo.Monitors(ctx, enum)
+	monitors, err := s.repo.Monitors(ctx, def.OfferingKey)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +163,8 @@ const incidentMonths = 6
 // script pre-seeds them and the frontend renders a row per key. Returning only
 // the months that have incidents would silently shorten the page.
 func (s *cloudStatusDashboardService) Incidents(ctx context.Context, cloud string) (domain.CloudStatusIncidentsResponse, error) {
-	if _, err := validateCloud(cloud); err != nil {
+	def, err := s.validateCloud(ctx, cloud)
+	if err != nil {
 		return nil, err
 	}
 
@@ -195,7 +191,7 @@ func (s *cloudStatusDashboardService) Incidents(ctx context.Context, cloud strin
 	// the six keys above, which the quarter boundary does not always do.
 	since := firstOfMonth.AddDate(0, -(incidentMonths - 1), 0)
 
-	rows, err := s.repo.Incidents(ctx, strings.ToLower(strings.TrimSpace(cloud)), since)
+	rows, err := s.repo.Incidents(ctx, def.IncidentPrefix, since)
 	if err != nil {
 		return nil, err
 	}
@@ -296,16 +292,11 @@ func incidentStatus(end string) string {
 // numbers -- but it would also hide the one structural fact that makes the
 // weights mean anything, so the shape is kept.
 func (s *cloudStatusDashboardService) Availabilities(ctx context.Context, cloud string) (domain.CloudAvailabilitiesResponse, error) {
-	if _, err := validateCloud(cloud); err != nil {
+	def, err := s.validateCloud(ctx, cloud)
+	if err != nil {
 		return nil, err
 	}
-	slug := strings.ToLower(strings.TrimSpace(cloud))
-	plan, ok := domain.CloudAvailabilityPlans[slug]
-	if !ok {
-		// validateCloud accepts exactly the seven the plans cover, so this is
-		// unreachable unless the two lists drift apart.
-		return nil, &apierror.ValidationError{Msg: "no availability plan configured for cloud " + slug}
-	}
+	plan := def.Plan
 
 	resp := domain.CloudAvailabilitiesResponse{}
 	for _, region := range plan.Regions {
@@ -401,7 +392,7 @@ const availabilityHistoryTZ = "Asia/Colombo"
 
 // AvailabilityHistory assembles one cloud's 90-day daily uptime chart.
 func (s *cloudStatusDashboardService) AvailabilityHistory(ctx context.Context, cloud string) (domain.CloudAvailabilityHistoryResponse, error) {
-	enum, err := validateCloud(cloud)
+	def, err := s.validateCloud(ctx, cloud)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +400,7 @@ func (s *cloudStatusDashboardService) AvailabilityHistory(ctx context.Context, c
 	// The history script orders by group then name, and NOT by
 	// group_priority, which the monitors script does. Reproduced as written:
 	// the row order decides the order of groups on the page.
-	monitors, err := s.repo.MonitorsForHistory(ctx, enum)
+	monitors, err := s.repo.MonitorsForHistory(ctx, def.OfferingKey)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +521,8 @@ var incidentDetailExcludedStates = map[string]bool{
 // Returns nil when no outage with that id belongs to that cloud, which the
 // handler renders as 404.
 func (s *cloudStatusDashboardService) IncidentDetail(ctx context.Context, id, cloud string) (any, error) {
-	if _, err := validateCloud(cloud); err != nil {
+	def, err := s.validateCloud(ctx, cloud)
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(id) == "" {
@@ -549,7 +541,7 @@ func (s *cloudStatusDashboardService) IncidentDetail(ctx context.Context, id, cl
 		return nil, nil
 	}
 
-	row, err := s.repo.IncidentDetail(ctx, outageID, strings.ToLower(strings.TrimSpace(cloud)))
+	row, err := s.repo.IncidentDetail(ctx, outageID, def.IncidentPrefix)
 	if err != nil {
 		return nil, err
 	}

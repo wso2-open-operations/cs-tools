@@ -162,6 +162,14 @@ const (
 	// Open (renewed, or its overdue invoice paid); dispatch sends the "Back to
 	// Open state" email. On PROJECT_EVENT_HUB_TOPIC, keyed by the project id.
 	TypeProjectReactivated Type = "project.reactivated"
+	// TypeCaseTypeChanged is published by entity-service's case type
+	// transfer (PATCH /cases/{id} with a "type") whenever it revises this
+	// case's own SLA clocks -- see CaseTypeChangedPayload's own doc comment
+	// for the false-breach-alert incident this closes. No Chat/email
+	// reaction reads this; it exists purely so Engine.ReviseClocks can
+	// re-sync this engine's own Redis-held clock tracking with
+	// entity-service's now-revised state.
+	TypeCaseTypeChanged Type = "case.type_changed"
 )
 
 // KnownTypes lists every Type this service accepts, in the order they're
@@ -180,6 +188,7 @@ var KnownTypes = []Type{
 	TypeSRCreated, TypeSRAcknowledged, TypeSRCommentAdded,
 	TypeCaseEscalated,
 	TypeMailAlertReceived,
+	TypeCaseTypeChanged,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -245,8 +254,15 @@ type CaseCreatedPayload struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Priority   string `json:"priority"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CommentAddedPayload.EngagementType's own
+	// convention (entity-service's cv.EngagementType, lowercase, e.g.
+	// "migration"; "" for every non-engagement case-like type) — lets
+	// slaengine.Engine tell a migration engagement apart from any other the
+	// same way dispatch.checkFrustration already can from
+	// CommentAddedPayload's own copy of this field.
+	EngagementType string `json:"engagementType,omitempty"`
+	Priority       string `json:"priority"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (e.g. "Castor") —
 	// displayed in Chat cards; purely a display value, no routing role
 	// (unlike Product).
@@ -384,9 +400,14 @@ type StatusChangedPayload struct {
 	// CaseTitle is used only for the email subject line (dispatch's
 	// subjectLine) — optional, same as CaseNumber, so an older publisher
 	// still produces a valid (just less descriptive) subject.
-	CaseTitle  string   `json:"caseTitle,omitempty"`
-	NewStatus  string   `json:"newStatus"`
-	Recipients []string `json:"recipients"`
+	CaseTitle string `json:"caseTitle,omitempty"`
+	NewStatus string `json:"newStatus"`
+	// PreviousStatus is the state before this change, as a display label.
+	// Optional: an older publisher omits it, and the customer email is then
+	// always sent, since there is nothing to compare against. See
+	// dispatch.handleStatusChanged.
+	PreviousStatus string   `json:"previousStatus,omitempty"`
+	Recipients     []string `json:"recipients"`
 }
 
 // CaseAssignedPayload is TypeCaseAssigned's payload. See CaseCreatedPayload's
@@ -493,6 +514,33 @@ type SeverityChangedPayload struct {
 	// decode-compatibility pair exists.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
 	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+}
+
+// CaseTypeChangedPayload is TypeCaseTypeChanged's payload -- see that
+// constant's own doc comment. Priority is this case's CURRENT severity
+// (raw uppercase, e.g. "CRITICAL") when it's still/now a "case" after the
+// transfer, "" when it transferred OUT of "case" entirely -- passed
+// straight through to Engine.ReviseClocks' own Priority parameter the same
+// way SeverityChangedPayload.NewSeverity is. CaseNumber/WSO2CaseID/
+// CaseTitle/Product/Team are display-only (a newly-registered clock's own
+// Redis metadata for a later breach card); PreviousType/NewType are purely
+// informational, read by no handler logic today.
+type CaseTypeChangedPayload struct {
+	CaseID       string `json:"caseId"`
+	CaseNumber   string `json:"caseNumber,omitempty"`
+	WSO2CaseID   string `json:"wso2CaseId,omitempty"`
+	CaseTitle    string `json:"caseTitle,omitempty"`
+	Product      string `json:"product,omitempty"`
+	Team         string `json:"team,omitempty"`
+	Priority     string `json:"priority,omitempty"`
+	PreviousType string `json:"previousType,omitempty"`
+	NewType      string `json:"newType,omitempty"`
+	// NewEngagementType mirrors entity-service's own CaseTypeChangedPayload
+	// field of the same name -- see that repo's own events.go doc comment
+	// for why this exists (keeping a transferred clock's Redis-held
+	// EngagementType current for slaengine.Engine.sendBreachAlert's
+	// migration suppression check).
+	NewEngagementType string `json:"newEngagementType,omitempty"`
 }
 
 // IncidentCreatedPayload is TypeIncidentCreated's payload. This event has

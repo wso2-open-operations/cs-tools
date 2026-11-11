@@ -480,7 +480,6 @@ export type PatchCaseRequest = {
 
 // Request type for creating a support case.
 export type CreateCaseRequest = {
-  attachments?: Array<{ file: string; name: string }>;
   type?: string;
   deploymentId: string;
   description: string;
@@ -492,4 +491,9 @@ export type CreateCaseRequest = {
   relatedCaseId?: string;
   conversationId?: string;
   watchList?: string[];
+  /**
+   * Files already uploaded as drafts of `projectId` (before the case exists). A
+   * security report is created with them: the backend refuses one with none.
+   */
+  attachmentIds?: string[];
 };

@@ -212,6 +212,575 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/upload:
+    post:
+      summary: >-
+        Start an upload. Checks the caller may add a file to the parent (a
+        REGISTERED member of its project, or internal), that the work item is not
+        closed (refused for every caller), and the size and type. Records a
+        PENDING attachment and returns its id: the portal backend holds the file,
+        so the browser sends it there in chunks (the backend calls authorize for
+        each chunk), then the backend confirms. expiresAt is when an unconfirmed
+        upload may be cleaned up. A comment image (type comment) may only be a
+        PNG, JPEG or WebP; it is uploaded against the work item before its
+        comment exists. The response is never cacheable.
+      operationId: initiateAttachmentUpload
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitiateAttachmentUploadRequest'
+      responses:
+        "201":
+          description: The upload was started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitiateAttachmentUploadResponse'
+        "400":
+          description: 'Invalid request: type, parentId / projectId (exactly one for a comment image), name, contentType, or sizeBytes over the limit.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The parent (or, with projectId, the project) does not exist or the caller may not see it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The work item is closed, so new attachments cannot be added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: The caller started too many uploads in a minute (60 per caller per minute); retry shortly.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/upload/{id}/confirm:
+    post:
+      summary: >-
+        Finish an upload. This service cannot look at the file, so the portal
+        backend that committed it says what it stored (sizeBytes, required, and for
+        a comment image the contentType it found by reading the file). Both are
+        checked against what the upload declared and the limits, and the work item
+        must still be open. The attachment is marked COMPLETE. Only the person who
+        started the upload can confirm it. A rejected upload is recorded FAILED and
+        cannot be confirmed again; the backend then removes the file it committed.
+        Repeating a confirm that already succeeded answers the same.
+      operationId: confirmAttachmentUpload
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The attachmentId returned by the upload start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmAttachmentUploadRequest'
+      responses:
+        "200":
+          description: The stored attachment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmAttachmentUploadResponse'
+        "400":
+          description: 'The upload was rejected: no file or more than one, wrong size, over the limit, or not an image.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such attachment, or it is not the caller's upload."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The work item is closed, the upload was already rejected, or it was confirmed concurrently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; confirm can be retried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/upload/{id}/authorize:
+    post:
+      summary: >-
+        Authorize receiving data for a started upload. The portal backends hold the
+        files: the backend calls it for every chunk it receives, so the caller's
+        access is checked again each time. Checks, as the caller, that the upload is theirs,
+        still PENDING and its work item still open, and returns the storage key to
+        write to. The key is internal: it is for the calling backend and must never
+        be sent to a browser. The response is never cacheable.
+      operationId: authorizeAttachmentUpload
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The attachmentId returned by the upload start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeAttachmentUploadRequest'
+      responses:
+        "200":
+          description: Where the file is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentUploadTarget'
+        "400":
+          description: The type or id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such upload, it is not the caller's, its parent is not visible to the caller, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The upload was already confirmed or rejected, or the work item is closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/locate:
+    post:
+      summary: >-
+        Find where an attachment's file is, for a portal backend that will read it.
+        Checks, as the caller, that they
+        may see the attachment and returns its storage key, or a reason there is no
+        file (available false, reason NOT_STORED, FAILED or DELETED). An attachment
+        the caller cannot see is 404. The key is internal: it is for the calling
+        backend and must never be sent to a browser. Counts against the caller's
+        per-minute allowance (60). The response is never cacheable.
+      operationId: locateAttachment
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocateAttachmentRequest'
+      responses:
+        "200":
+          description: The attachment's location, or why it has none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentLocation'
+        "400":
+          description: The type or id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such attachment, or the caller may not see it, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: The caller asked for too many locations in a minute; retry shortly.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/inline/{id}/location:
+    get:
+      summary: >-
+        Find where a comment's inline image is stored, for a portal backend that
+        will stream it. An image the caller cannot see or that is not stored is 404, one the caller can see that was
+        deleted is 410 (errorCode attachment_removed), and a work item file that is
+        not an image is 404. The key is internal: it is for the calling backend and
+        must never be sent to a browser. Not charged against the caller's
+        allowance. The response is never cacheable.
+      operationId: getInlineImageLocation
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Where the image is stored. contentType is only ever one of the four image types, else application/octet-stream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentLocation'
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found, not visible to the caller, not stored, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: The image was deleted or removed (errorCode attachment_removed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/inline/{id}/relocated:
+    post:
+      summary: >-
+        Record that a portal backend moved an inline image's file to the key
+        GET /attachments/inline/{id}/location named in relocateTo. Only that key is
+        accepted (anything else is 400); a repeated call, once the row has the key,
+        is 204; an image that has nothing to move is 409. The file is moved by the
+        backend: this service never touches one.
+      operationId: postInlineImageRelocated
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storageKey]
+              properties:
+                storageKey:
+                  type: string
+                  description: The key the file was moved to; must equal relocateTo.
+      responses:
+        "204":
+          description: The image now points at the new key.
+        "400":
+          description: The id is not a UUID, or storageKey is not where this image belongs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found, not visible to the caller, not stored, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: This image does not need to be moved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: The image was deleted or removed (errorCode attachment_removed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/uploads/cleanup:
+    post:
+      summary: >-
+        Clear out uploads that were started and never confirmed. Each upload still
+        PENDING after 24 hours is marked FAILED (lists hide it and a later confirm
+        refuses it), at most 200 per run, and the comment images never linked to a
+        comment, and the security report files never linked to a case (25 hours old),
+        are returned in orphans for the caller to remove. Internal callers
+        only. Meant to be called on a schedule.
+      operationId: cleanupAttachmentUploads
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      responses:
+        "200":
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [found, cleaned, failed, imagesRemoved, imagesFailed]
+                properties:
+                  found: {type: integer}
+                  cleaned: {type: integer}
+                  failed: {type: integer}
+                  imagesRemoved:
+                    type: integer
+                    description: Comment images stored but never linked to a comment within 24 hours, removed.
+                  imagesFailed: {type: integer}
+                  reportDraftsRemoved:
+                    type: integer
+                    description: Security report files stored but never linked to a case, with no file to remove, marked DELETED.
+                  reportDraftsFailed: {type: integer}
+                  orphans:
+                    type: array
+                    description: >-
+                      The unlinked comment images and security report files whose files the caller must
+                      remove from storage. They are not
+                      marked DELETED yet, so every run lists them again until the
+                      caller removes the files and acknowledges them with
+                      POST /attachments/uploads/cleanup/acknowledge. The storage
+                      keys are internal and must never reach a browser.
+                    items:
+                      type: object
+                      required: [id, type, storageKey]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        type:
+                          type: string
+                          enum: [comment, work_item]
+                          description: comment for an unlinked comment image, work_item for an unlinked security report file.
+                        storageKey:
+                          type: string
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/uploads/cleanup/acknowledge:
+    post:
+      summary: >-
+        Acknowledge orphaned comment images and security report files whose files the caller has removed from
+        storage. POST /attachments/uploads/cleanup hands the orphans over without
+        marking them DELETED. An id is marked DELETED only if it is still an orphan (an
+        unlinked comment image past the cleanup age); one that was linked to a
+        comment since, was already acknowledged, or never was an orphan is skipped,
+        so this cannot delete an arbitrary image and repeating a call is safe. Internal
+        callers only. At most 200 ids.
+      operationId: acknowledgeOrphanedImages
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              additionalProperties: false
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acknowledged, skipped]
+                properties:
+                  acknowledged:
+                    type: integer
+                    description: Images marked DELETED.
+                  skipped:
+                    type: integer
+                    description: Images that are no longer orphans.
+        "400":
+          description: No ids, more than 200, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/delete:
+    post:
+      summary: >-
+        Delete an attachment (soft delete). Marks the attachment DELETED; the row
+        stays, with who deleted it and when, and no list includes it afterwards.
+        The file is not removed here: the portal backend removes it. Only the person
+        who uploaded the attachment can delete it, or a portal admin through the CSM
+        portal backend (asAdmin), and not once its work item is closed. Repeating a delete that already succeeded answers the same. An image
+        embedded in a comment cannot be deleted on its own.
+      operationId: deleteStoredAttachment
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteStoredAttachmentRequest'
+      responses:
+        "204":
+          description: The attachment is deleted.
+        "400":
+          description: Unknown type, a comment image, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller can see the attachment but did not upload it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such attachment, or the caller may not see it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The work item is closed, or the attachment is not stored (still uploading, or its upload failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; the delete can be retried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /customer-engagements/allocations/search:
     post:
       summary: Search customer engagement allocations.
@@ -1104,6 +1673,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/sla/recalculate:
+    post:
+      summary: >-
+        Recompute one case's currently IN_PROGRESS SLA clocks' pause history
+        from the case's own state-change activity log, correcting
+        pause_duration/business_pause_duration when they disagree. A CSM
+        admin-only action, trusted via the CSM Portal's own PermAdmin gate;
+        no request body. Returns an empty clock list with hasHistory=false
+        for a case with no activity history at all to replay (the
+        ServiceNow-backed case path never writes it) -- existing clocks are
+        left untouched, never guessed at.
+      operationId: recalculateCasePauseTotals
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      responses:
+        "200":
+          description: The recalculation ran; see each clock's own outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseSLAPauseRecalcResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a CSM admin, or not called through the CSM Portal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sla-duration-policy:
     get:
       summary: >-
@@ -1822,12 +2436,10 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
           description: >-
-            Seven clouds, where the ServiceNow script accepted five. choreo-eu
-            and agent-manager have monitors and a dashboard but have never
-            been reachable, because the notification flow's URL script has no
-            branch for them.
+            Every registered cloud is served, so a cloud added to the registry
+            needs no API change.
       responses:
         "200":
           description: >-
@@ -1866,7 +2478,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: Six month keys, newest first in the dashboard's rendering.
@@ -1904,7 +2516,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: >-
@@ -1944,7 +2556,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: >-
@@ -2010,7 +2622,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+            description: "The slug of a registered, active cloud, for example asgardeo or choreo-eu. An unknown or inactive slug is rejected with a 400 that lists the valid ones."
       responses:
         "200":
           description: The outage's detail, or an attachments-only object.
@@ -3838,7 +4450,7 @@ paths:
         Asgardeo admin acting through apps/csm-portal/backend, when
         reassigning a team lead whose paging number needs to be set) can
         update someone else's profile. Both fields are optional but at least
-        one must be present; phone has the same trim/length/clear rules as
+        one must be present; phone has the same trim/E.164/length/clear rules as
         PATCH /users/me. The incident call-escalation ladder dials this
         number for a team's lead, so fine-grained authorization beyond
         "internal service" (e.g. admin-only) is the caller's own job.
@@ -3865,7 +4477,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PatchUserMeResponse'
         '400':
-          description: Bad request (malformed id, neither field present, or phone too long).
+          description: Bad request (malformed id, neither field present, or phone too long or not E.164).
           content:
             application/json:
               schema:
@@ -6405,6 +7017,13 @@ paths:
     post:
       summary: Create a new support case.
       operationId: createCase
+      description: >-
+        If the description shows inline images (src="/<attachmentId>") they must
+        be draft images uploaded to the request's project by the caller
+        (POST /attachments/upload with projectId): at most 5, within
+        INLINE_IMAGES_TOTAL_MAX_MB together, none still a blob: URL; otherwise
+        a 400 and nothing is created. They are linked to the new record right
+        after it exists. data:image base64 images are still accepted as before.
       requestBody:
         required: true
         content:
@@ -6656,13 +7275,14 @@ paths:
 
   /cases/volume-trend:
     post:
-      summary: Day-bucketed case-volume trend (opened vs. closed), for a dashboard chart.
+      summary: Case-volume trend (opened vs. closed), for a dashboard chart.
       description: >-
         Returns exactly two series, "Opened" (by created date) and "Closed"
         (by closed date), one point per UTC calendar day over a trailing
-        window (30 days by default). Deliberately narrow compared to the
-        aggregate operation's open-ended groupBy: this backs exactly one
-        chart, not a platform.
+        window (30 days by default), or over a fixed startDate/endDate
+        window one point per day, week (Monday to Sunday) or month.
+        Deliberately narrow compared to the aggregate operation's open-ended
+        groupBy: this backs one chart, not a platform.
       operationId: caseVolumeTrend
       requestBody:
         required: false
@@ -6672,7 +7292,7 @@ paths:
               $ref: '#/components/schemas/CaseVolumeTrendRequest'
       responses:
         "200":
-          description: Daily opened/closed case counts for the requested window.
+          description: Opened/closed case counts for the requested window.
           content:
             application/json:
               schema:
@@ -7579,122 +8199,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments:
-    post:
-      summary: Upload a file attachment to a support case.
-      operationId: createCaseAttachment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateAttachmentRequest'
-      responses:
-        "201":
-          description: Attachment uploaded successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreateAttachmentResponse'
-        "400":
-          description: Bad request (missing fields, invalid data URI, or file exceeds 10 MB).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Case not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments/{id}/confirm:
-    post:
-      summary: >
-        Confirm a pending CSM-native (Postgres) data source attachment now that its file has
-        finished uploading to SFTPGo.
-      description: >
-        Second half of the two-step upload flow: the caller registers a "pending" row via
-        POST /attachments before minting an SFTPGo upload credential, then calls this once the
-        browser reports the upload succeeded. This closes the gap where a browser upload could
-        succeed in SFTPGo while the metadata-registration call never lands, leaving an
-        untracked orphan file. Only the actor who created the pending row may confirm it.
-        ServiceNow-sourced attachments have no such lifecycle and are rejected with 503.
-      operationId: confirmCaseAttachment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      responses:
-        "200":
-          description: Attachment confirmed successfully; status transitioned to complete.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ConfirmAttachmentResponse'
-        "400":
-          description: Bad request (malformed UUID).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: The attachment was not created by the current user.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: Attachment exists but is no longer pending (already confirmed).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: Not supported for the ServiceNow data source.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /attachments/search:
     post:
-      summary: Search attachments linked to a support case.
+      summary: >-
+        Search the attachments of a case, change request, incident, conversation
+        or deployment, most recent first. Deployment attachments are listed from
+        deployment_attachment, scoped to the caller's projects by row-level
+        security; a failed or still-uploading attachment is not listed. A deleted
+        attachment is not listed either, unless the caller is the CSM portal
+        backend and sets `deletedOnly` (it does, when a portal admin asks): the
+        list is then of the deleted attachments only, most recently deleted
+        first, with `status: deleted`, `deletedOn` and `deletedBy`, and its
+        total and paging count only those. `deletedOnly` is ignored from any
+        other caller and for a deployment.
       operationId: searchCaseAttachments
       requestBody:
         required: true
@@ -7728,246 +8247,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments/{id}/content:
-    get:
-      summary: Download the binary content of a case attachment.
-      operationId: getCaseAttachmentContent
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      responses:
-        "200":
-          description: Raw file content. Content-Type reflects the actual file type (e.g. image/png, application/pdf).
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /attachments/{id}/case:
-    get:
-      summary: Get the case an attachment belongs to, sourced consistently with ATTACHMENT_DATA_SOURCE.
-      description: >
-        Resolves an attachment to its own parent case: looks the attachment up (the same
-        way GET /attachments/{id} does), then its referenceId (the same way GET
-        /cases/{id} does), both through whichever CaseService backs attachment reads (see
-        ATTACHMENT_DATA_SOURCE) rather than the general DATA_SOURCE-selected one. Intended
-        for a caller's own attachment-authorization check, so the attachment and its case
-        are always resolved from the same data source as each other. Exists because
-        ATTACHMENT_DATA_SOURCE=servicenow attachments can have a parent case that only
-        exists in ServiceNow, never synced to Postgres -- looking that case up via the
-        plain GET /cases/{id} (always DATA_SOURCE-scoped) would 404 even though the
-        attachment's own content is reachable. id here is an attachment UUID, matching
-        every other /attachments/{id}... route.
 
 
-        An attachment pasted inline into a comment has that comment's id as its
-        referenceId, not a case id. When the referenceId is not a case, it is resolved as a
-        comment (Postgres comment table, read through the caller's own scope) and that
-        comment's case is returned -- but only if the comment is visible to the caller, not
-        deleted, a customer-visible comment (never a work note or activity entry), and its
-        own case is visible to the caller. Otherwise the response is the original 404.
-      operationId: getAttachmentParentCase
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      responses:
-        "200":
-          description: The case the attachment belongs to.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CaseView'
-        "400":
-          description: Bad request — id is not a valid UUID.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found, or its parent case not found/not visible under the active attachment data source.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /attachments/{id}:
-    get:
-      summary: Get an attachment's metadata and base64-encoded content (ServiceNow data source only).
-      description: >
-        Distinct from GET /attachments/{id}/content, which streams the raw binary. This
-        endpoint returns JSON metadata plus the content as a base64 data URI.
-      operationId: getAttachment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      responses:
-        "200":
-          description: The attachment's metadata and content.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentDetails'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
-      summary: Update an attachment's reference, name, or description (ServiceNow data source only).
-      operationId: updateAttachment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateAttachmentRequest'
-      responses:
-        "200":
-          description: Attachment updated successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpdateAttachmentResponse'
-        "400":
-          description: >-
-            Bad request — invalid referenceType (only case and deployment are accepted here);
-            for case, name is required and description is not allowed; for deployment, at
-            least one of name or description must be provided.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: Attachments are only supported for the ServiceNow data source.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    delete:
-      summary: Delete a case attachment (ServiceNow data source only).
-      operationId: deleteCaseAttachment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Attachment UUID.
-      responses:
-        "200":
-          description: Attachment deleted successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteAttachmentResponse'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Attachment not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /deployed-products:
     post:
       summary: Create a new deployed product.
+      description: >-
+        On the PostgreSQL data source the deployed product is written there and
+        numbered from the IBITM series (IBITM + 7 digits, past every IBITM number
+        already stored). The deployment must belong to `projectId` and the version
+        to `productId` (400 otherwise); a customer can create only in a project
+        they are a registered contact of. Under dual-write it is created in
+        ServiceNow first and takes ServiceNow's id and number.
       operationId: createDeployedProduct
       requestBody:
         required: true
@@ -7983,13 +8275,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/CreateDeployedProductResponse'
         "400":
-          description: Bad request.
+          description: >-
+            Bad request: an id that is not a UUID, an unknown category, a deployment that
+            does not exist or that the caller may not see (reported the same way, so its
+            existence is not revealed), a deployment of another project, or a version of
+            another product.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: >-
+            The insert policy refused the caller. A fallback: a caller outside the project
+            cannot see its deployment and gets the 400 above first. A missing database
+            privilege (for example on the number sequence) is a 500, not a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The deployed product could not be numbered after one retry; try again.
           content:
             application/json:
               schema:
@@ -8335,6 +8646,13 @@ paths:
     post:
       summary: Create a change request.
       operationId: createChangeRequest
+      description: >-
+        If the description shows inline images (src="/<attachmentId>") they must
+        be draft images uploaded to the request's project by the caller
+        (POST /attachments/upload with projectId): at most 5, within
+        INLINE_IMAGES_TOTAL_MAX_MB together, none still a blob: URL; otherwise
+        a 400 and nothing is created. They are linked to the new record right
+        after it exists. data:image base64 images are still accepted as before.
       requestBody:
         required: true
         content:
@@ -9145,6 +9463,62 @@ paths:
             Not found — the schedule routes are registered only when a database
             pool is configured, so an entity-service running without one has no
             such path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
           content:
             application/json:
               schema:
@@ -10861,7 +11235,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The person still has upcoming turns on the team, or holds its Case Alerts responder tier; the message says which.
+          description: The person holds the team's Case Alerts responder tier. Their upcoming turns on the team are removed with the membership, never a reason to refuse.
           content:
             application/json:
               schema:
@@ -11015,7 +11389,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The person is on both teams, holds a lead role, has upcoming turns, or holds a responder tier on the source team; the message says which.
+          description: The person is on both teams, holds a lead role, holds a responder tier on the source team, or is already moved to the target by a tag on the roster; the message says which. Their upcoming turns on the source team are removed with the move.
           content:
             application/json:
               schema:
@@ -15851,7 +16225,7 @@ paths:
       summary: Start a new conversation on a project.
       description: >-
         On the Postgres data sources the conversation is stored natively
-        (number from next_portal_work_item_number(), state ACTIVE, the first
+        (number from next_work_item_number('CONVERSATION'), state ACTIVE, the first
         message as its description); under postgres-servicenow-dual-write
         ServiceNow creates it first and the Postgres row takes its id and number.
       operationId: createConversation
@@ -20781,10 +21155,12 @@ components:
           type: string
           nullable: true
           description: >
-            The user's phone number. Surrounding whitespace is trimmed and no format is
-            enforced. The 32-character limit applies after trimming; longer is a 400. An
-            empty (or whitespace-only) value clears it. Omit or send null to leave it
-            unchanged. Accepted but ignored by the alternate (non-PostgreSQL) data source.
+            The user's phone number. Surrounding whitespace is trimmed, then a non-empty
+            value must be E.164 (`+` and 8 to 15 digits, first digit not 0, no spaces or
+            separators, e.g. `+14155552671`); anything else, including longer than 32
+            characters, is a 400. Values are not normalized. An empty (or whitespace-only)
+            value clears it. Omit or send null to leave it unchanged. Accepted but ignored
+            by the alternate (non-PostgreSQL) data source.
       anyOf:
         - required: [timeZone]
           properties:
@@ -21145,6 +21521,9 @@ components:
         updatedOn:
           type: string
           format: date-time
+        phone:
+          type: string
+          description: The user's phone number. Omitted when none is stored.
         roles:
           type: array
           uniqueItems: true
@@ -21799,8 +22178,11 @@ components:
           description: Only projects with this overall closure state.
         sortBy:
           type: string
-          enum: [endDate]
-          description: Sort field. Postgres puts projects with no end date last.
+          enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
+          description: >-
+            Sort field. Projects with no value for it are last. Only endDate is
+            supported on every data source; the others are Postgres only and a 400
+            elsewhere.
         sortOrder:
           type: string
           enum: [asc, desc]
@@ -21872,6 +22254,96 @@ components:
             Postgres; applied in Go on ServiceNow by paging through every
             match (503 if that exceeds the page bound), and a project the
             ServiceNow response carries no sfId for is never returned.
+        onboardingStartDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding start date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        onboardingStartDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding start date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound. Postgres only; a 400 on any other data
+            source.
+        goLivePlanDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a planned go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        goLivePlanDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a planned go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound. Postgres only; a 400 on any other data
+            source.
+        goLiveDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a actual go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        goLiveDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a actual go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound. Postgres only; a 400 on any other data
+            source.
+        onboardingExpiryDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding expiry date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        onboardingExpiryDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a onboarding expiry date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound. Postgres only; a 400 on any other data
+            source.
+        productionReadinessCompletionDateFrom:
+          type: string
+          format: date
+          description: >-
+            Only projects with a production-readiness completion date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound. Postgres only; a 400 on any other data
+            source.
+        productionReadinessCompletionDateTo:
+          type: string
+          format: date
+          description: >-
+            Only projects with a production-readiness completion date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound. Postgres only; a 400 on any other data
+            source.
+        closureStates:
+          type: array
+          items:
+            type: string
+            enum: [Open, Suspended, Restricted]
+          description: >-
+            Only projects whose closure state is any of the given values (the
+            include-side counterpart of excludeClosureStates; a project with no
+            recorded closure state matches none). Postgres only; a 400 on any
+            other data source.
 
     ProjectAccountRef:
       type: object
@@ -21960,6 +22432,11 @@ components:
           format: date-time
           nullable: true
           description: Onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+        productionReadinessCompletionDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
         onboardingStatus:
           type: string
           nullable: true
@@ -22036,6 +22513,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
         onboardingOwner:
           description: >
             The person assigned to run this project's onboarding. Null when
@@ -22131,6 +22611,26 @@ components:
           description: >
             project.onboarding_go_live_date. Null when the project hasn't
             gone live (or the date isn't tracked).
+        goLivePlanDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Planned go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+        onboardingExpiryDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date the onboarding entitlement expires (midnight UTC). Postgres data sources only; null elsewhere.
+        onboardingStartDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+        productionReadinessCompletionDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
         verificationEnabled:
           type: boolean
           description: Whether the Pending Verification feature is enabled for this project.
@@ -22160,6 +22660,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer. Always null on Postgres.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
 
     SearchProjectsResponse:
       type: object
@@ -22213,6 +22716,9 @@ components:
             recomputes the overall state from them again, silently overwriting
             a manual override — there is no column recording that one was ever
             set.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Sets whether the automatic Account Closure Process must skip this project (Postgres data sources only; a 400 on the legacy data source). Only true or false changes it; null and omitted leave it unchanged. Touches no closure state and combines freely with every other field. The response echoes the stored value. Admin-only enforcement lives in the BFF, not here."
         suspensionProcessState:
           type: object
           additionalProperties: true
@@ -22274,6 +22780,17 @@ components:
             (Postgres data sources only). A malformed date, or one earlier
             than the start date (supplied or stored), is a 400. Clearing is
             not supported.
+        onboardingProductionReadinessCompletionDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Sets the date the project's onboarding production-readiness work
+            was completed, as YYYY-MM-DD (Postgres data sources only; a 400 on
+            any other data source). Read back as
+            productionReadinessCompletionDate. A malformed date, or one
+            earlier than the start date (supplied or stored), is a 400.
+            Clearing is not supported.
 
     ProjectUpdateResponse:
       type: object
@@ -22314,6 +22831,10 @@ components:
         verificationEnabled:
           type: boolean
           nullable: true
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Present on Postgres data sources only."
         onboardingStatus:
           type: string
           description: Present on Postgres data sources only.
@@ -22338,6 +22859,11 @@ components:
           nullable: true
           description: Present on Postgres data sources only (midnight UTC).
         onboardingExpiryDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present on Postgres data sources only (midnight UTC).
+        productionReadinessCompletionDate:
           type: string
           format: date-time
           nullable: true
@@ -23792,11 +24318,25 @@ components:
             payload for one — and is rejected with 400 if supplied here.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
+            - `security_report_analysis`: security report; requires `subject`, `description` and, for a user caller, at least one report file in `attachmentIds` (uploaded first as a draft, see `attachmentIds`). A machine caller (no user token) is not held to the minimum.
             - `engagement`: professional-services engagement (e.g. migration, onboarding); requires `subject`, `description`, `engagementType`, `engagementPaymentType`.
         projectId:
           type: string
           format: uuid
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Files uploaded BEFORE this request as draft work item attachments of
+            `projectId` (`POST /attachments/upload` with `type: work_item` and
+            `projectId`, then the chunks and the confirm). Every id must be a COMPLETE
+            draft uploaded to this project by the caller and not linked yet, else 400
+            and nothing is created. They are linked to the new case right after it is
+            created. Required (at least one) for a `security_report_analysis` created
+            by a user, so a security report never exists without its report file.
         deploymentId:
           type: string
           format: uuid
@@ -23835,14 +24375,6 @@ components:
           items:
             $ref: '#/components/schemas/Variable'
           description: Required for `service_request` type.
-        attachments:
-          type: array
-          items:
-            $ref: '#/components/schemas/CaseAttachment'
-          description: >-
-            Optional even for `security_report_analysis` type — the frontend
-            creates the case first, then uploads attachments in separate
-            requests per file, so this may be omitted or empty.
         engagementPaymentType:
           type: string
           enum: [paid, foc]
@@ -24143,6 +24675,21 @@ components:
             search is `total`. Defaults to false. Rejected (400) together with
             skipTotal -- there would be nothing left to compute. Postgres data
             source only.
+        excludeFields:
+          type: array
+          items:
+            type: string
+            enum:
+              - description
+            description: "A response field to leave out of every returned case."
+          description: >-
+            Response fields to leave out of every returned case, for a list that
+            never shows them. Only `description` is supported (it can be
+            megabytes of rich text); any other value is rejected (400). An
+            excluded field comes back `null`, as for a case with no value, and
+            the Postgres data source does not read it from the database at all.
+            Filtering and sorting are unaffected. Omitted or empty returns
+            every field exactly as before.
         filters:
           $ref: '#/components/schemas/SearchCasesFilters'
         sortBy:
@@ -24194,7 +24741,29 @@ components:
           type: integer
           description: >-
             Size of the trailing window, ending today (UTC). Optional;
-            defaults to 30 when omitted. Must be between 1 and 90.
+            defaults to 30 when omitted. Must be between 1 and 90. Not
+            allowed together with startDate/endDate.
+        startDate:
+          type: string
+          description: >-
+            First day of a fixed window (inclusive, UTC): a YYYY-MM-DD date or
+            a relative date placeholder (__today__, __startOfMonth:-1__, ...).
+            Needs endDate.
+          example: "2025-12-01"
+        endDate:
+          type: string
+          description: >-
+            Last day of a fixed window (inclusive, UTC), in the same forms as
+            startDate. Needs startDate. A day after today counts 0.
+          example: "2025-12-31"
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >-
+            How a fixed window's days are grouped into points. Optional;
+            defaults to day. day covers at most 90 days, week (Monday to
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months. Only with startDate/endDate.
 
     CaseVolumeTrendPoint:
       type: object
@@ -24203,7 +24772,15 @@ components:
         date:
           type: string
           format: date
-          description: UTC calendar day (YYYY-MM-DD).
+          description: >-
+            UTC calendar day (YYYY-MM-DD); for a week or month point, the
+            bucket's first day within the window.
+        endDate:
+          type: string
+          format: date
+          description: >-
+            For a week or month point only: the bucket's last day within the
+            window, so date to endDate are exactly the days counted.
         count:
           type: integer
 
@@ -24219,8 +24796,9 @@ components:
           items:
             $ref: '#/components/schemas/CaseVolumeTrendPoint'
           description: >-
-            One point per day in the requested window, oldest first. A day
-            with no matching cases is still present, with count 0.
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no matching cases is still present,
+            with count 0.
 
     CaseVolumeTrendResponse:
       type: object
@@ -24231,7 +24809,19 @@ components:
       properties:
         days:
           type: integer
-          description: The size of the window actually returned.
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
         series:
           type: array
           items:
@@ -25340,111 +25930,17 @@ components:
         hasMore:
           type: boolean
 
-    CreateAttachmentRequest:
-      type: object
-      description: >
-        The two data sources populate mutually exclusive fields. ServiceNow requires file
-        (a base64 data URI) and computes sizeBytes from the decoded bytes. The CSM-native
-        (Postgres) data source instead requires storageKey (the file was already uploaded to
-        SFTPGo out of band, referenced by this key) and sizeBytes, since this service never
-        sees the file bytes for that data source -- there is no base64-payload alternative
-        there.
-      required: [referenceId, referenceType, name, type]
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-          description: UUID of the reference entity (case, change request, etc.)
-        referenceType:
-          $ref: '#/components/schemas/ReferenceType'
-        name:
-          type: string
-          description: File name including extension.
-        type:
-          type: string
-          description: MIME type of the file (e.g. image/png, application/pdf).
-        file:
-          type: string
-          description: >
-            Base64 data URI of the file content (e.g. data:image/png;base64,...). Maximum
-            decoded size is 10 MB. Required for the ServiceNow data source; not accepted by
-            the CSM-native (Postgres) data source.
-        description:
-          type: string
-          nullable: true
-        storageKey:
-          type: string
-          description: >
-            Reference to file bytes already uploaded to SFTPGo. Required for the CSM-native
-            (Postgres) data source; not accepted by ServiceNow.
-        sizeBytes:
-          type: integer
-          description: >
-            File size in bytes. Required for the CSM-native (Postgres) data source (this
-            service cannot compute it there); ignored for ServiceNow, which computes it from
-            the decoded file payload.
-        status:
-          $ref: '#/components/schemas/AttachmentStatus'
 
     AttachmentStatus:
       type: string
       enum:
-        - pending
         - complete
+        - deleted
       description: >
-        Upload lifecycle state for a CSM-native (Postgres) data source attachment. Meaningful
-        for that data source only -- ServiceNow's /attachments API only ever returns
-        fully-uploaded files, so ServiceNow-sourced attachments are always "complete". On
-        create, omitted/empty defaults to "complete" (today's behavior, preserved for every
-        existing caller); pass "pending" to register the row before the file has finished
-        uploading to SFTPGo, then confirm it via POST /attachments/{id}/confirm.
-
-    AttachmentDetail:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        sizeBytes:
-          type: integer
-        createdOn:
-          type: string
-          format: date-time
-        createdBy:
-          type: string
-        downloadUrl:
-          type: string
-          nullable: true
-          description: >
-            Null for a CSM-native (Postgres) data source attachment: this service holds no
-            download location for it, only its storageKey. Always set for ServiceNow-sourced
-            attachments.
-        storageKey:
-          type: string
-          nullable: true
-          description: Set only for CSM-native (Postgres) data source attachments. See Attachment.storageKey.
-        status:
-          $ref: '#/components/schemas/AttachmentStatus'
-
-    CreateAttachmentResponse:
-      type: object
-      properties:
-        message:
-          type: string
-        attachment:
-          $ref: '#/components/schemas/AttachmentDetail'
-
-    ConfirmAttachmentResponse:
-      type: object
-      description: >
-        Response for POST /attachments/{id}/confirm. Same shape as CreateAttachmentResponse --
-        confirming is the second half of the CSM-native (Postgres) data source's two-step
-        (pending -> complete) upload flow.
-      properties:
-        message:
-          type: string
-        attachment:
-          $ref: '#/components/schemas/AttachmentDetail'
+        Lifecycle state of a listed attachment. Complete attachments are listed; a
+        pending (still uploading) or failed one is not returned by
+        POST /attachments/search. `deleted` appears only when the CSM portal backend
+        asked for the deleted attachments (`deletedOnly`); that list holds only them.
 
     Attachment:
       type: object
@@ -25481,11 +25977,16 @@ components:
           type: string
           nullable: true
           description: >
-            Reference to the file's location in external object storage (SFTPGo), set only for
-            CSM-native (Postgres) data source attachments. Null for ServiceNow-sourced
-            attachments, whose bytes are held by ServiceNow itself.
+            Reference to the file's location in Azure Blob Storage. Null for a row with no file of
+            its own recorded. Entity-service never reads the file; the portal backends do.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
+        deletedOn:
+          type: string
+          format: date-time
+          description: When the attachment was deleted. Set only when `status` is `deleted`.
+        deletedBy:
+          $ref: '#/components/schemas/UserReference'
 
     ReferenceType:
       type: string
@@ -25508,6 +26009,13 @@ components:
           $ref: '#/components/schemas/ReferenceType'
         pagination:
           $ref: '#/components/schemas/Pagination'
+        deletedOnly:
+          type: boolean
+          description: >
+            List the deleted attachments instead of the available ones, most
+            recently deleted first (total and paging are of the deleted ones).
+            Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID);
+            ignored from any other caller and for referenceType `deployment`.
 
     SearchAttachmentsResponse:
       type: object
@@ -25525,11 +26033,6 @@ components:
         hasMore:
           type: boolean
 
-    DeleteAttachmentResponse:
-      type: object
-      properties:
-        message:
-          type: string
 
     ChangeRequestBranchFilter:
       type: object
@@ -26289,16 +26792,6 @@ components:
           type: string
           description: Answer/value for the variable.
 
-    CaseAttachment:
-      type: object
-      required: [name, file]
-      properties:
-        name:
-          type: string
-          description: File name including extension.
-        file:
-          type: string
-          description: Base64-encoded file content.
 
     CatalogItem:
       type: object
@@ -28348,6 +28841,23 @@ components:
         colourToken:
           type: string
           enum: [AL, LL, MAT, PAT, RND, EXT, INT, BR, MIG, ONB, EXC, IND]
+        family:
+          type: string
+          enum: [CRE, SRE, SME]
+          description: >-
+            The family the tag is for; only that family's rosters offer it. A rota admin's
+            or team lead's tag is always their own family's (this picks one when they run or
+            lead more than one; another family is a 403). A portal admin who runs no rota
+            may name one, else the tag is shared.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            Take people off the worklog timesheet on the tag's days (an SRE rotation, say).
+            Allocation tags only; a leave tag with it is a 400 (leave shows as leave).
+        description:
+          type: string
+          maxLength: 300
+          description: Optional; shown when hovering the tag.
     ScheduleAbsenceKind:
       type: object
       description: Why someone is out of the rota.
@@ -28371,6 +28881,14 @@ components:
           description: >-
             True for a kind no longer offered. Still served so the days already
             marked with it keep their label; a client must not offer it.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            True when the tag's days take a person off the worklog timesheet. The
+            built-in ENG, ALLO_EXT and ALLO_INT carry it; leave kinds never do.
+        description:
+          type: string
+          description: What the tag is for, shown on hover; absent when it has none.
     ScheduleCatalogue:
       type: object
       properties:
@@ -28784,11 +29302,14 @@ components:
         excludeAbsent:
           type: boolean
           description: >
-            Leave out an assignment whose person is away (leave, an
-            allocation, excluded from the rota) on its rota day, by the same
-            rule `/team-schedule/on-duty` applies. A span that moves somebody
-            to another team does not count against that team's shifts. Off by
-            default: the rota views draw leave over the rota instead.
+            Leave out an assignment whose person is away (leave, excluded
+            from the rota, or an allocation that moves them to another team)
+            on its rota day. An allocation that moves nobody (Allo-INT, ENG,
+            ...) does not count: it does not hide a turn on the same day.
+            `/team-schedule/on-duty` still counts every allocation. A span
+            that moves somebody to another team does not count against that
+            team's shifts. Off by default: the rota views draw leave over the
+            rota instead.
     SearchScheduleAbsencesRequest:
       type: object
       required: [from, to]
@@ -28841,6 +29362,31 @@ components:
           description: Percentage of the person's time the allocation takes.
         startDate: { type: string, format: date }
         endDate: { type: string, format: date }
+        dismissedDates:
+          type: array
+          items: { type: string, format: date }
+          description: >
+            The days in the window the allocation was taken off this person's roster;
+            absent when there are none.
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     ScheduleEngagementAllocationsResponse:
       type: object
       required: [allocations, count]
@@ -31161,13 +31707,17 @@ components:
     LongOpenCaseReportRow:
       type: object
       description: One long-open case.
-      required: [number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
+      required: [id, number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: The case UUID the portal routes on.
         number:
           type: string
         internalId:
           type: string
-          description: The case's internal identifier, or empty.
+          description: The case's internal identifier (a display reference, not the id the portal routes on), or empty.
         createdOn:
           type: string
           format: date-time
@@ -31403,6 +31953,50 @@ components:
                 type: string
                 nullable: true
                 description: The link the removed runbook had.
+    CaseSLAPauseRecalcClock:
+      type: object
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate.
+      properties:
+        target:
+          type: string
+          example: RESOLUTION
+        schedule:
+          type: string
+          example: WSO2 Business days
+        skipped:
+          type: boolean
+        skipReason:
+          type: string
+          description: Empty when skipped is false.
+        oldPauseSeconds:
+          type: integer
+          format: int64
+        newPauseSeconds:
+          type: integer
+          format: int64
+        oldBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        newBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        updated:
+          type: boolean
+    CaseSLAPauseRecalcResponse:
+      type: object
+      properties:
+        hasHistory:
+          type: boolean
+          description: >-
+            False (clocks always empty) when the case has no state-change
+            activity history at all to replay -- its clocks are left exactly
+            as they are, never guessed at.
+        clocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
     ErrorResponse:
       type: object
       description: >-
@@ -35041,112 +35635,9 @@ components:
         feedback:
           $ref: '#/components/schemas/CaseFeedbackResult'
 
-    AttachmentDetails:
-      type: object
-      description: >
-        The response for GET /attachments/{id}. Distinct from GET /attachments/{id}/content,
-        which streams the raw binary — this endpoint returns JSON metadata plus the content
-        as a base64 data URI. For a CSM-native (Postgres) data source attachment, content is
-        always "" and storageKey is populated instead: this service holds no bytes for that
-        data source, so content must be resolved externally via storageKey.
-      required: [id, referenceId, referenceType, name, type, sizeBytes, createdBy, createdOn, content]
-      properties:
-        id:
-          type: string
-          format: uuid
-        referenceId:
-          type: string
-          format: uuid
-        referenceType:
-          type: string
-          nullable: true
-          enum:
-            - case
-            - conversation
-            - change_request
-            - deployment
-            - incident
-          description: >
-            The entity type referenceId points at. Always populated for CSM-native
-            (Postgres) data source attachments; null when the backing data source's
-            attachment-details lookup does not report a reference type. Callers
-            authorizing access per referenced resource must treat a null value as
-            unknown and fail closed.
-        name:
-          type: string
-        type:
-          type: string
-        sizeBytes:
-          type: integer
-        description:
-          type: string
-          nullable: true
-        createdBy:
-          type: string
-        createdOn:
-          type: string
-          format: date-time
-        downloadUrl:
-          type: string
-          nullable: true
-        previewUrl:
-          type: string
-          nullable: true
-        content:
-          type: string
-          nullable: true
-          description: >
-            Base64 data URI of the attachment content (e.g. data:image/png;base64,...). Null
-            for a CSM-native (Postgres) data source attachment: this service holds no bytes for
-            it, only its storageKey. Always set for ServiceNow-sourced attachments.
-        storageKey:
-          type: string
-          nullable: true
-          description: Set only for CSM-native (Postgres) data source attachments. See Attachment.storageKey.
-        status:
-          $ref: '#/components/schemas/AttachmentStatus'
 
-    UpdateAttachmentRequest:
-      type: object
-      description: >
-        referenceType accepts only case and deployment (the broader ReferenceType enum also
-        has conversation, change_request, and incident, but this endpoint rejects those). For
-        case, name is required and description is not allowed; for deployment, at least one
-        of name or description must be provided.
-      required: [referenceId, referenceType]
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-        referenceType:
-          type: string
-          enum: [case, deployment]
-        name:
-          type: string
-        description:
-          type: string
 
-    UpdatedAttachment:
-      type: object
-      required: [id, updatedOn, updatedBy]
-      properties:
-        id:
-          type: string
-          format: uuid
-        updatedOn:
-          type: string
-          format: date-time
-        updatedBy:
-          type: string
 
-    UpdateAttachmentResponse:
-      type: object
-      required: [message, attachment]
-      properties:
-        message:
-          type: string
-        attachment:
-          $ref: '#/components/schemas/UpdatedAttachment'
 
     DeployedProductMetricsRequest:
       type: object
@@ -39579,6 +40070,250 @@ components:
           type: string
           description: Why it could not be landed. Required and must not be empty.
 
+    StoredAttachmentKind:
+      type: string
+      enum: [work_item, comment, deployment]
+      description: >-
+        Which attachment table: work_item (work_item_attachment), comment (the
+        images embedded in a comment, comment_attachment) or deployment
+        (deployment_attachment).
+
+    InitiateAttachmentUploadRequest:
+      type: object
+      required: [type, name, sizeBytes]
+      additionalProperties: false
+      description: >-
+        Send parentId, except for a comment image that is a draft for the
+        description of a record that does not exist yet, or a work item
+        attachment that is a draft report for a case that does not exist yet:
+        then send projectId instead. For types comment and work_item exactly
+        one of parentId and projectId is required (both or neither is a 400);
+        for deployment parentId is required and projectId is refused.
+      properties:
+        type:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            The work item (types work_item and comment) or the deployment (type
+            deployment) the file belongs to.
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            Types comment and work_item only, instead of parentId. The project the draft
+            is uploaded to. The caller must be a REGISTERED member of it (internal callers
+            are unrestricted); a project the caller cannot see is a 404. A draft is private
+            to its uploader until the record it belongs to is created.
+
+            - work_item: a security report's file. It is listed nowhere and linked to the
+              case by `POST /cases` with `attachmentIds`. Its key is
+              csm/projects/<project>/workitems/drafts/attachments/... and stays valid
+              after linking.
+            - comment: a description image. The create request's description then refers
+              to it as src="/<attachmentId>" and entity-service links it (work_item_id
+              set, description_image true) when the record exists. Its key is
+              csm/projects/<project>/workitems/drafts/inline_attachments/... and stays
+              valid after linking. Draft images never linked within 24 hours are removed
+              by the upload cleanup; linked ones never are.
+        name:
+          type: string
+          maxLength: 255
+        contentType:
+          type: string
+          description: >-
+            Required for type comment, where it must be image/png, image/jpeg
+            or image/webp. Defaults to application/octet-stream otherwise.
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            The file's size. Checked against ATTACHMENT_MAX_MB (type comment:
+            INLINE_IMAGES_TOTAL_MAX_MB, default 1 MB, so one image is at most
+            that big), and the uploaded file must match it. One comment or description may show at most 5 images and
+            at most INLINE_IMAGES_TOTAL_MAX_MB (default 1 MB) together; a
+            comment (create or edit) or a record whose description exceeds
+            either is a 400 and nothing is saved.
+
+    InitiateAttachmentUploadResponse:
+      type: object
+      required: [attachmentId, number, expiresAt, maxBytes]
+      properties:
+        attachmentId:
+          type: string
+          format: uuid
+        number:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+          description: When an unconfirmed upload may be cleaned up.
+        maxBytes:
+          type: integer
+          format: int64
+
+    DeleteStoredAttachmentRequest:
+      type: object
+      required: [type, id]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [work_item, deployment]
+          description: An image embedded in a comment (type comment) is not deleted on its own.
+        id:
+          type: string
+          format: uuid
+          description: The attachment's id.
+        asAdmin:
+          type: boolean
+          description: >-
+            Set by the CSM portal backend, and only by it, when the person deleting
+            holds the portal's admin role: they may then delete an attachment they
+            did not upload. From any other caller the flag is ignored and the
+            uploader-only rule applies (403).
+
+    ConfirmAttachmentUploadRequest:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            Required: the size of the file the portal backend committed.
+        contentType:
+          type: string
+          description: >-
+            For type comment: the type the portal backend found by reading the
+            file's leading bytes; it must be image/png, image/jpeg or image/webp.
+
+    AuthorizeAttachmentUploadRequest:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+
+    AttachmentUploadTarget:
+      type: object
+      required: [attachmentId, number, name, contentType, sizeBytes, maxBytes, storageKey]
+      description: >-
+        Where the portal backend may write an upload it has been authorized to
+        receive. storageKey is internal: it must never be sent to a browser.
+      properties:
+        attachmentId:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+        contentType:
+          type: string
+          description: The type declared when the upload started.
+        sizeBytes:
+          type: integer
+          format: int64
+          description: The size declared when the upload started.
+        maxBytes:
+          type: integer
+          format: int64
+          description: The most a file of this kind may be.
+        storageKey:
+          type: string
+          description: Where to write the file, for example csm/projects/<project>/workitems/<n>/attachments/<number>_<name>.
+
+    LocateAttachmentRequest:
+      type: object
+      required: [type, id]
+      additionalProperties: false
+      properties:
+        type:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+        id:
+          type: string
+          format: uuid
+          description: The attachment's id.
+
+    AttachmentLocation:
+      type: object
+      required: [id, number, name, available]
+      description: >-
+        Where an attachment's file is, once the caller's access has been checked.
+        storageKey is internal: it must never be sent to a browser.
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+        contentType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        available:
+          type: boolean
+          description: True when storageKey names a file that can be read.
+        reason:
+          type: string
+          enum: [NOT_STORED, FAILED, DELETED]
+          description: Why there is no file when available is false.
+        storageKey:
+          type: string
+          description: Where the file is stored. Absent when available is false.
+        relocateTo:
+          type: string
+          description: >-
+            Only on an inline image location, and only for a description image whose
+            file still sits in the project's drafts folder. The key it belongs under
+            now that it has a work item. The backend copies the file there, removes
+            the old one, then calls POST /attachments/inline/{id}/relocated. Internal,
+            like storageKey.
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            Only on an inline image location: the work item the image belongs to, or
+            the project while draft is true.
+        draft:
+          type: boolean
+          description: >-
+            Only on an inline image location: true for a description image whose
+            record does not exist yet (parentId is then the project).
+
+    ConfirmAttachmentUploadResponse:
+      type: object
+      required: [id, number, name, sizeBytes, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+        contentType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+        status:
+          type: string
+          example: COMPLETE
     SkillLevel:
       type: object
       required: [id, name]

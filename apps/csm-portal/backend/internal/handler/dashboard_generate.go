@@ -70,8 +70,32 @@ const (
 	errMsgGenerateDraftTooBig  = "The dashboard being edited is too large to change in the chat. Start a new one."
 	errMsgGenerateRefused      = "This request can't be turned into a dashboard. Try rephrasing it."
 	errMsgGenerateUnusable     = "The answer couldn't be turned into a dashboard. Try again, or rephrase the request."
-	errMsgGenerateTimeout      = "Generating the dashboard took too long. Try again."
-	errMsgGenerateCall         = "The dashboard model couldn't be reached. Try again in a moment."
+	errMsgGenerateTruncated    = "The dashboard was too large to create in one go. Ask for fewer widgets, or build it in steps."
+	errMsgGenerateTimeout      = "The AI assistant took too long to answer. Try again."
+	errMsgGenerateCall         = "The AI assistant can't be reached right now. Try again in a few minutes."
+	errMsgGenerateUsageLimit   = "The AI assistant has reached its usage limit. Try again later."
+)
+
+// The errorCode on each message above, and on the prompt and rate limit
+// messages. Every one starts with "generate_": the webapp shows a generate
+// failure's message only when its errorCode does, so a proxy's or gateway's
+// own JSON body (which can also carry a "message") is never shown as ours. A
+// 500 has none; the webapp words it itself.
+const (
+	errCodeGenerateUnavailable   = "generate_unavailable"
+	errCodeGeneratePromptEmpty   = "generate_prompt_empty"
+	errCodeGeneratePromptTooLong = "generate_prompt_too_long"
+	errCodeGenerateRateLimited   = "generate_rate_limited"
+	errCodeGenerateDraftInvalid  = "generate_draft_invalid"
+	errCodeGenerateDraftTooBig   = "generate_draft_too_large"
+	errCodeGenerateDeclined      = "generate_declined"
+	errCodeGenerateTeam          = "generate_team"
+	errCodeGenerateRefused       = "generate_refused"
+	errCodeGenerateUnusable      = "generate_unusable"
+	errCodeGenerateTruncated     = "generate_truncated"
+	errCodeGenerateUsageLimit    = "generate_usage_limit"
+	errCodeGenerateTimeout       = "generate_timeout"
+	errCodeGenerateCall          = "generate_call_failed"
 )
 
 // writeGenerateError maps a generator error to a status and message, and
@@ -84,7 +108,10 @@ const (
 //   - errDashboardTeam (a team filter that cannot   422, the reason (an unknown
 //     work: see dashboardTeams)                         team, the wrong field, ...)
 //   - errGenerateRefused                             422
-//   - errGenerateUnusable, errGenerateTruncated      502
+//   - errGenerateUnusable                            502
+//   - errGenerateTruncated (the reply was cut off)   502, its own message
+//   - errGenerateUsageLimit (the AI side's limit,    503 (429 stays this
+//     not the per-user one)                              backend's own limit)
 //   - errGenerateCall, timed out                     504
 //   - errGenerateCall, otherwise                     502 (a gateway 401/403 is
 //     this backend's key problem, never passed on as the caller's)
@@ -95,31 +122,37 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrGenerateUnavailable):
 		slog.WarnContext(ctx, "dashboard generate: generator unavailable", "err", err)
-		writeError(w, http.StatusServiceUnavailable, errMsgGenerateUnavailable)
+		writeErrorCode(w, http.StatusServiceUnavailable, errMsgGenerateUnavailable, errCodeGenerateUnavailable)
 	case errors.Is(err, errDraftInvalid):
 		slog.InfoContext(ctx, "dashboard generate: invalid draft", "err", err)
-		writeError(w, http.StatusBadRequest, errMsgGenerateDraftInvalid)
+		writeErrorCode(w, http.StatusBadRequest, errMsgGenerateDraftInvalid, errCodeGenerateDraftInvalid)
 	case errors.Is(err, errDraftTooLarge):
 		slog.InfoContext(ctx, "dashboard generate: draft too large", "err", err)
-		writeError(w, http.StatusRequestEntityTooLarge, errMsgGenerateDraftTooBig)
+		writeErrorCode(w, http.StatusRequestEntityTooLarge, errMsgGenerateDraftTooBig, errCodeGenerateDraftTooBig)
 	case errors.As(err, &declined):
 		slog.InfoContext(ctx, "dashboard generate: model declined")
-		writeError(w, http.StatusUnprocessableEntity, declined.Reason)
+		writeErrorCode(w, http.StatusUnprocessableEntity, declined.Reason, errCodeGenerateDeclined)
 	case errors.Is(err, errDashboardTeam):
 		slog.InfoContext(ctx, "dashboard generate: unusable team filter", "err", err)
-		writeError(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err))
+		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateTeam)
 	case errors.Is(err, errGenerateRefused):
 		slog.InfoContext(ctx, "dashboard generate: model refused")
-		writeError(w, http.StatusUnprocessableEntity, errMsgGenerateRefused)
-	case errors.Is(err, errGenerateUnusable), errors.Is(err, errGenerateTruncated):
+		writeErrorCode(w, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused)
+	case errors.Is(err, errGenerateTruncated):
+		slog.WarnContext(ctx, "dashboard generate: model reply cut off", "err", err)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateTruncated, errCodeGenerateTruncated)
+	case errors.Is(err, errGenerateUnusable):
 		slog.WarnContext(ctx, "dashboard generate: unusable model reply", "err", err)
-		writeError(w, http.StatusBadGateway, errMsgGenerateUnusable)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateUnusable, errCodeGenerateUnusable)
+	case errors.Is(err, errGenerateUsageLimit):
+		slog.WarnContext(ctx, "dashboard generate: model usage limit reached", "err", err)
+		writeErrorCode(w, http.StatusServiceUnavailable, errMsgGenerateUsageLimit, errCodeGenerateUsageLimit)
 	case errors.Is(err, errGenerateCall) && isTimeout(err):
 		slog.WarnContext(ctx, "dashboard generate: model call timed out", "err", err)
-		writeError(w, http.StatusGatewayTimeout, errMsgGenerateTimeout)
+		writeErrorCode(w, http.StatusGatewayTimeout, errMsgGenerateTimeout, errCodeGenerateTimeout)
 	case errors.Is(err, errGenerateCall):
 		slog.ErrorContext(ctx, "dashboard generate: model call failed", "err", err)
-		writeError(w, http.StatusBadGateway, errMsgGenerateCall)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateCall, errCodeGenerateCall)
 	default:
 		slog.ErrorContext(ctx, "dashboard generate: generator failed", "err", err)
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
@@ -206,7 +239,7 @@ func writeGenerateRateLimited(w http.ResponseWriter, r *http.Request, retryAfter
 	if daily {
 		msg = "You've reached the limit of dashboard generations for the last 24 hours. Try again later."
 	}
-	writeError(w, http.StatusTooManyRequests, msg)
+	writeErrorCode(w, http.StatusTooManyRequests, msg, errCodeGenerateRateLimited)
 }
 
 // GenerateDashboard handles POST /dashboards/generate.
@@ -224,11 +257,11 @@ func (h *DashboardGenerateHandler) GenerateDashboard(w http.ResponseWriter, r *h
 	// Checked before any work, so a refused prompt never reaches the model.
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
-		writeError(w, http.StatusBadRequest, errMsgGeneratePromptEmpty)
+		writeErrorCode(w, http.StatusBadRequest, errMsgGeneratePromptEmpty, errCodeGeneratePromptEmpty)
 		return
 	}
 	if utf8.RuneCountInString(prompt) > generatePromptMaxLength {
-		writeError(w, http.StatusBadRequest, errMsgGeneratePromptTooLong)
+		writeErrorCode(w, http.StatusBadRequest, errMsgGeneratePromptTooLong, errCodeGeneratePromptTooLong)
 		return
 	}
 	if h.limiter != nil {

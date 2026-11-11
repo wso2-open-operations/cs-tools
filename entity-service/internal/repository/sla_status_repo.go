@@ -154,6 +154,26 @@ const activeSLAStatusFromJoins = `
 // the stable, portable key here.
 const evaluationSubscriptionProjectTypeName = "Evaluation Subscription"
 
+// onboardingTeamKey is team.key's exact value for the Customer Onboarding
+// team -- matched by key (UNIQUE), not name (team.name carries no such
+// constraint), for the same "stable, portable, can't silently match the
+// wrong row" reasoning evaluationSubscriptionProjectTypeName's own doc
+// comment gives for matching project_type by name instead of id.
+//
+// slaClockStateOnboardingStatuses mirrors csm-notification-service's own
+// chataudience.onboardingStatuses (internal/chataudience/resolve.go) --
+// the same project.onboarding_status raw values that route an SLA breach
+// alert to the Onboarding Chat audience also redirect GetClockState's own
+// TeamEmail/TeamLeadName to the Customer Onboarding team instead of the
+// case's real CRE team, so the breach email lands in the same team's inbox
+// the Chat card now posts to. Kept in sync by hand across the two repos,
+// like internal/events/internal/eventbus already are -- changing one
+// without the other silently desyncs which team gets notified from which
+// channel.
+const onboardingTeamKey = "customer_onboarding_team"
+
+var slaClockStateOnboardingStatuses = []string{"IN_PROGRESS", "NOT_STARTED"}
+
 // stringOrEmpty returns "" for a nil column value rather than propagating a
 // nil *string into a domain type's plain string fields. Shared across this
 // package's repositories (was previously defined alongside the now-removed
@@ -194,7 +214,7 @@ func nullIfEmpty(s string) *string {
 func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error) {
 	var s domain.SLAStatus
 	var target, severity, caseType string
-	var caseNumber, wso2CaseID, caseTitle, productName, state, teamName, onboardingStatus *string
+	var caseNumber, wso2CaseID, caseTitle, engagementType, productName, state, teamName, onboardingStatus *string
 	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
 	var stage, schedule string
 	var isEvaluation bool
@@ -204,7 +224,7 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	err := row.Scan(
 		&s.CaseID, &target, &s.BusinessElapsedPercent, &s.HasBreached, &stage, &s.StartedOn,
 		&s.PausedOn, &pauseDurationSeconds, &durationSeconds, &schedule, &businessPauseSeconds,
-		&caseNumber, &wso2CaseID, &caseTitle, &caseType,
+		&caseNumber, &wso2CaseID, &caseTitle, &caseType, &engagementType,
 		&productName, &severity, &state, &teamName, &onboardingStatus, &isEvaluation,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
 	)
@@ -235,6 +255,10 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	s.WSO2CaseID = stringOrEmpty(wso2CaseID)
 	s.CaseTitle = stringOrEmpty(caseTitle)
 	s.CaseType = caseType
+	// engagement_type_enum is UPPER_SNAKE_CASE ("MIGRATION"); SLAStatus.EngagementType
+	// carries the lowercase domain value ("migration"), same convention as
+	// CaseView.EngagementType (case_repo.go) and CaseCreatedPayload.EngagementType.
+	s.EngagementType = strings.ToLower(stringOrEmpty(engagementType))
 	s.Product = stringOrEmpty(productName)
 	s.State = stringOrEmpty(state)
 	s.Team = stringOrEmpty(teamName)
@@ -293,20 +317,35 @@ func appendSLAStatusFilterSQL(f domain.SLAStatusFilters, args *[]any) string {
 }
 
 // slaElapsedBucketMatches reports whether pct falls in the named bucket --
-// the four fixed ranges the CSM Portal's SLA Engine admin table filters by
+// the eleven fixed ranges the CSM Portal's SLA Engine admin table filters by
 // (domain.SLAElapsedBucket* constants). "" (no bucket filter requested)
 // always matches, so a caller that never asks for one can share this
-// unconditionally. 75to100 is inclusive of exactly 100% (its own label reads
-// "75% - 100%"); over100 is exclusive of it (its own label reads "Over
-// 100%") -- a clock at exactly 100% belongs in the former, not the latter.
+// unconditionally. Each ten-point bucket's lower bound is inclusive, upper
+// bound exclusive, except 90to100 (inclusive of exactly 100%) and over100
+// (exclusive of it) -- a clock at exactly 100% belongs in the former, not
+// the latter.
 func slaElapsedBucketMatches(bucket string, pct float64) bool {
 	switch bucket {
-	case domain.SLAElapsedBucketUnder50:
-		return pct < 50
-	case domain.SLAElapsedBucket50To75:
-		return pct >= 50 && pct < 75
-	case domain.SLAElapsedBucket75To100:
-		return pct >= 75 && pct <= 100
+	case domain.SLAElapsedBucketUnder10:
+		return pct < 10
+	case domain.SLAElapsedBucket10To20:
+		return pct >= 10 && pct < 20
+	case domain.SLAElapsedBucket20To30:
+		return pct >= 20 && pct < 30
+	case domain.SLAElapsedBucket30To40:
+		return pct >= 30 && pct < 40
+	case domain.SLAElapsedBucket40To50:
+		return pct >= 40 && pct < 50
+	case domain.SLAElapsedBucket50To60:
+		return pct >= 50 && pct < 60
+	case domain.SLAElapsedBucket60To70:
+		return pct >= 60 && pct < 70
+	case domain.SLAElapsedBucket70To80:
+		return pct >= 70 && pct < 80
+	case domain.SLAElapsedBucket80To90:
+		return pct >= 80 && pct < 90
+	case domain.SLAElapsedBucket90To100:
+		return pct >= 90 && pct <= 100
 	case domain.SLAElapsedBucketOver100:
 		return pct > 100
 	default:
@@ -314,22 +353,44 @@ func slaElapsedBucketMatches(bucket string, pct float64) bool {
 	}
 }
 
+// slaStatusMatches reports whether a row's already-corrected IsPaused/
+// HasBreached pair satisfies the named status filter (domain.SLAStatus*
+// constants). "" (no status filter requested) always matches. StatusPaused
+// and StatusBreached are not mutually exclusive against the same row -- a
+// clock can be paused after its own wall-clock time already ran out, and
+// such a row matches either filter if selected, the same way the CSM
+// Portal's own status chips show both at once for it (see
+// domain.SLAStatus*'s own doc comment).
+func slaStatusMatches(status string, isPaused, hasBreached bool) bool {
+	switch status {
+	case domain.SLAStatusPaused:
+		return isPaused
+	case domain.SLAStatusBreached:
+		return hasBreached
+	case domain.SLAStatusInProgress:
+		return !isPaused && !hasBreached
+	default:
+		return true
+	}
+}
+
 // SearchActiveSLAStatuses implements SLAStatusRepository.
 //
-// ElapsedBucket can't be a SQL WHERE/HAVING clause the way the other three
-// filters are: scanSLAStatus's own BusinessElapsedPercent is only final
-// after its Go-side business-day correction (see that function's own doc
-// comment) -- the raw column a SQL predicate would have to filter on,
-// als.business_elapsed_percentage, is wrong for exactly the still-running,
-// 'WSO2 Business days'-scheduled clocks a bucket filter most needs to get
-// right. So whenever ElapsedBucket is set, this fetches every row matching
-// the OTHER filters with no SQL LIMIT/OFFSET, corrects and buckets each one
-// in Go (scanSLAStatus already does the correction), and paginates the
-// filtered slice in Go instead -- bounded by the same modest active-clock
-// total maxSLAStatusLimit's own doc comment already describes (around 5,500
-// rows checked live), not a new, unbounded read.
+// ElapsedBucket/Stage can't be a SQL WHERE/HAVING clause the way
+// Severity/CaseType/Search are: scanSLAStatus's own BusinessElapsedPercent
+// and HasBreached are only final after their Go-side business-day
+// correction (see that function's own doc comment) -- the raw columns a SQL
+// predicate would have to filter on, als.business_elapsed_percentage/
+// als.has_breached, are wrong for exactly the still-running, 'WSO2 Business
+// days'-scheduled clocks a bucket/status filter most needs to get right. So
+// whenever either is set, this fetches every row matching the OTHER filters
+// with no SQL LIMIT/OFFSET, corrects and buckets/matches each one in Go
+// (scanSLAStatus already does the correction), and paginates the filtered
+// slice in Go instead -- bounded by the same modest active-clock total
+// maxSLAStatusLimit's own doc comment already describes (around 5,500 rows
+// checked live), not a new, unbounded read.
 func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error) {
-	bucketed := filters.ElapsedBucket != ""
+	bucketed := filters.ElapsedBucket != "" || filters.Stage != ""
 
 	countArgs := []any{}
 	countFilterSQL := appendSLAStatusFilterSQL(filters, &countArgs)
@@ -344,7 +405,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM als.duration), 0)::BIGINT,
 		       als.schedule, COALESCE(EXTRACT(EPOCH FROM als.business_pause_duration), 0),
-		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
+		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT, eng.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
 		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $1, FALSE),
@@ -392,7 +453,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 			if err != nil {
 				return nil, 0, fmt.Errorf("scan sla status: %w", err)
 			}
-			if slaElapsedBucketMatches(filters.ElapsedBucket, st.BusinessElapsedPercent) {
+			if slaElapsedBucketMatches(filters.ElapsedBucket, st.BusinessElapsedPercent) && slaStatusMatches(filters.Stage, st.IsPaused, st.HasBreached) {
 				matched = append(matched, st)
 			}
 		}
@@ -458,6 +519,25 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // SLA breach email reaction needed them from the exact same call it
 // already makes before sending a breach alert, rather than resolve any
 // other case-like display data this method still has no need for.
+// Also joins project/project_type for ProjectOnboardingStatus/
+// IsEvaluationAccount, the same two facts SearchActiveSLAStatuses already
+// resolves -- added so csm-notification-service's SLA breach Chat alert can
+// route through chataudience.Resolve with the case's real team/onboarding/
+// evaluation facts instead of the hardcoded false/"" it used before this.
+//
+// OnboardingTeamEmail is a SEPARATE field from TeamEmail, not a swap of it:
+// TeamEmail/TeamLeadName always stay the case's real CRE team (cre_team),
+// unaffected by onboarding status. OnboardingTeamEmail additionally resolves
+// the Customer Onboarding team's own group_email (onboardingTeamKey)
+// whenever p.onboarding_status is one of slaClockStateOnboardingStatuses,
+// "" otherwise -- by explicit request, an onboarding-stage case's breach
+// EMAIL should reach BOTH inboxes (the team actually working the case, and
+// whoever is running the onboarding), the same two-audience shape its
+// breach CHAT card now posts to (see chataudience.Resolve's own doc
+// comment) -- csm-notification-service sends to both addresses together
+// rather than this service picking one. Every other field (AssigneeName/
+// AssigneeEmail, and the Stage/HasBreached/etc. clock state itself) is
+// completely unaffected by onboarding status.
 //
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
@@ -473,7 +553,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // correct for those (a PAUSED/terminal row's figure was already frozen
 // correctly, business-day-aware, at the moment it was written).
 func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
-	args := []any{workItemID, target}
+	args := []any{workItemID, target, evaluationSubscriptionProjectTypeName, onboardingTeamKey, slaClockStateOnboardingStatuses}
 
 	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
 	// on this): the per-policy registration guard lets two policies
@@ -498,8 +578,11 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
-		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
-		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
+		       cre_team.group_email,
+		       COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
+		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -514,6 +597,9 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		) lead_tm ON TRUE
 		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
+		LEFT JOIN project p ON p.id = wi.project_id
+		LEFT JOIN project_type pt ON pt.id = p.project_type_id
+		LEFT JOIN team onboarding_team ON onboarding_team.key = $4
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
@@ -530,12 +616,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail *string
+	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
+		&onboardingStatus, &isEvaluation, &onboardingTeamEmail,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -556,6 +644,9 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	state.TeamLeadName = stringOrEmpty(teamLeadName)
 	state.AssigneeName = stringOrEmpty(assigneeName)
 	state.AssigneeEmail = stringOrEmpty(assigneeEmail)
+	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
+	state.IsEvaluationAccount = isEvaluation
+	state.OnboardingTeamEmail = stringOrEmpty(onboardingTeamEmail)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

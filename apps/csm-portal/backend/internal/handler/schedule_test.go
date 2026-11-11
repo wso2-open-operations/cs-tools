@@ -33,6 +33,7 @@ type mockEntityScheduleClient struct {
 	catalogueFn   func(ctx context.Context) ([]byte, error)
 	assignmentsFn func(ctx context.Context, body []byte) ([]byte, error)
 	allocationsFn func(ctx context.Context, body []byte) ([]byte, error)
+	dismissFn     func(ctx context.Context, body []byte) ([]byte, error)
 	absencesFn    func(ctx context.Context, body []byte) ([]byte, error)
 	onDutyFn      func(ctx context.Context, at string) ([]byte, error)
 
@@ -186,6 +187,13 @@ func (m *mockEntityScheduleClient) SearchScheduleAbsences(ctx context.Context, b
 	return []byte(`{"absences":[],"count":0}`), nil
 }
 
+func (m *mockEntityScheduleClient) DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error) {
+	if m.dismissFn != nil {
+		return m.dismissFn(ctx, body)
+	}
+	return []byte(`{"days":0}`), nil
+}
+
 func (m *mockEntityScheduleClient) SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error) {
 	if m.allocationsFn != nil {
 		return m.allocationsFn(ctx, body)
@@ -198,6 +206,48 @@ func (m *mockEntityScheduleClient) GetScheduleOnDuty(ctx context.Context, at str
 		return m.onDutyFn(ctx, at)
 	}
 	return []byte(`{"assignments":[],"count":0}`), nil
+}
+
+// A new tag refused by entity-service shows the lead the reason, written for
+// them there (which family it is for, a name taken); a server fault stays
+// generic.
+func TestCreateScheduleAbsenceKindPassesTheReason(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{"400 keeps its reason", &apierror.Error{StatusCode: http.StatusBadRequest,
+			Body: `{"message":"you run more than one family's rota: say which family the tag is for (family)"}`},
+			http.StatusBadRequest, "you run more than one family's rota: say which family the tag is for (family)"},
+		{"409 keeps its reason", &apierror.Error{StatusCode: http.StatusConflict,
+			Body: `{"message":"a tag named SRE already exists"}`},
+			http.StatusConflict, "a tag named SRE already exists"},
+		{"500 stays generic", &apierror.Error{StatusCode: http.StatusInternalServerError,
+			Body: `{"message":"pq: relation does not exist"}`},
+			http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewScheduleHandler(&mockEntityScheduleClient{
+				createKindFn: func(context.Context, []byte) ([]byte, error) { return nil, tc.err },
+			})
+			r := withUser(httptest.NewRequest(http.MethodPost, "/team-schedule/absence-kinds",
+				strings.NewReader(`{"shortCode":"SRE","label":"SRE","bucket":"ALLOCATION","colourToken":"INT"}`)))
+			w := httptest.NewRecorder()
+			h.CreateScheduleAbsenceKind(w, r)
+			if w.Code != tc.wantCode {
+				t.Fatalf("status %d, want %d (%s)", w.Code, tc.wantCode, w.Body.String())
+			}
+			if tc.wantMsg != "" && !strings.Contains(w.Body.String(), tc.wantMsg) {
+				t.Fatalf("body %s, want the reason %q", w.Body.String(), tc.wantMsg)
+			}
+			if tc.wantMsg == "" && strings.Contains(w.Body.String(), "pq:") {
+				t.Fatalf("body %s leaks the upstream detail", w.Body.String())
+			}
+		})
+	}
 }
 
 func TestSearchScheduleAssignments(t *testing.T) {
@@ -782,5 +832,50 @@ func TestPagingContactRoutes(t *testing.T) {
 		if strings.Contains(w.Body.String(), "twilio") {
 			t.Fatalf("upstream detail leaked: %s", w.Body.String())
 		}
+	})
+}
+
+func TestDismissScheduleEngagementAllocation(t *testing.T) {
+	const path = "/team-schedule/engagement-allocations/dismiss"
+	const payload = `{"id":"00000000-0000-0000-0000-000000000001","teamKey":"castor","from":"2026-11-02","to":"2026-11-03"}`
+
+	t.Run("requires an authenticated user", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload)))
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("rejects a body that is not JSON", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(`nope`))))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("forwards the body and returns the answer as sent", func(t *testing.T) {
+		var captured []byte
+		h := NewScheduleHandler(&mockEntityScheduleClient{dismissFn: func(_ context.Context, body []byte) ([]byte, error) {
+			captured = body
+			return []byte(`{"days":2}`), nil
+		}})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
+		assertStatus(t, w, http.StatusOK)
+		if string(captured) != payload {
+			t.Fatalf("forwarded %s, want the body unchanged", captured)
+		}
+		if strings.TrimSpace(w.Body.String()) != `{"days":2}` {
+			t.Fatalf("body = %s", w.Body.String())
+		}
+	})
+
+	t.Run("shows the entity service's refusal", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{dismissFn: func(context.Context, []byte) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusForbidden, Body: `{"message":"that engineer is not on castor, so their rota is not yours to change"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
+		assertStatus(t, w, http.StatusForbidden)
 	})
 }

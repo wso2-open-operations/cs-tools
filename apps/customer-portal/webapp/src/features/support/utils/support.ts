@@ -35,6 +35,7 @@ import {
   CallRequestStatus,
   CaseType,
   type CaseTypeInput,
+  WAITING_ON_WSO2_STATE_KEY,
 } from "@features/support/constants/supportConstants";
 import { CaseReportType } from "@features/security/types/security";
 import { SEVERITY_LABEL_TO_DISPLAY } from "@/features/dashboard/constants/dashboard";
@@ -678,6 +679,19 @@ export function formatFileSize(
 }
 
 /**
+ * The size of a file as a number of bytes for a download, or undefined when it is
+ * not known. A download of a known small file goes through the browser's own
+ * download (so it shows in its download list); only an unknown or large size opens
+ * the save dialog.
+ */
+export function downloadSizeOf(
+  bytes: number | string | null | undefined,
+): number | undefined {
+  const n = typeof bytes === "string" ? parseInt(bytes, 10) : bytes;
+  return n != null && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Returns whether to show View or Resume for a chat status.
  *
  * @param status - Chat status string (e.g. Resolved, Still Open, Abandoned).
@@ -975,6 +989,7 @@ export function getStatusIcon(
     case normalized === CaseStatus.OPEN.toLowerCase():
       return CircleAlert;
     case normalized === CaseStatus.WORK_IN_PROGRESS.toLowerCase():
+    case normalized === LEGACY_WORK_IN_PROGRESS_LABEL.toLowerCase():
       return Clock;
     case normalized === CaseStatus.AWAITING_INFO.toLowerCase():
       return MessageCircle;
@@ -1097,6 +1112,7 @@ export function getStatusColor(label?: string): string {
     case CaseStatus.OPEN:
       return colors.lightBlue[500];
     case CaseStatus.WORK_IN_PROGRESS:
+    case LEGACY_WORK_IN_PROGRESS_LABEL:
       return colors.green[500];
     case CaseStatus.AWAITING_INFO:
       return colors.orange[900];
@@ -1313,6 +1329,18 @@ const ANY_HTML_TAG = /<[a-z][\s\S]*>/i;
  * @returns {string} HTML with real line breaks preserved as `<br>`, or the
  *   input unchanged if it already contains markup.
  */
+// Matches a bare "Hello,"/"Hi Team," opening greeting only -- `[^,]*` (no
+// comma allowed before the trailing one) keeps this from also matching a
+// sentence that merely starts with a greeting word and has its own comma,
+// e.g. "Hi, I checked the configuration,".
+const GREETING_OPENING_LINE = /^(?:hello|hi|hey|dear)\b[^,]*,\s*$/i;
+// Matches a bare sign-off line only (e.g. "Thanks,", "Thanks and Regards,",
+// "Best regards") -- not a sentence that merely starts with one of these
+// words (e.g. "Thanks for your patience"). Matched against the already
+// HTML-escaped line, so "&" must also match its escaped form "&amp;".
+const SIGN_OFF_LINE =
+  /^(?:thanks(?:\s+(?:and|&(?:amp;)?)\s+regards)?|thank you|regards|kind regards|best regards)\s*[,.]?\s*$/i;
+
 export function plainTextCommentToHtml(content: string): string {
   if (!content || typeof content !== "string") return "";
   if (ANY_HTML_TAG.test(content) || /\[\\?\/?code\]/i.test(content)) {
@@ -1324,7 +1352,28 @@ export function plainTextCommentToHtml(content: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-  return escaped.replace(/\r\n|\r|\n/g, "<br>");
+
+  // A single Enter between an opening "Hello,"-style greeting and the body,
+  // or between the body and a "Thanks,"-style sign-off, renders as a bare
+  // <br> with no visual gap -- reported live as a cramped-looking email
+  // when the author didn't leave a blank line themselves. Insert one
+  // automatically at those two boundaries (and only those, and only when
+  // the author hasn't already left a blank line there) so the common
+  // greeting/body/sign-off shape always reads as separate paragraphs.
+  const lines = escaped.split(/\r\n|\r|\n/);
+  const withSpacing: string[] = [];
+  lines.forEach((line, i) => {
+    withSpacing.push(line);
+    const next = lines[i + 1];
+    if (next === undefined) return;
+    const alreadyBlank = line.trim() === "" || next.trim() === "";
+    const isGreetingBoundary = i === 0 && GREETING_OPENING_LINE.test(line.trim());
+    const isSignOffBoundary = SIGN_OFF_LINE.test(next.trim());
+    if (!alreadyBlank && (isGreetingBoundary || isSignOffBoundary)) {
+      withSpacing.push("");
+    }
+  });
+  return withSpacing.join("<br>");
 }
 
 /**
@@ -1631,6 +1680,39 @@ export function toPresentContinuousActionLabel(label: string): string {
     "Reject Solution": "Rejecting...",
   };
   return map[label] ?? `${label}...`;
+}
+
+/**
+ * The label a state carried before Work In Progress and Waiting On WSO2 were
+ * shown as one In Progress. Still matched so a response that bypasses the merge
+ * does not fall back to the default colour and icon.
+ */
+const LEGACY_WORK_IN_PROGRESS_LABEL = "Work In Progress";
+
+/**
+ * Resolves the state key an action button sends. Looks the label up in the
+ * project's case states; "Waiting On WSO2" is not listed there any more (it is
+ * folded into In Progress), so its key is supplied directly.
+ *
+ * @param actionLabel - Action button label (e.g. "Waiting on WSO2").
+ * @param caseStates - Case states from the project filters.
+ * @returns {number | undefined} The state key, or undefined when none applies.
+ */
+export function resolveActionStateKey(
+  actionLabel: string,
+  caseStates?: { id: string; label: string }[],
+): number | undefined {
+  const stateLabel = ACTION_TO_CASE_STATE_LABEL[actionLabel];
+  if (!stateLabel) return undefined;
+  const entry = caseStates?.find(
+    (s) => s.label.toLowerCase() === stateLabel.toLowerCase(),
+  );
+  const num = entry?.id ? Number(entry.id) : NaN;
+  if (!Number.isNaN(num)) return num;
+  if (stateLabel === CaseStatus.WAITING_ON_WSO2) {
+    return WAITING_ON_WSO2_STATE_KEY;
+  }
+  return undefined;
 }
 
 /** Maps action labels (from getAvailableCaseActions) to caseState labels for lookup. */

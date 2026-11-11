@@ -1446,6 +1446,16 @@ type Project struct {
 	// portal backend's customer-health risk flags) search by account rather
 	// than fetching one project at a time.
 	GoLiveDate *time.Time `json:"goLiveDate"`
+	// GoLivePlanDate, OnboardingExpiryDate, OnboardingStartDate and
+	// ProductionReadinessCompletionDate are the project's other onboarding
+	// dates (project.onboarding_go_live_plan_date, onboarding_expiry_date,
+	// onboarding_start_date, onboarding_production_readiness_completion_date),
+	// selected so a project list can show them without a GetProjectByID call per
+	// row. Nil when not set.
+	GoLivePlanDate                    *time.Time `json:"goLivePlanDate"`
+	OnboardingExpiryDate              *time.Time `json:"onboardingExpiryDate"`
+	OnboardingStartDate               *time.Time `json:"onboardingStartDate"`
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate"`
 }
 
 // ProjectAccountRef is the embedded account summary returned in project detail responses.
@@ -1496,6 +1506,13 @@ type ProjectClosureFields struct {
 	// does not interpret, validate, or impose any schema on its contents — it is
 	// passed through opaquely as written by that SN flow (ServiceNow data source only).
 	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
+	// SuspensionProcessOverridden is the CSM-owned "suspension process
+	// overridden" flag (project.suspension_process_overridden, migration 0281).
+	// When true the automatic Account Closure Process must not evaluate the
+	// project. Always present, false by default. Read-only: there is no write
+	// path yet, it is set directly in the database or by the data sync. The
+	// legacy data source carries no such field, so it is always false there.
+	SuspensionProcessOverridden bool `json:"suspensionProcessOverridden"`
 }
 
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.
@@ -1521,7 +1538,10 @@ type ProjectEngagementFields struct {
 	// OnboardingStartDate is populated on Postgres data sources only (nil
 	// elsewhere).
 	OnboardingStartDate *time.Time `json:"onboardingStartDate"`
-	OnboardingStatus    *string    `json:"onboardingStatus"`
+	// ProductionReadinessCompletionDate is populated on Postgres data sources
+	// only (nil elsewhere).
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate"`
+	OnboardingStatus                  *string    `json:"onboardingStatus"`
 }
 
 type ProjectDetailsView struct {
@@ -1576,6 +1596,13 @@ type ProjectDetailsView struct {
 // VerificationEnabled is likewise Postgres data source only — no ServiceNow
 // equivalent — and combines freely with every other field here (no
 // exclusivity rule), the same as ClosureState.
+//
+// SuspensionProcessOverridden is Postgres data source only as well (rejected
+// on the legacy data source, which has no such field) and combines freely with
+// every other field. Setting it touches no closure state, no
+// suspension_process_state and recomputes nothing; it only stamps
+// updated_by/updated_on like every other field. As for closureState,
+// fine-grained "admin only" enforcement lives in the BFF, not here.
 type ProjectUpdateRequest struct {
 	HasAgent                        *bool           `json:"hasAgent,omitempty"`
 	HasKbReferences                 *bool           `json:"hasKbReferences,omitempty"`
@@ -1590,6 +1617,12 @@ type ProjectUpdateRequest struct {
 	// and tolerant of spaces (normalized the same way the three sub-state
 	// fields above already are).
 	ClosureState *string `json:"closureState,omitempty"`
+	// SuspensionProcessOverridden sets project.suspension_process_overridden
+	// (Postgres data sources only; rejected on the legacy data source). Only a
+	// boolean true or false changes it; null and omitted both leave it
+	// unchanged. When true, the automatic Account Closure Process never
+	// evaluates the project.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden,omitempty"`
 	// OnboardingStatus sets the project's onboarding status (Postgres data
 	// sources only; rejected on the ServiceNow data source). Accepts the labels
 	// reads return ("Not-Started", "In-Progress", "On-Hold", "Completed",
@@ -1601,16 +1634,18 @@ type ProjectUpdateRequest struct {
 	// Must be an active internal user. Clearing the owner is not supported:
 	// null and omitted both leave it unchanged.
 	OnboardingOwner *string `json:"onboardingOwner,omitempty"`
-	// OnboardingStartDate, OnboardingGoLivePlanDate, OnboardingGoLiveDate and
-	// OnboardingExpiryDate set the project's onboarding dates, as "YYYY-MM-DD"
-	// (Postgres data sources only; rejected on the ServiceNow data source). A
-	// malformed date is a 400, as is a go-live plan, go-live or expiry date
-	// earlier than the (supplied or stored) start date. Clearing a date is not
+	// OnboardingStartDate, OnboardingGoLivePlanDate, OnboardingGoLiveDate,
+	// OnboardingExpiryDate and OnboardingProductionReadinessCompletionDate set
+	// the project's onboarding dates, as "YYYY-MM-DD"
+	// (Postgres data sources only; rejected on the legacy data source). A
+	// malformed date is a 400, as is any other date earlier than the (supplied
+	// or stored) start date. Clearing a date is not
 	// supported: null and omitted both leave it unchanged.
-	OnboardingStartDate      *string `json:"onboardingStartDate,omitempty"`
-	OnboardingGoLivePlanDate *string `json:"onboardingGoLivePlanDate,omitempty"`
-	OnboardingGoLiveDate     *string `json:"onboardingGoLiveDate,omitempty"`
-	OnboardingExpiryDate     *string `json:"onboardingExpiryDate,omitempty"`
+	OnboardingStartDate                         *string `json:"onboardingStartDate,omitempty"`
+	OnboardingGoLivePlanDate                    *string `json:"onboardingGoLivePlanDate,omitempty"`
+	OnboardingGoLiveDate                        *string `json:"onboardingGoLiveDate,omitempty"`
+	OnboardingExpiryDate                        *string `json:"onboardingExpiryDate,omitempty"`
+	OnboardingProductionReadinessCompletionDate *string `json:"onboardingProductionReadinessCompletionDate,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -1632,16 +1667,19 @@ type ProjectUpdateResult struct {
 	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
 	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 	VerificationEnabled             *bool           `json:"verificationEnabled,omitempty"`
+	// SuspensionProcessOverridden is populated on Postgres data sources only.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden,omitempty"`
 	// OnboardingStatus, OnboardingOwner and the onboarding dates are populated
 	// on Postgres data sources only.
 	OnboardingStatus *string    `json:"onboardingStatus,omitempty"`
 	OnboardingOwner  *PersonRef `json:"onboardingOwner,omitempty"`
 	// The onboarding dates are named as the project read names them
 	// (goLiveDate, goLivePlanDate, onboardingExpiryDate).
-	OnboardingStartDate  *time.Time `json:"onboardingStartDate,omitempty"`
-	GoLivePlanDate       *time.Time `json:"goLivePlanDate,omitempty"`
-	GoLiveDate           *time.Time `json:"goLiveDate,omitempty"`
-	OnboardingExpiryDate *time.Time `json:"onboardingExpiryDate,omitempty"`
+	OnboardingStartDate               *time.Time `json:"onboardingStartDate,omitempty"`
+	GoLivePlanDate                    *time.Time `json:"goLivePlanDate,omitempty"`
+	GoLiveDate                        *time.Time `json:"goLiveDate,omitempty"`
+	OnboardingExpiryDate              *time.Time `json:"onboardingExpiryDate,omitempty"`
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate,omitempty"`
 }
 
 // ProjectConsumptionStatus represents the product consumption state and keys for a project.
@@ -1681,7 +1719,10 @@ type SearchProjectsRequest struct {
 	// EndDateTo filters projects with an end date on or before this date
 	// (yyyy-MM-dd).
 	EndDateTo string `json:"endDateTo"`
-	// SortBy is the field to sort results by. Only "endDate" is accepted.
+	// SortBy is the field to sort results by: "endDate" on every data source;
+	// "goLivePlanDate", "goLiveDate", "onboardingExpiryDate" and
+	// "productionReadinessCompletionDate" on Postgres data sources only (nulls
+	// last).
 	SortBy string `json:"sortBy"`
 	// SortOrder is the sort direction ("asc" or "desc").
 	SortOrder string `json:"sortOrder"`
@@ -1739,6 +1780,26 @@ type SearchProjectsRequest struct {
 	// in Go by paging through every match, with the same page-bound caveat as
 	// ExcludeClosureStates.
 	SfIDs []string `json:"sfIds,omitempty"`
+	// ClosureStates is the include-side counterpart of ExcludeClosureStates:
+	// keeps only projects whose closure state is any of the given values
+	// ("Open"/"Suspended"/"Restricted"). Postgres data sources only; rejected
+	// on the legacy data source. A project with no recorded closure state
+	// matches none.
+	ClosureStates []string `json:"closureStates,omitempty"`
+	// The *From/*To fields below filter on the project's onboarding dates, as
+	// inclusive yyyy-MM-dd bounds; a project with no such date never matches a
+	// bound, and From must not be after To. Postgres data sources only;
+	// rejected on the legacy data source.
+	OnboardingStartDateFrom               string `json:"onboardingStartDateFrom"`
+	OnboardingStartDateTo                 string `json:"onboardingStartDateTo"`
+	GoLivePlanDateFrom                    string `json:"goLivePlanDateFrom"`
+	GoLivePlanDateTo                      string `json:"goLivePlanDateTo"`
+	GoLiveDateFrom                        string `json:"goLiveDateFrom"`
+	GoLiveDateTo                          string `json:"goLiveDateTo"`
+	OnboardingExpiryDateFrom              string `json:"onboardingExpiryDateFrom"`
+	OnboardingExpiryDateTo                string `json:"onboardingExpiryDateTo"`
+	ProductionReadinessCompletionDateFrom string `json:"productionReadinessCompletionDateFrom"`
+	ProductionReadinessCompletionDateTo   string `json:"productionReadinessCompletionDateTo"`
 }
 
 // ProjectSearchAccountRef is the account reference embedded in a project
@@ -1801,6 +1862,14 @@ type ProjectView struct {
 	// populated on GetProjectByID; added here so an account-scoped search
 	// doesn't need one GetProjectByID call per project just to know this.
 	GoLiveDate *time.Time `json:"goLiveDate"`
+	// GoLivePlanDate, OnboardingExpiryDate, OnboardingStartDate and
+	// ProductionReadinessCompletionDate are the project's other onboarding
+	// dates, as on ProjectDetailsView. Populated on Postgres data sources
+	// only; the legacy data source's project search carries none of them (nil).
+	GoLivePlanDate                    *time.Time `json:"goLivePlanDate"`
+	OnboardingExpiryDate              *time.Time `json:"onboardingExpiryDate"`
+	OnboardingStartDate               *time.Time `json:"onboardingStartDate"`
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate"`
 	// VerificationEnabled mirrors ProjectDetailsView's own field of the same
 	// name -- see domain.Project.VerificationEnabled's own doc comment.
 	// Previously selected by SearchProjects into the internal Project
@@ -3429,6 +3498,27 @@ type SearchCasesRequest struct {
 	// Rejected together with SkipTotal (there would be nothing left to
 	// compute); Postgres data source only.
 	CountOnly bool `json:"countOnly,omitempty"`
+	// ExcludeFields names response fields to leave out of every returned row,
+	// for a list that never shows them and would otherwise download them for
+	// nothing (a case description can be megabytes of rich text). Only
+	// SearchExcludeFieldDescription is supported; any other value is rejected.
+	// An excluded field comes back null, the same as a case with no value, and
+	// the Postgres data source does not read the column at all. Filtering on the
+	// field (searchQuery) is unaffected. Omitted or empty changes nothing.
+	ExcludeFields []string `json:"excludeFields,omitempty"`
+}
+
+// SearchExcludeFieldDescription is the one ExcludeFields value supported today.
+const SearchExcludeFieldDescription = "description"
+
+// ExcludesField reports whether name is listed in ExcludeFields.
+func (r SearchCasesRequest) ExcludesField(name string) bool {
+	for _, f := range r.ExcludeFields {
+		if f == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AggregateCasesRequest is the input for the dedicated case aggregate
@@ -3490,31 +3580,45 @@ type AggregateResponse struct {
 	TotalMinutes  *int              `json:"totalMinutes,omitempty"`
 }
 
-// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a
-// day-bucketed count of cases opened and closed per day, for dashboard
-// widgets. Deliberately narrow (no bucket-unit/series config, unlike
-// AggregateCasesRequest's open-ended groupBy): this backs exactly one chart,
-// not a platform, so the two series (opened, closed) are fixed.
+// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a count
+// of cases opened and closed per day (or per week or month of a fixed
+// window), for dashboard widgets. Deliberately narrow (unlike
+// AggregateCasesRequest's open-ended groupBy): this backs one chart, not a
+// platform, so the two series (opened, closed) are fixed.
 type CaseVolumeTrendRequest struct {
 	Filters SearchCasesFilters `json:"filters"`
 	// Days is the size of the trailing window, ending today (UTC). Optional;
 	// the service applies a default (30) when omitted and rejects a value
-	// outside 1-90.
+	// outside 1-90. Not allowed together with StartDate/EndDate.
 	Days int `json:"days,omitempty"`
+	// StartDate and EndDate are a fixed window instead of the trailing one:
+	// both inclusive UTC calendar days, each a plain YYYY-MM-DD or a relative
+	// date placeholder (__today__, __startOfMonth:-1__, ...). Optional, but
+	// one needs the other.
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+	// Bucket is how a fixed window's days are grouped into points: "day"
+	// (the default, at most 90 days), "week" (Monday to Sunday, at most 54
+	// weeks: a whole leap year that starts on a Sunday) or "month" (at most 24 months). Only with StartDate/EndDate.
+	Bucket string `json:"bucket,omitempty"`
 }
 
-// CaseVolumeTrendPoint is one day's count in a CaseVolumeTrendSeries. Date is
-// a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
-// date-only wire fields.
+// CaseVolumeTrendPoint is one point's count in a CaseVolumeTrendSeries. Date
+// is a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
+// date-only wire fields. For a "week" or "month" bucket, Date is the bucket's
+// first day and EndDate its last, both clipped to the requested window, so
+// the two are exactly the days the count covers; EndDate is absent for a
+// day point.
 type CaseVolumeTrendPoint struct {
-	Date  string `json:"date"`
-	Count int    `json:"count"`
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Count   int    `json:"count"`
 }
 
 // CaseVolumeTrendSeries is one named line in a CaseVolumeTrendResponse
-// ("Opened" or "Closed"), with one point per day in the requested window,
-// in chronological order. A day with no matching cases is still present,
-// with Count 0 -- the chart draws a continuous line.
+// ("Opened" or "Closed"), with one point per day (or bucket) in the
+// requested window, in chronological order. A day with no matching cases is
+// still present, with Count 0 -- the chart draws a continuous line.
 type CaseVolumeTrendSeries struct {
 	Label  string                 `json:"label"`
 	Points []CaseVolumeTrendPoint `json:"points"`
@@ -3524,8 +3628,14 @@ type CaseVolumeTrendSeries struct {
 // exactly two series, "Opened" (by created date) and "Closed" (by closed
 // date, own-type only -- see caseLikeOwnClosedOnColumn's doc comment).
 type CaseVolumeTrendResponse struct {
-	Days   int                     `json:"days"`
-	Series []CaseVolumeTrendSeries `json:"series"`
+	// Days is the number of days the window covers.
+	Days int `json:"days"`
+	// StartDate, EndDate and Bucket echo a fixed window's resolved bounds
+	// and grouping; all absent for the trailing window.
+	StartDate string                  `json:"startDate,omitempty"`
+	EndDate   string                  `json:"endDate,omitempty"`
+	Bucket    string                  `json:"bucket,omitempty"`
+	Series    []CaseVolumeTrendSeries `json:"series"`
 }
 
 // CaseVolumeDayCount is the opened/closed count for one UTC calendar day --
@@ -3929,19 +4039,16 @@ type Variable struct {
 	Value string `json:"value"`
 }
 
-// CaseAttachment is a file attachment for security report analysis case creation.
-// File must be a base64 data URI (e.g. data:application/pdf;base64,...).
-type CaseAttachment struct {
-	Name string `json:"name"`
-	File string `json:"file"`
-}
-
 // CreateCaseRequest is the input for creating a new case.
 // id, number, and internal_id are auto-generated; state defaults to open.
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
 // For type "service_request": catalogId, catalogItemId, and variables are required.
-// For type "security_report_analysis": subject and description are required; attachments are optional
-// (uploaded via a separate request after creation, not bundled into this one).
+// For type "security_report_analysis": subject, description and at least one report file
+// are required. The files are uploaded BEFORE the case, as drafts of its project
+// (POST /attachments/upload with type work_item and projectId), and named here in
+// attachmentIds; they are linked to the case in the same request, so a case never
+// exists without its report. Machine callers (no user token) are not held to the
+// minimum.
 type CreateCaseRequest struct {
 	CreatedBy         string        `json:"-"`
 	Type              string        `json:"type"`
@@ -3956,6 +4063,14 @@ type CreateCaseRequest struct {
 	CatalogID     string     `json:"catalogId"`
 	CatalogItemID string     `json:"catalogItemId"`
 	Variables     []Variable `json:"variables"`
+	// AttachmentIDs are draft work item attachments the caller uploaded to ProjectID
+	// before this request (see the type's comment): checked before the case is
+	// created and linked to it right after. At most service.MaxCreateAttachments.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	// ReportDraftOwnerEmail is the email AttachmentIDs were checked against, set by the
+	// service (never read from the request). The plain-Postgres create links the files in
+	// its own transaction as that uploader, atomically with the case.
+	ReportDraftOwnerEmail string `json:"-"`
 	// Optional fields
 	RelatedCaseID string `json:"relatedCaseId"`
 	// ResolvedRelatedCaseID is the related-case id already checked against
@@ -3967,8 +4082,6 @@ type CreateCaseRequest struct {
 	// WatchList is watcher emails (Customer Portal / Ballerina). Platform user
 	// UUIDs are still accepted and resolved to emails for CSM callers.
 	WatchList []string `json:"watchList"`
-	// For security_report_analysis type
-	Attachments []CaseAttachment `json:"attachments"`
 	// For engagement type
 	EngagementType        EngagementType        `json:"engagementType"`
 	EngagementPaymentType EngagementPaymentType `json:"engagementPaymentType"`
@@ -4350,26 +4463,18 @@ type CreateCaseGithubIssueResponse struct {
 	Issue   CaseGithubIssueDetail `json:"issue"`
 }
 
-// AttachmentStatus is the upload lifecycle state of a CSM-native (Postgres)
-// data source attachment. ServiceNow-sourced attachments have no such
-// lifecycle -- SN's /attachments API only ever returns fully-uploaded files --
-// so this is meaningful for the Postgres data source only, where the browser
-// uploads directly to SFTPGo and CSM's row can be registered before that
-// upload finishes.
+// AttachmentStatus is the lifecycle state of an attachment row as it is listed
+// by POST /attachments/search. Only complete rows are listed.
 type AttachmentStatus string
 
 const (
-	// AttachmentStatusPending marks a row created before the browser has
-	// uploaded (or finished uploading) the file to SFTPGo. It exists so an
-	// orphan-file gap can't occur: if the upload never completes or the
-	// browser never calls back, CSM still has a record that something was
-	// started, for a future reconciliation job to find and clean up.
-	AttachmentStatusPending AttachmentStatus = "pending"
 	// AttachmentStatusComplete marks a row whose file is confirmed present in
-	// SFTPGo. This is the only state that has ever existed prior to this
-	// change, and remains the default for every caller that doesn't specify
-	// a status (the ServiceNow path, and any existing Postgres-path caller).
+	// Azure Blob Storage (or was migrated there).
 	AttachmentStatusComplete AttachmentStatus = "complete"
+	// AttachmentStatusDeleted marks a row a person deleted. It is listed only
+	// when the CSM portal backend asks for deleted rows (see
+	// SearchAttachmentsRequest.DeletedOnly); it has no file and no link.
+	AttachmentStatusDeleted AttachmentStatus = "deleted"
 )
 
 // Attachment represents a file attachment linked to a reference entity.
@@ -4388,84 +4493,15 @@ type Attachment struct {
 	CreatedOn   time.Time      `json:"createdOn"`
 	DownloadURL *string        `json:"downloadUrl"`
 	PreviewURL  *string        `json:"previewUrl"`
-	// StorageKey identifies the file's location in external object storage
-	// (SFTPGo) for CSM-native (Postgres) data source attachments. Nil for
-	// ServiceNow-sourced attachments, whose bytes are held by ServiceNow itself.
+	// StorageKey identifies the file's location in Azure Blob Storage. Nil for a
+	// row that has no file of its own recorded.
 	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments.
+	// Status is the lifecycle state -- see AttachmentStatus.
 	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// CreateAttachmentRequest is the input for POST /attachments.
-//
-// The two data sources populate mutually exclusive fields: ServiceNow requires
-// File (a base64 data URI) and computes SizeBytes from the decoded bytes; the
-// CSM-native (Postgres) data source requires StorageKey (the file was already
-// uploaded to SFTPGo out of band) and SizeBytes, since this service never sees
-// the bytes themselves.
-type CreateAttachmentRequest struct {
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	File          string        `json:"file,omitempty"`
-	Description   *string       `json:"description"`
-	// StorageKey references file bytes already uploaded to SFTPGo. Required
-	// for the CSM-native (Postgres) data source; ignored for ServiceNow.
-	StorageKey *string `json:"storageKey,omitempty"`
-	// SizeBytes is the file size in bytes. Required for the CSM-native
-	// (Postgres) data source (this service cannot compute it, since it never
-	// sees the file bytes); ignored for ServiceNow, which computes it from
-	// the decoded File payload.
-	SizeBytes int `json:"sizeBytes,omitempty"`
-	// Status requests the initial lifecycle state for a CSM-native
-	// (Postgres) data source attachment -- see AttachmentStatus. Empty
-	// defaults to AttachmentStatusComplete, preserving today's behavior for
-	// every existing caller (including the ServiceNow path, which ignores
-	// this field entirely). Callers that upload directly to SFTPGo should
-	// pass AttachmentStatusPending here *before* minting the upload
-	// credential, then call CaseService.ConfirmCaseAttachment once the
-	// browser reports the upload succeeded.
-	Status AttachmentStatus `json:"status,omitempty"`
-	// CreatedBy is the resolved actor user id, wired in by the Postgres-backed
-	// service from the request's auth token before it reaches the repository.
-	// Not part of the wire contract.
-	CreatedBy string `json:"-"`
-}
-
-// AttachmentDetail holds the core fields returned after creating an attachment.
-type AttachmentDetail struct {
-	ID        string    `json:"id"`
-	SizeBytes int       `json:"sizeBytes"`
-	CreatedOn time.Time `json:"createdOn"`
-	CreatedBy string    `json:"createdBy"`
-	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
-	// this service holds no download location for it, only its storage_key --
-	// resolving storage_key to an actual download location is the downstream
-	// CSM backend's job. Always non-nil for ServiceNow-sourced attachments.
-	DownloadURL *string `json:"downloadUrl"`
-	// StorageKey is set only for CSM-native (Postgres) data source attachments.
-	// See Attachment.StorageKey.
-	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments.
-	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// CreateAttachmentResponse is the response for POST /cases/{id}/attachments.
-type CreateAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
-}
-
-// ConfirmAttachmentResponse is the response for POST /attachments/{id}/confirm.
-// It reports the same shape as CreateAttachmentResponse -- confirming is just
-// the second half of creating an attachment for the CSM-native (Postgres)
-// data source's two-step (pending -> complete) upload flow.
-type ConfirmAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
+	// DeletedOn and DeletedBy say when and by whom a deleted attachment was
+	// deleted. Set only on a row whose Status is AttachmentStatusDeleted.
+	DeletedOn *time.Time     `json:"deletedOn,omitempty"`
+	DeletedBy *UserReference `json:"deletedBy,omitempty"`
 }
 
 // ReferenceType identifies the entity type an attachment is associated with.
@@ -4484,6 +4520,12 @@ type SearchAttachmentsRequest struct {
 	ReferenceID   string        `json:"referenceId"`
 	ReferenceType ReferenceType `json:"referenceType"`
 	Pagination    Pagination    `json:"pagination"`
+	// DeletedOnly lists the deleted attachments of the reference INSTEAD of the
+	// available ones (total and paging are of the deleted rows), most recently
+	// deleted first. Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID),
+	// which sets it for a portal admin; from any other caller it is ignored.
+	// Not read for "deployment".
+	DeletedOnly bool `json:"deletedOnly,omitempty"`
 }
 
 // SearchAttachmentsResponse is the paginated result of an attachment search.
@@ -4494,40 +4536,6 @@ type SearchAttachmentsResponse struct {
 	Limit       int          `json:"limit"`
 	Offset      int          `json:"offset"`
 	HasMore     bool         `json:"hasMore"`
-}
-
-// DeleteAttachmentRequest is the input for DELETE /attachments/{attachmentId}.
-type DeleteAttachmentRequest struct {
-	AttachmentID string `json:"-"`
-}
-
-// DeleteAttachmentResponse is the output for DELETE /cases/{id}/attachments/{attachmentId}.
-type DeleteAttachmentResponse struct {
-	Message string `json:"message"`
-}
-
-// UpdateAttachmentRequest is the input for PATCH /attachments/{attachmentId}.
-// ReferenceID and ReferenceType scope the update the same way SearchAttachmentsRequest does
-// (an IDOR guard: the caller asserts which entity it believes the attachment belongs to).
-// At least one of Name or Description must be provided.
-// Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear,
-// `"value"` = set -- mirroring UpdateDeployedProductRequest.Description, since a plain *string
-// cannot tell an omitted field apart from an explicit null.
-type UpdateAttachmentRequest struct {
-	AttachmentID  string          `json:"-"`
-	ReferenceID   string          `json:"referenceId"`
-	ReferenceType ReferenceType   `json:"referenceType"`
-	Name          *string         `json:"name,omitempty"`
-	Description   json.RawMessage `json:"description,omitempty"`
-}
-
-// UpdateAttachmentResponse is the response for PATCH /attachments/{attachmentId}.
-
-// UpdatedAttachment carries the fields that may change after an attachment update.
-type UpdatedAttachment struct {
-	ID        string    `json:"id"`
-	UpdatedOn time.Time `json:"updatedOn"`
-	UpdatedBy string    `json:"updatedBy"`
 }
 
 // ChangeRequestType classifies the change request type.
@@ -8182,64 +8190,6 @@ type CaseEmojiFeedback struct {
 	AdditionalComment *string              `json:"additionalComment"`
 }
 
-// --- attachment gaps (formerly ServiceNow data source only; the CSM-native
-// Postgres data source now implements GetAttachmentByID and UpdateAttachment
-// too, in caseService -- see its Content/StorageKey doc comments above for how
-// the two data sources differ) ---
-
-// AttachmentDetails is the response for GET /attachments/{id} — attachment
-// metadata plus its base64-encoded file content. The upstream response does
-// include a createdByUser key, but this lookup leaves it null rather than
-// resolving the uploader the way the search/comment paths do — so CreatedBy is
-// a bare string here. ReferenceType is genuinely absent from the upstream
-// response, so it is deliberately not modeled below.
-type AttachmentDetails struct {
-	ID          string `json:"id"`
-	ReferenceID string `json:"referenceId"`
-	// ReferenceType identifies which entity type ReferenceID points at (see
-	// ReferenceType). Always populated for CSM-native (Postgres) data source
-	// attachments; nil (JSON null) when the backing data source's
-	// attachment-details lookup does not report a reference type. Callers
-	// authorizing access per referenced resource must treat a nil value as
-	// unknown and fail closed.
-	ReferenceType *ReferenceType `json:"referenceType"`
-	Name          string         `json:"name"`
-	Type          string         `json:"type"`
-	SizeBytes     int            `json:"sizeBytes"`
-	Description   *string        `json:"description"`
-	CreatedBy     string         `json:"createdBy"`
-	CreatedOn     time.Time      `json:"createdOn"`
-	DownloadURL   *string        `json:"downloadUrl"`
-	PreviewURL    *string        `json:"previewUrl"`
-	// Content is nil for CSM-native (Postgres) data source attachments: this
-	// service holds no bytes for them -- see CaseService.GetCaseAttachmentContent.
-	// Always non-nil for ServiceNow-sourced attachments.
-	Content *string `json:"content"`
-	// StorageKey is set only for CSM-native (Postgres) data source
-	// attachments, whose Content is always nil (see above).
-	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments. A
-	// 'pending' row is still returned here (unlike the default search/list
-	// response, which excludes pending rows) since a direct id lookup is how
-	// the confirm step and an uploader checking their own in-flight upload
-	// both work.
-	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// UpdateAttachmentRequest is the request body for PATCH /attachments/{id}.
-// ReferenceType must be "case" or "deployment"; for "case" Name is required
-// and Description is not allowed; for "deployment" at least one of Name or
-// Description must be present.
-
-// UpdatedAttachment holds the fields returned after updating an attachment.
-
-// UpdateAttachmentResponse is the response for PATCH /attachments/{id}.
-type UpdateAttachmentResponse struct {
-	Message    string            `json:"message"`
-	Attachment UpdatedAttachment `json:"attachment"`
-}
-
 // --- deployed product metrics (ServiceNow data source only) ---
 
 // DeployedProductMetricsRequest is the request body for
@@ -8869,7 +8819,16 @@ type SLAStatus struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle,omitempty"`
 	CaseType   string `json:"caseType,omitempty"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CaseCreatedPayload.EngagementType's own
+	// convention (engagement.engagement_type, lowercased, e.g. "migration";
+	// "" for every non-engagement case-like type) -- exists so
+	// csm-notification-service's startup reconciliation (Engine.Reconcile,
+	// GetActiveCSMSLAClocks) can rebuild a clock's Redis-held EngagementType
+	// from this same durable source instead of silently dropping it to ""
+	// on every restart, the identical reasoning CaseType itself already has
+	// here.
+	EngagementType string `json:"engagementType,omitempty"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (account.cre_team_id
 	// joined to "group") -- "" when the case has no account, or the account
 	// has no CRE team assigned.
@@ -8955,12 +8914,42 @@ type SearchSLAStatusResponse struct {
 // named ranges rather than an open gte/lte pair (unlike the unrelated,
 // generic taskSLABusinessElapsedPercent case-search filter in
 // internal/service/sla_filters.go): the CSM Portal's SLA Engine admin table
-// offers exactly these four buckets, not an arbitrary range.
+// offers exactly these eleven buckets, not an arbitrary range. Ten percent
+// wide each (0-10, 10-20, ... 90-100), plus a final open-ended "over100" for
+// an already-breached clock whose elapsed time keeps climbing past its own
+// duration -- replaced the original four coarser buckets (under50/50to75/
+// 75to100/over100) at explicit request for finer-grained filtering. Each
+// bucket's own lower bound is inclusive, its upper bound exclusive, except
+// the final 90to100 bucket (inclusive of exactly 100%) and over100 (strictly
+// greater than 100%) -- same boundary convention the original four buckets
+// already used, just applied at every ten-point step instead of only three.
 const (
-	SLAElapsedBucketUnder50 = "under50"
-	SLAElapsedBucket50To75  = "50to75"
-	SLAElapsedBucket75To100 = "75to100"
+	SLAElapsedBucketUnder10 = "under10"
+	SLAElapsedBucket10To20  = "10to20"
+	SLAElapsedBucket20To30  = "20to30"
+	SLAElapsedBucket30To40  = "30to40"
+	SLAElapsedBucket40To50  = "40to50"
+	SLAElapsedBucket50To60  = "50to60"
+	SLAElapsedBucket60To70  = "60to70"
+	SLAElapsedBucket70To80  = "70to80"
+	SLAElapsedBucket80To90  = "80to90"
+	SLAElapsedBucket90To100 = "90to100"
 	SLAElapsedBucketOver100 = "over100"
+)
+
+// SLA status/stage filter keys -- GET /sla-status's own status query param,
+// and SLAStatusFilters.Stage's accepted values. Named after the same three
+// states the CSM Portal's SLA Engine table already renders as status chips
+// (scanSLAStatus's own IsPaused/HasBreached fields) rather than the raw
+// sla_stage_enum label: a clock can be IsPaused AND HasBreached at once (a
+// clock paused after its own wall-clock time ran out), which the UI already
+// shows as both chips together -- StatusPaused/StatusBreached are therefore
+// not mutually exclusive filter matches against the same row, same as the
+// chips aren't mutually exclusive display states.
+const (
+	SLAStatusInProgress = "in_progress"
+	SLAStatusPaused     = "paused"
+	SLAStatusBreached   = "breached"
 )
 
 // SLAStatusFilters narrows GET /sla-status's result set for the CSM Portal's
@@ -8983,12 +8972,18 @@ type SLAStatusFilters struct {
 	// product, or any other field: this is a case-identity lookup, not a
 	// general-purpose search box.
 	Search string
-	// ElapsedBucket is one of the four SLAElapsedBucket* constants above, or
-	// "" for no bucket filter. Applied AFTER the same business-day
-	// correction scanSLAStatus already applies to BusinessElapsedPercent --
-	// see SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for
-	// why this can't be a plain SQL WHERE/HAVING clause.
+	// ElapsedBucket is one of the SLAElapsedBucket* constants above, or ""
+	// for no bucket filter. Applied AFTER the same business-day correction
+	// scanSLAStatus already applies to BusinessElapsedPercent -- see
+	// SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for why
+	// this can't be a plain SQL WHERE/HAVING clause.
 	ElapsedBucket string
+	// Stage is one of the SLAStatus* constants above, or "" for no status
+	// filter. Matched against IsPaused/HasBreached, not the raw sla_stage_enum
+	// column, for the same reason ElapsedBucket isn't matched against the
+	// raw business_elapsed_percentage column -- see SearchActiveSLAStatuses'
+	// own doc comment.
+	Stage string
 }
 
 // SLAClockState is GET /sla-status/clock-state's response — the full,
@@ -9085,6 +9080,27 @@ type SLAClockState struct {
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
 	TeamLeadName  string `json:"teamLeadName,omitempty"`
+	// ProjectOnboardingStatus/IsEvaluationAccount mirror SLAStatus's own
+	// fields of the same name and the same resolution (project.onboarding_status,
+	// project_type.name = "Evaluation Subscription") -- added so
+	// csm-notification-service's SLA breach Chat-alert routing can read real
+	// team/onboarding/evaluation facts from this same call (GetClockState,
+	// made right before sending a breach alert) instead of the hardcoded
+	// false/"" it used to pass to chataudience.Resolve, now that
+	// case.created no longer carries either fact itself.
+	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
+	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// OnboardingTeamEmail is the Customer Onboarding team's own group_email
+	// (team.key = "customer_onboarding_team"), populated only when
+	// ProjectOnboardingStatus is IN_PROGRESS/NOT_STARTED -- "" otherwise,
+	// including when that team has no group_email configured. TeamEmail
+	// above is always the case's real CRE team, never swapped for this one
+	// -- csm-notification-service's breach email is meant to reach BOTH
+	// inboxes for an onboarding-stage case (the team actually working the
+	// case, and whoever is running the onboarding), not one in place of the
+	// other, so it sends to TeamEmail and OnboardingTeamEmail together
+	// rather than this service picking one.
+	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

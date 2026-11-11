@@ -36,6 +36,7 @@ type entityScheduleClient interface {
 	SearchScheduleAssignments(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleAbsences(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error)
+	DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error)
 	GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error)
 
 	// Lead edit. The portal proxies these unchanged -- entity-service is where
@@ -183,6 +184,27 @@ func (h *ScheduleHandler) SearchScheduleEngagementAllocations(w http.ResponseWri
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchScheduleEngagementAllocations failed", "userID", userID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search engagement allocations.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// DismissScheduleEngagementAllocation handles
+// POST /team-schedule/engagement-allocations/dismiss: a lead or rota admin
+// taking a customer engagement allocation (from the allocation app) off a
+// person's roster for some days, or putting them back. Who may is the entity
+// service's check, the same as marking a tag; its refusal is shown as written.
+func (h *ScheduleHandler) DismissScheduleEngagementAllocation(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.DismissScheduleEngagementAllocation(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity DismissScheduleEngagementAllocation failed", "userID", userID, "err", err)
+		mapScheduleWriteError(w, err, "Failed to change the engagement allocation.")
 		return
 	}
 
@@ -640,6 +662,20 @@ func mapScheduleWriteError(w http.ResponseWriter, err error, fallbackMsg string)
 	mapUpstreamErrorGeneric(w, err, fallbackMsg)
 }
 
+// mapAbsenceKindWriteError is mapScheduleWriteError plus the 400: entity-service
+// refuses a new tag in words written for the lead who typed it (the name is
+// taken or too long, a leave tag cannot exclude from the timesheet, which
+// family the tag is for), and the form can only show what is wrong if it gets
+// that reason. Read only from the JSON envelope, never a raw body.
+func mapAbsenceKindWriteError(w http.ResponseWriter, err error, fallbackMsg string) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+		writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
+		return
+	}
+	mapScheduleWriteError(w, err, fallbackMsg)
+}
+
 // ApplyScheduleRange handles POST /team-schedule/assignments/apply.
 func (h *ScheduleHandler) ApplyScheduleRange(w http.ResponseWriter, r *http.Request) {
 	body, userID, ok := readScheduleBody(w, r)
@@ -703,7 +739,7 @@ func (h *ScheduleHandler) CreateScheduleAbsenceKind(w http.ResponseWriter, r *ht
 	result, err := h.entity.CreateScheduleAbsenceKind(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateScheduleAbsenceKind failed", "userID", userID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to add the tag.")
+		mapAbsenceKindWriteError(w, err, "Failed to add the tag.")
 		return
 	}
 

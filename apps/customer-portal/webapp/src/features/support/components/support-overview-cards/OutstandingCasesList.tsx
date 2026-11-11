@@ -195,7 +195,7 @@ export default function OutstandingCasesList({
                 <CaseCardDescriptionClamp
                   description={c.description}
                   emptyLabel=""
-                  sx={{ mb: 0, minHeight: "2.4em" }}
+                  sx={{ mb: 0, height: "2.86em", overflow: "hidden" }}
                 />
               </Box>
             </Form.CardContent>

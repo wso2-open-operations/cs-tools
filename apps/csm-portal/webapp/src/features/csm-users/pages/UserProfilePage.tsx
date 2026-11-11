@@ -240,8 +240,8 @@ function TeamMetaCell({ user }: { user: NormalizedUserDetail }): JSX.Element {
 
 /**
  * SCIM "external" org exists/locked chips for an external contact, rendered
- * in the Overview grid — the slot an internal user's Team/Phone cells
- * occupy, since the two are mutually exclusive. Absent `status` (the SCIM
+ * in the Overview grid — the slot an internal user's Team cell
+ * occupies, since the two are mutually exclusive. Absent `status` (the SCIM
  * lookup itself failed, best-effort per the backend) reads "Unavailable"
  * rather than a false "Not found".
  */
@@ -556,8 +556,8 @@ function AccessibleProjectsCard({ user }: { user: NormalizedUserDetail }): JSX.E
  * `useResolvedUserId` — most actor fields carry only an email, resolved to an
  * id through a cached lookup before the link ever appears).
  *
- * Renders everything `GET /users/{id}` returns: name, email, timezone, phone,
- * team (internal users only), roles, created/updated times, plus — split by
+ * Renders everything `GET /users/{id}` returns: name, email, timezone, mobile
+ * number (all users), team (internal users only), roles, created/updated times, plus — split by
  * `userType` — an internal user's group memberships or an external user's
  * per-project access (with the reason surfaced whenever a project doesn't
  * grant case access, per `UserProjectAccess.grantsCaseAccess`) and SCIM
@@ -708,11 +708,14 @@ export default function UserProfilePage(): JSX.Element {
               />
             </MetaCell>
           )}
-          {internal && (
-            <MetaCell label="Phone">
-              <Typography variant="body2">{user.phone ?? "Not set"}</Typography>
-            </MetaCell>
-          )}
+          {/* Shown for every user type (internal and external), read-only, and
+              verbatim: a stored value that is not valid E.164 is displayed
+              as-is. An empty string counts as unset. */}
+          <MetaCell label="Mobile number">
+            <Typography variant="body2" sx={{ wordBreak: "break-all" }}>
+              {user.phone?.trim() ? user.phone : "Not set"}
+            </Typography>
+          </MetaCell>
           {!internal && !isWso2Email(user.email) && (
             <ExternalAccountMetaCell status={user.externalAccount} />
           )}

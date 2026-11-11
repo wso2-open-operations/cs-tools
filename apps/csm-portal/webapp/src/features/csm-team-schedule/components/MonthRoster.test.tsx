@@ -1010,15 +1010,23 @@ describe("MonthRoster: a cell is editable exactly when the server would accept t
     expect(editableDays(container)).toHaveLength(30);
   });
 
-  it("gives nobody a leaver's days, who is on no team's member list", () => {
+  it("gives a leaver's past days to nobody, and the days from today on to the team's lead to clear", () => {
+    // Somebody on no team's member list with days still filed under Alpha:
+    // the past is the record of what they worked; what is still ahead is
+    // left on Alpha's rota, and Alpha's lead may only take it off.
+    const onEditCell = vi.fn();
     const { container } = renderRoster({
       assignments: [assignment({ name: "Lee Left", rotaDate: "2026-09-01", shiftCode: EVENING.code, teamKey: "alpha" })],
       teamMembers: { alpha: [] },
       leadTeams: ["alpha"],
       editing: true,
-      onEditCell: vi.fn(),
+      onEditCell,
     });
-    expect(editableDays(container)).toEqual([]);
+    const today = new Date().getDate();
+    expect(editableDays(container).every((d) => d >= today)).toBe(true);
+    const cell = container.querySelector("tbody tr td.editable") as HTMLElement;
+    fireEvent.click(cell);
+    expect(onEditCell.mock.calls[0][0]).toMatchObject({ clearOnly: true });
   });
 });
 
@@ -1341,17 +1349,20 @@ describe("MonthRoster: customer engagement markers", () => {
     assignment({ name: "Jane Doe", userId: JANE, rotaDate: "2026-09-21", shiftCode: EVENING.code }),
     assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: EVENING.code }),
   ];
-  const marks = (el: ParentNode) => [...el.querySelectorAll(".engmk")] as HTMLElement[];
+  const chips = (el: ParentNode) => [...el.querySelectorAll(".chip.eng:not(.engmksw)")] as HTMLElement[];
+  const dots = (el: ParentNode) => [...el.querySelectorAll(".engdot")] as HTMLElement[];
+  const marks = (el: ParentNode) => [...chips(el), ...dots(el)];
   const rowOf = (c: HTMLElement, name: string) =>
     [...c.querySelectorAll("tbody tr")].find((r) => r.textContent?.includes(name)) as HTMLElement;
+  const legendChips = (c: HTMLElement) => c.querySelectorAll(".rl-g .engmksw");
 
-  it("draws no marker, and no legend entry, without allocations", () => {
+  it("draws no engagement, and no legend entry, without allocations", () => {
     const { container } = renderRoster({ assignments: onRota });
     expect(marks(container)).toHaveLength(0);
-    expect(container.querySelectorAll(".engmksw")).toHaveLength(0);
+    expect(legendChips(container)).toHaveLength(0);
   });
 
-  it("marks only the days an allocation covers, on that engineer's row", () => {
+  it("shows the engagement only on the days an allocation covers, on that engineer's row", () => {
     const { container } = renderRoster({ assignments: onRota, engagementAllocations: [alloc()] });
     const jane = rowOf(container, "Jane Doe");
     const cells = [...jane.querySelectorAll("td")];
@@ -1359,6 +1370,33 @@ describe("MonthRoster: customer engagement markers", () => {
     // Sept 22 to 24 on a grid that starts on the 1st.
     expect(marked).toEqual([22, 23, 24]);
     expect(marks(rowOf(container, "Asela"))).toHaveLength(0);
+  });
+
+  it("leaves the weekend out: an allocation is working-day time", () => {
+    const { container } = renderRoster({
+      assignments: onRota,
+      // Fri 25 to Mon 28 September.
+      engagementAllocations: [alloc({ startDate: "2026-09-25", endDate: "2026-09-28" })],
+    });
+    const cells = [...rowOf(container, "Jane Doe").querySelectorAll("td")];
+    const marked = cells.map((td, i) => (marks(td).length ? i + 1 : 0)).filter(Boolean);
+    expect(marked).toEqual([25, 28]);
+  });
+
+  it("leaves a day a lead removed off the roster, and offers it for restore in the picker", () => {
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({
+      assignments: onRota,
+      engagementAllocations: [alloc({ dismissedDates: ["2026-09-23"] })],
+      leadTeams: ["alpha"],
+      editing: true,
+      onEditCell,
+    });
+    const cells = [...rowOf(container, "Jane Doe").querySelectorAll("td")];
+    expect(cells.map((td, i) => (marks(td).length ? i + 1 : 0)).filter(Boolean)).toEqual([22, 24]);
+    fireEvent.click(cells[22]);
+    const sent = onEditCell.mock.calls[0][0];
+    expect(sent.engagements).toEqual([expect.objectContaining({ id: "a1", label: "Allo-ENG-1001", dismissed: true })]);
   });
 
   it("does not draw days outside the days on the grid", () => {
@@ -1369,15 +1407,35 @@ describe("MonthRoster: customer engagement markers", () => {
     expect(marks(rowOf(container, "Jane Doe"))).toHaveLength(2);
   });
 
-  it("carries the week view's details in the title, with the label leading", () => {
+  it("reads Allo- and the engagement id, with the whole line on hover", () => {
     const { container } = renderRoster({ assignments: onRota, engagementAllocations: [alloc()] });
-    expect(marks(container)[0]).toHaveAttribute(
+    const chip = chips(container)[0];
+    expect(chip).toHaveTextContent("Allo-ENG-1001");
+    expect(chip).toHaveAttribute(
       "title",
       "Example Corp - ENG-1001: Consultancy ● Onsite ● ALLOC-7 ● 50% ● 2026-09-22 - 2026-09-24",
     );
   });
 
-  it("lists every allocation on a day in one marker, one per line", () => {
+  it("stands in for an unmarked weekday instead of its regular hours", () => {
+    const { container } = renderRoster({ assignments: onRota, engagementAllocations: [alloc()] });
+    const day22 = [...rowOf(container, "Jane Doe").querySelectorAll("td")][21];
+    expect([...day22.querySelectorAll(".chip")].map((c) => c.textContent)).toEqual(["Allo-ENG-1001"]);
+  });
+
+  it("sits beside a rotation turn on the same day", () => {
+    const { container } = renderRoster({
+      assignments: onRota,
+      engagementAllocations: [alloc({ startDate: "2026-09-21", endDate: "2026-09-21" })],
+    });
+    const day21 = [...rowOf(container, "Jane Doe").querySelectorAll("td")][20];
+    const shown = [...day21.querySelectorAll(".chip")].map((c) => c.textContent);
+    expect(shown).toHaveLength(2);
+    expect(shown[1]).toBe("Allo-ENG-1001");
+    expect(day21.querySelector(".duo")).not.toBeNull();
+  });
+
+  it("shows each allocation on a day as its own chip, stacked", () => {
     const { container } = renderRoster({
       assignments: onRota,
       engagementAllocations: [
@@ -1386,46 +1444,76 @@ describe("MonthRoster: customer engagement markers", () => {
       ],
     });
     const jane = rowOf(container, "Jane Doe");
-    const day23 = marks([...jane.querySelectorAll("td")][22]);
-    expect(day23).toHaveLength(1);
-    const lines = day23[0].getAttribute("title")!.split("\n");
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain("Another Corp - ENG-2002");
-    expect(lines[1]).toContain("Example Corp - ENG-1001");
+    const day23 = chips([...jane.querySelectorAll("td")][22]);
+    expect(day23.map((c) => c.textContent)).toEqual(["Allo-ENG-2002", "Allo-ENG-1001"]);
+    expect(day23[0].getAttribute("title")).toContain("Another Corp - ENG-2002");
+    expect(day23[1].getAttribute("title")).toContain("Example Corp - ENG-1001");
+    expect([...jane.querySelectorAll("td")][22].querySelector(".duo")).not.toBeNull();
     // The 22nd has the one allocation only.
-    expect(marks([...jane.querySelectorAll("td")][21])[0].getAttribute("title")!.split("\n")).toHaveLength(1);
+    expect(chips([...jane.querySelectorAll("td")][21]).map((c) => c.textContent)).toEqual(["Allo-ENG-1001"]);
   });
 
-  it("names the marker once for assistive technology, and says how many", () => {
+  it("stacks a turn and two allocations, and folds a third into +1", () => {
+    const day = { startDate: "2026-09-21", endDate: "2026-09-21" };
+    const { container } = renderRoster({
+      assignments: onRota,
+      engagementAllocations: [
+        alloc({ id: "a1", accountName: "A Corp", engagementDisplayId: "E1", ...day }),
+        alloc({ id: "a2", accountName: "B Corp", engagementDisplayId: "E2", ...day }),
+        alloc({ id: "a3", accountName: "C Corp", engagementDisplayId: "E3", ...day }),
+      ],
+    });
+    const day21 = [...rowOf(container, "Jane Doe").querySelectorAll("td")][20];
+    const shown = [...day21.querySelectorAll(".chip")].map((c) => c.textContent);
+    expect(shown).toHaveLength(3);
+    expect(shown.slice(1)).toEqual(["Allo-E1", "+2"]);
+    const more = chips(day21)[1];
+    expect(more.getAttribute("title")!.split("\n")).toHaveLength(2);
+    expect(more.getAttribute("title")).toContain("C Corp - E3");
+  });
+
+  it("stacks up to three allocations on a day with no turn", () => {
+    const day = { startDate: "2026-09-22", endDate: "2026-09-22" };
+    const { container } = renderRoster({
+      assignments: onRota,
+      engagementAllocations: [
+        alloc({ id: "a1", accountName: "A Corp", engagementDisplayId: "E1", ...day }),
+        alloc({ id: "a2", accountName: "B Corp", engagementDisplayId: "E2", ...day }),
+        alloc({ id: "a3", accountName: "C Corp", engagementDisplayId: "E3", ...day }),
+      ],
+    });
+    const day22 = [...rowOf(container, "Jane Doe").querySelectorAll("td")][21];
+    expect(chips(day22).map((c) => c.textContent)).toEqual(["Allo-E1", "Allo-E2", "Allo-E3"]);
+  });
+
+  it("names each engagement for assistive technology", () => {
     const { container } = renderRoster({
       assignments: onRota,
       engagementAllocations: [alloc(), alloc({ id: "a2", accountName: "Another Corp" })],
     });
-    const m = marks(container)[0];
+    const m = chips(container)[0];
     expect(m).toHaveAttribute("role", "img");
-    expect(m.getAttribute("aria-label")).toMatch(/^2 customer engagements\. /);
+    expect(m.getAttribute("aria-label")).toMatch(/^Customer engagement\. /);
     expect(m.getAttribute("aria-label")).not.toContain("\n");
-    expect(screen.getAllByRole("img", { name: /customer engagement/i })).toHaveLength(3);
+    // Two allocations on each of three days.
+    expect(screen.getAllByRole("img", { name: /customer engagement/i })).toHaveLength(6);
   });
 
-  it("leaves the rota chip, the leave and the cell's own title as they were", () => {
-    const base = renderRoster({ assignments: onRota, absences: [absence({ name: "Jane Doe", userId: JANE, startsOn: "2026-09-23", endsOn: "2026-09-23" })] });
-    const before = [...rowOf(base.container, "Jane Doe").querySelectorAll("td")].map((td) => [td.className, td.getAttribute("title"), td.querySelector(".chip")?.textContent]);
+  it("lets a tag keep the day: the leave chip and the cell's title stay, the engagement is a corner dot", () => {
+    const leave = [absence({ name: "Jane Doe", userId: JANE, startsOn: "2026-09-23", endsOn: "2026-09-23" })];
+    const base = renderRoster({ assignments: onRota, absences: leave });
+    const leaveBefore = [...rowOf(base.container, "Jane Doe").querySelectorAll("td")][22];
+    const before = [leaveBefore.className, leaveBefore.getAttribute("title"), leaveBefore.querySelector(".chip")?.textContent];
     base.unmount();
-    const { container } = renderRoster({
-      assignments: onRota,
-      absences: [absence({ name: "Jane Doe", userId: JANE, startsOn: "2026-09-23", endsOn: "2026-09-23" })],
-      engagementAllocations: [alloc()],
-    });
-    const after = [...rowOf(container, "Jane Doe").querySelectorAll("td")].map((td) => [td.className, td.getAttribute("title"), td.querySelector(".chip")?.textContent]);
-    expect(after).toEqual(before);
-    // The leave day still shows its chip, with the marker beside it.
+    const { container } = renderRoster({ assignments: onRota, absences: leave, engagementAllocations: [alloc()] });
     const leaveCell = [...rowOf(container, "Jane Doe").querySelectorAll("td")][22];
-    expect(leaveCell.querySelector(".chip")).not.toBeNull();
-    expect(marks(leaveCell)).toHaveLength(1);
+    expect([leaveCell.className, leaveCell.getAttribute("title"), leaveCell.querySelector(".chip")?.textContent]).toEqual(before);
+    expect(chips(leaveCell)).toHaveLength(0);
+    expect(dots(leaveCell)).toHaveLength(1);
+    expect(dots(leaveCell)[0].getAttribute("title")).toContain("Example Corp - ENG-1001");
   });
 
-  it("keeps the marker out of the way of an edit click", () => {
+  it("keeps the engagement out of the way of an edit click", () => {
     const onEditCell = vi.fn();
     const { container } = renderRoster({
       assignments: onRota,
@@ -1434,14 +1522,14 @@ describe("MonthRoster: customer engagement markers", () => {
       editing: true,
       onEditCell,
     });
-    fireEvent.click(marks(container)[0]);
+    fireEvent.click(chips(container)[0]);
     expect(onEditCell).toHaveBeenCalledTimes(1);
   });
 
-  it("explains the marker in the legend, once, only while markers are drawn", () => {
+  it("explains the engagement chip in the legend, once, only while engagements are drawn", () => {
     const { container } = renderRoster({ assignments: onRota, engagementAllocations: [alloc()] });
-    expect(container.querySelectorAll(".engmksw")).toHaveLength(1);
-    expect(container.textContent).toContain("Customer engagement: a strip under the day");
+    expect(legendChips(container)).toHaveLength(1);
+    expect(container.textContent).toContain("Customer engagement from the allocation app");
   });
 
   it("hides the legend entry when the only allocations are off the grid", () => {
@@ -1449,7 +1537,7 @@ describe("MonthRoster: customer engagement markers", () => {
       assignments: onRota,
       engagementAllocations: [alloc({ startDate: "2026-10-05", endDate: "2026-10-06" })],
     });
-    expect(container.querySelectorAll(".engmksw")).toHaveLength(0);
+    expect(legendChips(container)).toHaveLength(0);
   });
 
   it("says quietly that engagements could not be loaded, and draws the roster unchanged", () => {
@@ -1470,22 +1558,22 @@ describe("MonthRoster: customer engagement markers", () => {
       engagementAllocations: [alloc({ startDate: "2026-09-22", endDate: "2026-09-22" })],
     };
 
-    it("runs the strip across every zone of the day but names it once", () => {
+    it("keeps the zone's turn and names the engagement once", () => {
       const { container } = renderRoster(sre);
-      const day = marks(rowOf(container, "Jane Doe"));
-      expect(day.length).toBeGreaterThan(1);
-      expect(day.filter((m) => m.getAttribute("role") === "img")).toHaveLength(1);
-      expect(day.filter((m) => m.getAttribute("aria-hidden") === "true")).toHaveLength(day.length - 1);
-      expect(new Set(day.map((m) => m.getAttribute("title"))).size).toBe(1);
+      const row = rowOf(container, "Jane Doe");
+      const named = chips(row).filter((m) => m.getAttribute("role") === "img");
+      expect(named.length).toBeGreaterThan(0);
+      expect(new Set(named.map((m) => m.getAttribute("title"))).size).toBe(1);
+      expect(dots(row)).toHaveLength(0);
     });
 
-    it("marks a whole-day cell once", () => {
+    it("shows the engagement in a whole-day cell once", () => {
       const { container } = renderRoster({
         ...sre,
         assignments: [assignment({ name: "Jane Doe", userId: JANE, rotaDate: "2026-09-21", shiftCode: TZ1.code, zoneCode: "TZ1", teamKey: "delta" })],
       });
-      expect(marks(rowOf(container, "Jane Doe"))).toHaveLength(1);
-      expect(rowOf(container, "Jane Doe").querySelector("td.zwhole .engmk")).not.toBeNull();
+      expect(chips(rowOf(container, "Jane Doe"))).toHaveLength(1);
+      expect(rowOf(container, "Jane Doe").querySelector("td.zwhole .chip.eng")).not.toBeNull();
     });
   });
 });
@@ -1544,5 +1632,76 @@ describe("MonthRoster: the legend across 1 Nov 2026 from blank weekdays alone", 
     const legend = [...container.querySelectorAll(".rlegend .chip")].map((c) => c.textContent);
     expect(legend).toContain("LK");
     expect(legend).toContain("IST");
+  });
+});
+
+describe("MonthRoster: days left on a team the person is not on", () => {
+  const member = (userId: string, name: string) => ({ userId, name, email: `${userId}@example.com`, isLead: false, role: "engineer" });
+  // Somebody whose Brazil rotation ended, with Bravo days still filed for
+  // them: their own team's lead clears only Alpha's rows, so Bravo's lead or
+  // rota admin has to be able to take these off -- and only take them off.
+  const leftOnBravo = () =>
+    renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["bravo"],
+      editing: true,
+      onEditCell: vi.fn(),
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-01T00:00:00"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("lets the team's lead open such a day, for a clear only", () => {
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["bravo"],
+      editing: true,
+      onEditCell,
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+    });
+    const turn = within(container.querySelector("tbody tr") as HTMLElement).getByText(EVENING.shortCode).closest("td")!;
+    fireEvent.click(turn);
+    expect(onEditCell).toHaveBeenCalledTimes(1);
+    expect(onEditCell.mock.calls[0][0]).toMatchObject({ teamKey: "bravo", clearOnly: true });
+  });
+
+  it("keeps a member's own day a full edit", () => {
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["bravo"],
+      editing: true,
+      onEditCell,
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [member("u-Asela", "Asela")] },
+    });
+    fireEvent.click(within(container.querySelector("tbody tr") as HTMLElement).getByText(EVENING.shortCode).closest("td")!);
+    expect(onEditCell.mock.calls[0][0].clearOnly).toBeUndefined();
+  });
+
+  it("leaves their past days alone: those are history", () => {
+    vi.setSystemTime(new Date("2026-10-01T00:00:00"));
+    const { container } = leftOnBravo();
+    const turn = within(container.querySelector("tbody tr") as HTMLElement).getByText(EVENING.shortCode).closest("td")!;
+    expect(turn.classList.contains("editable")).toBe(false);
+  });
+
+  it("gives another team's lead nothing to click", () => {
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      leadTeams: ["alpha"],
+      editing: true,
+      onEditCell: vi.fn(),
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+    });
+    expect(container.querySelectorAll("td.editable")).toHaveLength(0);
   });
 });

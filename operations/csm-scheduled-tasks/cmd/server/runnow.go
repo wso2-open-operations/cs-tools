@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -67,6 +68,7 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	fs.SetOutput(io.Discard)
 	task := fs.String("run-now", "", "run this registered task once now, then exit")
 	dryRun := fs.Bool("dry-run", false, "force a dry run (only with --run-now, only some tasks)")
+	fullSweep := fs.Bool("full-sweep", false, "evaluate every project live, no screening (only with --run-now=acp_closure)")
 	limit := fs.Int("limit", 0, "daily limit for this run (only with --run-now, only some tasks)")
 	states := fs.String("states", "", "comma list of states to work (only with --run-now, only some tasks)")
 	fromDate := fs.String("from-date", "", "first day of the reporting window, YYYY-MM-DD (only with --run-now, only the CS Worklogs reports)")
@@ -85,7 +87,7 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 
 	if !seen["run-now"] {
-		return nil, errors.New("--dry-run, --limit, --states, --from-date, --to-date, --recipients, --to, --cc and --project-key are only valid together with --run-now")
+		return nil, errors.New("--dry-run, --limit, --full-sweep, --states, --from-date, --to-date, --recipients, --to, --cc and --project-key are only valid together with --run-now")
 	}
 	name := strings.TrimSpace(*task)
 	if name == "" {
@@ -95,6 +97,10 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	if seen["dry-run"] {
 		out.Options.DryRun = *dryRun
 		out.Given = append(out.Given, "--dry-run")
+	}
+	if seen["full-sweep"] {
+		out.Options.FullSweep = *fullSweep
+		out.Given = append(out.Given, "--full-sweep")
 	}
 	if seen["limit"] {
 		if *limit <= 0 {
@@ -248,6 +254,31 @@ func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (aut
 			}
 		}
 		cfg.States = chosen
+	}
+	return cfg, nil
+}
+
+// narrowACP applies an on-demand run's arguments to acp_closure's configured
+// settings. They can only tighten: a dry run stays a dry run, and the limit may
+// not exceed a configured ACP_DAILY_LIMIT (when none is configured it sets one
+// for the run). --full-sweep only widens the live scope (no screening). Forcing a dry run also turns emails off unless there is a debug
+// list: a dry run records no notice, so with emails on it would send real
+// notices that the next run sends again (acpConfig refuses that combination).
+func narrowACP(cfg acp.Config, a registry.RunNowOptions, hasDebug bool) (acp.Config, error) {
+	if a.DryRun {
+		cfg.DryRun = true
+		if !hasDebug {
+			cfg.EmailEnabled = false
+		}
+	}
+	if a.FullSweep {
+		cfg.FullSweep = true
+	}
+	if a.Limit > 0 {
+		if cfg.DailyLimit != 0 && a.Limit > cfg.DailyLimit {
+			return cfg, fmt.Errorf("--limit=%d exceeds ACP_DAILY_LIMIT=%d; a run-now can only tighten the configured limit", a.Limit, cfg.DailyLimit)
+		}
+		cfg.DailyLimit = a.Limit
 	}
 	return cfg, nil
 }

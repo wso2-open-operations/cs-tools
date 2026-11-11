@@ -39,6 +39,10 @@ type fakeScheduleRepo struct {
 	gotOnDutyAt                time.Time
 	gotEngagementAllocationReq domain.SearchScheduleEngagementAllocationsRequest
 	engagementAllocations      []domain.ScheduleEngagementAllocation
+	allocationOnRoster         *domain.EngagementAllocationOnRoster
+	gotDismissReq              domain.DismissScheduleEngagementAllocationRequest
+	gotDismissActor            string
+	dismissDays                int
 	gotIncludeOnLeave          bool
 	called                     bool
 
@@ -58,6 +62,8 @@ type fakeScheduleRepo struct {
 	gotKindCode string
 	gotRange    domain.ApplyScheduleRangeRequest
 	adminTeams  []string
+	// portalAdmin is whether the caller holds the database admin role.
+	portalAdmin bool
 	// markerTeams is what a rota marker holds (migration 0225). Nil by
 	// default, so the existing tests describe nobody holding one.
 	markerTeams []string
@@ -78,6 +84,8 @@ type fakeScheduleRepo struct {
 	// absence tag writes were given.
 	adminFamilies  []string
 	gotKindFamily  *string
+	gotKindReq     domain.CreateScheduleAbsenceKindRequest
+	leadFamilies   []string // families of the teams the caller leads
 	gotKindAllowed []string
 	markers        []domain.ScheduleEditMarker
 	// gotImport is the write an import handed the repository, nil until one does.
@@ -167,6 +175,7 @@ func (f *fakeScheduleRepo) DeleteAbsence(_ context.Context, id, actor string, _ 
 
 func (f *fakeScheduleRepo) CreateAbsenceKind(_ context.Context, code string, req domain.CreateScheduleAbsenceKindRequest, family *string, actor string) (domain.ScheduleAbsenceKind, error) {
 	f.called, f.gotKindCode, f.gotActorEml, f.gotKindFamily = true, code, actor, family
+	f.gotKindReq = req
 	return domain.ScheduleAbsenceKind{Code: code, ShortCode: req.ShortCode, Label: req.Label, Bucket: req.Bucket, ColourToken: req.ColourToken}, f.err
 }
 
@@ -181,6 +190,10 @@ func (f *fakeScheduleRepo) EditMarkers(context.Context, string, string) ([]domai
 
 func (f *fakeScheduleRepo) RotaAdminFamilies(context.Context, string) ([]string, error) {
 	return f.adminFamilies, f.err
+}
+
+func (f *fakeScheduleRepo) IsPortalAdmin(context.Context, string) (bool, error) {
+	return f.portalAdmin, f.err
 }
 
 func (f *fakeScheduleRepo) UserInTeam(_ context.Context, _ string, teamKey string) (bool, error) {
@@ -199,6 +212,10 @@ func (f *fakeScheduleRepo) MovedToTeamOver(_ context.Context, _ string, teamKey,
 
 func (f *fakeScheduleRepo) TeamsShareRota(context.Context, string, string) (bool, error) {
 	return f.shareRota, f.err
+}
+
+func (f *fakeScheduleRepo) LeadFamiliesFor(context.Context, string) ([]string, error) {
+	return f.leadFamilies, f.err
 }
 
 func (f *fakeScheduleRepo) LeadTeamsFor(context.Context, string) ([]string, error) {
@@ -246,6 +263,22 @@ func (f *fakeScheduleRepo) SearchEngagementAllocations(_ context.Context, req do
 	f.called = true
 	f.gotEngagementAllocationReq = req
 	return f.engagementAllocations, f.err
+}
+
+func (f *fakeScheduleRepo) EngagementAllocationOnRoster(_ context.Context, id string) (domain.EngagementAllocationOnRoster, error) {
+	f.called = true
+	if f.allocationOnRoster == nil {
+		return domain.EngagementAllocationOnRoster{}, &apierror.NotFoundError{Msg: "not on the roster"}
+	}
+	return *f.allocationOnRoster, f.err
+}
+
+func (f *fakeScheduleRepo) DismissEngagementAllocation(_ context.Context, al domain.EngagementAllocationOnRoster,
+	req domain.DismissScheduleEngagementAllocationRequest, actorEmail string) (int, error) {
+	f.called = true
+	f.gotDismissReq = req
+	f.gotDismissActor = actorEmail
+	return f.dismissDays, f.err
 }
 
 func (f *fakeScheduleRepo) OnDutyAt(_ context.Context, at time.Time, includeOnLeave bool) ([]domain.ScheduleAssignment, error) {
@@ -926,7 +959,7 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 	}
 
 	t.Run("a lead's tag gets a code from its label", func(t *testing.T) {
-		repo := &fakeScheduleRepo{leadsTeam: true}
+		repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 		svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
 		k, err := svc.CreateAbsenceKind(leadCtx("castor.01@example.com"), ok)
 		if err != nil {
@@ -937,6 +970,19 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 		}
 		if k.ShortCode != "Trn" || k.Bucket != "ALLOCATION" || k.ColourToken != "INT" {
 			t.Fatalf("stored %+v, want the fields trimmed and upper-cased", k)
+		}
+	})
+
+	t.Run("an allocation tag may exclude from the timesheet, with a description", func(t *testing.T) {
+		repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
+		svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+		req := ok
+		req.ExcludesFromTimesheet, req.Description = true, "  Off support while on the SRE rotation  "
+		if _, err := svc.CreateAbsenceKind(leadCtx("castor.01@example.com"), req); err != nil {
+			t.Fatalf("CreateAbsenceKind: %v", err)
+		}
+		if !repo.gotKindReq.ExcludesFromTimesheet || repo.gotKindReq.Description != "Off support while on the SRE rotation" {
+			t.Fatalf("stored %+v, want the flag kept and the description trimmed", repo.gotKindReq)
 		}
 	})
 
@@ -959,10 +1005,14 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 		"label with no letters":     func(r *domain.CreateScheduleAbsenceKindRequest) { r.Label = "— —" },
 		"excluded is not for leads": func(r *domain.CreateScheduleAbsenceKindRequest) { r.Bucket = "EXCLUDED" },
 		"a colour the rota lacks":   func(r *domain.CreateScheduleAbsenceKindRequest) { r.ColourToken = "TZ1" },
+		"a leave tag that excludes": func(r *domain.CreateScheduleAbsenceKindRequest) {
+			r.Bucket, r.ExcludesFromTimesheet = "LEAVE", true
+		},
+		"a description over 300": func(r *domain.CreateScheduleAbsenceKindRequest) { r.Description = strings.Repeat("a", 301) },
 	}
 	for name, mutate := range bad {
 		t.Run(name, func(t *testing.T) {
-			repo := &fakeScheduleRepo{leadsTeam: true}
+			repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 			svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
 			req := ok
 			mutate(&req)
@@ -1027,6 +1077,7 @@ func TestDeletingATagNeedsALead(t *testing.T) {
 	}
 
 	repo.leadsTeam = true
+	repo.leadFamilies = []string{"CRE"}
 	if err := svc.DeleteAbsenceKind(leadCtx("castor.01@example.com"), " TRAINING "); err != nil {
 		t.Fatalf("a lead was refused: %v", err)
 	}
@@ -1254,5 +1305,74 @@ func TestSearchEngagementAllocationsEmptyIsAnEmptyList(t *testing.T) {
 	}
 	if resp.Count != 0 || resp.Allocations == nil {
 		t.Fatalf("got count %d, allocations nil=%v; want 0 and a non-nil empty list", resp.Count, resp.Allocations == nil)
+	}
+}
+
+// A clear is the one change a team's lead or rota admin may make to rows filed
+// under their team for somebody who is not on it, with no span putting them
+// there: what was left on the Americas team after a Brazil rotation ended.
+// Nobody else can reach those rows -- their own team's lead clears only their
+// own team's rows -- so without this they could only be removed in SQL.
+func TestARotaAdminMayClearRowsLeftOnTheirTeamForANonMember(t *testing.T) {
+	repo := &leadOf{team: "", notOnTeam: true}
+	repo.adminTeams = []string{"americas"}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+
+	if _, err := svc.ApplyRange(leadCtx("cre.rota.admin@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: "22222222-2222-2222-2222-222222222222", TeamKey: "americas",
+		From: "2099-11-10", To: "2099-12-31",
+	}); err != nil {
+		t.Fatalf("a rota admin was refused clearing rows left on their team: %v", err)
+	}
+	if !repo.called {
+		t.Fatal("the clear never reached the repository")
+	}
+}
+
+// The same lead may not use it on a team they do not run, and a clear is all
+// it allows: nothing new is put on a non-member.
+func TestClearingANonMembersRowsStillNeedsTheTeam(t *testing.T) {
+	stranger := "22222222-2222-2222-2222-222222222222"
+	var forbidden *apierror.ForbiddenError
+
+	repo := &leadOf{team: "castor", notOnTeam: true}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	if _, err := svc.ApplyRange(leadCtx("castor.01@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: stranger, TeamKey: "americas", From: "2099-11-10", To: "2099-11-10",
+	}); !errors.As(err, &forbidden) {
+		t.Fatalf("a Castor lead cleared Americas rows: want ForbiddenError, got %v", err)
+	}
+	if repo.called {
+		t.Fatal("a lead cleared rows on a team they do not run")
+	}
+
+	admin := &leadOf{team: "", notOnTeam: true}
+	admin.adminTeams = []string{"americas"}
+	svc = NewScheduleService(admin, alwaysUnrestrictedAccess{})
+	if _, err := svc.ApplyRange(leadCtx("cre.rota.admin@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: stranger, TeamKey: "americas", ShiftCode: "CRE_AMERICAS", From: "2099-11-10", To: "2099-11-10",
+	}); !errors.As(err, &forbidden) {
+		t.Fatalf("a rota admin set a window on a non-member: want ForbiddenError, got %v", err)
+	}
+	if admin.called {
+		t.Fatal("a window was written against somebody not on the team")
+	}
+}
+
+// A former member's past days are the record of what they worked: the clear
+// for rows left on a team starts today.
+func TestClearingANonMembersPastDaysIsRefused(t *testing.T) {
+	repo := &leadOf{team: "", notOnTeam: true}
+	repo.adminTeams = []string{"americas"}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	var forbidden *apierror.ForbiddenError
+	if _, err := svc.ApplyRange(leadCtx("cre.rota.admin@example.com"), domain.ApplyScheduleRangeRequest{
+		UserID: "22222222-2222-2222-2222-222222222222", TeamKey: "americas",
+		From: "2020-01-01", To: "2020-01-31",
+	}); !errors.As(err, &forbidden) {
+		t.Fatalf("a non-member's past days were cleared: want ForbiddenError, got %v", err)
+	}
+	if repo.called {
+		t.Fatal("past rows of a non-member reached the repository")
 	}
 }

@@ -93,6 +93,18 @@ type commentService struct {
 	// narrower interface.
 	snWriteback *SNWritebackDispatcher
 	snMirror    CommentService
+	// imageLinker attaches the comment images a saved comment shows (nil: none).
+	imageLinker InlineImageLinker
+}
+
+// WithCommentInlineImageLinker attaches the linker that, when a comment is
+// created or edited, attaches the comment images it shows to it. A no-op if svc
+// is not the Postgres-backed comment service or l is nil.
+func WithCommentInlineImageLinker(svc CommentService, l InlineImageLinker) CommentService {
+	if cs, ok := svc.(*commentService); ok && l != nil {
+		cs.imageLinker = l
+	}
+	return svc
 }
 
 // NewCommentService constructs a CommentService backed by Postgres.
@@ -300,9 +312,26 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 		createdBy = user.Email
 	}
 
+	// At most MaxInlineImagesPerContent images and the total size limit, checked
+	// before the comment is saved.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		if err := s.imageLinker.ValidateCommentImages(ctx, "", req.ReferenceID, createdBy, req.Content); err != nil {
+			return domain.CreateCommentResponse{}, err
+		}
+	}
+
+	if s.imageLinker != nil {
+		if err := s.imageLinker.ValidateEmbeddedImages(ctx, createdBy, req.Content); err != nil {
+			return domain.CreateCommentResponse{}, err
+		}
+	}
+
 	row, err := s.repo.CreateComment(ctx, req.ReferenceID, req.ReferenceType, enumType, req.Content, createdBy)
 	if err != nil {
 		return domain.CreateCommentResponse{}, err
+	}
+	if s.imageLinker != nil {
+		s.imageLinker.LinkFromContent(ctx, row.ID, row.WorkItemID, createdBy, req.Content)
 	}
 
 	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
@@ -316,6 +345,7 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 	if s.snWriteback != nil {
 		// req.CreatedBy is "" or "agent" here; ServiceNow resolves the author from the token otherwise.
 		mirrorReq := req
+		mirrorReq.Content = req.Content
 		s.snWriteback.Dispatch(ctx, "comment", req.ReferenceID, "create",
 			map[string]any{"referenceId": req.ReferenceID, "referenceType": req.ReferenceType, "type": req.Type, "content": req.Content},
 			func(writeCtx context.Context) error {
@@ -419,9 +449,24 @@ func (s *commentService) UpdateComment(ctx context.Context, req domain.UpdateCom
 		return domain.UpdateCommentResponse{}, err
 	}
 
+	// Same limits as on create, before the edit is saved; the comment's work item
+	// is read only when the new content has an image in it.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		current, err := s.repo.GetCommentByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCommentResponse{}, err
+		}
+		if err := s.imageLinker.ValidateCommentImages(ctx, req.ID, current.WorkItemID, actorEmail, req.Content); err != nil {
+			return domain.UpdateCommentResponse{}, err
+		}
+	}
+
 	row, err := s.repo.UpdateComment(ctx, req.ID, req.Content, actorEmail)
 	if err != nil {
 		return domain.UpdateCommentResponse{}, err
+	}
+	if s.imageLinker != nil {
+		s.imageLinker.LinkFromContent(ctx, row.ID, row.WorkItemID, actorEmail, req.Content)
 	}
 
 	return domain.UpdateCommentResponse{

@@ -65,8 +65,8 @@ vi.mock("@context/success-banner/SuccessBannerContext", () => ({ useSuccessBanne
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({ useErrorBanner: () => ({ showError }) }));
 // The widgets fetch their own data; the grid is not under test here.
 vi.mock("@features/csm-dashboard/components/DashboardWidgetGrid", () => ({
-  default: ({ widgets }: { widgets: { widgetId: string }[] }) => (
-    <div>Grid: {widgets.map((w) => w.widgetId).join(", ")}</div>
+  default: ({ widgets, linePointClickThrough }: { widgets: { widgetId: string }[]; linePointClickThrough?: boolean }) => (
+    <div data-line-points={String(Boolean(linePointClickThrough))}>Grid: {widgets.map((w) => w.widgetId).join(", ")}</div>
   ),
 }));
 
@@ -135,6 +135,8 @@ describe("MyDashboardsPage", () => {
     renderAt(`/dashboard/my/${B.id}`);
     expect(screen.getByText("Beta", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText("Grid: open-cases")).toBeInTheDocument();
+    // A line widget's points open that day's cases on a saved dashboard.
+    expect(screen.getByText("Grid: open-cases")).toHaveAttribute("data-line-points", "true");
     expect(detailIds).toContain(B.id);
   });
 

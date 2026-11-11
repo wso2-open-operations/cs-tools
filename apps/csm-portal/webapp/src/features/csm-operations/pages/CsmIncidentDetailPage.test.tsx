@@ -79,15 +79,17 @@ vi.mock("@features/csm-operations/api/useCsmIncidentActivities", () => ({
   useGetCsmIncidentActivities: () => ({ data: [] }),
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  useGetCsmDeletedCaseAttachments: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
   useGetCsmCaseAttachments: () => ({ data: [] }),
   usePostCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
   useDownloadCsmCaseAttachment: () => vi.fn(),
+  useDeleteCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
   useGetCsmCaseAttachmentPreviewSource: () => vi.fn(),
-  useGetCsmCaseAttachmentContent: () => vi.fn(),
-  // Only reached by the reply composer's upload modal (`CsmUploadAttachmentModal`),
-  // not exercised by this file's existing tests — the "reports its own draft
-  // state" tests below are the first to actually mount the composer.
-  MAX_ATTACHMENT_SIZE_BYTES: 10 * 1024 * 1024,
 }));
 vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
   default: () => null,

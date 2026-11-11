@@ -25,6 +25,7 @@ import {
   useCreateAbsenceKind,
   useDeleteAbsenceKind,
   useDeleteAbsence,
+  useDismissEngagementAllocation,
   useScheduleEditMarkers,
   useApplyRange,
   useMarkerOnlyTeams,
@@ -38,7 +39,7 @@ import {
   type MonthWindow,
   type RotaRead,
 } from "../api/useTeamSchedule";
-import CellPicker, { type CellPickerTarget, type NewAbsenceKind } from "../components/CellPicker";
+import CellPicker, { type CellEngagement, type CellPickerTarget, type NewAbsenceKind } from "../components/CellPicker";
 import { BackendApiError } from "@api/backend/client";
 import DayLadder, { type LadderLane } from "../components/DayLadder";
 import MonthRoster from "../components/MonthRoster";
@@ -49,7 +50,7 @@ import RosterFreezeBanner from "../components/RosterFreezeBanner";
 import UndoToast, { type UndoOffer } from "../components/UndoToast";
 import { UndoIncomplete, applyRevertRuns, awayIsRevertible, rotaRevertRuns } from "../utils/undo";
 import { useEngagementAllocations } from "../api/useEngagementAllocations";
-import { distinctUserIds } from "../utils/engagementAllocations";
+import { distinctUserIds, engagementUndoIsExact } from "../utils/engagementAllocations";
 import { weekClear } from "../utils/weekEdit";
 import WeekTable, { type WeekEditControls, type WeekPerson, type WeekTurn } from "../components/WeekTable";
 import CasePagingTab, { type PagingRotaTarget } from "../components/CasePagingTab";
@@ -103,6 +104,7 @@ import ScheduleSkeleton, { TabStripSkeleton } from "../components/ScheduleSkelet
 import { rotaIsLoading } from "../utils/rotaLoading";
 import "../teamSchedule.css";
 import { teamDisplayName } from "../utils/teamDisplayName";
+import { addKindRefusal } from "../utils/tagRefusal";
 /** What the banner says when an edit is refused: the server's own reason where
  *  it gave one a lead can act on -- the person is not on that team, or already
  *  holds an overlapping window -- and that nothing moved either way. */
@@ -295,6 +297,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   const applyRange = useApplyRange();
   const applyAbsence = useApplyAbsence();
   const deleteAbsence = useDeleteAbsence();
+  const dismissEngagement = useDismissEngagementAllocation();
   const createKind = useCreateAbsenceKind();
   const deleteKind = useDeleteAbsenceKind();
 
@@ -1109,6 +1112,41 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   };
 
   /** Remove the whole leave or allocation the clicked cell is part of. */
+  /** Take a synced engagement allocation off this person's roster over the
+   *  picked days, or put them back. Undo does the opposite over the same days. */
+  const toggleEngagement = (engagement: CellEngagement, from: string, to: string, restore: boolean): void => {
+    if (!picker) return;
+    const target = picker;
+    const send = (back: boolean) =>
+      dismissEngagement.mutateAsync({ id: engagement.id, teamKey: target.teamKey, from, to, restore: back });
+    dismissEngagement.mutate(
+      { id: engagement.id, teamKey: target.teamKey, from, to, restore },
+      {
+        // An undo only where it restores exactly what was there before.
+        onSuccess: (res) =>
+          recordChange(
+            target,
+            from,
+            to,
+            `${engagement.label} ${restore ? "restored" : "removed"}`,
+            engagementUndoIsExact(from, to, res.days)
+              ? async () => {
+                  await send(!restore);
+                }
+              : undefined,
+          ),
+        onError: (err) =>
+          showError(
+            restore
+              ? "That engagement was not put back. Nothing has changed."
+              : "That engagement was not removed. Nothing has changed.",
+            err,
+          ),
+        onSettled: () => setPicker(null),
+      },
+    );
+  };
+
   const removeAbsence = (absenceId: string): void => {
     if (!picker?.absence) return;
     const ab = picker.absence;
@@ -1144,19 +1182,14 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     );
   };
 
-  /** Add a tag to the shared catalogue. The picker stays open so the lead can
-   *  use it straight away; the form shows why when it is refused. */
+  /** Add a tag for the family whose roster is being edited (a rota admin of
+   *  several families must say which). A refusal shows the server's own
+   *  reason, which is written for the lead who typed the tag. */
   const addKind = (kind: NewAbsenceKind): Promise<void> =>
-    createKind.mutateAsync(kind).then(
+    createKind.mutateAsync({ ...kind, family }).then(
       () => undefined,
       (err: unknown) => {
-        throw new Error(
-          err instanceof BackendApiError && err.status === 409
-            ? "A tag with that name or short code already exists."
-            : err instanceof BackendApiError && err.status === 403
-              ? "Only a team lead can add a tag."
-              : "The tag was not added. Try again.",
-        );
+        throw new Error(addKindRefusal(err));
       },
     );
 
@@ -1937,6 +1970,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
             applyRange.isPending ||
             applyAbsence.isPending ||
             deleteAbsence.isPending ||
+            dismissEngagement.isPending ||
             createKind.isPending ||
             deleteKind.isPending
           }
@@ -1946,10 +1980,12 @@ export default function CsmTeamSchedulePage(): JSX.Element {
           onApply={applyToCell}
           onMarkAway={markAway}
           onRemoveAbsence={removeAbsence}
+          onDismissEngagement={toggleEngagement}
           // The tags are shared by every team, so they are a lead's or a rota
           // admin's to change; a reader who only marks a team is not offered
           // them (the server refuses them too).
           onCreateKind={fullTeams.length > 0 ? addKind : undefined}
+          tagFamily={family}
           onDeleteKind={fullTeams.length > 0 ? removeKind : undefined}
           onClear={clearCell}
           onClose={() => setPicker(null)}

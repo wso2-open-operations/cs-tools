@@ -489,11 +489,48 @@ export function useDeleteAbsence(): UseMutationResult<
   });
 }
 
+export interface DismissEngagementPayload {
+  /** The allocation's id, as the engagement allocation read returns it. */
+  id: string;
+  /** The team whose roster the change is made on. */
+  teamKey: string;
+  from: string;
+  to: string;
+  /** Put the days back instead of taking them off. */
+  restore?: boolean;
+}
+
+/**
+ * Take a customer engagement allocation (from the allocation app) off a
+ * person's roster for some days, or put them back. The synced allocation is
+ * never edited: the removed days are recorded, so the roster and the timesheet
+ * leave them out until they are restored.
+ */
+export function useDismissEngagementAllocation(): UseMutationResult<{ days: number }, Error, DismissEngagementPayload> {
+  const api = useBackendApi();
+  const qc = useQueryClient();
+  return useMutation<{ days: number }, Error, DismissEngagementPayload>({
+    mutationFn: (payload) =>
+      api.post<DismissEngagementPayload, { days: number }>("/team-schedule/engagement-allocations/dismiss", payload),
+    onSuccess: () => {
+      invalidateRota(qc);
+      void qc.invalidateQueries({ queryKey: ["team-schedule", "engagement-allocations"] });
+    },
+  });
+}
+
 export interface CreateAbsenceKindPayload {
   shortCode: string;
   label: string;
   bucket: "LEAVE" | "ALLOCATION";
   colourToken: string;
+  /** The tag's days take people off the timesheet. Allocation tags only. */
+  excludesFromTimesheet?: boolean;
+  /** Optional, at most 300 characters; shown when hovering the tag. */
+  description?: string;
+  /** The rota family the tag is for: the roster being edited. Needed by a
+   *  rota admin of more than one family; the server decides it otherwise. */
+  family?: string;
 }
 
 /**

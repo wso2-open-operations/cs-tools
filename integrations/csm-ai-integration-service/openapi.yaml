@@ -61,6 +61,8 @@ paths:
           $ref: '#/components/responses/Error'
         "422":
           $ref: '#/components/responses/Error'
+        "429":
+          $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
         "502":
@@ -74,8 +76,9 @@ components:
     Error:
       description: >
         The request could not be answered; code says why (invalid_request,
-        not_configured, refused, truncated, unusable, timeout,
-        model_call_failed, internal).
+        not_configured, refused, truncated, unusable, usage_limit, timeout,
+        model_call_failed, internal). usage_limit (429) is the AI side's
+        request, token or spend limit, not the caller's.
       content:
         application/json:
           schema:

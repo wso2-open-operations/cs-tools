@@ -98,8 +98,8 @@ export interface QuickCaseHit {
  * engagements from this search. Narrowed by security-report access rather
  * than sending every type unconditionally: the backend 403s the WHOLE search
  * when the type filter names `security_report_analysis` and the caller lacks
- * `PermViewSecurityCenter`, so a caller without it would otherwise get no
- * quick-search results at all, not just a lack of security-report hits.
+ * `PermViewSecurityReportCases`, so a caller without it would otherwise get
+ * no quick-search results at all, not just a lack of security-report hits.
  *
  * The query is disabled until the trimmed text reaches
  * {@link QUICK_CASE_MIN_QUERY_LEN}, so opening the palette costs no network.
@@ -109,18 +109,17 @@ export function useQuickCaseSearch(
   options?: { forceFreeText?: boolean },
 ): UseQueryResult<QuickCaseHit[], Error> {
   const api = useBackendApi();
-  const { canUseSecurityCenter, canUpdateDeleteAnyComment } = usePortalAccess();
-  const canSeeSecurityReports = canUseSecurityCenter || canUpdateDeleteAnyComment;
+  const { canViewSecurityReportCases } = usePortalAccess();
   const q = query.trim();
   const scope = options?.forceFreeText ? "text" : classifyQuickCaseQuery(q);
 
   return useQuery<QuickCaseHit[], Error>({
-    queryKey: [ApiQueryKeys.CSM_CASES, "quick-search", q, scope, canSeeSecurityReports],
+    queryKey: [ApiQueryKeys.CSM_CASES, "quick-search", q, scope, canViewSecurityReportCases],
     queryFn: async (): Promise<QuickCaseHit[]> => {
       const typeFilter: BeCaseFieldFilter = {
         field: "type",
         op: "in",
-        values: visibleCaseTypes(canSeeSecurityReports),
+        values: visibleCaseTypes(canViewSecurityReportCases),
       };
       const filters: BeCaseSearchFilters =
         scope === "text"

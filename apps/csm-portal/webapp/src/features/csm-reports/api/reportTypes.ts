@@ -29,7 +29,21 @@ export interface TimeLogBreakdownDetails extends DataStruct {
   projectType: string;
   remainingQueryHours: string;
   totalQueryHours: string;
+  /** Inclusive start of the period the report covers (YYYY-MM-DD); empty or absent when unbounded. */
+  periodStart?: string;
+  /** Inclusive end of the period the report covers (YYYY-MM-DD); empty or absent when unbounded. */
+  periodEnd?: string;
   cases: TimeLogBreakdownCase[];
+}
+
+/** Optional period for the time report. No fields set means the backend default (the project's subscription period). */
+export interface TimelogsPeriodParams {
+  /** YYYY-MM-DD, inclusive, filters by time card work date. */
+  from?: string;
+  /** YYYY-MM-DD, inclusive. */
+  to?: string;
+  /** Disable the subscription-period defaults and report all time. */
+  allTime?: boolean;
 }
 
 export interface TimeLogBreakdownCase extends DataStruct {

@@ -161,14 +161,43 @@ func (s *deployedProductService) SearchProjectsByProductVersion(ctx context.Cont
 	}, nil
 }
 
-// CreateDeployedProduct implements DeployedProductService. Not supported for
-// the plain PostgreSQL data source (s.snMirror == nil); SN-first under
-// DATA_SOURCE=postgres-servicenow-dual-write -- see createDeployedProductSNFirst.
+// CreateDeployedProduct implements DeployedProductService. SN-first under
+// DATA_SOURCE=postgres-servicenow-dual-write (see createDeployedProductSNFirst);
+// on the plain PostgreSQL data source the row is written here, numbered from
+// the IBITM series ServiceNow uses (DeployedProductRepository.CreateDeployedProduct).
+// The checks are the ServiceNow path's (the four ids, the category) plus what
+// ServiceNow enforced on its side: the deployment belongs to the project and
+// the version to the product.
 func (s *deployedProductService) CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error) {
 	if s.snMirror != nil {
 		return s.createDeployedProductSNFirst(ctx, req)
 	}
-	return domain.CreateDeployedProductResponse{}, &apierror.ValidationError{Msg: "CreateDeployedProduct is not supported for the PostgreSQL data source"}
+
+	for _, f := range []struct{ name, id string }{
+		{"projectId", req.ProjectID}, {"deploymentId", req.DeploymentID},
+		{"productId", req.ProductID}, {"versionId", req.VersionID},
+	} {
+		if err := validateUUIDs(f.name, []string{f.id}); err != nil {
+			return domain.CreateDeployedProductResponse{}, err
+		}
+	}
+	if err := validateDeployedProductCategory(req.Category); err != nil {
+		return domain.CreateDeployedProductResponse{}, err
+	}
+
+	actor, err := s.resolveActorEmail(ctx)
+	if err != nil {
+		return domain.CreateDeployedProductResponse{}, err
+	}
+
+	created, err := s.repo.CreateDeployedProduct(ctx, req, actor)
+	if err != nil {
+		return domain.CreateDeployedProductResponse{}, err
+	}
+	return domain.CreateDeployedProductResponse{
+		Message:         "Deployed product created successfully.",
+		DeployedProduct: created,
+	}, nil
 }
 
 // createDeployedProductSNFirst implements CreateDeployedProduct's

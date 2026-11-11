@@ -47,7 +47,6 @@ import (
 	plgconfig "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/config"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/risk"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
-	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/sftpgo"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
@@ -211,21 +210,13 @@ func main() {
 	})
 	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
-	// SFTPGo-backed attachment storage — off by default (see loadSftpgoConfig).
-	// When disabled, no SFTPGO_* env var is read at all and neither the client
-	// nor its routes are constructed: the existing streaming attachment
-	// endpoints on caseHandler above are completely unaffected either way.
-	sftpgoAttachmentStorageEnabled, sftpgoCfg := loadSftpgoConfig()
-	var attachmentStorageHandler *handler.AttachmentStorageHandler
-	if sftpgoAttachmentStorageEnabled {
-		sftpgoClientInst := sftpgo.NewClient(sftpgoCfg)
-		attachmentStorageHandler = handler.NewAttachmentStorageHandler(customerEntityClient, sftpgoClientInst)
-		// Inline-image extraction on CreateCaseComment (base64 data: URIs
-		// rewritten into real SFTPGo-backed attachments) shares the same
-		// SFTPGo client and is gated by the same flag — see
-		// CaseHandler.WithInlineImageProcessor. SN-backed comment creation is
-		// unaffected: it never reaches this branch.
-		caseHandler.WithInlineImageProcessor(handler.NewInlineImageProcessor(customerEntityClient, sftpgoClientInst))
+	// Attachment files live in Azure Blob Storage and this service holds the
+	// credentials and moves the bytes; entity-service keeps the access checks.
+	// Without a reachable container there is nothing to serve, so refuse to start.
+	attachmentStore, err := newAttachmentStore(os.Getenv)
+	if err != nil {
+		slog.Error("could not set up attachment storage", "err", err)
+		os.Exit(1)
 	}
 
 	// One guard authorises every route below (including /spl/*) and also
@@ -390,7 +381,7 @@ func main() {
 	// grantableRoles (the same resolution CreateUser's own grant uses) rather
 	// than a second, parallel lookup.
 	timecardApproverRoleIDs := handler.RoleIDsForKey(grantableRoles, "timecard_approver")
-	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, sftpgoAttachmentStorageEnabled, timecardApproverRoleIDs).
+	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, timecardApproverRoleIDs).
 		WithAccessGuard(accessGuard).
 		WithGrantableRoles(grantableRoles)
 	grantableRolesHandler := handler.NewGrantableRolesHandler(grantableRoles)
@@ -471,21 +462,21 @@ func main() {
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
 	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
-	route("POST /attachments", handler.PermWrite, caseHandler.CreateCaseAttachment)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
-	route("GET /attachments/{id}/content", handler.PermDownloadAttachment, caseHandler.GetCaseAttachmentContent)
-	route("DELETE /attachments/{id}", handler.PermWrite, caseHandler.DeleteCaseAttachment)
-	// The SFTPGo-backed attachment-storage routes only exist on the mux when
-	// the feature flag is on: with it off (default), these paths are not
-	// registered at all and 404, rather than existing but erroring, so
-	// shipping this dark carries zero risk to the routes above.
-	if attachmentStorageHandler != nil {
-		route("POST /cases/{id}/attachments/upload-token", handler.PermWrite, attachmentStorageHandler.MintUploadToken)
-		route("POST /attachments/{id}/share", handler.PermDownloadAttachment, attachmentStorageHandler.CreateAttachmentShare)
-		route("POST /cases/{caseId}/attachments/{attachmentId}/confirm", handler.PermWrite, attachmentStorageHandler.ConfirmUpload)
-	}
-	route("GET /attachments/{id}", handler.PermView, caseHandler.GetAttachment)
-	route("PATCH /attachments/{id}", handler.PermWrite, caseHandler.UpdateAttachment)
+	// Stored attachments, forwarded to the entity service, which owns every
+	// access decision. This backend holds the Azure Blob Storage credentials and
+	// moves the bytes: an upload arrives in chunks, a download and a comment's
+	// inline image are streamed through it (so they are PermDownloadAttachment);
+	// upload, confirm and delete are PermWrite.
+	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
+	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore).WithAccessGuard(accessGuard)
+	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
+	route("PUT /attachments/upload/{id}/chunks/{index}", handler.PermWrite, blobAttachmentHandler.PutChunk)
+	route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)
+	route("POST /attachments/upload/{id}/confirm", handler.PermWrite, blobAttachmentHandler.ConfirmUpload)
+	route("POST /attachments/delete", handler.PermWrite, blobAttachmentHandler.DeleteAttachment)
+	route("GET /attachments/download/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.Download)
+	route("GET /attachments/inline/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.InlineImage)
 	route("POST /cases/{id}/call-requests", handler.PermWrite, caseHandler.CreateCallRequest)
 	route("POST /cases/{id}/call-requests/search", handler.PermView, caseHandler.SearchCallRequests)
 	route("POST /call-requests/search", handler.PermView, caseHandler.SearchAllCallRequests)
@@ -741,6 +732,7 @@ func main() {
 	route("POST /team-schedule/paging-contacts/{userId}/test", handler.PermWrite, scheduleHandler.TestPagingContact)
 	route("POST /team-schedule/assignments/apply", handler.PermWrite, scheduleHandler.ApplyScheduleRange)
 	route("POST /team-schedule/absences/apply", handler.PermWrite, scheduleHandler.ApplyScheduleAbsence)
+	route("POST /team-schedule/engagement-allocations/dismiss", handler.PermWrite, scheduleHandler.DismissScheduleEngagementAllocation)
 	route("DELETE /team-schedule/absences/{id}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsence)
 	route("POST /team-schedule/absence-kinds", handler.PermWrite, scheduleHandler.CreateScheduleAbsenceKind)
 	route("DELETE /team-schedule/absence-kinds/{code}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsenceKind)
@@ -831,6 +823,7 @@ func main() {
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
 	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
+	route("POST /cases/{id}/sla/recalculate", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)
@@ -1019,7 +1012,7 @@ func main() {
 		),
 		ReadHeaderTimeout: 10 * time.Second,
 		// REST_READ_TIMEOUT / REST_WRITE_TIMEOUT, default 60s each (raised from
-		// 30s so large inline-attachment uploads are not cut off).
+		// 30s so slow upstream calls are not cut off).
 		ReadTimeout:  reqTimeouts.RESTRead,
 		WriteTimeout: reqTimeouts.RESTWrite,
 		IdleTimeout:  60 * time.Second,
@@ -1382,8 +1375,7 @@ const onboardingStatusFlag = "CSM_MIGRATION_ONBOARDING_STATUS_ENABLED"
 //	                                         "TRUE", "yes") keeps it dark and
 //	                                         changes nothing else in this
 //	                                         backend. Deliberately stricter
-//	                                         than the strconv.ParseBool
-//	                                         parsing SFTPGO_* uses: every
+//	                                         than strconv.ParseBool: every
 //	                                         CSM_MIGRATION_* flag is a
 //	                                         cutover switch that must not
 //	                                         flip on by accident.
@@ -1400,74 +1392,12 @@ func onboardingStatusEnabled(raw string) bool {
 	return !strings.EqualFold(strings.TrimSpace(raw), "false")
 }
 
-// loadSftpgoConfig resolves the SFTPGo-backed attachment-storage feature
-// flag and, only when it is on, the client configuration it needs:
-//
-//	SFTPGO_ATTACHMENT_STORAGE_ENABLED  Any strconv.ParseBool-true value (1, t,
-//	                                   T, TRUE, true, True). Off by default —
-//	                                   unset, empty, or any other value keeps
-//	                                   this feature dark and every other
-//	                                   env var below unread. This mirrors
-//	                                   DASHBOARDS_HOT_RELOAD's parsing: an
-//	                                   unparseable non-empty value is a
-//	                                   warning, not fatal, and defaults to off.
-//	SFTPGO_BASE_URL                    SFTPGo's REST API base URL. Required
-//	                                   when the flag is on.
-//	SFTPGO_PUBLIC_BASE_URL             Public host for constructing share
-//	                                   URLs, e.g. when SFTPGo's WebClient
-//	                                   share pages are fronted separately
-//	                                   from its REST API. Optional; defaults
-//	                                   to SFTPGO_BASE_URL when unset.
-//
-// Returns (false, zero Config) when the flag is off, so the caller never
-// touches the returned Config in that case.
-func loadSftpgoConfig() (bool, sftpgo.Config) {
-	enabled := false
-	if raw := strings.TrimSpace(os.Getenv("SFTPGO_ATTACHMENT_STORAGE_ENABLED")); raw != "" {
-		parsed, err := strconv.ParseBool(raw)
-		if err != nil {
-			slog.Warn("SFTPGO_ATTACHMENT_STORAGE_ENABLED is not a boolean; treating it as false",
-				"value", raw, "expected", "1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False")
-		}
-		enabled = parsed
-	}
-	if !enabled {
-		return false, sftpgo.Config{}
-	}
-
-	slog.Info("SFTPGO_ATTACHMENT_STORAGE_ENABLED is on: the SFTPGo-backed attachment-storage endpoints are active")
-	baseURL := mustHTTPSURL("SFTPGO_BASE_URL", mustEnv("SFTPGO_BASE_URL"))
-	publicBaseURL := baseURL
-	if raw := os.Getenv("SFTPGO_PUBLIC_BASE_URL"); raw != "" {
-		publicBaseURL = mustHTTPSURL("SFTPGO_PUBLIC_BASE_URL", raw)
-	}
-	return true, sftpgo.Config{
-		BaseURL:       baseURL,
-		PublicBaseURL: publicBaseURL,
-	}
-}
-
-// mustHTTPSURL validates value via validateHTTPSURL, exiting the process with
-// a logged error if it is invalid. Both SFTPGO_BASE_URL and
-// SFTPGO_PUBLIC_BASE_URL are used to build requests/URLs that carry the
-// caller's email and raw gateway JWT (see internal/sftpgo.Client.MintToken)
-// or are handed to end users as a public download link (see
-// internal/sftpgo.Client.PublicShareURL), so a non-HTTPS or spoofed-looking
-// value here is a credential-leak/MITM risk, not just a misconfiguration —
-// refuse to start rather than proceed with it.
-// mustHTTPSBaseURL is mustHTTPSURL for a base URL that may carry a path; see
-// validateHTTPSBaseURL. Used for upstream services the backend authenticates to
-// with an OAuth2 client, whose token and requests must not travel in cleartext.
+// mustHTTPSBaseURL validates value via validateHTTPSBaseURL, exiting the process
+// with a logged error if it is invalid. Used for upstream services the backend
+// authenticates to with an OAuth2 client, whose token and requests must not
+// travel in cleartext.
 func mustHTTPSBaseURL(key, value string) string {
 	if err := validateHTTPSBaseURL(value); err != nil {
-		slog.Error("invalid environment variable", "key", key, "err", err)
-		os.Exit(1)
-	}
-	return value
-}
-
-func mustHTTPSURL(key, value string) string {
-	if err := validateHTTPSURL(value); err != nil {
 		// Deliberately omit the raw value from this log line: it may carry
 		// embedded userinfo (e.g. "https://user:pass@host"), which would
 		// otherwise write a credential straight into the startup log.
@@ -1477,28 +1407,13 @@ func mustHTTPSURL(key, value string) string {
 	return value
 }
 
-// validateHTTPSURL reports an error unless value parses as a URL with scheme
+// validateHTTPSBaseURL reports an error unless value parses as a URL with scheme
 // "https", a non-empty host, no embedded userinfo (e.g.
 // "https://user:pass@host/...", which could indicate a misconfigured or
-// spoofed URL), and no path/query/fragment beyond an empty or bare "/" path.
-// The path restriction matters beyond cosmetics: internal/sftpgo.Client
-// builds request URLs by plain string concatenation (baseURL +
-// "/api/v2/user/token", etc.), so a configured value with a path component
-// (e.g. "https://host/api") would silently double up into
-// "https://host/api/api/v2/user/token" rather than erroring.
-func validateHTTPSURL(value string) error {
-	return validateSecureURL(value, false)
-}
-
-// validateHTTPSBaseURL is validateHTTPSURL for a base URL that API paths are
-// appended to and that may itself sit under a path (a gateway-hosted service
-// such as "https://host/org/service/v1.0"): the same https, host, userinfo,
-// query and fragment rules, but a path is allowed.
+// spoofed URL), no query and no fragment. A path is allowed, since API paths are
+// appended to the base URL and a gateway-hosted service's base normally has one
+// (such as "https://host/org/service/v1.0").
 func validateHTTPSBaseURL(value string) error {
-	return validateSecureURL(value, true)
-}
-
-func validateSecureURL(value string, allowPath bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return fmt.Errorf("not a valid URL: %w", err)
@@ -1511,9 +1426,6 @@ func validateSecureURL(value string, allowPath bool) error {
 	}
 	if parsed.User != nil {
 		return errors.New("must not contain embedded userinfo (e.g. \"https://user:pass@host/...\")")
-	}
-	if path := parsed.EscapedPath(); !allowPath && path != "" && path != "/" {
-		return fmt.Errorf("must not include a path (got %q); this value is concatenated with API paths, e.g. \"https://host\" not \"https://host/api\"", path)
 	}
 	if parsed.RawQuery != "" {
 		return errors.New("must not include a query string")

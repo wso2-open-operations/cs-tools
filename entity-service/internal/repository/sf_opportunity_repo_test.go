@@ -43,6 +43,16 @@ type oppQuerier struct {
 	statements []string
 	ledger     []domain.UpsertSalesforceIngestStateRequest
 	nextID     int
+	// hoursFor lists the opportunities the project hours hook ran for.
+	hoursFor []string
+	// linkedProjects are the projects linked to the opportunity being deleted;
+	// projectsRecomputed lists the projects the hours hook ran for.
+	linkedProjects     []string
+	projectsRecomputed []string
+	// hoursProjects are the projects the hours hook finds linked to the
+	// opportunity, each read back with hoursState (no lines).
+	hoursProjects []string
+	hoursState    []any
 }
 
 func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -77,13 +87,40 @@ func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.Co
 	return pgconn.NewCommandTag("SELECT 1"), nil
 }
 
-func (q *oppQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (q *oppQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+		// The project hours hook: no linked projects.
+		q.statements = append(q.statements, sql)
+		q.hoursFor = append(q.hoursFor, args[0].(string))
+		rows := &fakeRows{}
+		for _, id := range q.hoursProjects {
+			rows.rows = append(rows.rows, []any{id})
+		}
+		return rows, nil
+	}
+	if sql == projectHoursLinesQuery {
+		return &fakeRows{}, nil
+	}
 	return nil, fmt.Errorf("unexpected Query")
 }
 
 func (q *oppQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
 	switch sql {
+	case projectHoursStateQuery:
+		q.projectsRecomputed = append(q.projectsRecomputed, args[0].(string))
+		if q.hoursState != nil {
+			return fakeRow{vals: q.hoursState}
+		}
+		return scanRow{err: pgx.ErrNoRows}
+	case previousOpportunityProjectsQuery:
+		return scanRow{vals: []any{q.linkedProjects}}
+	case previousLineItemOpportunitiesQuery:
+		prev := []string{}
+		if owner, ok := q.products[args[0].(string)]; ok {
+			prev = append(prev, owner)
+		}
+		return scanRow{vals: []any{prev}}
 	case insertSfOpportunityQuery:
 		q.nextID++
 		id := fmt.Sprintf("opp-row-%d", q.nextID)
@@ -183,6 +220,10 @@ func TestWriteSfOpportunity_InsertsNewOpportunityWithLineItems(t *testing.T) {
 	if !strings.Contains(q.statements[0], "pg_advisory_xact_lock") {
 		t.Errorf("first statement = %q, want the advisory lock", q.statements[0])
 	}
+	// Project hours are recomputed once for the opportunity written.
+	if !reflect.DeepEqual(q.hoursFor, []string{"opp-row-1"}) {
+		t.Errorf("project hours recomputed for %v, want [opp-row-1]", q.hoursFor)
+	}
 	if len(q.ledger) != 1 || q.ledger[0].Entity != "opportunity" || q.ledger[0].EventType != "CREATED" {
 		t.Errorf("ledger = %+v", q.ledger)
 	}
@@ -239,6 +280,42 @@ func TestWriteSfOpportunity_EmptyLineItemsClearsTheSet(t *testing.T) {
 	}
 }
 
+// A write that deletes stale line items recomputes the opportunity's projects
+// as having lost lines, so one left with no lines clears its query pool; a
+// write that deletes nothing leaves such a project's figures alone.
+func TestWriteSfOpportunity_StaleLineDeleteClearsEmptiedProject(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		products  map[string]string
+		wantClear bool
+	}{
+		{"stale line deleted", map[string]string{"00k1": "opp-a"}, true},
+		{"nothing deleted", map[string]string{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &oppQuerier{
+				opportunities: map[string]string{"006xx": "opp-a"}, products: tc.products,
+				hoursProjects: []string{"p1"}, hoursState: stateRow("NOT_APPLICABLE"),
+			}
+			if _, err := writeSfOpportunity(context.Background(), q, domain.SalesforceOpportunityUpsert{SfID: "006xx"}, oppState("UPDATED")); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(q.projectsRecomputed, []string{"p1"}) {
+				t.Fatalf("projects recomputed = %v, want [p1]", q.projectsRecomputed)
+			}
+			cleared := false
+			for _, s := range q.statements {
+				if s == projectHoursClearQueryPoolQuery {
+					cleared = true
+				}
+			}
+			if cleared != tc.wantClear {
+				t.Errorf("query pool cleared = %v, want %v", cleared, tc.wantClear)
+			}
+		})
+	}
+}
+
 // TestDeleteSfOpportunity_CascadeIntent: DELETED is a hard delete by sf_id —
 // the line items go with it through ON DELETE CASCADE — and the ledger
 // records DELETED in the same transaction; a missing row deletes nothing and
@@ -262,6 +339,18 @@ func TestDeleteSfOpportunity_CascadeIntent(t *testing.T) {
 	n, err = deleteSfOpportunity(context.Background(), q, "006xx", oppState("DELETED"))
 	if err != nil || n != 0 || len(q.ledger) != 2 {
 		t.Errorf("second delete = %d, %v, ledger rows %d; want 0, nil, 2", n, err, len(q.ledger))
+	}
+}
+
+// Deleting an opportunity recomputes the projects that were linked to it.
+func TestDeleteSfOpportunity_RecomputesItsProjects(t *testing.T) {
+	q := &oppQuerier{opportunities: map[string]string{"006xx": "opp-a"}, products: map[string]string{},
+		linkedProjects: []string{"p1", "p2"}}
+	if _, err := deleteSfOpportunity(context.Background(), q, "006xx", oppState("DELETED")); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(q.projectsRecomputed, []string{"p1", "p2"}) {
+		t.Errorf("projects recomputed = %v, want [p1 p2]", q.projectsRecomputed)
 	}
 }
 
@@ -300,5 +389,28 @@ func TestSfOpportunitySQL_NeverTouchesServiceNowColumns(t *testing.T) {
 		if m := forbidden.FindString(sql); m != "" {
 			t.Errorf("%s writes ServiceNow-owned column %q", name, m)
 		}
+	}
+}
+
+// A line item the opportunity set takes over from another opportunity
+// re-derives the opportunity it left, after the new one.
+func TestWriteSfOpportunity_LineItemMoveDerivesPreviousOpportunity(t *testing.T) {
+	q := &oppQuerier{
+		opportunities: map[string]string{"006xx": "opp-a", "006yy": "opp-b"},
+		products:      map[string]string{"00k-moved": "opp-b"},
+	}
+	if _, err := writeSfOpportunity(context.Background(), q, domain.SalesforceOpportunityUpsert{
+		SfID: "006xx", LineItems: []domain.SalesforceOpportunityLineItemUpsert{lineItem("00k-moved")},
+	}, oppState("UPDATED")); err != nil {
+		t.Fatal(err)
+	}
+	var derived int
+	for _, s := range q.statements {
+		if s == deriveOnboardingForOpportunityQuery {
+			derived++
+		}
+	}
+	if derived != 2 {
+		t.Errorf("derive statements = %d, want 2 (new opportunity, then the previous one)", derived)
 	}
 }

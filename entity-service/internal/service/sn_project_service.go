@@ -238,6 +238,9 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 	if err := validateProjectSearchFilters(req); err != nil {
 		return domain.SearchProjectsResponse{}, err
 	}
+	if err := rejectPostgresOnlyProjectSearch(req); err != nil {
+		return domain.SearchProjectsResponse{}, err
+	}
 	var accountSysid string
 	if req.AccountID != "" {
 		if err := validateUUIDs("accountId", []string{req.AccountID}); err != nil {
@@ -723,6 +726,9 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	if req.OnboardingStatus != nil || req.OnboardingOwner != nil || hasOnboardingDates(req) {
 		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "onboardingStatus, onboardingOwner and the onboarding dates can only be updated on the Postgres data source"}
 	}
+	if req.SuspensionProcessOverridden != nil {
+		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "suspensionProcessOverridden can only be updated on the Postgres data source"}
+	}
 	if req.HasAgent == nil && req.HasKbReferences == nil && req.EndDateClosureState == nil &&
 		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil &&
 		req.SuspensionProcessState == nil {
@@ -769,6 +775,84 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	}, nil
 }
 
+// validProjectSortFields is the set of sortBy values the project search
+// accepts; only endDate is supported by every data source (see
+// rejectPostgresOnlyProjectSearch).
+var validProjectSortFields = map[string]struct{}{
+	"endDate":                           {},
+	"goLivePlanDate":                    {},
+	"goLiveDate":                        {},
+	"onboardingExpiryDate":              {},
+	"productionReadinessCompletionDate": {},
+}
+
+// projectSortFieldNames lists validProjectSortFields for error messages.
+var projectSortFieldNames = []string{"endDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"}
+
+// projectDateRange is one onboarding date filter's request field prefix and
+// its inclusive yyyy-MM-dd bounds.
+type projectDateRange struct {
+	name, from, to string
+}
+
+// projectDateRanges lists the onboarding date range filters of req, by the
+// request field prefix ("onboardingStartDate" for onboardingStartDateFrom/To).
+func projectDateRanges(req domain.SearchProjectsRequest) []projectDateRange {
+	return []projectDateRange{
+		{"onboardingStartDate", req.OnboardingStartDateFrom, req.OnboardingStartDateTo},
+		{"goLivePlanDate", req.GoLivePlanDateFrom, req.GoLivePlanDateTo},
+		{"goLiveDate", req.GoLiveDateFrom, req.GoLiveDateTo},
+		{"onboardingExpiryDate", req.OnboardingExpiryDateFrom, req.OnboardingExpiryDateTo},
+		{"productionReadinessCompletionDate", req.ProductionReadinessCompletionDateFrom, req.ProductionReadinessCompletionDateTo},
+	}
+}
+
+// validateProjectDateRange rejects a malformed bound, and a from date after
+// the to date, of the range name+"From"/name+"To".
+func validateProjectDateRange(name, from, to string) error {
+	var fromT, toT time.Time
+	var err error
+	if from != "" {
+		if fromT, err = time.Parse(snDateLayout, from); err != nil {
+			return apierror.InvalidValue(name+"From", from, "date", []string{"yyyy-MM-dd"})
+		}
+	}
+	if to != "" {
+		if toT, err = time.Parse(snDateLayout, to); err != nil {
+			return apierror.InvalidValue(name+"To", to, "date", []string{"yyyy-MM-dd"})
+		}
+	}
+	if from != "" && to != "" && fromT.After(toT) {
+		return &apierror.ValidationError{Msg: name + "From must not be after " + name + "To"}
+	}
+	return nil
+}
+
+// rejectPostgresOnlyProjectSearch rejects, rather than silently ignores, the
+// project search filters and sort fields only the Postgres data source
+// supports: closureStates, the onboarding date ranges and every sortBy but
+// endDate.
+func rejectPostgresOnlyProjectSearch(req domain.SearchProjectsRequest) error {
+	if len(req.ClosureStates) > 0 {
+		return &apierror.ValidationError{Msg: errProjectSearchUnsupported("closureStates")}
+	}
+	for _, r := range projectDateRanges(req) {
+		if r.from != "" || r.to != "" {
+			return &apierror.ValidationError{Msg: errProjectSearchUnsupported(r.name + "From/" + r.name + "To")}
+		}
+	}
+	if req.SortBy != "" && req.SortBy != "endDate" {
+		return &apierror.ValidationError{Msg: errProjectSearchUnsupported("sortBy " + strconv.Quote(req.SortBy))}
+	}
+	return nil
+}
+
+// errProjectSearchUnsupported is the message for a project search option this
+// data source does not support.
+func errProjectSearchUnsupported(what string) string {
+	return what + " is not supported on this data source; remove it"
+}
+
 // validClosureStatuses is the set of values the "Update WSO2 Closure State"
 // SN business rule ever computes for the overall closure state — the only
 // three literal strings that rule's branches assign. Safe to enforce here
@@ -809,8 +893,10 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 			return apierror.InvalidValue("closureStatus", req.ClosureStatus, "closure state", closureStatusNames)
 		}
 	}
-	if req.SortBy != "" && req.SortBy != "endDate" {
-		return apierror.InvalidValue("sortBy", req.SortBy, "sort field", []string{"endDate"})
+	if req.SortBy != "" {
+		if _, ok := validProjectSortFields[req.SortBy]; !ok {
+			return apierror.InvalidValue("sortBy", req.SortBy, "sort field", projectSortFieldNames)
+		}
 	}
 	if _, ok := validSortOrders[req.SortOrder]; !ok {
 		return apierror.InvalidValue("sortOrder", req.SortOrder, "sort order", []string{"asc", "desc"})
@@ -828,6 +914,16 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 	for _, s := range req.ExcludeClosureStates {
 		if _, ok := validClosureStatuses[s]; !ok {
 			return apierror.InvalidValue("excludeClosureStates", s, "closure state", closureStatusNames)
+		}
+	}
+	for _, s := range req.ClosureStates {
+		if _, ok := validClosureStatuses[s]; !ok {
+			return apierror.InvalidValue("closureStates", s, "closure state", closureStatusNames)
+		}
+	}
+	for _, r := range projectDateRanges(req) {
+		if err := validateProjectDateRange(r.name, r.from, r.to); err != nil {
+			return err
 		}
 	}
 	for _, t := range req.ExcludeSubscriptionTypes {

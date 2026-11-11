@@ -30,6 +30,7 @@ import (
 type entitySLAEngineClient interface {
 	SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string, filters entity.SLAStatusManageFilters) ([]byte, error)
 	RequestSLARecalculation(ctx context.Context) ([]byte, error)
+	RecalculateCasePauseTotals(ctx context.Context, caseID string) ([]byte, error)
 }
 
 // SLAEngineHandler proxies the CSM portal's "Recalculate SLA" admin action:
@@ -51,9 +52,9 @@ func NewSLAEngineHandler(entity entitySLAEngineClient) *SLAEngineHandler {
 
 // SearchActiveSLAStatusesManage handles GET /sla-status/manage -- what the
 // admin page polls to show which clocks are currently running, typically
-// right after RequestRecalculation. severity/caseType/search/elapsedBucket
-// are the admin table's own optional filters, forwarded to entity-service
-// as-is (it validates each) -- see entity.SLAStatusManageFilters.
+// right after RequestRecalculation. severity/caseType/search/elapsedBucket/
+// status are the admin table's own optional filters, forwarded to
+// entity-service as-is (it validates each) -- see entity.SLAStatusManageFilters.
 func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if middleware.UserInfoFromContext(r.Context()) == nil {
@@ -66,6 +67,7 @@ func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, 
 		CaseType:      q.Get("caseType"),
 		Search:        q.Get("search"),
 		ElapsedBucket: q.Get("elapsedBucket"),
+		Status:        q.Get("status"),
 	}
 	result, err := h.entity.SearchActiveSLAStatusesManage(r.Context(), q.Get("limit"), q.Get("offset"), filters)
 	if err != nil {
@@ -92,4 +94,32 @@ func (h *SLAEngineHandler) RequestRecalculation(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RecalculateCasePauseTotals handles POST /cases/{id}/sla/recalculate
+// -- recomputes one case's currently IN_PROGRESS SLA clocks' pause history
+// from the case's own state-change activity log, correcting
+// pause_duration/business_pause_duration when they disagree. No request
+// body; see entity-service's own CaseSLARecalcService for what the
+// response reports and why a case with no activity history to replay
+// leaves everything untouched.
+func (h *SLAEngineHandler) RecalculateCasePauseTotals(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.RecalculateCasePauseTotals(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity RecalculateCasePauseTotals failed", "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to recalculate this case's SLA pause totals.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

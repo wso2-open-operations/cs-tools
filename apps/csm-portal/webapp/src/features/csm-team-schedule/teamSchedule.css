@@ -2642,6 +2642,8 @@
 .csm-ts .ra-mem-grid .cp-x:disabled { opacity: 0.4; cursor: default; }
 .csm-ts .ra-mem-q { flex: 1 1 100%; font-size: 12.5px; color: var(--ink); }
 .csm-ts .ra-mem-acts { display: flex; gap: 6px; }
+.csm-ts .ra-mem-turns { flex: 1 1 100%; font-size: 11.5px; color: var(--muted); }
+.csm-ts .ra-mem-turns-warn { color: var(--crit); font-weight: 600; }
 .csm-ts .ra-mem-yes { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--line-2)); }
 .csm-ts .ra-mem-empty { font-size: 12.5px; color: var(--muted); padding: 14px 0; }
 @media (max-width: 760px) {
@@ -3428,35 +3430,50 @@
    the bar's edge colour: 4.3:1 or better against the cell in light (4.27
    on the reader's row tint, 4.38 on a weekend) and 6.1:1 or better in dark.
    Keyed on the marker, not on td.c: a read-only, unsplit day cell has no .c. */
-.csm-ts .roster td:has(> .engmk) {
-  position: relative;
-}
-.csm-ts .roster td:has(> .engmk) .engmk {
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  bottom: 0;
-  height: 7px;
+/* A customer engagement from the allocation app, read-only: a chip reading
+   Allo- and the engagement id, in the engagement colours. */
+.csm-ts .chip.eng {
+  background: var(--eng-bg);
+  color: var(--eng-fg);
+  box-shadow: inset 3px 0 0 var(--eng-edge);
   cursor: default;
 }
-.csm-ts .roster td:has(> .engmk) .engmk::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 1px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--eng-edge);
+/* The picker's engagement rows: one per allocation covering the day. */
+.csm-ts .pk-remove.pk-eng {
+  flex-direction: column;
+  align-items: stretch;
 }
-/* The legend's swatch: the same strip, on its own. */
-.csm-ts .engmksw {
-  display: inline-block;
-  width: 26px;
-  height: 3px;
-  border-radius: 2px;
+.csm-ts .pk-eng .pkeng-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.csm-ts .pk-eng .pkeng-row .pkrm-t {
+  flex: 1;
+  min-width: 0;
+}
+.csm-ts .pk-eng .pkeng-row .pkrm-t small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.csm-ts .chip.eng.gone {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+/* A tag holds the day: the engagement is a dot in the cell's corner. */
+.csm-ts .roster td:has(> .engdot) {
+  position: relative;
+}
+.csm-ts .roster td > .engdot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: var(--eng-edge);
-  align-self: center;
+  cursor: default;
 }
 /* A yes or no and a pick from a few are changed right in their row. */
 .csm-ts .cas-inline { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -3511,7 +3528,7 @@
 .csm-ts .cp-modal.cas-dlg:has(.cas-team-emails) { width: min(580px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
 .csm-ts .cas-team-emails tbody th .cas-sub { font-weight: 400; font-size: 11.5px; color: var(--muted); }
 
-/* The daily timesheet window: a notice not to edit the roster. */
+/* The daily timesheet window: a notice that roster changes may affect the report. */
 .csm-ts .freezebar {
   margin: 0 0 12px;
   padding: 10px 14px;
@@ -3550,4 +3567,97 @@
 .csm-ts .recent .rc-when .rc-at {
   display: block;
   color: var(--faint);
+}
+
+/* A tag whose days take people off the timesheet says so under its name in
+   the picker, so nobody has to hover to find out. */
+.csm-ts .pk-c .pk-l .pk-off {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The New tag form's two choices, Tag type and Timesheet, are labelled
+   dropdowns with a line under each saying what the choice does. */
+.csm-ts .tf .tf-pick select {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.csm-ts .tf .tf-pick select:disabled {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+.csm-ts .tf label > span {
+  min-width: 72px;
+}
+.csm-ts .tf .tf-help {
+  margin: -4px 0 0 80px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The New tag form in two titled groups -- what the roster shows, and how the
+   tag counts -- then a preview of the tag as it will look. */
+.csm-ts .tf .tf-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+.csm-ts .tf .tf-group legend {
+  padding: 0 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.csm-ts .tf .tf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.csm-ts .tf .tf-row > span {
+  min-width: 72px;
+}
+.csm-ts .tf .tf-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.csm-ts .tf .tf-preview-h {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.csm-ts .tf .tf-preview-d {
+  color: var(--ink-2);
+}
+.csm-ts .tf .tf-preview-t {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--muted);
 }

@@ -137,6 +137,9 @@ type Case struct {
 	ID         string
 	Number     string
 	InternalID string
+	// Type is entity-service's case type value (case, service_request,
+	// security_report_analysis, ...).
+	Type       string
 	Subject    string
 	State      string
 	Severity   string
@@ -204,6 +207,7 @@ type searchCaseView struct {
 	ID               string         `json:"id"`
 	Number           string         `json:"number"`
 	InternalID       string         `json:"internalId"`
+	Type             string         `json:"type"`
 	Subject          *string        `json:"subject"`
 	State            string         `json:"state"`
 	Severity         *string        `json:"severity"`
@@ -253,7 +257,14 @@ type searchCasesResponse struct {
 	Limit  int              `json:"limit"`
 }
 
-// SearchCasesInStateCreatedBeforeYesterday returns every case whose state is
+// OpenCaseTypes are the work item types the open cases report covers, in
+// entity-service's canonical case type values. Without this filter the search
+// also returns the other case-like work item types (announcements and
+// engagements), which are not worked in the triage queue this report polices.
+var OpenCaseTypes = []string{"case", "security_report_analysis", "service_request"}
+
+// SearchCasesInStateCreatedBeforeYesterday returns every case, service
+// request and security report analysis (see OpenCaseTypes) whose state is
 // exactly state (not "not closed" — an exact match, e.g. "open") and whose
 // createdOn falls before the start of yesterday. This is a calendar-day
 // boundary computed in UTC: a case created at 23:59 yesterday is excluded, one
@@ -268,6 +279,7 @@ func (c *Client) SearchCasesInStateCreatedBeforeYesterday(ctx context.Context, s
 	startOfYesterday := startOfToday.Add(-24 * time.Hour)
 	cutoff := startOfYesterday.Format(time.RFC3339)
 	cases, total, err := c.searchCases(ctx, []caseFieldFilter{
+		{Field: "type", Op: "in", Values: OpenCaseTypes},
 		{Field: "state", Op: "in", Values: []string{state}},
 		{Field: "createdOn", Op: "lte", Values: []string{cutoff}},
 	})
@@ -347,6 +359,7 @@ func toCase(cv searchCaseView) (Case, error) {
 		ID:         cv.ID,
 		Number:     cv.Number,
 		InternalID: cv.InternalID,
+		Type:       cv.Type,
 		State:      cv.State,
 		CreatedOn:  createdOn,
 		UpdatedOn:  updatedOn,

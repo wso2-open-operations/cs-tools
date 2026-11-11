@@ -30,8 +30,8 @@ func TestRun_SinglePageEvaluatesAllProjects(t *testing.T) {
 		searchProjectsFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			return []byte(`{
 				"projects": [
-					{"id": "p1", "endDate": null},
-					{"id": "p2", "endDate": null}
+					{"suspensionProcessOverridden": false, "id": "p1", "endDate": null},
+					{"suspensionProcessOverridden": false, "id": "p2", "endDate": null}
 				],
 				"total": 2, "limit": 50, "offset": 0, "hasMore": false
 			}`), nil
@@ -40,7 +40,7 @@ func TestRun_SinglePageEvaluatesAllProjects(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -69,12 +69,12 @@ func TestRun_MultiPagePaginatesUntilHasMoreFalse(t *testing.T) {
 
 			if req.Pagination.Offset == 0 {
 				return []byte(`{
-					"projects": [{"id": "p1", "endDate": null}],
+					"projects": [{"suspensionProcessOverridden": false, "id": "p1", "endDate": null}],
 					"total": 2, "limit": 50, "offset": 0, "hasMore": true
 				}`), nil
 			}
 			return []byte(`{
-				"projects": [{"id": "p2", "endDate": null}],
+				"projects": [{"suspensionProcessOverridden": false, "id": "p2", "endDate": null}],
 				"total": 2, "limit": 50, "offset": 50, "hasMore": false
 			}`), nil
 		},
@@ -82,7 +82,7 @@ func TestRun_MultiPagePaginatesUntilHasMoreFalse(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -116,7 +116,7 @@ func TestRun_StopsWhenPageReturnsZeroProjects(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -147,7 +147,7 @@ func TestRun_BoundsIterationsByTotalWhenHasMoreNeverFalse(t *testing.T) {
 				if i > 0 {
 					projects = append(projects, ',')
 				}
-				projects = append(projects, []byte(fmt.Sprintf(`{"id": "p%d-%d", "endDate": null}`, calls, i))...)
+				projects = append(projects, []byte(fmt.Sprintf(`{"suspensionProcessOverridden": false, "id": "p%d-%d", "endDate": null}`, calls, i))...)
 			}
 			return []byte(`{
 				"projects": [` + string(projects) + `],
@@ -158,7 +158,7 @@ func TestRun_BoundsIterationsByTotalWhenHasMoreNeverFalse(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -183,9 +183,9 @@ func TestRun_OneProjectFailureDoesNotBlockTheRest(t *testing.T) {
 		searchProjectsFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			return []byte(`{
 				"projects": [
-					{"id": "p1", "endDate": null},
-					{"id": "p2", "endDate": "` + firingEndDate + `", "suspensionProcessState": "not-an-object"},
-					{"id": "p3", "endDate": null}
+					{"suspensionProcessOverridden": false, "id": "p1", "endDate": null},
+					{"suspensionProcessOverridden": false, "id": "p2", "endDate": "` + firingEndDate + `", "suspensionProcessState": "not-an-object"},
+					{"suspensionProcessOverridden": false, "id": "p3", "endDate": null}
 				],
 				"total": 3, "limit": 50, "offset": 0, "hasMore": false
 			}`), nil
@@ -194,7 +194,7 @@ func TestRun_OneProjectFailureDoesNotBlockTheRest(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -221,7 +221,7 @@ func TestRun_PageFetchFailureIsFatal(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
@@ -239,7 +239,7 @@ func TestRun_ScopedToProjectIDFetchesOnlyThatProject(t *testing.T) {
 	reader := &mockEntityReader{
 		getProjectFn: func(ctx context.Context, id string) ([]byte, error) {
 			gotID = id
-			return []byte(`{"id": "` + testProjectID + `", "account": {"id": "00000000-0000-4000-8000-000000000002"}, "endDate": null}`), nil
+			return []byte(`{"suspensionProcessOverridden": false, "id": "` + testProjectID + `", "account": {"id": "00000000-0000-4000-8000-000000000002"}, "endDate": null}`), nil
 		},
 		searchProjectsFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			t.Fatal("SearchProjects should not be called when scoped to a single project")
@@ -249,7 +249,7 @@ func TestRun_ScopedToProjectIDFetchesOnlyThatProject(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), testProjectID, nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), testProjectID, nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -278,7 +278,7 @@ func TestRun_ScopedProjectFetchFailureIsFatal(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "00000000-0000-4000-8000-000000000001", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "00000000-0000-4000-8000-000000000001", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
@@ -305,9 +305,9 @@ func TestRun_SkipsExcludedProjectsInBroadSweep(t *testing.T) {
 			// CodeRabbit).
 			return []byte(`{
 				"projects": [
-					{"id": "p1", "endDate": null},
-					{"id": "p2", "endDate": "` + firingEndDate + `", "suspensionProcessState": "not-an-object"},
-					{"id": "p3", "endDate": null}
+					{"suspensionProcessOverridden": false, "id": "p1", "endDate": null},
+					{"suspensionProcessOverridden": false, "id": "p2", "endDate": "` + firingEndDate + `", "suspensionProcessState": "not-an-object"},
+					{"suspensionProcessOverridden": false, "id": "p3", "endDate": null}
 				],
 				"total": 3, "limit": 50, "offset": 0, "hasMore": false
 			}`), nil
@@ -317,7 +317,7 @@ func TestRun_SkipsExcludedProjectsInBroadSweep(t *testing.T) {
 	ntf := &mockNotifier{}
 	excluded := map[string]bool{"p2": true}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", excluded)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", excluded, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -350,7 +350,7 @@ func TestRun_ScopedToProjectIDSkipsExcludedProjectWithoutFetching(t *testing.T) 
 	ntf := &mockNotifier{}
 	excluded := map[string]bool{excludedID: true}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), excludedID, excluded)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), excludedID, excluded, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -373,11 +373,11 @@ func TestRun_StopsAtMaxProjectPagesWhenUpstreamNeverEnds(t *testing.T) {
 			if calls > maxProjectPages+5 {
 				return []byte(`{"projects":[],"hasMore":false}`), nil // test safety stop
 			}
-			return []byte(`{"projects":[{"id":"p","endDate":null}],"total":0,"hasMore":true}`), nil
+			return []byte(`{"projects":[{"suspensionProcessOverridden": false, "id":"p","endDate":null}],"total":0,"hasMore":true}`), nil
 		},
 	}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want an error when the page cap is reached")
 	}
@@ -427,7 +427,7 @@ func TestRun_SuspensionsDoNotMakeTheSweepSkipProjects(t *testing.T) {
 			to := min(from+req.Pagination.Limit, len(open))
 			var rows []map[string]any
 			for _, id := range open[from:to] {
-				rows = append(rows, map[string]any{"id": id, "endDate": nil})
+				rows = append(rows, map[string]any{"suspensionProcessOverridden": false, "id": id, "endDate": nil})
 			}
 			return json.Marshal(map[string]any{
 				"projects": rows, "total": len(open), "limit": req.Pagination.Limit,
@@ -437,7 +437,7 @@ func TestRun_SuspensionsDoNotMakeTheSweepSkipProjects(t *testing.T) {
 	}
 	details := suspendingDetails{open: &open, seen: map[string]int{}}
 
-	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -462,12 +462,12 @@ func TestRun_APageFetchFailureEvaluatesNothing(t *testing.T) {
 			if calls == 2 {
 				return nil, errors.New("upstream down")
 			}
-			return []byte(`{"projects":[{"id":"p1","endDate":null}],"total":2,"hasMore":true}`), nil
+			return []byte(`{"projects":[{"suspensionProcessOverridden": false, "id":"p1","endDate":null}],"total":2,"hasMore":true}`), nil
 		},
 	}
 	details := suspendingDetails{open: &[]string{}, seen: map[string]int{}}
 
-	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want the page fetch failure")
 	}

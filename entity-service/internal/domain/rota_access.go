@@ -60,9 +60,9 @@ type TeamMemberRemoval struct {
 	Role string
 	// AlertTier is the person's Case Alerts responder tier (T1-T3), or "".
 	AlertTier string
-	// UpcomingTurns counts the person's turns on this team that have not
-	// ended yet.
-	UpcomingTurns int
+	// RemovedTurns counts the person's turns on this team that had not ended
+	// yet and were removed with the membership.
+	RemovedTurns int
 }
 
 // TeamMemberPatch is a change to one person's place on a team: their role
@@ -108,11 +108,12 @@ type TeamMemberMove struct {
 	Moved bool
 	// OnSource and OnTarget say where they were when the call started.
 	OnSource, OnTarget bool
-	// Role, AlertTier and UpcomingTurns describe the source membership, as
-	// for TeamMemberRemoval.
-	Role          string
-	AlertTier     string
-	UpcomingTurns int
+	// Role and AlertTier describe the source membership, as for
+	// TeamMemberRemoval. RemovedTurns counts the turns on the source team that
+	// had not ended yet and were removed with the move.
+	Role         string
+	AlertTier    string
+	RemovedTurns int
 	// Lead is true when the source role is lead-type.
 	Lead bool
 	// SpanUntil is set when a move span (Brazil rotation, Migration) already

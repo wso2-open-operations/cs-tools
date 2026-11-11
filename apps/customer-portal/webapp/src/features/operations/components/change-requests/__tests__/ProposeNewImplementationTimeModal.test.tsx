@@ -15,6 +15,7 @@
 // under the License.
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { format as formatDate, parse as parseDate } from "date-fns";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProposeNewImplementationTimeModal from "@features/operations/components/change-requests/ProposeNewImplementationTimeModal";
 import {
@@ -80,10 +81,29 @@ function renderModal(
   return { onClose, onProposed, onRefused };
 }
 
-const startInput = () => screen.getByLabelText(/Proposed start/) as HTMLInputElement;
-const endInput = () => screen.getByLabelText(/Proposed end/) as HTMLInputElement;
-const setValue = (input: HTMLElement, value: string) =>
-  fireEvent.change(input, { target: { value } });
+const PICKER_FORMAT = "MM/dd/yyyy hh:mm a";
+const LOCAL_FORMAT = "yyyy-MM-dd'T'HH:mm";
+/** The picker shows a wall-clock time as MM/dd/yyyy hh:mm a; the tests write it as YYYY-MM-DDTHH:mm. */
+const toPickerText = (local: string): string =>
+  local ? formatDate(parseDate(local, LOCAL_FORMAT, new Date()), PICKER_FORMAT) : "";
+const local = (input: HTMLElement): string => {
+  const date = parseDate((input as HTMLInputElement).value, PICKER_FORMAT, new Date());
+  return Number.isNaN(date.getTime()) ? "" : formatDate(date, LOCAL_FORMAT);
+};
+const fieldInput = (label: RegExp) =>
+  screen.getAllByLabelText(label).find((el) => el.tagName === "INPUT") as HTMLInputElement;
+const fieldGroup = (label: RegExp) =>
+  screen.getAllByLabelText(label).find((el) => el.getAttribute("role") === "group") as HTMLElement;
+const startInput = () => fieldInput(/Proposed start/);
+const endInput = () => fieldInput(/Proposed end/);
+const startGroup = () => fieldGroup(/Proposed start/);
+const endGroup = () => fieldGroup(/Proposed end/);
+const firstSection = (group: HTMLElement) => group.querySelector<HTMLElement>('[role="spinbutton"]') as HTMLElement;
+const setValue = (input: HTMLElement, value: string) => {
+  fireEvent.change(input, { target: { value: toPickerText(value) } });
+  // An emptied field is only reported once focus leaves it.
+  if (value === "") fireEvent.blur(firstSection(input.closest('[role="group"]') as HTMLElement));
+};
 const submit = () => fireEvent.click(screen.getByRole("button", { name: "Submit Proposal" }));
 
 describe("ProposeNewImplementationTimeModal", () => {
@@ -134,8 +154,8 @@ describe("ProposeNewImplementationTimeModal", () => {
 
   it("prefills the start from the current window, and shows the end it implies, in the viewer's time zone", () => {
     renderModal();
-    expect(startInput().value).toBe("2026-06-10T10:00");
-    expect(endInput().value).toBe("2026-06-10T12:00");
+    expect(local(startInput())).toBe("2026-06-10T10:00");
+    expect(local(endInput())).toBe("2026-06-10T12:00");
     expect(startInput()).toBeRequired();
     expect(screen.getByText(/Asia\/Colombo/)).toBeInTheDocument();
     expect(screen.getByText("Same length as the planned window (2 hours)")).toBeInTheDocument();
@@ -145,22 +165,22 @@ describe("ProposeNewImplementationTimeModal", () => {
     renderModal();
     const end = endInput();
     expect(end).toHaveAttribute("readonly");
-    expect(end).toHaveAttribute("aria-readonly", "true");
+    expect(firstSection(endGroup())).toHaveAttribute("aria-readonly", "true");
     expect(end).not.toBeRequired();
     // Not disabled: a disabled field loses its contrast and is skipped by assistive technology.
     expect(end).not.toBeDisabled();
     // A change event on a read-only field is not a way in: what shows is always
     // the end the start implies.
     setValue(end, "2026-06-10T18:00");
-    expect(end.value).toBe("2026-06-10T12:00");
+    expect(local(end)).toBe("2026-06-10T12:00");
     setValue(startInput(), "2026-06-12T09:00");
-    expect(end.value).toBe("2026-06-12T11:00");
+    expect(local(end)).toBe("2026-06-12T11:00");
   });
 
   it("leaves the start empty, and the end with it, when the change request has no window yet, and says it cannot be proposed", () => {
     renderModal({ startDate: "", endDate: "" });
-    expect(startInput().value).toBe("");
-    expect(endInput().value).toBe("");
+    expect(local(startInput())).toBe("");
+    expect(local(endInput())).toBe("");
     expect(startInput()).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent(CHANGE_REQUEST_NO_WINDOW_MESSAGE);
     expect(screen.getByRole("button", { name: "Submit Proposal" })).toBeDisabled();
@@ -170,15 +190,15 @@ describe("ProposeNewImplementationTimeModal", () => {
   it("moves the end with the start, keeping the planned length", () => {
     renderModal();
     setValue(startInput(), "2026-06-12T09:00");
-    expect(endInput().value).toBe("2026-06-12T11:00");
+    expect(local(endInput())).toBe("2026-06-12T11:00");
     setValue(startInput(), "2026-06-13T22:30");
-    expect(endInput().value).toBe("2026-06-14T00:30");
+    expect(local(endInput())).toBe("2026-06-14T00:30");
   });
 
   it("empties the end while the start is not a time", () => {
     renderModal();
     setValue(startInput(), "");
-    expect(endInput().value).toBe("");
+    expect(local(endInput())).toBe("");
   });
 
   it("shows no errors before the first submit", () => {
@@ -192,8 +212,8 @@ describe("ProposeNewImplementationTimeModal", () => {
     setValue(startInput(), "");
     submit();
     expect(screen.getByText("Enter the proposed start date and time.")).toBeInTheDocument();
-    expect(startInput()).toHaveAttribute("aria-invalid", "true");
-    expect(document.activeElement).toBe(startInput());
+    expect(startGroup()).toHaveAttribute("aria-invalid", "true");
+    expect(document.activeElement).toBe(firstSection(startGroup()));
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
   });
 
@@ -220,7 +240,7 @@ describe("ProposeNewImplementationTimeModal", () => {
   it("sends the start and the end that keeps the planned length, both as UTC for a viewer outside UTC, then says what happens next and closes", async () => {
     const { onClose } = renderModal();
     setValue(startInput(), "2026-06-11T15:30");
-    expect(endInput().value).toBe("2026-06-11T17:30");
+    expect(local(endInput())).toBe("2026-06-11T17:30");
     submit();
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
@@ -248,7 +268,7 @@ describe("ProposeNewImplementationTimeModal", () => {
   it("keeps a length that is not a whole number of hours, and a window that crosses midnight", async () => {
     const { onClose } = renderModal({ startDate: "2026-06-10 04:30:00", endDate: "2026-06-10 06:15:00" });
     setValue(startInput(), "2026-06-11T23:00");
-    expect(endInput().value).toBe("2026-06-12T00:45");
+    expect(local(endInput())).toBe("2026-06-12T00:45");
     submit();
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mocks.mutateAsync).toHaveBeenCalledWith({
@@ -301,7 +321,7 @@ describe("ProposeNewImplementationTimeModal", () => {
       expect(screen.getByText("Proposed start waiting for WSO2")).toBeInTheDocument();
       expect(screen.getByText(/Friday, June 12, 2026 at 10:00 AM GMT\+5:30/)).toBeInTheDocument();
       // The field still starts from what is planned now.
-      expect(startInput().value).toBe("2026-06-10T10:00");
+      expect(local(startInput())).toBe("2026-06-10T10:00");
     });
 
     it("shows no standing proposal when nothing waits (an accepted or declined one is history)", () => {

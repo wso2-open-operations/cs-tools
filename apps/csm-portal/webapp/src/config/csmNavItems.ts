@@ -256,7 +256,21 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Security reports",
         href: "/security-center?tab=security_reports",
         tab: "security_reports",
-        routes: ["/security-center/reports"],
+        // "/security-center/reports" is this tab's own create route
+        // (/security-center/reports/new); "/security-center/security-reports"
+        // is a security_report_analysis case's detail route
+        // (caseTypeDetailBasePath, CaseDetailRouteSync) -- a different
+        // literal segment, not a typo of the first. `requires` is this
+        // node's own, narrower than the section's `canUseSecurityCenter`,
+        // so a viewer (who holds canViewSecurityReportCases but not
+        // canUseSecurityCenter, same split PermViewSecurityReportCases /
+        // PermViewSecurityCenter draws backend-side) can open a security
+        // report case clicked from the Work Items list without that also
+        // reaching the Security Center section's own tab strip, which is
+        // reached through a different pathname ("/security-center" itself)
+        // this node contributes no route prefix for.
+        routes: ["/security-center/reports", "/security-center/security-reports"],
+        requires: "canViewSecurityReportCases",
         icon: FileWarning,
       },
       {

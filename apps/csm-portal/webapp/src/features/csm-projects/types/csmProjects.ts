@@ -71,9 +71,13 @@ export interface Project {
   invoiceDueDateClosureState: string | null;
   complianceViolationClosureState: string | null;
   complianceViolationDate: string | null;
-  /** Opaque JSON describing in-flight suspension processing; not rendered
-   *  today. */
+  /** Opaque JSON describing in-flight suspension processing; rendered
+   *  defensively by the Closure tab (see `closureProcessState.ts`). */
   suspensionProcessState: unknown;
+  /** True when an admin has excluded the project from the automatic closure
+   *  process. Always present on a current backend; optional here so an older
+   *  one (field absent) reads as "not set" rather than crashing. */
+  suspensionProcessOverridden?: boolean;
   /** Onboarding engagement status. `null`/absent when the project has no
    *  onboarding engagement at all. Treat the project as onboarding-enabled —
    *  and only then show {@link onboardingOwner} — when this is present and
@@ -83,6 +87,19 @@ export interface Project {
   /** See {@link ProjectOnboardingOwnerRef}. Only meaningful when
    *  {@link onboardingStatus} indicates onboarding is enabled. */
   onboardingOwner?: ProjectOnboardingOwnerRef | null;
+  /** Onboarding calendar dates on the search row. Each is an RFC 3339
+   *  timestamp at midnight UTC, or `null`/absent when not set (and always
+   *  `null` for projects from a data source that does not track them). Show
+   *  the UTC calendar day -- see `formatUtcDateForDisplay` in `@utils/dateTime`. */
+  onboardingStartDate?: string | null;
+  /** Planned go-live date; see {@link onboardingStartDate}. */
+  goLivePlanDate?: string | null;
+  /** Actual go-live date; see {@link onboardingStartDate}. */
+  goLiveDate?: string | null;
+  /** Onboarding expiry date; see {@link onboardingStartDate}. */
+  onboardingExpiryDate?: string | null;
+  /** Production readiness completion date; see {@link onboardingStartDate}. */
+  productionReadinessCompletionDate?: string | null;
 }
 
 /**
@@ -120,6 +137,16 @@ export interface ProjectDetails {
   updatedOn: string;
   /** Free-form closure-state string; see {@link Project.closureState}. */
   closureState: string | null;
+  /** Per-track closure sub-states, mirroring {@link Project}. Only populated
+   *  for projects from the backing data source; absent or `null` otherwise. */
+  endDateClosureState?: string | null;
+  invoiceDueDateClosureState?: string | null;
+  complianceViolationClosureState?: string | null;
+  complianceViolationDate?: string | null;
+  /** Opaque JSON; see {@link Project.suspensionProcessState}. */
+  suspensionProcessState?: unknown;
+  /** See {@link Project.suspensionProcessOverridden}. */
+  suspensionProcessOverridden?: boolean;
   /** Whether this project is eligible to raise service requests, as
    *  precomputed by the backing data source. */
   hasSr?: boolean;
@@ -142,6 +169,8 @@ export interface ProjectDetails {
   goLiveDate?: string | null;
   /** Onboarding expiry date; see {@link onboardingStartDate} for the format. */
   onboardingExpiryDate?: string | null;
+  /** Production readiness completion date; see {@link onboardingStartDate}. */
+  productionReadinessCompletionDate?: string | null;
   /** Onboarding hours entitlement, in hours. `null`/absent when not tracked. */
   totalOnboardingHours?: number | null;
   /** Onboarding hours consumed, in hours. `null`/absent when not tracked. */
@@ -164,7 +193,36 @@ export interface SearchProjectsRequest {
    *  the field name a dashboard widget's `resourceType: "project"` tile uses
    *  on the wire (its `query` is passed verbatim as this request body). */
   onboardingStatus?: string[];
+  /** Include list of closure states (`Open` | `Suspended` | `Restricted`).
+   *  The existing `closureStatus`/`excludeClosureStates` stay supported. */
+  closureStates?: string[];
+  /** Single closure state (`Open` | `Suspended` | `Restricted`). */
+  closureStatus?: string;
+  excludeClosureStates?: string[];
+  /** Inclusive `yyyy-MM-dd` bounds, one From/To pair per date column. */
+  onboardingStartDateFrom?: string;
+  onboardingStartDateTo?: string;
+  goLivePlanDateFrom?: string;
+  goLivePlanDateTo?: string;
+  goLiveDateFrom?: string;
+  goLiveDateTo?: string;
+  onboardingExpiryDateFrom?: string;
+  onboardingExpiryDateTo?: string;
+  productionReadinessCompletionDateFrom?: string;
+  productionReadinessCompletionDateTo?: string;
+  endDateFrom?: string;
+  endDateTo?: string;
+  sortBy?: ProjectSortField;
+  sortOrder?: "asc" | "desc";
 }
+
+/** Fields `POST /projects/search` can sort by. */
+export type ProjectSortField =
+  | "endDate"
+  | "goLivePlanDate"
+  | "goLiveDate"
+  | "onboardingExpiryDate"
+  | "productionReadinessCompletionDate";
 
 export interface SearchProjectsResponse {
   projects: Project[];

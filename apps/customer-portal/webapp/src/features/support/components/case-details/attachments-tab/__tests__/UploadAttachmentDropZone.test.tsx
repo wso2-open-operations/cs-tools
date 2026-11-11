@@ -16,7 +16,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import UploadAttachmentDropZone from "../UploadAttachmentDropZone";
 
 describe("UploadAttachmentDropZone", () => {
@@ -35,5 +35,38 @@ describe("UploadAttachmentDropZone", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /choose file/i }));
     expect(onChooseFile).toHaveBeenCalledTimes(1);
+  });
+
+  describe("maximum file size", () => {
+    afterEach(() => {
+      delete window.config?.CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB;
+    });
+
+    const renderZone = () =>
+      render(
+        <ThemeProvider theme={createTheme()}>
+          <UploadAttachmentDropZone
+            dragOver={false}
+            onDrop={vi.fn()}
+            onDragOver={vi.fn()}
+            onDragLeave={vi.fn()}
+            onChooseFile={vi.fn()}
+          />
+        </ThemeProvider>,
+      );
+
+    it("shows the portal default when nothing is configured", () => {
+      renderZone();
+      expect(screen.getByText("Maximum file size: 10 MB.")).toBeInTheDocument();
+    });
+
+    it("shows the configured limit", () => {
+      window.config = {
+        ...window.config,
+        CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 50,
+      } as typeof window.config;
+      renderZone();
+      expect(screen.getByText("Maximum file size: 50 MB.")).toBeInTheDocument();
+    });
   });
 });

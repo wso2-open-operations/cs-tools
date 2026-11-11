@@ -1,6 +1,6 @@
 module github.com/wso2-open-operations/cs-tools/entity-service
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0

@@ -18,6 +18,7 @@ package events
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -347,6 +348,52 @@ func TestValidate_MailAlertReceived(t *testing.T) {
 	} {
 		if err := Validate(c.entityID, TypeMailAlertReceived, rawJSON(t, c.payload)); err == nil {
 			t.Errorf("%s: Validate() error = nil, want an error", name)
+		}
+	}
+}
+
+// The cloud slug is checked for shape only: which slugs exist is
+// configuration, enforced where the post is made.
+func TestValidate_OutageStatusPageDue_CloudSlug(t *testing.T) {
+	build := func(cloud string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{
+			"webhookId": "W-1", "claimToken": "T-1", "outageId": "O-1", "cloud": cloud,
+			"event": "outage_begin", "timestamp": "2026-10-09T06:54:00.000Z",
+		})
+		return b
+	}
+	cases := []struct {
+		name    string
+		cloud   string
+		wantErr bool
+	}{
+		{"existing asgardeo", "asgardeo", false},
+		{"existing choreo", "choreo", false},
+		{"existing bijira", "bijira", false},
+		{"existing devant", "devant", false},
+		{"existing moesif", "moesif", false},
+		{"existing choreo-eu", "choreo-eu", false},
+		{"existing agent-manager", "agent-manager", false},
+		{"new fictional slug", "acme-cloud", false},
+		{"digits", "cloud2-eu1", false},
+		{"max length", strings.Repeat("a", 40), false},
+		{"empty", "", true},
+		{"uppercase", "Acme-Cloud", true},
+		{"underscore", "acme_cloud", true},
+		{"leading hyphen", "-acme", true},
+		{"trailing hyphen", "acme-", true},
+		{"double hyphen", "acme--cloud", true},
+		{"too long", strings.Repeat("a", 41), true},
+		{"path-ish", "acme/../cloud", true},
+		{"slash", "acme/cloud", true},
+		{"dot", "acme.cloud", true},
+		{"space", "acme cloud", true},
+		{"query", "acme?x=1", true},
+	}
+	for _, c := range cases {
+		err := Validate("O-1", TypeOutageStatusPageDue, build(c.cloud))
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err = %v, wantErr %v", c.name, err, c.wantErr)
 		}
 	}
 }

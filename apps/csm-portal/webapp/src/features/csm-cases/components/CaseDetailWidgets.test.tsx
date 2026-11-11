@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState, type ComponentProps, type JSX, type ReactElement } from "react";
@@ -38,7 +38,10 @@ import {
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
-import type { WatchListMember } from "@features/csm-cases/components/CaseDetailWidgets";
+import type {
+  DeletedAttachmentsTab,
+  WatchListMember,
+} from "@features/csm-cases/components/CaseDetailWidgets";
 import type {
   CaseAttachment,
   CaseCustomerContext,
@@ -831,7 +834,7 @@ describe("AttachmentsWidget — upload progress", () => {
     );
 
     // Rendering the list alone must never trigger a download resolution
-    // (e.g. a lazily-created SFTPGo share) — only an explicit click does.
+    // (e.g. a streamed file fetch) — only an explicit click does.
     expect(onDownload).not.toHaveBeenCalled();
 
     fireEvent.click(
@@ -1082,5 +1085,183 @@ describe("RequestDetailsWidget", () => {
     renderWithRouter(<RequestDetailsWidget variables={[]} />);
 
     expect(screen.getByText("No request details captured.")).toBeInTheDocument();
+  });
+});
+
+describe("AttachmentsWidget — per-row delete gate", () => {
+  const mine: CaseAttachment = {
+    id: "att-mine",
+    filename: "mine.txt",
+    size: 1,
+    contentType: "text/plain",
+    uploadedBy: "Me",
+    uploadedAt: "2026-01-01T00:00:00Z",
+  };
+  const theirs: CaseAttachment = { ...mine, id: "att-theirs", filename: "theirs.txt", uploadedBy: "Them" };
+
+  it("shows Delete on every row when no gate is given (unchanged behaviour)", () => {
+    renderWithRouter(<AttachmentsWidgetHarness attachments={[mine, theirs]} onDelete={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Delete mine.txt" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete theirs.txt" })).toBeInTheDocument();
+  });
+
+  it("hides Delete on the rows the gate refuses", () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[mine, theirs]}
+        onDelete={vi.fn()}
+        canDeleteAttachment={(a) => a.id === "att-mine"}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Delete mine.txt" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete theirs.txt" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AttachmentsWidget — upload progress and cancel", () => {
+  it("shows a determinate bar, a disabled Upload button and a working Cancel while uploading", () => {
+    const onCancelUpload = vi.fn();
+    render(
+      <AttachmentsWidgetHarness
+        attachments={[]}
+        uploading
+        uploadProgress={42}
+        onUpload={vi.fn()}
+        onCancelUpload={onCancelUpload}
+      />,
+    );
+    const bar = screen.getByRole("progressbar", { name: "Upload progress" });
+    expect(bar).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByRole("button", { name: /Uploading… 42%/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no Cancel when nothing is uploading", () => {
+    render(<AttachmentsWidgetHarness attachments={[]} onUpload={vi.fn()} onCancelUpload={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+});
+
+describe("AttachmentsWidget — deleted attachments", () => {
+  const LIVE: CaseAttachment = {
+    id: "live-1",
+    filename: "kept.pdf",
+    size: 1024,
+    contentType: "application/pdf",
+    uploadedBy: "Jane Doe",
+    uploadedAt: "2026-01-01T00:00:00Z",
+  };
+  const GONE: CaseAttachment = {
+    id: "gone-1",
+    filename: "removed.zip",
+    size: 2048,
+    contentType: "application/zip",
+    uploadedBy: "Jane Doe",
+    uploadedAt: "2026-01-02T00:00:00Z",
+    deletedAt: "2026-01-03T00:00:00Z",
+    deletedBy: "Sam Admin",
+  };
+
+  const tab = (over: Partial<DeletedAttachmentsTab> = {}): DeletedAttachmentsTab => ({
+    attachments: undefined,
+    loading: false,
+    error: false,
+    onOpen: vi.fn(),
+    ...over,
+  });
+
+  it("asks for the deleted attachments only when the Deleted tab is opened", () => {
+    const onOpen = vi.fn();
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[LIVE]}
+        deletedAttachments={tab({ onOpen })}
+      />,
+    );
+    // The Available tab is the default; the count of the deleted ones is not known yet.
+    expect(screen.getByText("kept.pdf")).toBeInTheDocument();
+    expect(screen.queryByTestId("deleted-attachment")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Available (1)" })).toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Deleted" }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the deleted attachments are loading while they are fetched", () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[LIVE]}
+        deletedAttachments={tab({ loading: true })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Deleted" }));
+    expect(screen.getByText("Loading deleted attachments…")).toBeInTheDocument();
+  });
+
+  it("lists the deleted rows in the order the backend sends them (newest deletion first), marked Deleted with who deleted them and no actions", () => {
+    const OLDER: CaseAttachment = {
+      ...GONE,
+      id: "gone-0",
+      filename: "older.zip",
+      deletedAt: "2026-01-02T12:00:00Z",
+    };
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[LIVE]}
+        deletedAttachments={tab({ attachments: [GONE, OLDER] })}
+        onDownload={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Deleted (2)" }));
+    expect(screen.queryByText("kept.pdf")).not.toBeInTheDocument();
+    const rows = screen.getAllByTestId("deleted-attachment");
+    expect(rows.map((r) => within(r).getByText(/\.zip$/).textContent)).toEqual([
+      "removed.zip",
+      "older.zip",
+    ]);
+    expect(within(rows[0]).getByText("Deleted")).toBeInTheDocument();
+    expect(rows[0]).toHaveTextContent("deleted by");
+    expect(rows[0]).toHaveTextContent("Sam Admin");
+    expect(within(rows[0]).queryByRole("button")).not.toBeInTheDocument();
+    // The title count is of the available attachments only.
+    expect(screen.getByText("Attachments (1)")).toBeInTheDocument();
+    // Nothing to download from this tab.
+    expect(screen.getByRole("button", { name: /download all/i })).toBeDisabled();
+  });
+
+  it("shows an empty message on the Deleted tab when nothing was deleted", () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[LIVE]}
+        deletedAttachments={tab({ attachments: [] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Deleted (0)" }));
+    expect(screen.getByText("No deleted attachments.")).toBeInTheDocument();
+  });
+
+  it("offers a retry when the deleted attachments could not be loaded, without hiding the available ones", () => {
+    const onRetry = vi.fn();
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[LIVE]}
+        deletedAttachments={tab({ error: true, onRetry })}
+      />,
+    );
+    expect(screen.getByText("kept.pdf")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Deleted" }));
+    expect(screen.getByText("Could not load deleted attachments.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("tab", { name: "Available (1)" }));
+    expect(screen.getByText("kept.pdf")).toBeInTheDocument();
+  });
+
+  it("shows no deleted rows when none are passed", () => {
+    renderWithRouter(<AttachmentsWidgetHarness attachments={[LIVE]} />);
+    expect(screen.queryByTestId("deleted-attachment")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /deleted/i })).not.toBeInTheDocument();
   });
 });

@@ -29,6 +29,7 @@ import (
 func TestResolve(t *testing.T) {
 	configuredTeam := func(a string) bool { return a == "Castor" }
 	noneConfigured := func(a string) bool { return false }
+	configuredTeamAndOnboarding := func(a string) bool { return a == "Castor" || a == Onboarding }
 
 	// A Monday at noon IST — outside both the Americas overnight window
 	// and the weekend window, so it isolates whichever rule each subtest
@@ -47,10 +48,10 @@ func TestResolve(t *testing.T) {
 		{"recognized team", "Castor", false, "", weekdayNoon, configuredTeam, []string{"Castor"}},
 		{"unrecognized team falls back", "Polaris", false, "", weekdayNoon, noneConfigured, []string{IncidentMonitor}},
 		{"no team falls back", "", false, "", weekdayNoon, noneConfigured, []string{IncidentMonitor}},
-		{"evaluation overrides team and onboarding", "Castor", true, "IN_PROGRESS", weekdayNoon, configuredTeam, []string{Evaluation}},
-		{"onboarding IN_PROGRESS adds Onboarding", "Castor", false, "IN_PROGRESS", weekdayNoon, configuredTeam, []string{"Castor", Onboarding}},
-		{"onboarding NOT_STARTED adds Onboarding", "Castor", false, "NOT_STARTED", weekdayNoon, configuredTeam, []string{"Castor", Onboarding}},
-		{"onboarding COMPLETED does not add Onboarding", "Castor", false, "COMPLETED", weekdayNoon, configuredTeam, []string{"Castor"}},
+		{"evaluation overrides team and onboarding", "Castor", true, "IN_PROGRESS", weekdayNoon, configuredTeamAndOnboarding, []string{Evaluation}},
+		{"onboarding IN_PROGRESS adds Onboarding alongside the team", "Castor", false, "IN_PROGRESS", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor", Onboarding}},
+		{"onboarding NOT_STARTED adds Onboarding alongside the team", "Castor", false, "NOT_STARTED", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor", Onboarding}},
+		{"onboarding COMPLETED does not add Onboarding", "Castor", false, "COMPLETED", weekdayNoon, configuredTeamAndOnboarding, []string{"Castor"}},
 		{
 			"9pm IST is inside the Americas window", "Castor", false, "",
 			time.Date(2026, time.January, 5, 15, 30, 0, 0, time.UTC), // 21:00 IST

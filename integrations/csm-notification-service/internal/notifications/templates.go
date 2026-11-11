@@ -85,6 +85,10 @@ var projectReactivatedTemplateRaw string
 // isn't reachable from outside WSO2's network.
 const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
 
+// wso2LogoWhiteURL is the same logo for the dark header band of the
+// onboarding emails, written straight into those templates' HTML.
+const wso2LogoWhiteURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
+
 // bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder.
 // Done once per template at package init rather than on every Render* call,
 // since the logo never varies between emails.
@@ -108,6 +112,37 @@ var (
 
 	projectReactivatedTemplate = bakeLogo(projectReactivatedTemplateRaw)
 )
+
+// logoTemplates lists every template that carries a logo URL.
+func logoTemplates() []*string {
+	return []*string{
+		&commentAddedTemplate, &statusChangedTemplate, &crApprovalRequestedTemplate,
+		&crPlanDateNoticeTemplate, &caseAssignedTemplate, &caseCreatedTemplate,
+		&internalNoteTemplate, &severityChangedTemplate,
+		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
+		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
+		&projectReactivatedTemplate, &slaBreachTeamTemplate, &slaBreachAssigneeTemplate,
+		&caseEscalatedTemplate, &outageNotificationTemplate, &outageCommunicationTemplate,
+		&casePagingTemplate,
+	}
+}
+
+// SetLogoURLs replaces the logo every email carries: logo for the emails with
+// a light header (the default above), logoWhite for the dark header band of
+// the onboarding emails. An empty value keeps the default. It rewrites the
+// already-baked templates, so call it once at startup, before any email is
+// rendered.
+func SetLogoURLs(logo, logoWhite string) {
+	logo, logoWhite = strings.TrimSpace(logo), strings.TrimSpace(logoWhite)
+	for _, t := range logoTemplates() {
+		if logo != "" {
+			*t = strings.ReplaceAll(*t, wso2LogoURL, html.EscapeString(logo))
+		}
+		if logoWhite != "" {
+			*t = strings.ReplaceAll(*t, wso2LogoWhiteURL, html.EscapeString(logoWhite))
+		}
+	}
+}
 
 // safeLinkSchemes is the allow-list of URL schemes sanitizeRichText permits
 // on an <a href>. Everything else (javascript:, data:, vbscript:, a bare
@@ -678,7 +713,10 @@ func sanitizeRichTextMode(s string, budget *inlineImageBudget, keepStyles bool) 
 						// inline image ahead of the text it was inserted after,
 						// even though the underlying HTML keeps the original
 						// text-then-image source order — a real reported bug.
-						b.WriteString(`<br><img src="cid:` + contentID + `" alt="` + escapeHTML(alt) + `" style="display:block;max-width:100%;height:auto;margin:8px 0;"><br>`)
+						// A thumbnail, not the picture at its full size: 360x240 at most, the
+						// same size the portals' activity tabs show an inline image at. The
+						// picture itself is still attached in full.
+						b.WriteString(`<br><img src="cid:` + contentID + `" alt="` + escapeHTML(alt) + `" style="display:block;max-width:360px;max-height:240px;width:auto;height:auto;margin:8px 0;border:1px solid #e0e0e0;border-radius:4px;"><br>`)
 					}
 				}
 				continue

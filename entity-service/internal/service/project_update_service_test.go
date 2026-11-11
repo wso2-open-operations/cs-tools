@@ -424,7 +424,7 @@ func TestPgProjectUpdateService_MirrorDropsOnboardingFieldsFromMixedRequest(t *t
 	hasAgent := true
 	status := "In-Progress"
 	owner := "00000000-0000-0000-0000-000000000001"
-	start, planned, golive, expiry := "2026-03-01", "2026-05-01", "2026-05-15", "2027-03-01"
+	start, planned, golive, expiry, readiness := "2026-03-01", "2026-05-01", "2026-05-15", "2027-03-01", "2026-04-15"
 	repo := &stubProjectUpdateRepo{}
 	mirror := &stubProjectMirror{}
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
@@ -435,6 +435,7 @@ func TestPgProjectUpdateService_MirrorDropsOnboardingFieldsFromMixedRequest(t *t
 		HasAgent: &hasAgent, OnboardingStatus: &status, OnboardingOwner: &owner,
 		OnboardingStartDate: &start, OnboardingGoLivePlanDate: &planned,
 		OnboardingGoLiveDate: &golive, OnboardingExpiryDate: &expiry,
+		OnboardingProductionReadinessCompletionDate: &readiness,
 	}
 	if _, err := svc.UpdateProject(ctx, "11111111-1111-1111-1111-111111111111", req); err != nil {
 		t.Fatalf("UpdateProject() error = %v, want success", err)
@@ -515,6 +516,7 @@ func TestSNProjectUpdateService_RejectsOnboardingFields(t *testing.T) {
 		"go-live plan date": {OnboardingGoLivePlanDate: &date},
 		"go-live date":      {OnboardingGoLiveDate: &date},
 		"expiry date":       {OnboardingExpiryDate: &date},
+		"readiness date":    {OnboardingProductionReadinessCompletionDate: &date},
 		"with other fields": {HasAgent: &hasAgent, OnboardingStatus: &status},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -541,13 +543,21 @@ func TestPgProjectUpdateService_OnboardingDates(t *testing.T) {
 	if _, err := svc.UpdateProject(ctx, id, req); err != nil || !repo.called {
 		t.Fatalf("valid dates: err = %v, repo called = %v", err, repo.called)
 	}
+	// A readiness-date-only request counts as a stored field too.
+	repo = &stubProjectUpdateRepo{}
+	svc = NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
+	if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{OnboardingProductionReadinessCompletionDate: str("2026-04-01")}); err != nil || !repo.called {
+		t.Fatalf("readiness date only: err = %v, repo called = %v", err, repo.called)
+	}
 
 	for name, bad := range map[string]domain.ProjectUpdateRequest{
-		"malformed":      {OnboardingStartDate: str("01/03/2026")},
-		"impossible":     {OnboardingExpiryDate: str("2026-02-30")},
-		"timestamp":      {OnboardingGoLivePlanDate: str("2026-03-01T00:00:00Z")},
-		"plan < start":   {OnboardingStartDate: str("2026-03-01"), OnboardingGoLivePlanDate: str("2026-02-28")},
-		"expiry < start": {OnboardingStartDate: str("2026-03-01"), OnboardingExpiryDate: str("2026-01-01")},
+		"malformed":           {OnboardingStartDate: str("01/03/2026")},
+		"impossible":          {OnboardingExpiryDate: str("2026-02-30")},
+		"timestamp":           {OnboardingGoLivePlanDate: str("2026-03-01T00:00:00Z")},
+		"plan < start":        {OnboardingStartDate: str("2026-03-01"), OnboardingGoLivePlanDate: str("2026-02-28")},
+		"expiry < start":      {OnboardingStartDate: str("2026-03-01"), OnboardingExpiryDate: str("2026-01-01")},
+		"readiness malformed": {OnboardingProductionReadinessCompletionDate: str("01/03/2026")},
+		"readiness < start":   {OnboardingStartDate: str("2026-03-01"), OnboardingProductionReadinessCompletionDate: str("2026-02-01")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &stubProjectUpdateRepo{}
@@ -559,6 +569,106 @@ func TestPgProjectUpdateService_OnboardingDates(t *testing.T) {
 			}
 			if repo.called {
 				t.Fatal("repository must not be called")
+			}
+		})
+	}
+}
+
+// TestPgProjectUpdateService_SuspensionProcessOverridden pins that the flag
+// alone counts as a stored field, reaches the repository for true and false,
+// and that a nil value alone is "at least one field must be provided".
+func TestPgProjectUpdateService_SuspensionProcessOverridden(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	id := "11111111-1111-1111-1111-111111111111"
+	for _, want := range []bool{true, false} {
+		v := want
+		repo := &stubProjectUpdateRepo{}
+		svc := NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
+		if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{SuspensionProcessOverridden: &v}); err != nil {
+			t.Fatalf("value %v: UpdateProject() error = %v", want, err)
+		}
+		if !repo.called || repo.gotReq.SuspensionProcessOverridden == nil || *repo.gotReq.SuspensionProcessOverridden != want {
+			t.Fatalf("value %v: repo called = %v with %v", want, repo.called, repo.gotReq.SuspensionProcessOverridden)
+		}
+	}
+
+	repo := &stubProjectUpdateRepo{}
+	svc := NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
+	_, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{SuspensionProcessOverridden: nil})
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) || repo.called {
+		t.Fatalf("nil only: err = %v, repo called = %v, want ValidationError and no repo call", err, repo.called)
+	}
+}
+
+// TestPgProjectUpdateService_SuspensionProcessOverriddenCombinesWithOtherFields
+// pins that the flag rides along with another field and no exclusivity rule
+// applies.
+func TestPgProjectUpdateService_SuspensionProcessOverriddenCombinesWithOtherFields(t *testing.T) {
+	overridden, verification := true, true
+	closure := "SUSPENDED"
+	repo := &stubProjectUpdateRepo{}
+	svc := NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	req := domain.ProjectUpdateRequest{SuspensionProcessOverridden: &overridden, VerificationEnabled: &verification, ClosureState: &closure}
+	if _, err := svc.UpdateProject(ctx, "11111111-1111-1111-1111-111111111111", req); err != nil {
+		t.Fatalf("UpdateProject() error = %v, want success", err)
+	}
+	got := repo.gotReq
+	if got.SuspensionProcessOverridden == nil || !*got.SuspensionProcessOverridden || got.VerificationEnabled == nil || got.ClosureState == nil {
+		t.Fatalf("repo request lost a field: %+v", got)
+	}
+}
+
+// TestPgProjectUpdateService_SuspensionProcessOverriddenNeverReachesMirror pins
+// the dual-write behaviour: a flag-only request writes Postgres and dispatches
+// no mirror call, and a mixed request mirrors the other field without the flag.
+func TestPgProjectUpdateService_SuspensionProcessOverriddenNeverReachesMirror(t *testing.T) {
+	overridden, hasAgent := true, true
+	id := "11111111-1111-1111-1111-111111111111"
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	repo := &stubProjectUpdateRepo{}
+	mirror := &stubProjectMirror{}
+	svc := NewProjectUpdateServiceWithSNWriteback(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror)
+	if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{SuspensionProcessOverridden: &overridden}); err != nil {
+		t.Fatalf("flag only: UpdateProject() error = %v, want success", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !repo.called || mirror.calls != 0 {
+		t.Fatalf("flag only: repo called = %v, mirror calls = %d, want true and 0", repo.called, mirror.calls)
+	}
+
+	repo2 := &stubProjectUpdateRepo{}
+	mirror2 := &stubProjectMirror{}
+	svc2 := NewProjectUpdateServiceWithSNWriteback(repo2, testProjectUserRepo(), alwaysUnrestrictedAccess{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror2)
+	if _, err := svc2.UpdateProject(ctx, id, domain.ProjectUpdateRequest{SuspensionProcessOverridden: &overridden, HasAgent: &hasAgent}); err != nil {
+		t.Fatalf("mixed: UpdateProject() error = %v, want success", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if repo2.gotReq.SuspensionProcessOverridden == nil {
+		t.Fatal("mixed: repo must still receive the flag")
+	}
+	if mirror2.calls != 1 || mirror2.gotReq.SuspensionProcessOverridden != nil || mirror2.gotReq.HasAgent == nil {
+		t.Fatalf("mixed: mirror calls = %d, request %+v, want 1 call with hasAgent and no flag", mirror2.calls, mirror2.gotReq)
+	}
+}
+
+// TestSNProjectUpdateService_RejectsSuspensionProcessOverridden pins that the
+// legacy data source rejects the Postgres-only flag before any upstream call,
+// alone or with other fields.
+func TestSNProjectUpdateService_RejectsSuspensionProcessOverridden(t *testing.T) {
+	overridden, hasAgent := false, true
+	svc := &snProjectUpdateService{}
+	for name, req := range map[string]domain.ProjectUpdateRequest{
+		"alone":             {SuspensionProcessOverridden: &overridden},
+		"with other fields": {HasAgent: &hasAgent, SuspensionProcessOverridden: &overridden},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.UpdateProject(context.Background(), "11111111-1111-1111-1111-111111111111", req)
+			var ve *apierror.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want ValidationError", err)
 			}
 		})
 	}

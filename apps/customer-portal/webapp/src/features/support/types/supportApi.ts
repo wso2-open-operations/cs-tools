@@ -15,10 +15,6 @@
 // under the License.
 
 import type { CommentType } from "@features/support/constants/supportConstants";
-import type {
-  PostCaseAttachmentRequest,
-  PatchAttachmentRequest,
-} from "@features/support/types/attachments";
 export type PostCommentRequest = {
   content: string;
   type: CommentType;
@@ -27,17 +23,6 @@ export type PostCommentRequest = {
 export type PostCommentVariables = {
   caseId: string;
   body: PostCommentRequest;
-};
-
-export type PostAttachmentsVariables = {
-  caseId: string;
-  body: PostCaseAttachmentRequest;
-};
-
-export type PatchCaseAttachmentVariables = {
-  caseId: string;
-  attachmentId: string;
-  body: PatchAttachmentRequest;
 };
 
 /** Minimal response from PATCH /cases/:caseId. */
@@ -76,8 +61,3 @@ export type UseGetCaseCommentsOptions = {
   limit?: number;
 };
 
-export type DeleteAttachmentVariables = {
-  attachmentId: string;
-  caseId?: string;
-  deploymentId?: string;
-};

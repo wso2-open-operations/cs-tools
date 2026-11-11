@@ -222,6 +222,30 @@ func TestSearchProjects(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards onboarding date filters, closureStates and sort keys verbatim", func(t *testing.T) {
+		const reqPayload = `{"goLivePlanDateFrom":"2026-01-01","goLivePlanDateTo":"2026-03-31","goLiveDateFrom":"2026-01-01","onboardingExpiryDateTo":"2026-12-31","onboardingStartDateFrom":"2026-01-01","productionReadinessCompletionDateFrom":"2026-02-01","closureStates":["Open","Suspended"],"sortBy":"productionReadinessCompletionDate","sortOrder":"desc"}`
+		const respPayload = `{"projects":[{"id":"proj-1","goLivePlanDate":"2026-02-01T00:00:00Z","onboardingExpiryDate":"2026-12-31T00:00:00Z","onboardingStartDate":"2026-01-05T00:00:00Z","productionReadinessCompletionDate":"2026-02-20T00:00:00Z"}],"total":1}`
+		var capturedBody []byte
+		client := &mockEntityProjectClient{
+			searchProjectsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(respPayload), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/search", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.SearchProjects(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		if got := strings.TrimSpace(w.Body.String()); got != respPayload {
+			t.Errorf("response = %q, want %q", got, respPayload)
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrorsGeneric("Failed to search projects.") {
 			t.Run(tc.name, func(t *testing.T) {
@@ -620,7 +644,7 @@ func TestUpdateProject(t *testing.T) {
 	t.Run("closureState: case-insensitive key spelling still requires PermAdmin", func(t *testing.T) {
 		// entity-service's own JSON decoding (encoding/json) matches a key to
 		// a struct field without regard to case, so this guard must catch a
-		// differently-cased spelling too -- see projectUpdateTargetsClosureState's
+		// differently-cased spelling too -- see projectUpdateAdminOnlyField's
 		// own doc comment.
 		called := false
 		h := NewProjectHandler(&mockEntityProjectClient{
@@ -681,6 +705,10 @@ func TestUpdateProject(t *testing.T) {
 			{"onboarding_lead may set onboardingGoLivePlanDate", []string{"test-onboarding-lead"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusOK},
 			{"onboarding_lead may set onboardingGoLiveDate", []string{"test-onboarding-lead"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusOK},
 			{"onboarding_lead may set onboardingExpiryDate", []string{"test-onboarding-lead"}, `{"onboardingExpiryDate":"2026-12-31"}`, http.StatusOK},
+			{"onboarding_lead may set onboardingProductionReadinessCompletionDate", []string{"test-onboarding-lead"}, `{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`, http.StatusOK},
+			{"admin may set onboardingProductionReadinessCompletionDate", []string{"test-admin"}, `{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`, http.StatusOK},
+			{"cs_engineer alone is denied onboardingProductionReadinessCompletionDate", []string{"test-cs-engineer"}, `{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`, http.StatusForbidden},
+			{"cs_engineer alone is denied a differently-cased production-readiness key", []string{"test-cs-engineer"}, `{"ONBOARDINGPRODUCTIONREADINESSCOMPLETIONDATE":"2026-02-20"}`, http.StatusForbidden},
 			{"admin may set onboardingStartDate", []string{"test-admin"}, `{"onboardingStartDate":"2026-01-05"}`, http.StatusOK},
 			{"admin may set onboardingGoLivePlanDate", []string{"test-admin"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusOK},
 			{"admin may set onboardingGoLiveDate", []string{"test-admin"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusOK},
@@ -759,8 +787,17 @@ func withProjectCaller(r *http.Request, roles ...string) *http.Request {
 // encoding/json matches keys with Unicode simple folding, so the key checks
 // must too: a long-s spelling still names the protected field to the decoder.
 func TestProjectUpdateKeyChecksFoldLikeDecoder(t *testing.T) {
-	if !projectUpdateTargetsClosureState([]byte(`{"closureſtate":"CLOSED"}`)) {
+	if projectUpdateAdminOnlyField([]byte(`{"closureſtate":"CLOSED"}`)) == "" {
 		t.Error("long-s spelling of closureState must be detected")
+	}
+	if projectUpdateAdminOnlyField([]byte(`{"SUSPENSIONPROCESSOVERRIDDEN":null}`)) == "" {
+		t.Error("upper-case spelling of suspensionProcessOverridden must be detected")
+	}
+	if projectUpdateAdminOnlyField([]byte(`{"suspenſionProceſſOverridden":true}`)) == "" {
+		t.Error("long-s spelling of suspensionProcessOverridden must be detected")
+	}
+	if got := projectUpdateAdminOnlyField([]byte(`{"hasAgent":true,"suspensionProcessState":{}}`)); got != "" {
+		t.Errorf("unrelated keys must not be admin-only, got %q", got)
 	}
 	onb, other := projectUpdateTargets([]byte(`{"onboardingſtatus":"In-Progress"}`))
 	if !onb || other {
@@ -770,10 +807,110 @@ func TestProjectUpdateKeyChecksFoldLikeDecoder(t *testing.T) {
 	if !onb || other {
 		t.Errorf("upper-case onboardingStartDate: onboarding=%v other=%v, want true/false", onb, other)
 	}
+	onb, other = projectUpdateTargets([]byte(`{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`))
+	if !onb || other {
+		t.Errorf("onboardingProductionReadinessCompletionDate: onboarding=%v other=%v, want true/false", onb, other)
+	}
 	var req struct {
 		ClosureState string `json:"closureState"`
 	}
 	if err := json.Unmarshal([]byte(`{"closureſtate":"CLOSED"}`), &req); err != nil || req.ClosureState != "CLOSED" {
 		t.Fatalf("premise: decoder should fold long-s (got %q, err %v)", req.ClosureState, err)
 	}
+	var flag struct {
+		Overridden *bool `json:"suspensionProcessOverridden"`
+	}
+	if err := json.Unmarshal([]byte(`{"suspenſionProceſſOverridden":true}`), &flag); err != nil || flag.Overridden == nil || !*flag.Overridden {
+		t.Fatalf("premise: decoder should fold long-s in suspensionProcessOverridden (got %v, err %v)", flag.Overridden, err)
+	}
+}
+
+// suspensionProcessOverridden is admin-only exactly like closureState: any body
+// that names the key (even null, any spelling the decoder folds to it) needs
+// PermAdmin, and a refusal is decided before anything reaches entity-service.
+func TestUpdateProject_SuspensionProcessOverriddenRequiresAdmin(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+	const upstream = `{"message":"Project updated.","project":{"id":"` + projectID + `","updatedBy":"u","updatedOn":"2026-01-01T00:00:00Z","suspensionProcessOverridden":true}}`
+
+	do := func(role, body string) (code int, called bool, got []byte, resp string) {
+		h := NewProjectHandler(&mockEntityProjectClient{
+			updateProjectFn: func(_ context.Context, _ string, b []byte) ([]byte, error) {
+				called = true
+				got = b
+				return []byte(upstream), nil
+			},
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := withProjectCaller(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(body)), role)
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		return w.Code, called, got, w.Body.String()
+	}
+
+	t.Run("admin may set it: forwarded and echoed verbatim", func(t *testing.T) {
+		const body = `{"suspensionProcessOverridden":true}`
+		code, called, got, resp := do("test-admin", body)
+		if code != http.StatusOK || !called || string(got) != body {
+			t.Fatalf("code=%d called=%v forwarded=%q", code, called, got)
+		}
+		if strings.TrimSpace(resp) != upstream {
+			t.Errorf("response %q, want upstream verbatim %q", resp, upstream)
+		}
+	})
+
+	refused := []struct{ name, body string }{
+		{"true", `{"suspensionProcessOverridden":true}`},
+		{"false", `{"suspensionProcessOverridden":false}`},
+		{"explicit null", `{"suspensionProcessOverridden":null}`},
+		{"unusual casing", `{"SuspensionProcessOVERRIDDEN":true}`},
+		{"all upper case", `{"SUSPENSIONPROCESSOVERRIDDEN":true}`},
+		{"long-s look-alike", `{"suspenſionProceſſOverridden":true}`},
+		{"mixed with a permitted field", `{"hasAgent":true,"suspensionProcessOverridden":true}`},
+		{"mixed with closureState", `{"closureState":"SUSPENDED","suspensionProcessOverridden":true}`},
+	}
+	for _, c := range refused {
+		t.Run("non-admin refused before forwarding: "+c.name, func(t *testing.T) {
+			code, called, _, _ := do("test-cs-engineer", c.body)
+			if code != http.StatusForbidden {
+				t.Fatalf("code = %d, want 403", code)
+			}
+			if called {
+				t.Fatal("entity service must not be called for a denied suspensionProcessOverridden update")
+			}
+		})
+	}
+
+	t.Run("admin mixed closureState and flag body forwarded verbatim", func(t *testing.T) {
+		const body = `{"closureState":"SUSPENDED","suspensionProcessOverridden":true}`
+		code, called, got, _ := do("test-admin", body)
+		if code != http.StatusOK || !called || string(got) != body {
+			t.Fatalf("code=%d called=%v forwarded=%q", code, called, got)
+		}
+	})
+
+	t.Run("non-admin body without the key still passes", func(t *testing.T) {
+		const body = `{"hasAgent":true,"suspensionProcessState":{"a":1}}`
+		code, called, got, _ := do("test-cs-engineer", body)
+		if code != http.StatusOK || !called || string(got) != body {
+			t.Fatalf("code=%d called=%v forwarded=%q", code, called, got)
+		}
+	})
+
+	t.Run("no guard wired fails closed", func(t *testing.T) {
+		called := false
+		h := NewProjectHandler(&mockEntityProjectClient{
+			updateProjectFn: func(context.Context, string, []byte) ([]byte, error) {
+				called = true
+				return []byte(`{}`), nil
+			},
+		})
+		r := withProjectCaller(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(`{"suspensionProcessOverridden":true}`)), "test-admin")
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		if called {
+			t.Fatal("entity service must not be called when no guard is wired")
+		}
+	})
 }

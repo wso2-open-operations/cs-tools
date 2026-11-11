@@ -69,7 +69,7 @@ validation boundary. Types and their reaction, from `dispatch.Dispatcher.Handle`
 
 | Type | Reaction |
 |---|---|
-| `case.created`, `case.comment_added`, `case.status_changed`, `case.assigned`, `case.severity_changed` | One email per distinct portal link among the recipients (recipients are supplied in the payload). `case.created` and `case.severity_changed` also post a Chat alert to the fixed "Incident Monitor" audience; the two steps are independent. `case.comment_added` also feeds frustration detection and the SLA engine. |
+| `case.created`, `case.comment_added`, `case.status_changed`, `case.assigned`, `case.severity_changed` | One email per distinct portal link among the recipients (recipients are supplied in the payload). `case.created` and `case.severity_changed` also post a Chat alert to the fixed "Incident Monitor" audience; the two steps are independent. `case.comment_added` also feeds frustration detection and the SLA engine. For `case.status_changed`, the customer-portal email shows Work In Progress and Waiting On WSO2 as "In Progress" and is skipped when the change is a move between the two (using the payload's optional `previousStatus`); the staff email is unchanged. |
 | `case.acknowledged` | Chat alert only. |
 | `case.workaround_provided` | Completes the workaround SLA clock (no message). |
 | `case.escalated` | One email to the escalation's notification list. |
@@ -308,10 +308,15 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `EMAIL_SCOPES` | No | none | Comma-separated OAuth2 scopes. | `scope-a,scope-b` |
 | `EMAIL_FROM_ADDRESS` | Yes unless `EMAIL_SENDING_ENABLED=false` | none | Fixed From address; startup exits if missing while sending is on. | `no-reply@example.com` |
 | `EMAIL_REPLY_TO` | No | built-in support address if unset; none if set to empty | Reply-To for onboarding emails. Comma-separated. | `support@example.com` |
+| `EMAIL_LOGO_DARK_URL` | No | built-in logo if unset | Dark-coloured logo, shown on the light header of most emails. Must be a publicly fetchable `https` URL (mail clients do not load `data:` images). | `https://example.com/logo.png` |
+| `EMAIL_LOGO_WHITE_URL` | No | built-in white logo if unset | White-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-white.png` |
 | `EMAIL_SENDING_ENABLED` | No | `true` | Killswitch for case.* email. `false` logs instead of sending, regardless of debug mode. Does not affect Chat or calls. | `false` |
 | `EMAIL_DEBUG_MODE` | No | off (exact `true` to enable) | Redirect case.* email to `EMAIL_DEBUG_RECIPIENTS`. Links are still resolved from the real recipients. | `true` |
 | `EMAIL_DEBUG_RECIPIENTS` | No | none | Comma-separated test addresses. With debug on and this empty, the email is skipped. | `qa@example.com` |
 | `DEFAULT_CSM_EMAIL_CC` | No | none | Comma-separated CC added to the CSM-portal-link group of case.* email only, never to the customer group and never in debug mode. | `team@example.com` |
+| `AZURE_STORAGE_ACCOUNT` | No | none | Storage account holding the attachments. Together with `AZURE_STORAGE_CONTAINER` (and the three Entra settings) it turns on images in emails: a comment's or description's stored image is read and attached to the email. Unset (or unreachable) means emails show no stored image, as before. Read-only access is enough. | `wso2csmfiles` |
+| `AZURE_STORAGE_CONTAINER` | No | none | The one container the attachments live in. | `attachments` |
+| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | With the account | none | A Microsoft Entra app of this service's own, with the **Storage Blob Data Reader** role on that container only (never the portal backends' app). `AZURE_STORAGE_ENDPOINT`, `AZURE_STORAGE_CONNECTION_STRING` and `AZURE_STORAGE_KEY` exist for Azurite and local development only: the last two (shared-key, read-write access) are ignored unless the endpoint is on localhost. | `<tenant-id>` |
 | `ACP_REACTIVATION_CC` | No | none | Comma-separated CC on the "Back to Open state" email (`project.reactivated`); never in debug mode. Every entry must be an email address, or the service refuses to start. When the email has no internal recipient, these addresses get it in To. Two deliveries of the same event arriving at once in one running service send one email even without Redis. Preventing a second email after a restart, a rebalance or a redelivery needs Redis (`REDIS_URL` / `REDIS_ADDR`); if Redis is unreachable the email is still sent (at worst one duplicate), and in `EMAIL_DEBUG_MODE` nothing is recorded. | `lifecycle@example.com,billing@example.com` |
 
 ### Google Chat
@@ -392,7 +397,7 @@ the steps until the code or documentation is reconciled.
 
 | Variable | Default | Description | Example |
 |---|---|---|---|
-| `CLOUD_STATUS_WEBHOOK_URLS` | unset (events reported undelivered for a scheduler to retry) | JSON object of cloud slug to base URL (`https` only; posts to `<url>/api/v1/webhook`). An unparseable value stops startup. | `{"cloud-a":"https://status.example.com"}` |
+| `CLOUD_STATUS_WEBHOOK_URLS` | unset (events reported undelivered for a scheduler to retry) | JSON object of cloud slug to base URL (`https` only; posts to `<url>/api/v1/webhook`). A new cloud is onboarded by adding its slug here and in the secrets; a well-formed slug with no URL is reported as a failed attempt for the scheduler to retry. An unparseable value stops startup. | `{"cloud-a":"https://status.example.com"}` |
 | `CLOUD_STATUS_WEBHOOK_SECRETS` | none | JSON object of secrets; the whole `X-Webhook-Signature` header value, with a `default` entry as fallback. Required to parse when URLs are set. | `{"default":"Secret <token>"}` |
 
 ### SLA engine and Redis

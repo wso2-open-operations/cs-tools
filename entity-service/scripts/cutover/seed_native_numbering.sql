@@ -26,9 +26,19 @@
 -- allocates after this script runs is not accounted for. Re-run this script
 -- after any late sync: it is idempotent and only ever moves values forward.
 --
+-- ALSO STOP every native allocator while it runs: the entity-service API and
+-- its background workers (for example the incident report drainer, which
+-- creates TASK-numbered tasks), and anything else that calls
+-- next_work_item_number() / next_series_number() / next_wso2_id(). Wait for
+-- in-flight work to finish and keep them stopped until the script has
+-- committed. setval() is not atomic with the maximum it was computed from, so
+-- an allocation in between can be overwritten and a number issued twice.
+--
 -- USAGE (dry run is the default and only reads):
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed_native_numbering.sql
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v apply=1 -f seed_native_numbering.sql
+-- The role needs USAGE (or SELECT) on every number_series sequence; without it
+-- the script stops before changing anything and names the sequences.
 --
 -- Rules:
 --   * A series' maximum is taken only from values matching exactly
@@ -40,7 +50,10 @@
 --   * wso2_id: per project, the largest integer N among ids exactly
 --     "<project.key>-N" (compared as integers, so 10 beats 9), across ALL
 --     work items (an id keeps its key's namespace even if the item moved
---     project). "<key>-PORTAL-<n>" ids never match. Counters only move up.
+--     project). A portal id "<key>-PORTAL-<n>" is read as key "<key>-PORTAL", so
+--     it only counts toward a project with exactly that key (the only project
+--     whose native ids it could collide with); for every other project it never
+--     matches. Counters only move up.
 --   * Row-level security on work_item and friends would silently hide rows
 --     and seed too LOW. app.is_internal = 'true' (the internal-staff branch
 --     of every visibility policy) is set for this transaction; check the
@@ -63,6 +76,23 @@ LOCK TABLE project IN SHARE ROW EXCLUSIVE MODE;
 BEGIN READ ONLY;
 \endif
 SET LOCAL app.is_internal = 'true';
+
+-- A sequence this role may not read shows last_value NULL in pg_sequences,
+-- which the plan below would take for "never used" (start_value - 1). Its
+-- real value can be far ahead (TASK starts at 1000000), so the setval() would
+-- move it backwards and reissue numbers already allocated, and a rollback does
+-- not undo setval(). Refuse before anything is read or changed, in a dry run
+-- too, whose figures would be just as wrong.
+SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_unreadable_sequences,
+       count(*) > 0 AS seed_has_unreadable_sequences
+FROM number_series ns
+WHERE NOT (has_sequence_privilege(ns.sequence_name, 'SELECT')
+        OR has_sequence_privilege(ns.sequence_name, 'USAGE')) \gset
+\if :seed_has_unreadable_sequences
+\echo 'ABORTED: this role cannot read these sequences, so their current values are unknown:' :'seed_unreadable_sequences'
+\echo 'Grant USAGE (or SELECT) on them, or run as a role that has it. Nothing was changed.'
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: the role cannot read every number sequence (listed above)'; END $$;
+\endif
 
 \echo ''
 \echo '--- rows visible per source column (cross-check against expected totals) ---'
@@ -165,7 +195,7 @@ JOIN (
     SELECT substring(wso2_id from '^(.*)-[0-9]+$') AS key,
            max(substring(wso2_id from '-([0-9]+)$')::numeric) AS source_max
     FROM work_item
-    WHERE wso2_id ~ '^.+-[0-9]+$' AND wso2_id NOT LIKE '%-PORTAL-%'
+    WHERE wso2_id ~ '^.+-[0-9]+$'
     GROUP BY 1
 ) m ON m.key = p.key
 WHERE m.source_max > p.wso2_id_counter
@@ -179,7 +209,7 @@ FROM (
     SELECT substring(wso2_id from '^(.*)-[0-9]+$') AS key,
            max(substring(wso2_id from '-([0-9]+)$')::numeric) AS source_max
     FROM work_item
-    WHERE wso2_id ~ '^.+-[0-9]+$' AND wso2_id NOT LIKE '%-PORTAL-%'
+    WHERE wso2_id ~ '^.+-[0-9]+$'
     GROUP BY 1
 ) m
 WHERE m.key = p.key AND m.source_max > p.wso2_id_counter;
