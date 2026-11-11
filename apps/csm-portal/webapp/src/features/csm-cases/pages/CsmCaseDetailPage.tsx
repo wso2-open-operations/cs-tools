@@ -3515,6 +3515,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isLinking={patchCase.isPending}
           onClose={() => setLinkCaseOpen(false)}
           onLink={onLinkCase}
+          relatedUnavailableReason={
+            isAnnouncement || isServiceRequest || isSecurityReport || isEngagement
+              ? "Only a case can have a related case. Link this one as a parent instead."
+              : undefined
+          }
         />
       )}
 
