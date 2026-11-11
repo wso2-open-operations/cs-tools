@@ -53,6 +53,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation } from "react-router";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { TASKS_FEATURE_ENABLED } from "@constants/featureFlags";
 import { releaseInlineImages } from "@features/csm-cases/api/inlineImageUploads";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -330,9 +331,8 @@ type CaseTabId =
   | "call-requests"
   | "tasks";
 
-// Paused product-wide pending an upstream Task data-model decision. Flip to
-// true to restore; nothing else needs to change.
-const TASKS_FEATURE_ENABLED = false;
+// `TASKS_FEATURE_ENABLED` (shared with the dashboard tasks widget) is defined
+// in `@constants/featureFlags`.
 
 // Shown in the composer for a caller who can add internal work notes but has no
 // full write access (a worknote_creator).
