@@ -1482,7 +1482,7 @@ type ProjectAccountRef struct {
 	IsPartner *bool `json:"isPartner"`
 }
 
-// ProjectClosureFields groups the ServiceNow-only closure-tracking fields
+// ProjectClosureFields groups the closure-tracking fields
 // shared by ProjectDetailsView and ProjectView, so the two don't drift when a
 // closure field is added or renamed. Embedded anonymously; encoding/json
 // promotes its fields to the parent's JSON object, so the wire shape is
@@ -1502,16 +1502,17 @@ type ProjectClosureFields struct {
 	// SuspensionProcessState is a free-form JSON object tracking per-dimension
 	// Account Closure Process (ACP) suspension-process state (event type + action
 	// results, e.g. per the "based_on_subscription_end_date"/"based_on_due_invoices"/
-	// "based_on_compliance" keys an existing SN suspension flow writes). This layer
-	// does not interpret, validate, or impose any schema on its contents — it is
-	// passed through opaquely as written by that SN flow (ServiceNow data source only).
+	// "based_on_compliance" keys). This layer does not interpret, validate, or
+	// impose any schema on its contents: it is passed through opaquely as
+	// written. Stored in project.suspension_process_state on Postgres data
+	// sources and written by PATCH /projects/{id}.
 	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
 	// SuspensionProcessOverridden is the CSM-owned "suspension process
 	// overridden" flag (project.suspension_process_overridden, migration 0281).
 	// When true the automatic Account Closure Process must not evaluate the
-	// project. Always present, false by default. Read-only: there is no write
-	// path yet, it is set directly in the database or by the data sync. The
-	// legacy data source carries no such field, so it is always false there.
+	// project. Always present, false by default. Writable on Postgres data
+	// sources via PATCH /projects/{id} (ProjectUpdateRequest); always false on
+	// data sources that carry no such field.
 	SuspensionProcessOverridden bool `json:"suspensionProcessOverridden"`
 }
 
