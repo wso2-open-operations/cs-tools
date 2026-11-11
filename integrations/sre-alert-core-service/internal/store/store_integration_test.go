@@ -305,11 +305,15 @@ func TestIncidentRepo_MuteLifecycle(t *testing.T) {
 	if _, superseded, err := repo.MuteOutcome(ctx, muted); err != nil || !superseded {
 		t.Fatalf("superseded = %v %v", superseded, err)
 	}
+	cur, _, _ := repo.Get(ctx, muted.ID)
+	if ok, superseded, err := repo.Unmute(ctx, cur); err != nil || ok || !superseded {
+		t.Fatalf("unmute with a newer incident = %v %v %v; want false, true, nil", ok, superseded, err)
+	}
 
 	if closed, err := repo.CloseMuted(ctx, muted.ID, muted.FoldVersion); err != nil || closed {
 		t.Fatalf("close with a stale fold version = %v %v, want no-op", closed, err)
 	}
-	cur, _, _ := repo.Get(ctx, muted.ID)
+	cur, _, _ = repo.Get(ctx, muted.ID)
 	if closed, err := repo.CloseMuted(ctx, cur.ID, cur.FoldVersion); err != nil || !closed {
 		t.Fatalf("close = %v %v", closed, err)
 	}
@@ -325,11 +329,13 @@ func TestIncidentRepo_MuteLifecycle(t *testing.T) {
 	if err := repo.Mute(ctx, other.ID, "b1", "AMR0000001"); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := repo.Unmute(ctx, other.ID, other.FoldVersion+1); err != nil || ok {
-		t.Fatalf("stale unmute = %v, %v; want false, nil", ok, err)
+	stale := other
+	stale.FoldVersion++
+	if ok, superseded, err := repo.Unmute(ctx, stale); err != nil || ok || superseded {
+		t.Fatalf("stale unmute = %v %v %v; want false, false, nil", ok, superseded, err)
 	}
-	if ok, err := repo.Unmute(ctx, other.ID, other.FoldVersion); err != nil || !ok {
-		t.Fatalf("unmute = %v, %v", ok, err)
+	if ok, superseded, err := repo.Unmute(ctx, other); err != nil || !ok || superseded {
+		t.Fatalf("unmute = %v %v %v", ok, superseded, err)
 	}
 	other, _, _ = repo.Get(ctx, other.ID)
 	if other.Muted || other.UnmutedAt == nil || other.MutedAt == nil || other.MuteEligible() {
