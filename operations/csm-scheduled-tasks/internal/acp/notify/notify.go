@@ -107,6 +107,10 @@ type Notice struct {
 	// different, more specific fact than "never attempted," worth keeping
 	// distinct in the log.
 	ResolvedVia recipients.ResolvedVia
+	// StandingAsCC puts the notifier's standing recipients in "cc" instead
+	// of "to", for a notice addressed to one person (the end-date mismatch
+	// warning). When nobody is left in "to" they take its place.
+	StandingAsCC bool
 }
 
 // LoggingNotifier logs that a notice would have been sent instead of

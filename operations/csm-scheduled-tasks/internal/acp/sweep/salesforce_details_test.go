@@ -367,7 +367,9 @@ func csmListing(t *testing.T, projects ...project) *mockEntityReader {
 }
 
 // TestRun_SalesforceDetailsDecideAndCSMIsWritten: the project ended on 13
-// Oct in Salesforce, though CSM's copy says next year. The run suspends it
+// Oct in Salesforce, and CSM's copy says 1 Sep (a CSM date later than
+// Salesforce's holds the end-date track instead, see
+// TestProcessProject_EndDateMismatch). The run suspends it
 // from Salesforce's date, emails Salesforce's account people and business
 // contact, and writes the notice and the suspension to the CSM project id.
 // The account is a Customer and not a partner (a partner account is skipped
@@ -375,7 +377,7 @@ func csmListing(t *testing.T, projects ...project) *mockEntityReader {
 // opportunity, so only the end-date cascade acts.
 func TestRun_SalesforceDetailsDecideAndCSMIsWritten(t *testing.T) {
 	proj := csmPartnerProject()
-	proj.EndDate = timePtr(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+	proj.EndDate = timePtr(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
 	open := "Open"
 	proj.EndDateClosureState, proj.InvoiceDueDateClosureState, proj.ClosureState = &open, &open, &open
 	proj.SuspensionProcessState = json.RawMessage(`{"based_on_subscription_end_date":{"event_type":"7_days_notice"}}`)

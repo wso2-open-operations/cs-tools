@@ -186,6 +186,7 @@ func (d salesforceDetails) forProject(ctx context.Context, proj project) (projec
 	if proj.StartDate, err = salesforceDate(sp.StartDate); err != nil {
 		return proj, nil, &dataError{err: fmt.Errorf("salesforce project start date: %w", err)}
 	}
+	proj.csmEndDate = proj.EndDate
 	if proj.EndDate, err = salesforceDate(sp.EndDate); err != nil {
 		return proj, nil, &dataError{err: fmt.Errorf("salesforce project end date: %w", err)}
 	}

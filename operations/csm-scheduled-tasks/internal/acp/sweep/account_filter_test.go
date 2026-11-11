@@ -41,7 +41,7 @@ func openProject(id, sfID string) project {
 	open := "Open"
 	p := csmPartnerProject()
 	p.ID, p.SfID = id, &sfID
-	p.EndDate = timePtr(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+	p.EndDate = timePtr(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
 	p.EndDateClosureState, p.InvoiceDueDateClosureState, p.ClosureState = &open, &open, &open
 	p.SuspensionProcessState = json.RawMessage(`{"based_on_subscription_end_date":{"event_type":"7_days_notice"}}`)
 	return p

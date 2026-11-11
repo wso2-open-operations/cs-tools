@@ -122,6 +122,16 @@ func processProject(ctx context.Context, reader entityReader, updater projectUpd
 	if err != nil {
 		return false, err
 	}
+	// The end-date track would act on Salesforce's date, but CSM's is later
+	// (a hand-extended term): the track does nothing this run, no notice, no
+	// suspension, no state write and no renewal reset (subRenewed below), so
+	// nothing follows from the earlier date. Decided before anything runs.
+	// The invoice track is unaffected.
+	endDateHeld := false
+	if subCascade != nil && csmEndDateLater(proj) {
+		warnEndDateMismatch(ctx, reader, ntf, proj, subCascade.decision)
+		subCascade, endDateHeld = nil, true
+	}
 	if subCascade != nil {
 		cascades = append(cascades, *subCascade)
 	}
@@ -129,6 +139,9 @@ func processProject(ctx context.Context, reader entityReader, updater projectUpd
 	subRenewed, err := subscriptionRenewed(proj, now)
 	if err != nil {
 		return false, err
+	}
+	if endDateHeld {
+		subRenewed = false
 	}
 
 	invoiceCascade, invoiceRenewed, invoiceErr := buildInvoiceCascade(ctx, reader, updater, ntf, proj, now)

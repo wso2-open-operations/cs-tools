@@ -74,6 +74,12 @@ type project struct {
 	// filter applies only when it was read.
 	accountStatus     *string
 	accountStatusRead bool
+	// csmEndDate is the end date CSM held before the Salesforce details
+	// source replaced EndDate with Salesforce's; nil when nothing replaced it.
+	// endDateWarnDay is set by the run: today is the weekday the end-date
+	// mismatch warning may be sent (see warnEndDateMismatch).
+	csmEndDate     *time.Time
+	endDateWarnDay bool
 	// StartDate is nil only when genuinely absent on the wire — mirrors
 	// EndDate's existing nullable-pointer convention.
 	StartDate *time.Time `json:"startDate"`

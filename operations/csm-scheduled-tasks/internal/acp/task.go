@@ -228,7 +228,8 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 		}
 		ctx = entity.WithCorrelationID(ctx, runID)
 		result, err := sweep.RunWith(ctx, clients.CSM, details, updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs,
-			sweep.Options{Limit: cfg.DailyLimit, Screening: screening, Repair: repair})
+			sweep.Options{Limit: cfg.DailyLimit, Screening: screening, Repair: repair,
+				EndDateWarningDay: now.In(operationsZone).Weekday() == cfg.FullSweepWeekday})
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,

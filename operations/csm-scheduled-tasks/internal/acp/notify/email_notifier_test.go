@@ -650,3 +650,47 @@ func TestEmailNotifier_Send_StandingListsAloneDoNotDeliverACustomerNotice(t *tes
 		})
 	}
 }
+
+// StandingAsCC (the end-date mismatch warning): the person is To, the standing
+// lists Cc; with nobody in To (no valid address) the lists take To's place.
+func TestEmailNotifier_Send_StandingAsCC(t *testing.T) {
+	standing := []string{"lists@example.com"}
+	tests := []struct {
+		name       string
+		am         string
+		allowNon   bool
+		wantTo     string
+		wantCc     string
+		wantNoMail bool
+	}{
+		{"person to, lists cc", "am@example.com", true, "am@example.com", "lists@example.com", false},
+		{"no person: lists to", "", true, "lists@example.com", "", false},
+		{"person filtered out: lists to", "am@example.com", false, "", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &mockEmailSender{}
+			n := &EmailNotifier{Sender: sender, Logger: discardLogger(), AllowNonWSO2Recipients: tc.allowNon, StandingRecipients: standing}
+			_, err := n.Send(context.Background(), Notice{
+				Subject: "s", Body: "b", StandingAsCC: true,
+				Recipients: Recipients{AccountOwner: recipients.Contact{Email: tc.am}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantNoMail {
+				if len(sender.calls) != 0 {
+					t.Fatalf("calls = %+v, want none (nobody valid)", sender.calls)
+				}
+				return
+			}
+			if len(sender.calls) != 1 {
+				t.Fatalf("calls = %d, want 1", len(sender.calls))
+			}
+			c := sender.calls[0]
+			if strings.Join(c.to, ",") != tc.wantTo || strings.Join(c.cc, ",") != tc.wantCc {
+				t.Errorf("to=%v cc=%v, want to=%q cc=%q", c.to, c.cc, tc.wantTo, tc.wantCc)
+			}
+		})
+	}
+}

@@ -246,12 +246,20 @@ func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	// or AllowNonWSO2Recipients still false) would reach only the lists and
 	// be recorded as sent, and the project suspended on day 0 untold.
 	customerReached := customerFacing && len(n.filterRecipients(to)) > 0
-	to = append(to, n.StandingRecipients...)
-	if customerFacing {
-		cc = append(cc, n.StandingRecipients...)
+	if notice.StandingAsCC {
+		to = n.filterRecipients(to)
+		cc = n.filterRecipients(append(cc, n.StandingRecipients...))
+		if len(to) == 0 {
+			to, cc = cc, nil
+		}
+	} else {
+		to = append(to, n.StandingRecipients...)
+		if customerFacing {
+			cc = append(cc, n.StandingRecipients...)
+		}
+		to = n.filterRecipients(to)
+		cc = n.filterRecipients(cc)
 	}
-	to = n.filterRecipients(to)
-	cc = n.filterRecipients(cc)
 
 	if len(to) == 0 {
 		n.Logger.InfoContext(ctx, "email skipped: no valid recipients",

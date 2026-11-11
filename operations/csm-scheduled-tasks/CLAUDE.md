@@ -625,6 +625,23 @@ both places.
     that never reached the CSM copy, nor a Salesforce end date that is earlier than CSM's; the full sweep
     catches both. `ACP_SCREENING=off` restores evaluating every project live on every run. Screened-out
     projects are not evaluated and never count against `ACP_DAILY_LIMIT`.
+- **End date later in CSM than in Salesforce (`sweep/end_date_mismatch.go`).** The end-date track decides from
+  Salesforce's date (`salesforceDetails.forProject` replaces the project's `EndDate` and keeps CSM's as
+  `csmEndDate`). Staff sometimes extend a term by hand in CSM only, so when CSM's date is a later calendar day
+  (UTC) than Salesforce's, both known, **and** Salesforce's date would trigger a notice window or a suspension
+  (the same `closure.Decide` test as the cascade, so a window already notified, a completed suspension or a date
+  far out does nothing and warns nobody), the end-date track does nothing this run: no notice, no suspension,
+  no state write and no renewal reset (decided in `processProject` before any cascade runs). The invoice track
+  is unaffected. The Account Manager is sent a short warning asking to correct the end date in Salesforce, **only
+  on `ACP_SCREENING_FULL_SWEEP_WEEKDAY`** (Colombo), screening on or off, so it repeats at most weekly with no new
+  persisted state; on other days the project is skipped with an INFO line. To = the Account Manager, Cc =
+  `ACP_STANDING_CC_RECIPIENTS` (`Notice.StandingAsCC`); with no Account Manager email the standing lists are To;
+  with neither, a WARN and nothing is sent. It goes through the same notifier as every notice, so emails off,
+  the `debug` redirect and the WSO2-only filter apply. It does not count toward `ACP_DAILY_LIMIT` (a project that
+  only warns is not "acted"), so warnings cannot crowd out real notices. A project with a CSM date past
+  the screening horizon is screened out on a screened day and reaches this guard on the full-sweep day. With
+  `ACP_REPAIR` on, the repair's project-date comparison can make entity-service re-read Salesforce's earlier
+  date into CSM after the run: check that before relying on a hand-extended CSM date surviving.
 - **Repairing the CSM copy (`ACP_REPAIR`, default ON; `ACP_REPAIR_MAX_EVENTS`, default 200, 0 = off).** In the
   pass ACP already makes over Salesforce for a project (a candidate, or every project on a full-sweep day),
   it compares what it read with the CSM copy it has, with **no extra Salesforce call**, and posts one
