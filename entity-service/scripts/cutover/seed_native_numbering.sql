@@ -67,8 +67,9 @@
 -- (to_regclass), the same way setval() resolves them.
 -- The extra sequences (not number_series') are formatted by an allocator that
 -- LEFT-TRUNCATES past its digit width (lpad), so the script also aborts, in a
--- dry run too, if max + gap would exceed that width (9 digits for DEP, 7 for
--- CSPRJ); lower gap or fix the formatter first.
+-- dry run too, if the next number (the larger of the current value and
+-- max + gap, plus one) would exceed that width (9 digits for DEP, 7 for CSPRJ),
+-- including a sequence already at the limit; lower gap or fix the formatter.
 --
 -- Rules:
 --   * A series' maximum is taken only from values matching exactly
@@ -189,6 +190,23 @@ LEFT JOIN parsed p ON p.source = ss.source AND p.prefix = ss.series
 GROUP BY ss.series
 $q$ AS seed_maxima \gset
 
+-- Each seeded sequence with its real current state. Highest value already
+-- issued (or reserved) is read from the sequence itself: pg_sequences.last_value
+-- is NULL when is_called is false (e.g. after setval(seq, n, false)), which
+-- would be misread as "start_value - 1" and could lower the sequence. The name
+-- is resolved once, as setval() and the privilege checks do.
+SELECT replace($q$
+SELECT ns.series, ns.digits, ns.sequence_name, ns.used_by, ns.strict,
+       CASE WHEN st.is_called THEN st.last_value ELSE st.last_value - 1 END AS seq_before
+FROM (SEED_SEQ) ns
+JOIN pg_class seq ON seq.oid = to_regclass(ns.sequence_name) AND seq.relkind = 'S'
+CROSS JOIN LATERAL (
+    SELECT (xpath('/row/last_value/text()', x))[1]::text::bigint AS last_value,
+           (xpath('/row/is_called/text()', x))[1]::text::boolean AS is_called
+    FROM (SELECT query_to_xml(format('SELECT last_value, is_called FROM %s', seq.oid::regclass), false, true, '') AS x) q
+) st
+$q$, 'SEED_SEQ', :'seed_seq') AS seed_state \gset
+
 -- A sequence this role may not read shows last_value NULL in pg_sequences,
 -- which would be taken for "never used" (start_value - 1). Its
 -- real value can be far ahead (TASK starts at 1000000), so the setval() would
@@ -209,16 +227,20 @@ DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: the role lacks the sequence 
 \endif
 
 -- The extra sequences' allocators left-truncate past their digit width, so a
--- target beyond it would issue truncated (duplicate) numbers. Refuse first.
-SELECT coalesce(string_agg(ns.sequence_name, ', ' ORDER BY ns.sequence_name), '') AS seed_overflow_sequences,
+-- NEXT value beyond it would be issued truncated (a repeat). The value after
+-- seeding is GREATEST(current value, max + gap) and the next one is that + 1,
+-- so this also catches a sequence that is already at the limit and would be
+-- left unchanged. Refuse first, in a dry run too.
+SELECT coalesce(string_agg(st.sequence_name, ', ' ORDER BY st.sequence_name), '') AS seed_overflow_sequences,
        count(*) > 0 AS seed_has_overflow
-FROM (:seed_seq) ns
-JOIN (:seed_maxima) m ON m.series = ns.series
-WHERE ns.strict AND m.source_max + :gap > power(10, ns.digits) - 1 \gset
+FROM (:seed_state) st
+LEFT JOIN (:seed_maxima) m ON m.series = st.series
+WHERE st.strict
+  AND GREATEST(st.seq_before, COALESCE(m.source_max + :gap, st.seq_before)) + 1 > power(10, st.digits) - 1 \gset
 \if :seed_has_overflow
-\echo 'ABORTED: max + gap would exceed the allocator digit width for:' :'seed_overflow_sequences'
+\echo 'ABORTED: the next number would exceed the allocator digit width for:' :'seed_overflow_sequences'
 \echo 'Its formatter would truncate (and so repeat) numbers. Lower gap or fix the formatter first. Nothing was changed.'
-DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: max + gap overflows the digit width of a sequence (listed above)'; END $$;
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: next number overflows the digit width of a sequence (listed above)'; END $$;
 \endif
 
 \echo ''
@@ -244,19 +266,8 @@ plan AS (
     SELECT ns.series, ns.digits, ns.sequence_name, ns.used_by,
            COALESCE(m.sources, '(no source column)') AS sources,
            m.source_max,
-           -- Highest value already issued (or reserved) by the sequence. Read
-           -- from the sequence itself: pg_sequences.last_value is NULL when
-           -- is_called is false (e.g. after setval(seq, n, false)), which would
-           -- be misread as "start_value - 1" and could lower the sequence.
-           CASE WHEN st.is_called THEN st.last_value ELSE st.last_value - 1 END AS seq_before
-    FROM (:seed_seq) ns
-    -- Resolve the name once, as setval() and the privilege checks do.
-    JOIN pg_class seq ON seq.oid = to_regclass(ns.sequence_name) AND seq.relkind = 'S'
-    CROSS JOIN LATERAL (
-        SELECT (xpath('/row/last_value/text()', x))[1]::text::bigint AS last_value,
-               (xpath('/row/is_called/text()', x))[1]::text::boolean AS is_called
-        FROM (SELECT query_to_xml(format('SELECT last_value, is_called FROM %s', seq.oid::regclass), false, true, '') AS x) q
-    ) st
+           ns.seq_before
+    FROM (:seed_state) ns
     LEFT JOIN maxima m ON m.series = ns.series
 ),
 applied AS (
