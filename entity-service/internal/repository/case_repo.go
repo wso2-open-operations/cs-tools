@@ -1228,7 +1228,11 @@ func mapCreateCaseError(err error) error {
 		switch pgErr.Code {
 		case "23503": // foreign_key_violation -- one of the referenced IDs does not exist
 			return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority) and from next_portal_wso2_id when project_id doesn't exist
+		// raise_exception from integrity triggers (deployment/project,
+		// deployed_product/deployment, catastrophic priority) and from
+		// next_wso2_id when project_id doesn't exist; the caller then sees
+		// "next_wso2_id: no project with id <id>" (migration 0180).
+		case "P0001":
 			return &apierror.ValidationError{Msg: pgErr.Message}
 		}
 	}
