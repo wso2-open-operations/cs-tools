@@ -416,12 +416,8 @@ async function readAndStore(
 }
 
 /**
- * Asks Azure for the first byte of a download link before the browser is handed
- * it. A link Azure would refuse (expired, a storage firewall, a clock that is off,
- * a site the storage does not allow) makes the browser show or save Azure's error
- * page as the file, and a download it started cannot be taken back, so the stream
- * through the backend is used instead. A cross-origin check Azure's CORS rules do
- * not allow fails here too, which is the same answer.
+ * Reads the first byte of a download link. A link Azure refuses would make the
+ * browser save Azure's error page as the file, so the backend stream is used instead.
  */
 async function linkWorks(url: string, signal?: AbortSignal): Promise<boolean> {
   try {
