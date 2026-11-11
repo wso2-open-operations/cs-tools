@@ -15,7 +15,12 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { mutedAlertsSummaryText } from "@features/csm-operations/utils/alertMuteRules";
+import {
+  mutedAlertsSummaryText,
+  pickerInstant,
+  SKIPPED_WALL_TIME,
+  validateAlertMuteRule,
+} from "@features/csm-operations/utils/alertMuteRules";
 
 describe("mutedAlertsSummaryText", () => {
   it("says when nothing was muted", () => {
@@ -24,8 +29,36 @@ describe("mutedAlertsSummaryText", () => {
 
   it("lists only the outcomes that happened", () => {
     expect(mutedAlertsSummaryText({ total: 12, summary: { muted: 1, incident: 2, closed_quietly: 9 } })).toBe(
-      "12 muted alerts · 1 still muted · 2 became incidents · 9 closed quietly",
+      "12 muted alert groups · 1 still muted · 2 became incidents · 9 closed quietly",
     );
-    expect(mutedAlertsSummaryText({ total: 1, summary: { incident: 1 } })).toBe("1 muted alert · 1 became incident");
+    expect(mutedAlertsSummaryText({ total: 1, summary: { incident: 1 } })).toBe("1 muted alert group · 1 became incident");
+  });
+});
+
+describe("pickerInstant", () => {
+  it("refuses a wall time daylight saving skips", () => {
+    // 2027-03-14 02:30 doesn't exist in New York: clocks jump from 02:00 to 03:00.
+    const day = new Date(2027, 2, 14);
+    expect(pickerInstant(day, new Date(2027, 2, 14, 2, 30), "America/New_York")).toBe(SKIPPED_WALL_TIME);
+    expect(pickerInstant(day, new Date(2027, 2, 14, 3, 30), "America/New_York")).toBe("2027-03-14T07:30:00.000Z");
+  });
+
+  it("names the skipped time when validating", () => {
+    const errors = validateAlertMuteRule(
+      {
+        name: "x",
+        description: "",
+        timeZone: "America/New_York",
+        startOn: SKIPPED_WALL_TIME,
+        endOn: "2027-03-14T09:00:00.000Z",
+        conditions: [
+          { field: "service", value: "a" },
+          { field: "environment", value: "prod" },
+        ],
+      },
+      Date.parse("2027-03-01T00:00:00Z"),
+      true,
+    );
+    expect(errors.startOn).toMatch(/doesn't exist in this time zone/);
   });
 });

@@ -151,8 +151,9 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const isEdit = !!id;
   const navigate = useNavTransition();
-  const backState = useLocation().state as { from?: string } | undefined;
-  const backTarget = backState?.from ?? LIST_PATH;
+  const nav = useLocation().state as { from?: string; parentState?: unknown } | undefined;
+  const backTarget = nav?.from ?? LIST_PATH;
+  const backState = nav?.parentState ?? undefined;
   const existing = useGetAlertMuteRule(id);
   const create = usePostAlertMuteRule();
   const update = usePatchAlertMuteRule();
@@ -182,8 +183,15 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
     const found = validateAlertMuteRule(input, at, !isEdit);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
-    const onSuccess = (rule: AlertMuteRule): void =>
-      navigate(`${LIST_PATH}/${rule.id}`, { replace: true, state: { from: backTarget } });
+    // Opened from the rule's own page (Edit), the saved rule's page keeps that page's state; otherwise its Back
+    // returns to wherever this form was opened from.
+    const onSuccess = (rule: AlertMuteRule): void => {
+      const detail = `${LIST_PATH}/${rule.id}`;
+      navigate(detail, {
+        replace: true,
+        state: backTarget === detail ? backState : { from: backTarget, parentState: backState ?? null },
+      });
+    };
     if (isEdit && id) update.mutate({ id, input }, { onSuccess });
     else create.mutate(input, { onSuccess });
   };
@@ -193,7 +201,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
       variant="text"
       size="small"
       startIcon={<ArrowLeft size={16} />}
-      onClick={() => navigate(backTarget)}
+      onClick={() => navigate(backTarget, { state: backState })}
       sx={{ alignSelf: "flex-start" }}
     >
       Back
@@ -376,7 +384,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
           <Typography variant="body2" color="text.secondary" role="status">
             {`Mutes alerts from when you create the rule until about ${
               formatBackendTimestampForDisplay(preview.endOn, { timeStyle: "short" }) ?? "—"
-            } (${timeZoneLabel(resolveDisplayTimeZone())}).`}
+            }, ${timeZoneLabel(resolveDisplayTimeZone(), Date.parse(preview.endOn))}.`}
           </Typography>
         )}
       </Section>
@@ -403,7 +411,7 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
       )}
 
       <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1 }}>
-        <Button color="inherit" onClick={() => navigate(backTarget)} disabled={saving}>
+        <Button color="inherit" onClick={() => navigate(backTarget, { state: backState })} disabled={saving}>
           Cancel
         </Button>
         <Button variant="contained" onClick={save} loading={saving}>

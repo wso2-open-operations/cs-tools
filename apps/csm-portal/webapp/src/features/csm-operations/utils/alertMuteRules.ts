@@ -179,9 +179,12 @@ export function validateAlertMuteRule(input: AlertMuteRuleInput, now: number, is
 
   const start = Date.parse(input.startOn);
   const end = Date.parse(input.endOn);
-  if (Number.isNaN(start)) errors.startOn = "Enter a start date and time.";
+  const skipped = "That time doesn't exist in this time zone (clocks go forward). Pick another time.";
+  if (input.startOn === SKIPPED_WALL_TIME) errors.startOn = skipped;
+  else if (Number.isNaN(start)) errors.startOn = "Enter a start date and time.";
   else if (isNew && start < now - 60_000) errors.startOn = "The start can't be in the past.";
-  if (Number.isNaN(end)) errors.endOn = "Enter an end date and time.";
+  if (input.endOn === SKIPPED_WALL_TIME) errors.endOn = skipped;
+  else if (Number.isNaN(end)) errors.endOn = "Enter an end date and time.";
   else if (!Number.isNaN(start)) {
     if (end <= start) errors.endOn = "The end must be after the start.";
     else if (end - start > MAX_ALERT_MUTE_RULE_HOURS * HOUR_MS)
@@ -194,14 +197,24 @@ export function validateAlertMuteRule(input: AlertMuteRuleInput, now: number, is
 const pad = (n: number): string => String(n).padStart(2, "0");
 
 /**
+ * What {@link pickerInstant} returns for a wall time `timeZone` skips (the
+ * hour clocks jump over when daylight saving starts, e.g. 02:30 on
+ * America/New_York's spring-forward day). Validation names it.
+ */
+export const SKIPPED_WALL_TIME = "skipped-wall-time";
+
+/**
  * The instant a date picker's day and a time picker's hh:mm mean in
  * `timeZone`, as a UTC ISO string ("" until both are set). Only the pickers'
- * wall-clock parts are read, so the browser's own zone doesn't matter.
+ * wall-clock parts are read, so the browser's own zone doesn't matter. A wall
+ * time the zone skips gives {@link SKIPPED_WALL_TIME}, not a shifted instant.
  */
 export function pickerInstant(date: Date | null, time: Date | null, timeZone: string): string {
   if (!date || !time || Number.isNaN(date.getTime()) || Number.isNaN(time.getTime())) return "";
   const local = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(time.getHours())}:${pad(time.getMinutes())}`;
-  return zonedInputToUtcIso(local, timeZone) ?? "";
+  const iso = zonedInputToUtcIso(local, timeZone);
+  if (!iso) return "";
+  return utcMsToZonedInputValue(Date.parse(iso), timeZone) === local ? iso : SKIPPED_WALL_TIME;
 }
 
 /** The inverse of {@link pickerInstant}: picker values showing `iso`'s wall clock in `timeZone`. */
@@ -270,7 +283,8 @@ export function mutedAlertsSummaryText(
   data: Pick<AlertMuteRuleMutedAlertsResponse, "total" | "summary">,
 ): string {
   if (data.total === 0) return "No alerts muted";
-  const parts = [`${data.total} muted alert${data.total === 1 ? "" : "s"}`];
+  // Each row is one fingerprint's group of alerts, not a single alert.
+  const parts = [`${data.total} muted alert group${data.total === 1 ? "" : "s"}`];
   const s = data.summary;
   if (s.muted) parts.push(`${s.muted} still muted`);
   if (s.incident)
