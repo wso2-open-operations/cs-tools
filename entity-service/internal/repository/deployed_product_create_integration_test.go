@@ -47,6 +47,7 @@ const (
 	dpcSyncedDPID     = "a5000000-0000-0000-0000-0000000000c1"
 	dpcSyncedNumber   = 9999990 // far above anything a real database holds
 	dpcActor          = "dpc-actor@test.local"
+	dpcCollider       = "dpc-collider@test.local" // rows that take a number between advance and insert
 )
 
 var ibitmNumber = regexp.MustCompile(`^IBITM([0-9]{7,})$`)
@@ -60,7 +61,7 @@ func TestDeployedProductCreateIntegration(t *testing.T) {
 	now := time.Now().UTC()
 
 	cleanup := func() {
-		_, _ = scoped.Exec(sys, `DELETE FROM deployed_product WHERE created_by IN ($1, $2)`, depCreatedBy, dpcActor)
+		_, _ = scoped.Exec(sys, `DELETE FROM deployed_product WHERE created_by IN ($1, $2, $3)`, depCreatedBy, dpcActor, dpcCollider)
 		_, _ = pool.Exec(sys, `DELETE FROM product_version WHERE id IN ($1, $2)`, dpcVersionID, dpcOtherVersionID)
 		_, _ = pool.Exec(sys, `DELETE FROM product WHERE id = $1`, dpcOtherProductID)
 	}
@@ -171,4 +172,69 @@ func TestDeployedProductCreateIntegration(t *testing.T) {
 			}
 		})
 	}
+
+	// takeNextNumber commits, from another connection, a deployed product that
+	// holds the number the create's insert is about to draw: what a sync still
+	// running would do between the sequence advance and the insert.
+	takeNextNumber := func(t *testing.T) int {
+		t.Helper()
+		var next int
+		if err := scoped.QueryRow(sys, `SELECT CASE WHEN is_called THEN last_value + 1 ELSE last_value END FROM ibitm_number_seq`).Scan(&next); err != nil {
+			t.Fatalf("read ibitm_number_seq: %v", err)
+		}
+		if _, err := scoped.Exec(sys, `INSERT INTO deployed_product (id, created_on, updated_on, created_by, updated_by, number, active, project_id, deployment_id, product_id, version_id)
+			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, 'IBITM' || lpad($2::bigint::text, 7, '0'), TRUE, $3, $4, $5, $6)`,
+			dpcCollider, next, depProjectOne, depDeployOne, depProductID, dpcVersionID); err != nil {
+			t.Fatalf("take number %d: %v", next, err)
+		}
+		return next
+	}
+	createdByActor := func(t *testing.T) int {
+		t.Helper()
+		var n int
+		if err := scoped.QueryRow(sys, `SELECT count(*) FROM deployed_product WHERE created_by = $1`, dpcActor).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+
+	t.Run("a number taken before the insert is retried once and succeeds", func(t *testing.T) {
+		calls, taken := 0, 0
+		t.Cleanup(repository.SetBeforeDeployedProductInsert(func(context.Context) {
+			calls++
+			if calls == 1 {
+				taken = takeNextNumber(t)
+			}
+		}))
+		created, err := repo.CreateDeployedProduct(internal, req(depProjectOne, depDeployOne, depProductID, dpcVersionID), dpcActor)
+		if err != nil {
+			t.Fatalf("CreateDeployedProduct: %v", err)
+		}
+		if calls != 2 {
+			t.Errorf("insert attempts = %d, want 2 (one collision, one retry)", calls)
+		}
+		if got := numberOf(t, created.ID); got != taken+1 {
+			t.Errorf("number = IBITM%07d, want IBITM%07d (past the number taken in between)", got, taken+1)
+		}
+	})
+
+	t.Run("a number taken before both attempts is a 409 and writes nothing", func(t *testing.T) {
+		calls := 0
+		t.Cleanup(repository.SetBeforeDeployedProductInsert(func(context.Context) {
+			calls++
+			takeNextNumber(t)
+		}))
+		before := createdByActor(t)
+		_, err := repo.CreateDeployedProduct(internal, req(depProjectOne, depDeployOne, depProductID, dpcVersionID), dpcActor)
+		var ce *apierror.ConflictError
+		if !errors.As(err, &ce) {
+			t.Fatalf("want a ConflictError, got %v", err)
+		}
+		if calls != 2 {
+			t.Errorf("insert attempts = %d, want 2 (no retry after the second collision)", calls)
+		}
+		if after := createdByActor(t); after != before {
+			t.Errorf("a refused create wrote %d row(s)", after-before)
+		}
+	})
 }
