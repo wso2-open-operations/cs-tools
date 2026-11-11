@@ -442,6 +442,19 @@ func (s *storedAttachmentFileService) CompleteUpload(ctx context.Context, req do
 		if err := s.store.Copy(ctx, putKey, target.StorageKey); err != nil {
 			return domain.ConfirmAttachmentUploadResponse{}, storeError(ctx, "Copy", req.ID, err, "Failed to finish the upload.")
 		}
+		// What is recorded must be what is at the final key, not what was checked at
+		// the staging key: a copy that did not carry the whole file is removed (the
+		// staging file stays) and the confirm can be tried again.
+		copied, err := s.store.Stat(ctx, target.StorageKey)
+		if err != nil {
+			return domain.ConfirmAttachmentUploadResponse{}, storeError(ctx, "Stat", req.ID, err, "Failed to finish the upload.")
+		}
+		if copied.Size != info.Size {
+			slog.ErrorContext(ctx, "copied upload is not the size that was checked", "attachmentId", req.ID,
+				"correlationId", middleware.CorrelationIDFromContext(ctx), "checked", info.Size, "copied", copied.Size)
+			s.discard(ctx, req.ID, target.StorageKey)
+			return domain.ConfirmAttachmentUploadResponse{}, &apierror.ServiceUnavailableError{Msg: "Failed to finish the upload."}
+		}
 	}
 	size := info.Size
 	resp, err := s.attachments.ConfirmUpload(ctx, domain.ConfirmAttachmentUploadRequest{
