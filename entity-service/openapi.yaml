@@ -8286,6 +8286,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found, or the caller may not create in it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The deployed product could not be numbered after one retry; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
