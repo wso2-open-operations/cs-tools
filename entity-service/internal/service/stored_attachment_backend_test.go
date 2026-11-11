@@ -901,3 +901,39 @@ func TestBackend_CleanupTreatsAFileAlreadyGoneAsRemoved(t *testing.T) {
 		t.Errorf("result = %+v, deleted = %v: a file that is already gone is done", res, repo.deleted)
 	}
 }
+
+// An abandoned upload's chunks (under its staging key) and anything at its own key
+// are removed with the row marked FAILED; chunks that cannot be removed keep the
+// row PENDING for the next run.
+func TestBackend_CleanupRemovesAnAbandonedUploadsFiles(t *testing.T) {
+	newAbandoned := func() *fakeStoredRepo {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 20*mib)
+		repo.abandoned = []domain.AbandonedUpload{{Kind: domain.StoredAttachmentWorkItem, ID: saAttID}}
+		return repo
+	}
+	t.Run("removed", func(t *testing.T) {
+		repo, blob := newAbandoned(), newFakeBlob()
+		res, err := withBlob(repo, blob).CleanupUploads(context.Background())
+		if err != nil || res.Cleaned != 1 || res.Failed != 0 {
+			t.Fatalf("result = %+v, %v", res, err)
+		}
+		if len(blob.discarded) != 2 || blob.discarded[0] != workItemKey+stagingSuffix || blob.discarded[1] != workItemKey {
+			t.Errorf("discarded = %v, want the staging key then the file's own key", blob.discarded)
+		}
+		if repo.failed[saAttID] == "" {
+			t.Error("the abandoned row was not marked FAILED")
+		}
+	})
+	t.Run("a failure keeps the row for the next run", func(t *testing.T) {
+		repo, blob := newAbandoned(), newFakeBlob()
+		blob.discardErr = errors.New("storage down")
+		res, err := withBlob(repo, blob).CleanupUploads(context.Background())
+		if err != nil || res.Cleaned != 0 || res.Failed != 1 {
+			t.Fatalf("result = %+v, %v", res, err)
+		}
+		if repo.failed[saAttID] != "" || len(repo.deferred) != 1 {
+			t.Errorf("failed = %v, deferred = %v: the row must stay PENDING and go to the back of the queue", repo.failed, repo.deferred)
+		}
+	})
+}
