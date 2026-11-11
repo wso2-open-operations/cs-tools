@@ -50,6 +50,7 @@ const attachmentChunkDeadline = 10 * time.Minute
 type blobEntityClient interface {
 	PutStoredAttachmentChunk(ctx context.Context, id, kind string, index int, size int64, body io.Reader) error
 	ListStoredAttachmentChunks(ctx context.Context, id, kind string) ([]byte, error)
+	StoredAttachmentLimits(ctx context.Context) ([]byte, error)
 	DirectStoredAttachmentUploadLinks(ctx context.Context, id, kind string) ([]byte, error)
 	DirectStoredAttachmentDownloadLink(ctx context.Context, id, kind string) ([]byte, error)
 	DownloadStoredAttachment(ctx context.Context, kind, id, rangeHeader string) (*entity.FileResponse, error)
@@ -155,6 +156,26 @@ func (h *BlobAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeStoredAttachmentJSON(w, http.StatusOK, out)
+}
+
+// Limits handles GET /attachments/limits: the attachment size limits, so the
+// portal shows the same numbers entity-service enforces. They are not secret and
+// change rarely, so unlike the other answers here they may be cached briefly.
+func (h *BlobAttachmentHandler) Limits(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	out, err := h.entity.StoredAttachmentLimits(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity StoredAttachmentLimits failed", "err", summarizeErr(err))
+		mapStoredAttachmentError(w, err, "Failed to read the attachment limits.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out) // #nosec G705 -- Content-Type: application/json set; SecurityHeaders adds nosniff
 }
 
 // DirectUploadLinks handles POST /attachments/{id}/upload-links?type=: one signed

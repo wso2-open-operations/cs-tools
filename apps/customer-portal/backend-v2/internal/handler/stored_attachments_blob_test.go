@@ -66,6 +66,11 @@ func (f *fakeBlobEntity) ListStoredAttachmentChunks(context.Context, string, str
 	return []byte(f.chunks), f.listErr
 }
 
+// StoredAttachmentLimits answers with the two limits.
+func (f *fakeBlobEntity) StoredAttachmentLimits(context.Context) ([]byte, error) {
+	return []byte(`{"maxFileBytes":1073741824,"maxInlineImagesTotalBytes":10485760}`), f.directErr
+}
+
 // DirectStoredAttachmentUploadLinks records the call and answers with one link.
 func (f *fakeBlobEntity) DirectStoredAttachmentUploadLinks(_ context.Context, id, kind string) ([]byte, error) {
 	f.directID, f.directKind = id, kind
@@ -114,6 +119,7 @@ func serveBlob(t *testing.T, e *fakeBlobEntity, stored *fakeStoredEntity, permit
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
+	mux.HandleFunc("GET /attachments/limits", h.Limits)
 	mux.HandleFunc("POST /attachments/{id}/upload-links", h.DirectUploadLinks)
 	mux.HandleFunc("GET /attachments/download/{id}/content", h.Download)
 	mux.HandleFunc("POST /attachments/{id}/download-links", h.DirectDownloadLink)
@@ -354,6 +360,27 @@ func TestBlobListChunks(t *testing.T) {
 	}
 	if rec := serveBlob(t, &fakeBlobEntity{listErr: errors.New("down")}, &fakeStoredEntity{}, nil, http.MethodGet, "/attachments/upload/"+storedID+"/chunks?type=work_item", nil, nil); rec.Code < 500 {
 		t.Errorf("a failed list: %d", rec.Code)
+	}
+}
+
+// The limits are relayed as entity-service made them and may be cached briefly.
+func TestBlobLimits_AreRelayedAndCachedBriefly(t *testing.T) {
+	rec := serveBlob(t, &fakeBlobEntity{}, &fakeStoredEntity{}, nil, http.MethodGet, "/attachments/limits", nil, nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"maxFileBytes":1073741824,"maxInlineImagesTotalBytes":10485760}` {
+		t.Errorf("%d %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Errorf("Cache-Control = %q", got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q", got)
+	}
+}
+
+func TestBlobLimits_AFailureIsMappedAndNotCached(t *testing.T) {
+	rec := serveBlob(t, &fakeBlobEntity{directErr: errors.New("down")}, &fakeStoredEntity{}, nil, http.MethodGet, "/attachments/limits", nil, nil)
+	if rec.Code < 500 || rec.Header().Get("Cache-Control") == "private, max-age=300" {
+		t.Errorf("a failed read: %d, Cache-Control = %q", rec.Code, rec.Header().Get("Cache-Control"))
 	}
 }
 
