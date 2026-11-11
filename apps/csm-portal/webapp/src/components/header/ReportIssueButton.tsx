@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Button, Divider } from "@wso2/oxygen-ui";
+import { Button, Divider, Tooltip } from "@wso2/oxygen-ui";
 import { Bug } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useGetAppConfig } from "@api/useGetAppConfig";
@@ -37,18 +37,33 @@ export default function ReportIssueButton(): JSX.Element | null {
 
   return (
     <>
-      <Button
-        size="small"
-        variant="outlined"
-        color="primary"
-        startIcon={<Bug size={16} />}
-        onClick={() =>
-          window.open(reportIssueUrl, "_blank", "noopener,noreferrer")
-        }
-        sx={{ whiteSpace: "nowrap" }}
-      >
-        Report an issue
-      </Button>
+      {/* describeChild: adds the title as aria-describedby instead of
+          replacing the button's own accessible name ("Report an issue",
+          from its visible text) with the tooltip text. */}
+      <Tooltip title="Report an internal issue" describeChild>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<Bug size={16} />}
+          onClick={() =>
+            window.open(reportIssueUrl, "_blank", "noopener,noreferrer")
+          }
+          sx={(theme) => ({
+            whiteSpace: "nowrap",
+            color: theme.palette.common.white,
+            borderColor: "rgba(255, 255, 255, 0.5)",
+            "&:hover": {
+              // Same as the base state on purpose — hovering should only
+              // surface the tooltip above, not change the button's color.
+              color: theme.palette.common.white,
+              borderColor: "rgba(255, 255, 255, 0.5)",
+              backgroundColor: "transparent",
+            },
+          })}
+        >
+          Report an issue
+        </Button>
+      </Tooltip>
       <Divider
         orientation="vertical"
         flexItem
