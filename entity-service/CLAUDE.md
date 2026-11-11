@@ -11152,11 +11152,16 @@ was the only way to create one. `deployedProductService.CreateDeployedProduct` n
   revealed).
 - **Who**: `created_by` is the caller's email from `x-user-id-token` (401 without it). A customer can
   create only in a project they are a registered contact of (`deployed_product_write`, migration
-  100017).
+  100017). The insert policy's refusal is a 404; a 42501 that is not a row-level security refusal
+  (the role lacks USAGE on `ibitm_number_seq`) is a 500, not "project not found"
+  (`isRowSecurityRefusal`: the two share the SQLSTATE, only the message differs).
 
-Tests: `TestDeployedProductService_CreateDeployedProduct_Postgres*` and
+Tests: `TestDeployedProductService_CreateDeployedProduct_Postgres*`, `TestIsRowSecurityRefusal` and
 `TestDeployedProductCreateIntegration` (`CASE_STATS_TEST_DSN`, a login that does not bypass row-level
-security: numbering with an unseeded sequence, the refusals, a customer in and out of their project).
+security: numbering with an unseeded sequence, the refusals, a customer in and out of their project, and
+the retry: a number committed by another connection between the advance and the insert is retried once
+and succeeds, and taken before both attempts is a 409 that writes nothing; the test reaches in through
+`SetBeforeDeployedProductInsert` in `export_test.go`, compiled into tests only).
 
 ## Air-gapped deployments (`deployment.air_gapped`)
 
