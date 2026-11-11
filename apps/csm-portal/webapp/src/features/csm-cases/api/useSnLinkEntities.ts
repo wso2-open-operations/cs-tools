@@ -39,6 +39,12 @@ export function useGetAlert(
       api.get<BeAlertDetail>(`/alerts/${encodeURIComponent(id as string)}`),
     enabled: !!id,
     staleTime: 30_000,
+    // A 404 already resolves to `null` (see `BackendApi.get`, which never reads
+    // the body, so a plain-text 404 is handled the same as a JSON one) and is
+    // not an error, so it is never retried. Any other failure just shows the
+    // same not-available state in the modal; don't re-hit an endpoint that is
+    // down for a read nobody is waiting on.
+    retry: false,
   });
 }
 
@@ -59,5 +65,6 @@ export function useGetSmartAlert(
       ),
     enabled: !!id,
     staleTime: 30_000,
+    retry: false,
   });
 }

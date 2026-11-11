@@ -94,14 +94,25 @@ export function SnLinkLoadingState(): JSX.Element {
 }
 
 /**
- * Shown when the resolved id 404s (stale/unknown reference) or the fetch
- * otherwise failed — never a thrown error or a blank modal.
+ * Shown when the resolved id 404s (the record is not served yet, or the
+ * reference is stale) or the fetch otherwise failed — never a thrown error or
+ * a blank modal. Echoes the reference so the user can still identify it.
  */
-export function SnLinkNotFoundState({ kind }: { kind: string }): JSX.Element {
+export function SnLinkNotFoundState({
+  kind,
+  reference,
+}: {
+  kind: string;
+  reference: string;
+}): JSX.Element {
   return (
-    <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-      This {kind} could no longer be found. It may have been removed, or the
-      reference may be out of date.
-    </Typography>
+    <Box role="status" sx={{ py: 2, display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <Typography variant="body2" color="text.secondary">
+        {kind.charAt(0).toUpperCase() + kind.slice(1)} details are not available
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+        Reference: {reference}
+      </Typography>
+    </Box>
   );
 }

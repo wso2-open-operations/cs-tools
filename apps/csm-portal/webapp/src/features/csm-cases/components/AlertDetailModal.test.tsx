@@ -99,7 +99,20 @@ describe("AlertDetailModal", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseQueryResult stub
     } as any);
     renderModal();
-    expect(screen.getByText(/could no longer be found/)).toBeInTheDocument();
+    expect(screen.getByText("Alert details are not available")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Reference: alert-1");
+  });
+
+  it("shows the same not-available state, without throwing, when the lookup errors", () => {
+    mockedUseGetAlert.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseQueryResult stub
+    } as any);
+    renderModal();
+    expect(screen.getByText("Alert details are not available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
   });
 
   it("navigates to the linked incident and closes the modal", () => {

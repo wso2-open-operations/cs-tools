@@ -96,7 +96,20 @@ describe("SmartAlertDetailModal", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseQueryResult stub
     } as any);
     renderModal();
-    expect(screen.getByText(/could no longer be found/)).toBeInTheDocument();
+    expect(screen.getByText("Smart alert details are not available")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Reference: sa-1");
+  });
+
+  it("shows the same not-available state, without throwing, when the lookup errors", () => {
+    mockedUseGetSmartAlert.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- partial UseQueryResult stub
+    } as any);
+    renderModal();
+    expect(screen.getByText("Smart alert details are not available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
   });
 
   it("links out to the monitoring tool and the linked incident", () => {
