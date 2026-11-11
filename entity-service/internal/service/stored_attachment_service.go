@@ -81,9 +81,8 @@ type StoredAttachmentLimits struct {
 	// MaxBytes caps one file.
 	MaxBytes int64
 	// DirectTransfers is true when links can be signed, so a new upload of an
-	// ordinary file (not an inline image) above DirectMinBytes is sent straight to
-	// Azure. It is decided when the upload starts and recorded on the upload, so a
-	// later change here does not affect an upload in progress.
+	// ordinary file (not an inline image) above DirectMinBytes goes straight to
+	// Azure. It is recorded on the upload when it starts.
 	DirectTransfers bool
 	DirectMinBytes  int64
 	// DirectMaxBytes is the cap of such an upload. It does not pass through this

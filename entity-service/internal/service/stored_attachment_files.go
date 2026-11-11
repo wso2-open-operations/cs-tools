@@ -230,10 +230,9 @@ func maxChunks(maxBytes int64) int {
 // stagingSuffix marks the key where the chunks of a direct-sized upload are put.
 const stagingSuffix = ".upload"
 
-// uploadKey is where the chunks of an upload are put. A staged upload (decided
-// when it started) is put under its own key plus stagingSuffix and copied to the
-// real key at confirm, so an upload link that is still valid cannot change a
-// confirmed file.
+// uploadKey is where the chunks of an upload are put. A staged upload goes under
+// its key plus stagingSuffix and is copied at confirm, so a link that is still
+// valid cannot change a confirmed file.
 func (s *storedAttachmentFileService) uploadKey(target domain.AttachmentUploadTarget) string {
 	if target.Staged {
 		return target.StorageKey + stagingSuffix
@@ -441,9 +440,9 @@ func (s *storedAttachmentFileService) CompleteUpload(ctx context.Context, req do
 // errStagedFileChanged is the refusal for a staging file that was replaced after it was checked.
 var errStagedFileChanged = &apierror.ValidationError{Msg: "The upload changed while it was being checked."}
 
-// copyStagedFile copies the checked staging file to the file's own key, refusing
-// if the staging file is no longer the one that was checked, and makes sure the
-// copy is complete. A short copy is removed so the confirm can be retried.
+// copyStagedFile copies the checked staging file to the file's own key. It refuses
+// a staging file that changed after the check, and removes a short copy so the
+// confirm can be retried.
 func (s *storedAttachmentFileService) copyStagedFile(ctx context.Context, id, stagingKey, key string, checked azblobstore.Info) error {
 	if err := s.store.Copy(ctx, stagingKey, key, checked.ETag); err != nil {
 		if errors.Is(err, azblobstore.ErrSourceChanged) {
