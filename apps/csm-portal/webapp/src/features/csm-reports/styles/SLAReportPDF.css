@@ -1,0 +1,154 @@
+/* The SLA report PDF. The front page, the thank-you page and the divider come
+ * from CSReportPDF.css; this adds the content sheets: the figures at a glance,
+ * the summary table and the cases table. */
+
+.sla-pdf-body {
+    margin: 0;
+    padding: 36px 40px 28px;
+    box-sizing: border-box;
+    font-family: sans-serif;
+    color: #1f2933;
+    background: #ffffff;
+  }
+
+.sla-pdf-body .sla-title {
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--report-accent, #fa7b3f);
+    text-align: left;
+    margin-top: 0;
+    margin-bottom: 6px;
+    margin-left: 0;
+  }
+
+.sla-pdf-note {
+    margin: 0 0 18px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #5c6570;
+  }
+
+.sla-pdf-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 0 24px;
+  }
+
+.sla-pdf-tile {
+    padding: 12px 14px;
+    border: 1px solid #d5dde3;
+    border-top: 3px solid var(--report-accent, #fa7b3f);
+    border-radius: 6px;
+    background: #ffffff;
+  }
+
+.sla-pdf-tile-label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #607d8b;
+  }
+
+.sla-pdf-tile-value {
+    display: block;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+.sla-pdf-tile-value.met { color: #2e7d32; }
+.sla-pdf-tile-value.missed { color: #c62828; }
+.sla-pdf-tile-value.running { color: #1565c0; }
+
+.sla-pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 12px;
+    text-align: left;
+  }
+
+.sla-pdf-table th {
+    padding: 9px 10px;
+    background: #455a66;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+.sla-pdf-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #e6eaee;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+  }
+
+.sla-pdf-table tbody tr:nth-child(even) td {
+    background: #f7f8f9;
+  }
+
+.sla-pdf-empty {
+    padding: 18px 10px;
+    text-align: center;
+    color: #5c6570;
+  }
+
+.sla-pdf-elapsed {
+    font-weight: 700;
+  }
+
+.sla-pdf-sub {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #5c6570;
+  }
+
+.sla-pdf-counts {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #5c6570;
+  }
+
+.sla-pdf-status {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border: 1px solid #9aa7b0;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.5;
+    color: #5c6570;
+    background: #eceff1;
+  }
+
+.sla-pdf-status.met { color: #2e7d32; border-color: #2e7d32; background: #e8f5e9; }
+.sla-pdf-status.missed { color: #c62828; border-color: #c62828; background: #fdecea; }
+.sla-pdf-status.running { color: #1565c0; border-color: #1565c0; background: #e3f2fd; }
+.sla-pdf-status.paused { color: #b45309; border-color: #b45309; background: #fff3e0; }
+
+.sla-pdf-summary col.c-label { width: 22%; }
+.sla-pdf-summary col.c-cases { width: 8%; }
+
+.sla-pdf-cases col.c-case { width: 11%; }
+.sla-pdf-cases col.c-type { width: 8%; }
+.sla-pdf-cases col.c-severity { width: 12%; }
+.sla-pdf-cases col.c-state { width: 13%; }
+.sla-pdf-cases col.c-opened { width: 10%; }
+
+/* A rule inside a flex column keeps its automatic side margins and shrinks to
+ * nothing, so the accent line on the dark pages shows as a dot. Stretch it. */
+.sla-pdf-front .section-divider,
+.sla-pdf-thanks .section-divider {
+    align-self: stretch;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
