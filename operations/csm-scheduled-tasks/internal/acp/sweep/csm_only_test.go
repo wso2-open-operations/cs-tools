@@ -55,7 +55,7 @@ func csmOnlyListing(accountID string) *mockEntityReader {
 	if accountID == "" {
 		acc = ""
 	}
-	p := `{"id":"p1","suspensionProcessOverridden":false,"endDate":"` + end + `"` + acc + `}`
+	p := `{"id":"p1","subscriptionType":"subscription","suspensionProcessOverridden":false,"endDate":"` + end + `"` + acc + `}`
 	return &mockEntityReader{searchProjectsFn: func(context.Context, []byte) ([]byte, error) {
 		return []byte(`{"projects":[` + p + `],"total":1,"hasMore":false}`), nil
 	}}
@@ -127,7 +127,7 @@ func TestCSMOnlyDetails_SingleProjectRunNeedsTheList(t *testing.T) {
 	reader := csmOnlyListing("acc-customer")
 	reader.getProjectFn = func(context.Context, string) ([]byte, error) {
 		end := screenNow.AddDate(0, 0, 89).Format(time.RFC3339)
-		return []byte(`{"id":"p1","suspensionProcessOverridden":false,"endDate":"` + end + `","account":{"id":"acc-customer","isPartner":false}}`), nil
+		return []byte(`{"id":"p1","subscriptionType":"subscription","suspensionProcessOverridden":false,"endDate":"` + end + `","account":{"id":"acc-customer","isPartner":false}}`), nil
 	}
 	accounts := &fakeAccounts{pages: [][]string{{"acc-customer"}}, total: 1}
 	result, err := Run(context.Background(), reader, CSMOnlyDetails(reader, accounts), &mockProjectUpdater{}, delivering(), screenNow, "p1", nil, 0)

@@ -72,12 +72,15 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/projects/%s/contacts/search", url.PathEscape(projectID)), body)
 }
 
-// UpdateProject calls PATCH /projects/{id}. This is a
-// legacy-data-source-only operation. M2M-only auth (no forwarded
-// x-user-id-token) is confirmed sufficient for this call — verified via a
-// real write against the dedicated test project
-// (00000000-0000-4000-8000-000000000001), not inferred. Response is returned
-// as raw JSON; typed response structs are deferred to the caller.
+// UpdateProject calls PATCH /projects/{id}. entity-service persists the
+// closure-state fields it carries (end date closure state, invoice due date
+// closure state, suspension process state and the overridden flag) to the
+// database and recomputes the overall closure state in the same transaction.
+// M2M-only auth (no forwarded x-user-id-token) is confirmed sufficient for
+// this call, for a caller whose client id is in entity-service's
+// M2M_CLIENT_IDS: verified via a real write against the dedicated test
+// project (00000000-0000-4000-8000-000000000001), not inferred. Response is
+// returned as raw JSON; typed response structs are deferred to the caller.
 func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/projects/%s", url.PathEscape(id)), body)
 }

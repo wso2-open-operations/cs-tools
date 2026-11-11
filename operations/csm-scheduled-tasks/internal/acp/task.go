@@ -238,6 +238,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"projectsExcluded", result.ProjectsExcluded,
 			"projectsActed", result.ProjectsActed,
 			"projectsScreenedOut", result.ProjectsScreenedOut,
+			"projectsSkippedUnknownType", result.ProjectsFilteredUnknownType,
 			"projectsNotEvaluatedByLimit", result.NotEvaluatedByLimit,
 			"projectsSkipped", len(result.Skipped),
 			"failureCount", len(result.Failures),

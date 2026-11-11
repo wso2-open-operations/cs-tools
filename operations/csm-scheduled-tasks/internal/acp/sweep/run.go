@@ -47,10 +47,27 @@ const (
 	maxSearchPages  = 200
 )
 
-// ineligibleSubscriptionTypes are the project types ACP never evaluates, as
-// the legacy process did not: evaluation, cloud support, cloud evaluation
-// support and internal projects. The values are entity-service's
-// SubscriptionType enum, which the project read carries.
+// knownSubscriptionTypes are the project types ACP recognises: entity-service's
+// SubscriptionType enum, which the project read carries. A type outside this
+// set (or none at all) is not evaluated, see skipIneligible. A value added to
+// that enum is skipped, with a WARN, until it is added here and classified as
+// eligible or ineligible.
+var knownSubscriptionTypes = map[string]bool{
+	"development_support":        true,
+	"managed_cloud_subscription": true,
+	"evaluation_subscription":    true,
+	"subscription":               true,
+	"cloud_evaluation_support":   true,
+	"internal":                   true,
+	"platformer_subscription":    true,
+	"cloud_support":              true,
+	"professional_services":      true,
+}
+
+// ineligibleSubscriptionTypes are the known project types ACP never
+// evaluates: evaluation, cloud support, cloud evaluation support and internal
+// projects. Every other known type is
+// eligible.
 var ineligibleSubscriptionTypes = map[string]bool{
 	"evaluation_subscription":  true,
 	"cloud_support":            true,
@@ -60,7 +77,11 @@ var ineligibleSubscriptionTypes = map[string]bool{
 
 // skipIneligible reports whether proj is outside ACP's selection (see
 // ineligibleSubscriptionTypes), counting it in result. It logs nothing per
-// project: Run logs the count once.
+// project: Run logs the count once. A project with no type, an empty type or
+// a type outside knownSubscriptionTypes fails closed: it is skipped and
+// counted in ProjectsFilteredUnknownType, since it could be an ineligible
+// project whose type is missing or unmapped, and a notice or suspension
+// cannot be taken back.
 func skipIneligible(proj project, result *Result) bool {
 	// The flag is read from the fresh re-read, which is what is decided from.
 	// An absent flag fails closed: an entity-service without it would
@@ -73,7 +94,15 @@ func skipIneligible(proj project, result *Result) bool {
 		result.ProjectsFilteredOverridden++
 		return true
 	}
-	if proj.SubscriptionType == nil || !ineligibleSubscriptionTypes[strings.ToLower(strings.TrimSpace(*proj.SubscriptionType))] {
+	var typ string
+	if proj.SubscriptionType != nil {
+		typ = strings.ToLower(strings.TrimSpace(*proj.SubscriptionType))
+	}
+	if !knownSubscriptionTypes[typ] {
+		result.ProjectsFilteredUnknownType++
+		return true
+	}
+	if !ineligibleSubscriptionTypes[typ] {
 		return false
 	}
 	result.ProjectsFiltered++
@@ -128,13 +157,18 @@ func logFiltered(ctx context.Context, result Result) {
 		slog.WarnContext(ctx, "acp: projects skipped because entity-service did not return suspensionProcessOverridden for them: it must be deployed (with its migration) before this task runs; none of these were evaluated",
 			"projectsSkipped", result.ProjectsFilteredOverrideUnknown)
 	}
-	n := result.ProjectsFilteredOverridden + result.ProjectsFilteredOverrideUnknown + result.ProjectsFiltered + result.ProjectsFilteredStatus + result.ProjectsFilteredNoStatus + result.ProjectsFilteredPartner
+	if result.ProjectsFilteredUnknownType > 0 {
+		slog.WarnContext(ctx, "acp: projects skipped because their project type is missing or not one ACP recognises: none of these were evaluated, so no notice or suspension; check the project type data",
+			"projectsSkipped", result.ProjectsFilteredUnknownType)
+	}
+	n := result.ProjectsFilteredUnknownType + result.ProjectsFilteredOverridden + result.ProjectsFilteredOverrideUnknown + result.ProjectsFiltered + result.ProjectsFilteredStatus + result.ProjectsFilteredNoStatus + result.ProjectsFilteredPartner
 	if n > 0 {
 		slog.InfoContext(ctx, "acp: projects skipped by the selection filter",
 			"projectsFiltered", n,
 			"byProjectType", result.ProjectsFiltered,
 			"byOverrideFlag", result.ProjectsFilteredOverridden,
 			"byMissingOverrideFlag", result.ProjectsFilteredOverrideUnknown,
+			"byUnknownProjectType", result.ProjectsFilteredUnknownType,
 			"byAccountStatus", result.ProjectsFilteredStatus,
 			"byMissingAccountStatus", result.ProjectsFilteredNoStatus,
 			"byPartnerAccount", result.ProjectsFilteredPartner)

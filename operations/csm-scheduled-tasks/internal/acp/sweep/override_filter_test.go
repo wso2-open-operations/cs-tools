@@ -36,7 +36,7 @@ func overrideListing(now time.Time, flags []string) *mockEntityReader {
 		if f != "absent" {
 			field = `,"suspensionProcessOverridden":` + f
 		}
-		parts = append(parts, fmt.Sprintf(`{"id":"p%d","endDate":"%s"%s}`, i+1, end, field))
+		parts = append(parts, fmt.Sprintf(`{"id":"p%d","subscriptionType":"subscription","endDate":"%s"%s}`, i+1, end, field))
 	}
 	body := `{"projects":[` + strings.Join(parts, ",") + `],"total":` + fmt.Sprint(len(flags)) + `,"hasMore":false}`
 	return &mockEntityReader{searchProjectsFn: func(context.Context, []byte) ([]byte, error) { return []byte(body), nil }}
@@ -97,7 +97,7 @@ func TestRun_OverrideFlagFilterSingleProject(t *testing.T) {
 		wantActed, wantOv, wantUn int
 	}{{`,"suspensionProcessOverridden":false`, 1, 0, 0}, {`,"suspensionProcessOverridden":true`, 0, 1, 0}, {``, 0, 0, 1}} {
 		reader := &mockEntityReader{getProjectFn: func(context.Context, string) ([]byte, error) {
-			return []byte(`{"id":"p1","endDate":"` + end + `"` + tc.flag + `}`), nil
+			return []byte(`{"id":"p1","subscriptionType":"subscription","endDate":"` + end + `"` + tc.flag + `}`), nil
 		}}
 		ntf, updater := delivering(), &mockProjectUpdater{}
 		result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "p1", nil, 0)

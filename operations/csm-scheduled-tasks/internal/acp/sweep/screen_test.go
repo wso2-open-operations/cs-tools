@@ -96,7 +96,7 @@ func screenProject(id string, endInDays int, state string) string {
 	if state != "" {
 		st = `,"suspensionProcessState":` + state
 	}
-	return `{"id":"` + id + `","suspensionProcessOverridden":false` + end + st + `}`
+	return `{"id":"` + id + `","subscriptionType":"subscription","suspensionProcessOverridden":false` + end + st + `}`
 }
 
 func dateIn(days int) string { return screenNow.AddDate(0, 0, days).Format("2006-01-02") }

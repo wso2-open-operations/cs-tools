@@ -59,8 +59,9 @@ type project struct {
 	// here, and the notice then falls back to plain (unlinked) text.
 	SfID *string `json:"sfId"`
 	// SubscriptionType is the project's type, a lowercase snake_case value
-	// (entity-service's SubscriptionType enum); see ineligibleSubscriptionTypes.
-	// Nil when the response has none.
+	// (entity-service's SubscriptionType enum); see knownSubscriptionTypes and
+	// ineligibleSubscriptionTypes. Nil when the response has none, which is
+	// skipped, not evaluated.
 	SubscriptionType *string `json:"subscriptionType"`
 	// SuspensionProcessOverridden is the CSM project record's "suspension
 	// process overridden" flag: true means the project is never evaluated.
@@ -337,6 +338,10 @@ type Result struct {
 	// selection filter excludes them (see ineligibleSubscriptionTypes). They
 	// are included in ProjectsEvaluated, which counts every project read.
 	ProjectsFiltered int
+	// ProjectsFilteredUnknownType counts projects whose type is missing, empty
+	// or not in knownSubscriptionTypes (skipped, fail closed). Decided from
+	// the project read, included in ProjectsEvaluated, never in ProjectsActed.
+	ProjectsFilteredUnknownType int
 	// ProjectsFilteredOverridden counts projects whose suspension process is
 	// overridden, ProjectsFilteredOverrideUnknown those whose read carried no
 	// such flag (skipped, fail closed). Both are decided from the project
