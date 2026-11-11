@@ -16199,7 +16199,7 @@ paths:
       summary: Start a new conversation on a project.
       description: >-
         On the Postgres data sources the conversation is stored natively
-        (number from next_portal_work_item_number(), state ACTIVE, the first
+        (number from next_work_item_number('CONVERSATION'), state ACTIVE, the first
         message as its description); under postgres-servicenow-dual-write
         ServiceNow creates it first and the Postgres row takes its id and number.
       operationId: createConversation
