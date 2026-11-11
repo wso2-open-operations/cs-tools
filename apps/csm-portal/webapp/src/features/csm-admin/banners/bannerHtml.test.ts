@@ -15,12 +15,79 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { buildBannerHtml, parseBannerHtml } from "@features/csm-admin/banners/bannerHtml";
+import {
+  EMPTY_BANNER_CONTENT,
+  buildBannerHtml,
+  hasVisibleBannerHtml,
+  parseBannerHtml,
+} from "@features/csm-admin/banners/bannerHtml";
 
 describe("banner HTML", () => {
-  it("round-trips the fields the engineer fills in, including a close button", () => {
+  it("builds a custom banner from the pasted HTML and reads it back as pasted", () => {
+    const pasted = '<div style="background:#123456;color:#fff;line-height:3rem;text-align:center">Maintenance <b>tonight</b></div>';
     const html = buildBannerHtml({
       type: "custom",
+      title: "",
+      message: pasted,
+      textColor: "#f9fafb",
+      backgroundColor: "#1f2937",
+      iconColor: "",
+      imageUrl: "",
+      linkUrl: "",
+      closeable: true,
+    });
+    expect(html).toContain('data-banner="1"');
+    expect(html).toContain('data-banner-type="custom"');
+    expect(html).toContain("data-banner-custom");
+    expect(html).toContain('data-close-banner="true"');
+    expect(html).toContain("background:#123456");
+    expect(html).not.toContain("data-bg=");
+    expect(parseBannerHtml(html)).toMatchObject({ type: "custom", message: pasted, closeable: true });
+  });
+
+  it("stamps the banner id on a custom banner", () => {
+    const html = buildBannerHtml(
+      { ...EMPTY_BANNER_CONTENT, type: "custom", message: "<p>Hi</p>" },
+      "11111111-1111-4111-8111-111111111111",
+    );
+    expect(html).toContain('data-id="11111111-1111-4111-8111-111111111111"');
+  });
+
+  it("removes scripts, event handlers, style tags and forms from pasted HTML", () => {
+    const html = buildBannerHtml({
+      ...EMPTY_BANNER_CONTENT,
+      type: "custom",
+      message:
+        '<style>body{display:none}</style><script>alert(1)</script><form action="/x"><input name="a"></form><a href="javascript:alert(1)" onclick="alert(2)">go</a><span>kept</span>',
+    });
+    expect(html).not.toMatch(/<style|<script|<form|<input|onclick|javascript:/i);
+    expect(html).toContain("<span>kept</span>");
+  });
+
+  it("keeps a link that opens in a new tab, safely", () => {
+    const html = buildBannerHtml({
+      ...EMPTY_BANNER_CONTENT,
+      type: "custom",
+      message: '<a href="https://example.com/status" target="_blank">Status</a>',
+    });
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+  });
+
+  it("opens a custom banner saved with colours as HTML that keeps its look", () => {
+    const legacy =
+      '<div data-banner="1" data-banner-type="custom" data-text-color="#ffeeaa" data-bg="#223344" data-closeable="false" style="x">' +
+      '<div data-banner-text style="margin:0;color:#ffeeaa"><p style="margin:0">Old notice</p></div></div>';
+    const parsed = parseBannerHtml(legacy);
+    expect(parsed.type).toBe("custom");
+    expect(parsed.message).toContain("Old notice");
+    expect(parsed.message).toContain("background-color:#223344");
+    expect(parsed.message).toContain("color:#ffeeaa");
+  });
+
+  it("round-trips a text banner, including a close button", () => {
+    const html = buildBannerHtml({
+      type: "info",
       title: "Hello",
       message: '<p>Hello <strong>"team"</strong></p>',
       textColor: "#f9fafb",
@@ -31,20 +98,12 @@ describe("banner HTML", () => {
       closeable: true,
     });
     expect(html).toContain('data-close-banner="true"');
-    expect(html).toContain('data-banner-type="custom"');
+    expect(html).toContain('data-banner-type="info"');
     expect(html).not.toContain("data-title=");
-    expect(html).not.toContain("data-banner-title");
     expect(html).toContain("<strong>");
-    expect(html).not.toContain("<img");
-    expect(parseBannerHtml(html)).toEqual({
-      type: "custom",
-      title: "",
+    expect(parseBannerHtml(html)).toMatchObject({
+      type: "info",
       message: '<p style="margin:0">Hello <strong>"team"</strong></p>',
-      textColor: "#f9fafb",
-      backgroundColor: "#1f2937",
-      iconColor: "",
-      imageUrl: "",
-      linkUrl: "",
       closeable: true,
     });
   });
@@ -122,5 +181,29 @@ describe("banner HTML", () => {
     expect(html).not.toContain("javascript:");
     expect(parseBannerHtml(html).imageUrl).toBe("");
     expect(parseBannerHtml(html).linkUrl).toBe("");
+  });
+});
+
+describe("hasVisibleBannerHtml", () => {
+  it("counts text and pictures as something to show", () => {
+    expect(hasVisibleBannerHtml("Maintenance tonight")).toBe(true);
+    expect(hasVisibleBannerHtml('<div style="color:#fff"><b>Heads up</b></div>')).toBe(true);
+    expect(hasVisibleBannerHtml('<img src="https://cdn.example.com/banner.png" alt="">')).toBe(true);
+    expect(hasVisibleBannerHtml('<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>')).toBe(true);
+  });
+
+  it("does not count markup that shows nothing", () => {
+    expect(hasVisibleBannerHtml("")).toBe(false);
+    expect(hasVisibleBannerHtml("   ")).toBe(false);
+    expect(hasVisibleBannerHtml("<div></div>")).toBe(false);
+    expect(hasVisibleBannerHtml('<div style="background:red"><span> </span></div>')).toBe(false);
+    expect(hasVisibleBannerHtml("<p><br></p>")).toBe(false);
+    expect(hasVisibleBannerHtml("<p>&nbsp;</p>")).toBe(false);
+  });
+
+  it("does not count what the sanitiser removes", () => {
+    expect(hasVisibleBannerHtml("<script>alert(1)</script>")).toBe(false);
+    expect(hasVisibleBannerHtml("<style>body{display:none}</style>")).toBe(false);
+    expect(hasVisibleBannerHtml('<form action="/x"><input name="a"></form>')).toBe(false);
   });
 });
