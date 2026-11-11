@@ -128,7 +128,7 @@ func TestPlainPostgresUpdateDeployedProduct(t *testing.T) {
 				t.Errorf("updatedBy = %q", resp.DeployedProduct.UpdatedBy)
 			}
 			var got string
-			if err := pool.QueryRow(ctx, s.check, ppuDeployedID).Scan(&got); err != nil {
+			if err := repository.NewScoped(pool).QueryRow(ctx, s.check, ppuDeployedID).Scan(&got); err != nil {
 				t.Fatalf("read back: %v", err)
 			}
 			if got != s.want {
@@ -155,7 +155,7 @@ func TestPlainPostgresUpdateDeployment(t *testing.T) {
 		t.Fatalf("UpdateDeployment (name): %v", err)
 	}
 	var gotName, gotBy string
-	if err := pool.QueryRow(ctx, `SELECT name, updated_by FROM deployment WHERE id = $1`, ppuDeploymentID).Scan(&gotName, &gotBy); err != nil {
+	if err := repository.NewScoped(pool).QueryRow(ctx, `SELECT name, updated_by FROM deployment WHERE id = $1`, ppuDeploymentID).Scan(&gotName, &gotBy); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if gotName != name || gotBy != "jane.doe@example.com" {
@@ -167,7 +167,7 @@ func TestPlainPostgresUpdateDeployment(t *testing.T) {
 		t.Fatalf("UpdateDeployment (deactivate): %v", err)
 	}
 	var active bool
-	if err := pool.QueryRow(ctx, `SELECT is_active FROM deployment WHERE id = $1`, ppuDeploymentID).Scan(&active); err != nil {
+	if err := repository.NewScoped(pool).QueryRow(ctx, `SELECT is_active FROM deployment WHERE id = $1`, ppuDeploymentID).Scan(&active); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if active {
