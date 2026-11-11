@@ -63,6 +63,12 @@ func (c *Client) MutedIncidents(ctx context.Context, ruleID string, limit, offse
 	return c.get(ctx, "/alert-mute-rules/"+url.PathEscape(ruleID)+"/muted-incidents?"+q.Encode(), "muted incidents")
 }
 
+// MutedCounts returns alert-core's JSON map of how many incidents each of ruleIDs muted.
+func (c *Client) MutedCounts(ctx context.Context, ruleIDs []string) ([]byte, error) {
+	q := url.Values{"ids": {strings.Join(ruleIDs, ",")}}
+	return c.get(ctx, "/alert-mute-rules/muted-counts?"+q.Encode(), "muted counts")
+}
+
 // FieldValues returns alert-core's JSON list of the values alerts carry in field that contain query.
 func (c *Client) FieldValues(ctx context.Context, field, query string, limit int) ([]byte, error) {
 	q := url.Values{"field": {field}, "q": {query}, "limit": {strconv.Itoa(limit)}}
@@ -82,9 +88,12 @@ func (c *Client) get(ctx context.Context, pathAndQuery, what string) ([]byte, er
 		return nil, fmt.Errorf("alertcore: %s: %w", what, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("alertcore: read %s: %w", what, err)
+	}
+	if len(body) > maxBody {
+		return nil, fmt.Errorf("alertcore: %s response is larger than %d bytes", what, maxBody)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, &apierror.Error{StatusCode: resp.StatusCode}

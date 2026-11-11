@@ -36,6 +36,7 @@ func TestAlertMuteRuleRoutePermissions(t *testing.T) {
 		"GET /alert-mute-rules/{id}":              "handler.PermViewOperations",
 		"GET /alert-mute-rules/{id}/muted-alerts": "handler.PermViewOperations",
 		"GET /alert-field-values":                 "handler.PermViewOperations",
+		"GET /alert-mute-rules/muted-counts":      "handler.PermViewOperations",
 		"POST /alert-mute-rules":                  "handler.PermWrite",
 		"PATCH /alert-mute-rules/{id}":            "handler.PermWrite",
 		"POST /alert-mute-rules/{id}/extend":      "handler.PermWrite",

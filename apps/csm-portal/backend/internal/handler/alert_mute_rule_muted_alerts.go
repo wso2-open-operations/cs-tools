@@ -21,7 +21,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -47,6 +49,7 @@ var alertMuteRuleFieldValueFields = map[string]bool{
 type alertCoreMutedClient interface {
 	MutedIncidents(ctx context.Context, ruleID string, limit, offset int) ([]byte, error)
 	FieldValues(ctx context.Context, field, query string, limit int) ([]byte, error)
+	MutedCounts(ctx context.Context, ruleIDs []string) ([]byte, error)
 }
 
 // AlertMuteRuleMutedAlertsHandler serves GET /alert-mute-rules/{id}/muted-alerts. The muted alerts live in alert-core's
@@ -91,6 +94,45 @@ func (h *AlertMuteRuleMutedAlertsHandler) ListMutedAlerts(w http.ResponseWriter,
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}
+		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsUnavailable)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// mutedCountsMaxIDs matches the rules list's largest page.
+const mutedCountsMaxIDs = 100
+
+// mutedCountsIDPattern is a UUID, which entity-service gives every alert mute rule.
+var mutedCountsIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// ListMutedCounts handles GET /alert-mute-rules/muted-counts?ids=a,b,c: how many alert groups each rule on a list page
+// muted, in one alert-core call instead of one per row.
+func (h *AlertMuteRuleMutedAlertsHandler) ListMutedCounts(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	raw := r.URL.Query().Get("ids")
+	ids := strings.Split(raw, ",")
+	if raw == "" || len(ids) > mutedCountsMaxIDs {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	for _, id := range ids {
+		if !mutedCountsIDPattern.MatchString(id) {
+			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+			return
+		}
+	}
+	if h.alertCore == nil {
+		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsNotConfigured)
+		return
+	}
+	result, err := h.alertCore.MutedCounts(r.Context(), ids)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "alert-core MutedCounts failed", "userID", user.UserID, "rules", len(ids), "err", err)
 		writeError(w, http.StatusServiceUnavailable, errMsgMutedAlertsUnavailable)
 		return
 	}
