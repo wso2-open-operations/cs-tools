@@ -20639,7 +20639,7 @@ components:
           several times matches once. Not supported inside an anyOf branch.
         - **stateEnteredOn** (gte / lte): bounds when that change was logged:
           a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
-          placeholder such as __today__ or __startOfMonth:-1__; gte is
+          placeholder such as `__today__` or `__startOfMonth:-1__`; gte is
           inclusive, a date-only lte covers the whole day. Needs a
           stateEntered filter in the same request;
           without one, stateEntered means at any time. Not supported inside an
