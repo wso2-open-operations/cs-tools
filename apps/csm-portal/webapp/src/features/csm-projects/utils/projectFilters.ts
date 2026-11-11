@@ -16,6 +16,18 @@
 
 import type { SearchProjectsRequest } from "@features/csm-projects/types/csmProjects";
 
+/** The onboarding status labels `PATCH /projects/{id}` accepts; the search
+ *  endpoint matches the same set ignoring case and `-`/`_`/space separators. */
+export const PROJECT_ONBOARDING_STATUSES = [
+  "Not-Started",
+  "In-Progress",
+  "On-Hold",
+  "Completed",
+  "Cancelled",
+  "Expired",
+  "Not-Applicable",
+] as const;
+
 /** The overall closure states `POST /projects/search` filters on. */
 export const PROJECT_CLOSURE_STATES = ["Open", "Suspended", "Restricted"] as const;
 
@@ -112,6 +124,18 @@ function parseClosureStates(raw: string | null): string[] {
   return parseCsv(raw).filter((s) => (PROJECT_CLOSURE_STATES as readonly string[]).includes(s));
 }
 
+/** Case, hyphen, underscore and space are ignored by the search endpoint's
+ *  onboarding status match (`OnHold` and `On-Hold` are both accepted). */
+const normalizeStatus = (s: string): string => s.toLowerCase().replace(/[-_\s]/g, "");
+const KNOWN_ONBOARDING_STATUSES = new Set<string>(PROJECT_ONBOARDING_STATUSES.map(normalizeStatus));
+
+/** Only onboarding statuses the search accepts: an unknown or hand-edited value
+ *  is dropped (the endpoint answers 400 for it). Valid values keep their
+ *  spelling so they still match the filter's option values. */
+function parseOnboardingStatuses(raw: string | null): string[] {
+  return parseCsv(raw).filter((s) => KNOWN_ONBOARDING_STATUSES.has(normalizeStatus(s)));
+}
+
 /** A real `yyyy-MM-dd` calendar date, else `""`. */
 function parseDateOnly(raw: string | null): string {
   const m = raw ? DATE_ONLY_RE.exec(raw) : null;
@@ -128,7 +152,7 @@ function parseDateOnly(raw: string | null): string {
 export function readProjectFilters(params: URLSearchParams): ProjectFilters {
   const out: ProjectFilters = {
     ...EMPTY_PROJECT_FILTERS,
-    onboardingStatus: parseCsv(params.get("onboardingStatus")),
+    onboardingStatus: parseOnboardingStatuses(params.get("onboardingStatus")),
     closureStates: parseClosureStates(params.get("closureStates")),
     excludeClosureStates: parseClosureStates(params.get("excludeClosureStates")),
   };

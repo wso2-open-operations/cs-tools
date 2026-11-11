@@ -118,6 +118,11 @@ func TestProjectOnboardingReadinessIntegration(t *testing.T) {
 		if req.SortOrder == "" {
 			req.SortOrder = "asc"
 		}
+		// Fixtures are inserted from a map (random order), so default to a
+		// deterministic sort instead of created_on; explicit sorts are kept.
+		if req.SortBy == "" {
+			req.SortBy = "productionReadinessCompletionDate"
+		}
 		projects, _, err := repo.SearchProjects(ctx, req, scope)
 		if err != nil {
 			t.Fatalf("SearchProjects(%+v): %v", req, err)

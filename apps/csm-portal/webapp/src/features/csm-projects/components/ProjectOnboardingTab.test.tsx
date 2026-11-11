@@ -16,7 +16,7 @@
 
 import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -333,6 +333,28 @@ describe("ProjectOnboardingTab", () => {
       });
       expect(screen.getByRole("alert")).toHaveTextContent("must not be earlier than the onboarding start date");
       expect(screen.getByRole("group", { name: "Go-live plan date" })).toBeInTheDocument();
+    });
+
+    it("clears the server error when the open field's value changes", () => {
+      function Harness(): ReactElement {
+        const [err, setErr] = useState<string | null>(null);
+        return (
+          <ProjectOnboardingTab
+            project={PROJECT}
+            canEdit
+            saveError={err}
+            onResetError={() => setErr(null)}
+            onSave={() => setErr("go-live date rejected")}
+          />
+        );
+      }
+      render(<Harness />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit Go-live date" }));
+      typeDate("Go-live date", "06/15/2026");
+      save();
+      expect(screen.getByRole("alert")).toHaveTextContent("go-live date rejected");
+      typeDate("Go-live date", "06/20/2026");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
 
     it("shows no error when no field is open", () => {

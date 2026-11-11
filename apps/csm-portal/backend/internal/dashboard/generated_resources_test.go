@@ -231,6 +231,8 @@ func TestParseGenerated_AcceptsProjectOnboardingDateFilters(t *testing.T) {
 	bad := map[string]string{
 		"bad sortBy":           `,"query":{},"sortBy":{"field":"onboardingStartDate","order":"asc"}`,
 		"bad date":             `,"query":{"goLivePlanDateFrom":"next quarter"}`,
+		"timestamp on From":    `,"query":{"onboardingStartDateFrom":"2026-01-01T00:00:00Z"}`,
+		"timestamp on endDate": `,"query":{"endDateTo":"2026-01-01T00:00:00Z"}`,
 		"bad date on To":       `,"query":{"productionReadinessCompletionDateTo":"2026-13-45"}`,
 		"bad closure state":    `,"query":{"closureStates":["Closed"]}`,
 		"closureStates scalar": `,"query":{"closureStates":"Open"}`,

@@ -32,6 +32,14 @@ describe("readProjectFilters", () => {
     expect(read("")).toEqual(EMPTY_PROJECT_FILTERS);
   });
 
+  it("drops unknown onboardingStatus values and keeps the valid ones", () => {
+    expect(read("onboardingStatus=Bogus").onboardingStatus).toEqual([]);
+    expect(read("onboardingStatus=Completed,Bogus%2CNot-Started").onboardingStatus).toEqual([
+      "Completed",
+      "Not-Started",
+    ]);
+  });
+
   it("keeps the dashboard click-through's onboardingStatus format working", () => {
     expect(read("onboardingStatus=In-Progress%2COnHold").onboardingStatus).toEqual(["In-Progress", "OnHold"]);
     expect(read("onboardingStatus=In-Progress,OnHold").onboardingStatus).toEqual(["In-Progress", "OnHold"]);

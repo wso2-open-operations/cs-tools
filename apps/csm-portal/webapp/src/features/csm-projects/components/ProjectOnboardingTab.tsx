@@ -146,8 +146,11 @@ export default function ProjectOnboardingTab({
     onResetError?.();
     setSession(null);
   };
-  const update = (patch: Partial<OnboardingFormValues>): void =>
+  const update = (patch: Partial<OnboardingFormValues>): void => {
+    // The old server error described the previous draft value.
+    onResetError?.();
     setSession((s) => (s ? { ...s, values: { ...s.values, ...patch } } : s));
+  };
 
   const patch = session ? buildOnboardingPatch(session.values, session.baseline) : {};
   const dateErrors = session ? validateOnboardingDates(session.values, session.baseline) : {};

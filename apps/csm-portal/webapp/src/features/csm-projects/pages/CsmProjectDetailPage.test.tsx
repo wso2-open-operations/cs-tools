@@ -111,20 +111,29 @@ vi.mock("@features/csm-projects/api/usePatchProjectSuspensionOverride", () => ({
 }));
 
 const mockPatchOnboardingMutate = vi.fn();
-let mockPatchOnboardingIsError = false;
+// When true, a submitted save fails: the mocked mutation flips to its error
+// state, as a real rejected PATCH would, and `reset` clears it again.
+let mockPatchOnboardingShouldFail = false;
 vi.mock("@features/csm-projects/api/usePatchProjectOnboarding", async () => {
   const actual = await vi.importActual<
     typeof import("@features/csm-projects/api/usePatchProjectOnboarding")
   >("@features/csm-projects/api/usePatchProjectOnboarding");
+  const { useState } = await import("react");
   return {
     ...actual,
-    usePatchProjectOnboarding: () => ({
-      mutate: mockPatchOnboardingMutate,
-      reset: vi.fn(),
-      isPending: false,
-      isError: mockPatchOnboardingIsError,
-      error: mockPatchOnboardingIsError ? new Error("failed") : null,
-    }),
+    usePatchProjectOnboarding: () => {
+      const [isError, setIsError] = useState(false);
+      return {
+        mutate: (...args: unknown[]) => {
+          mockPatchOnboardingMutate(...args);
+          if (mockPatchOnboardingShouldFail) setIsError(true);
+        },
+        reset: () => setIsError(false),
+        isPending: false,
+        isError,
+        error: isError ? new Error("failed") : null,
+      };
+    },
   };
 });
 // The owner picker's directory search is exercised on its own in
@@ -470,7 +479,7 @@ describe("CsmProjectDetailPage — onboarding edit", () => {
   beforeEach(() => {
     mockCanEditProjectOnboarding = false;
     mockPatchOnboardingMutate.mockReset();
-    mockPatchOnboardingIsError = false;
+    mockPatchOnboardingShouldFail = false;
     mockUseGetProject.mockReturnValue({
       data: {
         ...PROJECT,
@@ -583,12 +592,17 @@ describe("CsmProjectDetailPage — onboarding edit", () => {
     );
   });
 
-  it("shows the save error inline next to the open field", () => {
+  it("shows the save error inline next to the open field after a failed save", () => {
     mockCanEditProjectOnboarding = true;
-    mockPatchOnboardingIsError = true;
+    // The failure lands when the save is submitted, as it does for a real PATCH.
+    mockPatchOnboardingShouldFail = true;
     renderPage("/customers/projects/proj-1?tab=onboarding");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Edit Onboarding status" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /onboarding status/i }));
+    fireEvent.click(screen.getByRole("option", { name: "On Hold" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mockPatchOnboardingMutate).toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Could not update the project's onboarding details",
     );
@@ -599,7 +613,7 @@ describe("CsmProjectDetailPage — Onboarding tab", () => {
   beforeEach(() => {
     mockCanEditProjectOnboarding = false;
     mockPatchOnboardingMutate.mockReset();
-    mockPatchOnboardingIsError = false;
+    mockPatchOnboardingShouldFail = false;
     mockUseGetProject.mockReturnValue({
       data: {
         ...PROJECT,

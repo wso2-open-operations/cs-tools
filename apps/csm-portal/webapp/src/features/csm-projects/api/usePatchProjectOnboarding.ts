@@ -21,17 +21,11 @@ import {
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { PROJECT_ONBOARDING_STATUSES } from "@features/csm-projects/utils/projectFilters";
 
-/** The onboarding status labels `PATCH /projects/{id}` accepts. */
-export const PROJECT_ONBOARDING_STATUSES = [
-  "Not-Started",
-  "In-Progress",
-  "On-Hold",
-  "Completed",
-  "Cancelled",
-  "Expired",
-  "Not-Applicable",
-] as const;
+// Defined beside the filter vocabulary (a config-free module the URL parser
+// can import); re-exported here for this hook's callers.
+export { PROJECT_ONBOARDING_STATUSES };
 
 export type ProjectOnboardingStatusValue = (typeof PROJECT_ONBOARDING_STATUSES)[number];
 
@@ -97,13 +91,16 @@ export function usePatchProjectOnboarding(
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [ApiQueryKeys.CSM_PROJECT_DETAIL, projectId ?? ""],
-      });
       // The projects list (`useSearchProjects.ts`) keys its cache with a raw
       // literal, not `ApiQueryKeys.CSM_PROJECTS`.
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         predicate: (q) => q.queryKey[0] === "csm-projects-search",
+      });
+      // Returned so the mutation stays pending until the detail refetch lands:
+      // the tab captures its date-validation baseline from the project on a
+      // pencil click, and a click before the refetch would use the old values.
+      return queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CSM_PROJECT_DETAIL, projectId ?? ""],
       });
     },
   });

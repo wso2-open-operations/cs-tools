@@ -69,6 +69,7 @@ type resourceRules struct {
 	fields     map[string]fieldRule // allowed "filters" list fields; nil means no list
 	sortBy     []string             // allowed list sortBy fields; none means a list sets no sortBy
 	slicesVia  string               // the grouping to suggest when groupBy is not allowed
+	plainDates bool                 // dateKeys take YYYY-MM-DD or a relative date token, never an RFC 3339 time (the backing search rejects one)
 	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
 	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
 }
@@ -183,9 +184,10 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"productionReadinessCompletionDateFrom": aDate,
 			"productionReadinessCompletionDateTo":   aDate,
 		},
-		dateKeys:  map[string]bool{"endDateFrom": true, "endDateTo": true, "onboardingStartDateFrom": true, "onboardingStartDateTo": true, "goLivePlanDateFrom": true, "goLivePlanDateTo": true, "goLiveDateFrom": true, "goLiveDateTo": true, "onboardingExpiryDateFrom": true, "onboardingExpiryDateTo": true, "productionReadinessCompletionDateFrom": true, "productionReadinessCompletionDateTo": true},
-		sortBy:    []string{"endDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"},
-		slicesVia: "group with slices",
+		dateKeys:   map[string]bool{"endDateFrom": true, "endDateTo": true, "onboardingStartDateFrom": true, "onboardingStartDateTo": true, "goLivePlanDateFrom": true, "goLivePlanDateTo": true, "goLiveDateFrom": true, "goLiveDateTo": true, "onboardingExpiryDateFrom": true, "onboardingExpiryDateTo": true, "productionReadinessCompletionDateFrom": true, "productionReadinessCompletionDateTo": true},
+		sortBy:     []string{"endDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"},
+		plainDates: true,
+		slicesVia:  "group with slices",
 	},
 	// Case feedback (CSAT): a flat rating and submission dates; grouped on the
 	// server by a date bucket (bars of the average rating) or by rating /
@@ -313,7 +315,7 @@ func checkGeneratedQuery(at string, query map[string]any, rules resourceRules) e
 			if ok && rules.fixedDates && generatedRelativeDate.MatchString(s) {
 				return fmt.Errorf("%w: %s.%s: a %s widget takes a plain date (YYYY-MM-DD), not a relative date", ErrGeneratedInvalid, at, k, rules.noun)
 			}
-			if !ok || !generatedDate(s) {
+			if !ok || !generatedDate(s) || (rules.plainDates && !generatedPlainDate(s)) {
 				return fmt.Errorf("%w: %s.%s must be a date (YYYY-MM-DD) or a relative date such as __daysAgo:30__", ErrGeneratedInvalid, at, k)
 			}
 			continue
@@ -446,6 +448,16 @@ func generatedDate(s string) bool {
 		return true
 	}
 	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
+}
+
+// generatedPlainDate reports whether s is a relative date placeholder or a
+// YYYY-MM-DD date, but not an RFC 3339 time.
+func generatedPlainDate(s string) bool {
+	if generatedRelativeDate.MatchString(s) {
+		return true
+	}
+	_, err := time.Parse("2006-01-02", s)
 	return err == nil
 }
 

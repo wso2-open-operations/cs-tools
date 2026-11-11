@@ -22242,7 +22242,7 @@ components:
           description: >-
             Only projects with a onboarding start date on or before this date (yyyy-MM-dd,
             inclusive); a project with no such date never matches. Must not be
-            after the matching From bound. Postgres only; a 400 on any other data
+            before the matching From bound. Postgres only; a 400 on any other data
             source.
         goLivePlanDateFrom:
           type: string
@@ -22258,7 +22258,7 @@ components:
           description: >-
             Only projects with a planned go-live date on or before this date (yyyy-MM-dd,
             inclusive); a project with no such date never matches. Must not be
-            after the matching From bound. Postgres only; a 400 on any other data
+            before the matching From bound. Postgres only; a 400 on any other data
             source.
         goLiveDateFrom:
           type: string
@@ -22274,7 +22274,7 @@ components:
           description: >-
             Only projects with a actual go-live date on or before this date (yyyy-MM-dd,
             inclusive); a project with no such date never matches. Must not be
-            after the matching From bound. Postgres only; a 400 on any other data
+            before the matching From bound. Postgres only; a 400 on any other data
             source.
         onboardingExpiryDateFrom:
           type: string
@@ -22290,7 +22290,7 @@ components:
           description: >-
             Only projects with a onboarding expiry date on or before this date (yyyy-MM-dd,
             inclusive); a project with no such date never matches. Must not be
-            after the matching From bound. Postgres only; a 400 on any other data
+            before the matching From bound. Postgres only; a 400 on any other data
             source.
         productionReadinessCompletionDateFrom:
           type: string
@@ -22306,7 +22306,7 @@ components:
           description: >-
             Only projects with a production-readiness completion date on or before this date (yyyy-MM-dd,
             inclusive); a project with no such date never matches. Must not be
-            after the matching From bound. Postgres only; a 400 on any other data
+            before the matching From bound. Postgres only; a 400 on any other data
             source.
         closureStates:
           type: array
