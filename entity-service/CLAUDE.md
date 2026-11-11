@@ -8687,6 +8687,13 @@ drainer, which creates `TASK`-numbered tasks) -- wait for in-flight work to fini
 until the seed has committed: `setval()` is not atomic with the maximum it was computed from, so an
 allocation in between can be overwritten and a number issued twice.
 
+**Update (migration `0290`): `next_wso2_id` heals a stale counter.** It now checks each candidate
+`<key>-<n>` against `work_item.wso2_id` (the unique index) and advances `project.wso2_id_counter`
+past any existing id, never lowering it, so the counter seed is no longer required for `wso2_id`
+correctness and precondition (2) no longer applies to it (`CS` numbers and the other series still
+need the seed). The check runs with `app.is_internal = 'true'` set on the function only, so a
+customer-initiated create also sees ids it cannot read; the caller's own visibility is unchanged.
+
 > **Historical.** The rest of this section, down to the `CaseRepository.CreateCase` paragraph, describes
 > migration `0140`'s `CS-PORTAL-` / `<key>-PORTAL-<n>` generators as they were introduced. Everything it
 > says about *which functions the create queries use* is superseded by the update above (migration
