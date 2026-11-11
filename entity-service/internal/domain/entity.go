@@ -9024,6 +9024,16 @@ type SLAClockState struct {
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
 	TeamLeadName  string `json:"teamLeadName,omitempty"`
+	// ProjectOnboardingStatus/IsEvaluationAccount mirror SLAStatus's own
+	// fields of the same name and the same resolution (project.onboarding_status,
+	// project_type.name = "Evaluation Subscription") -- added so
+	// csm-notification-service's SLA breach Chat-alert routing can read real
+	// team/onboarding/evaluation facts from this same call (GetClockState,
+	// made right before sending a breach alert) instead of the hardcoded
+	// false/"" it used to pass to chataudience.Resolve, now that
+	// case.created no longer carries either fact itself.
+	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
+	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

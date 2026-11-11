@@ -495,6 +495,11 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // SLA breach email reaction needed them from the exact same call it
 // already makes before sending a breach alert, rather than resolve any
 // other case-like display data this method still has no need for.
+// Also joins project/project_type for ProjectOnboardingStatus/
+// IsEvaluationAccount, the same two facts SearchActiveSLAStatuses already
+// resolves -- added so csm-notification-service's SLA breach Chat alert can
+// route through chataudience.Resolve with the case's real team/onboarding/
+// evaluation facts instead of the hardcoded false/"" it used before this.
 //
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
@@ -510,7 +515,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // correct for those (a PAUSED/terminal row's figure was already frozen
 // correctly, business-day-aware, at the moment it was written).
 func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
-	args := []any{workItemID, target}
+	args := []any{workItemID, target, evaluationSubscriptionProjectTypeName}
 
 	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
 	// on this): the per-policy registration guard lets two policies
@@ -536,7 +541,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
 		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
-		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
+		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
+		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE)
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -551,6 +557,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		) lead_tm ON TRUE
 		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
+		LEFT JOIN project p ON p.id = wi.project_id
+		LEFT JOIN project_type pt ON pt.id = p.project_type_id
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
@@ -567,12 +575,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus *string
+	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
+		&onboardingStatus, &isEvaluation,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -593,6 +603,8 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	state.TeamLeadName = stringOrEmpty(teamLeadName)
 	state.AssigneeName = stringOrEmpty(assigneeName)
 	state.AssigneeEmail = stringOrEmpty(assigneeEmail)
+	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
+	state.IsEvaluationAccount = isEvaluation
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

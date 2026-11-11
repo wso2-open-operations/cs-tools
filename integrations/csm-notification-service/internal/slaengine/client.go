@@ -333,6 +333,13 @@ type clockState struct {
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
 	TeamLeadName  string `json:"teamLeadName,omitempty"`
+	// ProjectOnboardingStatus/IsEvaluationAccount mirror entity-service's own
+	// domain.SLAClockState fields of the same name — the real team/
+	// onboarding/evaluation facts Engine.sendBreachAlert passes to
+	// chataudience.Resolve, replacing the hardcoded false/"" it used before
+	// entity-service's GetClockState started resolving these.
+	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
+	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
 }
 
 // GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>

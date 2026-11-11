@@ -2621,6 +2621,22 @@ otherwise narrow scope (see its own doc comment on why it has no
 work_item/case/announcement join otherwise) — purely for these four
 display-only fields, nothing else case-like is added.
 
+**`GetClockState` also resolves `ProjectOnboardingStatus`/`IsEvaluationAccount`**
+(`project`/`project_type` joins, the same ones `SearchActiveSLAStatuses` already
+uses for the identical two fields) — added because `csm-notification-service`'s
+own SLA breach Chat alert had been routing with these two facts hardcoded to
+`false`/`""` ever since `case.created` stopped carrying them, so an
+onboarding-stage case's breach alert never reached the Onboarding Chat space
+at all, regardless of the project's real `onboarding_status` (the
+frustration-detection alert, which gets these facts off its own event
+payload instead, never had this gap). `csm-notification-service`'s
+`Engine.sendBreachAlert` now reads both straight off this same `GetClockState`
+call — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine", and
+`internal/chataudience`'s own doc comments for the routing side of this fix
+(onboarding now routes to the Onboarding Chat audience alone, not on top of
+the case's own team space, mirroring how an Evaluation Subscription case
+already routes to Evaluation alone).
+
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
 of the same name/reasoning) — `AccessService.ResolveScope`'s scope must be

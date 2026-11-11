@@ -1008,6 +1008,40 @@ func TestTick_BreachAlert_RealTeamAudienceIsNotRetargeted(t *testing.T) {
 	}
 }
 
+// TestTick_BreachAlert_OnboardingProjectRoutesToOnboardingAlone is the
+// regression test for a real, reported gap: sendBreachAlert used to call
+// chataudience.Resolve with isEvaluationAccount/onboardingStatus hardcoded
+// to false/"", so an onboarding-stage case's SLA breach Chat alert never
+// reached the Onboarding space at all, regardless of the project's real
+// onboarding_status. Those two facts now come from the same GetClockState
+// call already made for the stale-alert check (state.IsEvaluationAccount/
+// state.ProjectOnboardingStatus) -- and chataudience.Resolve now routes an
+// onboarding-stage case to the Onboarding space ALONE, not on top of its
+// own team's space (see that function's own doc comment).
+func TestTick_BreachAlert_OnboardingProjectRoutesToOnboardingAlone(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{spaces: map[string]bool{"Team Nova": true, "Onboarding": true}}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {Found: true, Stage: "IN_PROGRESS", StartedOn: &past, ProjectOnboardingStatus: "IN_PROGRESS"},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 1 {
+		t.Fatalf("chat calls = %+v, want exactly one", chat.calls)
+	}
+	if got := chat.calls[0].audience; got != "Onboarding" {
+		t.Errorf("audience = %q, want %q (an onboarding-stage case must route to Onboarding alone, not its own team's space)", got, "Onboarding")
+	}
+}
+
 // TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor
 // guards the product decision that a service request's SLA breach stays
 // UI-only: the account's default CRE team (ClockMeta.Team) is often not the

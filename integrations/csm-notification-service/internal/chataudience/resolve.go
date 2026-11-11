@@ -62,9 +62,10 @@ const (
 )
 
 // onboardingStatuses are the entity-service project.onboarding_status raw
-// values that add the Onboarding Chat audience on top of whichever
-// audience the case's own CreTeam resolves to. A policy decision kept
-// here, not in entity-service, so it can change without a redeploy there.
+// values that route a case to the Onboarding Chat audience alone, in place
+// of whichever audience the case's own CreTeam would otherwise resolve to
+// (see Resolve's own doc comment). A policy decision kept here, not in
+// entity-service, so it can change without a redeploy there.
 var onboardingStatuses = map[string]bool{
 	"IN_PROGRESS": true,
 	"NOT_STARTED": true,
@@ -126,6 +127,20 @@ func Resolve(team string, isEvaluationAccount bool, onboardingStatus string, now
 		return []string{Evaluation}
 	}
 
+	// A case on a project still being onboarded belongs to the Onboarding
+	// audience ALONE — not on top of its own team's space — mirroring
+	// Evaluation's own exclusive posture above, by explicit product
+	// direction (an onboarding-stage case's alerts should be watched by
+	// whoever is actually running that onboarding, not split across two
+	// spaces). Gated on hasAudience(Onboarding): with no Onboarding space
+	// configured for this deployment, there is nowhere for this to go, so
+	// routing falls through unchanged to the team/Incident Monitor rules
+	// below exactly as if the project weren't onboarding at all, rather
+	// than silently dropping every onboarding-stage alert on the floor.
+	if onboardingStatuses[strings.ToUpper(strings.TrimSpace(onboardingStatus))] && hasAudience(Onboarding) {
+		return []string{Onboarding}
+	}
+
 	var audiences []string
 	add := func(audience string) {
 		if !slices.Contains(audiences, audience) {
@@ -137,10 +152,6 @@ func Resolve(team string, isEvaluationAccount bool, onboardingStatus string, now
 		add(team)
 	} else {
 		add(IncidentMonitor)
-	}
-
-	if onboardingStatuses[strings.ToUpper(strings.TrimSpace(onboardingStatus))] {
-		add(Onboarding)
 	}
 
 	ist := now.In(istLocation)

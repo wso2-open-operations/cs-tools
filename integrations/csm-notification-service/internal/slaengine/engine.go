@@ -1194,20 +1194,26 @@ func (e *Engine) alertTier(ctx context.Context, meta ClockMeta, caseID, clockTyp
 
 // sendBreachAlert builds and sends the Google Chat breach card for one tier
 // crossing, once per resolved Chat audience — team/standing-audience
-// routing (chataudience.Resolve), same as the design this replaces. Unlike
-// that design, isEvaluationAccount/onboardingStatus are always
-// false/"" here: case.created carries neither any more (see
+// routing (chataudience.Resolve), same as the design this replaces.
+// isEvaluationAccount/onboardingStatus now come from state.IsEvaluationAccount/
+// state.ProjectOnboardingStatus — the same GetClockState call already made
+// for the stale-alert check below, which entity-service now also resolves
+// these two on (see that call's own doc comment). They used to be
+// hardcoded false/"" here: case.created stopped carrying either fact (see
 // events.CaseCreatedPayload's own doc comment — a since-reverted feature
-// briefly needed them and entity-service stopped populating them), so this
-// alert routes on team alone, falling back to the fixed "Incident Monitor"
-// audience — a known, accepted reduction from the removed poll design's
-// own live entity-service lookup, not a bug. teamLeadName, by contrast, IS
-// resolved — from state.TeamLeadName below, the same GetClockState call
-// made for the stale-alert check, which entity-service now also resolves
-// this field on (see that call's own doc comment). Resolve's
-// own "Incident Monitor" fallback is retargeted to chataudience.SLADefault
-// right before sending (see that constant's own doc comment) — a different
-// webhook into the same Chat space, not a different space.
+// briefly needed them), and this call site was never updated to source
+// them another way until entity-service's GetClockState grew them, the
+// same way it already carried TeamLeadName for this identical reason. A
+// real, reported gap this closes: an onboarding-stage case's SLA breach
+// Chat alert never reached the Onboarding space at all, regardless of the
+// project's real onboarding_status, while the frustration-detection alert
+// (dispatch.checkFrustration, which gets these facts straight off its own
+// event payload) always had. Resolve's own "Incident Monitor" fallback is
+// retargeted to chataudience.SLADefault right before sending (see that
+// constant's own doc comment) — a different webhook into the same Chat
+// space, not a different space; this retargeting never applies to the
+// Onboarding/Evaluation audiences, both of which Resolve now returns
+// exclusively (see that function's own doc comment).
 //
 // A failed send to one audience is logged (naming that Chat space) and NOT
 // retried — same explicit product decision, and same reasoning, as the
@@ -1263,7 +1269,7 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		openedAt = meta.StartedAt.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
 	}
 
-	audiences := chataudience.Resolve(meta.Team, false, "", e.clock(), e.chat.HasAudienceSpace)
+	audiences := chataudience.Resolve(meta.Team, state.IsEvaluationAccount, state.ProjectOnboardingStatus, e.clock(), e.chat.HasAudienceSpace)
 	caseLink := e.links.CSMLink(caseID)
 	for _, audience := range audiences {
 		// The Incident Monitor fallback posts through its own dedicated
