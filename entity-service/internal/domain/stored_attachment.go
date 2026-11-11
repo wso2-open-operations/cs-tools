@@ -250,6 +250,11 @@ type StoredAttachmentInsert struct {
 	Draft bool
 	// Staged: the upload may be sent straight to Azure (see StoredAttachmentRow.Staged).
 	Staged bool
+	// MaxPendingStaged, when above 0, is how many staged uploads CreatedBy may have
+	// pending (created after PendingSince) once this one is added. It is checked in
+	// the same transaction as the insert.
+	MaxPendingStaged int
+	PendingSince     time.Time
 }
 
 // AbandonedUpload is an upload that was started and never confirmed.

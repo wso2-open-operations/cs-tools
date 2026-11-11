@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -296,12 +297,6 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ConflictError{Msg: closedParentMessage}
 	}
 
-	if staged {
-		if err := s.checkPendingStagedUploads(ctx, email); err != nil {
-			return domain.InitiateAttachmentUploadResponse{}, err
-		}
-	}
-
 	// Charged before the row is written, so a refused call leaves nothing behind.
 	if err := s.reserveShares(ctx, 1); err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
@@ -309,7 +304,11 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	row, err := s.repo.InsertPending(ctx, req.Kind, domain.StoredAttachmentInsert{
 		ParentID: parentID, Name: req.Name, ContentType: req.ContentType,
 		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft, Staged: staged,
+		MaxPendingStaged: maxPendingStagedUploads, PendingSince: s.now().Add(-pendingStagedUploadWindow),
 	})
+	if errors.Is(err, repository.ErrTooManyPendingUploads) {
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.TooManyRequestsError{Msg: "Too many large uploads are waiting to finish. Finish or cancel some, or wait a few hours, and try again."}
+	}
 	if err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
@@ -336,19 +335,6 @@ const (
 	// caller who gave up on some is not blocked until the cleanup runs.
 	pendingStagedUploadWindow = 6 * time.Hour
 )
-
-// checkPendingStagedUploads limits how much unconfirmed data a caller can leave in
-// storage, since a link cannot cap how much is sent.
-func (s *storedAttachmentService) checkPendingStagedUploads(ctx context.Context, email string) error {
-	n, err := s.repo.CountPendingStagedUploads(ctx, email, s.now().Add(-pendingStagedUploadWindow))
-	if err != nil {
-		return err
-	}
-	if n >= maxPendingStagedUploads {
-		return &apierror.TooManyRequestsError{Msg: "Too many large uploads are waiting to finish. Finish or cancel some, or wait a few hours, and try again."}
-	}
-	return nil
-}
 
 // ConfirmUpload implements StoredAttachmentService.
 func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error) {

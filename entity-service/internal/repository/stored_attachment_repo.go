@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -68,10 +69,6 @@ type StoredAttachmentRepository interface {
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
 	ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error)
-	// CountPendingStagedUploads returns how many uploads by email, across the three
-	// tables, are still PENDING and were created after since, among the uploads
-	// that may be sent straight to storage.
-	CountPendingStagedUploads(ctx context.Context, email string, since time.Time) (int, error)
 	// LinkInlineImages attaches to a comment the images in ids that are stored,
 	// unlinked, on that work item and uploaded by email, and returns the ids it
 	// linked (repeating the call for an already linked image returns it again).
@@ -245,12 +242,19 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		// A draft description image or report has a project and no work item yet.
 		parentCol = "project_id"
 	}
-	row := r.db.QueryRow(ctx, `
-		INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`, staged)
-		VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5, $6)
-		RETURNING `+storedAttachmentColumns(t),
-		in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID, in.Staged)
-	a, err := scanStoredAttachment(row)
+	insert := func(q querier) (domain.StoredAttachmentRow, error) {
+		return scanStoredAttachment(q.QueryRow(ctx, `
+			INSERT INTO `+t.table+` (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, `+parentCol+`, staged)
+			VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3, $4, $5, $6)
+			RETURNING `+storedAttachmentColumns(t),
+			in.CreatedBy, in.Name, in.ContentType, in.SizeBytes, in.ParentID, in.Staged))
+	}
+	var a domain.StoredAttachmentRow
+	if in.Staged && in.MaxPendingStaged > 0 {
+		a, err = r.insertWithinPendingLimit(ctx, in, insert)
+	} else {
+		a, err = insert(r.db)
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		// 42501: a row-level-security policy refused the insert, which is what a
@@ -266,6 +270,31 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		return domain.StoredAttachmentRow{}, callerError(fmt.Errorf("insert pending attachment: %w", err))
 	}
 	return a, nil
+}
+
+// ErrTooManyPendingUploads: the caller already has as many unfinished staged uploads as allowed.
+var ErrTooManyPendingUploads = errors.New("too many pending staged uploads")
+
+// insertWithinPendingLimit counts the caller's pending staged uploads and inserts
+// in one transaction. The per-caller lock makes two requests at once take turns,
+// so they cannot both pass the count.
+func (r *storedAttachmentRepo) insertWithinPendingLimit(ctx context.Context, in domain.StoredAttachmentInsert, insert func(querier) (domain.StoredAttachmentRow, error)) (domain.StoredAttachmentRow, error) {
+	var row domain.StoredAttachmentRow
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "staged-uploads:"+strings.ToLower(in.CreatedBy)); err != nil {
+			return fmt.Errorf("lock staged uploads: %w", err)
+		}
+		n, err := countPendingStaged(ctx, tx, in.CreatedBy, in.PendingSince)
+		if err != nil {
+			return err
+		}
+		if n >= in.MaxPendingStaged {
+			return ErrTooManyPendingUploads
+		}
+		row, err = insert(tx)
+		return err
+	})
+	return row, err
 }
 
 // GetProject implements StoredAttachmentRepository.
@@ -555,8 +584,9 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 	return out, nil
 }
 
-// CountPendingStagedUploads implements StoredAttachmentRepository.
-func (r *storedAttachmentRepo) CountPendingStagedUploads(ctx context.Context, email string, since time.Time) (int, error) {
+// countPendingStaged returns how many staged uploads by email, across the three
+// tables, are still PENDING and were created after since.
+func countPendingStaged(ctx context.Context, q querier, email string, since time.Time) (int, error) {
 	total := 0
 	for _, kind := range []domain.StoredAttachmentKind{domain.StoredAttachmentWorkItem, domain.StoredAttachmentComment, domain.StoredAttachmentDeployment} {
 		t, err := storedAttachmentTableFor(kind)
@@ -564,7 +594,7 @@ func (r *storedAttachmentRepo) CountPendingStagedUploads(ctx context.Context, em
 			return 0, err
 		}
 		var n int
-		if err := r.db.QueryRow(ctx, `SELECT count(*) FROM `+t.table+`
+		if err := q.QueryRow(ctx, `SELECT count(*) FROM `+t.table+`
 			WHERE status = 'PENDING' AND staged AND lower(created_by) = lower($1) AND created_on > $2`,
 			email, since).Scan(&n); err != nil {
 			return 0, fmt.Errorf("count pending staged uploads: %w", err)
