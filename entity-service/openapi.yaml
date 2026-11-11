@@ -5268,8 +5268,10 @@ paths:
         Postgres by the same rule in the same transaction) and returned. Sub-states
         are accepted and returned in ServiceNow Title Case, e.g. "Pending Notified".
         On Postgres, endDateClosureState, invoiceDueDateClosureState,
-        suspensionProcessState and suspensionProcessOverridden are stored, and
-        the overall closureState is recomputed in the same transaction. A caller
+        suspensionProcessState and suspensionProcessOverridden are stored.
+        Changing endDateClosureState, invoiceDueDateClosureState or
+        complianceViolationClosureState also recomputes the overall
+        closureState in the same transaction. A caller
         whose client id is in the internal-client allow-list (M2M_CLIENT_IDS)
         may call without x-user-id-token.
       operationId: updateProject
