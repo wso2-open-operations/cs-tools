@@ -50,6 +50,12 @@
 -- USAGE (dry run is the default and only reads):
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed_native_numbering.sql
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v apply=1 -f seed_native_numbering.sql
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v apply=1 -v gap=500 -f seed_native_numbering.sql
+-- gap (default 100) is added to every number series' maximum, so the source
+-- system can keep allocating that many more numbers while the data source is
+-- being switched without reaching the first native number. It does not apply
+-- to the wso2_id counters (see below). Size it from the source system's
+-- allocation rate times the length of the switch window.
 -- The role needs USAGE (or SELECT) on every number_series sequence and every
 -- extra sequence listed in :seed_seq; without it
 -- the script stops before changing anything and names the sequences.
@@ -60,8 +66,14 @@
 --     leading prefix, too few or no digits) never count. Portal/GitHub marker
 --     numbers (CS-PORTAL-, CHG-GH-, SR-GH-) contain hyphens and so never
 --     match; neither does a longer prefix (CSTASK never counts towards CS).
---   * setval(seq, max, true): the next value issued is max + 1. A sequence
---     already at or past max is left alone: nothing ever moves backwards.
+--   * setval(seq, max + gap, true): the next value issued is max + gap + 1. A
+--     sequence already at or past max + gap is left alone: nothing ever moves
+--     backwards. A series that already allocates natively (TASK, OUT) gets the
+--     gap once too; harmless, since it only moves forward. Re-running after
+--     native allocation has started never lowers or re-spends anything.
+--   * wso2_id counters get NO gap: a "<key>-N" id has to stay consecutive per
+--     project. The native allocator skips an id that already exists, so a
+--     counter that is behind the data heals itself on the next create.
 --   * wso2_id: per project, the largest integer N among ids exactly
 --     "<project.key>-N" (compared as integers, so 10 beats 9), across ALL
 --     work items (an id keeps its key's namespace even if the item moved
@@ -78,6 +90,17 @@
 \if :{?apply}
 \else
 \set apply false
+\endif
+\if :{?gap}
+\else
+\set gap 100
+\endif
+-- Refuse a gap that is not a non-negative integer before anything runs.
+SELECT (:'gap' ~ '^[0-9]+$') AS seed_gap_ok \gset
+\if :seed_gap_ok
+\else
+\echo 'ABORTED: gap must be a non-negative integer, got' :'gap'
+DO $$ BEGIN RAISE EXCEPTION 'seed_native_numbering: gap must be a non-negative integer'; END $$;
 \endif
 
 \if :apply
@@ -191,15 +214,15 @@ plan AS (
 ),
 applied AS (
     SELECT plan.*,
-           CASE WHEN :'apply'::boolean AND source_max > seq_before
-                THEN setval(sequence_name::regclass, source_max::bigint, true)
-                ELSE GREATEST(seq_before, COALESCE(source_max, seq_before))
+           CASE WHEN :'apply'::boolean AND source_max + :gap > seq_before
+                THEN setval(sequence_name::regclass, (source_max + :gap)::bigint, true)
+                ELSE GREATEST(seq_before, COALESCE(source_max + :gap, seq_before))
            END AS seq_after
     FROM plan
 )
 SELECT series, sequence_name, used_by, sources, source_max, seq_before, seq_after,
        CASE WHEN source_max IS NULL THEN 'unchanged (no matching rows)'
-            WHEN source_max > seq_before THEN CASE WHEN :'apply'::boolean THEN 'ADVANCED' ELSE 'would advance' END
+            WHEN source_max + :gap > seq_before THEN CASE WHEN :'apply'::boolean THEN 'ADVANCED' ELSE 'would advance' END
             ELSE 'unchanged (sequence already ahead)'
        END AS action,
        series || LPAD((seq_after + 1)::text, GREATEST(digits, LENGTH((seq_after + 1)::text)), '0') AS next_number
