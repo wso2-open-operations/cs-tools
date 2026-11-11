@@ -228,6 +228,7 @@ func main() {
 	requireAPIToken := auth.RequireToken(apiToken, "api token", base.With("component", "auth"))
 	mux.Handle("GET /alert-mute-rules/{id}/muted-incidents", requireAPIToken(http.HandlerFunc(apiHandler.MutedIncidents)))
 	mux.Handle("GET /alert-field-values", requireAPIToken(http.HandlerFunc(apiHandler.FieldValues)))
+	mux.Handle("GET /alert-mute-rules/muted-counts", requireAPIToken(http.HandlerFunc(apiHandler.MutedCounts)))
 
 	port := os.Getenv("PORT")
 	if port == "" {

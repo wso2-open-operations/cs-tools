@@ -325,8 +325,11 @@ func TestIncidentRepo_MuteLifecycle(t *testing.T) {
 	if err := repo.Mute(ctx, other.ID, "b1", "AMR0000001"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Unmute(ctx, other.ID); err != nil {
-		t.Fatal(err)
+	if ok, err := repo.Unmute(ctx, other.ID, other.FoldVersion+1); err != nil || ok {
+		t.Fatalf("stale unmute = %v, %v; want false, nil", ok, err)
+	}
+	if ok, err := repo.Unmute(ctx, other.ID, other.FoldVersion); err != nil || !ok {
+		t.Fatalf("unmute = %v, %v", ok, err)
 	}
 	other, _, _ = repo.Get(ctx, other.ID)
 	if other.Muted || other.UnmutedAt == nil || other.MutedAt == nil || other.MuteEligible() {

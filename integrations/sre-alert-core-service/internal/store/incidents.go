@@ -313,9 +313,16 @@ func (r *IncidentRepo) Mute(ctx context.Context, id int64, ruleID, ruleNumber st
 		id, ruleID, ruleNumber)
 }
 
-// Unmute releases a muted incident for normal delivery.
-func (r *IncidentRepo) Unmute(ctx context.Context, id int64) error {
-	return r.exec(ctx, "unmute", id, `UPDATE incidents_processed SET muted = false, unmuted_at = now() WHERE id = $1`, id)
+// Unmute releases a muted incident for normal delivery. Like CloseMuted it is fold-version guarded: it does nothing,
+// and returns false, if a fold changed the incident since foldVersion (an OK that just arrived must be seen before the
+// incident is delivered), and that fold left it due, so the next pass decides again.
+func (r *IncidentRepo) Unmute(ctx context.Context, id, foldVersion int64) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE incidents_processed SET muted = false, unmuted_at = now()
+		WHERE id = $1 AND fold_version = $2`, id, foldVersion)
+	if err != nil {
+		return false, fmt.Errorf("unmute incident %d: %w", id, err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // MuteOutcome reports, for a muted incident no rule matches any more, whether its last alert was a resolving one
@@ -382,6 +389,33 @@ func (r *IncidentRepo) MutedByRuleSummary(ctx context.Context, ruleID string) (m
 	counts := map[string]int{}
 	for _, inc := range incs {
 		counts[inc.MuteOutcome()]++
+	}
+	return counts, nil
+}
+
+// MutedCounts returns how many incidents each of ruleIDs muted (rules that muted nothing are absent), in one query, so a
+// list of rules does not ask once per rule.
+func (r *IncidentRepo) MutedCounts(ctx context.Context, ruleIDs []string) (map[string]int, error) {
+	counts := map[string]int{}
+	if len(ruleIDs) == 0 {
+		return counts, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT mute_rule_id, count(*) FROM incidents_processed
+		WHERE mute_rule_id = ANY($1) GROUP BY mute_rule_id`, ruleIDs)
+	if err != nil {
+		return nil, fmt.Errorf("count incidents muted by %d rules: %w", len(ruleIDs), err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("count incidents muted by %d rules: %w", len(ruleIDs), err)
+		}
+		counts[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("count incidents muted by %d rules: %w", len(ruleIDs), err)
 	}
 	return counts, nil
 }
