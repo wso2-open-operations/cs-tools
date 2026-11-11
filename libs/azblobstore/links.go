@@ -91,16 +91,13 @@ func (s *Store) DownloadLink(key, fileName, contentType string, ttl time.Duratio
 // reads the source while it handles the request, so a short time is enough.
 const copySourceTTL = 2 * time.Minute
 
-// copyPollEvery is how often Copy asks whether a copy Azure answered "pending" to
-// has finished. A copy inside one account normally finishes in the first answer.
+// copyPollEvery is how often Copy checks a copy that Azure has not finished.
 const copyPollEvery = 200 * time.Millisecond
 
-// Copy makes the blob at dstKey a copy of the committed blob at srcKey, content
-// and content type, inside Azure: no byte passes through the caller. An existing
-// blob at dstKey is replaced. It needs what links need (an account key), because
-// Azure reads the source through a short-lived read link. It returns ErrNotFound
-// when there is no blob at srcKey, and waits (until ctx ends) for a copy Azure
-// has not finished yet.
+// Copy makes dstKey a copy of the committed blob at srcKey (content and type),
+// inside Azure, replacing what is at dstKey. It needs an account key, because
+// Azure reads the source through a short-lived link. It returns ErrNotFound when
+// srcKey is missing and waits, until ctx ends, for a copy that is still pending.
 func (s *Store) Copy(ctx context.Context, srcKey, dstKey string) error {
 	if err := validateKey(srcKey); err != nil {
 		return err
