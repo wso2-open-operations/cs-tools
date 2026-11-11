@@ -8253,6 +8253,13 @@ paths:
   /deployed-products:
     post:
       summary: Create a new deployed product.
+      description: >-
+        On the PostgreSQL data source the deployed product is written there and
+        numbered from the IBITM series (IBITM + 7 digits, past every IBITM number
+        already stored). The deployment must belong to `projectId` and the version
+        to `productId` (400 otherwise); a customer can create only in a project
+        they are a registered contact of. Under dual-write it is created in
+        ServiceNow first and takes ServiceNow's id and number.
       operationId: createDeployedProduct
       requestBody:
         required: true
@@ -8268,13 +8275,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/CreateDeployedProductResponse'
         "400":
-          description: Bad request.
+          description: >-
+            Bad request: an id that is not a UUID, an unknown category, a deployment that
+            does not exist or that the caller may not see (reported the same way, so its
+            existence is not revealed), a deployment of another project, or a version of
+            another product.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: >-
+            The insert policy refused the caller. A fallback: a caller outside the project
+            cannot see its deployment and gets the 400 above first. A missing database
+            privilege (for example on the number sequence) is a 500, not a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The deployed product could not be numbered after one retry; try again.
           content:
             application/json:
               schema:

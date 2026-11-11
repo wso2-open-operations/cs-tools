@@ -36,6 +36,7 @@ type stubDeployedProductRepo struct {
 	searchDeployedProducts              func(ctx context.Context, req domain.SearchDeployedProductsRequest) ([]domain.DeployedProductView, int, error)
 	searchProjectsByProductVersion      func(ctx context.Context, req domain.SearchProjectsByProductVersionRequest, excludeClosureStates []string, excludeSubscriptionTypes []domain.SubscriptionType) ([]domain.EntityRef, int, error)
 	createDeployedProductFromServiceNow func(ctx context.Context, req domain.CreateDeployedProductRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployedProduct, error)
+	createDeployedProduct               func(ctx context.Context, req domain.CreateDeployedProductRequest, createdBy string) (domain.CreatedDeployedProduct, error)
 	updateDeployedProductFields         func(ctx context.Context, req domain.UpdateDeployedProductRequest, updatedBy string) (domain.UpdatedDeployedProduct, error)
 	getDeployedProductCategory          func(ctx context.Context, id string) (*string, error)
 }
@@ -67,6 +68,13 @@ func (s *stubDeployedProductRepo) CreateDeployedProductFromServiceNow(ctx contex
 		panic("stubDeployedProductRepo: CreateDeployedProductFromServiceNow not set")
 	}
 	return s.createDeployedProductFromServiceNow(ctx, req, id, number, createdBy, createdOn)
+}
+
+func (s *stubDeployedProductRepo) CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest, createdBy string) (domain.CreatedDeployedProduct, error) {
+	if s.createDeployedProduct == nil {
+		panic("stubDeployedProductRepo: CreateDeployedProduct not set")
+	}
+	return s.createDeployedProduct(ctx, req, createdBy)
 }
 
 func (s *stubDeployedProductRepo) UpdateDeployedProductFields(ctx context.Context, req domain.UpdateDeployedProductRequest, updatedBy string) (domain.UpdatedDeployedProduct, error) {
@@ -527,5 +535,73 @@ func TestDeployedProductService_SearchDeployedProducts_ActiveFilter(t *testing.T
 	}
 	if _, err := svc.SearchDeployedProducts(context.Background(), domain.SearchDeployedProductsRequest{Active: &no}); err != nil || gotReq.Active == nil || *gotReq.Active {
 		t.Errorf("active=false did not reach the repository: err=%v active=%v", err, gotReq.Active)
+	}
+}
+
+// On the plain PostgreSQL data source a deployed product is created in
+// Postgres, by the caller (from x-user-id-token), with the request passed on
+// unchanged. It used to be refused outright with a 400.
+func TestDeployedProductService_CreateDeployedProduct_PostgresCreatesTheRow(t *testing.T) {
+	cores := 4
+	category := "ms"
+	req := domain.CreateDeployedProductRequest{
+		ProjectID: testProjectUUID, DeploymentID: testDeploymentUUID,
+		ProductID: "11111111-1111-4111-8111-111111111111", VersionID: "22222222-2222-4222-8222-222222222222",
+		Cores: &cores, Category: &category,
+	}
+	var gotReq domain.CreateDeployedProductRequest
+	var gotBy string
+	svc := NewDeployedProductService(&stubDeployedProductRepo{
+		createDeployedProduct: func(_ context.Context, r domain.CreateDeployedProductRequest, createdBy string) (domain.CreatedDeployedProduct, error) {
+			gotReq, gotBy = r, createdBy
+			return domain.CreatedDeployedProduct{ID: "33333333-3333-4333-8333-333333333333", CreatedBy: createdBy}, nil
+		},
+	})
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	resp, err := svc.CreateDeployedProduct(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateDeployedProduct: %v", err)
+	}
+	if gotBy != "jane.doe@example.com" {
+		t.Errorf("createdBy = %q, want the caller's email", gotBy)
+	}
+	if gotReq.DeploymentID != req.DeploymentID || gotReq.VersionID != req.VersionID || gotReq.Cores == nil || *gotReq.Cores != 4 || gotReq.Category == nil || *gotReq.Category != "ms" {
+		t.Errorf("repository got %+v, want the request unchanged", gotReq)
+	}
+	if resp.DeployedProduct.ID != "33333333-3333-4333-8333-333333333333" || resp.Message == "" {
+		t.Errorf("response = %+v", resp)
+	}
+}
+
+// Bad input is refused before the repository is reached (the stub panics if
+// it is called), and a call with no user token is unauthorized.
+func TestDeployedProductService_CreateDeployedProduct_PostgresRefusesBadInput(t *testing.T) {
+	valid := domain.CreateDeployedProductRequest{
+		ProjectID: testProjectUUID, DeploymentID: testDeploymentUUID,
+		ProductID: "11111111-1111-4111-8111-111111111111", VersionID: "22222222-2222-4222-8222-222222222222",
+	}
+	badCategory := "nope"
+	cases := map[string]func(r *domain.CreateDeployedProductRequest){
+		"projectId":    func(r *domain.CreateDeployedProductRequest) { r.ProjectID = "x" },
+		"deploymentId": func(r *domain.CreateDeployedProductRequest) { r.DeploymentID = "" },
+		"productId":    func(r *domain.CreateDeployedProductRequest) { r.ProductID = "not-a-uuid" },
+		"versionId":    func(r *domain.CreateDeployedProductRequest) { r.VersionID = "x" },
+		"category":     func(r *domain.CreateDeployedProductRequest) { r.Category = &badCategory },
+	}
+	svc := NewDeployedProductService(&stubDeployedProductRepo{})
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	for name, mutate := range cases {
+		req := valid
+		mutate(&req)
+		var ve *apierror.ValidationError
+		if _, err := svc.CreateDeployedProduct(ctx, req); !errors.As(err, &ve) {
+			t.Errorf("%s: want a ValidationError, got %v", name, err)
+		}
+	}
+
+	var ue *apierror.UnauthorizedError
+	if _, err := svc.CreateDeployedProduct(context.Background(), valid); !errors.As(err, &ue) {
+		t.Errorf("no user token: want an UnauthorizedError, got %v", err)
 	}
 }
