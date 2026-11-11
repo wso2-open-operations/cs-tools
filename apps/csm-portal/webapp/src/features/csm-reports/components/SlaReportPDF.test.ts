@@ -72,6 +72,13 @@ function report(over: Partial<SlaReportDetails> = {}): SlaReportDetails {
 }
 
 describe("buildSlaReportSheets", () => {
+  it("says Not recorded for a clock with a status but no elapsed time", () => {
+    const data = report();
+    data.cases[0].response = { elapsed: "—", status: "Met" };
+    const cases = buildSlaReportSheets(data)[2];
+    expect(cases.textContent).toContain("Not recorded");
+  });
+
   it("lays out a front page, the summary, the cases and a thank-you page", () => {
     const sheets = buildSlaReportSheets(report());
     expect(sheets.map((s) => s.className.split(" ")[0])).toEqual(["front-page", "sla-pdf-body", "sla-pdf-body", "thank-page"]);

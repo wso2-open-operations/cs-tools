@@ -225,11 +225,17 @@ function SummaryCard({ rows }: { rows: SlaReportSummaryRow[] }): JSX.Element {
   );
 }
 
+// The API sends "—" for a clock with no elapsed time.
+function hasElapsed(elapsed?: string | null): elapsed is string {
+  const trimmed = elapsed?.trim();
+  return !!trimmed && trimmed !== "—";
+}
+
 function ClockCell({ clock }: { clock: SlaReportClock }): JSX.Element {
   return (
     <TableCell>
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
-        <Typography variant="body2">{display(clock.elapsed)}</Typography>
+        <Typography variant="body2">{hasElapsed(clock.elapsed) ? clock.elapsed : clock.status ? "Not recorded" : "—"}</Typography>
         {clock.status && <Chip size="small" variant="outlined" color={STATUS_COLOR[clock.status]} label={clock.status} />}
       </Box>
     </TableCell>

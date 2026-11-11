@@ -86,7 +86,9 @@ function statusPill(status: string): string {
 }
 
 function clockCell(clock: SlaReportClock): string {
-  return `<td><span class="sla-pdf-elapsed">${display(clock.elapsed)}</span>${statusPill(clock.status)}</td>`;
+  const hasTime = !!clock.elapsed?.trim() && clock.elapsed.trim() !== "—";
+  const elapsed = hasTime ? display(clock.elapsed) : clock.status ? "Not recorded" : "—";
+  return `<td><span class="sla-pdf-elapsed">${elapsed}</span>${statusPill(clock.status)}</td>`;
 }
 
 function metricCell(metric: SlaReportMetric): string {

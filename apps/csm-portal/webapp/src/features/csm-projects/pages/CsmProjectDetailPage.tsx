@@ -292,8 +292,14 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", flexShrink: 0 }}>
           {/* Shown to anyone who can open this project. Outlined, not
               contained: the single contained CTA on this page is Create. */}
-          <Button variant="outlined" size="small" className="csm-print-hide" disabled>
-            SLA Report — Coming soon
+          <Button
+            variant="outlined"
+            size="small"
+            className="csm-print-hide"
+            component={RouterLink}
+            to={`/customers/projects/${p.id}/sla-report/${p.id}`}
+          >
+            SLA Report
           </Button>
           <Button
             variant="outlined"

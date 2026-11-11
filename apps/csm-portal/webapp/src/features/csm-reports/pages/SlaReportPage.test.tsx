@@ -135,6 +135,14 @@ describe("SlaReportPage", () => {
     expect(within(second).getByText("Running")).toBeInTheDocument();
   });
 
+  it("says Not recorded for a finished clock with no elapsed time", async () => {
+    get.mockResolvedValue(report({ cases: [caseRow(1, { response: { elapsed: "—", status: "Met" } })] }));
+    renderPage();
+    const row = (await screen.findByRole("button", { name: "CS0001" })).closest("tr") as HTMLElement;
+    expect(within(row).getByText("Not recorded")).toBeInTheDocument();
+    expect(within(row).getByText("Met")).toBeInTheDocument();
+  });
+
   it("opens a case in a new tab", async () => {
     get.mockResolvedValue(report());
     const open = vi.spyOn(window, "open").mockImplementation(() => null);

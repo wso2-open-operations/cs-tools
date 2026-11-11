@@ -345,11 +345,15 @@ describe("CsmProjectDetailPage — report buttons", () => {
     });
   });
 
-  it("shows Time and CS reports to anyone who can open the project, and keeps SLA disabled", () => {
+  it("shows the SLA, Time and CS reports to anyone who can open the project", () => {
     renderPage();
+    expect(screen.getByRole("link", { name: "SLA Report" })).toHaveAttribute(
+      "href",
+      `/customers/projects/${PROJECT.id}/sla-report/${PROJECT.id}`,
+    );
     expect(screen.getByRole("link", { name: "Time Report" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "CS Report" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "SLA Report — Coming soon" })).toBeDisabled();
+    expect(screen.queryByText(/Coming soon/)).not.toBeInTheDocument();
   });
 });
 
