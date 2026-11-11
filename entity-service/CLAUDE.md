@@ -11133,6 +11133,31 @@ unaffected and keeps creating external users exactly as before. `apps/csm-portal
 disables the "External" option in its type selector rather than offering a choice the backend will
 reject — all three are temporary, meant to come out together once external-type creation is ready.
 
+## Creating a deployed product on PostgreSQL (`POST /deployed-products`)
+
+It used to be refused on the plain PostgreSQL data source with a 400 ("not supported"); dual-write
+was the only way to create one. `deployedProductService.CreateDeployedProduct` now writes it
+(`DeployedProductRepository.CreateDeployedProduct`):
+
+- **Number**: `next_series_number('IBITM')` (migration 0180), ServiceNow's own format. Synced deployed
+  products already hold IBITM numbers and the sequence starts at 1 until the cutover seed has run, so
+  before each create `ibitm_number_seq` is moved past the highest stored `IBITM` number, forwards only,
+  as the system identity (under the caller's row-level security the maximum would be taken over what
+  they can see). A number another writer took in between (a sync still running) fails the unique key;
+  that one case is retried once, then answered 409.
+- **Checks**: the four ids are UUIDs and the category valid (the ServiceNow path's checks), plus what
+  ServiceNow enforced itself: the deployment belongs to `projectId` and the version to `productId`, both
+  400. An internal caller skips row-level security, so these are checked in the repository, not left to
+  the insert policy; a deployment the caller may not see reads as absent (400, so its existence is not
+  revealed).
+- **Who**: `created_by` is the caller's email from `x-user-id-token` (401 without it). A customer can
+  create only in a project they are a registered contact of (`deployed_product_write`, migration
+  100017).
+
+Tests: `TestDeployedProductService_CreateDeployedProduct_Postgres*` and
+`TestDeployedProductCreateIntegration` (`CASE_STATS_TEST_DSN`, a login that does not bypass row-level
+security: numbering with an unseeded sequence, the refusals, a customer in and out of their project).
+
 ## Air-gapped deployments (`deployment.air_gapped`)
 
 Migration 0246 adds `deployment.air_gapped` (default false). An air-gapped deployment's products
