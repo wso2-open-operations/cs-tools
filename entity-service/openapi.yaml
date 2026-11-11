@@ -6473,6 +6473,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/{id}/slas/report:
+    get:
+      summary: Get the SLA report of the cases a project opened in a date range.
+      description: >-
+        Internal callers only. Postgres SLA data only; with
+        SLA_DATA_SOURCE=servicenow the endpoint returns 400. Covers the cases
+        of the project created from..to, inclusive on both ends (a date-only
+        `to` covers that whole day, UTC). Each case carries its latest clock for
+        the RESPONSE, WORKAROUND and RESOLUTION targets, read from sla_live,
+        so elapsed time, stage and breach reflect this moment, and the target
+        is the policy's own duration. Clocks that already finished are
+        included, and a case with no clock for a target shows "—". The summary
+        has one row per case type (Incident, or Query for a QUESTION case) and
+        severity with at least one case, Incident first then Query, each by
+        severity from S0. For each target a summary cell gives the 95th
+        percentile of the elapsed time of the clocks that finished (ACHIEVED or
+        COMPLETED), the policy target, and how many clocks were met (finished
+        within the target), missed (went past it, finished late or still
+        running and already over) or running (still inside it, in progress or
+        paused). A cancelled clock is in none of them. Durations are display
+        strings such as "2 Days 3 Hours". A range with no cases returns 200
+        with empty summary and cases arrays.
+
+
+        To identify the project by its key rather than its id, resolve the id
+        first with POST /projects/search (searchQuery set to the key; take the
+        result whose key matches exactly), then call this endpoint with that id.
+      operationId: getProjectSlaReport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: First case creation date to include (yyyy-MM-dd, or an RFC 3339 timestamp).
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Last case creation date to include (yyyy-MM-dd covers the whole day, or an RFC 3339 timestamp). Must not be before from.
+      responses:
+        "200":
+          description: The project's SLA report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlaReportResponse'
+        "400":
+          description: >-
+            Bad request: id is not a UUID, from or to is missing or not a date,
+            from is after to, or SLA data is read from ServiceNow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}/change-requests/stats:
     get:
       summary: Get a project's change-request statistics.
@@ -38417,6 +38500,121 @@ components:
           description: One row per case with approved time in the range, ordered by case number ascending.
           items:
             $ref: '#/components/schemas/ProjectTimeCardReportCase'
+
+    SlaReportMetric:
+      type: object
+      description: One clock target for one case type and severity.
+      required: [elapsed, target, met, missed, running]
+      properties:
+        elapsed:
+          type: string
+          description: 95th percentile of the elapsed time of the finished clocks, or "—" when none finished.
+          example: 2 Hours 54 Minutes
+        target:
+          type: string
+          description: The policy duration the clocks run against, or "Not applicable" when there is no clock.
+          example: 4 Hours
+        met:
+          type: integer
+          description: Clocks that finished within the target.
+        missed:
+          type: integer
+          description: Clocks that went past the target, whether finished late or still running.
+        running:
+          type: integer
+          description: Clocks still inside the target (in progress or paused).
+    SlaReportSummaryRow:
+      type: object
+      required: [label, caseType, severity, cases, response, workaround, resolution]
+      properties:
+        label:
+          type: string
+          example: Incident - Critical (P1)
+        caseType:
+          type: string
+          enum: [incident, query]
+        severity:
+          type: string
+          description: The case severity code (S0 to S4), empty when a case has none.
+        cases:
+          type: integer
+          description: Cases in this row.
+        response:
+          $ref: '#/components/schemas/SlaReportMetric'
+        workaround:
+          $ref: '#/components/schemas/SlaReportMetric'
+        resolution:
+          $ref: '#/components/schemas/SlaReportMetric'
+    SlaReportClock:
+      type: object
+      required: [elapsed, status]
+      properties:
+        elapsed:
+          type: string
+          description: Elapsed time as a display string, or "—" when the case has no clock for the target.
+        status:
+          type: string
+          enum: ["", Met, Missed, Running, Paused, Cancelled]
+          description: Empty when the case has no clock for the target.
+    SlaReportCase:
+      type: object
+      required: [caseId, caseNumber, caseType, severity, state, opened, response, workaround, resolution]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        caseNumber:
+          type: string
+        caseType:
+          type: string
+          enum: [Incident, Query]
+        severity:
+          type: string
+          description: The severity label, for example "Critical (P1)", or "—".
+        state:
+          type: string
+          description: The case state label, for example "Work In Progress".
+        opened:
+          type: string
+          format: date-time
+        response:
+          $ref: '#/components/schemas/SlaReportClock'
+        workaround:
+          $ref: '#/components/schemas/SlaReportClock'
+        resolution:
+          $ref: '#/components/schemas/SlaReportClock'
+    SlaReportResponse:
+      type: object
+      description: The response for GET /projects/{id}/slas/report.
+      required: [project, from, to, summary, cases]
+      properties:
+        project:
+          type: object
+          required: [id, key, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            key:
+              type: string
+            name:
+              type: string
+              nullable: true
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        summary:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlaReportSummaryRow'
+        cases:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/SlaReportCase'
 
     ProjectTimeCardReportTotals:
       type: object

@@ -59,6 +59,30 @@ set `is_active = FALSE`.
 - `GET /sla-status/clock-state?workItemId=&target=` — the most recent row for one clock regardless of
   `is_active`, with `Found=false` when none exists. Used to re-verify a clock right before alerting.
 
+## Project SLA report
+
+`GET /projects/{id}/slas/report?from=&to=` (internal callers only; the CSM backend's `GET /generate-sla-report` calls it).
+It is read-only and, like the other SLA reads, goes through `sla_live`, never `sla`, so elapsed time, stage and breach
+reflect this moment.
+
+- **Which cases.** Cases of the project created from..to inclusive (a date-only `to` covers the whole day, UTC). Only
+  `case` work items; service requests, engagements and security reports are not in it.
+- **Which clock.** The latest clock per (case, target) by `start_on`, with no `is_active` filter, because a report must
+  include the clocks that already finished (the live status reads in `sla_status_repo.go` keep only active ones). A case
+  with no clock for a target is still listed.
+- **Target and elapsed.** The target is `sla_policy.duration`, never the clock's own `duration`. Elapsed is
+  `live_business_duration`; a running `WSO2 Business days` clock is corrected in Go (`businessDayCorrectedLiveState`)
+  exactly as the case SLA tab does, so the two never disagree. No `sla.source` filter: that column is gone.
+- **Summary.** One row per case type (Incident, or Query for a `QUESTION` case) and severity that has a case. Per target:
+  the 95th percentile (`percentile_cont`, linear interpolation) of the elapsed time of the clocks that **finished**
+  (`ACHIEVED` or `COMPLETED`), the most common policy duration among the clocks, and three counts. **Met** finished within
+  the target; **Missed** went past it, whether it finished late or is still running and already over; **Running** is still
+  inside it (in progress or paused). A cancelled clock is in none. A still-running breached clock is only counted as
+  missed: its elapsed time keeps growing, so it would otherwise push the percentile up for as long as it stays open.
+- **Case rows.** Each case shows the elapsed time and status (`Met`, `Missed`, `Running`, `Paused`, `Cancelled`) of its
+  three clocks.
+- **Not available** when `SLA_DATA_SOURCE=servicenow` (400): the Postgres clocks are not the source of truth then.
+
 ## Caveats
 
 - Every engine call is best-effort: a failure is logged and never fails the case request.

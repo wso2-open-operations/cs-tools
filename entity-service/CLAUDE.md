@@ -2541,6 +2541,18 @@ in one bulk list with no per-project/per-case filtering, so it has its own
 pagination cap (`normalizeSLAStatusPagination` — default `500`, max `2000`)
 well above the generic `20`/`50` `normalizePagination` uses everywhere else.
 
+**`GET /projects/{id}/slas/report?from&to` is the project SLA report**
+(`internalOnly`, `SlaReportService`/`slaReportRepo`, spec in `docs/sla.md`
+"Project SLA report"): one project's cases created in the window, each with
+its latest clock per target, plus a per-case-type-and-severity summary (95th
+percentile of the *finished* clocks, and met/missed/running counts). Unlike
+`GET /sla-status` it is historical, so it must **not** filter `is_active`, and
+it takes the target from `sla_policy.duration` and the elapsed time from
+`sla_live`, applying the same `businessDayCorrectedLiveState` correction the
+other SLA reads do so its figures agree with the case SLA tab. The clocks are
+limited to the window's cases inside the CTE so the view is not evaluated for
+every clock.
+
 **There used to be a `source` query param (`csm`/`servicenow`) narrowing the
 result to one `sla.source` value — removed along with the column itself
 (migration `0268`).** It existed so `csm-notification-service`'s Redis
