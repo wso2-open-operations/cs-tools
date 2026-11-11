@@ -72,7 +72,7 @@ func (b AlertMuteRule) StateAt(now time.Time) AlertMuteRuleState {
 	}
 }
 
-// SaveAlertMuteRuleRequest is the body of POST /alert-mute-rules and PATCH /alert-mute-rules/{id} (a PATCH replaces every field).
+// SaveAlertMuteRuleRequest is the body of POST /alert-mute-rules: every field of a new rule.
 // StartOn and EndOn are RFC 3339 timestamps.
 type SaveAlertMuteRuleRequest struct {
 	Name        string                   `json:"name"`
@@ -81,6 +81,18 @@ type SaveAlertMuteRuleRequest struct {
 	StartOn     string                   `json:"startOn"`
 	EndOn       string                   `json:"endOn"`
 	Conditions  []AlertMuteRuleCondition `json:"conditions"`
+}
+
+// PatchAlertMuteRuleRequest is the body of PATCH /alert-mute-rules/{id}: only the fields present change, the rest keep
+// the stored rule's values (like PatchOutageRequest). Conditions, when present, replace the whole list. The merged rule
+// is validated as a create would be.
+type PatchAlertMuteRuleRequest struct {
+	Name        *string                   `json:"name"`
+	Description *string                   `json:"description"`
+	TimeZone    *string                   `json:"timeZone"`
+	StartOn     *string                   `json:"startOn"`
+	EndOn       *string                   `json:"endOn"`
+	Conditions  *[]AlertMuteRuleCondition `json:"conditions"`
 }
 
 // AlertMuteRuleWrite is a validated SaveAlertMuteRuleRequest, as the repository stores it.

@@ -230,7 +230,7 @@ type AlertMuteRuleService interface {
 	Active(ctx context.Context) (domain.ActiveAlertMuteRulesResponse, error)
 	Create(ctx context.Context, req domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error)
 	// Update replaces every field of a scheduled rule.
-	Update(ctx context.Context, id string, req domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error)
+	Update(ctx context.Context, id string, req domain.PatchAlertMuteRuleRequest) (domain.AlertMuteRule, error)
 	// Extend moves the end of a scheduled or active rule later.
 	Extend(ctx context.Context, id string, req domain.ExtendAlertMuteRuleRequest) (domain.AlertMuteRule, error)
 	// End ends an active rule now.

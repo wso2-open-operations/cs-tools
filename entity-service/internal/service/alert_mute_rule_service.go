@@ -109,17 +109,49 @@ func (s *alertMuteRuleService) Create(ctx context.Context, req domain.SaveAlertM
 	return s.repo.Create(ctx, actorOf(ctx), w)
 }
 
-func (s *alertMuteRuleService) Update(ctx context.Context, id string, req domain.SaveAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
+func (s *alertMuteRuleService) Update(ctx context.Context, id string, req domain.PatchAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
+	current, err := s.Get(ctx, id)
+	if err != nil {
 		return domain.AlertMuteRule{}, err
 	}
 	now := s.now()
-	w, err := validateAlertMuteRule(req, now)
+	w, err := validateAlertMuteRule(mergeAlertMuteRulePatch(current, req), now)
 	if err != nil {
 		return domain.AlertMuteRule{}, err
 	}
 	b, err := s.repo.Update(ctx, actorOf(ctx), id, w, now)
 	return s.guarded(ctx, id, b, err, "only a scheduled alert mute rule can be edited")
+}
+
+// mergeAlertMuteRulePatch lays the fields present in req over the stored rule.
+func mergeAlertMuteRulePatch(current domain.AlertMuteRule, req domain.PatchAlertMuteRuleRequest) domain.SaveAlertMuteRuleRequest {
+	merged := domain.SaveAlertMuteRuleRequest{
+		Name:        current.Name,
+		Description: current.Description,
+		TimeZone:    current.TimeZone,
+		StartOn:     current.StartOn.UTC().Format(time.RFC3339),
+		EndOn:       current.EndOn.UTC().Format(time.RFC3339),
+		Conditions:  current.Conditions,
+	}
+	if req.Name != nil {
+		merged.Name = *req.Name
+	}
+	if req.Description != nil {
+		merged.Description = *req.Description
+	}
+	if req.TimeZone != nil {
+		merged.TimeZone = *req.TimeZone
+	}
+	if req.StartOn != nil {
+		merged.StartOn = *req.StartOn
+	}
+	if req.EndOn != nil {
+		merged.EndOn = *req.EndOn
+	}
+	if req.Conditions != nil {
+		merged.Conditions = *req.Conditions
+	}
+	return merged
 }
 
 func (s *alertMuteRuleService) Extend(ctx context.Context, id string, req domain.ExtendAlertMuteRuleRequest) (domain.AlertMuteRule, error) {
@@ -143,7 +175,22 @@ func (s *alertMuteRuleService) Extend(ctx context.Context, id string, req domain
 		return domain.AlertMuteRule{}, &apierror.ValidationError{Msg: "an alert mute rule can last at most 72 hours from its start"}
 	}
 	b, err := s.repo.Extend(ctx, actorOf(ctx), id, endOn, now)
-	return s.guarded(ctx, id, b, err, wrongState)
+	if err != nil || b != nil {
+		return s.guarded(ctx, id, b, err, wrongState)
+	}
+	// The guarded UPDATE matched nothing: the rule changed after it was read. Say which way, so a rule that can still
+	// be extended (another extension moved its end) isn't reported as being in the wrong state.
+	latest, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return domain.AlertMuteRule{}, err
+	}
+	if latest == nil {
+		return domain.AlertMuteRule{}, alertMuteRuleNotFound()
+	}
+	if st := latest.StateAt(s.now()); st == domain.AlertMuteRuleStateScheduled || st == domain.AlertMuteRuleStateActive {
+		return domain.AlertMuteRule{}, &apierror.ConflictError{Msg: "the alert mute rule changed while it was being extended; reload it and try again"}
+	}
+	return domain.AlertMuteRule{}, &apierror.ConflictError{Msg: wrongState}
 }
 
 func (s *alertMuteRuleService) End(ctx context.Context, id string) (domain.AlertMuteRule, error) {
