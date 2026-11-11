@@ -53,8 +53,7 @@ import { OFF_TIMESHEET_NOTE, tagHoverText, tagSideText } from "../utils/tagHover
 const legendTagLabel = (kind: ScheduleAbsenceKind): string => {
   const side = tagSideText(kind);
   if (!kind.excludesFromTimesheet) return side;
-  const note = OFF_TIMESHEET_NOTE.toLowerCase();
-  return side ? `${side} (${note})` : note.charAt(0).toUpperCase() + note.slice(1);
+  return side ? `${side} (${OFF_TIMESHEET_NOTE})` : OFF_TIMESHEET_NOTE;
 };
 
 export type { RosterSpan };

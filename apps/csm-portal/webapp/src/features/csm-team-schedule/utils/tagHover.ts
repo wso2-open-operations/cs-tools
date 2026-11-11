@@ -17,7 +17,7 @@
 import type { ScheduleAbsenceKind } from "../types";
 
 /** Said wherever a tag that takes people off the timesheet is explained. */
-export const OFF_TIMESHEET_NOTE = "Not on the timesheet";
+export const OFF_TIMESHEET_NOTE = "Exclude from timesheet";
 
 /** A tag added from the portal is its short name: its chip and its name are
  *  the same text. */

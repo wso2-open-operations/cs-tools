@@ -30,7 +30,7 @@ import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } fr
 import { escalationGrid } from "../utils/rota";
 import { INDIA_HOURS_CODE, REGULAR_HOURS_CODE } from "../utils/standingDay";
 import { useTeamName } from "../utils/teamColourContext";
-import { tagHoverText, tagSideText } from "../utils/tagHover";
+import { OFF_TIMESHEET_NOTE, tagHoverText, tagSideText } from "../utils/tagHover";
 
 
 /** A customer engagement allocation (from the allocation app) covering the
@@ -568,7 +568,7 @@ export default function CellPicker({
             <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
             <span className="pk-l">
               {tagSideText(kind)}
-              {kind.excludesFromTimesheet ? <span className="pk-off">Not on the timesheet</span> : null}
+              {kind.excludesFromTimesheet ? <span className="pk-off">{OFF_TIMESHEET_NOTE}</span> : null}
             </span>
           </button>
         );
@@ -1146,7 +1146,7 @@ export default function CellPicker({
                       {tag.bucket === "LEAVE"
                         ? "Leave · shown as leave"
                         : tag.excludesFromTimesheet
-                          ? "Allocation · not on the timesheet"
+                          ? `Allocation · ${OFF_TIMESHEET_NOTE}`
                           : "Allocation · on the timesheet"}
                     </span>
                   </div>
