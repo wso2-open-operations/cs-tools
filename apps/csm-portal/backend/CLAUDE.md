@@ -974,10 +974,15 @@ and every read need nothing more:
   (name or account number) filter becomes `projectId` / `accountId` with the same op, on the record's
   id, so a renamed project still matches. An exact key / number wins, then one exact name, then the only
   match of the caller's own search (`/projects/search`, `/accounts/search`, scoped to what they may see).
+  The search is read page by page, up to `namedSearchPages` (10 pages of 50): a key is taken as soon as
+  it is seen, but one exact name only once every page has been read, since another record of that name
+  (or the key) may be on a later page; a name matching more than those pages hold is "matches several".
 
 A value that names nothing, or several, is a 422 (`generate_product`, `generate_project`,
 `generate_account`) naming the candidates, e.g. `"quartz labs" matches several projects (Quartz Labs
-(QRTZ-PROJ1), Quartz Labs (QRTZ-PROJ2)); name the one you mean.`; a search that fails is a 502 (`_lookup`). Never
+(QRTZ-PROJ1), Quartz Labs (QRTZ-PROJ2)); name the one you mean.`; a search that fails is a 502 (`_lookup`).
+The 422 is logged as which filter it was only, never its reason: that names what the user typed and the
+records it matched, such as a customer's name. Never
 dropped: a `notIn` that left out nothing would count every product or project under a title that says
 otherwise. `ParseGenerated` checks the shapes first (`generated_product_version.go`,
 `generated_project.go`): `product`, `project` and `account` are `in` or `notIn` with names, the last two

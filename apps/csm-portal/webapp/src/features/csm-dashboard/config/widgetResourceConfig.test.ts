@@ -451,6 +451,15 @@ describe("WIDGET_RESOURCE_CONFIG — case-table resourceTypes beyond `case`", ()
     ).toBe("/announcements");
   });
 
+  it("announcement's buildHref opens the preview page for a project filter, which /announcements would drop", () => {
+    const href = WIDGET_RESOURCE_CONFIG.announcement.buildHref(
+      { filters: [{ field: "projectId", op: "in", values: ["p-1"] }] },
+      { widgetId: "widget-7", displayName: "Project Announcements" },
+    );
+    expect(href.startsWith("/dashboard/preview/announcements?")).toBe(true);
+    expect(hrefParams(href).get("w")).toBe("widget-7");
+  });
+
   // Regression test: incident_task has no dedicated list route of its own
   // (only ever viewed as part of its parent incident), so its buildHref used
   // to fall back to the plain, unfiltered incidents tab -- silently dropping

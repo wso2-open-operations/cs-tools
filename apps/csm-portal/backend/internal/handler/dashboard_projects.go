@@ -60,10 +60,10 @@ func WithDashboardProjects(inner DashboardGenerator, projects projectSearcher) D
 	return &namedResolvingGenerator{inner: inner, kind: namedKind{
 		field: "project", idField: "projectId", noun: "project", plural: "projects",
 		unusable: errDashboardProject, lookup: errDashboardProjectLookup,
-		search: func(ctx context.Context, written string) ([]namedRecord, bool, error) {
+		search: func(ctx context.Context, written string, offset int) ([]namedRecord, bool, error) {
 			body, err := json.Marshal(map[string]any{
 				"searchQuery": written,
-				"pagination":  map[string]int{"limit": namedSearchLimit, "offset": 0},
+				"pagination":  map[string]int{"limit": namedSearchLimit, "offset": offset},
 			})
 			if err != nil {
 				return nil, false, err

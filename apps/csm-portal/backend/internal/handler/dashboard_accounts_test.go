@@ -29,8 +29,9 @@ import (
 
 // fakeAccountSearch answers POST /accounts/search as the entity service does:
 // every account whose name or number contains filters.searchQuery, ignoring
-// case, one page of at most limit. It records each query, and fails on a
-// body without filters.searchQuery (the shape the real search reads).
+// case, one page of at most limit from pagination.offset. It records each
+// query, and fails on a body without filters.searchQuery (the shape the real
+// search reads).
 type fakeAccountSearch struct {
 	accounts []searchedAccount
 	limit    int
@@ -44,6 +45,9 @@ func (f *fakeAccountSearch) SearchAccounts(_ context.Context, body []byte) ([]by
 		Filters *struct {
 			SearchQuery string `json:"searchQuery"`
 		} `json:"filters"`
+		Pagination struct {
+			Offset int `json:"offset"`
+		} `json:"pagination"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil || req.Filters == nil {
 		return nil, fmt.Errorf("not an accounts search body: %s", body)
@@ -59,6 +63,7 @@ func (f *fakeAccountSearch) SearchAccounts(_ context.Context, body []byte) ([]by
 			out = append(out, a)
 		}
 	}
+	out = out[min(req.Pagination.Offset, len(out)):]
 	hasMore := false
 	if f.limit > 0 && len(out) > f.limit {
 		out, hasMore = out[:f.limit], true
@@ -135,8 +140,8 @@ func TestWithDashboardAccounts_RefusesAnAccountItCannotPlace(t *testing.T) {
 			`"Corp" matches several accounts (Example Corp (ACC0001), Example Corp Europe (ACC0010)); name the one you mean.`},
 		{"a name two accounts share", "quartz labs", &fakeAccountSearch{accounts: testAccounts},
 			`"quartz labs" matches several accounts (Quartz Labs (ACC0003), Quartz Labs (ACC0004)); name the one you mean.`},
-		{"more than one page", "ACC", &fakeAccountSearch{accounts: testAccounts, limit: 2},
-			`"ACC" matches several accounts (Example Corp (ACC0001), Example Corp Europe (ACC0010) and more); name the one you mean.`},
+		{"more than one page, read to the end", "ACC", &fakeAccountSearch{accounts: testAccounts, limit: 2},
+			`"ACC" matches several accounts (Example Corp (ACC0001), Example Corp Europe (ACC0010), Summit Enterprises (ACC0002), Quartz Labs (ACC0003), Quartz Labs (ACC0004)); name the one you mean.`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := WithDashboardAccounts(&fakeGenerator{result: GeneratedDashboard{Dashboard: accountDashboard(t, "notIn", tc.account)}}, tc.search).Generate(context.Background(), "x", nil)

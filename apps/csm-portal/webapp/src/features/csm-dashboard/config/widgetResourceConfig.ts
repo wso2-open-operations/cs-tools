@@ -885,8 +885,15 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     // though: that page resolves `resourceType` from `previewSlug` generically
     // and posts raw filters straight to the search endpoint, so it needs no
     // announcement-specific filtered route of its own to render this widget's
-    // exact result set.
-    buildHref: (filters, ctx) => caseFamilyBuildHref("announcements", filters, ctx, () => "/announcements"),
+    // exact result set. A project filter goes there too: the case list holds
+    // it, so the translation is lossless, but this page would drop it and
+    // show every project's announcements.
+    buildHref: (filters, ctx) =>
+      caseFamilyBuildHref("announcements", filters, ctx, () =>
+        translateCaseDashboardFiltersChecked(filters).filters.projects
+          ? widgetPreviewFallbackHref("announcements", "case", filters, ctx)
+          : "/announcements",
+      ),
     icon: Megaphone,
     iconColor: "success",
     previewSlug: "announcements",

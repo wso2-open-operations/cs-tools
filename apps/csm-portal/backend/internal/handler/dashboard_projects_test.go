@@ -29,24 +29,30 @@ import (
 
 // fakeProjectSearch answers POST /projects/search as the entity service
 // does: every project whose name or key contains the search query, ignoring
-// case, one page of at most limit. It records each query.
+// case, one page of at most limit from pagination.offset. It records each
+// query and offset.
 type fakeProjectSearch struct {
 	projects []searchedProject
 	limit    int
 	err      error
 	reply    string
 	queries  []string
+	offsets  []int
 }
 
 // SearchProjects implements projectSearcher.
 func (f *fakeProjectSearch) SearchProjects(_ context.Context, body []byte) ([]byte, error) {
 	var req struct {
 		SearchQuery string `json:"searchQuery"`
+		Pagination  struct {
+			Offset int `json:"offset"`
+		} `json:"pagination"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, err
 	}
 	f.queries = append(f.queries, req.SearchQuery)
+	f.offsets = append(f.offsets, req.Pagination.Offset)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -60,6 +66,7 @@ func (f *fakeProjectSearch) SearchProjects(_ context.Context, body []byte) ([]by
 			out = append(out, p)
 		}
 	}
+	out = out[min(req.Pagination.Offset, len(out)):]
 	hasMore := false
 	if f.limit > 0 && len(out) > f.limit {
 		out, hasMore = out[:f.limit], true
@@ -194,10 +201,17 @@ func TestWithDashboardProjects_LeavesProjectsOut(t *testing.T) {
 // listing at most five candidates by name and key (key alone when a project
 // has no name); a failed or unreadable search is an errDashboardProjectLookup.
 func TestWithDashboardProjects_RefusesAProjectItCannotPlace(t *testing.T) {
-	var many []searchedProject
+	var many, tooMany []searchedProject
 	for i := range 7 {
 		many = append(many, searchedProject{ID: fmt.Sprint("m", i), Key: fmt.Sprint("CLOUD-", i), Name: fmt.Sprint("Cloud ", i)})
 	}
+	for i := range namedSearchPages + 2 {
+		tooMany = append(tooMany, searchedProject{ID: fmt.Sprint("t", i), Key: fmt.Sprint("ATLAS-", i), Name: fmt.Sprint("Atlas ", i)})
+	}
+	// One exact "Atlas" first, the rest on pages beyond the cap.
+	tooMany[0].Name = "Atlas"
+	// Two projects named "Orbit", a page apart.
+	orbits := []searchedProject{{ID: "o1", Key: "ORB-1", Name: "Orbit"}, {ID: "o2", Key: "ORB-2", Name: "Orbit Labs"}, {ID: "o3", Key: "ORB-3", Name: "Orbit"}}
 	for _, tc := range []struct {
 		name, project string
 		search        *fakeProjectSearch
@@ -212,10 +226,12 @@ func TestWithDashboardProjects_RefusesAProjectItCannotPlace(t *testing.T) {
 			`"LEGACY" matches several projects (LEGACY-01, Legacy Two (LEGACY-02)); name the one you mean.`},
 		{"more than five", "Cloud", &fakeProjectSearch{projects: many},
 			`"Cloud" matches several projects (Cloud 0 (CLOUD-0), Cloud 1 (CLOUD-1), Cloud 2 (CLOUD-2), Cloud 3 (CLOUD-3), Cloud 4 (CLOUD-4) and 2 more); name the one you mean.`},
-		{"more than one page", "Cloud", &fakeProjectSearch{projects: many, limit: 3},
-			`"Cloud" matches several projects (Cloud 0 (CLOUD-0), Cloud 1 (CLOUD-1), Cloud 2 (CLOUD-2) and more); name the one you mean.`},
-		{"one project on a page with more", "Cloud", &fakeProjectSearch{projects: many, limit: 1},
-			`"Cloud" matches several projects (Cloud 0 (CLOUD-0) and more); name the one you mean.`},
+		{"more than one page, read to the end", "Cloud", &fakeProjectSearch{projects: many, limit: 3},
+			`"Cloud" matches several projects (Cloud 0 (CLOUD-0), Cloud 1 (CLOUD-1), Cloud 2 (CLOUD-2), Cloud 3 (CLOUD-3), Cloud 4 (CLOUD-4) and 2 more); name the one you mean.`},
+		{"an exact name another project has on a later page", "Orbit", &fakeProjectSearch{projects: orbits, limit: 2},
+			`"Orbit" matches several projects (Orbit (ORB-1), Orbit (ORB-3)); name the one you mean.`},
+		{"one exact name, with more than the pages hold", "Atlas", &fakeProjectSearch{projects: tooMany, limit: 1},
+			`"Atlas" matches several projects (Atlas (ATLAS-0), Atlas 1 (ATLAS-1), Atlas 2 (ATLAS-2), Atlas 3 (ATLAS-3), Atlas 4 (ATLAS-4) and more); name the one you mean.`},
 		{"an empty name", " ", &fakeProjectSearch{projects: testProjects}, "A project filter has an empty name."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -238,6 +254,38 @@ func TestWithDashboardProjects_RefusesAProjectItCannotPlace(t *testing.T) {
 		if _, err := gen.Generate(context.Background(), "x", nil); !errors.Is(err, errDashboardProjectLookup) {
 			t.Errorf("%s: err = %v, want errDashboardProjectLookup", name, err)
 		}
+	}
+}
+
+// TestWithDashboardProjects_ReadsEveryPageBeforeAnExactName: an exact name
+// is taken only once the search has no more pages (each page asked from
+// where the last one ended), and an exact key on a later page still wins over
+// an exact name on the first.
+func TestWithDashboardProjects_ReadsEveryPageBeforeAnExactName(t *testing.T) {
+	for _, tc := range []struct {
+		name, project, want string
+		projects            []searchedProject
+		wantOffsets         string
+	}{
+		{"one exact name", "Orbit", "o1",
+			[]searchedProject{{ID: "o1", Key: "ORB-1", Name: "Orbit"}, {ID: "o2", Key: "ORB-2", Name: "Orbit Labs"}, {ID: "o3", Key: "ORB-3", Name: "Orbit West"}}, "[0 2]"},
+		{"an exact key on a later page", "orbit", "k1",
+			[]searchedProject{{ID: "o1", Key: "ORB-1", Name: "Orbit"}, {ID: "o2", Key: "ORB-2", Name: "Orbit Labs"}, {ID: "k1", Key: "ORBIT", Name: "Legacy"}}, "[0 2]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			search := &fakeProjectSearch{projects: tc.projects, limit: 2}
+			gen := WithDashboardProjects(&fakeGenerator{result: GeneratedDashboard{Dashboard: projectDashboard(t, []string{tc.project})}}, search)
+			got, err := gen.Generate(context.Background(), "x", nil)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if f := projectFilter(got.Dashboard.Widgets[0].Query, "projectId"); f == nil || fmt.Sprint(f["values"]) != "["+tc.want+"]" {
+				t.Errorf("projectId filter = %v, want [%s]", f, tc.want)
+			}
+			if fmt.Sprint(search.offsets) != tc.wantOffsets {
+				t.Errorf("offsets = %v, want %s", search.offsets, tc.wantOffsets)
+			}
+		})
 	}
 }
 

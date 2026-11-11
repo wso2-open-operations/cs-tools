@@ -25,9 +25,15 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 )
 
-// namedSearchLimit is the page of a search one name is checked against: the
+// namedSearchLimit is a page of the search one name is checked against: the
 // entity service's own cap.
 const namedSearchLimit = 50
+
+// namedSearchPages caps how many pages one name reads. An exact code is
+// taken as soon as it is seen; an exact name only once every page has been
+// read, since another record of that name may be on a later one. A name that
+// matches more records than these pages hold is answered as matching several.
+const namedSearchPages = 10
 
 // namedShown is how many candidates a "matches several" reason lists before
 // "and N more".
@@ -52,12 +58,13 @@ func (r namedRecord) label() string {
 // namedKind is one kind of record a generated case filter names as the user
 // wrote it and the case search filters by id: the filter's field, the id
 // field it becomes, the nouns its reasons use, its two errors, and the
-// search (by name or code, among the records the caller can see).
+// search (by name or code, among the records the caller can see): one page
+// of at most namedSearchLimit, from offset.
 type namedKind struct {
 	field, idField   string
 	noun, plural     string
 	unusable, lookup error
-	search           func(ctx context.Context, written string) (records []namedRecord, hasMore bool, err error)
+	search           func(ctx context.Context, written string, offset int) (records []namedRecord, hasMore bool, err error)
 }
 
 // namedResolvingGenerator turns the records named in what another generator
@@ -141,9 +148,10 @@ func (r namedResolver) resolveQuery(ctx context.Context, query map[string]any, w
 
 // resolveValue is the id of the record a value names: the record with exactly
 // that code, ignoring case, if there is one; else the one record with exactly
-// that name; else the only record the search finds. A value naming none, or
-// several (two records of one name, or a value the search finds in several),
-// is a kind.unusable saying so; a failed search is a kind.lookup.
+// that name; else the only record the search finds. The search is read page
+// by page (namedSearchPages). A value naming none, or several (two records of
+// one name, or a value the search finds in several, or in more than those
+// pages hold), is a kind.unusable saying so; a failed search is a kind.lookup.
 func (r namedResolver) resolveValue(ctx context.Context, value, where string) (string, error) {
 	k := r.kind
 	written := strings.TrimSpace(value)
@@ -154,23 +162,32 @@ func (r namedResolver) resolveValue(ctx context.Context, value, where string) (s
 	if written == "" {
 		return "", fmt.Errorf("%w: %s: a %s filter has an empty name", k.unusable, where, k.noun)
 	}
-	records, hasMore, err := k.search(ctx, written)
-	if err != nil {
-		return "", fmt.Errorf("%w: %s: %v", k.lookup, where, err)
-	}
-	var named []namedRecord
-	for _, rec := range records {
-		if strings.EqualFold(strings.TrimSpace(rec.Code), written) {
-			r.ids[key] = rec.ID
-			return rec.ID, nil
+	var records, named []namedRecord
+	hasMore := true
+	for page := 0; page < namedSearchPages && hasMore; page++ {
+		var got []namedRecord
+		var err error
+		got, hasMore, err = k.search(ctx, written, len(records))
+		if err != nil {
+			return "", fmt.Errorf("%w: %s: %v", k.lookup, where, err)
 		}
-		if strings.EqualFold(strings.TrimSpace(rec.Name), written) {
-			named = append(named, rec)
+		for _, rec := range got {
+			if strings.EqualFold(strings.TrimSpace(rec.Code), written) {
+				r.ids[key] = rec.ID
+				return rec.ID, nil
+			}
+			if strings.EqualFold(strings.TrimSpace(rec.Name), written) {
+				named = append(named, rec)
+			}
+		}
+		records = append(records, got...)
+		if len(got) == 0 {
+			break
 		}
 	}
 	candidates, more := records, hasMore
 	switch {
-	case len(named) == 1:
+	case len(named) == 1 && !hasMore:
 		r.ids[key] = named[0].ID
 		return named[0].ID, nil
 	case len(named) > 1:

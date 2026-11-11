@@ -17,11 +17,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -488,5 +490,35 @@ func TestGenerateDashboard_TheNoteIsInTheReplyNotTheDashboard(t *testing.T) {
 	}
 	if strings.Contains(string(body.Dashboard), `"note"`) {
 		t.Errorf("dashboard = %s, want no note in it", body.Dashboard)
+	}
+}
+
+// TestGenerateDashboard_LeavesTypedNamesOutOfTheLog: a product, project or
+// account filter that names nothing usable answers 422 with the name the user
+// typed and the records it matched, and logs only which filter it was.
+func TestGenerateDashboard_LeavesTypedNamesOutOfTheLog(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	for _, tc := range []struct {
+		kind string
+		err  error
+	}{
+		{"product", fmt.Errorf("%w: widgets[0].filters[0]: no product is named like %q", errDashboardProduct, "Jane Example")},
+		{"project", fmt.Errorf("%w: widgets[0].filters[0]: %q matches several projects (Jane Example One (JE-1), Jane Example Two (JE-2)); name the one you mean", errDashboardProject, "Jane Example")},
+		{"account", fmt.Errorf("%w: widgets[0].filters[0]: no account is named like %q", errDashboardAccount, "Jane Example")},
+	} {
+		buf.Reset()
+		w := httptest.NewRecorder()
+		NewDashboardGenerateHandler(&fakeGenerator{err: tc.err}).GenerateDashboard(w, withUser(newGenerateRequest(`{"prompt":"x"}`)))
+		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "Jane Example") {
+			t.Errorf("%s: %d %s, want 422 naming what was typed", tc.kind, w.Code, w.Body.String())
+		}
+		logged := buf.String()
+		if !strings.Contains(logged, "unusable "+tc.kind+" filter") || strings.Contains(logged, "Jane") || strings.Contains(logged, "JE-1") {
+			t.Errorf("%s: log = %q, want the filter's kind and no names", tc.kind, logged)
+		}
 	}
 }

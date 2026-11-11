@@ -59,10 +59,10 @@ func WithDashboardAccounts(inner DashboardGenerator, accounts accountSearcher) D
 	return &namedResolvingGenerator{inner: inner, kind: namedKind{
 		field: "account", idField: "accountId", noun: "account", plural: "accounts",
 		unusable: errDashboardAccount, lookup: errDashboardAccountLookup,
-		search: func(ctx context.Context, written string) ([]namedRecord, bool, error) {
+		search: func(ctx context.Context, written string, offset int) ([]namedRecord, bool, error) {
 			body, err := json.Marshal(map[string]any{
 				"filters":    map[string]string{"searchQuery": written},
-				"pagination": map[string]int{"limit": namedSearchLimit, "offset": 0},
+				"pagination": map[string]int{"limit": namedSearchLimit, "offset": offset},
 			})
 			if err != nil {
 				return nil, false, err

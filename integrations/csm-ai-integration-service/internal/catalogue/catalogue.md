@@ -471,7 +471,8 @@ that account:
 "groupBy": { "field": "account", "maxGroups": 10, "linkResourceType": "account" }
 ```
 
-A case-family widget may also group by `product` ("cases by product", "top products by open cases"):
+A case-family widget may also group by `product`, `productVersion` and `project`, besides the four
+fields above. By `product` ("cases by product", "top products by open cases"):
 one bar or slice per product, named as the product is; cases without a product are in none of them.
 
 ```json

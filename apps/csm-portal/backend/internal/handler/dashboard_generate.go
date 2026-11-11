@@ -155,19 +155,21 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.InfoContext(ctx, "dashboard generate: model refused")
 		writeErrorCode(w, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused)
 	case errors.Is(err, errDashboardProduct):
-		slog.InfoContext(ctx, "dashboard generate: unusable product filter", "err", err)
+		// The reason names what the user typed and the records it matched
+		// (a customer's name, say): the caller gets it, the log does not.
+		slog.InfoContext(ctx, "dashboard generate: unusable product filter")
 		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateProduct)
 	case errors.Is(err, errDashboardProductLookup):
 		slog.WarnContext(ctx, "dashboard generate: product lookup failed", "err", err)
 		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateProductLookup, errCodeGenerateProductLookup)
 	case errors.Is(err, errDashboardProject):
-		slog.InfoContext(ctx, "dashboard generate: unusable project filter", "err", err)
+		slog.InfoContext(ctx, "dashboard generate: unusable project filter")
 		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateProject)
 	case errors.Is(err, errDashboardProjectLookup):
 		slog.WarnContext(ctx, "dashboard generate: project lookup failed", "err", err)
 		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateProjectLookup, errCodeGenerateProjectLookup)
 	case errors.Is(err, errDashboardAccount):
-		slog.InfoContext(ctx, "dashboard generate: unusable account filter", "err", err)
+		slog.InfoContext(ctx, "dashboard generate: unusable account filter")
 		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateAccount)
 	case errors.Is(err, errDashboardAccountLookup):
 		slog.WarnContext(ctx, "dashboard generate: account lookup failed", "err", err)
