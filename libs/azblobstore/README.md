@@ -91,8 +91,8 @@ err = store.Copy(ctx, stagingKey, finalKey)
 A link is signed for one blob, for writing only (upload) or reading only
 (download). Azure checks it when a request starts, so a request that started
 before the expiry finishes after it. Choose the shortest lifetime that covers the
-start of the last chunk (entity-service uses 30 minutes to upload and 10 to
-download).
+start of the last chunk (entity-service uses 5 minutes up to 50 MiB, up to 20
+minutes for a file of 1 GiB, the largest it allows).
 
 A link cannot limit how much is sent, and the write permission is for the whole
 blob: until it expires, the holder can put a different file on that blob, even
