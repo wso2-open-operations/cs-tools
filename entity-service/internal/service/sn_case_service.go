@@ -1350,6 +1350,7 @@ func publishCaseCreatedEvent(
 		WSO2CaseID:           cv.InternalID,
 		CaseTitle:            cv.Subject,
 		CaseType:             strings.ToUpper(req.Type),
+		EngagementType:       derefString(cv.EngagementType),
 		Priority:             strings.ToUpper(string(derefSeverity(cv.Severity))),
 		Product:              product,
 		Team:                 caseTeamName(cv),

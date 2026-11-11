@@ -1367,6 +1367,18 @@ revisited.
   `csm-notification-service`'s `events.Validate` would reject anyway for an
   empty `recipients` list.
 
+  **`CaseCreatedPayload.EngagementType`** mirrors `CommentAddedPayload.EngagementType`'s
+  own convention (`cv.EngagementType`'s lowercase value, e.g. `"migration"`; `""`
+  for every non-engagement case-like type) — added so `csm-notification-service`'s
+  SLA engine can tell a migration engagement apart from any other the same way
+  `dispatch.checkFrustration` already can from `CommentAddedPayload`'s own copy
+  of this field (see that repo's own `CLAUDE.md`, "SLA breach-alerting engine",
+  for what this closes: a clock can get attached to an engagement via clock
+  re-evaluation, which has no `case_type` gate the way registration at creation
+  does, and its breach must be suppressed the same way a service request's is).
+  Deploy `csm-notification-service` before this field starts being sent, or its
+  strict decode rejects every `case.created` event outright.
+
   **Only `type: "case"` requires a severity to publish at all.**
   `CaseCreatedPayload.Priority` has no `omitempty` (a consumer always
   expects a real value) and `""` is not a real priority, so a nil severity
@@ -2620,6 +2632,59 @@ one existing call now serves both purposes, with no second query against
 otherwise narrow scope (see its own doc comment on why it has no
 work_item/case/announcement join otherwise) — purely for these four
 display-only fields, nothing else case-like is added.
+
+**`GetClockState` also resolves `ProjectOnboardingStatus`/`IsEvaluationAccount`**
+(`project`/`project_type` joins, the same ones `SearchActiveSLAStatuses` already
+uses for the identical two fields) — added because `csm-notification-service`'s
+own SLA breach Chat alert had been routing with these two facts hardcoded to
+`false`/`""` ever since `case.created` stopped carrying them, so an
+onboarding-stage case's breach alert never reached the Onboarding Chat space
+at all, regardless of the project's real `onboarding_status` (the
+frustration-detection alert, which gets these facts off its own event
+payload instead, never had this gap). `csm-notification-service`'s
+`Engine.sendBreachAlert` now reads both straight off this same `GetClockState`
+call — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine", and
+`internal/chataudience`'s own doc comments for the routing side of this fix
+(onboarding now adds the Onboarding Chat audience on top of the case's own
+team space, so both the team actually working the case and whoever is
+running the onboarding see the alert — unlike an Evaluation Subscription
+case, which routes to Evaluation alone).
+
+**`GetClockState` also resolves `OnboardingTeamEmail`, a SEPARATE field from
+`TeamEmail`, not a swap of it** — the Customer Onboarding team's own
+`group_email` (`team.key = "customer_onboarding_team"`), populated only when
+`ProjectOnboardingStatus` is `IN_PROGRESS`/`NOT_STARTED`, `""` otherwise.
+`TeamEmail`/`TeamLeadName` always stay the case's real CRE team, completely
+unaffected by onboarding status — an earlier version of this fix swapped
+them to the onboarding team entirely, which a CodeRabbit review caught
+pairing the Customer Onboarding team's lead with the CRE team's own name on
+the displayed Chat card/email (`meta.Team`), a real mismatch. By explicit
+request, an onboarding-stage case's breach EMAIL should reach BOTH inboxes —
+`csm-notification-service`'s `sendBreachEmails` sends to `TeamEmail` and
+`OnboardingTeamEmail` together in one email's "to" list, the same two-
+audience shape its breach CHAT card now posts to — never one in place of
+the other. Matched by `team.key` (UNIQUE), not `team.name` (`team.name`
+carries no uniqueness constraint) — same reasoning
+`evaluationSubscriptionProjectTypeName`'s own doc comment gives for matching
+`project_type` by name instead of id. `slaClockStateOnboardingStatuses`
+(`sla_status_repo.go`) mirrors `csm-notification-service`'s own
+`chataudience.onboardingStatuses` by hand — keep the two in sync, or the
+Chat card and the email end up disagreeing on whether a given case counts
+as "onboarding." Every other field this method resolves (`AssigneeName`/
+`AssigneeEmail`, and the clock state itself) is unaffected by onboarding
+status.
+
+**`SearchActiveSLAStatuses` also resolves `EngagementType`** (`eng.type::TEXT`,
+lowercased — `caseLikeJoins`' own `engagement` table, already joined for every
+other case-like field here) — added for `csm-notification-service`'s
+`Engine.Reconcile`, its startup rebuild of Redis from this bulk endpoint, so a
+migration engagement's clock metadata survives a Redis wipe/restart instead
+of being rebuilt with `EngagementType` dropped to `""` (a CodeRabbit-caught
+follow-up on the fix above: `ClockMeta.EngagementType` also needs a LIVE
+refresh path, not just a durable one — see `events.CaseTypeChangedPayload`'s
+own new `NewEngagementType` field and `case_type_transfer_service.go`'s
+`publishCaseTypeChanged`, which populates it from a fresh `GetCaseByID` the
+same way `Product`/`Team` already are, for the event-driven half of this).
 
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
@@ -4852,9 +4917,18 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   ServiceNow and another in the portal because of a timeout. The transaction (and a row lock on
   that one work item) stays open for the length of the ServiceNow call.
 - **After the commit, best-effort, never undoing it:** an activity entry ("Type: Case ->
-  Engagement") and the SLA clocks above. No event is published (there is no `case.type_changed`).
-  A GitHub-linked service request still gets the one "record created" notice its insert
-  trigger always sends.
+  Engagement") and the SLA clocks above. **`case.type_changed` (`publishCaseTypeChanged`) now
+  also publishes here, but only when `"case"` is the previous or the new type** (`result.Type ==
+  "case"` or `result.PreviousType == "case"`) — a transfer between two non-`"case"` types (e.g.
+  `service_request` straight to `engagement`) still publishes nothing, so
+  `csm-notification-service`'s own `Engine.ReviseClocks` never hears about those. This stayed
+  undocumented here after it was added; see that repo's own `CLAUDE.md`, "SLA breach-alerting
+  engine", for what it's actually for — keeping a clock's Redis-held `CaseType`/`EngagementType`
+  current after a transfer (confirmed live, not hypothetical: entity-service's clock
+  re-evaluation has no `case_type` gate at creation time's own `slaClockEligibleCreateTypes`
+  does, so a case's clock can survive a transfer into an engagement and keep running under
+  stale metadata without this). A GitHub-linked service request still gets the one "record
+  created" notice its insert trigger always sends.
 - **`GetCaseByID` now returns `engagementType` too** (fixed; previously a known gap, not caused
   by the transfer itself) — it used to select only the list search's own `eng.type` and leave
   the detail read's `CaseView.EngagementType` nil, so anything keyed on it from the detail read

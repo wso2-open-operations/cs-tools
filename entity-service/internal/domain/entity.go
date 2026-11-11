@@ -8819,7 +8819,16 @@ type SLAStatus struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle,omitempty"`
 	CaseType   string `json:"caseType,omitempty"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CaseCreatedPayload.EngagementType's own
+	// convention (engagement.engagement_type, lowercased, e.g. "migration";
+	// "" for every non-engagement case-like type) -- exists so
+	// csm-notification-service's startup reconciliation (Engine.Reconcile,
+	// GetActiveCSMSLAClocks) can rebuild a clock's Redis-held EngagementType
+	// from this same durable source instead of silently dropping it to ""
+	// on every restart, the identical reasoning CaseType itself already has
+	// here.
+	EngagementType string `json:"engagementType,omitempty"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (account.cre_team_id
 	// joined to "group") -- "" when the case has no account, or the account
 	// has no CRE team assigned.
@@ -9071,6 +9080,27 @@ type SLAClockState struct {
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
 	TeamLeadName  string `json:"teamLeadName,omitempty"`
+	// ProjectOnboardingStatus/IsEvaluationAccount mirror SLAStatus's own
+	// fields of the same name and the same resolution (project.onboarding_status,
+	// project_type.name = "Evaluation Subscription") -- added so
+	// csm-notification-service's SLA breach Chat-alert routing can read real
+	// team/onboarding/evaluation facts from this same call (GetClockState,
+	// made right before sending a breach alert) instead of the hardcoded
+	// false/"" it used to pass to chataudience.Resolve, now that
+	// case.created no longer carries either fact itself.
+	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
+	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// OnboardingTeamEmail is the Customer Onboarding team's own group_email
+	// (team.key = "customer_onboarding_team"), populated only when
+	// ProjectOnboardingStatus is IN_PROGRESS/NOT_STARTED -- "" otherwise,
+	// including when that team has no group_email configured. TeamEmail
+	// above is always the case's real CRE team, never swapped for this one
+	// -- csm-notification-service's breach email is meant to reach BOTH
+	// inboxes for an onboarding-stage case (the team actually working the
+	// case, and whoever is running the onboarding), not one in place of the
+	// other, so it sends to TeamEmail and OnboardingTeamEmail together
+	// rather than this service picking one.
+	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

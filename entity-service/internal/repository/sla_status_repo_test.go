@@ -39,6 +39,7 @@ type fakeSLAStatusScanRow struct {
 	businessPauseSeconds              float64
 	caseNumber, wso2CaseID, caseTitle *string
 	fixedCaseType                     string
+	engagementType                    *string
 	product, severity, state          *string
 	team, onboardingStatus            *string
 	isEvaluation                      bool
@@ -60,12 +61,13 @@ func (f fakeSLAStatusScanRow) Scan(dest ...any) error {
 	*dest[12].(**string) = f.wso2CaseID
 	*dest[13].(**string) = f.caseTitle
 	*dest[14].(*string) = f.fixedCaseType
-	*dest[15].(**string) = f.product
-	*dest[16].(*string) = strOrEmpty(f.severity)
-	*dest[17].(**string) = f.state
-	*dest[18].(**string) = f.team
-	*dest[19].(**string) = f.onboardingStatus
-	*dest[20].(*bool) = f.isEvaluation
+	*dest[15].(**string) = f.engagementType
+	*dest[16].(**string) = f.product
+	*dest[17].(*string) = strOrEmpty(f.severity)
+	*dest[18].(**string) = f.state
+	*dest[19].(**string) = f.team
+	*dest[20].(**string) = f.onboardingStatus
+	*dest[21].(*bool) = f.isEvaluation
 	return nil
 }
 
