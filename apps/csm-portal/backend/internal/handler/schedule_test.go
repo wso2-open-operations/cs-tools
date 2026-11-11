@@ -17,9 +17,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1002,6 +1004,22 @@ func TestHolidayAvailability(t *testing.T) {
 		assertStatus(t, w, http.StatusConflict)
 		if !strings.Contains(w.Body.String(), "Morning (Ann)") {
 			t.Fatalf("body %s", w.Body.String())
+		}
+	})
+
+	t.Run("a refusal's words, which name people, never reach the log", func(t *testing.T) {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: `{"message":"Morning (Ann) has nobody"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.ConfirmHolidayAvailability(w, withUser(confirmReq(http.MethodPut)))
+		assertStatus(t, w, http.StatusConflict)
+		if strings.Contains(buf.String(), "Ann") || !strings.Contains(buf.String(), "status=409") {
+			t.Fatalf("log %q", buf.String())
 		}
 	})
 

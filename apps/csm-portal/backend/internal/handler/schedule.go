@@ -279,7 +279,14 @@ func (h *ScheduleHandler) holidayConfirmation(w http.ResponseWriter, r *http.Req
 		result, err = h.entity.WithdrawHolidayAvailability(r.Context(), teamKey, date)
 	}
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity "+verb+" failed", "userID", user.UserID, "err", err)
+		// A refusal's body names the people on the uncovered turns: log only
+		// its status. The caller still gets the words.
+		var apiErr *apierror.Error
+		if errors.As(err, &apiErr) {
+			slog.WarnContext(r.Context(), "entity "+verb+" refused", "userID", user.UserID, "status", apiErr.StatusCode)
+		} else {
+			slog.ErrorContext(r.Context(), "entity "+verb+" failed", "userID", user.UserID, "err", err)
+		}
 		mapScheduleRefusalError(w, err, msg)
 		return
 	}
