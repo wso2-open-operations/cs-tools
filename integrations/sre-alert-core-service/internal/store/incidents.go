@@ -317,16 +317,39 @@ func (r *IncidentRepo) Mute(ctx context.Context, id int64, ruleID, ruleNumber st
 		id, ruleID, ruleNumber)
 }
 
-// Unmute releases a muted incident for normal delivery. Like CloseMuted it is fold-version guarded: it does nothing,
-// and returns false, if a fold changed the incident since foldVersion (an OK that just arrived must be seen before the
-// incident is delivered), and that fold left it due, so the next pass decides again.
-func (r *IncidentRepo) Unmute(ctx context.Context, id, foldVersion int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `UPDATE incidents_processed SET muted = false, unmuted_at = now()
-		WHERE id = $1 AND fold_version = $2`, id, foldVersion)
+// Unmute releases a muted incident for normal delivery. It takes the fingerprint's fold lock, so no Fold runs between
+// its checks and its write, and it does nothing in two cases:
+//   - a fold changed the incident since inc.FoldVersion (an OK that just arrived must be seen before the incident is
+//     delivered): it returns false, false, and that fold left the incident due, so the next pass decides again;
+//   - a newer incident of the same fingerprint exists. A fold that starts a new incident does not touch the old one's
+//     fold_version, so the version check alone would let both generations reach CSM: it returns false, true, and the
+//     caller closes this one quietly instead.
+func (r *IncidentRepo) Unmute(ctx context.Context, inc model.Incident) (unmuted, superseded bool, err error) {
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("unmute incident %d: %w", id, err)
+		return false, false, fmt.Errorf("unmute incident %d: begin: %w", inc.ID, err)
 	}
-	return tag.RowsAffected() == 1, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "fold:"+inc.Fingerprint); err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: lock: %w", inc.ID, err)
+	}
+	err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM incidents_processed WHERE fingerprint = $1 AND first_seen > $2)`,
+		inc.Fingerprint, inc.FirstSeen).Scan(&superseded)
+	if err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: check newer incident: %w", inc.ID, err)
+	}
+	if superseded {
+		return false, true, nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE incidents_processed SET muted = false, unmuted_at = now()
+		WHERE id = $1 AND fold_version = $2`, inc.ID, inc.FoldVersion)
+	if err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: %w", inc.ID, err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, false, fmt.Errorf("unmute incident %d: commit: %w", inc.ID, err)
+	}
+	return tag.RowsAffected() == 1, false, nil
 }
 
 // MuteOutcome reports, for a muted incident no rule matches any more, whether its last alert was a resolving one

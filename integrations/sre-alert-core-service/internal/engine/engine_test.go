@@ -46,6 +46,8 @@ type fakeIncidents struct {
 	nextID    int64
 	locked    map[int64]bool
 	folds     int
+	// beforeUnmute, if set, runs as Unmute starts, standing in for a fold that lands between MuteOutcome and Unmute.
+	beforeUnmute func()
 }
 
 func newFakeIncidents() *fakeIncidents {

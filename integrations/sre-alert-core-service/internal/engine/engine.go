@@ -46,7 +46,7 @@ type incidentStore interface {
 	SettleNotes(ctx context.Context, incident int64, csm, chat bool) error
 	FinishDelivery(ctx context.Context, id, foldVersion int64, next *time.Time) error
 	Mute(ctx context.Context, id int64, ruleID, ruleNumber string) error
-	Unmute(ctx context.Context, id, foldVersion int64) (bool, error)
+	Unmute(ctx context.Context, inc model.Incident) (unmuted, superseded bool, err error)
 	MuteOutcome(ctx context.Context, inc model.Incident) (resolved, superseded bool, err error)
 	CloseMuted(ctx context.Context, id, foldVersion int64) (bool, error)
 }
@@ -445,42 +445,45 @@ func (e *Engine) holdMuted(ctx context.Context, inc *model.Incident) bool {
 		recheck()
 		return true
 	}
-	if resolved || superseded {
-		var closed bool
-		if !write("quiet close", func(c context.Context) (err error) {
-			closed, err = e.incidents.CloseMuted(c, inc.ID, inc.FoldVersion)
+	if !resolved && !superseded {
+		var unmuted bool
+		if !write("unmute", func(c context.Context) (err error) {
+			unmuted, superseded, err = e.incidents.Unmute(c, *inc)
 			return err
 		}) {
 			recheck()
 			return true
 		}
-		if closed {
-			reason := "resolved"
-			if superseded {
-				reason = "superseded by a newer incident"
-			}
-			log.Info("alert mute rule ended; muted incident closed quietly without a CSM incident", "reason", reason, "alerts", inc.AlertCount)
+		if unmuted {
+			now := time.Now()
+			inc.Muted, inc.UnmutedAt = false, &now
+			log.Info("alert mute rule no longer matches; delivering muted incident that is still firing", "alerts", inc.AlertCount)
+			return false
 		}
-		// Not closed means a fold just changed it; that fold left it due, so the next pass decides again.
-		return true
+		if !superseded {
+			// A fold changed it after MuteOutcome read it (an OK, say); that fold left it due, so the next pass decides
+			// again with the new alert seen, rather than delivering an incident that may have resolved.
+			return true
+		}
+		// A newer incident of the same fingerprint appeared after MuteOutcome read it: close this one quietly.
 	}
-	var unmuted bool
-	if !write("unmute", func(c context.Context) (err error) {
-		unmuted, err = e.incidents.Unmute(c, inc.ID, inc.FoldVersion)
+	var closed bool
+	if !write("quiet close", func(c context.Context) (err error) {
+		closed, err = e.incidents.CloseMuted(c, inc.ID, inc.FoldVersion)
 		return err
 	}) {
 		recheck()
 		return true
 	}
-	if !unmuted {
-		// A fold changed it after MuteOutcome read it (an OK, say); that fold left it due, so the next pass decides
-		// again with the new alert seen, rather than delivering an incident that may have resolved.
-		return true
+	if closed {
+		reason := "resolved"
+		if superseded {
+			reason = "superseded by a newer incident"
+		}
+		log.Info("alert mute rule ended; muted incident closed quietly without a CSM incident", "reason", reason, "alerts", inc.AlertCount)
 	}
-	now := time.Now()
-	inc.Muted, inc.UnmutedAt = false, &now
-	log.Info("alert mute rule no longer matches; delivering muted incident that is still firing", "alerts", inc.AlertCount)
-	return false
+	// Not closed means a fold just changed it; that fold left it due, so the next pass decides again.
+	return true
 }
 
 // settleQuietlyClosed settles the notes that later alerts (an OK, say) folded into an incident closed quietly while

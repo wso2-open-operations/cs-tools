@@ -39,14 +39,23 @@ func (f *fakeIncidents) Mute(_ context.Context, id int64, ruleID, ruleNumber str
 	})
 }
 
-func (f *fakeIncidents) Unmute(_ context.Context, id, foldVersion int64) (bool, error) {
+func (f *fakeIncidents) Unmute(_ context.Context, inc model.Incident) (bool, bool, error) {
+	if f.beforeUnmute != nil {
+		f.beforeUnmute()
+	}
 	f.mu.Lock()
-	stale := f.incidents[id].FoldVersion != foldVersion
+	for _, other := range f.incidents {
+		if other.Fingerprint == inc.Fingerprint && other.FirstSeen.After(inc.FirstSeen) {
+			f.mu.Unlock()
+			return false, true, nil
+		}
+	}
+	stale := f.incidents[inc.ID].FoldVersion != inc.FoldVersion
 	f.mu.Unlock()
 	if stale {
-		return false, nil
+		return false, false, nil
 	}
-	return true, f.update(id, func(i *model.Incident) {
+	return true, false, f.update(inc.ID, func(i *model.Incident) {
 		now := time.Now()
 		i.Muted, i.UnmutedAt = false, &now
 	})
@@ -275,6 +284,35 @@ func TestMute_SupersededGenerationIsClosedAndLatestDelivered(t *testing.T) {
 	got = incidents.byFingerprint(fpOf(item("ALT1", 0, "")))
 	if n.csmCalls != 1 || got[0].Status != "closed" || got[0].CSMConfirmed || !got[1].CSMConfirmed {
 		t.Fatalf("csm = %d incidents = %+v, want only the latest generation delivered", n.csmCalls, got)
+	}
+}
+
+// A fold that starts a newer incident after MuteOutcome read the old one leaves the old one's fold version alone, so
+// Unmute itself must notice the newer incident and the old one must close quietly instead of reaching CSM.
+func TestMute_NewerGenerationBetweenOutcomeAndUnmuteClosesTheOldOneQuietly(t *testing.T) {
+	n := &fakeNotifier{csmOK: true, chatOK: true}
+	e, incidents, rules := newMutingEngine(n)
+	rules.set(svcBlock("b1"))
+	handle(t, e, item("ALT1", 0, "critical"))
+	e.DeliverDue(context.Background())
+
+	rules.set()
+	old := incidents.byFingerprint(fpOf(item("ALT1", 0, "")))[0]
+	incidents.beforeUnmute = func() {
+		incidents.beforeUnmute = nil
+		handle(t, e, item("ALT2", 6*time.Minute, "critical"))
+	}
+	incidents.makeDue(old.ID)
+	e.DeliverDue(context.Background())
+
+	got := incidents.byFingerprint(fpOf(item("ALT1", 0, "")))
+	if len(got) != 2 || got[0].ID != old.ID || got[0].Status != "closed" || got[0].CSMConfirmed {
+		t.Fatalf("incidents = %+v, want the superseded generation closed quietly", got)
+	}
+	for _, c := range n.creationNotes {
+		if strings.Contains(c, "ALT1") {
+			t.Fatalf("creation notes = %q, want the superseded generation never created in CSM", n.creationNotes)
+		}
 	}
 }
 
