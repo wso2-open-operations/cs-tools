@@ -166,7 +166,10 @@ func (s *stubCaseRepo) CreateCaseCommentAsSystem(ctx context.Context, req domain
 	if s.createCaseCommentAsSystem != nil {
 		return s.createCaseCommentAsSystem(ctx, req, createdOn)
 	}
-	panic("not implemented")
+	// Unset: succeeds quietly. Every plain-Postgres CreateCase now writes the
+	// description as the first comment through this method, so a test that
+	// is not about that comment need not stub it.
+	return domain.CaseComment{}, nil
 }
 func (s *stubCaseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
 	if s.searchCaseComments != nil {

@@ -4072,8 +4072,22 @@ already use — no route path, request, or response shape changed.
     its events report. Comments on those keep exactly the behaviour they had.
   - **A live comment only.** A comment carrying its own past `createdOn` is
     ServiceNow history being mirrored in at dual-write case creation
-    (`mirrorInitialSNComments`), not something happening now, so it does not move
-    `updated_on`.
+    (`mirrorInitialSNComments`), or the description written as a case's first
+    comment on the plain PostgreSQL create (`addDescriptionAsFirstComment`), not
+    something happening now, so it does not move `updated_on`.
+- **A case starts with its description as the first comment, on every data source.**
+  ServiceNow's case-creation rules write the description as the case's first comment;
+  dual-write copies it (`mirrorInitialSNComments`). With no ServiceNow behind the create
+  (`DATA_SOURCE=postgres`) nothing wrote it, so a new case's activity started without its
+  description. `caseService.addDescriptionAsFirstComment` now writes it right after the
+  insert: a `COMMENT` holding the description HTML unchanged, by the creator, at the case's
+  own `created_on`, through `CreateCaseCommentAsSystem` (no `case.comment_added`, no SLA
+  response, no watcher, no `updated_on`). Skipped for an announcement (its description is
+  shown already; the mirror drops ServiceNow's repeat too) and a blank description. Best
+  effort: the insert has its own 5s deadline (so the SLA clocks and `case.created` after it
+  keep their time), and a failure is logged by SQLSTATE or class only (`dbFailureReason`: a
+  pgx connection error names the host, user and database) while the create still succeeds. Cases created before this have
+  no such comment; nothing backfills them.
   - **Never backwards** (`updated_on <= NOW()`): `NOW()` is the transaction's
     start, so a comment that waited on the row lock behind a later-stamped write
     leaves that newer stamp, and its writer, alone.

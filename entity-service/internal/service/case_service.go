@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -817,6 +819,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		return domain.CreateCaseResponse{}, err
 	}
 	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
+	s.addDescriptionAsFirstComment(ctx, c, req)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered
@@ -1051,6 +1054,63 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 			State:      responseState,
 		},
 	}, nil
+}
+
+// addDescriptionAsFirstComment gives a case created on the plain PostgreSQL
+// data source the first comment ServiceNow's case-creation rules write: the
+// description itself, as a COMMENT by the creator at the case's creation time.
+// Under dual-write that comment comes from ServiceNow (mirrorInitialSNComments);
+// with no ServiceNow behind the create nothing wrote it, so the case's activity
+// started without its description.
+//
+// Written straight to the repository, like the mirror: it is the case's own
+// history, not a new reply, so it publishes no case.comment_added, counts as
+// no support engineer response, subscribes no watcher and, carrying the
+// case's own created_on, leaves updated_on alone. An announcement is skipped
+// (its description is already shown, and the mirror drops ServiceNow's
+// repeat of it), as is a blank description. Best effort: the case already
+// exists, so a failure is logged and the create still succeeds. The write
+// gets its own deadline (descriptionCommentTimeout) so a slow insert cannot
+// use up the request's and leave the steps after it (SLA clocks, case.created)
+// without time to run.
+func (s *caseService) addDescriptionAsFirstComment(ctx context.Context, c domain.Case, req domain.CreateCaseRequest) {
+	if req.Type == "announcement" || strings.TrimSpace(req.Description) == "" {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, descriptionCommentTimeout)
+	defer cancel()
+	createdOn := c.CreatedOn
+	if _, err := s.repo.CreateCaseCommentAsSystem(writeCtx, domain.CreateCaseCommentRequest{
+		CaseID:    c.ID,
+		Type:      domain.CommentTypeComment,
+		Content:   req.Description,
+		CreatedBy: c.CreatedBy,
+	}, &createdOn); err != nil {
+		slog.ErrorContext(ctx, "create case: writing the description as the first comment failed", "caseId", c.ID, "reason", dbFailureReason(err))
+	}
+}
+
+// descriptionCommentTimeout bounds addDescriptionAsFirstComment's insert, the
+// same 5s the other best-effort steps after a create get
+// (publishCaseCreatedTimeout and its siblings).
+const descriptionCommentTimeout = 5 * time.Second
+
+// dbFailureReason summarises a repository error for a log line without
+// repeating its text: a pgx connection error names the database host, user
+// and database. A PostgreSQL error is reported by its SQLSTATE, a deadline or
+// cancellation by name, anything else only as a database error.
+func dbFailureReason(err error) string {
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.As(err, &pgErr):
+		return "database error, SQLSTATE " + pgErr.Code
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "database error"
+	}
 }
 
 // mirrorInitialSNComments copies the comments ServiceNow's own case-creation
