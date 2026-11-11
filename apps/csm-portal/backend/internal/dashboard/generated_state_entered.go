@@ -137,7 +137,7 @@ func checkStateEnteredFilters(at string, query map[string]any, fields, base map[
 				}
 			}
 		case "stateEnteredOn":
-			if (op != "gte" && op != "lte") || len(values) != 1 || !generatedDate(values[0]) {
+			if (op != "gte" && op != "lte") || len(values) != 1 || !stateEnteredDate(values[0]) {
 				return fmt.Errorf("%w: %s: stateEnteredOn takes op \"gte\" or \"lte\" with one date or a relative date such as __today__", ErrGeneratedInvalid, where)
 			}
 			if !fields["stateEntered"] && !base["stateEntered"] {
@@ -146,6 +146,22 @@ func checkStateEnteredFilters(at string, query map[string]any, fields, base map[
 		}
 	}
 	return nil
+}
+
+// stateEnteredDate reports whether s is a date a stateEnteredOn filter may
+// hold: a plain date or time as generatedDate takes, or a relative date that
+// resolves as the webapp and entity-service resolve it (parseRelativeDate:
+// __today__ takes no argument, __daysAgo:N__ a non-negative one, the others
+// one each). generatedDate's own pattern accepts an argument on any token
+// (__today:3__), which entity-service refuses at tile load; it stays as it
+// is because saved dashboards are parsed again on every read, and no saved
+// dashboard has a stateEnteredOn yet.
+func stateEnteredDate(s string) bool {
+	if generatedRelativeDate.MatchString(s) {
+		_, ok := parseRelativeDate(s)
+		return ok
+	}
+	return generatedDate(s)
 }
 
 // filterFields is the set of field names in a query's (or an anyOf

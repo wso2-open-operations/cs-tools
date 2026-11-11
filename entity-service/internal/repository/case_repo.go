@@ -3608,9 +3608,12 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	// append-only work_item_activity, one "state" row per change, written by
 	// caseService.UpdateCase under the state's display label) has a change
 	// INTO one of the states, logged in the window. Whatever the case's state
-	// is now, and once however many such changes it has (EXISTS). Probed per
-	// case through idx_work_item_activity_work_item_id. Top level only:
-	// rejectUnsupportedOrGroupFields refuses both inside an anyOf branch.
+	// is now, and once however many such changes it has (EXISTS). Served by
+	// idx_work_item_activity_state_entered (migration 0283: the state rows by
+	// LOWER(new_value), created_on), or per case through
+	// idx_work_item_activity_work_item_id when other filters leave few. Top
+	// level only: rejectUnsupportedOrGroupFields refuses both inside an anyOf
+	// branch.
 	if len(req.Parsed.EnteredStateLabels) > 0 {
 		pred := fmt.Sprintf("EXISTS (SELECT 1 FROM work_item_activity sa WHERE sa.work_item_id = wi.id AND sa.field_name = 'state' AND LOWER(sa.new_value) = ANY($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.EnteredStateLabels)

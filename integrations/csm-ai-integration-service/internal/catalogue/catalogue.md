@@ -206,7 +206,11 @@ to**, read from its state history: with `stateEnteredOn` it counts the cases tha
 states in that period (dates as above), whether they are still there or have moved on since; a case
 that moved there several times counts once. Without `stateEnteredOn` it means at any time. "... and
 still there" adds `state in` the same state(s). A slice may carry only the `stateEnteredOn` window when
-the widget's own `query` has the `stateEntered`.
+the widget's own `query` has the `stateEntered`. The state history starts on **2026-10-11**: a period
+(or no period) reaching before that day misses the earlier moves, so that dashboard is a closest one
+(section 1) with a `note` such as "State changes are only known from 11 October 2026, so earlier moves
+are not counted." A case's first state is not in the history, so "moved to Open" cannot be expressed
+("reopened" can).
 
 ```json
 { "id": "moved-to-wow-today", "displayName": "Moved to Waiting on WSO2 Today", "resourceType": "case",
@@ -563,6 +567,7 @@ Never set both `slices` and `groupBy`.
 | "... and still there", "moved to WOW today and still waiting on WSO2" | the `stateEntered` filters plus `state in` the same state(s) |
 | "in WOW", "WOW cases", "currently waiting on WSO2" (no word for moving) | `state in ["waiting_on_wso2"]`: where cases are now |
 | "moved out of" / "left" a state, the state a case came from ("from WOW to In Progress"), how many times cases changed state | not expressible: only the state a case moved to is known, and each case counts once; the closest is `stateEntered` with the new state, with a `note` |
+| "moved to Open", "opened" as a state change | not expressible (a case's first state is not in its history); "opened" / "created" in a period is `createdOn`, "reopened" is `stateEntered in ["reopened"]` |
 | "unassigned", "no assignee" | `assignedUserId isEmpty` (case family only) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |

@@ -10494,19 +10494,28 @@ date forms and relative placeholders) answer the first: `buildCaseSearchWhere` a
 - **Meaning:** whatever the case's state is now, and once per case however many times it entered
   (`EXISTS`). Add `state in` for "entered today and still there".
 - **Rules:** `stateEnteredOn` needs `stateEntered`; a `lte` before its `gte` is refused; both are top
-  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` refuses both (search and aggregate)
-  before any call: it keeps no history, and dropping them would widen the result.
-- **Coverage:** only what was logged. `caseService.UpdateCase` logs every state change made through
-  the portal, including the automatic moves to Waiting on WSO2 on a customer's reply or attachment.
-  Whether csm-sync-service copies changes made in ServiceNow into this table is not known here.
-- **Cost:** probed per case through `idx_work_item_activity_work_item_id`. There is no
-  `updated_on` pre-filter, because it is not confirmed that every writer bumps `updated_on` with the
-  state.
+  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` (the legacy data source) refuses both
+  (search and aggregate) before any call: it keeps no history, and dropping them would widen the result.
+- **Coverage:** only what was logged, so a period reaching further back undercounts.
+  - The history starts when the portal began logging (2026-10-11). Whether csm-sync-service copies
+    changes made in the legacy data source into this table is not known here.
+  - `caseService.UpdateCase` logs every state change made through the portal, including the automatic
+    moves to Waiting on WSO2 on a customer's reply or attachment, best effort: a failed write is
+    logged and dropped, and `recordFieldChangeActivity` skips the row when no actor email is resolved.
+  - Case creation logs no state row, so `stateEntered in [open]` matches only cases moved back to
+    Open, never one created and left there. The AI catalogue treats "moved to Open" as not expressible.
+- **Cost:** `idx_work_item_activity_state_entered` (migration 0283, partial on `field_name = 'state'`,
+  keyed `LOWER(new_value), created_on`) serves the predicate. Without it the planner seq-scanned the whole
+  table: on 100k cases and 1.5M activity rows, "moved to Waiting on WSO2 today" went from ~100 ms to
+  2-3 ms, and "this month" takes ~25 ms. There is no `updated_on` pre-filter, because it is not confirmed
+  that every writer bumps `updated_on` with the state.
 
-Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the ServiceNow refusal) and
-`repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`: left again, entered twice,
-yesterday, an upper-case label, a non-state row and a change out of the state, window edges, the
-aggregate).
+Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the legacy data source's
+refusal) and `repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`, run locally:
+no CI workflow runs the entity-service Go tests; left again, entered twice, yesterday, an upper-case
+label, a non-state row and a change out of the state, created in the state with no history row, window
+edges, the aggregate, and a customer caller inside and outside the case's project, since
+`work_item_activity` has forced row-level security).
 
 ## Case search `countOnly`, and the projectOnboardingStatus `in` filter's exclusion-list rewrite
 
