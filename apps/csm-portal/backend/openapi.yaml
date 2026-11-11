@@ -1686,7 +1686,7 @@ paths:
         chunk i (chunkBytes long, the last one shorter) to links[i], then confirm the upload as
         usual; confirm checks the real size. The links are credentials that expire at
         expiresAt (a request that started before then finishes), and the answer is never
-        cacheable. If a link cannot be used, send the chunks through the chunk route instead.
+        cacheable. If a link cannot be used, a file within the ordinary size limit may be sent through the chunk route instead; a larger one cannot, so ask for new links or report the failure.
       operationId: createAttachmentUploadLinks
       parameters:
         - name: id
