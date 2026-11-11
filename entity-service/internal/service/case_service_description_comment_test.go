@@ -19,8 +19,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -96,6 +99,53 @@ func TestCaseService_CreateCase_NoDescriptionCommentForAnAnnouncementOrABlankDes
 			_, _ = svc.CreateCase(context.Background(), req)
 			if len(calls) != 0 {
 				t.Errorf("comments written = %d, want none", len(calls))
+			}
+		})
+	}
+}
+
+func TestCaseService_CreateCase_TheDescriptionCommentHasItsOwnDeadline(t *testing.T) {
+	var deadline time.Time
+	var hadDeadline bool
+	repo := &stubCaseRepo{
+		createCase: func(_ context.Context, _ domain.CreateCaseRequest) (domain.Case, error) {
+			return domain.Case{ID: "case-1", CreatedBy: "jane.doe@example.com"}, nil
+		},
+		createCaseCommentAsSystem: func(ctx context.Context, _ domain.CreateCaseCommentRequest, _ *time.Time) (domain.CaseComment, error) {
+			deadline, hadDeadline = ctx.Deadline()
+			return domain.CaseComment{}, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	req := validCreateCaseRequest()
+	req.CreatedBy = "system"
+	start := time.Now()
+	if _, err := svc.CreateCase(context.Background(), req); err != nil {
+		t.Fatalf("CreateCase: %v", err)
+	}
+	if !hadDeadline {
+		t.Fatal("the description comment was written with no deadline")
+	}
+	if limit := start.Add(descriptionCommentTimeout + time.Second); deadline.After(limit) {
+		t.Errorf("deadline = %v, want within %v of the create", deadline, descriptionCommentTimeout)
+	}
+}
+
+func TestDBFailureReason_NeverRepeatsTheErrorText(t *testing.T) {
+	connErr := errors.New("failed to connect to `user=app database=csm host=db.internal`: refused")
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"postgres error":    {fmt.Errorf("create comment: %w", &pgconn.PgError{Code: "23503", Message: "violates foreign key"}), "database error, SQLSTATE 23503"},
+		"deadline":          {fmt.Errorf("create comment: %w", context.DeadlineExceeded), "timed out"},
+		"canceled":          {context.Canceled, "canceled"},
+		"connection failed": {fmt.Errorf("create comment: %w", connErr), "database error"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := dbFailureReason(tc.err); got != tc.want {
+				t.Errorf("dbFailureReason = %q, want %q", got, tc.want)
 			}
 		})
 	}
