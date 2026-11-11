@@ -257,6 +257,18 @@ type StoredAttachmentInsert struct {
 	PendingSince     time.Time
 }
 
+// AttachmentLimits is the answer of GET /attachments/limits: the sizes the portals
+// may offer, so a webapp keeps no copy of them in its own configuration.
+type AttachmentLimits struct {
+	// MaxFileBytes is the largest file that may be uploaded as an attachment: the
+	// direct-upload maximum while direct uploads are on and above the portal limit,
+	// else the portal limit.
+	MaxFileBytes int64 `json:"maxFileBytes"`
+	// MaxInlineImagesTotalBytes is the most image bytes one comment or description
+	// may hold in total (and so the largest single image).
+	MaxInlineImagesTotalBytes int64 `json:"maxInlineImagesTotalBytes"`
+}
+
 // AbandonedUpload is an upload that was started and never confirmed.
 type AbandonedUpload struct {
 	Kind StoredAttachmentKind

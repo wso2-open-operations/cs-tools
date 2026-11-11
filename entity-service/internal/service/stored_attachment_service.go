@@ -869,6 +869,14 @@ func (s *storedAttachmentService) limitForUpload(kind domain.StoredAttachmentKin
 	return s.limitFor(kind)
 }
 
+// Limits implements StoredAttachmentService.
+func (s *storedAttachmentService) Limits() domain.AttachmentLimits {
+	return domain.AttachmentLimits{
+		MaxFileBytes:              s.limitForUpload(domain.StoredAttachmentWorkItem, s.limits.DirectTransfers),
+		MaxInlineImagesTotalBytes: s.limits.inlineTotalMax(),
+	}
+}
+
 // failQuietly marks a row FAILED as the system. A failure to do so is logged
 // only: the caller is already being given a more useful error.
 func (s *storedAttachmentService) failQuietly(ctx context.Context, kind domain.StoredAttachmentKind, id, reason string) {

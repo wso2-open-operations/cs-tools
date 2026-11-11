@@ -1718,6 +1718,9 @@ type StoredAttachmentService interface {
 	// do so (a ForbiddenError otherwise), and not once the work item is closed (a
 	// ConflictError). Repeating a delete that already succeeded answers the same.
 	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
+	// Limits returns the attachment sizes in force, for the portals to show and check
+	// against. It reads configuration only.
+	Limits() domain.AttachmentLimits
 
 	// The three calls below each return an internal storage key for the backend
 	// that asked.
