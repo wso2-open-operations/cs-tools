@@ -1476,6 +1476,53 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /attachments/limits:
+    get:
+      summary: Get the attachment size limits.
+      description: >-
+        The largest file and the largest total of inline images entity-service accepts, so
+        the portal shows the numbers that are enforced. The answer is not secret and may be
+        cached for five minutes (`Cache-Control: private, max-age=300`).
+      operationId: getAttachmentLimits
+      responses:
+        "200":
+          description: The limits, in bytes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  maxFileBytes:
+                    type: integer
+                    format: int64
+                  maxInlineImagesTotalBytes:
+                    type: integer
+                    format: int64
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /attachments/{id}/upload-links:
     post:
       summary: Get signed links to send a large file straight to Azure Blob Storage.

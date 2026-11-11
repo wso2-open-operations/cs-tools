@@ -71,6 +71,19 @@ func TestStoredAttachments_BodiesAreRelayedVerbatimWithTheCallersHeaders(t *test
 	}
 }
 
+func TestStoredAttachmentLimits_IsRelayedVerbatim(t *testing.T) {
+	c := storedTestClient(t, map[string]http.HandlerFunc{
+		"GET /attachments/limits": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"maxFileBytes":1,"maxInlineImagesTotalBytes":2}`))
+		},
+	})
+	out, err := c.StoredAttachmentLimits(context.Background())
+	if err != nil || string(out) != `{"maxFileBytes":1,"maxInlineImagesTotalBytes":2}` {
+		t.Errorf("err=%v out=%s", err, out)
+	}
+}
+
 func TestStoredAttachments_UpstreamStatusIsKept(t *testing.T) {
 	c := storedTestClient(t, map[string]http.HandlerFunc{
 		"POST /attachments/upload": func(w http.ResponseWriter, _ *http.Request) {

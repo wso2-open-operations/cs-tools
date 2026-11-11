@@ -31,6 +31,7 @@ func TestStoredAttachmentRoutesDoNotConflict(t *testing.T) {
 		"POST /attachments/upload",
 		"POST /attachments/upload/{id}/confirm",
 		"POST /attachments/delete",
+		"GET /attachments/limits",
 		"PUT /attachments/upload/{id}/chunks/{index}",
 		"GET /attachments/upload/{id}/chunks",
 		"GET /attachments/download/{id}/content",
