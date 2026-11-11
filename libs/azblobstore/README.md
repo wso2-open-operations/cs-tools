@@ -85,7 +85,7 @@ if store.CanSignLinks() {
 }
 
 // Inside Azure, no byte passes through the caller (needs the same account key):
-err = store.Copy(ctx, stagingKey, finalKey)
+err = store.Copy(ctx, stagingKey, finalKey, etagOfTheCheckedFile)
 ```
 
 A link is signed for one blob, for writing only (upload) or reading only
@@ -102,13 +102,15 @@ the blocks there, then `Copy` the result to the final key and delete the staging
 blob: a link that is still valid can then only write a file nothing reads. `Copy`
 works inside Azure (Copy Blob, read through a short-lived link of its own), so no
 byte passes through the caller, and it waits for a copy Azure has not finished.
+Pass the `ETag` that `Stat` gave for the file you checked: the copy is refused with
+`ErrSourceChanged` if the staging file was replaced after the check.
 For an upload that was abandoned, use `Discard` on both keys: it drops blocks that
 were put and never committed, which `Delete` cannot reach (Azure keeps them for
 about a week).
 
-A store that signs in as an Entra app cannot sign a link and returns
-`ErrLinksUnavailable` (`Copy` too); the storage account also needs CORS for the
-browsers that use the links.
+Signing as an Entra app (with a user delegation key) is not supported yet: such a
+store returns `ErrLinksUnavailable` (`Copy` too). The storage account also needs
+CORS for the browsers that use the links.
 
 ## Limits to know
 

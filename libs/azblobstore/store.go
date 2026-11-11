@@ -271,9 +271,11 @@ func (s *Store) Commit(ctx context.Context, key string, blockCount int, contentT
 type Info struct {
 	Size        int64
 	ContentType string
+	// ETag changes whenever the blob does; Copy can be pinned to it.
+	ETag string
 }
 
-// Stat returns the size and type of the committed blob at key, or ErrNotFound.
+// Stat returns the size, type and ETag of the committed blob at key, or ErrNotFound.
 func (s *Store) Stat(ctx context.Context, key string) (Info, error) {
 	if err := validateKey(key); err != nil {
 		return Info{}, err
@@ -291,6 +293,9 @@ func (s *Store) Stat(ctx context.Context, key string) (Info, error) {
 	}
 	if resp.ContentType != nil {
 		info.ContentType = *resp.ContentType
+	}
+	if resp.ETag != nil {
+		info.ETag = string(*resp.ETag)
 	}
 	return info, nil
 }
