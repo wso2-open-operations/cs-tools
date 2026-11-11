@@ -3830,9 +3830,17 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	// WHERE and ORDER BY do not reference. Under RLS this matters: the
 	// policies on the joined tables stop the planner from limiting rows
 	// before joining, so a deep page used to join every matching row first.
+	// A description can be megabytes of rich text. When the caller excluded it,
+	// a typed NULL stands in so the column is never read from the table, and
+	// the scan target and row shape stay the same. Filtering on description
+	// lives in the WHERE clause and is unaffected.
+	descriptionColumn := "wi.description"
+	if req.ExcludesField(domain.SearchExcludeFieldDescription) {
+		descriptionColumn = "NULL::text"
+	}
 	dataQuery := fmt.Sprintf(
 		`SELECT wi.id, wi.number, wi.wso2_id,
-		        wi.type::TEXT, wi.subject, wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
+		        wi.type::TEXT, wi.subject, `+descriptionColumn+`, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
 		        eng.type::TEXT, `+caseLikeWorkStateColumn+`, c.current_escalation_level::TEXT, wi.created_on, wi.updated_on,
 		        wi.created_by,
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta,

@@ -1150,6 +1150,13 @@ export interface BeCaseSearchPayload {
    */
   skipTotal?: boolean;
   /**
+   * Response fields to leave out of each row. Only `"description"` is accepted
+   * (anything else is a 400); an excluded row carries `description: null`.
+   * For list callers that never render the body. Needs an entity service that
+   * declares the field; it rejects unknown request fields.
+   */
+  excludeFields?: "description"[];
+  /**
    * The mirror image of `skipTotal`: skip the page query entirely and return
    * `cases: []`, reading only `total`. For a count or pie/bar dashboard
    * widget, whose only use for a search is `total` -- the page it would
@@ -1176,7 +1183,8 @@ export interface BeCaseSearchView {
    * `GET /cases/{id}` CaseView (the earlier `title` naming inconsistency is gone).
    */
   subject?: string;
-  description?: string;
+  /** `null` when the request excluded it via `excludeFields`. */
+  description?: string | null;
   /** Free-form display string from the backend, e.g. "Low (P4)", "Critical (P1)". */
   severity?: string;
   issueType?: BeCaseIssueType;

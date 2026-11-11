@@ -3572,10 +3572,24 @@ func prepareCaseSearchFilters(ctx context.Context, req domain.SearchCasesRequest
 	return req, nil
 }
 
+// validateSearchExcludeFields rejects any excludeFields value other than the
+// supported ones, so a typo is a 400 rather than a silently full response.
+func validateSearchExcludeFields(fields []string) error {
+	for _, f := range fields {
+		if f != domain.SearchExcludeFieldDescription {
+			return &apierror.ValidationError{Msg: "excludeFields contains invalid value: " + f + " (supported: description)"}
+		}
+	}
+	return nil
+}
+
 // SearchCases implements CaseService.
 func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if req.CountOnly && req.SkipTotal {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "countOnly and skipTotal cannot both be set: countOnly already skips the page query, and skipTotal would leave nothing to compute"}
+	}
+	if err := validateSearchExcludeFields(req.ExcludeFields); err != nil {
+		return domain.SearchCasesResponse{}, err
 	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCasesResponse{}, err

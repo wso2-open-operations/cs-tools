@@ -11946,3 +11946,15 @@ rather than failing the change (the insert looks the id up). **Not ported:** the
 the field has no column and no portal input. `MissingSchema` also checks 0188's columns.
 
 Tests: `post_resolution_tasks_test.go` (unit), `post_resolution_tasks_integration_test.go`.
+
+## Case search `excludeFields`
+
+`SearchCasesRequest.ExcludeFields` (`entity.go`) lets a list leave a heavy field out of every row. Only
+`"description"` is supported (rich text, megabytes on some cases; a 20-row page was ~1.25 MB, almost all
+of it descriptions); anything else is a 400 from `validateSearchExcludeFields`, which both the Postgres
+and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for-byte unchanged:
+`SearchCaseView.Description` keeps its no-`omitempty` tag, so an excluded description serialises as
+`null`, the same as a case with none. On Postgres `caseRepo.SearchCases` swaps `wi.description` for
+`NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
+clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
+`/cases/search` only: aggregate, announcement-registry and every other search ignore it.

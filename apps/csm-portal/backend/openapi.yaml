@@ -20709,6 +20709,16 @@ components:
             hits). Defaults to false, which returns the exact total as before.
             Ignored on the ServiceNow data source, which always reports one,
             and for a search that sets groupBy (its totals are the bucket counts).
+        excludeFields:
+          type: array
+          items:
+            type: string
+            enum: [description]
+          description: >-
+            Response fields to leave out of every returned case, for a list
+            that never shows them. Only `description` is supported (it can be
+            megabytes of rich text); an excluded field comes back null. Omitted
+            or empty returns every field as before. Forwarded as is.
         filters:
           $ref: '#/components/schemas/CaseSearchFilters'
         sortBy:
@@ -22011,6 +22021,7 @@ components:
           type: string
         description:
           type: string
+          nullable: true
         severity:
           type: string
           enum:

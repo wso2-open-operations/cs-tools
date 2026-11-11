@@ -4603,6 +4603,9 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 
 // SearchCases implements CaseService by calling the Choreo POST /cases/search endpoint.
 func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
+	if err := validateSearchExcludeFields(req.ExcludeFields); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
@@ -4896,6 +4899,11 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		}
 		if c.RelatedCase != nil {
 			cv.RelatedCase = &domain.EntityRef{ID: sysidToUUID(c.RelatedCase.ID), Name: c.RelatedCase.Number}
+		}
+		if req.ExcludesField(domain.SearchExcludeFieldDescription) {
+			// The backing source has no way to leave the field out of its own
+			// response, so it is dropped here to keep the contract uniform.
+			cv.Description = nil
 		}
 		views = append(views, cv)
 	}
