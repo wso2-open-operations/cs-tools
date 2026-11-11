@@ -769,11 +769,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		limits := service.StoredAttachmentLimits{
 			MaxBytes:            cfg.AttachmentMaxBytes,
 			InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
-		}
-		if len(directTransfers) > 0 {
-			// A file sent straight to Azure may be larger than one sent through here.
-			limits.DirectMinBytes = cfg.AttachmentDirectMinBytes
-			limits.DirectMaxBytes = cfg.AttachmentDirectMaxBytes
+			DirectTransfers:     len(directTransfers) > 0,
+			DirectMinBytes:      cfg.AttachmentDirectMinBytes,
+			DirectMaxBytes:      cfg.AttachmentDirectMaxBytes,
 		}
 		storedAttachmentSvc = service.NewStoredAttachmentService(storedAttachmentRepo, limits)
 		// A portal admin may delete an attachment they did not upload, asked

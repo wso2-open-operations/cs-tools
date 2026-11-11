@@ -426,7 +426,8 @@ paths:
         work item open). A chunk may be sent again (a retry overwrites the same
         block), in any order, and a few at a time. Nothing is visible until the upload
         is confirmed. A chunk over the transfer limit is refused with a 429 and
-        should be retried.
+        should be retried. A file larger than ATTACHMENT_MAX_MB is refused with a 400:
+        it can only be sent through the upload links.
       operationId: putAttachmentChunk
       security:
         - clientAssertion: []
@@ -576,9 +577,10 @@ paths:
     post:
       summary: >-
         Signed links to send a large file's chunks straight to Azure Blob Storage, one link
-        per chunk, instead of through the portal backend. Only for a file larger than
-        ATTACHMENT_DIRECT_MIN_MB, and only when ATTACHMENT_DIRECT_TRANSFERS_ENABLED is on
-        (the upload start says so with directUpload). The access check, the open parent and
+        per chunk, instead of through the portal backend. Only for an upload that started
+        staged: a file larger than ATTACHMENT_DIRECT_MIN_MB while
+        ATTACHMENT_DIRECT_TRANSFERS_ENABLED was on (the upload start says so with directUpload,
+        and the decision is kept for the whole upload). The access check, the open parent and
         the size rules are those of storing a chunk, made once when the links are issued.
         The client PUTs chunk i (chunkBytes long, the last one shorter) to links[i], then
         confirms the upload; the chunks are put under a staging key, and confirm commits

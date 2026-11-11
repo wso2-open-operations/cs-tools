@@ -141,6 +141,12 @@ type AttachmentUploadTarget struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 	MaxBytes   int64  `json:"maxBytes"`
 	StorageKey string `json:"storageKey"`
+	// Staged is true when the upload may be sent straight to Azure. Its chunks are
+	// put under a staging key and copied to StorageKey at confirm.
+	Staged bool `json:"-"`
+	// ChunkRouteMaxBytes is the largest file the chunk route sends through this
+	// service: the ordinary limit, whatever MaxBytes is.
+	ChunkRouteMaxBytes int64 `json:"-"`
 }
 
 // LocateAttachmentRequest is the body of POST /attachments/locate.
@@ -229,6 +235,8 @@ type StoredAttachmentRow struct {
 	// Draft is true for a comment image uploaded to a project before the record
 	// whose description shows it exists (no work item and no comment yet).
 	Draft bool
+	// Staged is true for an upload that may be sent straight to Azure.
+	Staged bool
 }
 
 // StoredAttachmentInsert is a new, not yet stored, attachment.
@@ -240,6 +248,8 @@ type StoredAttachmentInsert struct {
 	CreatedBy   string
 	// Draft: ParentID is a project, and the row is a draft description image.
 	Draft bool
+	// Staged: the upload may be sent straight to Azure (see StoredAttachmentRow.Staged).
+	Staged bool
 }
 
 // AbandonedUpload is an upload that was started and never confirmed.

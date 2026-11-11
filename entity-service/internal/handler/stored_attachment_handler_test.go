@@ -38,6 +38,8 @@ type fakeStoredAttachmentSvc struct {
 	locate    domain.LocateAttachmentRequest
 	inlineID  string
 	err       error
+	// directUpload is what the upload start answers.
+	directUpload bool
 }
 
 func (f *fakeStoredAttachmentSvc) AuthorizeUpload(_ context.Context, req domain.AuthorizeAttachmentUploadRequest) (domain.AttachmentUploadTarget, error) {
@@ -65,7 +67,7 @@ func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain
 }
 
 func (f *fakeStoredAttachmentSvc) InitiateUpload(context.Context, domain.InitiateAttachmentUploadRequest) (domain.InitiateAttachmentUploadResponse, error) {
-	return domain.InitiateAttachmentUploadResponse{AttachmentID: "a", Number: "WIA0000001", MaxBytes: 100}, f.err
+	return domain.InitiateAttachmentUploadResponse{AttachmentID: "a", Number: "WIA0000001", MaxBytes: 100, DirectUpload: f.directUpload}, f.err
 }
 
 func (f *fakeStoredAttachmentSvc) ConfirmUpload(_ context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error) {
@@ -107,11 +109,10 @@ func TestStoredAttachmentHandler_InitiateReturns201(t *testing.T) {
 	}
 }
 
-// TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect: the upload start reports directUpload from the declared size.
+// TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect: the upload start passes on whether the service sends the file direct.
 func TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect(t *testing.T) {
 	for _, direct := range []bool{true, false} {
-		files := &fakeFiles{direct: direct}
-		rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodPost, "/attachments/upload",
+		rec := serveStoredWith(t, &fakeStoredAttachmentSvc{directUpload: direct}, &fakeFiles{}, http.MethodPost, "/attachments/upload",
 			`{"type":"work_item","parentId":"p","name":"a.pdf","contentType":"application/pdf","sizeBytes":20971520}`)
 		want := `"directUpload":false`
 		if direct {
@@ -119,9 +120,6 @@ func TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect(t *testing
 		}
 		if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("direct=%v: status %d body %s, want %s", direct, rec.Code, rec.Body.String(), want)
-		}
-		if files.directSize != 20971520 {
-			t.Errorf("asked about size %d, want the declared 20971520", files.directSize)
 		}
 	}
 }
@@ -314,15 +312,6 @@ type fakeFiles struct {
 	file        string
 	partial     bool
 	err         error
-	// direct is what DirectUploadAllowed answers; directSize is the size it was asked about.
-	direct     bool
-	directSize int64
-}
-
-// DirectUploadAllowed records the size it was asked about and answers as configured.
-func (f *fakeFiles) DirectUploadAllowed(size int64) bool {
-	f.directSize = size
-	return f.direct
 }
 
 // DirectUploadLinks answers with one link, or the configured error.

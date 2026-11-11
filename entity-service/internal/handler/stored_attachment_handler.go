@@ -120,7 +120,6 @@ func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.
 		writeServiceError(w, r, err)
 		return
 	}
-	resp.DirectUpload = h.files != nil && h.files.DirectUploadAllowed(req.SizeBytes)
 	writeStoredAttachmentJSON(w, http.StatusCreated, resp)
 }
 
