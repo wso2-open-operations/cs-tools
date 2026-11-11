@@ -34,6 +34,12 @@ type fakeAlertCore struct {
 	gotID             string
 	gotLimit, gotOffs int
 	gotField, gotQ    string
+	gotIDs            []string
+}
+
+func (f *fakeAlertCore) MutedCounts(_ context.Context, ids []string) ([]byte, error) {
+	f.gotIDs = ids
+	return f.body, f.err
 }
 
 func (f *fakeAlertCore) FieldValues(_ context.Context, field, q string, limit int) ([]byte, error) {
@@ -137,4 +143,29 @@ func TestListAlertFieldValuesGuards(t *testing.T) {
 	assertStatus(t, callFieldValues(NewAlertMuteRuleMutedAlertsHandler(nil), "/alert-field-values?field=service", true), http.StatusServiceUnavailable)
 	failing := NewAlertMuteRuleMutedAlertsHandler(&fakeAlertCore{err: &apierror.Error{StatusCode: http.StatusUnauthorized}})
 	assertStatus(t, callFieldValues(failing, "/alert-field-values?field=service", true), http.StatusServiceUnavailable)
+}
+
+func callMutedCounts(h *AlertMuteRuleMutedAlertsHandler, target string, user bool) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	if user {
+		req = withUser(req)
+	}
+	w := httptest.NewRecorder()
+	h.ListMutedCounts(w, req)
+	return w
+}
+
+func TestListMutedCounts(t *testing.T) {
+	core := &fakeAlertCore{body: []byte(`{"counts":{}}`)}
+	h := NewAlertMuteRuleMutedAlertsHandler(core)
+	w := callMutedCounts(h, "/alert-mute-rules/muted-counts?ids="+mutedRuleID+","+mutedRuleID, true)
+	assertStatus(t, w, http.StatusOK)
+	if len(core.gotIDs) != 2 || core.gotIDs[0] != mutedRuleID {
+		t.Errorf("forwarded ids = %v", core.gotIDs)
+	}
+	assertStatus(t, callMutedCounts(h, "/alert-mute-rules/muted-counts?ids="+mutedRuleID, false), http.StatusUnauthorized)
+	for _, q := range []string{"", "ids=", "ids=nope", "ids=" + mutedRuleID + ",x"} {
+		assertStatus(t, callMutedCounts(h, "/alert-mute-rules/muted-counts?"+q, true), http.StatusBadRequest)
+	}
+	assertStatus(t, callMutedCounts(NewAlertMuteRuleMutedAlertsHandler(nil), "/alert-mute-rules/muted-counts?ids="+mutedRuleID, true), http.StatusServiceUnavailable)
 }

@@ -68,3 +68,28 @@ func TestFieldValuesSendsFieldAndQuery(t *testing.T) {
 		t.Fatalf("body=%s auth=%q path=%q query=%q", body, gotAuth, gotPath, gotQuery)
 	}
 }
+
+func TestGetRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, maxBody+1))
+	}))
+	defer srv.Close()
+	if _, err := NewClient(Config{BaseURL: srv.URL, Token: "t"}).MutedIncidents(context.Background(), "abc", 20, 0); err == nil {
+		t.Fatal("want an error for a body over maxBody, got nil")
+	}
+}
+
+func TestMutedCountsSendsIDs(t *testing.T) {
+	var gotPath, gotIDs string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotIDs = r.URL.Path, r.URL.Query().Get("ids")
+		_, _ = w.Write([]byte(`{"counts":{}}`))
+	}))
+	defer srv.Close()
+	if _, err := NewClient(Config{BaseURL: srv.URL, Token: "t"}).MutedCounts(context.Background(), []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/alert-mute-rules/muted-counts" || gotIDs != "a,b" {
+		t.Fatalf("path=%q ids=%q", gotPath, gotIDs)
+	}
+}
