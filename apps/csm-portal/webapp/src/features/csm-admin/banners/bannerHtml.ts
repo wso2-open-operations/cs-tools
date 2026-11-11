@@ -231,7 +231,9 @@ export function buildBannerHtml(content: BannerContent, id = ""): string {
  * banner and what Edit reads the banner back from. The pasted HTML sits in
  * [data-banner-custom], so Edit gets it back as pasted instead of as the
  * wrapper's own markup. The wrapper adds no colours or layout of its own, and
- * a strip is 3rem tall in the portal, so what does not fit is cut off.
+ * a strip is 3rem tall in the portal, so what does not fit is cut off. The
+ * wrapper also contains painting, so pasted content with position:fixed stays
+ * inside the strip in any portal that shows it.
  */
 function buildCustomBannerHtml(content: BannerContent, id: string): string {
   const closeable = content.closeable;
@@ -242,7 +244,7 @@ function buildCustomBannerHtml(content: BannerContent, id: string): string {
     : "";
   return (
     `<div data-banner="1"${bannerId ? ` data-id="${escapeText(bannerId)}"` : ""} data-banner-type="custom" data-closeable="${closeable ? "true" : "false"}" ` +
-    `style="box-sizing:border-box;position:relative;width:100%;height:3rem;overflow:hidden;">` +
+    `style="box-sizing:border-box;position:relative;width:100%;height:3rem;overflow:hidden;contain:paint;">` +
     `<div data-banner-custom style="height:100%;width:100%">${pasted}</div>${close}</div>`
   );
 }

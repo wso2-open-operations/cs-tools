@@ -47,13 +47,15 @@ function parseTimestamp(value: string | null): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-// Saved HTML can carry a paragraph margin. The strip stays the same 3rem as an image banner.
+// Saved HTML can carry a paragraph margin. The strip stays the same 3rem as an image banner, and paint
+// containment keeps content with position:fixed (or a large z-index) inside it instead of over the portal.
 const BANNER_STRIP_CSS = `
 .portal-banner-strip{
   height:3rem !important;
   min-height:3rem !important;
   max-height:3rem !important;
   overflow:hidden !important;
+  contain:paint !important;
   box-sizing:border-box !important;
 }
 .portal-banner-strip [data-banner="1"]{

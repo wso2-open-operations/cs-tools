@@ -570,6 +570,8 @@ export default function CsmBannersPage(): JSX.Element {
               data-testid={`banner-body-${banner.id}`}
               sx={{
                 overflow: "hidden",
+                // Keeps a banner with fixed-position content inside its own box.
+                contain: "paint",
                 "& [data-banner='1']": {
                   height: "3rem !important",
                   minHeight: "3rem !important",
@@ -896,6 +898,7 @@ export default function CsmBannersPage(): JSX.Element {
                 sx={{
                   borderRadius: 1,
                   overflow: "hidden",
+                  contain: "paint",
                   border: 1,
                   borderColor: "divider",
                   "& [data-banner='1']": {

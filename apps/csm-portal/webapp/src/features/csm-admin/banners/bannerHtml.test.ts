@@ -42,6 +42,8 @@ describe("banner HTML", () => {
     expect(html).toContain('data-close-banner="true"');
     expect(html).toContain("background:#123456");
     expect(html).not.toContain("data-bg=");
+    // Fixed-position content in the pasted HTML must not escape the strip.
+    expect(html).toContain("contain:paint");
     expect(parseBannerHtml(html)).toMatchObject({ type: "custom", message: pasted, closeable: true });
   });
 

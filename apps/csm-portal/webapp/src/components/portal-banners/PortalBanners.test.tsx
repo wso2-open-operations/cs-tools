@@ -79,6 +79,11 @@ describe("PortalBannerList", () => {
     expect(screen.queryByText(/Hello engineers/)).not.toBeInTheDocument();
   });
 
+  it("contains a banner's painting, so fixed-position content stays in the strip", () => {
+    const { container } = render(<PortalBannerList banners={[banner]} />);
+    expect(container.querySelector("style")?.textContent ?? "").toMatch(/\.portal-banner-strip\{[^}]*contain:paint/);
+  });
+
   it("shows a current banner and dismisses it from the close button", () => {
     render(<PortalBannerList banners={[banner]} />);
     expect(screen.getByText("Hello engineers")).toBeInTheDocument();
