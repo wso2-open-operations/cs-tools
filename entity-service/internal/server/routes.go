@@ -2076,9 +2076,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// stream the answer back; the notification service reads an email's images.
 		mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", storedAttachmentHandler.PutChunk)
 		mux.HandleFunc("GET /attachments/upload/{id}/chunks", storedAttachmentHandler.ListChunks)
-		mux.HandleFunc("POST /attachments/upload/{id}/direct", storedAttachmentHandler.DirectUploadLinks)
+		mux.HandleFunc("POST /attachments/{id}/upload-links", storedAttachmentHandler.DirectUploadLinks)
 		mux.HandleFunc("GET /attachments/download/{id}/content", storedAttachmentHandler.DownloadAttachment)
-		mux.HandleFunc("GET /attachments/download/{id}/link", storedAttachmentHandler.DirectDownloadLink)
+		mux.HandleFunc("POST /attachments/{id}/download-links", storedAttachmentHandler.DirectDownloadLink)
 		mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
 		mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
 	}

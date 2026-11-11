@@ -87,9 +87,9 @@ func serveStoredWith(t *testing.T, svc *fakeStoredAttachmentSvc, files *fakeFile
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
 	mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", h.PutChunk)
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
-	mux.HandleFunc("POST /attachments/upload/{id}/direct", h.DirectUploadLinks)
+	mux.HandleFunc("POST /attachments/{id}/upload-links", h.DirectUploadLinks)
 	mux.HandleFunc("GET /attachments/download/{id}/content", h.DownloadAttachment)
-	mux.HandleFunc("GET /attachments/download/{id}/link", h.DirectDownloadLink)
+	mux.HandleFunc("POST /attachments/{id}/download-links", h.DirectDownloadLink)
 	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImageContent)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
@@ -128,11 +128,11 @@ func TestStoredAttachmentHandler_InitiateSaysWhetherTheFileGoesDirect(t *testing
 
 // TestStoredAttachmentHandler_DirectLinksAreNeverCached: the answers carry links, which are credentials, so they are no-store.
 func TestStoredAttachmentHandler_DirectLinksAreNeverCached(t *testing.T) {
-	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{}, http.MethodPost, "/attachments/upload/abc/direct?type=work_item", "")
+	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{}, http.MethodPost, "/attachments/abc/upload-links?type=work_item", "")
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"links":["https://blob.example/abc?c=0"]`) {
 		t.Errorf("upload links: status %d, Cache-Control %q, body %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
 	}
-	rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{}, http.MethodGet, "/attachments/download/abc/link?type=work_item", "")
+	rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{}, http.MethodPost, "/attachments/abc/download-links?type=work_item", "")
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"url":"https://blob.example/abc?sig=x"`) {
 		t.Errorf("download link: status %d, Cache-Control %q, body %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
 	}
@@ -149,11 +149,11 @@ func TestStoredAttachmentHandler_DirectLinkRefusalsAreMapped(t *testing.T) {
 		"gone":         {&apierror.GoneError{Msg: "removed"}, http.StatusGone},
 		"storage down": {&apierror.ServiceUnavailableError{Msg: "down"}, http.StatusServiceUnavailable},
 	} {
-		rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: tc.err}, http.MethodPost, "/attachments/upload/abc/direct?type=work_item", "")
+		rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: tc.err}, http.MethodPost, "/attachments/abc/upload-links?type=work_item", "")
 		if rec.Code != tc.want {
 			t.Errorf("%s: upload links gave %d, want %d", name, rec.Code, tc.want)
 		}
-		rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: tc.err}, http.MethodGet, "/attachments/download/abc/link?type=work_item", "")
+		rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: tc.err}, http.MethodPost, "/attachments/abc/download-links?type=work_item", "")
 		if rec.Code != tc.want {
 			t.Errorf("%s: download link gave %d, want %d", name, rec.Code, tc.want)
 		}
