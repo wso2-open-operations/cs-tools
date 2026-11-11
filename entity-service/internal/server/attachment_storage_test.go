@@ -73,7 +73,7 @@ func TestWarnAttachmentSizeSettings(t *testing.T) {
 	if got := warned(5, 8, 1024); !strings.Contains(got, "ATTACHMENT_VIA_PORTAL_MAX_MB and ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB") {
 		t.Errorf("no warning for a size gap: %q", got)
 	}
-	if got := warned(10, 8, 10); !strings.Contains(got, "has no effect") {
+	if got := warned(10, 8, 10); !strings.Contains(got, "does not raise the limit for large files") {
 		t.Errorf("no warning for an ignored direct maximum: %q", got)
 	}
 }

@@ -110,7 +110,7 @@ func warnAttachmentSizeSettings(cfg *config.Config) {
 			"portalMaxBytes", cfg.AttachmentMaxBytes, "directAboveBytes", cfg.AttachmentDirectMinBytes)
 	}
 	if cfg.AttachmentDirectMaxBytes <= cfg.AttachmentMaxBytes {
-		slog.Warn("ATTACHMENT_DIRECT_UPLOAD_MAX_MB is not above ATTACHMENT_VIA_PORTAL_MAX_MB, so it has no effect",
+		slog.Warn("ATTACHMENT_DIRECT_UPLOAD_MAX_MB is not above ATTACHMENT_VIA_PORTAL_MAX_MB, so it does not raise the limit for large files; the portal limit applies",
 			"directMaxBytes", cfg.AttachmentDirectMaxBytes, "portalMaxBytes", cfg.AttachmentMaxBytes)
 	}
 }
