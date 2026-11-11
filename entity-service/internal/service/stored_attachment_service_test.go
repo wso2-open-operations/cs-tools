@@ -74,7 +74,7 @@ type fakeStoredRepo struct {
 	failed      map[string]string // id -> detail
 	abandoned   []domain.AbandonedUpload
 	abandonedAt time.Time // the cutoff ListAbandoned was asked for
-	// pendingStaged is what CountPendingStagedUploads answers; pendingAsked is what it was asked.
+	// pendingStaged is how many staged uploads the caller already has; pendingAsked is what the insert was limited by.
 	pendingStaged int
 	pendingAsked  struct {
 		email string
@@ -145,6 +145,15 @@ func (f *fakeStoredRepo) InsertPending(_ context.Context, _ domain.StoredAttachm
 	if f.insertErr != nil {
 		return domain.StoredAttachmentRow{}, f.insertErr
 	}
+	if in.Staged && in.MaxPendingStaged > 0 {
+		f.pendingAsked = struct {
+			email string
+			since time.Time
+		}{in.CreatedBy, in.PendingSince}
+		if f.pendingStaged >= in.MaxPendingStaged {
+			return domain.StoredAttachmentRow{}, repository.ErrTooManyPendingUploads
+		}
+	}
 	f.inserted = append(f.inserted, in)
 	size := in.SizeBytes
 	ct := in.ContentType
@@ -202,15 +211,6 @@ func (f *fakeStoredRepo) ListAbandoned(ctx context.Context, olderThan time.Time,
 	f.abandonedSys = ok && scope.Unrestricted
 	f.abandonedAt = olderThan
 	return f.abandoned, nil
-}
-
-// CountPendingStagedUploads answers with the configured count and records what was asked.
-func (f *fakeStoredRepo) CountPendingStagedUploads(_ context.Context, email string, since time.Time) (int, error) {
-	f.pendingAsked = struct {
-		email string
-		since time.Time
-	}{email, since}
-	return f.pendingStaged, nil
 }
 
 func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error) {
