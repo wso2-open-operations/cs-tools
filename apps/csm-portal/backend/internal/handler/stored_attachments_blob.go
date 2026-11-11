@@ -51,6 +51,7 @@ const attachmentStreamWriteDeadline = 30 * time.Minute
 type blobEntityClient interface {
 	PutStoredAttachmentChunk(ctx context.Context, id, kind string, index int, size int64, body io.Reader) error
 	ListStoredAttachmentChunks(ctx context.Context, id, kind string) ([]byte, error)
+	StoredAttachmentLimits(ctx context.Context) ([]byte, error)
 	DirectStoredAttachmentUploadLinks(ctx context.Context, id, kind string) ([]byte, error)
 	DirectStoredAttachmentDownloadLink(ctx context.Context, id, kind string) ([]byte, error)
 	ConfirmStoredAttachmentUpload(ctx context.Context, id string, body []byte) ([]byte, error)
@@ -168,6 +169,20 @@ func (h *BlobAttachmentHandler) ListChunks(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
+}
+
+// Limits handles GET /attachments/limits: the attachment size limits the upload
+// dialogs show. They are the same for everyone, so the browser may keep them for
+// the five minutes entity-service allows.
+func (h *BlobAttachmentHandler) Limits(w http.ResponseWriter, r *http.Request) {
+	out, err := h.entity.StoredAttachmentLimits(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity StoredAttachmentLimits failed", "err", summarizeErr(err))
+		mapStoredAttachmentError(w, err, "Failed to read the attachment limits.")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
 	writeJSON(w, http.StatusOK, out)
 }
 

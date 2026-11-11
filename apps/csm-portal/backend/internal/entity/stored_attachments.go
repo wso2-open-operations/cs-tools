@@ -114,6 +114,12 @@ func (c *CustomerEntityClient) ListStoredAttachmentChunks(ctx context.Context, i
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/upload/%s/chunks?type=%s", url.PathEscape(id), url.QueryEscape(kind)), nil)
 }
 
+// StoredAttachmentLimits calls GET /attachments/limits: the largest file and the
+// largest total of inline images. Response is raw JSON.
+func (c *CustomerEntityClient) StoredAttachmentLimits(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/attachments/limits", nil)
+}
+
 // DirectStoredAttachmentUploadLinks calls POST /attachments/{id}/upload-links?type=:
 // one signed link per chunk, for a large file to go straight to Azure. Response is
 // raw JSON, and the links in it are credentials.

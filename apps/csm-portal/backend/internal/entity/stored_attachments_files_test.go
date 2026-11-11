@@ -156,3 +156,15 @@ func TestFileClientHasNoTotalTimeout(t *testing.T) {
 		t.Errorf("ordinary client timeout = %v, want %v", c.http.Timeout, defaultCustomerEntityTimeout)
 	}
 }
+
+func TestStoredAttachmentLimits_RequestsThePathAndReturnsRawJSON(t *testing.T) {
+	var method, path string
+	client := newHealthDetailTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		_, _ = w.Write([]byte(`{"maxFileBytes":1073741824,"maxInlineImagesTotalBytes":20971520}`))
+	})
+	out, err := client.StoredAttachmentLimits(context.Background())
+	if err != nil || method != http.MethodGet || path != "/attachments/limits" || !strings.Contains(string(out), "maxFileBytes") {
+		t.Errorf("out = %s, err = %v, request = %s %s", out, err, method, path)
+	}
+}

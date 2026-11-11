@@ -462,6 +462,7 @@ func main() {
 	route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)
 	route("POST /attachments/upload/{id}/confirm", handler.PermWrite, blobAttachmentHandler.ConfirmUpload)
 	route("POST /attachments/delete", handler.PermWrite, blobAttachmentHandler.DeleteAttachment)
+	route("GET /attachments/limits", handler.PermView, blobAttachmentHandler.Limits)
 	route("POST /attachments/{id}/upload-links", handler.PermWrite, blobAttachmentHandler.DirectUploadLinks)
 	route("GET /attachments/download/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.Download)
 	route("POST /attachments/{id}/download-links", handler.PermDownloadAttachment, blobAttachmentHandler.DirectDownloadLink)

@@ -36,7 +36,7 @@ import (
 // fakeBlobEntity is the entity-service side of the file routes: it records what
 // this backend forwarded and answers as configured.
 type fakeBlobEntity struct {
-	putErr, listErr, confirmErr, deleteErr, fileErr error
+	putErr, listErr, confirmErr, deleteErr, fileErr, limitsErr error
 
 	put struct {
 		id, kind string
@@ -69,6 +69,11 @@ func (f *fakeBlobEntity) PutStoredAttachmentChunk(_ context.Context, id, kind st
 
 func (f *fakeBlobEntity) ListStoredAttachmentChunks(context.Context, string, string) ([]byte, error) {
 	return []byte(f.chunks), f.listErr
+}
+
+// StoredAttachmentLimits answers with the two limits, or limitsErr.
+func (f *fakeBlobEntity) StoredAttachmentLimits(context.Context) ([]byte, error) {
+	return []byte(`{"maxFileBytes":1073741824,"maxInlineImagesTotalBytes":20971520}`), f.limitsErr
 }
 
 // DirectStoredAttachmentUploadLinks records the call and answers with one link.
@@ -120,6 +125,7 @@ func serveBlob(e *fakeBlobEntity, method, target string, body io.Reader, hdr map
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
+	mux.HandleFunc("GET /attachments/limits", h.Limits)
 	mux.HandleFunc("POST /attachments/{id}/upload-links", h.DirectUploadLinks)
 	mux.HandleFunc("GET /attachments/download/{id}/content", h.Download)
 	mux.HandleFunc("POST /attachments/{id}/download-links", h.DirectDownloadLink)
@@ -484,5 +490,35 @@ func TestDirectDownloadLinkNotAvailableIsNotAnError(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "level=ERROR") {
 		t.Errorf("a 404 for a link was logged as an error:\n%s", logs.String())
+	}
+}
+
+// The limits are relayed as entity-service sends them, and the browser may keep
+// them for five minutes (never no-store: the upload dialogs read them often).
+func TestLimitsRelaysJSONAndAllowsCaching(t *testing.T) {
+	rec := serveBlob(&fakeBlobEntity{}, http.MethodGet, "/attachments/limits", nil, nil, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Errorf("Cache-Control = %q", got)
+	}
+	var got map[string]int64
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got["maxFileBytes"] != 1073741824 || got["maxInlineImagesTotalBytes"] != 20971520 {
+		t.Errorf("body = %s, err = %v", rec.Body.String(), err)
+	}
+}
+
+func TestLimitsMapsEntityErrors(t *testing.T) {
+	e := &fakeBlobEntity{limitsErr: errors.New("down")}
+	rec := serveBlob(e, http.MethodGet, "/attachments/limits", nil, nil, true)
+	if rec.Code < 500 {
+		t.Errorf("status = %d, want a 5xx", rec.Code)
+	}
+	if rec.Header().Get("Cache-Control") == "private, max-age=300" {
+		t.Error("a failed answer must not be cached")
+	}
+	if !strings.Contains(rec.Body.String(), "Failed to read the attachment limits.") {
+		t.Errorf("body = %s", rec.Body.String())
 	}
 }
