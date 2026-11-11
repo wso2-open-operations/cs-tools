@@ -60,6 +60,9 @@ func TestParseGenerated_AcceptsStateEntered(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_RefusesStateEnteredItCannotRun: a stateEntered /
+// stateEnteredOn filter entity-service would refuse when the tile loads is
+// refused at generation instead, with the reason, so the model can retry.
 func TestParseGenerated_RefusesStateEnteredItCannotRun(t *testing.T) {
 	widget := func(query string) string {
 		return stateEnteredDashboard(`{"id":"w","displayName":"W","resourceType":"case","shape":"count","gridWidth":3,"query":` + query + `}`)
