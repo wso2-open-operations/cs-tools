@@ -1633,7 +1633,19 @@ func TestLoad_AttachmentDirectMax(t *testing.T) {
 // TestLoad_AttachmentSettingNames: the four attachment settings have clear
 // names; the older names still work, and the new name wins when both are set.
 func TestLoad_AttachmentSettingNames(t *testing.T) {
+	// Start each case from a clean slate, so a value inherited from the
+	// environment cannot change what it checks.
+	clearAttachmentEnv := func(t *testing.T) {
+		for _, k := range []string{
+			"ATTACHMENT_VIA_PORTAL_MAX_MB", "ATTACHMENT_DIRECT_UPLOAD_ENABLED", "ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_UPLOAD_MAX_MB",
+			"ATTACHMENT_MAX_MB", "ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MAX_MB",
+			"ATTACHMENT_MAX_BYTES", "ATTACHMENT_DIRECT_MIN_BYTES", "ATTACHMENT_DIRECT_MAX_BYTES",
+		} {
+			t.Setenv(k, "")
+		}
+	}
 	t.Run("new names", func(t *testing.T) {
+		clearAttachmentEnv(t)
 		t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "20")
 		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "true")
 		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "16")
@@ -1644,6 +1656,7 @@ func TestLoad_AttachmentSettingNames(t *testing.T) {
 		}
 	})
 	t.Run("older names still work", func(t *testing.T) {
+		clearAttachmentEnv(t)
 		t.Setenv("ATTACHMENT_MAX_MB", "30")
 		t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "true")
 		t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "12")
@@ -1654,6 +1667,7 @@ func TestLoad_AttachmentSettingNames(t *testing.T) {
 		}
 	})
 	t.Run("the new name wins over the older one", func(t *testing.T) {
+		clearAttachmentEnv(t)
 		t.Setenv("ATTACHMENT_MAX_MB", "30")
 		t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "40")
 		t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "true")
