@@ -75,6 +75,10 @@ func (f *fakeStoredAttachmentSvc) ConfirmUpload(_ context.Context, req domain.Co
 	return domain.ConfirmAttachmentUploadResponse{ID: req.ID, Status: "COMPLETE"}, f.err
 }
 
+func (f *fakeStoredAttachmentSvc) Limits() domain.AttachmentLimits {
+	return domain.AttachmentLimits{MaxFileBytes: 1 << 30, MaxInlineImagesTotalBytes: 1 << 20}
+}
+
 func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return serveStoredWith(t, svc, &fakeFiles{}, method, target, body)
@@ -84,6 +88,7 @@ func serveStoredWith(t *testing.T, svc *fakeStoredAttachmentSvc, files *fakeFile
 	t.Helper()
 	h := NewStoredAttachmentHandler(svc).WithFiles(files)
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /attachments/limits", h.Limits)
 	mux.HandleFunc("POST /attachments/upload", h.InitiateUpload)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
@@ -470,5 +475,19 @@ func TestStoredAttachmentHandler_FileRoutesAre404WithoutStorageService(t *testin
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s without the file service gave %d, want 404", name, rec.Code)
 		}
+	}
+}
+
+// TestStoredAttachmentHandler_Limits: the sizes in force are returned as JSON and may be cached briefly.
+func TestStoredAttachmentHandler_Limits(t *testing.T) {
+	rec := serveStored(t, &fakeStoredAttachmentSvc{}, http.MethodGet, "/attachments/limits", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"maxFileBytes":1073741824`) || !strings.Contains(rec.Body.String(), `"maxInlineImagesTotalBytes":1048576`) {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Errorf("Cache-Control = %q", cc)
 	}
 }

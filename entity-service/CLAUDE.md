@@ -2010,6 +2010,11 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
 
+**Attachment limits for the portals.** `GET /attachments/limits` (any authenticated caller, `Cache-Control: private, max-age=300`)
+answers `{maxFileBytes, maxInlineImagesTotalBytes}`: the largest attachment (the direct-upload maximum while direct uploads are on and above
+`ATTACHMENT_VIA_PORTAL_MAX_MB`, else that limit) and the inline-image total. The portal webapps read it through their backends instead of
+keeping a copy in their own `window.config`; the checks at upload start and confirm stay the authority.
+
 **Direct transfers (large files, off by default).** The settings are `ATTACHMENT_DIRECT_UPLOAD_ENABLED`, `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` and
 `ATTACHMENT_DIRECT_UPLOAD_MAX_MB`; the older names (`ATTACHMENT_DIRECT_TRANSFERS_ENABLED`, `ATTACHMENT_DIRECT_MIN_MB`, `ATTACHMENT_DIRECT_MAX_MB`) still work
 with a logged warning, and the new name wins when both are set. At startup a warning (`warnAttachmentSizeSettings`) names a

@@ -550,3 +550,15 @@ func TestPendingStagedUploads(t *testing.T) {
 		}
 	})
 }
+
+// TestLimits: the largest file is the direct maximum while direct uploads are on, else the portal limit.
+func TestLimits(t *testing.T) {
+	on := newDirectLimitsSvc(newFakeStoredRepo(), &fakeLinks{}).Limits()
+	if on.MaxFileBytes != 1024*mib || on.MaxInlineImagesTotalBytes != 100 {
+		t.Errorf("direct on = %+v, want 1024 MiB and the inline total", on)
+	}
+	off := newDirectLimitsSvc(newFakeStoredRepo(), nil).Limits()
+	if off.MaxFileBytes != 100*mib {
+		t.Errorf("direct off = %+v, want the 100 MiB portal limit", off)
+	}
+}
