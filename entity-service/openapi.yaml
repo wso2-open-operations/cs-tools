@@ -426,7 +426,7 @@ paths:
         work item open). A chunk may be sent again (a retry overwrites the same
         block), in any order, and a few at a time. Nothing is visible until the upload
         is confirmed. A chunk over the transfer limit is refused with a 429 and
-        should be retried. A file larger than ATTACHMENT_MAX_MB is refused with a 400:
+        should be retried. A file larger than ATTACHMENT_VIA_PORTAL_MAX_MB is refused with a 400:
         it can only be sent through the upload links.
       operationId: putAttachmentChunk
       security:
@@ -578,8 +578,8 @@ paths:
       summary: >-
         Signed links to send a large file's chunks straight to Azure Blob Storage, one link
         per chunk, instead of through the portal backend. Only for an upload that started
-        staged: a file larger than ATTACHMENT_DIRECT_MIN_MB while
-        ATTACHMENT_DIRECT_TRANSFERS_ENABLED was on (the upload start says so with directUpload,
+        staged: a file larger than ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB while
+        ATTACHMENT_DIRECT_UPLOAD_ENABLED was on (the upload start says so with directUpload,
         and the decision is kept for the whole upload). The access check, the open parent and
         the size rules are those of storing a chunk, made once when the links are issued.
         The client PUTs chunk i (chunkBytes long, the last one shorter) to links[i], then
@@ -590,8 +590,8 @@ paths:
         for the time in expiresAt (5 minutes for a file up to 50 MiB, 7 up to 100 MiB, then 10, 15
         and 20 minutes up to 250, 500 and 1024 MiB), and the response is never cached. Calling this
         again for an upload still pending returns fresh links, which is how a client carries on after
-        its links expired. A file above ATTACHMENT_MAX_MB may be sent this way, up to
-        ATTACHMENT_DIRECT_MAX_MB (default 1024).
+        its links expired. A file above ATTACHMENT_VIA_PORTAL_MAX_MB may be sent this way, up to
+        ATTACHMENT_DIRECT_UPLOAD_MAX_MB (default 1024).
       operationId: createAttachmentUploadLinks
       security:
         - clientAssertion: []
@@ -815,7 +815,7 @@ paths:
         A signed link to download an attachment's file straight from Azure Blob Storage, after
         checking the caller may see the attachment. The link is signed for reading that one
         file and answers as a download of the file's own name with the opaque type
-        application/octet-stream. Only when ATTACHMENT_DIRECT_TRANSFERS_ENABLED is on. The
+        application/octet-stream. Only when ATTACHMENT_DIRECT_UPLOAD_ENABLED is on. The
         link is valid for the time in expiresAt: a request that started before then finishes,
         and a resumed one asks for a new link. Charged one unit of the per-caller allowance.
         The response is never cached.
@@ -43204,7 +43204,7 @@ components:
           format: int64
           minimum: 1
           description: >-
-            The file's size. Checked against ATTACHMENT_MAX_MB (type comment:
+            The file's size. Checked against ATTACHMENT_VIA_PORTAL_MAX_MB (type comment:
             INLINE_IMAGES_TOTAL_MAX_MB, default 1 MB, so one image is at most
             that big), and the uploaded file must match it. One comment or description may show at most 5 images and
             at most INLINE_IMAGES_TOTAL_MAX_MB (default 1 MB) together; a
