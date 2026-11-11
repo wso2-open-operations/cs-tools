@@ -170,6 +170,28 @@ func (i Incident) QuietlyClosed() bool {
 		strings.EqualFold(strings.TrimSpace(i.Status), "closed")
 }
 
+// What happened to an incident an alert mute rule muted, as the CSM portal shows it.
+const (
+	MuteOutcomeMuted         = "muted"          // still held by a rule
+	MuteOutcomeIncident      = "incident"       // released and created in CSM
+	MuteOutcomeClosedQuietly = "closed_quietly" // resolved or replaced while muted; never sent anywhere
+	MuteOutcomeDelivering    = "delivering"     // released and still firing; CSM creation is in progress or failed
+)
+
+// MuteOutcome reports what happened to an incident an alert mute rule muted.
+func (i Incident) MuteOutcome() string {
+	switch {
+	case i.Muted:
+		return MuteOutcomeMuted
+	case i.CSMConfirmed:
+		return MuteOutcomeIncident
+	case i.QuietlyClosed():
+		return MuteOutcomeClosedQuietly
+	default:
+		return MuteOutcomeDelivering
+	}
+}
+
 // DeliverableSince is when the incident became deliverable: its creation, or its release from an alert mute rule mute.
 func (i Incident) DeliverableSince() time.Time {
 	if i.UnmutedAt != nil && i.UnmutedAt.After(i.CreatedAt) {

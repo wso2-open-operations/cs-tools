@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	schema "alert-core-service"
+	"alert-core-service/internal/api"
 	"alert-core-service/internal/auth"
 	"alert-core-service/internal/config"
 	"alert-core-service/internal/csm"
@@ -214,6 +215,19 @@ func main() {
 		os.Exit(1)
 	}
 	mux.Handle("/alertz", auth.RequireWakeToken(wakeToken, base.With("component", "auth"))(http.HandlerFunc(h.ServeAlert)))
+	// The CSM portal backend reads which incidents each alert mute rule muted, with its own shared token.
+	apiToken := strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN"))
+	switch {
+	case apiToken == "":
+		logger.Warn("ALERT_CORE_API_TOKEN not set; the read API rejects every call, so the CSM portal cannot list muted alerts")
+	case len(apiToken) < auth.MinWakeTokenLen:
+		logger.Error("ALERT_CORE_API_TOKEN is too short; generate one with openssl rand -hex 32", "min_length", auth.MinWakeTokenLen)
+		os.Exit(1)
+	}
+	apiHandler := api.New(base.With("component", "api"), incidents)
+	requireAPIToken := auth.RequireToken(apiToken, "api token", base.With("component", "auth"))
+	mux.Handle("GET /alert-mute-rules/{id}/muted-incidents", requireAPIToken(http.HandlerFunc(apiHandler.MutedIncidents)))
+	mux.Handle("GET /alert-field-values", requireAPIToken(http.HandlerFunc(apiHandler.FieldValues)))
 
 	port := os.Getenv("PORT")
 	if port == "" {

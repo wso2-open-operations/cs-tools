@@ -133,6 +133,9 @@ succeeding and its confirmation being stored, the retry creates a second CSM inc
 - `internal/model`: the `Alert`/`Incident`/`Note` shapes, severity/fingerprint
   normalization, and HTML note formatting.
 - `internal/hub`: the `/alertz` HTTP handler that wakes the poller early.
+- `internal/api`: read-only `GET /alert-mute-rules/{id}/muted-incidents`, which the CSM portal backend calls to list
+  the incidents an alert mute rule muted (with each one's outcome). Guarded by the shared `ALERT_CORE_API_TOKEN`
+  (`openssl rand -hex 32`); unset, every call is rejected. Rows go when the retention job purges them.
 - `internal/postgres`: connection setup (`pgxpool`) and schema migration.
 - `internal/config`: loads and validates `config.toml`.
 - `internal/auth`: PBKDF2 hashing/verification and the `integration_users`
