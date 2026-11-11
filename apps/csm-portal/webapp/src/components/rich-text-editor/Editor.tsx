@@ -71,7 +71,8 @@ import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
-import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
+import { attachmentLimitMessage } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -245,6 +246,7 @@ const ClipboardImagePlugin = ({
   onImageUpload?: ImageUploadHandler;
 }): null => {
   const [editor] = useLexicalComposerContext();
+  const { maxInlineImagesBytes } = useAttachmentLimits();
 
   // Keep the latest callback in a ref so the paste listener (registered once
   // per editor) always calls the current onPasteError without re-registering.
@@ -286,13 +288,13 @@ const ClipboardImagePlugin = ({
             break;
           }
 
-          if (file.size > inlineImageMaxBytes()) {
+          if (file.size > maxInlineImagesBytes) {
             onPasteErrorRef.current?.("size");
             break;
           }
 
           room ??= inlineImagesInEditor(editor);
-          const refusal = inlineImageRefusal(room, file.size);
+          const refusal = inlineImageRefusal(room, file.size, maxInlineImagesBytes);
           if (refusal) {
             onPasteErrorRef.current?.(refusal);
             break;
@@ -319,7 +321,7 @@ const ClipboardImagePlugin = ({
         rootElement?.addEventListener("paste", handlePaste);
       },
     );
-  }, [editor]);
+  }, [editor, maxInlineImagesBytes]);
 
   return null;
 };
@@ -609,6 +611,7 @@ const Editor = ({
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
+  const { maxInlineImagesBytes } = useAttachmentLimits();
   // Without an `onPasteError` handler a refused pasted image is said right
   // below the editor, for a few seconds.
   const [imageNotice, setImageNotice] = useState<string | null>(null);
@@ -619,8 +622,8 @@ const Editor = ({
   }, [imageNotice]);
   const onImageRefused = useMemo(
     () =>
-      onPasteError ?? ((reason: ImagePasteRefusal) => setImageNotice(imagePasteRefusalMessage(reason))),
-    [onPasteError],
+      onPasteError ?? ((reason: ImagePasteRefusal) => setImageNotice(imagePasteRefusalMessage(reason, maxInlineImagesBytes))),
+    [onPasteError, maxInlineImagesBytes],
   );
 
   const memoizedEditorConfig = useMemo(

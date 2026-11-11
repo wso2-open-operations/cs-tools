@@ -31,6 +31,7 @@ import { getPortalAccess } from "@context/current-user/portalAccess";
 import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
 import NoPortalAccessPage from "@components/error/NoPortalAccessPage";
 import { useLogger } from "@hooks/useLogger";
+import { useGetAttachmentLimits } from "@api/useGetAttachmentLimits";
 import { trySilentSignInOnce } from "@hooks/silentSignIn";
 import { isForbiddenError, isUnauthorizedError } from "@utils/ApiError";
 import { devBypassAccessCheck } from "@config/devFlags";
@@ -190,6 +191,10 @@ function AuthorizedAppShell(): JSX.Element {
     !devBypassAccessCheck &&
     (holdsNoPortalRole ||
       (isError && (isUnauthorizedError(error) || isForbiddenError(error))));
+
+  // Start the attachment limits request once, so the upload dialogs usually
+  // already have the answer (they use the defaults until it lands).
+  useGetAttachmentLimits(!isLoading && !notAuthorized);
 
   if (isLoading) {
     return (

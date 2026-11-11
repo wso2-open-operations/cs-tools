@@ -18,7 +18,7 @@
 // feature so the shared editor no longer imports from `@features/support`.
 
 // The largest image that can be pasted or inserted is a runtime setting, not a
-// constant: see `inlineImageMaxBytes` in `@config/attachmentLimitsConfig`.
+// constant: see `useAttachmentLimits` in `@api/useGetAttachmentLimits`.
 
 // MIME types accepted for inline images (paste or toolbar upload), mirroring
 // the backend's entity-service allow-list ("Unsupported inline image type"

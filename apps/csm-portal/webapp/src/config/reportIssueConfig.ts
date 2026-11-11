@@ -14,13 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Destination for the avatar menu's "Report an issue" control
- * (CSM_PORTAL_REPORT_ISSUE_URL). Read at call time (not module load) so a
- * test can set `window.config` per case. Unset (or not a string) returns
- * "", which `UserProfile` treats as "hide the control".
- */
-export function getReportIssueUrl(): string {
-  const raw = window.config?.CSM_PORTAL_REPORT_ISSUE_URL;
-  return typeof raw === "string" ? raw.trim() : "";
-}
+import { vi } from "vitest";
+
+// Global vitest setup. The runtime config normally comes from public/config.js
+// (gitignored, injected at deploy time), which vitest does not load. Modules
+// such as apiConfig.ts read it at import time and throw when it is missing, so
+// seed obviously-fake defaults here. Tests that need specific values override
+// them (spread keeps whatever they set).
+window.config = {
+  ...window.config,
+  CSM_PORTAL_BACKEND_BASE_URL: window.config?.CSM_PORTAL_BACKEND_BASE_URL ?? "http://localhost:0",
+};
+
+// The attachment limits come from the server through a query. Most tests render
+// components that read them without a QueryClientProvider or backend mock, so
+// they get the built-in defaults here. A test that needs other limits mocks
+// this module itself; the hook's own test calls `vi.unmock` to use the real one.
+vi.mock("@api/useGetAttachmentLimits", () => ({
+  useGetAttachmentLimits: () => ({ data: undefined }),
+  useAttachmentLimits: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesBytes: 1024 * 1024 }),
+}));

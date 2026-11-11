@@ -25,6 +25,10 @@ import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgr
 // transitively via CsmUploadAttachmentModal -> useCsmCaseAttachments, just
 // for its MAX_ATTACHMENT_SIZE_BYTES constant — the mock only exists to keep
 // that import chain from throwing on missing runtime config.
+// The server's limits (the global setup would give the defaults).
+const limits = vi.hoisted(() => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesBytes: 1024 * 1024 }));
+vi.mock("@api/useGetAttachmentLimits", () => ({ useAttachmentLimits: () => limits }));
+
 vi.mock("@api/backend/client", () => {
   const api = { post: vi.fn() };
   return { useBackendApi: () => api };
@@ -261,11 +265,11 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
 
   describe("size limit", () => {
     afterEach(() => {
-      window.config = {} as typeof window.config;
+      limits.maxFileBytes = 10 * 1024 * 1024;
     });
 
-    it("rejects a dropped file over the configured limit, but keeps the ones that fit", () => {
-      window.config = { CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 } as unknown as typeof window.config;
+    it("rejects a dropped file over the server's limit, but keeps the ones that fit", () => {
+      limits.maxFileBytes = 25 * 1024 * 1024;
       render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
       const composer = screen.getByTestId("csm-comment-composer");
 
@@ -279,7 +283,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
       expect(screen.getByText(/huge\.zip.*too large.*25\.00 MB/i)).toBeInTheDocument();
     });
 
-    it("keeps the default of 10 MB through the entity flow when nothing is configured", () => {
+    it("keeps the default of 10 MB until the server's limit is known", () => {
       render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
       const composer = screen.getByTestId("csm-comment-composer");
 
