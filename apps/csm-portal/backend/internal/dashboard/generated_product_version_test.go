@@ -18,6 +18,8 @@ package dashboard
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -109,5 +111,49 @@ func TestParseGenerated_RefusesProductVersionsItCannotRun(t *testing.T) {
 				t.Errorf("err = %v, want ErrGeneratedInvalid containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestParseGenerated_TheCatalogueProductVersionExamplesAreValid: every case
+// widget with a product version that the catalogue shows the model (section
+// 7: a grouping by version and a version filter) passes this backend's own
+// check, so the catalogue cannot teach a widget the save would refuse.
+func TestParseGenerated_TheCatalogueProductVersionExamplesAreValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "## 7. Grouping")
+	if !ok {
+		t.Fatal("catalogue has no section 7")
+	}
+	section, _, _ = strings.Cut(section, "## 8.")
+	grouped, filtered := 0, 0
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		rest = next
+		if !strings.Contains(block, `"productVersion"`) {
+			continue
+		}
+		d, err := ParseGenerated([]byte(opsDashboard(block)))
+		if err != nil {
+			t.Errorf("section 7 product version example is rejected: %v\n%s", err, block)
+			continue
+		}
+		if g := d.Widgets[0].GroupBy; g != nil && g.Field == "productVersion" {
+			grouped++
+		} else if _, ok := queryFilterValues(d.Widgets[0].Query, "productVersion"); ok {
+			filtered++
+		}
+	}
+	if grouped == 0 || filtered == 0 {
+		t.Errorf("section 7 has %d version groupings and %d version filters, want at least one of each", grouped, filtered)
 	}
 }

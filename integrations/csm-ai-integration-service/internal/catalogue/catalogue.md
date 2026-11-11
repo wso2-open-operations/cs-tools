@@ -27,10 +27,15 @@ resource types exist in the portal but are not in this catalogue. A dashboard ma
   grouping by team cannot be expressed, show only the viewer's own records (`__current_user__`), never
   everyone's. It never guesses who or what the user named: decline a person named without an email
   address and a team not in the Teams section.
-- Reply instead with `{"error": "<one sentence: what is missing>"}` only when nothing close answers the
+- Reply instead with `{"error": "<why, and what to ask instead>"}` only when nothing close answers the
   request: it is not about this portal's data (e.g. "a+b", a general question, writing text), it names
   a person, team or filter that cannot be used (above), or a substitute would show other data than the
   user meant.
+- The `error` text is shown to the user as it is, after "The dashboard cannot be generated from the
+  input.": at most two short sentences in plain words, saying why and, when there is one, what they
+  could ask instead. Never field names, values or ids from this catalogue (`productVersion`,
+  `waiting_on_wso2`, `creTeam`), JSON, or this catalogue's own words ("section 5", "not expressible").
+  Example: `{"error": "Revenue isn't part of the case data. Try open cases by account instead."}`
 
 ---
 
@@ -157,8 +162,12 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `escalationLevel` | `in` | `"0"` to `"5"` (as strings) |
 | `slaBreached` | `eq` | `["true"]` or `["false"]` (exactly one) |
 | `taskSLABusinessElapsedPercent` | `gte`, `lte` | one number as a string, e.g. `["80"]` |
-| `tag` | `in`, `notIn` | tag names, **only if the request gives them** |
-| `product` | `in` | exact product names, **only if the request gives them** |
+| `tag` | `in`, `notIn` | tag names, **only if the request gives them** or uses a word for one of the portal's own tags (section 8: `patch`, `s_dip`, `s_rg`) |
+| `product` | `in`, `notIn` | product names as the request writes them, abbreviations spelt out (section 8), **only if the request names a product**; `notIn` leaves those products' cases out |
+| `productVersion` | `in` | versions as the request writes them (`"4.3"`, `"4.x"`, `"7.0.0"`), only beside a `product` filter naming **one** product in the same search; never in an `anyOf` branch (section 8) |
+| `account` | `in`, `notIn` | customer (account) names or account numbers as the request writes them (`"Example Corp"`, `"ACC-0001"`), **only if the request names a customer**; `notIn` leaves those customers' cases out; never in an `anyOf` branch (section 8) |
+| `projectOnboardingStatus` | `in` | the case's project's onboarding status: `In-Progress`, `Not-Started`, `Completed`, `Not-Applicable` (exact case); never `notIn` (section 8) |
+| `project` | `in`, `notIn` | project keys or names as the request writes them (`"EXCORP-PROJ-1"`, `"Example Corp Production"`), **only if the request names a project**; `notIn` leaves those projects' cases out; never in an `anyOf` branch (section 8) |
 | `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date (below) |
 | `creTeam`, `sreTeam` | `in` | team **keys** from the Teams section (the last section), each in its team's field: e.g. `creTeam in ["rigel"]`, `creTeam in ["sirius", "draco"]`, `sreTeam in ["apollo"]` |
 | `creTeam`, `sreTeam` | `in` | `["__current_team__"]` ("my team"), **only on a `"cre"` dashboard**, never together with a team key |
@@ -208,7 +217,8 @@ and `sreTeam` must go in the top-level `filters`, never in a branch.
 
 Never use: ids of projects, accounts, deployments or users; `number`; `internalId`; `parentId`;
 `projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`; or any
-field / op not in the table.
+field / op not in the table. The one exception: a `projectId` or `accountId` filter already in the dashboard
+being edited (the portal writes it for a `project` or `account` filter) is kept exactly as it is.
 
 
 ### 5a. Time cards (`resourceType: "time_card"`)
@@ -461,6 +471,66 @@ that account:
 "groupBy": { "field": "account", "maxGroups": 10, "linkResourceType": "account" }
 ```
 
+A case-family widget may also group by `product` ("cases by product", "top products by open cases"):
+one bar or slice per product, named as the product is; cases without a product are in none of them.
+
+```json
+{ "id": "open-cases-by-product", "displayName": "Open Cases by Product", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] } ] },
+  "groupBy": { "field": "product", "maxGroups": 10 } }
+```
+
+Grouping by `productVersion` ("API Manager cases by version") is one bar per version of **one** product:
+the widget's own `query` has a `product` filter naming that product.
+
+```json
+{ "id": "api-manager-cases-by-version", "displayName": "API Manager Cases by Version", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "product", "op": "in", "values": ["API Manager"] } ] },
+  "groupBy": { "field": "productVersion", "maxGroups": 10 } }
+```
+
+A version filter sits beside its product the same way ("open API Manager 4.x cases"):
+
+```json
+{ "id": "open-api-manager-4-cases", "displayName": "Open API Manager 4.x Cases", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] },
+                          { "field": "product", "op": "in", "values": ["API Manager"] },
+                          { "field": "productVersion", "op": "in", "values": ["4.x"] } ] } }
+```
+
+A case-family widget may group by `project` too ("cases by project", "top projects by open cases"):
+one bar per project, named as the project is; cases without a project are in none of them.
+
+```json
+{ "id": "open-cases-by-project", "displayName": "Open Cases by Project", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] } ] },
+  "groupBy": { "field": "project", "maxGroups": 10 } }
+```
+
+A named project's cases are a `project` filter ("active EXCORP-PROJ-1 cases"):
+
+```json
+{ "id": "active-excorp-proj-1-cases", "displayName": "Active EXCORP-PROJ-1 Cases", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "project", "op": "in", "values": ["EXCORP-PROJ-1"] },
+                          { "field": "state", "op": "notIn", "values": ["closed"] } ] } }
+```
+
+Projects left out are a `notIn` ("Sirius cases opened this month, excluding the ACMESUB and EXCORP-PROJ-1 cases"):
+
+```json
+{ "id": "sirius-cases-opened-this-month", "displayName": "Sirius: Cases Opened This Month", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "description": "Excludes the ACMESUB and EXCORP-PROJ-1 projects",
+  "query": { "filters": [ { "field": "creTeam", "op": "in", "values": ["sirius"] },
+                          { "field": "createdOn", "op": "gte", "values": ["__startOfMonth:0__"] },
+                          { "field": "project", "op": "notIn", "values": ["ACMESUB", "EXCORP-PROJ-1"] } ] } }
+```
+
 `maxGroups` 5 to 12.
 
 Never set both `slices` and `groupBy`.
@@ -476,6 +546,9 @@ Never set both `slices` and `groupBy`.
 | "raised by person@example.com", "created by <email>" | `createdBy in ["person@example.com"]` (several people: one `in` with all their emails) |
 | "raised by Alex" (a name, no email) | not expressible: reply with `{"error": ...}` asking for the email address |
 | no creator mentioned | no `createdBy` filter at all (records raised by anyone) |
+| "not assigned to me", "assigned to someone else", "not raised by me", "raised by others" | not expressible: reply with `{"error": ...}`. Never "unassigned" (`assignedUserId isEmpty`) instead: that is cases assigned to no one |
+| "excluding migrations" / "excluding engagements" on cases | no filter: a `case` widget counts cases only, never engagements; say so in the `description` |
+| any other "not", "except", "excluding" or "without" this file has no filter for | never drop it: reply with `{"error": ...}`, as the dashboard would count what the user asked to leave out |
 | "open", "new" (state) | `state in ["open"]`: the Open state only |
 | "active", "outstanding", "not closed", "ongoing", "unresolved" | `state notIn ["closed"]`: every state except Closed |
 | "CSAT", "customer satisfaction", "feedback", "ratings", "survey responses" | `resourceType: "case_feedback"` (section 5d) |
@@ -550,6 +623,27 @@ Never set both `slices` and `groupBy`.
 | a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
+| a customer by name or account number: "Example Corp's cases", "cases of the customer Other Corp", "ACC-0001 cases" | `account in` the name or number as the request writes it, in **every** widget the request is about; several customers: one `in` with all of them. The portal matches it to the account and tells the user if it names none or several, so never refuse a customer as not exact |
+| customers left out: "excluding Example Corp", "except the customer Other Corp", "without ACC-0001's cases" | `account notIn` with every name or number as written (one `notIn` with all of them), in **every** widget the request is about |
+| a name that could be a customer or a project | a customer (`account`), unless the request calls it a project, writes a project key, or names a project the customer has ("Example Corp Production"); a customer's own name is never a `project` filter |
+| "by product", "per product", "top products by ..." (cases) | `bar` (or `pie` for a share) with `groupBy: {"field": "product", "maxGroups": 10}` (section 7) |
+| a product by name, in full, in part or abbreviated ("WSO2 API Manager", "API Manager", "APIM", "Identity Server", "IS") | `product in` the name as the request writes it, an abbreviation spelt out: APIM `"API Manager"`, IS `"Identity Server"`, MI `"Micro Integrator"`, EI `"Enterprise Integrator"`, SI `"Streaming Integrator"`. The portal matches it to the product's full name and tells the user if it names no product or several, so never refuse a product name as not exact. A family of products ("the identity products") is the shared word as written (`["Identity"]`), never one product picked from it |
+| products left out: "excluding API Manager", "except Identity Server", "without the APIM and IS cases", "every product but API Manager" | `product notIn` with every product as written, abbreviations spelt out (one `notIn` with all of them), in **every** widget the request is about; never a `product in` listing the other products |
+| a product with a version: "API Manager 4.3", "APIM 4.x", "IS 7.0.0", "version 4.3 of API Manager" | `product in` the product (above) plus `productVersion in` the version as written, without the product name: `["4.3"]`, `["4.x"]`, `["7.0.0"]`. "4.3" means every 4.3.x and "4.x" or "4" every 4.*; the portal matches it to the product's versions and tells the user if it has none such. Several versions of one product: one `productVersion` filter with all of them |
+| "<product> cases by version", "<product> versions", "per version" | `bar` with the `product` filter and `groupBy: {"field": "productVersion", "maxGroups": 10}` (section 7) |
+| versions of several products ("APIM 4.3 and IS 7") | one widget per product, each with its own `product` and `productVersion` filters; never two products beside one `productVersion` |
+| a version of a product left out ("excluding API Manager 4.3") | not expressible: a version only narrows a product kept; reply with `{"error": ...}` |
+| a version without a product ("cases on 4.3"); "latest", "newest", "older than" or "before" a version | not expressible: reply with `{"error": ...}` asking which product (with no product), or saying only named versions can be used |
+| "by project", "per project", "top projects by ..." (cases) | `bar` with `groupBy: {"field": "project", "maxGroups": 10}` (section 7) |
+| a project by key or name: "EXCORP-PROJ-1 cases", "cases of the Example Corp Production project", "project Summit's open cases" | `project in` the key or name as the request writes it, in **every** widget the request is about; several projects: one `in` with all of them. The portal matches it to the project and tells the user if it names no project or several, so never refuse a project as not exact. Cases of a project are case-family widgets; `resourceType: "project"` is for the projects themselves (section 5c) |
+| cases of customers "still onboarding", "in onboarding" / "whose onboarding has not started" / "onboarded", "fully onboarded" | `projectOnboardingStatus in ["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
+| cases of customers "not onboarded yet", "excluding onboarded customers" | `projectOnboardingStatus in ["In-Progress", "Not-Started"]`, never `notIn`; the widget's `description` says which statuses it counts |
+| projects left out: "excluding EXCORP-PROJ-1", "except the Summit project", "without the ACMESUB and EXCORP-PROJ-1 cases", "remove the ACMESUB cases" | `project notIn` with every key or name as written (one `notIn` with all of them), in **every** widget the request is about; never a `project in` listing the other projects |
+| a code-like word in capitals ("ACMESUB", "EXCORP-PROJ-1") the request uses for cases to include or leave out | a project key, unless this file gives the word a meaning ("ABT", "CSAT", "SLA") or the request calls it something else (a tag, a team) |
+| "patch cases", "patch tag cases", "cases with a patch" (a Patch Git issue was filed from them) | `tag in ["patch"]` |
+| "internal discussion cases", "discussion cases" (a discussion Git issue was filed from them) | `tag in ["s_dip"]` |
+| "cases with a Git issue", "GitHub issue cases" | `tag in ["patch", "s_dip"]`; "without a Git issue": `tag notIn ["patch", "s_dip"]` |
+| "regression cases" | `tag in ["s_rg"]` |
 | "cases" with no other type named | `resourceType: "case"` |
 | "service requests", "SRs" | `resourceType: "service_request"` |
 | "engagements", "migrations" | `resourceType: "engagement"` (migrations add `engagementType in ["migration"]`) |
@@ -562,6 +656,7 @@ Never set both `slices` and `groupBy`.
 | "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section |
 | "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some |
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
+| a team left out: "all ABTs except Sirius", "every CRE team but Rigel" | `creTeam` (or `sreTeam`) `in` every **other** key of that family, only when the request names the team as a team; the widget's `description` names the teams counted. Cases of accounts with no team of that family are not counted |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
 | "last calendar month", "previous month" | `createdOn gte __startOfMonth:-1__` and `createdOn lte __endOfMonth:-1__` |
 | "this week", "this year", "last week", "last year", a named month, quarter, year, day or range | `createdOn` (or the date the request names) with the dates of section 5 |
