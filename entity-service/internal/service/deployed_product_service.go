@@ -255,10 +255,10 @@ func (s *deployedProductService) createDeployedProductSNFirst(ctx context.Contex
 	}, nil
 }
 
-// UpdateDeployedProduct implements DeployedProductService. Not supported for
-// the plain PostgreSQL data source (s.snMirror == nil); Postgres-first with
-// an asynchronous ServiceNow mirror under
-// DATA_SOURCE=postgres-servicenow-dual-write.
+// UpdateDeployedProduct implements DeployedProductService. Postgres-first on
+// every data source; with a dual-write mirror wired an asynchronous mirror
+// write follows, and on plain PostgreSQL (s.snMirror == nil) the repository
+// update is the whole write.
 //
 // UPDATE stays Postgres-first/async -- unlike CreateDeployedProduct (see that
 // method's own doc comment for why create is SN-first/synchronous instead): a
@@ -277,10 +277,6 @@ func (s *deployedProductService) createDeployedProductSNFirst(ctx context.Contex
 // re-runs that same scope check against ServiceNow's own copy, which is
 // harmless and idempotent.
 func (s *deployedProductService) UpdateDeployedProduct(ctx context.Context, req domain.UpdateDeployedProductRequest) (domain.UpdateDeployedProductResponse, error) {
-	if s.snMirror == nil {
-		return domain.UpdateDeployedProductResponse{}, &apierror.ValidationError{Msg: "UpdateDeployedProduct is not supported for the PostgreSQL data source"}
-	}
-
 	if err := validateUpdateDeployedProductRequest(req); err != nil {
 		return domain.UpdateDeployedProductResponse{}, err
 	}
@@ -295,7 +291,9 @@ func (s *deployedProductService) UpdateDeployedProduct(ctx context.Context, req 
 		return domain.UpdateDeployedProductResponse{}, err
 	}
 
-	if s.snWriteback != nil {
+	// Mirror only when a dual-write mirror is wired; plain PostgreSQL stops
+	// at the repository update above.
+	if s.snMirror != nil && s.snWriteback != nil {
 		s.snWriteback.Dispatch(ctx, "deployed_product", req.ID, "update", req,
 			func(writeCtx context.Context) error {
 				_, err := s.snMirror.UpdateDeployedProduct(writeCtx, req)
