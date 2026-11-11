@@ -24515,6 +24515,21 @@ components:
             search is `total`. Defaults to false. Rejected (400) together with
             skipTotal -- there would be nothing left to compute. Postgres data
             source only.
+        excludeFields:
+          type: array
+          items:
+            type: string
+            enum:
+              - description
+            description: "A response field to leave out of every returned case."
+          description: >-
+            Response fields to leave out of every returned case, for a list that
+            never shows them. Only `description` is supported (it can be
+            megabytes of rich text); any other value is rejected (400). An
+            excluded field comes back `null`, as for a case with no value, and
+            the Postgres data source does not read it from the database at all.
+            Filtering and sorting are unaffected. Omitted or empty returns
+            every field exactly as before.
         filters:
           $ref: '#/components/schemas/SearchCasesFilters'
         sortBy:

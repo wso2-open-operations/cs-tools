@@ -3451,6 +3451,27 @@ type SearchCasesRequest struct {
 	// Rejected together with SkipTotal (there would be nothing left to
 	// compute); Postgres data source only.
 	CountOnly bool `json:"countOnly,omitempty"`
+	// ExcludeFields names response fields to leave out of every returned row,
+	// for a list that never shows them and would otherwise download them for
+	// nothing (a case description can be megabytes of rich text). Only
+	// SearchExcludeFieldDescription is supported; any other value is rejected.
+	// An excluded field comes back null, the same as a case with no value, and
+	// the Postgres data source does not read the column at all. Filtering on the
+	// field (searchQuery) is unaffected. Omitted or empty changes nothing.
+	ExcludeFields []string `json:"excludeFields,omitempty"`
+}
+
+// SearchExcludeFieldDescription is the one ExcludeFields value supported today.
+const SearchExcludeFieldDescription = "description"
+
+// ExcludesField reports whether name is listed in ExcludeFields.
+func (r SearchCasesRequest) ExcludesField(name string) bool {
+	for _, f := range r.ExcludeFields {
+		if f == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AggregateCasesRequest is the input for the dedicated case aggregate
