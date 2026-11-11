@@ -72,18 +72,18 @@ describe("attachment size limits", () => {
     expect(inlineImageMaxBytes()).toBe(1 * MIB);
   });
 
-  it("ignores a value above the 100 MB / 25 MB ceilings and accepts the ceilings", () => {
+  it("ignores a value above the 1024 MB / 25 MB ceilings and accepts the ceilings", () => {
     setConfig({
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 101,
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 1025,
       CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 26,
     });
     expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
     expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
     setConfig({
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 1024,
       CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
     });
-    expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
+    expect(entityAttachmentMaxBytes()).toBe(1024 * MIB);
     expect(inlineImagesTotalMaxBytes()).toBe(25 * MIB);
   });
 

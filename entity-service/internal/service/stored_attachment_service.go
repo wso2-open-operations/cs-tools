@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -80,6 +81,14 @@ var newInlineImageTypes = map[string]string{
 type StoredAttachmentLimits struct {
 	// MaxBytes caps one file.
 	MaxBytes int64
+	// DirectTransfers is true when links can be signed, so a new upload of an
+	// ordinary file (not an inline image) above DirectMinBytes goes straight to
+	// Azure. It is recorded on the upload when it starts.
+	DirectTransfers bool
+	DirectMinBytes  int64
+	// DirectMaxBytes is the cap of such an upload. It does not pass through this
+	// service, so it may be above MaxBytes.
+	DirectMaxBytes int64
 	// InlineTotalMaxBytes caps the images of ONE comment or description together
 	// (0 means DefaultInlineImagesTotalMaxBytes). One image can be at most this
 	// big too.
@@ -257,10 +266,11 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	} else if !strings.Contains(req.ContentType, "/") || len(req.ContentType) > 255 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "contentType must look like type/subtype"}
 	}
-	limit := s.limitFor(req.Kind)
 	if req.SizeBytes <= 0 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than 0"}
 	}
+	staged := s.startsStaged(req.Kind, req.SizeBytes)
+	limit := s.limitForUpload(req.Kind, staged)
 	if req.SizeBytes > limit {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "the file is larger than the " + formatByteLimit(limit) + " limit"}
 	}
@@ -293,8 +303,12 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	}
 	row, err := s.repo.InsertPending(ctx, req.Kind, domain.StoredAttachmentInsert{
 		ParentID: parentID, Name: req.Name, ContentType: req.ContentType,
-		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft,
+		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft, Staged: staged,
+		MaxPendingStaged: maxPendingStagedUploads, PendingSince: s.now().Add(-pendingStagedUploadWindow),
 	})
+	if errors.Is(err, repository.ErrTooManyPendingUploads) {
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.TooManyRequestsError{Msg: "Too many large uploads are waiting to finish. Finish or cancel some, or wait a few hours, and try again."}
+	}
 	if err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
@@ -310,8 +324,17 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		Number:       row.Number,
 		ExpiresAt:    s.now().Add(abandonedUploadAge),
 		MaxBytes:     limit,
+		DirectUpload: staged,
 	}, nil
 }
+
+const (
+	// maxPendingStagedUploads is how many unfinished direct uploads one caller may have.
+	maxPendingStagedUploads = 10
+	// pendingStagedUploadWindow is how far back an unfinished upload counts, so a
+	// caller who gave up on some is not blocked until the cleanup runs.
+	pendingStagedUploadWindow = 6 * time.Hour
+)
 
 // ConfirmUpload implements StoredAttachmentService.
 func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error) {
@@ -829,6 +852,21 @@ func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int
 		return s.limits.inlineTotalMax()
 	}
 	return s.limits.MaxBytes
+}
+
+// startsStaged reports whether a new upload is sent straight to Azure. An inline
+// image never is.
+func (s *storedAttachmentService) startsStaged(kind domain.StoredAttachmentKind, sizeBytes int64) bool {
+	return s.limits.DirectTransfers && kind != domain.StoredAttachmentComment && sizeBytes > s.limits.DirectMinBytes
+}
+
+// limitForUpload is the cap of an upload: the larger direct cap for a staged
+// upload, else the ordinary one.
+func (s *storedAttachmentService) limitForUpload(kind domain.StoredAttachmentKind, staged bool) int64 {
+	if staged && s.limits.DirectMaxBytes > s.limitFor(kind) {
+		return s.limits.DirectMaxBytes
+	}
+	return s.limitFor(kind)
 }
 
 // failQuietly marks a row FAILED as the system. A failure to do so is logged

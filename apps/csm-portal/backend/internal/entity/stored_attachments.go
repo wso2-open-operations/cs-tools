@@ -114,18 +114,18 @@ func (c *CustomerEntityClient) ListStoredAttachmentChunks(ctx context.Context, i
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/upload/%s/chunks?type=%s", url.PathEscape(id), url.QueryEscape(kind)), nil)
 }
 
-// DirectStoredAttachmentUploadLinks calls POST /attachments/upload/{id}/direct?type=:
+// DirectStoredAttachmentUploadLinks calls POST /attachments/{id}/upload-links?type=:
 // one signed link per chunk, for a large file to go straight to Azure. Response is
 // raw JSON, and the links in it are credentials.
 func (c *CustomerEntityClient) DirectStoredAttachmentUploadLinks(ctx context.Context, id, kind string) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/upload/%s/direct?type=%s", url.PathEscape(id), url.QueryEscape(kind)), nil)
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/%s/upload-links?type=%s", url.PathEscape(id), url.QueryEscape(kind)), nil)
 }
 
-// DirectStoredAttachmentDownloadLink calls GET /attachments/download/{id}/link?type=:
+// DirectStoredAttachmentDownloadLink calls POST /attachments/{id}/download-links?type=:
 // a signed link to download a large file straight from Azure. Response is raw
 // JSON, and the link in it is a credential.
 func (c *CustomerEntityClient) DirectStoredAttachmentDownloadLink(ctx context.Context, id, kind string) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/download/%s/link?type=%s", url.PathEscape(id), url.QueryEscape(kind)), nil)
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/%s/download-links?type=%s", url.PathEscape(id), url.QueryEscape(kind)), nil)
 }
 
 // DownloadStoredAttachment calls GET /attachments/download/{id}/content?type=,

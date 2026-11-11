@@ -73,12 +73,12 @@ type InitiateAttachmentUploadResponse struct {
 	ExpiresAt    time.Time `json:"expiresAt"`
 	MaxBytes     int64     `json:"maxBytes"`
 	// DirectUpload says the file may be sent straight to Azure through the links of
-	// POST /attachments/upload/{id}/direct instead of chunk by chunk through the
+	// POST /attachments/{id}/upload-links instead of chunk by chunk through the
 	// portal backend. It is only true for a file above the direct-transfer size.
 	DirectUpload bool `json:"directUpload"`
 }
 
-// DirectUploadLinks is the answer of POST /attachments/upload/{id}/direct: one
+// DirectUploadLinks is the answer of POST /attachments/{id}/upload-links: one
 // link per chunk. The client sends chunk i (ChunkBytes long, the last one
 // shorter) with a PUT to Links[i], then confirms the upload as usual.
 type DirectUploadLinks struct {
@@ -87,7 +87,7 @@ type DirectUploadLinks struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
-// DirectDownloadLink is the answer of GET /attachments/download/{id}/link: a
+// DirectDownloadLink is the answer of POST /attachments/{id}/download-links: a
 // link the client reads the file from, as a download named Name.
 type DirectDownloadLink struct {
 	URL       string    `json:"url"`
@@ -141,6 +141,12 @@ type AttachmentUploadTarget struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 	MaxBytes   int64  `json:"maxBytes"`
 	StorageKey string `json:"storageKey"`
+	// Staged is true when the upload may be sent straight to Azure. Its chunks are
+	// put under a staging key and copied to StorageKey at confirm.
+	Staged bool `json:"-"`
+	// ChunkRouteMaxBytes is the largest file the chunk route sends through this
+	// service: the ordinary limit, whatever MaxBytes is.
+	ChunkRouteMaxBytes int64 `json:"-"`
 }
 
 // LocateAttachmentRequest is the body of POST /attachments/locate.
@@ -229,6 +235,8 @@ type StoredAttachmentRow struct {
 	// Draft is true for a comment image uploaded to a project before the record
 	// whose description shows it exists (no work item and no comment yet).
 	Draft bool
+	// Staged is true for an upload that may be sent straight to Azure.
+	Staged bool
 }
 
 // StoredAttachmentInsert is a new, not yet stored, attachment.
@@ -240,6 +248,13 @@ type StoredAttachmentInsert struct {
 	CreatedBy   string
 	// Draft: ParentID is a project, and the row is a draft description image.
 	Draft bool
+	// Staged: the upload may be sent straight to Azure (see StoredAttachmentRow.Staged).
+	Staged bool
+	// MaxPendingStaged, when above 0, is how many staged uploads CreatedBy may have
+	// pending (created after PendingSince) once this one is added. It is checked in
+	// the same transaction as the insert.
+	MaxPendingStaged int
+	PendingSince     time.Time
 }
 
 // AbandonedUpload is an upload that was started and never confirmed.

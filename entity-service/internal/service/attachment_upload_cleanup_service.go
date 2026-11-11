@@ -120,6 +120,11 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 	}
 	res := domain.UploadCleanupResult{Found: len(abandoned)}
 	for _, u := range abandoned {
+		if !s.discardAbandonedFiles(ctx, sys, u) {
+			res.Failed++
+			s.deferRetry(ctx, sys, u.Kind, u.ID)
+			continue
+		}
 		if err := s.repo.MarkFailed(sys, u.Kind, u.ID, "upload abandoned: never confirmed"); err != nil {
 			res.Failed++
 			slog.WarnContext(ctx, "could not mark an abandoned upload failed", "attachmentId", u.ID, "error", err)
@@ -194,6 +199,50 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		"reportDraftsRemoved", res.ReportDraftsRemoved, "reportDraftsFailed", res.ReportDraftsFailed,
 		"orphans", len(res.Orphans))
 	return res, nil
+}
+
+// discardAbandonedFiles removes the chunks an abandoned upload left under its
+// staging key, and any file at its own key (a copy whose confirm never finished).
+// It reports whether the row may be marked FAILED; false means try again next run.
+func (s *attachmentUploadCleanupService) discardAbandonedFiles(ctx, sys context.Context, u domain.AbandonedUpload) bool {
+	if s.store == nil {
+		return true
+	}
+	key, err := s.abandonedKey(sys, u)
+	if err != nil {
+		// Without the key the chunks expire on their own, so do not hold the row back.
+		slog.WarnContext(ctx, "could not work out where an abandoned upload's files are", "attachmentId", u.ID, "error", err)
+		return true
+	}
+	for _, k := range []string{key + stagingSuffix, key} {
+		if err := s.store.Discard(ctx, k); err != nil {
+			slog.WarnContext(ctx, "could not remove an abandoned upload's files", "attachmentId", u.ID, "error", err)
+			return false
+		}
+	}
+	return true
+}
+
+// abandonedKey works out the key an abandoned upload's file would have had.
+func (s *attachmentUploadCleanupService) abandonedKey(sys context.Context, u domain.AbandonedUpload) (string, error) {
+	rows, err := s.repo.GetByIDs(sys, u.Kind, []string{u.ID})
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", fmt.Errorf("the upload row is gone")
+	}
+	row := rows[0]
+	var parent domain.StoredAttachmentParent
+	if row.Draft {
+		parent, err = s.repo.GetProject(sys, row.ParentID)
+	} else {
+		parent, err = s.repo.GetParent(sys, u.Kind, row.ParentID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return storageKeyFor(u.Kind, row, parent), nil
 }
 
 // AcknowledgeOrphans implements AttachmentUploadCleanupService.

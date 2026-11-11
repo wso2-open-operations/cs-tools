@@ -85,19 +85,20 @@ func newAttachmentFileStore(cfg *config.Config) service.FileStore {
 
 // directTransferOptions turns on direct transfers (a large file goes between the
 // browser and Azure through signed links) when they are asked for and the store
-// can sign a link. A link needs the account key, so a store signed in as an Entra
-// app cannot; that is logged, and every file keeps going through this service.
+// can sign a link. Links are signed with the account key; signing as an Entra app
+// is not supported yet. Otherwise this is logged and every file keeps going
+// through this service.
 func directTransferOptions(cfg *config.Config, store service.FileStore) []service.FileServiceOption {
 	if !cfg.AttachmentDirectTransfers {
 		return nil
 	}
 	links, ok := store.(service.LinkStore)
 	if !ok || !links.CanSignLinks() {
-		slog.Warn("direct attachment transfers are off: they need AZURE_STORAGE_KEY or a connection string with a key, not an Entra app")
+		slog.Warn("direct attachment transfers are off: they need AZURE_STORAGE_KEY or a connection string with a key (signing as an Entra app is not supported yet)")
 		return nil
 	}
 	slog.Info("direct attachment transfers are on", "aboveBytes", cfg.AttachmentDirectMinBytes)
-	return []service.FileServiceOption{service.WithDirectTransfers(links, cfg.AttachmentDirectMinBytes)}
+	return []service.FileServiceOption{service.WithDirectTransfers(links)}
 }
 
 // attachmentRequestTimeout gives the routes that move a file the longer limit

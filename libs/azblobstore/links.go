@@ -24,12 +24,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
 )
 
-// ErrLinksUnavailable: the store does not sign in with an account key, so it
-// cannot make a direct-transfer link. Callers keep sending the bytes themselves.
+// ErrLinksUnavailable: the store does not sign in with an account key, and signing
+// as an Entra app is not supported yet, so it makes no direct-transfer link.
+// Callers keep sending the bytes themselves.
 var ErrLinksUnavailable = errors.New("azblobstore: links need an account key or a connection string")
 
 // clockSkew is how far a link's start is set back, so a client whose clock runs a
@@ -37,7 +40,7 @@ var ErrLinksUnavailable = errors.New("azblobstore: links need an account key or 
 const clockSkew = time.Minute
 
 // CanSignLinks reports whether UploadLinks and DownloadLink work. They need the
-// account key: a store that signs in as an Entra app cannot sign a link.
+// account key; signing as an Entra app (a user delegation key) is not supported yet.
 func (s *Store) CanSignLinks() bool { return s.signer != nil }
 
 // UploadLinks returns one link per block index 0 to count-1. A client sends the
@@ -91,17 +94,16 @@ func (s *Store) DownloadLink(key, fileName, contentType string, ttl time.Duratio
 // reads the source while it handles the request, so a short time is enough.
 const copySourceTTL = 2 * time.Minute
 
-// copyPollEvery is how often Copy asks whether a copy Azure answered "pending" to
-// has finished. A copy inside one account normally finishes in the first answer.
+// copyPollEvery is how often Copy checks a copy that Azure has not finished.
 const copyPollEvery = 200 * time.Millisecond
 
-// Copy makes the blob at dstKey a copy of the committed blob at srcKey, content
-// and content type, inside Azure: no byte passes through the caller. An existing
-// blob at dstKey is replaced. It needs what links need (an account key), because
-// Azure reads the source through a short-lived read link. It returns ErrNotFound
-// when there is no blob at srcKey, and waits (until ctx ends) for a copy Azure
-// has not finished yet.
-func (s *Store) Copy(ctx context.Context, srcKey, dstKey string) error {
+// Copy makes dstKey a copy of the committed blob at srcKey (content and type),
+// inside Azure, replacing what is at dstKey. It needs an account key, because
+// Azure reads the source through a short-lived link. When srcETag is not empty
+// the copy is refused with ErrSourceChanged if the source no longer has it, so a
+// file that was checked is the file that is copied. It returns ErrNotFound when
+// srcKey is missing and waits, until ctx ends, for a copy that is still pending.
+func (s *Store) Copy(ctx context.Context, srcKey, dstKey, srcETag string) error {
 	if err := validateKey(srcKey); err != nil {
 		return err
 	}
@@ -114,7 +116,15 @@ func (s *Store) Copy(ctx context.Context, srcKey, dstKey string) error {
 	}
 	source := s.container.NewBlobClient(srcKey).URL() + "?" + query
 	dst := s.container.NewBlobClient(dstKey)
-	resp, err := dst.StartCopyFromURL(ctx, source, nil)
+	var opts *blob.StartCopyFromURLOptions
+	if srcETag != "" {
+		etag := azcore.ETag(srcETag)
+		opts = &blob.StartCopyFromURLOptions{SourceModifiedAccessConditions: &blob.SourceModifiedAccessConditions{SourceIfMatch: &etag}}
+	}
+	resp, err := dst.StartCopyFromURL(ctx, source, opts)
+	if bloberror.HasCode(err, bloberror.SourceConditionNotMet, bloberror.ConditionNotMet) {
+		return ErrSourceChanged
+	}
 	if isNotFound(err) {
 		return ErrNotFound
 	}

@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -30,19 +31,24 @@ import (
 
 // fakeBlob is an in-memory FileStore.
 type fakeBlob struct {
-	staged    map[string]map[int][]byte // key -> index -> bytes
-	committed map[string][]byte
-	types     map[string]string
-	deleted   []string
-	commitErr error
-	putErr    error
-	opened    []string
-	copyErr   error
-	copied    [][2]string // {from, to}
+	staged     map[string]map[int][]byte // key -> index -> bytes
+	committed  map[string][]byte
+	types      map[string]string
+	deleted    []string
+	commitErr  error
+	putErr     error
+	opened     []string
+	copyErr    error
+	copyShort  bool        // Copy carries only part of the file
+	copied     [][2]string // {from, to}
+	discarded  []string
+	discardErr error
+	versions   map[string]int
+	beforeCopy func() // runs just before Copy reads its source
 }
 
 func newFakeBlob() *fakeBlob {
-	return &fakeBlob{staged: map[string]map[int][]byte{}, committed: map[string][]byte{}, types: map[string]string{}}
+	return &fakeBlob{staged: map[string]map[int][]byte{}, committed: map[string][]byte{}, types: map[string]string{}, versions: map[string]int{}}
 }
 
 func (b *fakeBlob) PutBlock(_ context.Context, key string, index int, body io.Reader, size int64) error {
@@ -78,6 +84,7 @@ func (b *fakeBlob) Commit(_ context.Context, key string, count int, contentType 
 		all = append(all, chunk...)
 	}
 	b.committed[key], b.types[key] = all, contentType
+	b.versions[key]++
 	return nil
 }
 
@@ -86,8 +93,11 @@ func (b *fakeBlob) Stat(_ context.Context, key string) (azblobstore.Info, error)
 	if !ok {
 		return azblobstore.Info{}, azblobstore.ErrNotFound
 	}
-	return azblobstore.Info{Size: int64(len(data)), ContentType: b.types[key]}, nil
+	return azblobstore.Info{Size: int64(len(data)), ContentType: b.types[key], ETag: b.etag(key)}, nil
 }
+
+// etag is a value that changes whenever the file at key is committed again.
+func (b *fakeBlob) etag(key string) string { return fmt.Sprintf("v%d", b.versions[key]) }
 
 func (b *fakeBlob) Open(_ context.Context, key string, rng *azblobstore.Range) (*azblobstore.Object, error) {
 	data, ok := b.committed[key]
@@ -114,14 +124,34 @@ func (b *fakeBlob) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+// Discard removes a file and any chunks put for it and never committed.
+func (b *fakeBlob) Discard(_ context.Context, key string) error {
+	if b.discardErr != nil {
+		return b.discardErr
+	}
+	b.discarded = append(b.discarded, key)
+	delete(b.committed, key)
+	delete(b.staged, key)
+	return nil
+}
+
 // Copy duplicates a committed file, as Azure does inside the account.
-func (b *fakeBlob) Copy(_ context.Context, from, to string) error {
+func (b *fakeBlob) Copy(_ context.Context, from, to, srcETag string) error {
+	if b.beforeCopy != nil {
+		b.beforeCopy()
+	}
 	if b.copyErr != nil {
 		return b.copyErr
+	}
+	if srcETag != "" && srcETag != b.etag(from) {
+		return azblobstore.ErrSourceChanged
 	}
 	data, ok := b.committed[from]
 	if !ok {
 		return azblobstore.ErrNotFound
+	}
+	if b.copyShort {
+		data = data[:len(data)/2]
 	}
 	b.committed[to], b.types[to] = append([]byte(nil), data...), b.types[from]
 	b.copied = append(b.copied, [2]string{from, to})

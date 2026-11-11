@@ -416,12 +416,8 @@ async function readAndStore(
 }
 
 /**
- * Asks Azure for the first byte of a download link before the browser is handed
- * it. A link Azure would refuse (expired, a storage firewall, a clock that is off,
- * a site the storage does not allow) makes the browser show or save Azure's error
- * page as the file, and a download it started cannot be taken back, so the stream
- * through the backend is used instead. A cross-origin check Azure's CORS rules do
- * not allow fails here too, which is the same answer.
+ * Reads the first byte of a download link. A link Azure refuses would make the
+ * browser save Azure's error page as the file, so the backend stream is used instead.
  */
 async function linkWorks(url: string, signal?: AbortSignal): Promise<boolean> {
   try {
@@ -455,8 +451,8 @@ async function startDirectDownload(
   args: { type: EntityAttachmentType; id: string; name?: string; signal?: AbortSignal },
 ): Promise<boolean> {
   try {
-    const link = await api.get<{ url?: string; name?: string }>(
-      `/attachments/download/${encodeURIComponent(args.id)}/link?type=${encodeURIComponent(args.type)}`,
+    const link = await api.postEmpty<{ url?: string; name?: string }>(
+      `/attachments/${encodeURIComponent(args.id)}/download-links?type=${encodeURIComponent(args.type)}`,
     );
     if (!link?.url || !(await linkWorks(link.url, args.signal))) return false;
     startBrowserDownload(link.url, args.name || link.name || "attachment");
@@ -534,6 +530,14 @@ export const UPLOAD_CANCELLED_MESSAGE = "The upload was cancelled.";
 /** Shown when a chunk could not be stored and the retries ran out. */
 export const UPLOAD_INTERRUPTED_MESSAGE = "The upload was interrupted. Please try again.";
 
+/** An upload that gave up for good (retries ran out, or a link cannot be used). */
+export class UploadInterruptedError extends Error {
+  constructor() {
+    super(UPLOAD_INTERRUPTED_MESSAGE);
+    this.name = "UploadInterruptedError";
+  }
+}
+
 /** The user (or the app) aborted an upload. */
 export class EntityUploadAbortedError extends Error {
   constructor() {
@@ -592,7 +596,7 @@ async function sendChunk(
         throw new EntityUploadAbortedError();
       }
       if (attempt >= UPLOAD_CHUNK_ATTEMPTS || !chunkFailureIsTransient(err)) {
-        throw err instanceof BackendApiError ? err : new Error(UPLOAD_INTERRUPTED_MESSAGE);
+        throw err instanceof BackendApiError ? err : new UploadInterruptedError();
       }
       await pause(500 * 2 ** (attempt - 1), args.signal);
     }
@@ -670,12 +674,15 @@ export async function sendFileInChunks(
  */
 export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
 
-/** The links `POST /attachments/upload/{id}/direct` returns: one per chunk. */
+/** The links `POST /attachments/{id}/upload-links` returns: one per chunk. */
 interface DirectUploadLinks {
   links: string[];
   chunkBytes: number;
   expiresAt: string;
 }
+
+/** How many times the links of one upload are replaced when they expire. */
+const MAX_LINK_REFRESHES = 3;
 
 /** True when `links` is a usable answer: a positive whole chunk size and a link for every chunk of `fileSize`. */
 function linksCoverFile(links: DirectUploadLinks | null | undefined, fileSize: number): links is DirectUploadLinks {
@@ -688,25 +695,39 @@ function linksCoverFile(links: DirectUploadLinks | null | undefined, fileSize: n
   );
 }
 
-/** Sends one chunk to its signed link, trying again with a short pause when it fails in passing. */
-async function sendChunkToLink(link: string, body: Blob, signal?: AbortSignal): Promise<void> {
+/**
+ * Sends one chunk to its signed link, trying again with a short pause when it
+ * fails in passing. A 403 means the link expired (they last a few minutes): the
+ * links are asked for again and the chunk goes to its new one.
+ */
+async function sendChunkToLink(
+  source: () => { url: string; generation: number },
+  onExpired: (generation: number) => Promise<void>,
+  body: Blob,
+  signal?: AbortSignal,
+): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     if (signal?.aborted) throw new EntityUploadAbortedError();
+    const { url, generation } = source();
     try {
       // No Authorization header: the link itself is the credential.
-      const response = await fetch(link, { method: "PUT", body, signal });
+      const response = await fetch(url, { method: "PUT", body, signal });
       if (response.ok) return;
-      // Azure answers 500/503 when it is busy; any other refusal (a link that
-      // expired or was refused) will not change.
+      if (response.status === 403) {
+        await onExpired(generation); // throws once the links were replaced too often
+        attempt -= 1; // a new link is not a failed try
+        continue;
+      }
+      // Azure answers 500/503 when it is busy; any other refusal will not change.
       if (attempt >= UPLOAD_CHUNK_ATTEMPTS || ![408, 429, 500, 503].includes(response.status)) {
-        throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+        throw new UploadInterruptedError();
       }
     } catch (err) {
       if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
         throw new EntityUploadAbortedError();
       }
-      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || (err instanceof Error && err.message === UPLOAD_INTERRUPTED_MESSAGE)) {
-        throw new Error(UPLOAD_INTERRUPTED_MESSAGE);
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || err instanceof UploadInterruptedError) {
+        throw new UploadInterruptedError();
       }
     }
     await pause(500 * 2 ** (attempt - 1), signal);
@@ -716,9 +737,11 @@ async function sendChunkToLink(link: string, body: Blob, signal?: AbortSignal): 
 /**
  * Sends `file` straight to Azure through signed links the backend makes (one per
  * chunk), a few at a time. Returns the number of chunks, which the confirm step
- * needs. Throws when the links cannot be had or a chunk cannot be sent (for
- * example a storage account that does not allow this site); the caller then
- * sends the file through the backend instead, which stages the same chunks.
+ * needs. The links last a few minutes, longer for a bigger file; one that expires
+ * part-way is replaced by asking again, and the chunks already sent stay.
+ * Throws when the links cannot be had or a chunk cannot be sent (for example a
+ * storage account that does not allow this site); the caller then sends the file
+ * through the backend instead, which stages the same chunks.
  */
 export async function sendFileDirect(
   api: BackendApi,
@@ -731,19 +754,37 @@ export async function sendFileDirect(
   },
 ): Promise<number> {
   const { type, attachmentId, file, signal, onProgress } = args;
-  const direct = await api.postEmpty<DirectUploadLinks>(
-    `/attachments/upload/${encodeURIComponent(attachmentId)}/direct?type=${encodeURIComponent(type)}`,
-  );
+  const path = `/attachments/${encodeURIComponent(attachmentId)}/upload-links?type=${encodeURIComponent(type)}`;
+  const requestLinks = (): Promise<DirectUploadLinks> => api.postEmpty<DirectUploadLinks>(path);
+  let direct = await requestLinks();
+  // An answer that does not make sense is refused here, so the caller falls back to the backend.
+  if (!linksCoverFile(direct, file.size)) throw new Error("The upload links do not cover the file.");
   const count = Math.max(1, Math.ceil(file.size / direct.chunkBytes));
-  if (!linksCoverFile(direct, file.size)) {
-    throw new Error("The upload links do not cover the file.");
-  }
+  // Every chunk in flight may see the expiry at once; one request replaces the links.
+  let generation = 0;
+  let refreshing: Promise<void> | undefined;
+  const onExpired = async (seen: number): Promise<void> => {
+    if (seen !== generation) return; // already replaced
+    if (generation >= MAX_LINK_REFRESHES) throw new UploadInterruptedError();
+    refreshing ??= requestLinks()
+      .then((fresh) => {
+        if (!linksCoverFile(fresh, file.size) || fresh.chunkBytes !== direct.chunkBytes) {
+          throw new Error("The upload links do not cover the file.");
+        }
+        direct = fresh;
+        generation += 1;
+      })
+      .finally(() => {
+        refreshing = undefined;
+      });
+    await refreshing;
+  };
   await sendChunksInParallel({
     file,
     chunkBytes: direct.chunkBytes,
     count,
     onProgress,
-    send: (index, body) => sendChunkToLink(direct.links[index], body, signal),
+    send: (index, body) => sendChunkToLink(() => ({ url: direct.links[index], generation }), onExpired, body, signal),
   });
   return count;
 }

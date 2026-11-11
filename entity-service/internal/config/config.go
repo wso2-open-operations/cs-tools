@@ -870,13 +870,17 @@ type Config struct {
 	// AttachmentDirectTransfers (ATTACHMENT_DIRECT_TRANSFERS_ENABLED=true) lets a
 	// file larger than AttachmentDirectMinBytes go between the browser and Azure
 	// directly, through short-lived links this service signs, instead of through
-	// it. Off by default. It needs a storage account key or connection string (a
-	// link cannot be signed by an Entra app) and CORS on the storage account;
-	// without a key it stays off and logs why.
+	// it. Off by default. It needs a storage account key or connection string
+	// (signing as an Entra app is not supported yet) and CORS on the storage
+	// account; without a key it stays off and logs why.
 	AttachmentDirectTransfers bool
 	// AttachmentDirectMinBytes is the size above which a file uses a direct link
 	// (ATTACHMENT_DIRECT_MIN_MB, default 8 MiB, one chunk).
 	AttachmentDirectMinBytes int64
+	// AttachmentDirectMaxBytes is the largest file that may be sent that way
+	// (ATTACHMENT_DIRECT_MAX_MB, default and at most 1024 MB). Only used while
+	// direct transfers are on; ATTACHMENT_MAX_MB still caps every other file.
+	AttachmentDirectMaxBytes int64
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
 	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1, at most 25), and so also one image.
 	// At most service.MaxInlineImagesPerContent (5) images per comment or
@@ -1149,6 +1153,7 @@ func Load() *Config {
 	cfg.AttachmentMaxConcurrentTransfers = envPositiveInt("ATTACHMENT_MAX_CONCURRENT_TRANSFERS", 32)
 	cfg.AttachmentDirectTransfers = strings.EqualFold(strings.TrimSpace(os.Getenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED")), "true")
 	cfg.AttachmentDirectMinBytes = envMegabytes("ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES", 8, 100)
+	cfg.AttachmentDirectMaxBytes = envMegabytes("ATTACHMENT_DIRECT_MAX_MB", "ATTACHMENT_DIRECT_MAX_BYTES", maxAttachmentDirectMB, maxAttachmentDirectMB)
 	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()
 	return cfg
@@ -1795,7 +1800,10 @@ func envDuration(key string, def time.Duration) time.Duration {
 // is treated like a bad value (the default is used), so a mistyped setting can
 // never raise a limit past what the portals and the gateway are built for.
 const (
-	maxAttachmentMB        = 100
+	maxAttachmentMB = 100
+	// maxAttachmentDirectMB is the largest file that may be sent straight to Azure
+	// (1 GiB), and the default of ATTACHMENT_DIRECT_MAX_MB.
+	maxAttachmentDirectMB  = 1024
 	maxInlineImagesTotalMB = 25
 )
 

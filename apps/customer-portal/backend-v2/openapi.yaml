@@ -1476,7 +1476,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/upload/{id}/direct:
+  /attachments/{id}/upload-links:
     post:
       summary: Get signed links to send a large file straight to Azure Blob Storage.
       description: >-
@@ -1484,8 +1484,8 @@ paths:
         chunk i (chunkBytes long, the last one shorter) to links[i], then confirm the upload as
         usual; confirm checks the real size. The links are credentials that expire at
         expiresAt (a request that started before then finishes), and the answer is never
-        cacheable. If a link cannot be used, send the chunks through the chunk route instead.
-      operationId: postAttachmentsUploadIdDirect
+        cacheable. If a link cannot be used, a file within the ordinary size limit may be sent through the chunk route instead; a larger one cannot, so ask for new links or report the failure.
+      operationId: createAttachmentUploadLinks
       parameters:
         - name: id
           in: path
@@ -1785,15 +1785,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /attachments/download/{id}/link:
-    get:
-      summary: Get a signed link to download a large file straight from Azure Blob Storage.
+  /attachments/{id}/download-links:
+    post:
+      summary: Create a signed link to download a large file straight from Azure Blob Storage.
       description: >-
         A read-only link that answers as a download of the file's own name. It expires at
         expiresAt (a download that started before then finishes; a resumed one asks for a new
         link), and the answer is never cacheable. If the link cannot be used, download through
         the content route instead.
-      operationId: getAttachmentsDownloadIdLink
+      operationId: createAttachmentDownloadLink
       parameters:
         - name: id
           in: path
@@ -6528,7 +6528,7 @@ components:
         maxBytes: {type: integer, format: int64}
         directUpload:
           type: boolean
-          description: True when the file may be sent straight to Azure through POST /attachments/upload/{id}/direct; false means send it in chunks through this backend.
+          description: True when the file may be sent straight to Azure through POST /attachments/{id}/upload-links; false means send it in chunks through this backend.
     StoredAttachmentConfirmRequest:
       type: object
       required: [type]

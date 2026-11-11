@@ -173,7 +173,7 @@ func TestLinks_ConnectionString(t *testing.T) {
 // Copy reads its source through a link, so a store that cannot sign cannot copy.
 func TestCopyNeedsAnAccountKey(t *testing.T) {
 	s := &Store{}
-	if err := s.Copy(t.Context(), "a/b.bin.upload", "a/b.bin"); err == nil || !errors.Is(err, ErrLinksUnavailable) {
+	if err := s.Copy(t.Context(), "a/b.bin.upload", "a/b.bin", ""); err == nil || !errors.Is(err, ErrLinksUnavailable) {
 		t.Fatalf("Copy without a signer = %v, want ErrLinksUnavailable", err)
 	}
 }

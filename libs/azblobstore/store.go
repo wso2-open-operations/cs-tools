@@ -271,9 +271,11 @@ func (s *Store) Commit(ctx context.Context, key string, blockCount int, contentT
 type Info struct {
 	Size        int64
 	ContentType string
+	// ETag changes whenever the blob does; Copy can be pinned to it.
+	ETag string
 }
 
-// Stat returns the size and type of the committed blob at key, or ErrNotFound.
+// Stat returns the size, type and ETag of the committed blob at key, or ErrNotFound.
 func (s *Store) Stat(ctx context.Context, key string) (Info, error) {
 	if err := validateKey(key); err != nil {
 		return Info{}, err
@@ -291,6 +293,9 @@ func (s *Store) Stat(ctx context.Context, key string) (Info, error) {
 	}
 	if resp.ContentType != nil {
 		info.ContentType = *resp.ContentType
+	}
+	if resp.ETag != nil {
+		info.ETag = string(*resp.ETag)
 	}
 	return info, nil
 }
@@ -367,6 +372,26 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("azblobstore: delete %s: %w", key, err)
 	}
 	return nil
+}
+
+// Discard removes the blob at key and any blocks put for it but never committed.
+// Delete cannot remove those blocks, and Azure keeps them for about a week. A key
+// with nothing at it is not an error.
+func (s *Store) Discard(ctx context.Context, key string) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	staged, err := s.UncommittedBlocks(ctx, key)
+	if err != nil {
+		return err
+	}
+	if len(staged) > 0 {
+		// Committing an empty list drops the uncommitted blocks; Delete then removes the empty blob.
+		if _, err := s.container.NewBlockBlobClient(key).CommitBlockList(ctx, nil, nil); err != nil {
+			return fmt.Errorf("azblobstore: discard %s: %w", key, err)
+		}
+	}
+	return s.Delete(ctx, key)
 }
 
 // isNotFound reports a missing blob. A missing container is not that: it means

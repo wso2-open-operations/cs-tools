@@ -65,15 +65,21 @@ type fakeStoredRepo struct {
 		id, from, to string
 		sys          bool
 	}
-	deleted      map[string]string // id -> deleted_by
-	deleteCtx    []bool            // whether each MarkDeleted ran as the system
-	deleteOK     bool
-	completed    map[string]string // id -> storage key
-	completeCtx  []bool            // whether each MarkComplete ran as the system
-	completeOK   bool
-	failed       map[string]string // id -> detail
-	abandoned    []domain.AbandonedUpload
-	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
+	deleted     map[string]string // id -> deleted_by
+	deleteCtx   []bool            // whether each MarkDeleted ran as the system
+	deleteOK    bool
+	completed   map[string]string // id -> storage key
+	completeCtx []bool            // whether each MarkComplete ran as the system
+	completeOK  bool
+	failed      map[string]string // id -> detail
+	abandoned   []domain.AbandonedUpload
+	abandonedAt time.Time // the cutoff ListAbandoned was asked for
+	// pendingStaged is how many staged uploads the caller already has; pendingAsked is what the insert was limited by.
+	pendingStaged int
+	pendingAsked  struct {
+		email string
+		since time.Time
+	}
 	abandonedSys bool
 	linkWant     []string          // ids LinkInlineImages will report as linked
 	linkedTo     map[string]string // image id -> comment it is already linked to
@@ -139,12 +145,21 @@ func (f *fakeStoredRepo) InsertPending(_ context.Context, _ domain.StoredAttachm
 	if f.insertErr != nil {
 		return domain.StoredAttachmentRow{}, f.insertErr
 	}
+	if in.Staged && in.MaxPendingStaged > 0 {
+		f.pendingAsked = struct {
+			email string
+			since time.Time
+		}{in.CreatedBy, in.PendingSince}
+		if f.pendingStaged >= in.MaxPendingStaged {
+			return domain.StoredAttachmentRow{}, repository.ErrTooManyPendingUploads
+		}
+	}
 	f.inserted = append(f.inserted, in)
 	size := in.SizeBytes
 	ct := in.ContentType
 	row := domain.StoredAttachmentRow{
 		ID: saAttID, Number: "WIA0000042", Name: in.Name, ContentType: &ct, SizeBytes: &size,
-		Status: "PENDING", CreatedBy: in.CreatedBy, ParentID: in.ParentID,
+		Status: "PENDING", CreatedBy: in.CreatedBy, ParentID: in.ParentID, Staged: in.Staged,
 	}
 	f.rows[row.ID] = row
 	return row, nil
