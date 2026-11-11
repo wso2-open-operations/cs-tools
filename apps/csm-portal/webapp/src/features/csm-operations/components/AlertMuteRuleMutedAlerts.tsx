@@ -180,11 +180,21 @@ export default function AlertMuteRuleMutedAlerts({
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
+                    <TableCell sx={{ maxWidth: 220 }}>
+                      <Typography
+                        variant="body2"
+                        noWrap
+                        title={alert.service}
+                      >
                         {alert.service || "—"}
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        noWrap
+                        title={alert.environment}
+                        component="div"
+                      >
                         {alert.environment || "—"}
                       </Typography>
                     </TableCell>

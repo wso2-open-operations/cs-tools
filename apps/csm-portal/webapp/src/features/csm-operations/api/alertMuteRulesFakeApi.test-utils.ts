@@ -20,12 +20,17 @@ import type {
   AlertMuteRuleSearchPayload,
   AlertMuteRuleSearchResponse,
 } from "@features/csm-operations/types/alertMuteRules";
-import { alertMuteRuleState, matchesStateFilter } from "@features/csm-operations/utils/alertMuteRules";
+import {
+  alertMuteRuleState,
+  matchesStateFilter,
+  MAX_ALERT_MUTE_RULE_HOURS,
+} from "@features/csm-operations/utils/alertMuteRules";
 
 /**
  * Tests only: an in-memory `/alert-mute-rules` backend shaped like
  * `useBackendApi()`, with entity-service's state rules (edit and delete while
- * scheduled, end while active), so the pages can be driven end to end.
+ * scheduled, end while active, extend while scheduled or active to a later end
+ * within 72 hours of the start), so the pages can be driven end to end.
  */
 export function createFakeAlertMuteRulesApi(actor = "engineer@example.test") {
   let rules: AlertMuteRule[] = [];
@@ -48,6 +53,10 @@ export function createFakeAlertMuteRulesApi(actor = "engineer@example.test") {
       if (path.startsWith("/alert-field-values")) {
         const field = new URLSearchParams(path.split("?")[1]).get("field");
         return { field, values: field === "service" ? ["client-prod-alert-integration"] : [] } as T;
+      }
+      if (path.startsWith("/alert-mute-rules/muted-counts")) {
+        const ids = (new URLSearchParams(path.split("?")[1]).get("ids") ?? "").split(",");
+        return { counts: Object.fromEntries(ids.map((id) => [id, 0])) } as T;
       }
       if (path.includes("/muted-alerts")) return { items: [], total: 0, limit: 20, offset: 0, summary: {} } as T;
       return find(path) as T;
@@ -86,7 +95,16 @@ export function createFakeAlertMuteRulesApi(actor = "engineer@example.test") {
         return rule as TRes;
       }
       if (path.endsWith("/extend")) {
-        return save({ ...find(path), endOn: (body as { endOn: string }).endOn, updatedOn: stamp() }) as TRes;
+        const rule = find(path);
+        const state = alertMuteRuleState(rule, Date.now());
+        if (state !== "scheduled" && state !== "active") throw new Error("only a scheduled or active alert mute rule can be extended");
+        const endOn = (body as { endOn: string }).endOn;
+        const end = Date.parse(endOn);
+        if (!(end > Date.parse(rule.endOn))) throw new Error("endOn must be later than the alert mute rule's current end");
+        if (end - Date.parse(rule.startOn) > MAX_ALERT_MUTE_RULE_HOURS * 3_600_000) {
+          throw new Error("an alert mute rule can last at most 72 hours from its start");
+        }
+        return save({ ...rule, endOn, updatedBy: actor, updatedOn: stamp() }) as TRes;
       }
       throw new Error(`unexpected POST ${path}`);
     },

@@ -67,7 +67,9 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavTransition();
   const location = useLocation();
-  const backTarget = (location.state as { from?: string } | undefined)?.from ?? LIST_PATH;
+  const nav = location.state as { from?: string; parentState?: unknown } | undefined;
+  const backTarget = nav?.from ?? LIST_PATH;
+  const backState = nav?.parentState ?? undefined;
   const now = useNow();
   const { data: rule, isLoading, isError, error } = useGetAlertMuteRule(id);
   const paging = useMutedAlertsPaging();
@@ -84,7 +86,7 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
       variant="text"
       size="small"
       startIcon={<ArrowLeft size={16} />}
-      onClick={() => navigate(backTarget)}
+      onClick={() => navigate(backTarget, { state: backState })}
       sx={{ alignSelf: "flex-start" }}
     >
       Back
@@ -141,7 +143,8 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
           state={state}
           variant="buttons"
           returnTo={`${location.pathname}${location.search}`}
-          onDeleted={() => navigate(backTarget, { replace: true })}
+          parentState={location.state ?? null}
+          onDeleted={() => navigate(backTarget, { replace: true, state: backState })}
         />
         </Box>
       </Box>
@@ -162,7 +165,7 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
       <Section
         title="Schedule"
         rows={[
-          ["Time zone", timeZoneLabel(rule.timeZone)],
+          ["Time zone", timeZoneLabel(rule.timeZone, Date.parse(rule.startOn))],
           ["Start", formatDateTime(rule.startOn, rule.timeZone)],
           ["End", formatDateTime(rule.endOn, rule.timeZone)],
           ["Length", formatDuration(length)],

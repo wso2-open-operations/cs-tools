@@ -36,6 +36,13 @@ import type {
   AlertMuteRuleStateFilter,
 } from "@features/csm-operations/types/alertMuteRules";
 
+/**
+ * A rule's state follows the clock (scheduled → active → expired) while the
+ * server filters by state, so lists and counts refetch on this interval while
+ * they are open.
+ */
+const ALERT_MUTE_RULES_REFRESH_MS = 60_000;
+
 /** One page of alert mute rules (`POST /alert-mute-rules/search`), newest first. */
 export function useSearchAlertMuteRules(
   payload: AlertMuteRuleSearchPayload,
@@ -45,6 +52,7 @@ export function useSearchAlertMuteRules(
     queryKey: [ApiQueryKeys.ALERT_MUTE_RULES, "search", payload],
     queryFn: () => api.post<AlertMuteRuleSearchPayload, AlertMuteRuleSearchResponse>("/alert-mute-rules/search", payload),
     placeholderData: keepPreviousData,
+    refetchInterval: ALERT_MUTE_RULES_REFRESH_MS,
   });
 }
 
@@ -67,6 +75,7 @@ export function useAlertMuteRuleCounts(searchQuery: string): Record<AlertMuteRul
         queryKey: [ApiQueryKeys.ALERT_MUTE_RULES, "count", payload],
         queryFn: () => api.post<AlertMuteRuleSearchPayload, AlertMuteRuleSearchResponse>("/alert-mute-rules/search", payload),
         placeholderData: keepPreviousData,
+        refetchInterval: ALERT_MUTE_RULES_REFRESH_MS,
       };
     }),
   });
@@ -197,5 +206,30 @@ export function useAlertFieldValues(
     staleTime: 60_000,
     retry: false,
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * How many alert groups each rule on a list page muted
+ * (`GET /alert-mute-rules/muted-counts`): one call for the whole page instead
+ * of one per row. `live` polls every 30 s, for a page with an active rule.
+ */
+export function useAlertMuteRuleMutedCounts(
+  ruleIds: string[],
+  live = false,
+): UseQueryResult<Record<string, number>, Error> {
+  const api = useBackendApi();
+  return useQuery<Record<string, number>, Error>({
+    queryKey: [ApiQueryKeys.ALERT_MUTE_RULES, "muted-counts", ruleIds],
+    queryFn: async () => {
+      const res = await api.get<{ counts: Record<string, number> }>(
+        `/alert-mute-rules/muted-counts?ids=${ruleIds.map(encodeURIComponent).join(",")}`,
+      );
+      if (!res) throw new Error("No muted counts response.");
+      return res.counts;
+    },
+    enabled: ruleIds.length > 0,
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? 30_000 : false,
   });
 }

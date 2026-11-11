@@ -51,11 +51,20 @@ interface AlertMuteRuleActionsProps {
   variant: "menu" | "buttons";
   /** Where Edit returns to, and where Delete goes from the detail page. */
   returnTo: string;
+  /** The returnTo page's own location.state, handed back by the form's Back. */
+  parentState?: unknown;
   onDeleted?: () => void;
 }
 
 /** A rule's actions with their dialogs: End now and Delete confirm first, Extend picks the new end. */
-export default function AlertMuteRuleActions({ rule, state, variant, returnTo, onDeleted }: AlertMuteRuleActionsProps): JSX.Element | null {
+export default function AlertMuteRuleActions({
+  rule,
+  state,
+  variant,
+  returnTo,
+  parentState = null,
+  onDeleted,
+}: AlertMuteRuleActionsProps): JSX.Element | null {
   const navigate = useNavTransition();
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState<"end" | "extend" | "delete" | null>(null);
@@ -68,7 +77,7 @@ export default function AlertMuteRuleActions({ rule, state, variant, returnTo, o
   const run = (action: AlertMuteRuleAction): void => {
     setMenuAnchor(null);
     if (action === "edit") {
-      navigate(`/operations/alert-mute-rules/${rule.id}/edit`, { state: { from: returnTo } });
+      navigate(`/operations/alert-mute-rules/${rule.id}/edit`, { state: { from: returnTo, parentState } });
       return;
     }
     endRule.reset();

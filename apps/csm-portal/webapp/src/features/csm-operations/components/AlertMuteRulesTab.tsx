@@ -42,7 +42,7 @@ import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import {
   useAlertMuteRuleCounts,
-  useAlertMuteRuleMutedAlerts,
+  useAlertMuteRuleMutedCounts,
   useSearchAlertMuteRules,
 } from "@features/csm-operations/api/useAlertMuteRules";
 import type { AlertMuteRuleSearchPayload, AlertMuteRuleStateFilter } from "@features/csm-operations/types/alertMuteRules";
@@ -70,27 +70,22 @@ function formatDateTime(value: string): string {
  * search box, and one row per rule with its actions in a ⋮ menu. Searching,
  * filtering and paging run on the backend (`POST /alert-mute-rules/search`).
  */
-/** How many alert groups a rule muted: one one-row page from alert-core. A scheduled rule has muted nothing yet. */
+/** How many alert groups a rule muted. A scheduled rule has muted nothing yet. */
 function MutedCount({
-  ruleId,
-  enabled,
-  live,
+  count,
+  scheduled,
+  isError,
 }: {
-  ruleId: string;
-  enabled: boolean;
-  live: boolean;
+  count: number | undefined;
+  scheduled: boolean;
+  isError: boolean;
 }): JSX.Element {
-  const { data, isError } = useAlertMuteRuleMutedAlerts(
-    enabled ? ruleId : undefined,
-    { limit: 1, offset: 0 },
-    live,
-  );
-  const text = !enabled ? "—" : isError ? "?" : data ? String(data.total) : "…";
+  const text = scheduled ? "—" : isError ? "?" : count !== undefined ? String(count) : "…";
   return (
     <Typography
       variant="body2"
-      color={data?.total ? "text.primary" : "text.secondary"}
-      title={isError ? "Couldn't load muted alerts" : undefined}
+      color={count ? "text.primary" : "text.secondary"}
+      title={!scheduled && isError ? "Couldn't load muted alerts" : undefined}
     >
       {text}
     </Typography>
@@ -121,8 +116,15 @@ export default function AlertMuteRulesTab(): JSX.Element {
   const returnTo = `${location.pathname}${location.search}`;
   const pageRows = (data?.alertMuteRules ?? []).map((rule) => ({ rule, state: alertMuteRuleState(rule, now) }));
   const total = data?.total ?? 0;
+  const startedIds = pageRows.filter(({ state }) => state !== "scheduled").map(({ rule }) => rule.id);
+  const mutedCounts = useAlertMuteRuleMutedCounts(
+    startedIds,
+    pageRows.some(({ state }) => state === "active"),
+  );
 
-  const openRule = (id: string): void => navigate(`/operations/alert-mute-rules/${id}`, { state: { from: returnTo } });
+  // Each page's Back restores the state the page before it had (see the webapp CLAUDE.md, "parentState").
+  const returnState = { from: returnTo, parentState: location.state ?? null };
+  const openRule = (id: string): void => navigate(`/operations/alert-mute-rules/${id}`, { state: returnState });
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -184,7 +186,7 @@ export default function AlertMuteRulesTab(): JSX.Element {
           color="primary"
           size="small"
           startIcon={<Plus size={16} />}
-          onClick={() => navigate("/operations/alert-mute-rules/new", { state: { from: returnTo } })}
+          onClick={() => navigate("/operations/alert-mute-rules/new", { state: returnState })}
         >
           Create alert mute rule
         </Button>
@@ -278,7 +280,11 @@ export default function AlertMuteRulesTab(): JSX.Element {
                       <AlertMuteRuleStateChip state={state} />
                     </TableCell>
                     <TableCell>
-                      <MutedCount ruleId={rule.id} enabled={state !== "scheduled"} live={state === "active"} />
+                      <MutedCount
+                        count={mutedCounts.data?.[rule.id]}
+                        scheduled={state === "scheduled"}
+                        isError={mutedCounts.isError}
+                      />
                     </TableCell>
                     <TableCell sx={{ maxWidth: 200 }}>
                       <Typography variant="body2" noWrap title={rule.createdBy}>
@@ -286,7 +292,13 @@ export default function AlertMuteRulesTab(): JSX.Element {
                       </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <AlertMuteRuleActions rule={rule} state={state} variant="menu" returnTo={returnTo} />
+                      <AlertMuteRuleActions
+                        rule={rule}
+                        state={state}
+                        variant="menu"
+                        returnTo={returnTo}
+                        parentState={location.state ?? null}
+                      />
                     </TableCell>
                   </TableRow>
                 ))
