@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -346,6 +347,73 @@ func (r *IncidentRepo) CloseMuted(ctx context.Context, id, foldVersion int64) (b
 		return false, fmt.Errorf("close muted incident %d: %w", id, err)
 	}
 	return closed == 1, nil
+}
+
+// MutedByRule returns one page of the incidents alert mute rule ruleID muted, newest first, and how many there are in all.
+// An incident keeps mute_rule_id after it is released, so the page includes muted incidents that later became CSM
+// incidents or were closed quietly. Rows the retention job purged are gone.
+func (r *IncidentRepo) MutedByRule(ctx context.Context, ruleID string, limit, offset int) ([]model.Incident, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM incidents_processed WHERE mute_rule_id = $1`, ruleID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count incidents muted by rule %s: %w", ruleID, err)
+	}
+	rows, err := r.pool.Query(ctx, `SELECT `+incidentColumns+` FROM incidents_processed
+		WHERE mute_rule_id = $1 ORDER BY first_seen DESC, id DESC LIMIT $2 OFFSET $3`, ruleID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list incidents muted by rule %s: %w", ruleID, err)
+	}
+	incs, err := pgx.CollectRows(rows, pgx.RowToStructByName[model.Incident])
+	if err != nil {
+		return nil, 0, fmt.Errorf("list incidents muted by rule %s: %w", ruleID, err)
+	}
+	return incs, total, nil
+}
+
+// MutedByRuleSummary counts the incidents ruleID muted by outcome (see model.Incident.MuteOutcome).
+func (r *IncidentRepo) MutedByRuleSummary(ctx context.Context, ruleID string) (map[string]int, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+incidentColumns+` FROM incidents_processed WHERE mute_rule_id = $1`, ruleID)
+	if err != nil {
+		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
+	}
+	incs, err := pgx.CollectRows(rows, pgx.RowToStructByName[model.Incident])
+	if err != nil {
+		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
+	}
+	counts := map[string]int{}
+	for _, inc := range incs {
+		counts[inc.MuteOutcome()]++
+	}
+	return counts, nil
+}
+
+// fieldValueColumns maps the alert fields a mute rule condition can name to incidents_processed columns.
+var fieldValueColumns = map[string]string{
+	"service": "service", "environment": "environment", "source": "source", "metric_name": "metric_name",
+	"category": "category", "severity": "severity_label", "unique_identifier": "unique_identifier",
+}
+
+// likeEscaper escapes LIKE wildcards so a search matches them literally.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// FieldValues returns up to limit distinct non-empty values of alert field field that contain query (case-insensitive),
+// most recently seen first. They come from the incidents still kept, so they are the values real alerts carry, which is
+// what an alert mute rule must match. ok is false for a field it doesn't know.
+func (r *IncidentRepo) FieldValues(ctx context.Context, field, query string, limit int) (values []string, ok bool, err error) {
+	col, ok := fieldValueColumns[field]
+	if !ok {
+		return nil, false, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT `+col+` FROM incidents_processed
+		WHERE `+col+` <> '' AND `+col+` ILIKE '%' || $1 || '%'
+		GROUP BY `+col+` ORDER BY max(last_seen) DESC, `+col+` LIMIT $2`, likeEscaper.Replace(query), limit)
+	if err != nil {
+		return nil, true, fmt.Errorf("list %s values: %w", field, err)
+	}
+	values, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, true, fmt.Errorf("list %s values: %w", field, err)
+	}
+	return values, true, nil
 }
 
 // Purge deletes up to limit incidents, and their notes, last seen before cutoff with no delivery still owed.

@@ -93,6 +93,8 @@ ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS mute_rule_number text N
 
 -- The delivery loop reads only incidents whose CSM/Chat work is due.
 CREATE INDEX IF NOT EXISTS incidents_processed_due_idx ON incidents_processed (delivery_due_at) WHERE delivery_due_at IS NOT NULL;
+-- The CSM portal lists the incidents each alert mute rule muted.
+CREATE INDEX IF NOT EXISTS incidents_processed_mute_rule_idx ON incidents_processed (mute_rule_id, first_seen DESC) WHERE mute_rule_id <> '';
 
 -- Append-only log of every alert folded into an incident; alert_id makes a replayed alert a no-op.
 CREATE TABLE IF NOT EXISTS incident_notes (
