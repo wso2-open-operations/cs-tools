@@ -4084,7 +4084,9 @@ already use — no route path, request, or response shape changed.
   own `created_on`, through `CreateCaseCommentAsSystem` (no `case.comment_added`, no SLA
   response, no watcher, no `updated_on`). Skipped for an announcement (its description is
   shown already; the mirror drops ServiceNow's repeat too) and a blank description. Best
-  effort: a failure is logged and the create still succeeds. Cases created before this have
+  effort: the insert has its own 5s deadline (so the SLA clocks and `case.created` after it
+  keep their time), and a failure is logged by SQLSTATE or class only (`dbFailureReason`: a
+  pgx connection error names the host, user and database) while the create still succeeds. Cases created before this have
   no such comment; nothing backfills them.
   - **Never backwards** (`updated_on <= NOW()`): `NOW()` is the transaction's
     start, so a comment that waited on the row lock behind a later-stamped write
