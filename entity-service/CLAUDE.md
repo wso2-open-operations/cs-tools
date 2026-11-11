@@ -2637,6 +2637,22 @@ call — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine", and
 the case's own team space, mirroring how an Evaluation Subscription case
 already routes to Evaluation alone).
 
+**`GetClockState`'s `TeamEmail`/`TeamLeadName` themselves also switch to the
+Customer Onboarding team (`team.key = "customer_onboarding_team"`), not the
+case's real CRE team, whenever `ProjectOnboardingStatus` is `IN_PROGRESS`/
+`NOT_STARTED`** — by explicit request, so the breach EMAIL lands in the same
+team's inbox its breach CHAT card now posts to, rather than the case's own
+CRE team, which has nothing to do with running that onboarding. Matched by
+`team.key` (UNIQUE), not `team.name` (`team.name` carries no uniqueness
+constraint) — same reasoning `evaluationSubscriptionProjectTypeName`'s own
+doc comment gives for matching `project_type` by name instead of id.
+`slaClockStateOnboardingStatuses` (`sla_status_repo.go`) mirrors
+`csm-notification-service`'s own `chataudience.onboardingStatuses` by hand —
+keep the two in sync, or the Chat card and the email end up disagreeing on
+whether a given case counts as "onboarding." Every other field this method
+resolves (`AssigneeName`/`AssigneeEmail`, and the clock state itself) is
+unaffected by onboarding status.
+
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
 of the same name/reasoning) — `AccessService.ResolveScope`'s scope must be

@@ -154,6 +154,26 @@ const activeSLAStatusFromJoins = `
 // the stable, portable key here.
 const evaluationSubscriptionProjectTypeName = "Evaluation Subscription"
 
+// onboardingTeamKey is team.key's exact value for the Customer Onboarding
+// team -- matched by key (UNIQUE), not name (team.name carries no such
+// constraint), for the same "stable, portable, can't silently match the
+// wrong row" reasoning evaluationSubscriptionProjectTypeName's own doc
+// comment gives for matching project_type by name instead of id.
+//
+// slaClockStateOnboardingStatuses mirrors csm-notification-service's own
+// chataudience.onboardingStatuses (internal/chataudience/resolve.go) --
+// the same project.onboarding_status raw values that route an SLA breach
+// alert to the Onboarding Chat audience also redirect GetClockState's own
+// TeamEmail/TeamLeadName to the Customer Onboarding team instead of the
+// case's real CRE team, so the breach email lands in the same team's inbox
+// the Chat card now posts to. Kept in sync by hand across the two repos,
+// like internal/events/internal/eventbus already are -- changing one
+// without the other silently desyncs which team gets notified from which
+// channel.
+const onboardingTeamKey = "customer_onboarding_team"
+
+var slaClockStateOnboardingStatuses = []string{"IN_PROGRESS", "NOT_STARTED"}
+
 // stringOrEmpty returns "" for a nil column value rather than propagating a
 // nil *string into a domain type's plain string fields. Shared across this
 // package's repositories (was previously defined alongside the now-removed
@@ -501,6 +521,16 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // route through chataudience.Resolve with the case's real team/onboarding/
 // evaluation facts instead of the hardcoded false/"" it used before this.
 //
+// TeamEmail/TeamLeadName themselves come from the Customer Onboarding team
+// (onboardingTeamKey), not the case's real CRE team (cre_team), whenever
+// p.onboarding_status is one of slaClockStateOnboardingStatuses -- by
+// explicit request: an onboarding-stage case's breach EMAIL should land in
+// the same team's inbox its breach CHAT card now posts to (see
+// chataudience.Resolve's own equivalent routing), not the case's own CRE
+// team, which may have nothing to do with onboarding. Every other field
+// (AssigneeName/AssigneeEmail, and the Stage/HasBreached/etc. clock state
+// itself) is completely unaffected by onboarding status.
+//
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
 // live_elapsed_percentage for every row: that view has no business-day
@@ -515,7 +545,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // correct for those (a PAUSED/terminal row's figure was already frozen
 // correctly, business-day-aware, at the moment it was written).
 func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
-	args := []any{workItemID, target, evaluationSubscriptionProjectTypeName}
+	args := []any{workItemID, target, evaluationSubscriptionProjectTypeName, onboardingTeamKey, slaClockStateOnboardingStatuses}
 
 	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
 	// on this): the per-policy registration guard lets two policies
@@ -540,7 +570,11 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
-		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE cre_team.group_email END,
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[])
+		            THEN COALESCE(onboarding_teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', onboarding_teamlead.first_name, onboarding_teamlead.last_name)), ''))
+		            ELSE COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), ''))
+		       END,
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
 		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE)
 		FROM sla_live s
@@ -559,6 +593,15 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		LEFT JOIN project p ON p.id = wi.project_id
 		LEFT JOIN project_type pt ON pt.id = p.project_type_id
+		LEFT JOIN team onboarding_team ON onboarding_team.key = $4
+		LEFT JOIN LATERAL (
+			SELECT tm.user_id
+			FROM team_member tm
+			WHERE tm.team_id = onboarding_team.id AND tm.role = 'lead'
+			ORDER BY tm.created_on, tm.user_id
+			LIMIT 1
+		) onboarding_lead_tm ON TRUE
+		LEFT JOIN "user" onboarding_teamlead ON onboarding_teamlead.id = onboarding_lead_tm.user_id
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
