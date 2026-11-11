@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CURRENT_TEAM_PLACEHOLDER,
+  NO_TEAM_ID,
   hasTeamPlaceholder,
   resolveTeamPlaceholder,
 } from "./teamFilterPlaceholder";
@@ -478,11 +479,21 @@ describe("resolveTeamPlaceholder", () => {
       expect(resolveTeamPlaceholder(filters, [rigel, sirius], undefined)).toEqual({ teamIds: [sirius, rigel] });
     });
 
-    it("is dropped with no team, or a family with no groups", () => {
+    it("matches no team with no team selected, or a family with no groups", () => {
       const filters = { teamIds: [CURRENT_TEAM_PLACEHOLDER], startDate: "2026-11-01" };
+      const empty = { teamIds: [NO_TEAM_ID], startDate: "2026-11-01" };
 
-      expect(resolveTeamPlaceholder(filters, undefined, undefined)).toEqual({ startDate: "2026-11-01" });
-      expect(resolveTeamPlaceholder(filters, [], [])).toEqual({ startDate: "2026-11-01" });
+      expect(resolveTeamPlaceholder(filters, undefined, undefined)).toEqual(empty);
+      expect(resolveTeamPlaceholder(filters, [], [])).toEqual(empty);
+    });
+
+    it("matches no team with no team selected on a team-grouped widget, instead of sending no teamIds", () => {
+      // A groupBy "team" widget's query is its base filters: with teamIds
+      // dropped, entity-service would answer 400 (groupBy team requires
+      // filters.teamIds); with NO_TEAM_ID it returns no teams.
+      const filters = { teamIds: [CURRENT_TEAM_PLACEHOLDER] };
+
+      expect(resolveTeamPlaceholder(filters, undefined, undefined)).toEqual({ teamIds: [NO_TEAM_ID] });
     });
 
     it("becomes an SRE team's SRE group id on an SRE dashboard (an SRE team has no CRE group)", () => {

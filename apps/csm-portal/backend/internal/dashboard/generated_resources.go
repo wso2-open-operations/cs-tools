@@ -238,10 +238,15 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 			}
 		}
 		// Time cards by team: one group per team the widget names, so the
-		// widget's own query must name them.
+		// widget's own query must name them. A bar, never a pie: someone on
+		// two of the teams counts in both, so the slices would not add up to
+		// the cards and a pie would misstate the whole.
 		if w.GroupBy.Field == "team" {
 			if _, has := w.Query["teamIds"]; !has {
 				return fmt.Errorf("%w: %s.groupBy: grouping by team needs query.teamIds (the teams to show)", ErrGeneratedInvalid, at)
+			}
+			if w.Shape == ShapePie {
+				return fmt.Errorf("%w: %s: a widget grouped by team must be a bar, not a pie (someone on two of the teams counts in both)", ErrGeneratedInvalid, at)
 			}
 		}
 	}

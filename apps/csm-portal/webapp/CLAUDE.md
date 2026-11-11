@@ -898,8 +898,9 @@ everything past the cap rolls into a response `othersCount`).
   it is; its `__current_team__` is resolved by `resolveTeamPlaceholder`
   (`resolveTimeCardTeamIdsPlaceholder`) from `selectedTeamCreGroupId`, or `selectedTeamSreGroupId` when
   that is empty (an SRE dashboard). Unlike the other team filters, "All ABTs" expands it to every team of the
-  family (a `team` grouping then shows one bar per ABT) instead of dropping it; with no team at all it is
-  dropped (every engineer's cards). The route is CS engineer and admin
+  family (a `team` grouping then shows one bar per ABT) instead of dropping it; with no team at all it becomes
+  `NO_TEAM_ID` (a nil UUID no team has), so the tile is empty rather than showing every engineer's
+  cards as the team's (and a `team` grouping gets no bars rather than a 400). The route is CS engineer and admin
   only (`PermViewTimeCardTotals`), so for any other role (time card approver and viewer included) the
   backend answers 403, `useWidgetGroupByData` reports it as `isForbidden`, and the tile says "You don't
   have access to time card totals." in place of the chart, not the error. Any other failure is still

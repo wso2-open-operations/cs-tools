@@ -27658,6 +27658,7 @@ components:
           description: Return only time cards submitted by any of these users.
         teamIds:
           type: array
+          maxItems: 100
           items:
             type: string
             format: uuid
@@ -27666,8 +27667,8 @@ components:
             Team Schedule's team ids: a CRE team's CRE group id, an SRE team's
             SRE group id; a person counts
             once however many of the teams list them). Membership is the
-            current roster, whenever the card was logged. Not supported when
-            DATA_SOURCE=servicenow (400).
+            current roster, whenever the card was logged. Not supported on
+            the legacy data source (400).
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -27723,7 +27724,8 @@ components:
           default: 10
           description: >-
             How many buckets to return; the rest are folded into othersCount
-            and othersMinutes. Ignored for "day".
+            and othersMinutes. Ignored for "day". For "team" the default is
+            every team in filters.teamIds.
 
     SearchTimeCardsRequest:
       type: object

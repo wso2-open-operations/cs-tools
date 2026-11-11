@@ -146,9 +146,18 @@ func validateTimeCardDate(field, value string) error {
 	return nil
 }
 
+// maxTimeCardTeamIDs is the most teams one time card filter may name: each is
+// one more uuid in the query's team list, so the list is bounded for any
+// caller, not only the AI dashboard generator (which allows 20). "All ABTs"
+// on a dashboard sends every team of the family, well under this.
+const maxTimeCardTeamIDs = 100
+
 func validateTimeCardFilters(f *domain.SearchTimeCardsFilters) error {
 	if f == nil {
 		return nil
+	}
+	if len(f.TeamIDs) > maxTimeCardTeamIDs {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("teamIds must not contain more than %d values", maxTimeCardTeamIDs)}
 	}
 	for _, st := range f.States {
 		if !validTimeCardState[st] {
@@ -215,7 +224,9 @@ func validateTimeCardMinutes(values ...int) error {
 }
 
 // defaultTimeCardMaxGroups is AggregateTimeCards' bucket cap when the request
-// sets none, the same default as the change request aggregate.
+// sets none, the same default as the change request aggregate. A "team"
+// grouping has none by default: the caller has named the teams (at most
+// maxTimeCardTeamIDs), and each gets its bucket, a team with no cards at 0.
 const defaultTimeCardMaxGroups = 10
 
 // validTimeCardGroupBy and validTimeCardMeasure are AggregateTimeCardsRequest's
@@ -285,7 +296,9 @@ func (s *timeCardService) AggregateTimeCards(ctx context.Context, req domain.Agg
 		return domain.AggregateResponse{}, err
 	}
 	maxGroups := req.MaxGroups
-	if maxGroups == 0 {
+	if maxGroups == 0 && req.GroupBy == domain.TimeCardGroupByTeam {
+		maxGroups = len(req.Filters.TeamIDs)
+	} else if maxGroups == 0 {
 		maxGroups = defaultTimeCardMaxGroups
 	}
 	return s.repo.AggregateTimeCards(ctx, req, maxGroups)

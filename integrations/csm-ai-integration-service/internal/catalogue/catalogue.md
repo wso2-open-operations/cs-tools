@@ -547,7 +547,8 @@ Never set both `slices` and `groupBy`.
 | time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
 | a team's time cards or hours ("Rigel's", "team Rigel", "Rigel and Sirius") | `teamIds` with the teams' keys (section 5a), on a `"cs"` dashboard; the team names start `displayName`. "Rigel's hours per member": that plus `groupBy` `user` |
 | "my team's" time cards or hours | a `"cre"` dashboard with `teamIds ["__current_team__"]` |
-| time cards or hours "by ABT", "per ABT", "per team", "for each ABT" | one `bar` with `groupBy` `team` and `teamIds` the keys of **every** CRE ABT team (or only the teams named; "by SRE ABT": every SRE ABT team), on a `"cs"` dashboard; never one slice or widget per team |
+| time cards or hours "by ABT", "per ABT", "per team", "for each ABT" (the only grouping) | one `bar` with `groupBy` `team` and `teamIds` the keys of **every** CRE ABT team (or only the teams named; "by SRE ABT": every SRE ABT team), on a `"cs"` dashboard; never one slice or widget per team |
+| time cards or hours by state, user, project or day **together with** "by ABT", e.g. "hours by state, separated by ABT" | **one widget per CRE ABT team** (or only the teams named; "by SRE ABT": every SRE ABT team), on a `"cs"` dashboard: each widget's flat `query` carries `teamIds ["<key>"]` (never `creTeam`), its `groupBy` is the other grouping (as in the rows above), its `displayName` starts with the team name (e.g. "Rigel: Hours by State"); `gridWidth` 4 |
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
 | time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
 | "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
@@ -586,7 +587,7 @@ Never set both `slices` and `groupBy`.
 | a named team with "ABT": "Rigel ABT", "the Sirius ABT" | same as the team by name |
 | "all ABTs", "every ABT" (no grouping) | one `creTeam in [...]` with the keys of **every** CRE ABT team |
 | "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section (time cards: `groupBy` `team`, above) |
-| "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some |
+| "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some. Time cards: the time card row for this above (`teamIds`, not `creTeam`) |
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
 | "last calendar month", "previous month" | `createdOn gte __startOfMonth:-1__` and `createdOn lte __endOfMonth:-1__` |
@@ -621,8 +622,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
    `teamIds` (team keys, CRE or SRE, or `["__current_team__"]` on a `"cre"` dashboard), `startDate`, `endDate`;
    shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with flat-query `slices` or
    `groupBy` (`user`, `project`, `day`, `state`, `team`; `measure` `hours` or `count`); a `team` grouping
-   has `teamIds` in the widget's own `query`; a `day` grouping has both dates from section 5a's window
-   table (31 days at most); never `line`, a `filters` array or a `creTeam` / `sreTeam` filter. `measure`
+   has `teamIds` in the widget's own `query` and is a `bar`, never a `pie`; a `day` grouping has both
+   dates from section 5a's window table (31 days at most); never `line`, a `filters` array or a `creTeam` / `sreTeam` filter. `measure`
    appears on no other resourceType.
 10. An `incident` / `change_request` / `problem` widget: only the keys, fields, ops and **exact-case
     values** of section 5b; change request state in the flat `states`, never in `filters`; `groupBy` by

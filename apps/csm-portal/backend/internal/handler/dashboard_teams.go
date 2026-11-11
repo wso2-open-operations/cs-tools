@@ -62,6 +62,10 @@ type dashboardTeams struct {
 	list      []dashboardTeam
 	byName    map[string]dashboardTeam // lower-cased key and name
 	byGroupID map[string]dashboardTeam // lower-cased group id
+	// ambiguous is every lower-cased key or name more than one team answers
+	// to (two teams of one name, or one team's name another's key), with
+	// those teams' keys: such a value is refused, never resolved to either.
+	ambiguous map[string][]string
 }
 
 // newDashboardTeams builds the lookup from the team registry. CRE families
@@ -69,7 +73,7 @@ type dashboardTeams struct {
 // (sre-abt, sre) on sreTeam with the SRE group id; a team of any other family
 // (or none) has no case-search team field and is left out.
 func newDashboardTeams(results []directory.TeamResult) dashboardTeams {
-	t := dashboardTeams{byName: map[string]dashboardTeam{}, byGroupID: map[string]dashboardTeam{}}
+	t := dashboardTeams{byName: map[string]dashboardTeam{}, byGroupID: map[string]dashboardTeam{}, ambiguous: map[string][]string{}}
 	for _, r := range results {
 		team := dashboardTeam{Key: r.ID, Name: r.Name, Family: r.Family}
 		switch directory.Family(r.Family) {
@@ -81,14 +85,43 @@ func newDashboardTeams(results []directory.TeamResult) dashboardTeams {
 			continue
 		}
 		t.list = append(t.list, team)
-		t.byName[strings.ToLower(team.Key)] = team
-		t.byName[strings.ToLower(team.Name)] = team
+		t.addName(team.Key, team)
+		t.addName(team.Name, team)
 		if team.GroupID != "" {
 			t.byGroupID[team.GroupID] = team
 		}
 	}
 	sort.Slice(t.list, func(i, j int) bool { return t.list[i].Name < t.list[j].Name })
 	return t
+}
+
+// addName records that name (a key or name) means team. A name another team
+// already answers to becomes ambiguous for both.
+func (t dashboardTeams) addName(name string, team dashboardTeam) {
+	n := strings.ToLower(name)
+	if keys, ok := t.ambiguous[n]; ok {
+		t.ambiguous[n] = append(keys, team.Key)
+		return
+	}
+	prev, ok := t.byName[n]
+	if !ok || prev.Key == team.Key {
+		t.byName[n] = team
+		return
+	}
+	delete(t.byName, n)
+	t.ambiguous[n] = []string{prev.Key, team.Key}
+}
+
+// named is the team a key or name (any case) means. ok is false for a value
+// no team answers to; a value more than one team answers to is an
+// errDashboardTeam listing them, rather than a guess.
+func (t dashboardTeams) named(value, where string) (team dashboardTeam, ok bool, err error) {
+	n := strings.ToLower(strings.TrimSpace(value))
+	if keys, amb := t.ambiguous[n]; amb {
+		return dashboardTeam{}, false, fmt.Errorf("%w: %s: %q could be any of the teams %s; name one of them by its key", errDashboardTeam, where, value, strings.Join(keys, ", "))
+	}
+	team, ok = t.byName[n]
+	return team, ok, nil
 }
 
 // knownTeams is the readable list of team keys, for an error message.
@@ -123,7 +156,9 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 			continue
 		}
 		where := fmt.Sprintf("widgets[%d]", i)
-		c, err := t.resolveQuery(widget["query"], where)
+		resourceType, _ := widget["resourceType"].(string)
+		timeCard := resourceType == string(dashboard.ResourceTimeCard)
+		c, err := t.resolveQuery(widget["query"], where, timeCard)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +169,7 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 			if !ok {
 				continue
 			}
-			c, err := t.resolveQuery(slice["query"], fmt.Sprintf("%s.slices[%d]", where, j))
+			c, err := t.resolveQuery(slice["query"], fmt.Sprintf("%s.slices[%d]", where, j), timeCard)
 			if err != nil {
 				return nil, err
 			}
@@ -153,8 +188,10 @@ func (t dashboardTeams) resolve(definition []byte) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
-// resolveQuery handles one query object; changed reports whether a value was swapped.
-func (t dashboardTeams) resolveQuery(q any, where string) (changed bool, err error) {
+// resolveQuery handles one query object; changed reports whether a value was
+// swapped. timeCard is whether the widget is a time card widget: only its
+// teamIds is a list of teams.
+func (t dashboardTeams) resolveQuery(q any, where string, timeCard bool) (changed bool, err error) {
 	query, ok := q.(map[string]any)
 	if !ok {
 		return false, nil
@@ -163,7 +200,10 @@ func (t dashboardTeams) resolveQuery(q any, where string) (changed bool, err err
 		// An account query's abtTeam: the account search matches the team's
 		// name (CRE or SRE team), so a key or name becomes the registry name.
 		value, _ := v.(string)
-		team, known := t.byName[strings.ToLower(strings.TrimSpace(value))]
+		team, known, err := t.named(value, where)
+		if err != nil {
+			return false, err
+		}
 		if !known {
 			return false, fmt.Errorf("%w: %s: unknown team %q (known teams: %s)", errDashboardTeam, where, value, t.knownTeams())
 		}
@@ -172,7 +212,7 @@ func (t dashboardTeams) resolveQuery(q any, where string) (changed bool, err err
 			changed = true
 		}
 	}
-	if v, ok := query["teamIds"]; ok {
+	if v, ok := query["teamIds"]; ok && timeCard {
 		c, err := t.resolveTimeCardTeams(v, where)
 		if err != nil {
 			return false, err
@@ -213,7 +253,10 @@ func (t dashboardTeams) resolveTimeCardTeams(v any, where string) (bool, error) 
 		if name == currentTeamPlaceholder {
 			continue
 		}
-		team, ok := t.byName[strings.ToLower(strings.TrimSpace(name))]
+		team, ok, err := t.named(name, where)
+		if err != nil {
+			return false, err
+		}
 		if !ok {
 			team, ok = t.byGroupID[strings.ToLower(name)]
 		}
@@ -279,7 +322,10 @@ func (t dashboardTeams) resolveFilter(f any, where string) (bool, error) {
 // teamFor is the team a creTeam / sreTeam value names: a key or name (any
 // case), or a group id already resolved; checked against the field.
 func (t dashboardTeams) teamFor(value, field, where string) (dashboardTeam, error) {
-	team, ok := t.byName[strings.ToLower(strings.TrimSpace(value))]
+	team, ok, err := t.named(value, where)
+	if err != nil {
+		return dashboardTeam{}, err
+	}
 	if !ok {
 		team, ok = t.byGroupID[strings.ToLower(value)]
 	}
@@ -301,11 +347,12 @@ func (t dashboardTeams) resolveDashboard(d *dashboard.Dashboard) error {
 	for i := range d.Widgets {
 		w := &d.Widgets[i]
 		where := fmt.Sprintf("widgets[%d]", i)
-		if _, err := t.resolveQuery(w.Query, where); err != nil {
+		timeCard := w.ResourceType == dashboard.ResourceTimeCard
+		if _, err := t.resolveQuery(w.Query, where, timeCard); err != nil {
 			return err
 		}
 		for j := range w.Slices {
-			if _, err := t.resolveQuery(w.Slices[j].Query, fmt.Sprintf("%s.slices[%d]", where, j)); err != nil {
+			if _, err := t.resolveQuery(w.Slices[j].Query, fmt.Sprintf("%s.slices[%d]", where, j), timeCard); err != nil {
 				return err
 			}
 		}

@@ -385,3 +385,47 @@ func TestDashboardTeams_RefusesTimeCardTeamsItCannotFind(t *testing.T) {
 		}
 	}
 }
+
+// TestDashboardTeams_RefusesANameTwoTeamsAnswerTo: two teams of one name (a
+// CRE and an SRE "Rigel"), or one team's name another team's key, are
+// refused with the teams it could be, in every place a team is named,
+// rather than resolved to whichever the registry listed last. Each team's
+// own key still resolves.
+func TestDashboardTeams_RefusesANameTwoTeamsAnswerTo(t *testing.T) {
+	teams := newDashboardTeams([]directory.TeamResult{
+		{ID: "rigel", Name: "Rigel", Family: string(directory.FamilyCREAbt), CreGroupID: rigelGroup},
+		{ID: "rigel-sre", Name: "Rigel", Family: string(directory.FamilySREAbt), SreGroupID: apolloGroup},
+		{ID: "sirius", Name: "Vega", Family: string(directory.FamilyCREAbt), CreGroupID: siriusGroup},
+		{ID: "vega", Name: "Vega Team", Family: string(directory.FamilyCREAbt), CreGroupID: "6341878a-eb9b-ac6e-73a1-d104b2ab001f"},
+	})
+	for _, c := range []struct{ name, def, want string }{
+		{"a case team filter", string(teamDashboard(`{"filters":[{"field":"creTeam","op":"in","values":["RIGEL"]}]}`)), `"RIGEL" could be any of the teams rigel, rigel-sre`},
+		{"an account's abtTeam", string(teamDashboard(`{"abtTeam":"Rigel"}`)), `"Rigel" could be any of the teams rigel, rigel-sre`},
+		{"a time card teamIds", `{"widgets":[{"resourceType":"time_card","query":{"teamIds":["rigel"]}}]}`, `"rigel" could be any of the teams rigel, rigel-sre`},
+		{"a name that is another team's key", `{"widgets":[{"resourceType":"time_card","query":{"teamIds":["vega"]}}]}`, `"vega" could be any of the teams sirius, vega`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := teams.resolve([]byte(c.def))
+			if !errors.Is(err, errDashboardTeam) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want errDashboardTeam containing %q", err, c.want)
+			}
+		})
+	}
+
+	def, err := teams.resolve([]byte(`{"widgets":[{"resourceType":"time_card","query":{"teamIds":["rigel-sre","Vega Team"]}}]}`))
+	if err != nil || !strings.Contains(string(def), apolloGroup) || !strings.Contains(string(def), "6341878a-eb9b-ac6e-73a1-d104b2ab001f") {
+		t.Errorf("unambiguous keys and names: resolve = %s, %v; want their group ids", def, err)
+	}
+}
+
+// TestDashboardTeams_LeavesTeamIDsOfOtherResources: teamIds is a list of
+// teams only on a time card widget; on any other resourceType it is left as
+// it is (ParseGenerated decides whether that resource takes it).
+func TestDashboardTeams_LeavesTeamIDsOfOtherResources(t *testing.T) {
+	teams := testDashboardTeams(t)
+	in := `{"widgets":[{"resourceType":"case","query":{"teamIds":["not-a-team"]},"slices":[{"query":{"teamIds":["rigel"]}}]}]}`
+	def, err := teams.resolve([]byte(in))
+	if err != nil || string(def) != in {
+		t.Errorf("resolve = %s, %v; want the definition unchanged", def, err)
+	}
+}

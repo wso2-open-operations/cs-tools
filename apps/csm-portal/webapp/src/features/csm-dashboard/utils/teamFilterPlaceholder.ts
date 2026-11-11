@@ -66,6 +66,14 @@ export const ASSIGNMENT_GROUP_ID_FILTER_FIELD = "assignmentGroupId";
 export const TIME_CARD_TEAM_IDS_FIELD = "teamIds";
 
 /**
+ * The time card `teamIds` value for "my team" when there is no team to
+ * resolve it to: a valid UUID that is no team's id, so the search matches no
+ * cards and a team grouping returns no teams (see
+ * `resolveTimeCardTeamIdsPlaceholder`).
+ */
+export const NO_TEAM_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
  * Substitutes {@link CURRENT_TEAM_PLACEHOLDER} wherever it appears in a
  * `creTeam` or `sreTeam` filter entry's `values` (in the same
  * `{ filters: BeCaseFieldFilter[] }` DSL shape `mergeWidgetFilters` and
@@ -147,7 +155,8 @@ export const TIME_CARD_TEAM_IDS_FIELD = "teamIds";
  * A time card widget's flat `teamIds` is resolved the same way, from the
  * selected team's CRE group id or, for an SRE team (which has none), its SRE
  * group id, except that "All ABTs" expands to every team of the family
- * instead of dropping it (see `resolveTimeCardTeamIdsPlaceholder`).
+ * instead of dropping it, and no team matches no cards instead of every
+ * engineer's (see `resolveTimeCardTeamIdsPlaceholder`).
  */
 export function resolveTeamPlaceholder(
   filters: Record<string, unknown>,
@@ -257,8 +266,11 @@ function resolveAssignmentTeamIdsPlaceholder(
  * (arrays) does not drop it: the placeholder becomes every team of the
  * family, so a widget grouped by team shows one bar per ABT and a total over
  * the ABTs counts only their members' cards. With no team (a dashboard that
- * is not team-based, or no group configured) the key is dropped, as for the
- * other filters: every engineer's cards.
+ * is not team-based, no team selected, or no group configured) it becomes
+ * {@link NO_TEAM_ID}, which no team has, so the widget shows nothing: unlike
+ * the other filters it is not dropped, since dropping it would show every
+ * engineer's cards as the team's (and a team grouping with no teamIds is a
+ * 400).
  */
 function resolveTimeCardTeamIdsPlaceholder(
   filters: Record<string, unknown>,
@@ -277,8 +289,7 @@ function resolveTimeCardTeamIdsPlaceholder(
     ...new Set(teamIds.flatMap((v) => (v === CURRENT_TEAM_PLACEHOLDER ? replacement : [v]))),
   ];
   if (resolved.length === 0) {
-    const { [TIME_CARD_TEAM_IDS_FIELD]: _dropped, ...rest } = filters;
-    return rest;
+    return { ...filters, [TIME_CARD_TEAM_IDS_FIELD]: [NO_TEAM_ID] };
   }
   return { ...filters, [TIME_CARD_TEAM_IDS_FIELD]: resolved };
 }
