@@ -13,6 +13,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
+  createFormAttachmentsFull,
+} from "@config/attachmentLimitsConfig";
 import { Autocomplete, Box, Button, Chip, TextField, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -487,7 +491,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
     [],
   );
 
-  const handleAttachmentClick = () => setIsAttachmentModalOpen(true);
+  const handleAttachmentClick = () => {
+    // A create form takes one attachment: say so instead of opening a picker
+    // whose file would be refused.
+    if (createFormAttachmentsFull(attachments.length)) {
+      showError(CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE);
+      return;
+    }
+    setIsAttachmentModalOpen(true);
+  };
 
   const handleSelectAttachment = (file: File, attachmentName?: string) => {
     setAttachments((prev) => {
@@ -498,6 +510,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
         )
       )
         return prev;
+      if (createFormAttachmentsFull(prev.length)) return prev;
       const id = `att-${++attachmentIdCounterRef.current}-${Date.now()}`;
       if (attachmentName?.trim())
         attachmentNamesRef.current.set(id, attachmentName.trim());

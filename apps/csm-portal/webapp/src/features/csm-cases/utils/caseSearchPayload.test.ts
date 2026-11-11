@@ -19,7 +19,12 @@ import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar
 import { DEFAULT_CASES_FILTERS } from "@features/csm-cases/utils/casesFiltersUrl";
 import type { AdvancedFilterRow } from "@features/csm-cases/utils/advancedFilters";
 import type { BeCaseSearchView } from "@api/backend/types";
-import { buildCaseSearchFilters, mapCaseSearchViewToRow } from "./caseSearchPayload";
+import { resolveRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
+import {
+  buildCaseSearchFilters,
+  mapCaseSearchViewToRow,
+  resolveCaseFilterDates,
+} from "./caseSearchPayload";
 
 function filterOf(filters: CasesFilters, field: string) {
   return (buildCaseSearchFilters(filters, "", undefined).filters ?? []).filter(
@@ -541,5 +546,50 @@ describe("buildCaseSearchFilters — salesRegion", () => {
 
   it("omits the filter when no region is selected", () => {
     expect(filterOf(DEFAULT_CASES_FILTERS, "salesRegion")).toEqual([]);
+  });
+});
+
+describe("resolveCaseFilterDates", () => {
+  const now = new Date(2026, 9, 13, 10, 0, 0);
+
+  it("resolves every relative date bound against the given local now", () => {
+    const out = resolveCaseFilterDates(
+      {
+        ...DEFAULT_CASES_FILTERS,
+        createdOnGte: "__daysAgo:30__",
+        createdOnLte: "__today__",
+        updatedOnGte: "__startOfMonth:0__",
+        updatedOnLte: "__endOfMonth:0__",
+        closedOnGte: "__startOfQuarter:-1__",
+        closedOnLte: "__endOfQuarter:-1__",
+      },
+      now,
+    );
+    expect(out.createdOnGte).toBe(resolveRelativeDatePlaceholder("__daysAgo:30__", "gte", now));
+    expect(out.createdOnLte).toBe(resolveRelativeDatePlaceholder("__today__", "lte", now));
+    expect(out.updatedOnGte).toBe(resolveRelativeDatePlaceholder("__startOfMonth:0__", "gte", now));
+    expect(out.updatedOnLte).toBe(resolveRelativeDatePlaceholder("__endOfMonth:0__", "lte", now));
+    expect(out.closedOnGte).toBe(resolveRelativeDatePlaceholder("__startOfQuarter:-1__", "gte", now));
+    expect(out.closedOnLte).toBe(resolveRelativeDatePlaceholder("__endOfQuarter:-1__", "lte", now));
+    // Local midnight 30 days back, not UTC midnight.
+    expect(new Date(out.createdOnGte!).getTime()).toBe(new Date(2026, 8, 13).getTime());
+  });
+
+  it("leaves literal dates and unset bounds alone", () => {
+    const out = resolveCaseFilterDates(
+      { ...DEFAULT_CASES_FILTERS, createdOnGte: "2026-01-01" },
+      now,
+    );
+    expect(out.createdOnGte).toBe("2026-01-01");
+    expect(out.createdOnLte).toBeNull();
+    expect(out.closedOnGte).toBeNull();
+  });
+
+  it("resolves a relative date on an Advanced filters row too", () => {
+    const rows: AdvancedFilterRow[] = [{ field: "createdOn", op: "gte", values: ["__today__"] }];
+    const out = resolveCaseFilterDates({ ...DEFAULT_CASES_FILTERS, advancedFilters: rows }, now);
+    expect(out.advancedFilters[0].values[0]).toBe(
+      resolveRelativeDatePlaceholder("__today__", "gte", now),
+    );
   });
 });

@@ -66,13 +66,16 @@ func serveWithRoles(g *AccessGuard, perm Permission, roles []string) (status int
 	return w.Code, reached
 }
 
+// TestAccessGuard_PermissionMatrix: each role, or set of roles, is let through
+// to exactly the route permissions listed for it and refused (403) every
+// other.
 func TestAccessGuard_PermissionMatrix(t *testing.T) {
 	// csEngineerPerms is every route permission cs_engineer holds, escalation
 	// included (any internal engineer may escalate, as in ServiceNow).
 	// PermAdmin and PermApproveTimeCard are deliberately excluded and tested
 	// separately below -- approving a time card is a dedicated responsibility
 	// cs_engineer does not share, the same way PermAdmin isn't.
-	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg, PermViewCustomerHealth}
+	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg, PermViewCustomerHealth, PermViewTimeCardTotals}
 	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermManagePlaybooks, PermCreateAnnouncement)
 	tests := []struct {
 		name  string
@@ -594,15 +597,38 @@ func TestAccessGuard_SecurityReportCasesAlsoAllowsViewer(t *testing.T) {
 	}
 }
 
+// TestAccessGuard_UnconfiguredRolesAreHeldByNobody: with no roles configured,
+// every permission is refused whatever role names the caller has, and RolesFor
+// names none.
 func TestAccessGuard_UnconfiguredRolesAreHeldByNobody(t *testing.T) {
 	g := NewAccessGuard(AccessConfig{})
-	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermManageProductCatalog} {
+	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermManageProductCatalog, PermViewTimeCardTotals} {
 		if status, _ := serveWithRoles(g, perm, []string{"test-admin", "test-viewer", ""}); status != http.StatusForbidden {
 			t.Errorf("permission %d with no roles configured: status = %d, want 403", perm, status)
 		}
 	}
 	if got := g.RolesFor([]string{"test-admin", ""}); len(got) != 0 {
 		t.Errorf("RolesFor = %v, want none when no roles are configured", got)
+	}
+}
+
+// TestAccessGuard_TimeCardTotalsAreForCsEngineersAndAdmins: the time card
+// aggregate is narrower than the other time card routes; a time card approver
+// (who does hold PermTimeCardsAndUpdates) does not get it.
+func TestAccessGuard_TimeCardTotalsAreForCsEngineersAndAdmins(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	for _, role := range []string{"test-cs-engineer", "test-admin"} {
+		if status, _ := serveWithRoles(g, PermViewTimeCardTotals, []string{role}); status != http.StatusNoContent {
+			t.Errorf("%s: status = %d, want 204", role, status)
+		}
+	}
+	for _, role := range []string{
+		"test-timecard-approver", "test-viewer", "test-escalator", "test-attachment-downloader",
+		"test-usage-metrics-viewer", "test-dashboard-designer", "test-security-team", "test-sales-solutions",
+	} {
+		if status, _ := serveWithRoles(g, PermViewTimeCardTotals, []string{role}); status != http.StatusForbidden {
+			t.Errorf("%s: status = %d, want 403", role, status)
+		}
 	}
 }
 

@@ -69,6 +69,7 @@ function LocationProbe(): JSX.Element {
     <div data-testid="location-probe">
       {location.pathname}
       {location.search}
+      <span data-testid="location-state">{JSON.stringify(location.state ?? null)}</span>
     </div>
   );
 }
@@ -312,6 +313,24 @@ describe("useQueryParamTabs", () => {
     const probe = screen.getByTestId("location-probe").textContent ?? "";
     expect(probe).toContain("tab=two");
     expect(probe).not.toContain("subTab");
+  });
+
+  it("keeps the location state when switching tabs, so the page's Back still knows where it came from", () => {
+    const state = { from: "/cases?status=open", parentState: { from: "/dashboard/system/7" } };
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/detail/1", state }]}>
+        <LocationProbe />
+        <QueryParamTabsProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByText("Go to two"));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("tab=two");
+    expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "null")).toEqual(state);
+
+    fireEvent.click(screen.getByText("Go to three (push)"));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("tab=three");
+    expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "null")).toEqual(state);
   });
 
   it("replaces the history entry by default rather than pushing a new one", () => {

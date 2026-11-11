@@ -22,6 +22,8 @@ import {
   allocationLabel,
   allocationTitle,
   allocationsByPersonAndDay,
+  dismissedByPersonAndDay,
+  engagementUndoIsExact,
   chunk,
   distinctUserIds,
   humaniseEnum,
@@ -172,5 +174,41 @@ describe("allocationsByPersonAndDay", () => {
     const a = alloc();
     const out = allocationsByPersonAndDay([a, { ...a }], days);
     expect(out.get(U1)!.get("2026-09-21")).toHaveLength(1);
+  });
+});
+
+describe("days taken off the roster", () => {
+  const days = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"];
+
+  it("leaves a removed day out of the drawn chips", () => {
+    const out = allocationsByPersonAndDay(
+      [alloc({ startDate: "2026-09-21", endDate: "2026-09-24", dismissedDates: ["2026-09-22"] })],
+      days,
+    );
+    expect([...out.get(U1)!.keys()]).toEqual(["2026-09-21", "2026-09-23", "2026-09-24"]);
+  });
+
+  it("lists the removed days on the grid for the picker's Restore", () => {
+    const out = dismissedByPersonAndDay(
+      [alloc({ startDate: "2026-09-21", endDate: "2026-09-30", dismissedDates: ["2026-09-22", "2026-09-29"] })],
+      days,
+    );
+    expect([...out.get(U1)!.keys()]).toEqual(["2026-09-22"]);
+    expect(dismissedByPersonAndDay([alloc()], days).size).toBe(0);
+  });
+});
+
+describe("engagementUndoIsExact", () => {
+  it("offers the undo for one day that changed", () => {
+    expect(engagementUndoIsExact("2026-11-04", "2026-11-04", 1)).toBe(true);
+  });
+
+  it("offers none for a day that was already in that state", () => {
+    expect(engagementUndoIsExact("2026-11-04", "2026-11-04", 0)).toBe(false);
+  });
+
+  it("offers none over a range, which may hold days already in that state", () => {
+    expect(engagementUndoIsExact("2026-11-02", "2026-11-06", 4)).toBe(false);
+    expect(engagementUndoIsExact("2026-11-02", "2026-11-06", 5)).toBe(false);
   });
 });

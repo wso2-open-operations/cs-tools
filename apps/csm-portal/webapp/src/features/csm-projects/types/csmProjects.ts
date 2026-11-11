@@ -71,9 +71,13 @@ export interface Project {
   invoiceDueDateClosureState: string | null;
   complianceViolationClosureState: string | null;
   complianceViolationDate: string | null;
-  /** Opaque JSON describing in-flight suspension processing; not rendered
-   *  today. */
+  /** Opaque JSON describing in-flight suspension processing; rendered
+   *  defensively by the Closure tab (see `closureProcessState.ts`). */
   suspensionProcessState: unknown;
+  /** True when an admin has excluded the project from the automatic closure
+   *  process. Always present on a current backend; optional here so an older
+   *  one (field absent) reads as "not set" rather than crashing. */
+  suspensionProcessOverridden?: boolean;
   /** Onboarding engagement status. `null`/absent when the project has no
    *  onboarding engagement at all. Treat the project as onboarding-enabled —
    *  and only then show {@link onboardingOwner} — when this is present and
@@ -120,6 +124,16 @@ export interface ProjectDetails {
   updatedOn: string;
   /** Free-form closure-state string; see {@link Project.closureState}. */
   closureState: string | null;
+  /** Per-track closure sub-states, mirroring {@link Project}. Only populated
+   *  for projects from the backing data source; absent or `null` otherwise. */
+  endDateClosureState?: string | null;
+  invoiceDueDateClosureState?: string | null;
+  complianceViolationClosureState?: string | null;
+  complianceViolationDate?: string | null;
+  /** Opaque JSON; see {@link Project.suspensionProcessState}. */
+  suspensionProcessState?: unknown;
+  /** See {@link Project.suspensionProcessOverridden}. */
+  suspensionProcessOverridden?: boolean;
   /** Whether this project is eligible to raise service requests, as
    *  precomputed by the backing data source. */
   hasSr?: boolean;

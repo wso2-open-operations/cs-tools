@@ -13,6 +13,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { isAbortError } from "@api/storedAttachments";
 import type { StoredUploadVariables } from "@api/useStoredAttachments";
 
 export const ATTACHMENT_UPLOAD_WAIT_MS = 5_000;
@@ -54,6 +55,8 @@ export async function uploadServiceRequestAttachments({
         body: { name: attachmentName },
       });
     } catch (error) {
+      // Stopped by the person: that is not a failure to report.
+      if (isAbortError(error)) continue;
       logger?.error(`Failed to upload attachment ${attachmentName}`, error);
       failed.push(attachmentName);
     }

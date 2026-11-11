@@ -138,6 +138,7 @@ export const ApiQueryKeys = {
   CSM_CUSTOM_DASHBOARD_DETAIL: "csm-custom-dashboard-detail",
   CSM_CUSTOM_DASHBOARD_SHARES: "csm-custom-dashboard-shares",
   CSM_CUSTOM_DASHBOARD_TEAM_SHARES: "csm-custom-dashboard-team-shares",
+  CSM_CUSTOM_DASHBOARD_LINK: "csm-custom-dashboard-link",
   CSM_SHARED_DASHBOARD_LIST: "csm-shared-dashboard-list",
   CSM_SHARED_DASHBOARD_DETAIL: "csm-shared-dashboard-detail",
   CSM_TEAMS: "csm-teams",

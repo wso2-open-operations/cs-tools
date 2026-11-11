@@ -20,6 +20,7 @@ import ListPagination from "@components/list-view/ListPagination";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useMutationState } from "@tanstack/react-query";
+import { cancelCaseUpload, useCaseUploads } from "@api/caseUploadProgress";
 import {
   useGetCaseAttachments,
   flattenCaseAttachments,
@@ -39,6 +40,7 @@ import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
 import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSkeleton";
 import UploadingAttachmentPlaceholder from "@case-details-attachments/UploadingAttachmentPlaceholder";
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
+import { downloadSizeOf } from "@features/support/utils/support";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import ApiErrorState from "@components/error/ApiErrorState";
 
@@ -100,6 +102,8 @@ export default function CaseDetailsAttachmentsPanel({
     (vars): vars is StoredUploadVariables => vars?.caseId === caseId,
   );
 
+  const runningUploads = useCaseUploads(caseId);
+
   const allAttachments = useMemo(() => flattenCaseAttachments(data), [data]);
 
   const totalRecords = data?.pages?.[0]?.totalRecords ?? 0;
@@ -152,7 +156,7 @@ export default function CaseDetailsAttachmentsPanel({
         type: "work_item",
         id: att.id,
         name: att.name,
-        size: att.size,
+        size: downloadSizeOf(att.size ?? att.sizeBytes),
         onSaved: (outcome) =>
           showSuccess(
             outcome === "saved"
@@ -246,12 +250,23 @@ export default function CaseDetailsAttachmentsPanel({
           </Stack>
         ) : (
           <Stack spacing={2}>
-            {pendingUploads.map((vars, index) => (
-              <UploadingAttachmentPlaceholder
-                key={`pending-upload-${index}`}
-                name={vars.body.name}
-              />
-            ))}
+            {pendingUploads.map((vars, index) => {
+              // Same-named files: the n-th placeholder of a name takes the n-th running upload of it.
+              const sameNameBefore = pendingUploads
+                .slice(0, index)
+                .filter((p) => p.body.name === vars.body.name).length;
+              const running = runningUploads.filter((u) => u.name === vars.body.name)[
+                sameNameBefore
+              ];
+              return (
+                <UploadingAttachmentPlaceholder
+                  key={`pending-upload-${index}`}
+                  name={vars.body.name}
+                  percent={running?.percent}
+                  onCancel={running?.cancel ? () => cancelCaseUpload(running.key) : undefined}
+                />
+              );
+            })}
             {isFetchingNextPage && paginatedAttachments.length === 0 ? (
               <AttachmentsListSkeleton />
             ) : (
@@ -279,6 +294,7 @@ export default function CaseDetailsAttachmentsPanel({
                       storedDownload.isDownloadingId(att.id)
                     }
                     downloadProgress={storedDownload.downloadProgressOf(att.id)}
+                    onCancelDownload={(a) => storedDownload.cancelDownload(a.id)}
                   />
                 );
               })

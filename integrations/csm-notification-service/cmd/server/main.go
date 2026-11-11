@@ -367,6 +367,11 @@ func main() {
 	// doc comment.
 	defaultCSMEmailCC := splitComma(os.Getenv("DEFAULT_CSM_EMAIL_CC"))
 
+	// Reads the images a comment or description references, so an email can show
+	// them (see internal/inlineimages). Nil, and logged, when storage is not
+	// configured or reachable: that only costs the pictures, never the email.
+	inlineImages := newInlineImageResolver(os.Getenv, customerEntityClient)
+
 	dispatcher := dispatch.NewDispatcher(emailClient, googleChatClient, twilioClient, linkResolver, emailSendingEnabled, emailDebugMode, emailDebugRecipients, callSendingEnabled, defaultOnCallNumber, defaultCSMEmailCC).
 		WithOnboarding(loadOnboardingConfig(customerEntityClient, emailClient)).
 		// Same customerEntityClient as every other optional entity-service
@@ -409,6 +414,12 @@ func main() {
 		slog.Info("status page webhooks enabled", "clouds", len(urls))
 	} else {
 		dispatcher = dispatcher.WithStatusPage(nil, customerEntityClient)
+	}
+	// Assigned only when set: a nil *inlineimages.Resolver stored in the
+	// interface would be non-nil, and the dispatcher's own nil check would not
+	// catch it.
+	if inlineImages != nil {
+		dispatcher = dispatcher.WithInlineImages(inlineImages)
 	}
 	// escalationClient is a *escalation.Client, not the escalationDetector
 	// interface itself -- passing it through WithFrustrationDetection

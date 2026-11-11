@@ -1422,32 +1422,83 @@ func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
 }
 
 func TestLoad_AttachmentSizeLimits(t *testing.T) {
-	for _, k := range []string{"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES"} {
-		t.Setenv(k, "")
+	keys := []string{
+		"ATTACHMENT_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_MB",
+		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES",
 	}
-	c := Load()
-	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 || c.InlineImagesTotalMaxBytes != 25<<20 {
-		t.Errorf("size limits = %d / %d / %d, want 100 MiB / 25 MiB / 25 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes, c.InlineImagesTotalMaxBytes)
+	clear := func() {
+		for _, k := range keys {
+			t.Setenv(k, "")
+		}
 	}
-	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "2097152")
-	if c = Load(); c.InlineImagesTotalMaxBytes != 2097152 {
-		t.Errorf("INLINE_IMAGES_TOTAL_MAX_BYTES override not read: %d", c.InlineImagesTotalMaxBytes)
+	got := func() [2]int64 {
+		c := Load()
+		return [2]int64{c.AttachmentMaxBytes, c.InlineImagesTotalMaxBytes}
 	}
-	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "")
 
+	clear()
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("defaults = %v, want 10 / 1 MiB", g)
+	}
+
+	// The megabyte settings: a whole number or a decimal.
+	t.Setenv("ATTACHMENT_MAX_MB", "50")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0.5")
+	if g := got(); g != [2]int64{50 << 20, 1 << 19} {
+		t.Errorf("MB settings = %v, want 50 MiB / 512 KiB", g)
+	}
+
+	// The older bytes settings still work when the MB one is unset...
+	clear()
 	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
-	t.Setenv("INLINE_IMAGE_MAX_BYTES", "1048576")
-	c = Load()
-	if c.AttachmentMaxBytes != 52428800 || c.InlineImageMaxBytes != 1048576 {
-		t.Errorf("overrides not read: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "2097152")
+	if g := got(); g != [2]int64{52428800, 2097152} {
+		t.Errorf("bytes fallback = %v", g)
+	}
+	// ...and the MB one wins when both are set.
+	t.Setenv("ATTACHMENT_MAX_MB", "10")
+	if g := got(); g[0] != 10<<20 {
+		t.Errorf("ATTACHMENT_MAX_MB did not win over ATTACHMENT_MAX_BYTES: %d", g[0])
+	}
+
+	// A MB setting that is set but invalid gives the default, even when the
+	// older bytes setting is also set: the bytes one is read only when the MB
+	// one is unset.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "lots")
+	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "1048576")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
+	}
+
+	// Above the ceiling (100 MB file, 25 MB images) is as unusable as a typo:
+	// the default is used. The ceiling itself is accepted.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "100.5")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "26")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("above the ceiling = %v, want the defaults", g)
+	}
+	t.Setenv("ATTACHMENT_MAX_MB", "100")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "25")
+	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
+		t.Errorf("at the ceiling = %v, want 100 / 25 MiB", g)
+	}
+	clear()
+	t.Setenv("ATTACHMENT_MAX_BYTES", "209715200")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "52428800")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("bytes above the ceiling = %v, want the defaults", g)
 	}
 
 	// A typo costs the override, not the service.
-	t.Setenv("ATTACHMENT_MAX_BYTES", "lots")
-	t.Setenv("INLINE_IMAGE_MAX_BYTES", "-5")
-	c = Load()
-	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 {
-		t.Errorf("bad values did not fall back to the defaults: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "lots")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "-5")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("bad values did not fall back to the defaults: %v", g)
 	}
 }
 
@@ -1479,6 +1530,30 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " , ,")
 	if got := Load().LongOpenCasesReportProjectTypes; len(got) != 5 {
 		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
+	}
+}
+
+// TestLoad_OpenBeforeYesterdayReportSets pins the open-before-yesterday
+// variant's two project type sets: the defaults, trimming, and a blank value
+// falling back to the default.
+func TestLoad_OpenBeforeYesterdayReportSets(t *testing.T) {
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", "")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", " , ")
+	c := Load()
+	if want := []string{"Subscription", "Managed Cloud Subscription"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("default project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"Cloud Support"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("default product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", " A , ,B")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", "C")
+	c = Load()
+	if want := []string{"A", "B"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"C"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
 	}
 }
 

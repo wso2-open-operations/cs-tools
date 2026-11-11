@@ -572,6 +572,12 @@ type Config struct {
 	// excluded tags would list cases the team has set aside.
 	LongOpenCasesReportProjectTypes []string
 	LongOpenCasesReportExcludedTags []string
+	// OpenBeforeYesterdayReportProjectTypes are the project type names that
+	// put a case in the open-before-yesterday variant of that report whatever
+	// its product; OpenBeforeYesterdayReportProductProjectTypes put it there
+	// only when the case has a product set. Blank falls back to the defaults.
+	OpenBeforeYesterdayReportProjectTypes        []string
+	OpenBeforeYesterdayReportProductProjectTypes []string
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -735,6 +741,16 @@ type Config struct {
 	// catalogue. AUTH_ADMIN_ROLES may edit it too.
 	// Matched exactly. Empty means only admins can.
 	AuthProductCatalogManagerRoles []string
+	// AuthSkillDirectoryRoles, AuthSkillRequestReviewerRoles and
+	// AuthSkillCatalogueManagerRoles are AUTH_SKILL_DIRECTORY_ROLES,
+	// AUTH_SKILL_REQUEST_REVIEWER_ROLES and AUTH_SKILL_CATALOGUE_MANAGER_ROLES,
+	// comma-separated: the token roles that hold each skills capability (the
+	// directory of everybody's skills; reviewing skill requests; managing the
+	// skill catalogue) on top of AUTH_ADMIN_ROLES. Matched exactly. Empty means
+	// admins only, which is the default until roles are assigned per task.
+	AuthSkillDirectoryRoles        []string
+	AuthSkillRequestReviewerRoles  []string
+	AuthSkillCatalogueManagerRoles []string
 	// CaseAlertsSecretKey is CASE_ALERTS_SECRET_KEY: 32 bytes, base64, the
 	// AES-256-GCM key that seals the Case Alerts chat-room webhook URLs
 	// (migration 0233). One per environment, so a database copied from
@@ -839,16 +855,15 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
-	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
-	// (INLINE_IMAGE_MAX_BYTES, default 25 MiB). The declared size is checked
-	// when an upload starts and the real size when it is confirmed. Provisional
-	// defaults, to be set from the real size distribution.
-	AttachmentMaxBytes  int64
-	InlineImageMaxBytes int64
+	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 10, at most 100).
+	// The declared size is checked when an upload starts and the real size when
+	// it is confirmed. Provisional default, to be set from the real size
+	// distribution.
+	AttachmentMaxBytes int64
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
-	// together (INLINE_IMAGES_TOTAL_MAX_BYTES, default 25 MiB). At most
-	// service.MaxInlineImagesPerContent (5) images per comment or description.
+	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1, at most 25), and so also one image.
+	// At most service.MaxInlineImagesPerContent (5) images per comment or
+	// description.
 	InlineImagesTotalMaxBytes int64
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
@@ -1023,12 +1038,17 @@ func Load() *Config {
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
 		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
 		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
+		OpenBeforeYesterdayReportProjectTypes:         splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProjectTypes),
+		OpenBeforeYesterdayReportProductProjectTypes:  splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProductProjectTypes),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
 		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
 		AuthAdminRoles:                                splitComma(os.Getenv("AUTH_ADMIN_ROLES")),
 		AuthProductCatalogManagerRoles:                splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
+		AuthSkillDirectoryRoles:                       splitComma(os.Getenv("AUTH_SKILL_DIRECTORY_ROLES")),
+		AuthSkillRequestReviewerRoles:                 splitComma(os.Getenv("AUTH_SKILL_REQUEST_REVIEWER_ROLES")),
+		AuthSkillCatalogueManagerRoles:                splitComma(os.Getenv("AUTH_SKILL_CATALOGUE_MANAGER_ROLES")),
 		CaseAlertsSecretKey:                           strings.TrimSpace(os.Getenv("CASE_ALERTS_SECRET_KEY")),
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
@@ -1104,9 +1124,8 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
-	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 25<<20)
-	cfg.InlineImagesTotalMaxBytes = envPositiveInt64("INLINE_IMAGES_TOTAL_MAX_BYTES", 25<<20)
+	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10, maxAttachmentMB)
+	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1213,6 +1232,15 @@ var (
 	// "migrartion" is a historic misspelling that exists as stored on
 	// real cases; it must stay exactly as is to match them.
 	defaultLongOpenCasesReportExcludedTags = []string{"migrartion", "migration-assistance"}
+)
+
+// defaultOpenBeforeYesterdayReportProjectTypes and
+// defaultOpenBeforeYesterdayReportProductProjectTypes are the
+// open-before-yesterday report's project type sets when the environment does
+// not override them. The second set needs the case's product to be set.
+var (
+	defaultOpenBeforeYesterdayReportProjectTypes        = []string{"Subscription", "Managed Cloud Subscription"}
+	defaultOpenBeforeYesterdayReportProductProjectTypes = []string{"Cloud Support"}
 )
 
 func splitComma(s string) []string {
@@ -1734,6 +1762,38 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// Hard ceilings on the attachment size settings, in megabytes. A value above one
+// is treated like a bad value (the default is used), so a mistyped setting can
+// never raise a limit past what the portals and the gateway are built for.
+const (
+	maxAttachmentMB        = 100
+	maxInlineImagesTotalMB = 25
+)
+
+// envMegabytes reads a size in megabytes (1 MB = 1 MiB = 1048576 bytes; a
+// decimal such as 0.5 is allowed) from mbKey and returns it in bytes. The older
+// bytes setting bytesKey is read only when mbKey is unset. A value that is not a
+// positive number, or is above maxMB, gives the default (defMB), and so does an
+// older bytes value above maxMB; when mbKey is set but unusable the older setting
+// is not consulted. A typo costs the override, it does not stop the service
+// starting (same posture as envPositiveInt64).
+func envMegabytes(mbKey, bytesKey string, defMB, maxMB int64) int64 {
+	def, ceiling := defMB<<20, maxMB<<20
+	v := strings.TrimSpace(os.Getenv(mbKey))
+	if v == "" {
+		if n := envPositiveInt64(bytesKey, def); n <= ceiling {
+			return n
+		}
+		return def
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= float64(maxMB) {
+		if n := int64(f * (1 << 20)); n > 0 && n <= ceiling {
+			return n
+		}
+	}
+	return def
 }
 
 // envPositiveInt64 reads a positive integer, falling back to def when unset,

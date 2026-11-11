@@ -85,9 +85,11 @@ import {
   incidentStateColor,
   incidentStateLabel,
   isIncidentOpen,
+  isIncidentTerminal,
 } from "@features/csm-operations/utils/incidents";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import {
   AttachmentsWidget,
   WatchersWidget,
@@ -98,6 +100,8 @@ import {
   useDownloadCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useAttachmentDeletion } from "@features/csm-cases/hooks/useAttachmentDeletion";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import type {
   BeEntityRef,
@@ -329,6 +333,12 @@ const INCIDENT_TAB_IDS: readonly IncidentTabId[] = TAB_DEFS.map((t) => t.id);
 export const HANDOFF_NEEDS_ASSIGNEE_REASON =
   "Assign the incident to an engineer first: the assignee is responsible for the page to the SME on duty.";
 
+/**
+ * The incident detail page, mounted on its own route or in an open case tab.
+ * Back goes to `state.from` with `state.parentState` (the list the incident
+ * was opened from, with that list's own state), else to the Operations
+ * Incidents tab.
+ */
 export default function CsmIncidentDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when
@@ -347,8 +357,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // Prefer the list URL the row link captured (if any) so "back" returns to
   // the exact view the engineer came from, falling back to the bare tab path
   // for a bookmarked or directly-linked incident.
+  // `parentState` is the state that list was itself carrying (e.g.
+  // `{ from: <dashboard> }`), handed back on Back so it keeps its own Back.
   const backState = (routeOverride ? routeOverride.state : routedLocationState) as
-    | { from?: string }
+    | { from?: string; parentState?: unknown }
     | undefined;
   const backTarget = backState?.from ?? OPERATIONS_INCIDENTS_PATH;
   const { data, isLoading, isError } = useGetIncident(id);
@@ -394,7 +406,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const currentUserEmail = useIdTokenClaims()?.email;
   // UX only — the backend 403s attachment downloads the same regardless of
   // this flag, so hiding the control here is never the enforcement.
-  const { canDownloadAttachment } = usePortalAccess();
+  const { canDownloadAttachment, isAdmin } = usePortalAccess();
 
   const {
     data: comments,
@@ -433,6 +445,11 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     isError: isAttachmentsError,
   } = useGetCsmCaseAttachments(id, "incident");
   const postAttachment = usePostCsmCaseAttachment();
+  const attachmentDeletion = useAttachmentDeletion({
+    ownerId: id,
+    referenceType: "incident",
+    closed: isIncidentTerminal(data?.state),
+  });
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const getAttachmentPreviewContent = useGetCsmCaseAttachmentPreviewSource();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -449,6 +466,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const [previewTarget, setPreviewTarget] = useState<CaseAttachment | null>(null);
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(id, "incident", isAdmin);
   // The read model's entries already carry the platform user UUID the write
   // side is keyed by, so the widget can compute a replacement list straight
   // from what is on screen.
@@ -620,7 +639,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   );
 
   const back = (): void => {
-    navigate(backTarget);
+    navigate(backTarget, { state: backState?.parentState ?? undefined });
   };
 
   const BackButton = (
@@ -1037,9 +1056,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!id}
+                uploadProgress={commentUploadProgress(postAttachment)}
                 publicCommentDisabledReason={incidentCommentGateReason(incident.state)}
                 autoFocus
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!id) return;
                   // Comment and files are separate requests, sent together.
                   await sendCommentWithAttachments({
@@ -1047,6 +1067,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                     postComment: () =>
                       postComment.mutateAsync({ incidentId: id, bodyHtml, internal }),
                     attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
                     uploadAttachment: ({ file, name }) =>
                       postAttachment.mutateAsync({
                         caseId: id,
@@ -1253,6 +1275,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentsTab}
             uploading={postAttachment.isPending}
             uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
             onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
@@ -1265,6 +1288,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             onDownload={
               canDownloadAttachment ? onDownloadAttachment : undefined
             }
+            onDelete={attachmentDeletion.onDelete}
+            canDeleteAttachment={attachmentDeletion.canDeleteAttachment}
+            deletingId={attachmentDeletion.deletingId}
             preview={
               canDownloadAttachment
                 ? {
@@ -1277,6 +1303,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           />
         </Card>
       )}
+
+      {attachmentDeletion.dialog}
 
       {editOpen && (
         <EditIncidentDialog

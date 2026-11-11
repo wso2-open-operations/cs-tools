@@ -183,9 +183,11 @@ func (r *deployedProductRepo) resolveDeployedProductNodes(ctx context.Context, i
 		FROM deployment_node dn
 		JOIN project proj ON proj.key = dn.project_key
 		JOIN deployment dep ON dep.number = dn.deployment_number AND dep.project_id = proj.id
-		WHERE dn.product_version_id = $1
+		JOIN product_version pv ON pv.id = dn.product_version_id
+		JOIN `+deployedProductForNodeJoin+`
+		WHERE dprod.id = $1::uuid
 		AND dep.id = $2::uuid`,
-		*versionID, deploymentID,
+		id, deploymentID,
 	)
 	if err != nil {
 		return domain.ReferenceTableItem{}, nil, fmt.Errorf("resolve deployed product instances: %w", err)

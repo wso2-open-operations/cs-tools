@@ -160,6 +160,21 @@ func (h *StoredAttachmentHandler) InlineImageLocation(w http.ResponseWriter, r *
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
+// InlineImageRelocated handles POST /attachments/inline/{id}/relocated: the portal
+// backend moved the file of a description image to the key LocateInlineImage named.
+func (h *StoredAttachmentHandler) InlineImageRelocated(w http.ResponseWriter, r *http.Request) {
+	var req domain.InlineImageRelocatedRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	if err := h.svc.InlineImageRelocated(r.Context(), r.PathValue("id"), req); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // writeStoredAttachmentJSON writes a response that can carry an internal storage
 // key, so it must never be cached by a browser or an intermediary.
 func writeStoredAttachmentJSON(w http.ResponseWriter, status int, body any) {

@@ -26,6 +26,12 @@ export const skillKeys = {
   mine: [ROOT, "mine"] as const,
   history: (skillId: string, limit: number, offset: number) =>
     [ROOT, "history", skillId, limit, offset] as const,
-  managerProbe: [ROOT, "manager-probe"] as const,
-  people: (request: unknown) => [ROOT, "people", request] as const,
+  capabilities: [ROOT, "capabilities"] as const,
+  myRequests: [ROOT, "requests", "mine"] as const,
+  requestQueue: (request: unknown) => [ROOT, "requests", "queue", request] as const,
+  requestCheck: (name: string) => [ROOT, "requests", "check", name] as const,
+  directory: (request: unknown) => [ROOT, "directory", request] as const,
+  person: (userId: string) => [ROOT, "person", userId] as const,
+  personHistory: (userId: string, skillId: string, limit: number, offset: number) =>
+    [ROOT, "person", userId, "history", skillId, limit, offset] as const,
 };

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -6002,6 +6003,229 @@ func TestCaseService_CaseVolumeTrend_ValidatesDays(t *testing.T) {
 		if _, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{Days: days}); err == nil {
 			t.Errorf("days=%d: expected a ValidationError", days)
 		}
+	}
+}
+
+// volumeTrendRepoCountingDays is a repo whose every day has one opened and
+// two closed cases, recording the days it was asked for.
+func volumeTrendRepoCountingDays(gotDays *[]string) *stubCaseRepo {
+	return &stubCaseRepo{caseVolumeTrend: func(_ context.Context, _ domain.SearchCasesRequest, days []string) (map[string]domain.CaseVolumeDayCount, error) {
+		*gotDays = append(*gotDays, days...)
+		out := make(map[string]domain.CaseVolumeDayCount, len(days))
+		for _, d := range days {
+			out[d] = domain.CaseVolumeDayCount{Opened: 1, Closed: 2}
+		}
+		return out, nil
+	}}
+}
+
+func TestCaseService_CaseVolumeTrend_FixedWindowByDay(t *testing.T) {
+	var gotDays []string
+	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-12-01", EndDate: "2025-12-31"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Days != 31 || resp.StartDate != "2025-12-01" || resp.EndDate != "2025-12-31" || resp.Bucket != "day" {
+		t.Errorf("got days=%d startDate=%q endDate=%q bucket=%q, want 31, 2025-12-01, 2025-12-31, day", resp.Days, resp.StartDate, resp.EndDate, resp.Bucket)
+	}
+	if len(gotDays) != 31 || gotDays[0] != "2025-12-01" || gotDays[30] != "2025-12-31" {
+		t.Errorf("repo asked for %d days (%v), want 2025-12-01 to 2025-12-31", len(gotDays), gotDays)
+	}
+	opened := resp.Series[0].Points
+	if len(opened) != 31 || opened[0] != (domain.CaseVolumeTrendPoint{Date: "2025-12-01", Count: 1}) {
+		t.Errorf("opened = %d points starting %+v, want 31 day points with no endDate", len(opened), opened[0])
+	}
+}
+
+func TestCaseService_CaseVolumeTrend_FixedWindowByWeekClipsToTheWindow(t *testing.T) {
+	var gotDays []string
+	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	// 3 December 2025 is a Wednesday, 31 December a Wednesday.
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-12-03", EndDate: "2025-12-31", Bucket: "week"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []domain.CaseVolumeTrendPoint{
+		{Date: "2025-12-03", EndDate: "2025-12-07", Count: 5},
+		{Date: "2025-12-08", EndDate: "2025-12-14", Count: 7},
+		{Date: "2025-12-15", EndDate: "2025-12-21", Count: 7},
+		{Date: "2025-12-22", EndDate: "2025-12-28", Count: 7},
+		{Date: "2025-12-29", EndDate: "2025-12-31", Count: 3},
+	}
+	if got := resp.Series[0].Points; !reflect.DeepEqual(got, want) {
+		t.Errorf("opened = %+v, want %+v", got, want)
+	}
+	if got := resp.Series[1].Points[0]; got.Count != 10 {
+		t.Errorf("closed's first week = %+v, want count 10", got)
+	}
+	if resp.Days != 29 || len(gotDays) != 29 {
+		t.Errorf("days = %d, repo asked for %d days, want 29 each (still counted per day)", resp.Days, len(gotDays))
+	}
+}
+
+// A week point that crosses a month and a year end stays one point, and the
+// weeks at the window's edges are clipped to it; likewise a month window
+// that crosses a year end and starts and ends mid-month.
+func TestCaseService_CaseVolumeTrend_FixedWindowAcrossAYearEnd(t *testing.T) {
+	var gotDays []string
+	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	// 17 December 2025 and 14 January 2026 are Wednesdays.
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-12-17", EndDate: "2026-01-14", Bucket: "week"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantWeeks := []domain.CaseVolumeTrendPoint{
+		{Date: "2025-12-17", EndDate: "2025-12-21", Count: 5},
+		{Date: "2025-12-22", EndDate: "2025-12-28", Count: 7},
+		{Date: "2025-12-29", EndDate: "2026-01-04", Count: 7},
+		{Date: "2026-01-05", EndDate: "2026-01-11", Count: 7},
+		{Date: "2026-01-12", EndDate: "2026-01-14", Count: 3},
+	}
+	if got := resp.Series[0].Points; !reflect.DeepEqual(got, wantWeeks) {
+		t.Errorf("opened by week = %+v, want %+v", got, wantWeeks)
+	}
+	if resp.Days != 29 || len(gotDays) != 29 {
+		t.Errorf("days = %d, repo asked for %d days, want 29 each", resp.Days, len(gotDays))
+	}
+
+	gotDays = nil
+	resp, err = svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-11-15", EndDate: "2026-01-10", Bucket: "month"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantMonths := []domain.CaseVolumeTrendPoint{
+		{Date: "2025-11-15", EndDate: "2025-11-30", Count: 16},
+		{Date: "2025-12-01", EndDate: "2025-12-31", Count: 31},
+		{Date: "2026-01-01", EndDate: "2026-01-10", Count: 10},
+	}
+	if got := resp.Series[0].Points; !reflect.DeepEqual(got, wantMonths) {
+		t.Errorf("opened by month = %+v, want %+v", got, wantMonths)
+	}
+}
+
+func TestCaseService_CaseVolumeTrend_FixedWindowByMonth(t *testing.T) {
+	var gotDays []string
+	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2025-12-31", Bucket: "month"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	opened := resp.Series[0].Points
+	if len(opened) != 12 {
+		t.Fatalf("opened = %d points, want 12", len(opened))
+	}
+	if opened[1] != (domain.CaseVolumeTrendPoint{Date: "2025-02-01", EndDate: "2025-02-28", Count: 28}) {
+		t.Errorf("February = %+v, want 2025-02-01 to 2025-02-28, count 28", opened[1])
+	}
+	if opened[11] != (domain.CaseVolumeTrendPoint{Date: "2025-12-01", EndDate: "2025-12-31", Count: 31}) {
+		t.Errorf("December = %+v, want 2025-12-01 to 2025-12-31, count 31", opened[11])
+	}
+	if resp.Days != 365 || len(gotDays) != 365 {
+		t.Errorf("days = %d, repo asked for %d days, want 365 each", resp.Days, len(gotDays))
+	}
+}
+
+func TestCaseService_CaseVolumeTrend_FixedWindowNeverQueriesOrCachesAFutureDay(t *testing.T) {
+	var gotDays []string
+	volCache := newStubVolumeTrendCache()
+	svc := WithCaseVolumeTrendCache(NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil), volCache)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	today := time.Now().UTC()
+	yesterday := today.AddDate(0, 0, -1).Format("2006-01-02")
+	todayKey := today.Format("2006-01-02")
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: yesterday, EndDate: today.AddDate(0, 0, 2).Format("2006-01-02")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(gotDays, []string{yesterday, todayKey}) {
+		t.Errorf("repo asked for %v, want only [%s %s]", gotDays, yesterday, todayKey)
+	}
+	for _, c := range volCache.setCalls {
+		if c.day > todayKey {
+			t.Errorf("a future day %s was cached", c.day)
+		}
+	}
+	opened := resp.Series[0].Points
+	if len(opened) != 4 || opened[2].Count != 0 || opened[3].Count != 0 {
+		t.Errorf("opened = %+v, want 4 points, the two future days counting 0", opened)
+	}
+}
+
+func TestCaseService_CaseVolumeTrend_FixedWindowAcceptsRelativeDates(t *testing.T) {
+	var gotDays []string
+	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "__startOfMonth:-1__", EndDate: "__endOfMonth:-1__"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	now := time.Now().UTC()
+	wantStart := startOfRelativeMonth(now, -1)
+	wantEnd := startOfRelativeMonth(now, 0).AddDate(0, 0, -1)
+	if resp.StartDate != wantStart.Format("2006-01-02") || resp.EndDate != wantEnd.Format("2006-01-02") {
+		t.Errorf("window = %s to %s, want last month, %s to %s", resp.StartDate, resp.EndDate, wantStart.Format("2006-01-02"), wantEnd.Format("2006-01-02"))
+	}
+}
+
+func TestResolveCaseVolumeTrendWindow(t *testing.T) {
+	today := time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC)
+	valid := []struct {
+		name string
+		req  domain.CaseVolumeTrendRequest
+	}{
+		{"90 days by day", domain.CaseVolumeTrendRequest{StartDate: "2026-01-01", EndDate: "2026-03-31"}},
+		// 2026 runs from the week of Monday 29 December 2025 to the week of
+		// Monday 28 December 2026: 53 weeks.
+		{"a whole year by week", domain.CaseVolumeTrendRequest{StartDate: "2026-01-01", EndDate: "2026-12-31", Bucket: "week"}},
+		// 2040 is a leap year starting on a Sunday: from the week of Monday
+		// 26 December 2039 to the week of Monday 31 December 2040, 54 weeks.
+		{"a whole leap year from a Sunday by week", domain.CaseVolumeTrendRequest{StartDate: "2040-01-01", EndDate: "2040-12-31", Bucket: "week"}},
+		{"24 months by month", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2026-12-31", Bucket: "month"}},
+		{"one day", domain.CaseVolumeTrendRequest{StartDate: "2025-12-25", EndDate: "2025-12-25"}},
+	}
+	for _, tt := range valid {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := resolveCaseVolumeTrendWindow(tt.req, today); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name string
+		req  domain.CaseVolumeTrendRequest
+	}{
+		{"days with dates", domain.CaseVolumeTrendRequest{Days: 30, StartDate: "2025-12-01", EndDate: "2025-12-31"}},
+		{"only a start date", domain.CaseVolumeTrendRequest{StartDate: "2025-12-01"}},
+		{"only an end date", domain.CaseVolumeTrendRequest{EndDate: "2025-12-31"}},
+		{"a bucket without dates", domain.CaseVolumeTrendRequest{Bucket: "week"}},
+		{"a timestamp", domain.CaseVolumeTrendRequest{StartDate: "2025-12-01T00:00:00Z", EndDate: "2025-12-31"}},
+		{"end before start", domain.CaseVolumeTrendRequest{StartDate: "2025-12-31", EndDate: "2025-12-01"}},
+		{"an unknown bucket", domain.CaseVolumeTrendRequest{StartDate: "2025-12-01", EndDate: "2025-12-31", Bucket: "quarter"}},
+		{"91 days by day", domain.CaseVolumeTrendRequest{StartDate: "2026-01-01", EndDate: "2026-04-01"}},
+		{"55 weeks by week", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2026-01-12", Bucket: "week"}},
+		{"25 months by month", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2027-01-01", Bucket: "month"}},
+		{"a malformed relative date", domain.CaseVolumeTrendRequest{StartDate: "__startOfMonth__", EndDate: "__today__"}},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resolveCaseVolumeTrendWindow(tt.req, today)
+			var ve *apierror.ValidationError
+			if !errors.As(err, &ve) {
+				t.Errorf("got %v, want a ValidationError", err)
+			}
+		})
 	}
 }
 

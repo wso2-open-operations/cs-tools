@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useAttachmentDownloadProgress } from "@features/csm-cases/api/attachmentDownloadProgress";
+import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import {
   Box,
   Button,
@@ -23,6 +23,8 @@ import {
   CircularProgress,
   IconButton,
   LinearProgress,
+  Tab,
+  Tabs,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -57,6 +59,7 @@ import {
   useId,
   useMemo,
   useRef,
+  useState,
   type ChangeEvent,
   type JSX,
   type ReactNode,
@@ -1012,89 +1015,22 @@ export function TimeLogsWidget({
 // 4b. Attachments (all files on the case, newest first)
 // ---------------------------------------------------------------------------
 
-/** The bar along the bottom of an attachment row while it downloads (the row is `position: relative`). */
-function AttachmentDownloadBar({ id }: { id: string }) {
-  const progress = useAttachmentDownloadProgress(id);
-  if (progress === undefined) return null;
-  const known = progress >= 0;
-  return (
-    <LinearProgress
-      aria-hidden
-      variant={known ? "determinate" : "indeterminate"}
-      value={known ? progress : undefined}
-      sx={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4 }}
-    />
-  );
-}
-
-/** The Download button of an attachment row; while it downloads it shows the percentage. */
-function AttachmentDownloadButton({
-  attachment,
-  onDownload,
-}: {
-  attachment: CaseAttachment;
-  onDownload?: (attachment: CaseAttachment) => void;
-}) {
-  const progress = useAttachmentDownloadProgress(attachment.id);
-  const downloading = progress !== undefined;
-  const known = progress !== undefined && progress >= 0;
-  // Announced from beside the button: a disabled button is skipped by screen
-  // readers, so a status inside it would never be read. Every 10 percent only.
-  const announced = known ? Math.floor(progress / 10) * 10 : null;
-  return (
-    <>
-      <Box
-        component="span"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        sx={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          overflow: "hidden",
-          clip: "rect(0 0 0 0)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {downloading
-          ? announced === null
-            ? `Downloading ${attachment.filename}`
-            : `Downloading ${attachment.filename}: ${announced}%`
-          : ""}
-      </Box>
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={
-          downloading ? (
-            <CircularProgress
-              size={14}
-              color="inherit"
-              variant={known ? "determinate" : "indeterminate"}
-              value={known ? progress : undefined}
-              aria-hidden
-            />
-          ) : (
-            <Download size={14} />
-          )
-        }
-        onClick={() => onDownload?.(attachment)}
-        disabled={!onDownload || downloading}
-        aria-busy={downloading || undefined}
-        aria-label={`Download ${attachment.filename}`}
-      >
-        {known ? `${progress}%` : downloading ? "Starting" : "Download"}
-      </Button>
-    </>
-  );
-}
-
 /**
  * Lists every attachment on the case in descending order of upload time, with
  * a "Download all" affordance. Downloads are surfaced through the parent's
  * action handler (mock) until the BE exposes attachment download URLs.
  */
+/** The admin-only "Deleted" tab of `AttachmentsWidget`: its rows and fetch state. */
+export interface DeletedAttachmentsTab {
+  /** Deleted attachments, most recently deleted first; `undefined` until fetched. */
+  attachments: CaseAttachment[] | undefined;
+  loading: boolean;
+  error: boolean;
+  onRetry?: () => void;
+  /** The tab was opened: the page starts fetching the deleted attachments. */
+  onOpen: () => void;
+}
+
 export function AttachmentsWidget({
   attachments,
   loading = false,
@@ -1109,6 +1045,7 @@ export function AttachmentsWidget({
   onDownload,
   onDelete,
   canDeleteAttachment,
+  deletedAttachments,
   deletingId,
   preview,
   onRefresh,
@@ -1144,6 +1081,13 @@ export function AttachmentsWidget({
    * example "only the uploader"). Omit to show it on every row, as before.
    */
   canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
+  /**
+   * The "Deleted" tab: attachments that were deleted, newest deletion first,
+   * with who deleted them and when, in place of the Download button. Fetched
+   * by the page only once the tab is opened. Pass it only for an admin; omit
+   * to hide the tab.
+   */
+  deletedAttachments?: DeletedAttachmentsTab;
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1173,6 +1117,11 @@ export function AttachmentsWidget({
   refreshedAt?: number;
 }): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [view, setView] = useState<"active" | "deleted">("active");
+  const showDeletedTab = deletedAttachments !== undefined;
+  const showingDeleted = showDeletedTab && view === "deleted";
+  // The backend returns the deleted attachments newest deletion first; kept as is.
+  const deletedList = deletedAttachments?.attachments ?? [];
   const sorted = [...attachments].sort(
     (a, b) =>
       new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
@@ -1229,7 +1178,7 @@ export function AttachmentsWidget({
                   variant="text"
                   startIcon={<Download size={14} />}
                   onClick={onDownloadAll}
-                  disabled={!onDownloadAll || sorted.length === 0}
+                  disabled={!onDownloadAll || sorted.length === 0 || showingDeleted}
                 >
                   Download all
                 </Button>
@@ -1267,11 +1216,54 @@ export function AttachmentsWidget({
             {uploadError}
           </Typography>
         )}
-        {loading ? (
+        {showDeletedTab && (
+          <Tabs
+            value={showingDeleted ? "deleted" : "active"}
+            onChange={(_e, next: "active" | "deleted") => {
+              setView(next);
+              if (next === "deleted") deletedAttachments?.onOpen();
+            }}
+            sx={{ mb: 1.5, minHeight: 36, borderBottom: 1, borderColor: "divider" }}
+            aria-label="Attachment views"
+          >
+            <Tab
+              value="active"
+              label={`Available (${sorted.length})`}
+              sx={{ minHeight: 36, py: 0.5 }}
+            />
+            <Tab
+              value="deleted"
+              // The deleted attachments are fetched when this tab is first opened, so
+              // the count shows only once they are known.
+              label={
+                deletedAttachments?.attachments
+                  ? `Deleted (${deletedList.length})`
+                  : "Deleted"
+              }
+              sx={{ minHeight: 36, py: 0.5 }}
+            />
+          </Tabs>
+        )}
+        {showingDeleted && deletedAttachments?.loading ? (
+          <Typography variant="body2" color="text.secondary">
+            Loading deleted attachments…
+          </Typography>
+        ) : showingDeleted && deletedAttachments?.error ? (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+            <Typography variant="body2" color="error">
+              Could not load deleted attachments.
+            </Typography>
+            {deletedAttachments.onRetry && (
+              <Button size="small" variant="outlined" onClick={deletedAttachments.onRetry}>
+                Retry
+              </Button>
+            )}
+          </Box>
+        ) : !showingDeleted && loading ? (
           <Typography variant="body2" color="text.secondary">
             Loading attachments…
           </Typography>
-        ) : error ? (
+        ) : !showingDeleted && error ? (
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
             <Typography variant="body2" color="error">
               Could not load attachments.
@@ -1282,13 +1274,17 @@ export function AttachmentsWidget({
               </Button>
             )}
           </Box>
-        ) : sorted.length === 0 ? (
+        ) : showingDeleted && deletedList.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            No deleted attachments.
+          </Typography>
+        ) : !showingDeleted && sorted.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No attachments on this case.
           </Typography>
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {sorted.map((a) => (
+            {!showingDeleted && sorted.map((a) => (
               <Box
                 key={a.id}
                 sx={{
@@ -1400,6 +1396,66 @@ export function AttachmentsWidget({
                     )}
                   </IconButton>
                 )}
+              </Box>
+            ))}
+            {showingDeleted && deletedList.map((a) => (
+              <Box
+                key={a.id}
+                data-testid="deleted-attachment"
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  p: 1,
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: "divider",
+                  bgcolor: "action.disabledBackground",
+                  cursor: "not-allowed",
+                }}
+              >
+                <Box
+                  sx={{ display: "flex", color: "text.disabled", opacity: 0.8 }}
+                >
+                  <Paperclip size={16} />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0, opacity: 0.7 }}>
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    color="text.disabled"
+                    sx={{ fontWeight: 500 }}
+                  >
+                    {a.filename}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {formatBytes(a.size)} · {a.contentType} · uploaded by{" "}
+                    <UserRefLink
+                      name={a.uploadedBy}
+                      email={a.uploadedByUser?.email || a.uploadedByEmail}
+                      userId={a.uploadedByUser?.id}
+                    />{" "}
+                    · <RelativeTime iso={a.uploadedAt} /> · deleted by{" "}
+                    <UserRefLink
+                      name={a.deletedBy ?? "Unknown"}
+                      email={a.deletedByUser?.email || a.deletedByEmail}
+                      userId={a.deletedByUser?.id}
+                    />
+                    {a.deletedAt && (
+                      <>
+                        {" "}
+                        · <RelativeTime iso={a.deletedAt} />
+                      </>
+                    )}
+                  </Typography>
+                </Box>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  label="Deleted"
+                  sx={{ flexShrink: 0 }}
+                />
               </Box>
             ))}
           </Box>

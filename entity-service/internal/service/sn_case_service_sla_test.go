@@ -102,6 +102,10 @@ func (f *fakeSLAEngineService) ApplyIncidentStateEffects(_ context.Context, inci
 	f.incidentStateCalls = append(f.incidentStateCalls, fakeSLAIncidentStateCall{incidentID, state})
 }
 
+func (f *fakeSLAEngineService) RecalculateCasePauseTotals(_ context.Context, _ string) (CaseSLAPauseRecalcReport, error) {
+	return CaseSLAPauseRecalcReport{}, nil
+}
+
 // TestSNCaseService_CreateCase_RegistersSLAClocks verifies CreateCase, for
 // req.Type == "case", re-fetches the created case and calls
 // SLAEngineService.RegisterCaseClocks with its resolved severity and

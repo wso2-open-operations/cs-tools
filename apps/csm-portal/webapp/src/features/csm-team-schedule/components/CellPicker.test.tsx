@@ -19,10 +19,10 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import CellPicker, { type CellPickerTarget } from "./CellPicker";
+import CellPicker, { type CellEngagement, type CellPickerTarget } from "./CellPicker";
 import type { CellAbsence } from "../types";
 import type { ScheduleAbsenceKind } from "../types";
-import { ANNUAL_LEAVE, EVENING, LIEU_LEAVE, REGULAR, RND, TZ1, TZ1_L1, TZ2, TZ3, WEEKEND, shift } from "../test/fixtures";
+import { ANNUAL_LEAVE, EVENING, LIEU_LEAVE, REGULAR, REGULAR_IND, RND, TZ1, TZ1_L1, TZ2, TZ3, WEEKEND, shift } from "../test/fixtures";
 
 const ANCHOR = { top: 100, left: 100, bottom: 130, right: 144 };
 
@@ -801,5 +801,98 @@ describe("CellPicker: moving somebody to another team", () => {
     renderMoves("americas");
     expect(screen.getByRole("button", { name: /Americas cover/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Move to Americas Team/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("CellPicker: moving somebody to the India team", () => {
+  const AEST = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", isRotation: false, sortOrder: 92 });
+  const INDIA_MOVE: ScheduleAbsenceKind = {
+    id: "k-ind",
+    code: "ALLO_IND",
+    shortCode: "IND",
+    label: "India team rotation",
+    bucket: "ALLOCATION",
+    colourToken: "IND",
+    sortOrder: 72,
+    movesToTeamKey: "phoenix",
+    worksRotaThere: true,
+    showsAsShiftCode: "CRE_REGULAR_IND",
+  };
+
+  function renderFor(teamKey: string, onApply = vi.fn()) {
+    render(
+      <CellPicker
+        target={target({ teamKey })}
+        shifts={[REGULAR, REGULAR_IND, AEST, EVENING]}
+        awayKinds={[ANNUAL_LEAVE]}
+        allKinds={[ANNUAL_LEAVE, INDIA_MOVE]}
+        moveKinds={[]}
+        onApply={onApply}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    return { onApply };
+  }
+
+  it("offers the India region shift as a move to the India team, not as standing hours", () => {
+    const { onApply } = renderFor("draco");
+    const rota = screen.getByRole("region", { name: /^Rota/ });
+    expect(within(rota).queryByRole("button", { name: /India region shift/ })).not.toBeInTheDocument();
+    expect(within(rota).getByRole("button", { name: /Regular hours/ })).toBeInTheDocument();
+    expect(within(rota).getByRole("button", { name: /AEST regular hours/ })).toBeInTheDocument();
+    const away = screen.getByRole("region", { name: "Leave & allocations" });
+    fireEvent.click(within(away).getByRole("button", { name: /Move to India Team \(Phoenix\)/ }));
+    expect(onApply).toHaveBeenCalledWith("CRE_REGULAR_IND", "2026-09-23", "2026-09-23");
+  });
+
+  it("gives somebody already on the India team Regular hours only, and no move to it", () => {
+    renderFor("phoenix");
+    const rota = screen.getByRole("region", { name: /^Rota/ });
+    expect(within(rota).getByRole("button", { name: /Regular hours/ })).toBeInTheDocument();
+    expect(within(rota).queryByRole("button", { name: /India region shift/ })).not.toBeInTheDocument();
+    expect(within(rota).queryByRole("button", { name: /AEST regular hours/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move to India Team/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("CellPicker: customer engagements from the allocation app", () => {
+  const live: CellEngagement = { id: "al1", label: "Allo-E08110", title: "Quartz Robotics - E08110: Firefighting", dismissed: false };
+  const gone: CellEngagement = { id: "al2", label: "Allo-E07202", title: "Lumen Partners - E07202: Consultancy", dismissed: true };
+
+  function renderWith(engagements: CellEngagement[], onDismissEngagement = vi.fn()) {
+    render(
+      <CellPicker
+        target={target({ engagements })}
+        shifts={[REGULAR, EVENING, WEEKEND]}
+        awayKinds={[ANNUAL_LEAVE, LIEU_LEAVE, RND]}
+        onApply={vi.fn()}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onDismissEngagement={onDismissEngagement}
+        onClose={vi.fn()}
+      />,
+    );
+    return onDismissEngagement;
+  }
+
+  it("offers to remove one on the roster for the picked day", () => {
+    const onDismiss = renderWith([live]);
+    const group = screen.getByRole("group", { name: /customer engagements from the allocation app/i });
+    expect(within(group).getByText("Allo-E08110")).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole("button", { name: /^Remove/ }));
+    expect(onDismiss).toHaveBeenCalledWith(live, "2026-09-23", "2026-09-23", false);
+  });
+
+  it("offers to restore one that was removed", () => {
+    const onDismiss = renderWith([gone]);
+    fireEvent.click(screen.getByRole("button", { name: /^Restore/ }));
+    expect(onDismiss).toHaveBeenCalledWith(gone, "2026-09-23", "2026-09-23", true);
+  });
+
+  it("shows nothing without engagements or without the handler", () => {
+    renderWith([]);
+    expect(screen.queryByRole("group", { name: /customer engagements/i })).toBeNull();
   });
 });

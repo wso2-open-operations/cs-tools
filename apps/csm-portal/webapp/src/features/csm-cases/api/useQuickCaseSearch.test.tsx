@@ -30,16 +30,14 @@ vi.mock("@api/backend/client", () => ({
 // usePortalAccess transitively reaches CurrentUserContext -> useGetUsersMe,
 // which imports @config/apiConfig directly (also absent under vitest) --
 // mocked directly instead, the same "mock the hook module itself" shape
-// CLAUDE.md's Testing section calls for. Defaults to full Security Center
+// CLAUDE.md's Testing section calls for. Defaults to full security-report
 // access so the existing ALL_CASE_TYPES-based assertions below are
-// unaffected; the dedicated describe blocks further down override these to
+// unaffected; the dedicated describe blocks further down override this to
 // exercise visibleCaseTypes's own narrowing.
-let mockCanUseSecurityCenter = true;
-let mockCanUpdateDeleteAnyComment = false;
+let mockCanViewSecurityReportCases = true;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
-    canUseSecurityCenter: mockCanUseSecurityCenter,
-    canUpdateDeleteAnyComment: mockCanUpdateDeleteAnyComment,
+    canViewSecurityReportCases: mockCanViewSecurityReportCases,
   }),
 }));
 
@@ -62,8 +60,7 @@ describe("useQuickCaseSearch", () => {
   beforeEach(() => {
     postMock.mockReset();
     postMock.mockResolvedValue({ cases: [] });
-    mockCanUseSecurityCenter = true;
-    mockCanUpdateDeleteAnyComment = false;
+    mockCanViewSecurityReportCases = true;
   });
 
   it("asks the server not to count every match: the palette never shows a total", async () => {
@@ -165,13 +162,12 @@ describe("useQuickCaseSearch", () => {
 
   // Regression: the backend 403s the WHOLE /cases/search when the type
   // filter names security_report_analysis and the caller lacks
-  // PermViewSecurityCenter -- reported live as the quick-nav palette
+  // PermViewSecurityReportCases -- reported live as the quick-nav palette
   // returning no results at all (not just missing security-report hits) for
   // such a caller, since this hook used to send every type unconditionally.
-  describe("without security-report access (no Security Center, no comment_updater)", () => {
+  describe("without security-report access", () => {
     beforeEach(() => {
-      mockCanUseSecurityCenter = false;
-      mockCanUpdateDeleteAnyComment = false;
+      mockCanViewSecurityReportCases = false;
     });
 
     it("excludes security_report_analysis from the type filter", async () => {
@@ -185,14 +181,14 @@ describe("useQuickCaseSearch", () => {
     });
   });
 
-  // PermViewSecurityCenter is also held by comment_updater (access.go), so a
-  // caller with no Security Center access but who does hold comment_updater
-  // must still see security_report_analysis -- this hook's gate has to mirror
-  // the backend permission exactly, not just canUseSecurityCenter.
-  describe("comment_updater without Security Center access", () => {
+  // PermViewSecurityReportCases (access.go) is held by viewer/comment_updater
+  // too, not just cs_engineer/admin/security_team -- this hook's gate has to
+  // mirror that exactly, not the narrower canUseSecurityCenter
+  // (PermViewSecurityCenter). Reported live: a plain viewer searching by a
+  // security report's own case number got no quick-nav results at all.
+  describe("with security-report access but no Security Center access (viewer/comment_updater)", () => {
     beforeEach(() => {
-      mockCanUseSecurityCenter = false;
-      mockCanUpdateDeleteAnyComment = true;
+      mockCanViewSecurityReportCases = true;
     });
 
     it("still includes security_report_analysis in the type filter", async () => {

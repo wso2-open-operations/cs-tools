@@ -23,7 +23,7 @@ import (
 // StoredAttachmentKind says which attachment table a request is about. These
 // are the three whose files live in Azure Blob Storage: work_item_attachment,
 // comment_attachment (the images embedded in a comment) and
-// deployment_attachment. case_attachment is a separate, older flow.
+// deployment_attachment. case_attachment is an older table that nothing writes or lists any more.
 type StoredAttachmentKind string
 
 const (
@@ -142,6 +142,26 @@ type AttachmentLocation struct {
 	Available   bool    `json:"available"`
 	Reason      string  `json:"reason,omitempty"`
 	StorageKey  string  `json:"storageKey,omitempty"`
+	// RelocateTo is set only for an inline image whose file still sits in the
+	// drafts folder it was uploaded to (a description image, uploaded before its
+	// record existed): the key it belongs under now that it has a work item. The
+	// backend copies the file there, removes the old one, then calls
+	// POST /attachments/inline/{id}/relocated.
+	RelocateTo string `json:"relocateTo,omitempty"`
+	// ParentID and Draft are set only on an inline image location. ParentID is the
+	// work item the image belongs to, or the project while Draft is true (a
+	// description image whose record does not exist yet). The notification service
+	// reads the file as an internal caller, which no access rule filters, so it
+	// uses these to check the image belongs to the case it is emailing about.
+	ParentID string `json:"parentId,omitempty"`
+	Draft    bool   `json:"draft,omitempty"`
+}
+
+// InlineImageRelocatedRequest is the body of POST /attachments/inline/{id}/relocated.
+type InlineImageRelocatedRequest struct {
+	// StorageKey is the key the backend moved the file to; it must be the one
+	// RelocateTo named.
+	StorageKey string `json:"storageKey"`
 }
 
 // DeleteStoredAttachmentRequest is the body of POST /attachments/delete.
@@ -150,6 +170,11 @@ type DeleteStoredAttachmentRequest struct {
 	// on its own.
 	Kind StoredAttachmentKind `json:"type"`
 	ID   string               `json:"id"`
+	// AsAdmin is set by the CSM portal backend, and only by it, when the person
+	// deleting holds the portal's admin role: they may then delete an attachment
+	// they did not upload. Any other caller that sets it is refused, so a browser
+	// or the customer portal cannot use it.
+	AsAdmin bool `json:"asAdmin,omitempty"`
 }
 
 // StoredAttachmentParent is what an attachment hangs from, as the caller is
@@ -214,19 +239,25 @@ type UploadCleanupResult struct {
 	// uploaded and never linked to a comment.
 	ImagesRemoved int `json:"imagesRemoved"`
 	ImagesFailed  int `json:"imagesFailed"`
-	// Orphans are the unlinked comment images whose files the caller must
+	// ReportDraftsRemoved and ReportDraftsFailed are the same for a security
+	// report's files that were uploaded and never linked to a case.
+	ReportDraftsRemoved int `json:"reportDraftsRemoved"`
+	ReportDraftsFailed  int `json:"reportDraftsFailed"`
+	// Orphans are the unlinked comment images and report files whose files the caller must
 	// remove from storage. They are NOT yet marked DELETED, so every run lists
 	// them again until the caller removes the files and acknowledges them
 	// (AcknowledgeOrphansRequest). A lost response therefore loses nothing.
 	Orphans []OrphanedImage `json:"orphans,omitempty"`
 }
 
-// OrphanedImage is an unlinked comment image whose file is in storage this
-// service cannot reach. StorageKey is internal: it is for the caller that removes
-// the file and must never reach a browser.
+// OrphanedImage is an unlinked comment image or draft report file whose file is
+// in storage this service cannot reach. Type says which: "comment" or
+// "work_item". StorageKey is internal: it is for the caller that removes the
+// file and must never reach a browser.
 type OrphanedImage struct {
-	ID         string `json:"id"`
-	StorageKey string `json:"storageKey"`
+	ID         string               `json:"id"`
+	Type       StoredAttachmentKind `json:"type"`
+	StorageKey string               `json:"storageKey"`
 }
 
 // AcknowledgeOrphansRequest is the body of POST /attachments/uploads/cleanup/acknowledge:
