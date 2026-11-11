@@ -74,6 +74,8 @@ type tokenResponse struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
+// accessToken returns the cached bearer token while it is still valid, else
+// fetches a new one from the token endpoint with the client credentials grant.
 func (t *tokenSource) accessToken(ctx context.Context) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -117,6 +119,7 @@ func (t *tokenSource) accessToken(ctx context.Context) (string, error) {
 	return t.token, nil
 }
 
+// invalidate drops the cached token so the next call fetches a new one.
 func (t *tokenSource) invalidate() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -135,6 +138,8 @@ func (t *tokenSource) do(ctx context.Context, what string, build func() (*http.R
 	return body, err
 }
 
+// doOnce sends one request built by build with a bearer token and returns the
+// 2xx body; a 401 is reported as errUnauthorized so the caller can retry.
 func (t *tokenSource) doOnce(ctx context.Context, what string, build func() (*http.Request, error)) ([]byte, error) {
 	token, err := t.accessToken(ctx)
 	if err != nil {
@@ -164,6 +169,8 @@ func (t *tokenSource) doOnce(ctx context.Context, what string, build func() (*ht
 	return raw, nil
 }
 
+// newTokenSource returns a tokenSource that fetches tokens with the given
+// credentials over an HTTP client with the default timeout.
 func newTokenSource(creds Credentials) *tokenSource {
 	return &tokenSource{creds: creds, httpClient: &http.Client{Timeout: defaultTimeout}}
 }

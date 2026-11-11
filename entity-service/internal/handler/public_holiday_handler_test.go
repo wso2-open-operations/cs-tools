@@ -34,6 +34,7 @@ type fakePublicHolidaySvc struct {
 	started bool
 }
 
+// Search records the request and returns the canned result, or the configured error.
 func (f *fakePublicHolidaySvc) Search(_ context.Context, req domain.SearchSchedulePublicHolidaysRequest) (domain.SchedulePublicHolidaysResponse, error) {
 	f.gotReq = req
 	if f.err != nil {
@@ -44,12 +45,19 @@ func (f *fakePublicHolidaySvc) Search(_ context.Context, req domain.SearchSchedu
 	}, Count: 1}, nil
 }
 
+// Refresh returns an empty refresh result.
 func (f *fakePublicHolidaySvc) Refresh(context.Context) (domain.PublicHolidayRefreshResult, error) {
 	return domain.PublicHolidayRefreshResult{}, nil
 }
-func (f *fakePublicHolidaySvc) RefreshInBackground() bool                       { return f.started }
+
+// RefreshInBackground reports whether the fake was set up to start a run.
+func (f *fakePublicHolidaySvc) RefreshInBackground() bool { return f.started }
+
+// LastRefresh returns no previous result.
 func (f *fakePublicHolidaySvc) LastRefresh() *domain.PublicHolidayRefreshResult { return nil }
 
+// TestSearchPublicHolidays checks that the search handler passes the request
+// to the service and returns the holidays it gets back.
 func TestSearchPublicHolidays(t *testing.T) {
 	svc := &fakePublicHolidaySvc{}
 	h := NewPublicHolidayHandler(svc)
@@ -68,6 +76,8 @@ func TestSearchPublicHolidays(t *testing.T) {
 	}
 }
 
+// TestSearchPublicHolidays_ValidationAndUnknownField checks that a validation
+// error from the service and an unknown request field both answer 400.
 func TestSearchPublicHolidays_ValidationAndUnknownField(t *testing.T) {
 	h := NewPublicHolidayHandler(&fakePublicHolidaySvc{err: &apierror.ValidationError{Msg: "userIds is required"}})
 	w := httptest.NewRecorder()
@@ -82,6 +92,8 @@ func TestSearchPublicHolidays_ValidationAndUnknownField(t *testing.T) {
 	}
 }
 
+// TestRefreshPublicHolidays checks that a refresh answers 202 when it starts
+// and 409 when one is already running.
 func TestRefreshPublicHolidays(t *testing.T) {
 	w := httptest.NewRecorder()
 	NewPublicHolidayHandler(&fakePublicHolidaySvc{started: true}).RefreshPublicHolidays(w, httptest.NewRequest(http.MethodPost, "/", nil))

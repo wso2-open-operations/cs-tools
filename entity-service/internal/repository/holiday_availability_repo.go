@@ -70,6 +70,8 @@ func HolidayStageKey(teamKey, date string) string {
 	return strings.ToLower(teamKey) + "|" + date
 }
 
+// CREMembers returns the active members of rostered CRE teams, management left
+// out, with their team keys and stored location.
 func (r *holidayAvailabilityRepository) CREMembers(ctx context.Context) ([]domain.SchedulePerson, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT u.id::text,
@@ -102,6 +104,9 @@ func (r *holidayAvailabilityRepository) CREMembers(ctx context.Context) ([]domai
 	return out, rows.Err()
 }
 
+// PlaceHolidayTag places the public holiday tag on a person for a day and
+// records the placement. It returns false and places nothing when the tag was
+// placed before or the person already has any tag that day.
 func (r *holidayAvailabilityRepository) PlaceHolidayTag(ctx context.Context, p domain.HolidayTagPlacement) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -163,6 +168,9 @@ func (r *holidayAvailabilityRepository) PlaceHolidayTag(ctx context.Context, p d
 	return true, nil
 }
 
+// RemoveCancelledHolidayTags deletes the untouched holiday tags, from the given
+// date on, whose holiday is no longer stored, forgets those placements, and
+// returns how many tags it removed.
 func (r *holidayAvailabilityRepository) RemoveCancelledHolidayTags(ctx context.Context, onOrAfter string) (int, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -225,6 +233,8 @@ func (r *holidayAvailabilityRepository) RemoveCancelledHolidayTags(ctx context.C
 	return len(tags), nil
 }
 
+// PlacedBetween returns the holiday tags placed between two dates, for the
+// given teams or every team when none are given, with any other tag that day.
 func (r *holidayAvailabilityRepository) PlacedBetween(ctx context.Context, from, to string, teamKeys []string) ([]domain.HolidayPlacedRow, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT p.user_id::text, `+engineerName+`, COALESCE(u.email, ''),
@@ -263,6 +273,8 @@ func (r *holidayAvailabilityRepository) PlacedBetween(ctx context.Context, from,
 	return out, rows.Err()
 }
 
+// TurnsBetween returns the rota turns the given teams hold between two dates,
+// each marked with whether its person is away that day.
 func (r *holidayAvailabilityRepository) TurnsBetween(ctx context.Context, from, to string, teamKeys []string) ([]domain.HolidayTurn, error) {
 	if len(teamKeys) == 0 {
 		return nil, nil
@@ -294,6 +306,8 @@ func (r *holidayAvailabilityRepository) TurnsBetween(ctx context.Context, from, 
 	return out, rows.Err()
 }
 
+// ConfirmationsBetween returns the holiday confirmations between two dates,
+// for the given teams or for every team when none are given.
 func (r *holidayAvailabilityRepository) ConfirmationsBetween(ctx context.Context, from, to string, teamKeys []string) ([]domain.HolidayConfirmationRow, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT team_key, to_char(holiday_date, 'YYYY-MM-DD'), confirmed_by, confirmed_on
@@ -316,6 +330,8 @@ func (r *holidayAvailabilityRepository) ConfirmationsBetween(ctx context.Context
 	return out, rows.Err()
 }
 
+// Confirm records, or refreshes, a team's confirmation for a holiday date by
+// the given person and returns it.
 func (r *holidayAvailabilityRepository) Confirm(ctx context.Context, teamKey, date, by string) (domain.HolidayConfirmationRow, error) {
 	c := domain.HolidayConfirmationRow{TeamKey: teamKey, Date: date, ConfirmedBy: by}
 	err := r.db.QueryRow(ctx, `
@@ -330,6 +346,8 @@ func (r *holidayAvailabilityRepository) Confirm(ctx context.Context, teamKey, da
 	return c, nil
 }
 
+// Withdraw removes a team's confirmation for a holiday date and reports
+// whether there was one to remove.
 func (r *holidayAvailabilityRepository) Withdraw(ctx context.Context, teamKey, date string) (bool, error) {
 	tag, err := r.db.Exec(ctx, `
 		DELETE FROM team_schedule_holiday_confirmation
@@ -340,6 +358,8 @@ func (r *holidayAvailabilityRepository) Withdraw(ctx context.Context, teamKey, d
 	return tag.RowsAffected() > 0, nil
 }
 
+// ReminderRecipients returns the team's active internal leads and rota
+// managers who have an email, one entry per person, a lead taking precedence.
 func (r *holidayAvailabilityRepository) ReminderRecipients(ctx context.Context, teamKey string) ([]domain.HolidayReminderRecipient, error) {
 	// Leads by their position on the team; rota managers by their grant,
 	// counted only while they are still on the team and internal (as
@@ -377,6 +397,8 @@ func (r *holidayAvailabilityRepository) ReminderRecipients(ctx context.Context, 
 	return out, rows.Err()
 }
 
+// SentStages returns the reminder stages already sent between two dates, keyed
+// by HolidayStageKey of the team and date.
 func (r *holidayAvailabilityRepository) SentStages(ctx context.Context, from, to string) (map[string][]string, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT team_key, to_char(holiday_date, 'YYYY-MM-DD'), stage
@@ -398,6 +420,8 @@ func (r *holidayAvailabilityRepository) SentStages(ctx context.Context, from, to
 	return out, rows.Err()
 }
 
+// RecordReminder records that a reminder stage was sent for a team and holiday
+// date; recording the same stage again changes nothing.
 func (r *holidayAvailabilityRepository) RecordReminder(ctx context.Context, teamKey, date, stage string) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO team_schedule_holiday_reminder_sent (team_key, holiday_date, stage, sent_on)

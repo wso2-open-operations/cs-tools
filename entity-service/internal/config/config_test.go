@@ -1533,6 +1533,9 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	}
 }
 
+// TestConfig_Validate_PublicHolidaySourcesAllOrNothing checks that the holiday
+// calendar and HR entity connections each validate only when all four settings
+// are given or none are.
 func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
 	type set struct{ base, token, id, secret string }
 	cases := []struct {

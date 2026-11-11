@@ -207,6 +207,7 @@ func (m *mockEntityScheduleClient) SearchScheduleEngagementAllocations(ctx conte
 	return []byte(`{"allocations":[],"count":0}`), nil
 }
 
+// SearchSchedulePublicHolidays returns holidaysFn's answer, or an empty holiday list when none is set.
 func (m *mockEntityScheduleClient) SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
 	if m.holidaysFn != nil {
 		return m.holidaysFn(ctx, body)
@@ -214,6 +215,7 @@ func (m *mockEntityScheduleClient) SearchSchedulePublicHolidays(ctx context.Cont
 	return []byte(`{"holidays":[],"count":0}`), nil
 }
 
+// SearchHolidayAvailability returns availFn's answer, or an empty holiday list when none is set.
 func (m *mockEntityScheduleClient) SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error) {
 	if m.availFn != nil {
 		return m.availFn(ctx, body)
@@ -221,6 +223,7 @@ func (m *mockEntityScheduleClient) SearchHolidayAvailability(ctx context.Context
 	return []byte(`{"holidays":[],"count":0}`), nil
 }
 
+// ConfirmHolidayAvailability calls confirmFn with confirm=true, or returns an empty object when none is set.
 func (m *mockEntityScheduleClient) ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
 	if m.confirmFn != nil {
 		return m.confirmFn(ctx, teamKey, date, true)
@@ -228,6 +231,7 @@ func (m *mockEntityScheduleClient) ConfirmHolidayAvailability(ctx context.Contex
 	return []byte(`{}`), nil
 }
 
+// WithdrawHolidayAvailability calls confirmFn with confirm=false, or returns an empty object when none is set.
 func (m *mockEntityScheduleClient) WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
 	if m.confirmFn != nil {
 		return m.confirmFn(ctx, teamKey, date, false)
@@ -914,6 +918,8 @@ func TestDismissScheduleEngagementAllocation(t *testing.T) {
 	})
 }
 
+// TestSearchSchedulePublicHolidays pins that the public holiday search needs a signed-in
+// user, forwards the body and the answer unchanged, and maps an upstream failure to a 5xx.
 func TestSearchSchedulePublicHolidays(t *testing.T) {
 	const path = "/team-schedule/public-holidays/search"
 	const payload = `{"userIds":["00000000-0000-0000-0000-000000000000"],"from":"2026-11-01","to":"2026-11-30"}`
@@ -953,6 +959,8 @@ func TestSearchSchedulePublicHolidays(t *testing.T) {
 	})
 }
 
+// TestHolidayAvailability pins the holiday availability handlers: search forwards unchanged,
+// confirm and withdraw pass the team and day, and a refusal keeps entity-service's words out of the log.
 func TestHolidayAvailability(t *testing.T) {
 	t.Run("search forwards unchanged", func(t *testing.T) {
 		const payload = `{"from":"2026-11-01","to":"2026-11-30"}`

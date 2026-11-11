@@ -87,11 +87,14 @@ func NewHolidayAvailabilityService(repo repository.HolidayAvailabilityRepository
 	return &holidayAvailabilityService{repo: repo, holidays: holidays, access: access, authorize: authorize, zone: zone, now: time.Now}
 }
 
+// today is the current date on the rota's own calendar, as midnight UTC.
 func (s *holidayAvailabilityService) today() time.Time {
 	n := s.now().In(s.zone)
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 
+// PlaceUpcoming removes tags of cancelled holidays, then places a holiday tag on
+// each CRE member for every weekday holiday of their country in the lead window.
 func (s *holidayAvailabilityService) PlaceUpcoming(ctx context.Context) (domain.HolidayTagPlacementResult, error) {
 	res := domain.HolidayTagPlacementResult{}
 	from := s.today()
@@ -152,6 +155,8 @@ func (s *holidayAvailabilityService) PlaceUpcoming(ctx context.Context) (domain.
 	return res, nil
 }
 
+// Search returns each team's availability on every holiday in the requested
+// window, for internal staff only.
 func (s *holidayAvailabilityService) Search(ctx context.Context, req domain.SearchHolidayAvailabilityRequest) (domain.HolidayAvailabilityResponse, error) {
 	empty := domain.HolidayAvailabilityResponse{Holidays: []domain.HolidayAvailability{}}
 	if err := RequireInternalCaller(ctx, s.access, "the team schedule is only available to internal staff"); err != nil {
@@ -332,6 +337,8 @@ func (s *holidayAvailabilityService) changeable(ctx context.Context, teamKey, da
 	return nil
 }
 
+// Confirm records the team's availability on a holiday as confirmed, refusing
+// while a rota turn that day has nobody available.
 func (s *holidayAvailabilityService) Confirm(ctx context.Context, teamKey, date string) (domain.HolidayAvailability, error) {
 	if err := s.changeable(ctx, teamKey, date); err != nil {
 		return domain.HolidayAvailability{}, err
@@ -357,6 +364,8 @@ func (s *holidayAvailabilityService) Confirm(ctx context.Context, teamKey, date 
 	return s.one(ctx, teamKey, date)
 }
 
+// Withdraw removes a team's confirmation for a holiday, returning NotFound when
+// none was recorded.
 func (s *holidayAvailabilityService) Withdraw(ctx context.Context, teamKey, date string) (domain.HolidayAvailability, error) {
 	if err := s.changeable(ctx, teamKey, date); err != nil {
 		return domain.HolidayAvailability{}, err
@@ -408,6 +417,7 @@ func holidayReminderStage(today, day time.Time) string {
 	return due
 }
 
+// validHolidayStage reports whether stage is one of the known reminder stages.
 func validHolidayStage(stage string) bool {
 	switch stage {
 	case domain.HolidayReminderNotice, domain.HolidayReminderWeek, domain.HolidayReminderTwoDays, domain.HolidayReminderOneDay:
@@ -416,6 +426,9 @@ func validHolidayStage(stage string) bool {
 	return false
 }
 
+// DueReminders lists the holiday reminders due today that have not been sent,
+// with each team's recipients. The notice always goes; follow-ups only while
+// the team is not fully marked.
 func (s *holidayAvailabilityService) DueReminders(ctx context.Context, req domain.DueHolidayRemindersRequest) (domain.DueHolidayRemindersResponse, error) {
 	resp := domain.DueHolidayRemindersResponse{Reminders: []domain.DueHolidayReminder{}}
 	if err := RequireInternalCaller(ctx, s.access, "the team schedule is only available to internal staff"); err != nil {
@@ -473,6 +486,8 @@ func (s *holidayAvailabilityService) DueReminders(ctx context.Context, req domai
 	return resp, nil
 }
 
+// RecordReminder validates the team, date and stage, then records that the
+// reminder for that stage was sent.
 func (s *holidayAvailabilityService) RecordReminder(ctx context.Context, teamKey, date, stage string) error {
 	if err := RequireInternalCaller(ctx, s.access, "the team schedule is only available to internal staff"); err != nil {
 		return err

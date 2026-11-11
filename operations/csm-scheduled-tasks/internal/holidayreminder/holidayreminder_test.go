@@ -38,11 +38,13 @@ type fakeClient struct {
 	adminCalls int
 }
 
+// DueHolidayReminders notes the day it was asked about and returns the canned reminders.
 func (f *fakeClient) DueHolidayReminders(_ context.Context, today string) ([]teamschedule.DueHolidayReminder, error) {
 	f.asked = today
 	return f.due, nil
 }
 
+// RecordHolidayReminder stores the team, date and stage it was given, or returns the configured error.
 func (f *fakeClient) RecordHolidayReminder(_ context.Context, team, date, stage string) error {
 	if f.recordErr != nil {
 		return f.recordErr
@@ -51,6 +53,7 @@ func (f *fakeClient) RecordHolidayReminder(_ context.Context, team, date, stage 
 	return nil
 }
 
+// RotaAdmins counts the call and returns the canned rota admins, or the configured error.
 func (f *fakeClient) RotaAdmins(context.Context, string) ([]teamschedule.RotaAdmin, error) {
 	f.adminCalls++
 	if f.adminsErr != nil {
@@ -69,6 +72,7 @@ type fakeSender struct {
 	fail  bool
 }
 
+// SendEmail records the mail it was given, or fails when the fake is set to fail.
 func (f *fakeSender) SendEmail(_ context.Context, to, _ []string, subject, body string) error {
 	if f.fail {
 		return errors.New("down")
@@ -77,6 +81,7 @@ func (f *fakeSender) SendEmail(_ context.Context, to, _ []string, subject, body 
 	return nil
 }
 
+// reminder builds a due reminder of the given stage for the Atlas team's holiday, addressed to the given recipients.
 func reminder(stage string, recipients ...teamschedule.HolidayRecipient) teamschedule.DueHolidayReminder {
 	return teamschedule.DueHolidayReminder{
 		Stage: stage, DaysBefore: 14,
@@ -94,6 +99,7 @@ func reminder(stage string, recipients ...teamschedule.HolidayRecipient) teamsch
 
 var colombo = func() *time.Location { z, _ := time.LoadLocation("Asia/Colombo"); return z }()
 
+// TestRun_SendsAndRecordsEachReminder pins that a due reminder is emailed to its lead with the holiday details and then recorded once.
 func TestRun_SendsAndRecordsEachReminder(t *testing.T) {
 	c := &fakeClient{due: []teamschedule.DueHolidayReminder{
 		reminder("notice", teamschedule.HolidayRecipient{Name: "Lead One", Email: "lead@example.com", Role: "lead"}),
@@ -127,6 +133,8 @@ func TestRun_SendsAndRecordsEachReminder(t *testing.T) {
 	}
 }
 
+// TestRun_NoLeadGoesToRotaAdmins_RedirectAndFailures pins that a team with no lead goes to the rota admins,
+// that the redirect inbox is honoured, that a failed send fails the run unrecorded, and that disabled emails do nothing.
 func TestRun_NoLeadGoesToRotaAdmins_RedirectAndFailures(t *testing.T) {
 	c := &fakeClient{due: []teamschedule.DueHolidayReminder{reminder("one_day")},
 		admins: []teamschedule.RotaAdmin{{Name: "Admin", Email: "admin@example.com"}}}
@@ -156,6 +164,7 @@ func TestRun_NoLeadGoesToRotaAdmins_RedirectAndFailures(t *testing.T) {
 	}
 }
 
+// TestRun_SentButNotRecordedFailsTheRun pins that a reminder sent but not recorded fails the run with an error saying so.
 func TestRun_SentButNotRecordedFailsTheRun(t *testing.T) {
 	c := &fakeClient{due: []teamschedule.DueHolidayReminder{reminder("week", teamschedule.HolidayRecipient{Email: "l@example.com"})},
 		recordErr: errors.New("entity service down")}
@@ -172,6 +181,8 @@ func TestRun_SentButNotRecordedFailsTheRun(t *testing.T) {
 	}
 }
 
+// TestRun_UnreadableRotaAdminsIsNamedAndTriedAgain pins that a failed rota admins read fails the run naming the
+// cause, and is read again for the next reminder rather than cached.
 func TestRun_UnreadableRotaAdminsIsNamedAndTriedAgain(t *testing.T) {
 	second := reminder("week")
 	second.Availability.TeamKey, second.Availability.TeamName = "nova", "Nova"

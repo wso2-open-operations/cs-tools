@@ -251,6 +251,9 @@ func (h *ScheduleHandler) WithdrawHolidayAvailability(w http.ResponseWriter, r *
 	h.holidayConfirmation(w, r, false)
 }
 
+// holidayConfirmation is the shared body of the confirm and withdraw handlers: it
+// checks the caller, the team key and the date, then confirms or withdraws the
+// team's availability for that day and passes the entity-service answer through.
 func (h *ScheduleHandler) holidayConfirmation(w http.ResponseWriter, r *http.Request, confirm bool) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {

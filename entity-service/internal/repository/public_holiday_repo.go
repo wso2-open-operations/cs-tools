@@ -68,6 +68,8 @@ SELECT u.id::text,
  GROUP BY u.id, u.email
  ORDER BY u.id`
 
+// SchedulePeople returns team members with their team keys and stored
+// location, limited to the given users or every member when none are given.
 func (r *publicHolidayRepository) SchedulePeople(ctx context.Context, userIDs []string) ([]domain.SchedulePerson, error) {
 	if userIDs == nil {
 		userIDs = []string{}
@@ -88,6 +90,8 @@ func (r *publicHolidayRepository) SchedulePeople(ctx context.Context, userIDs []
 	return out, rows.Err()
 }
 
+// IndiaTeamKey returns the key of the team the ALLO_IND absence kind moves
+// people to, or an empty string when there is none.
 func (r *publicHolidayRepository) IndiaTeamKey(ctx context.Context) (string, error) {
 	var key *string
 	err := r.db.QueryRow(ctx,
@@ -104,6 +108,8 @@ func (r *publicHolidayRepository) IndiaTeamKey(ctx context.Context) (string, err
 	return *key, nil
 }
 
+// UpsertPersonLocation stores a person's location and when it was fetched,
+// replacing any earlier one.
 func (r *publicHolidayRepository) UpsertPersonLocation(ctx context.Context, userID, location string, at time.Time) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO team_schedule_person_location (user_id, location, fetched_on)
@@ -143,6 +149,8 @@ func mergeHolidayDays(days []domain.PublicHolidayDay) (dates, titles []string) {
 	return dates, titles
 }
 
+// ReplaceCountryRange makes a country's stored holidays in a date range match
+// days, in one transaction, and returns how many fall inside the range.
 func (r *publicHolidayRepository) ReplaceCountryRange(ctx context.Context, country string, from, to time.Time, days []domain.PublicHolidayDay, at time.Time) (int, error) {
 	dates, titles := mergeHolidayDays(days)
 	if dates == nil {
@@ -182,6 +190,8 @@ func (r *publicHolidayRepository) ReplaceCountryRange(ctx context.Context, count
 	return stored, nil
 }
 
+// HolidaysBetween returns the stored holidays of the given countries between
+// two dates, ordered by date and country.
 func (r *publicHolidayRepository) HolidaysBetween(ctx context.Context, countries []string, from, to time.Time) ([]domain.PublicHolidayDay, error) {
 	if len(countries) == 0 {
 		return nil, nil

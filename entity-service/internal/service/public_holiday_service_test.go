@@ -43,6 +43,7 @@ type fakePublicHolidayRepo struct {
 	replaced  []string // "country:from"
 }
 
+// SchedulePeople returns the fake's people, with stored locations applied, limited to ids when given.
 func (f *fakePublicHolidayRepo) SchedulePeople(_ context.Context, ids []string) ([]domain.SchedulePerson, error) {
 	var out []domain.SchedulePerson
 	for _, p := range f.people {
@@ -62,8 +63,10 @@ func (f *fakePublicHolidayRepo) SchedulePeople(_ context.Context, ids []string) 
 	return out, nil
 }
 
+// IndiaTeamKey returns the fake's configured India team key.
 func (f *fakePublicHolidayRepo) IndiaTeamKey(context.Context) (string, error) { return f.indiaKey, nil }
 
+// UpsertPersonLocation remembers the person's location in the fake.
 func (f *fakePublicHolidayRepo) UpsertPersonLocation(_ context.Context, userID, loc string, _ time.Time) error {
 	if f.locations == nil {
 		f.locations = map[string]string{}
@@ -72,6 +75,7 @@ func (f *fakePublicHolidayRepo) UpsertPersonLocation(_ context.Context, userID, 
 	return nil
 }
 
+// ReplaceCountryRange records the replacement and appends the days to the country's stored holidays.
 func (f *fakePublicHolidayRepo) ReplaceCountryRange(_ context.Context, country string, from, _ time.Time, days []domain.PublicHolidayDay, _ time.Time) (int, error) {
 	if f.stored == nil {
 		f.stored = map[string][]domain.PublicHolidayDay{}
@@ -81,6 +85,7 @@ func (f *fakePublicHolidayRepo) ReplaceCountryRange(_ context.Context, country s
 	return len(days), nil
 }
 
+// HolidaysBetween returns the stored holidays of the given countries dated in the range, sorted by date.
 func (f *fakePublicHolidayRepo) HolidaysBetween(_ context.Context, countries []string, from, to time.Time) ([]domain.PublicHolidayDay, error) {
 	var out []domain.PublicHolidayDay
 	for _, c := range countries {
@@ -100,6 +105,7 @@ type fakeCalendar struct {
 	calls     []string
 }
 
+// Holidays records the call and returns the country's holidays for the year, or an error when the country is set to fail.
 func (f *fakeCalendar) Holidays(_ context.Context, country string, from, _ time.Time) ([]holidays.Holiday, error) {
 	f.calls = append(f.calls, country+":"+from.Format("2006"))
 	if f.fail[country] {
@@ -116,6 +122,7 @@ func (f *fakeCalendar) Holidays(_ context.Context, country string, from, _ time.
 
 type fakeEmployees map[string]string // email -> location ("!" = error)
 
+// Location returns the email's location, not-found when absent, or an error when the location is "!".
 func (f fakeEmployees) Location(_ context.Context, email string) (string, error) {
 	loc, ok := f[email]
 	if !ok {
@@ -127,6 +134,7 @@ func (f fakeEmployees) Location(_ context.Context, email string) (string, error)
 	return loc, nil
 }
 
+// basePeople returns three test people: two on the nova team and one on the phoenix team.
 func basePeople() []domain.SchedulePerson {
 	return []domain.SchedulePerson{
 		{UserID: lkUser, Email: "lk@example.com", TeamKeys: []string{"nova"}},
@@ -135,6 +143,7 @@ func basePeople() []domain.SchedulePerson {
 	}
 }
 
+// TestHolidayCountryFor checks that a stored location wins, then the India team, then the Sri Lanka fallback.
 func TestHolidayCountryFor(t *testing.T) {
 	cases := []struct {
 		p       domain.SchedulePerson
@@ -155,6 +164,8 @@ func TestHolidayCountryFor(t *testing.T) {
 	}
 }
 
+// TestPublicHolidayRefresh_LocationsCountriesAndYears checks that a refresh updates locations, covers the
+// right countries and two years, and keeps a year that comes back empty.
 func TestPublicHolidayRefresh_LocationsCountriesAndYears(t *testing.T) {
 	repo := &fakePublicHolidayRepo{people: basePeople(), indiaKey: "phoenix"}
 	cal := &fakeCalendar{byCountry: map[string][]holidays.Holiday{
@@ -191,6 +202,8 @@ func TestPublicHolidayRefresh_LocationsCountriesAndYears(t *testing.T) {
 	}
 }
 
+// TestPublicHolidayRefresh_CalendarFailureKeepsStoredDays checks that a failed calendar read counts as a
+// failure and leaves the stored days for that country untouched.
 func TestPublicHolidayRefresh_CalendarFailureKeepsStoredDays(t *testing.T) {
 	repo := &fakePublicHolidayRepo{people: basePeople(), indiaKey: "phoenix",
 		stored: map[string][]domain.PublicHolidayDay{"India": {{Country: "India", Date: "2026-01-26", Title: "Republic Day"}}}}
@@ -210,6 +223,8 @@ func TestPublicHolidayRefresh_CalendarFailureKeepsStoredDays(t *testing.T) {
 	}
 }
 
+// TestPublicHolidayRefresh_UnconfiguredWritesNothing checks that with no calendar or employee source a
+// refresh writes nothing and falls back to Sri Lanka.
 func TestPublicHolidayRefresh_UnconfiguredWritesNothing(t *testing.T) {
 	repo := &fakePublicHolidayRepo{people: basePeople()}
 	res, err := NewPublicHolidayService(repo, alwaysUnrestrictedAccess{}, nil, nil).Refresh(context.Background())
@@ -225,6 +240,8 @@ func TestPublicHolidayRefresh_UnconfiguredWritesNothing(t *testing.T) {
 	}
 }
 
+// TestPublicHolidayRefresh_OneAtATime checks that while a refresh is running, a second one is refused
+// with a conflict and a background one does not start.
 func TestPublicHolidayRefresh_OneAtATime(t *testing.T) {
 	svc := NewPublicHolidayService(&fakePublicHolidayRepo{}, alwaysUnrestrictedAccess{}, nil, nil).(*publicHolidayService)
 	svc.running.Lock()
@@ -238,6 +255,8 @@ func TestPublicHolidayRefresh_OneAtATime(t *testing.T) {
 	}
 }
 
+// TestPublicHolidaySearch_OnlyThePeopleItAppliesTo checks that Search returns each holiday only for the
+// people of its country, sorted by date, with where the country came from.
 func TestPublicHolidaySearch_OnlyThePeopleItAppliesTo(t *testing.T) {
 	repo := &fakePublicHolidayRepo{people: basePeople(), indiaKey: "phoenix",
 		locations: map[string]string{frUser: "France"},
@@ -263,6 +282,8 @@ func TestPublicHolidaySearch_OnlyThePeopleItAppliesTo(t *testing.T) {
 	}
 }
 
+// TestPublicHolidaySearch_Validation checks that Search rejects missing or malformed user ids and bad
+// windows, and refuses a restricted caller.
 func TestPublicHolidaySearch_Validation(t *testing.T) {
 	svc := NewPublicHolidayService(&fakePublicHolidayRepo{}, alwaysUnrestrictedAccess{}, nil, nil)
 	bad := []domain.SearchSchedulePublicHolidaysRequest{

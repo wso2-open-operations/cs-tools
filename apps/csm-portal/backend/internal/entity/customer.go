@@ -775,6 +775,8 @@ func (c *CustomerEntityClient) WithdrawHolidayAvailability(ctx context.Context, 
 	return c.do(ctx, http.MethodDelete, holidayConfirmationPath(teamKey, date), nil)
 }
 
+// holidayConfirmationPath returns the entity-service path of a team's holiday
+// availability confirmation for one day, with both segments path-escaped.
 func holidayConfirmationPath(teamKey, date string) string {
 	return "/team-schedule/holiday-availability/" + url.PathEscape(teamKey) + "/" + url.PathEscape(date) + "/confirmation"
 }

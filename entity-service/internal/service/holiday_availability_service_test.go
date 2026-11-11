@@ -43,10 +43,12 @@ type fakeHolidayRepo struct {
 	removed       int
 }
 
+// CREMembers returns the fake's configured CRE members.
 func (f *fakeHolidayRepo) CREMembers(context.Context) ([]domain.SchedulePerson, error) {
 	return f.members, nil
 }
 
+// PlaceHolidayTag stores a placed tag unless the person already has one or another tag that day.
 func (f *fakeHolidayRepo) PlaceHolidayTag(_ context.Context, p domain.HolidayTagPlacement) (bool, error) {
 	for _, r := range f.placed {
 		if r.UserID == p.UserID && r.Date == p.Date {
@@ -63,10 +65,12 @@ func (f *fakeHolidayRepo) PlaceHolidayTag(_ context.Context, p domain.HolidayTag
 	return true, nil
 }
 
+// RemoveCancelledHolidayTags reports the fake's configured removed count without changing anything.
 func (f *fakeHolidayRepo) RemoveCancelledHolidayTags(context.Context, string) (int, error) {
 	return f.removed, nil
 }
 
+// PlacedBetween returns the placed tags dated in the range, limited to the given teams when any are named.
 func (f *fakeHolidayRepo) PlacedBetween(_ context.Context, from, to string, teams []string) ([]domain.HolidayPlacedRow, error) {
 	var out []domain.HolidayPlacedRow
 	for _, p := range f.placed {
@@ -78,6 +82,7 @@ func (f *fakeHolidayRepo) PlacedBetween(_ context.Context, from, to string, team
 	return out, nil
 }
 
+// TurnsBetween returns the configured rota turns dated in the range for the given teams.
 func (f *fakeHolidayRepo) TurnsBetween(_ context.Context, from, to string, teams []string) ([]domain.HolidayTurn, error) {
 	var out []domain.HolidayTurn
 	for _, t := range f.turns {
@@ -88,6 +93,7 @@ func (f *fakeHolidayRepo) TurnsBetween(_ context.Context, from, to string, teams
 	return out, nil
 }
 
+// ConfirmationsBetween returns the stored confirmations dated in the range.
 func (f *fakeHolidayRepo) ConfirmationsBetween(_ context.Context, from, to string, _ []string) ([]domain.HolidayConfirmationRow, error) {
 	var out []domain.HolidayConfirmationRow
 	for _, c := range f.confirmations {
@@ -98,6 +104,7 @@ func (f *fakeHolidayRepo) ConfirmationsBetween(_ context.Context, from, to strin
 	return out, nil
 }
 
+// Confirm stores a confirmation for the team and date and returns it.
 func (f *fakeHolidayRepo) Confirm(_ context.Context, team, date, by string) (domain.HolidayConfirmationRow, error) {
 	if f.confirmations == nil {
 		f.confirmations = map[string]domain.HolidayConfirmationRow{}
@@ -107,6 +114,7 @@ func (f *fakeHolidayRepo) Confirm(_ context.Context, team, date, by string) (dom
 	return c, nil
 }
 
+// Withdraw removes the stored confirmation and reports whether one existed.
 func (f *fakeHolidayRepo) Withdraw(_ context.Context, team, date string) (bool, error) {
 	k := strings.ToLower(team) + date
 	_, ok := f.confirmations[k]
@@ -114,14 +122,17 @@ func (f *fakeHolidayRepo) Withdraw(_ context.Context, team, date string) (bool, 
 	return ok, nil
 }
 
+// ReminderRecipients returns the fake's configured recipients for any team.
 func (f *fakeHolidayRepo) ReminderRecipients(context.Context, string) ([]domain.HolidayReminderRecipient, error) {
 	return f.recipients, nil
 }
 
+// SentStages returns the reminder stages recorded as sent, keyed by team and date.
 func (f *fakeHolidayRepo) SentStages(context.Context, string, string) (map[string][]string, error) {
 	return f.sent, nil
 }
 
+// RecordReminder appends the stage to the sent stages for the team and date.
 func (f *fakeHolidayRepo) RecordReminder(_ context.Context, team, date, stage string) error {
 	if f.sent == nil {
 		f.sent = map[string][]string{}
@@ -144,16 +155,20 @@ func leadsAtlasOnly(ctx context.Context, team string) error {
 	return &apierror.ForbiddenError{Msg: "no"}
 }
 
+// asUser returns a context carrying a validated user identity with the given email.
 func asUser(email string) context.Context {
 	return auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: email})
 }
 
+// newHolidaySvc builds the availability service over the fakes with its clock fixed at now.
 func newHolidaySvc(repo *fakeHolidayRepo, holidays *fakePublicHolidayRepo, now time.Time) *holidayAvailabilityService {
 	svc := NewHolidayAvailabilityService(repo, holidays, alwaysUnrestrictedAccess{}, leadsAtlasOnly, time.UTC).(*holidayAvailabilityService)
 	svc.now = func() time.Time { return now }
 	return svc
 }
 
+// TestPlaceUpcoming_PlacesWeekdayHolidaysOncePerPersonAndSkipsTaggedDays checks that
+// only in-window weekday holidays are placed, once per person, and that a day already tagged is skipped.
 func TestPlaceUpcoming_PlacesWeekdayHolidaysOncePerPersonAndSkipsTaggedDays(t *testing.T) {
 	repo := &fakeHolidayRepo{
 		members: []domain.SchedulePerson{
@@ -211,6 +226,8 @@ func atlasOnPoya() *fakeHolidayRepo {
 	}
 }
 
+// TestSearch_MemberStatusesTurnsAndCanConfirm checks the member statuses, turn counts,
+// uncovered turns and the per-caller CanConfirm flag that Search reports.
 func TestSearch_MemberStatusesTurnsAndCanConfirm(t *testing.T) {
 	repo := atlasOnPoya()
 	svc := newHolidaySvc(repo, &fakePublicHolidayRepo{}, time.Date(2026, 11, 10, 3, 30, 0, 0, time.UTC))
@@ -243,6 +260,8 @@ func TestSearch_MemberStatusesTurnsAndCanConfirm(t *testing.T) {
 	}
 }
 
+// TestConfirm_RefusedWhileATurnIsUncoveredThenFullyMarked checks that Confirm is refused while a turn
+// has nobody, succeeds once covered, turns to needs-attention if a turn is lost, and can be withdrawn once.
 func TestConfirm_RefusedWhileATurnIsUncoveredThenFullyMarked(t *testing.T) {
 	repo := atlasOnPoya()
 	svc := newHolidaySvc(repo, &fakePublicHolidayRepo{}, time.Date(2026, 11, 10, 3, 30, 0, 0, time.UTC))
@@ -280,6 +299,8 @@ func TestConfirm_RefusedWhileATurnIsUncoveredThenFullyMarked(t *testing.T) {
 	}
 }
 
+// TestConfirm_Refusals checks that Confirm is refused for a caller who may not change the team's rota,
+// a service credential, a past holiday, and a day with no holiday.
 func TestConfirm_Refusals(t *testing.T) {
 	repo := atlasOnPoya()
 	repo.turns[0].Away = false
@@ -301,6 +322,8 @@ func TestConfirm_Refusals(t *testing.T) {
 	}
 }
 
+// TestHolidayReminderStage checks which reminder stage is due on each day before a holiday,
+// including the working-day rule for the two-day and one-day stages.
 func TestHolidayReminderStage(t *testing.T) {
 	d := func(s string) time.Time { v, _ := time.Parse(time.DateOnly, s); return v }
 	// Monday 2026-11-30: notice Mon 16th, week Mon 23rd, two days Thu 26th,
@@ -327,6 +350,8 @@ func TestHolidayReminderStage(t *testing.T) {
 	}
 }
 
+// TestDueReminders_NoticeAlwaysFollowUpsOnlyUntilFullyMarked checks that the notice is sent once,
+// follow-ups stop when the team is fully marked, and an unknown stage cannot be recorded.
 func TestDueReminders_NoticeAlwaysFollowUpsOnlyUntilFullyMarked(t *testing.T) {
 	repo := atlasOnPoya()
 	svc := newHolidaySvc(repo, &fakePublicHolidayRepo{}, time.Date(2026, 11, 2, 3, 30, 0, 0, time.UTC))

@@ -45,6 +45,7 @@ const (
 	phMemberEmail = "ph-member@example.com"
 )
 
+// phPool opens a pool on ENTITY_TEST_DATABASE_URL, skipping the test when it is not set.
 func phPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
@@ -137,6 +138,10 @@ func seedHolidayTeam(t *testing.T, pool *pgxpool.Pool, day string) {
 		phActor, phMemberID, phTeamID, phTeamKey, day)
 }
 
+// TestHolidayAvailabilityRepository_PlaceReadConfirmRemind walks the holiday
+// availability repository against a live database: placing tags once, reading
+// them and the turns, confirming and withdrawing, reminders, and cleanup after
+// the holiday is cancelled.
 func TestHolidayAvailabilityRepository_PlaceReadConfirmRemind(t *testing.T) {
 	pool := phPool(t)
 	ctx := context.Background()

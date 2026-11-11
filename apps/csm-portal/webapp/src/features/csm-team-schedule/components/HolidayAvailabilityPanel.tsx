@@ -24,10 +24,12 @@ import type { HolidayAvailability, HolidayAvailabilityMember, HolidayAvailabilit
 /** How far ahead the panel looks: the server places the tags three weeks ahead. */
 export const HOLIDAY_LOOKAHEAD_DAYS = 21;
 
+/** Formats a Date as a local YYYY-MM-DD calendar day. */
 function isoDay(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Turns a YYYY-MM-DD day into a short readable label such as "Mon, 16 Nov". */
 function longDay(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
@@ -40,6 +42,7 @@ const STATUS_LABEL: Record<HolidayAvailabilityStatus, string> = {
   NEEDS_ATTENTION: "Needs attention",
 };
 
+/** Says what a member is doing on the holiday: off, working, or away (with the kind of leave). */
 function memberLabel(m: HolidayAvailabilityMember): string {
   if (m.status === "TAGGED") return "Off";
   if (m.status === "AVAILABLE") return "Working";
@@ -60,6 +63,7 @@ function nextStep(h: HolidayAvailability): string {
   }
 }
 
+/** One team's line for a holiday: its status and counts, with the member list and the confirm and make-available actions when opened. */
 function HolidayTeamRow({ h }: { h: HolidayAvailability }): JSX.Element {
   const [open, setOpen] = useState(h.canConfirm && !h.fullyMarked);
   const confirm = useHolidayConfirmation();

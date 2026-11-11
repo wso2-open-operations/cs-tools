@@ -152,6 +152,7 @@ func Run(client Client, email EmailSender, cfg Config) func(ctx context.Context)
 	}
 }
 
+// emailsOf returns the recipients' email addresses, trimmed, leaving out blank ones.
 func emailsOf(rs []teamschedule.HolidayRecipient) []string {
 	var out []string
 	for _, r := range rs {
@@ -162,6 +163,8 @@ func emailsOf(rs []teamschedule.HolidayRecipient) []string {
 	return out
 }
 
+// namesOf returns the greeting for the recipients: the one name when there is one,
+// "all" when there are several, and "team leads" when none has a name.
 func namesOf(rs []teamschedule.HolidayRecipient) string {
 	var names []string
 	for _, r := range rs {
@@ -178,6 +181,7 @@ func namesOf(rs []teamschedule.HolidayRecipient) string {
 	return "all"
 }
 
+// holidayDay formats a YYYY-MM-DD date as "Monday, 2 January 2006", or returns it unchanged when it does not parse.
 func holidayDay(date string) string {
 	d, err := time.Parse(time.DateOnly, date)
 	if err != nil {
@@ -210,6 +214,7 @@ func Subject(r teamschedule.DueHolidayReminder) string {
 	return fmt.Sprintf("[CRE] Reminder: mark who works on %s (%s)", day, r.Availability.TeamName)
 }
 
+// memberStatus is the wording for a member's status in the email's table.
 func memberStatus(m teamschedule.HolidayMember) string {
 	switch m.Status {
 	case "TAGGED":

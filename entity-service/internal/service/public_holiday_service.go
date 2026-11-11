@@ -118,6 +118,8 @@ func holidayCountryFor(p domain.SchedulePerson, indiaTeamKey string) (country, s
 	return domain.PublicHolidayCountrySriLanka, domain.PublicHolidayCountryFromTeam
 }
 
+// Search returns the stored public holidays that apply to the requested people
+// in the window, each with the country it was chosen by and where that came from.
 func (s *publicHolidayService) Search(ctx context.Context, req domain.SearchSchedulePublicHolidaysRequest) (domain.SchedulePublicHolidaysResponse, error) {
 	empty := domain.SchedulePublicHolidaysResponse{Holidays: []domain.SchedulePublicHoliday{}}
 	if err := RequireInternalCaller(ctx, s.access, "the team schedule is only available to internal staff"); err != nil {
@@ -181,6 +183,8 @@ func (s *publicHolidayService) Search(ctx context.Context, req domain.SearchSche
 	return domain.SchedulePublicHolidaysResponse{Holidays: out, Count: len(out)}, nil
 }
 
+// Refresh runs one holiday refresh and records its result, refusing with a
+// conflict when another refresh is already running.
 func (s *publicHolidayService) Refresh(ctx context.Context) (domain.PublicHolidayRefreshResult, error) {
 	if !s.running.TryLock() {
 		return domain.PublicHolidayRefreshResult{}, &apierror.ConflictError{Msg: "a public holiday refresh is already running"}
@@ -189,6 +193,9 @@ func (s *publicHolidayService) Refresh(ctx context.Context) (domain.PublicHolida
 	return s.refreshAndRecord(ctx)
 }
 
+// refresh updates stored member locations, works out the countries in use, and
+// replaces each country's holidays for this and next year from the calendar.
+// A failed or empty country-year keeps what is stored.
 func (s *publicHolidayService) refresh(ctx context.Context) (domain.PublicHolidayRefreshResult, error) {
 	now := s.now().UTC()
 	res := domain.PublicHolidayRefreshResult{
@@ -289,6 +296,8 @@ func (s *publicHolidayService) refresh(ctx context.Context) (domain.PublicHolida
 	return res, nil
 }
 
+// RefreshInBackground starts a refresh in a goroutine and returns true, or
+// returns false without starting one when a refresh is already running.
 func (s *publicHolidayService) RefreshInBackground() bool {
 	if !s.running.TryLock() {
 		return false
@@ -303,6 +312,8 @@ func (s *publicHolidayService) RefreshInBackground() bool {
 	return true
 }
 
+// refreshAndRecord runs a refresh and, when it succeeds, places holiday tags
+// and keeps the result as the last refresh.
 func (s *publicHolidayService) refreshAndRecord(ctx context.Context) (domain.PublicHolidayRefreshResult, error) {
 	res, err := s.refresh(ctx)
 	if err == nil {
@@ -314,6 +325,8 @@ func (s *publicHolidayService) refreshAndRecord(ctx context.Context) (domain.Pub
 	return res, err
 }
 
+// logRun logs the outcome of a background refresh: the error, or a summary of
+// the last stored result.
 func (s *publicHolidayService) logRun(ctx context.Context, err error) {
 	if err != nil {
 		slog.ErrorContext(ctx, "public holidays: refresh failed", "err", err)
@@ -326,6 +339,8 @@ func (s *publicHolidayService) logRun(ctx context.Context, err error) {
 	}
 }
 
+// LastRefresh returns a copy of the most recent successful refresh result, or
+// nil when none has completed yet.
 func (s *publicHolidayService) LastRefresh() *domain.PublicHolidayRefreshResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()

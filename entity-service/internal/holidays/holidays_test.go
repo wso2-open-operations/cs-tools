@@ -50,10 +50,13 @@ func fakeServer(t *testing.T, api http.HandlerFunc) (*httptest.Server, *int32) {
 	return srv, &tokens
 }
 
+// creds returns test credentials that point at the fake server's token endpoint.
 func creds(srv *httptest.Server) Credentials {
 	return Credentials{TokenURL: srv.URL + "/token", ClientID: "id", ClientSecret: "secret"}
 }
 
+// TestCalendarClient_Holidays checks the request the client sends and that
+// all-day events expand to one holiday per day while timed events are skipped.
 func TestCalendarClient_Holidays(t *testing.T) {
 	srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/holidays" {
@@ -90,6 +93,8 @@ func TestCalendarClient_Holidays(t *testing.T) {
 	}
 }
 
+// TestCalendarClient_EmptyAndErrors checks that an empty answer gives no
+// holidays and a 502 from the calendar service is returned as an error.
 func TestCalendarClient_EmptyAndErrors(t *testing.T) {
 	status := http.StatusOK
 	srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +112,8 @@ func TestCalendarClient_EmptyAndErrors(t *testing.T) {
 	}
 }
 
+// TestCalendarClient_RefreshesTokenOn401 checks that a 401 makes the client
+// fetch a new token and retry the request once.
 func TestCalendarClient_RefreshesTokenOn401(t *testing.T) {
 	var calls int32
 	srv, tokens := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +132,8 @@ func TestCalendarClient_RefreshesTokenOn401(t *testing.T) {
 	}
 }
 
+// TestExpandEvents_EndNotAfterStartIsOneDay checks that an all-day event whose
+// end is not after its start becomes a single day, with the title trimmed.
 func TestExpandEvents_EndNotAfterStartIsOneDay(t *testing.T) {
 	ev := calendarEvent{Summary: " Poya "}
 	ev.Start.Date = "2026-06-29"
@@ -135,6 +144,8 @@ func TestExpandEvents_EndNotAfterStartIsOneDay(t *testing.T) {
 	}
 }
 
+// TestEmployeeClient_Location checks that Location trims the returned location,
+// gives an empty string for none, reports GraphQL errors and an unknown employee.
 func TestEmployeeClient_Location(t *testing.T) {
 	srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
