@@ -46,7 +46,7 @@ an error, which is the single most confusing failure mode here.
 | `GITHUB_WEBHOOK_SECRET` | yes | `openssl rand -hex 32`. This *is* the endpoint's authentication. The same value goes in every repository's webhook settings. |
 | `GITHUB_TOKEN` | yes* | Needs **`repo` scope** — outbound calls `POST /repos/{owner}/{repo}/dispatches`, and inbound reads each repository's mapping file (fine-grained: **Contents: read**). |
 | `GITHUB_REPO_TOKENS` | yes* | Secret. JSON `{"owner/repository":"<PAT>"}` (or `"owner"` for all of an owner's repositories): each repository's own token, as ServiceNow kept a credential per repository. A fine-grained PAT reaches one owner's repositories only. Unlisted repositories use `GITHUB_TOKEN`. *One of the two is required. A repository with no token fails loudly; before this, a repository the single token could not see answered 404, read as "no config file", and its issues were skipped as unmapped. Malformed refuses to start. |
-| `GITHUB_SR_SERVICENOW_FIRST` | dual-write | `true`: a new SR is created in ServiceNow first through the ServiceNow integration service's `POST /github-cases` (ServiceNow's GitHub case API, as the integration service's M2M user; no credential here) and takes ServiceNow's **CS number and WSO2 Case ID** (`<KEY>-<n>`), as a portal SR does. Issue edits (`PATCH /github-cases`) and comments (`POST /comments`) reach ServiceNow; our SR automation runs and its acknowledgement reaches the case too. Needs the integration service with `/github-cases` deployed first, and `snBasicAuthConfig` set there. Default off: Postgres only, `SR-GH-`/`WSO2-GH-`. A repository mapped without a project keeps the GitHub series. |
+| `GITHUB_SR_SERVICENOW_FIRST` | dual-write | `true`: a new SR is created in ServiceNow first through the ServiceNow integration service's `POST /github-cases` (ServiceNow's GitHub case API, as the integration service's M2M user; no credential here) and takes ServiceNow's **CS number and WSO2 Case ID** (`<KEY>-<n>`), as a portal SR does. Issue edits (`PATCH /github-cases`) and comments (`POST /comments`) reach ServiceNow; our SR automation runs and its acknowledgement reaches the case too. Needs the integration service with `/github-cases` deployed first, and `snBasicAuthConfig` set there. Default off: Postgres only, numbered as a portal SR is (CS number, `<KEY>-<n>` id from the project's counter). A repository mapped without a project keeps the `SR-GH-`/`WSO2-GH-` series, since there is no project key to build the id from. |
 | `GITHUB_REPO_CONFIG_PATH` | no | The mapping file in each repository, default **`.github/servicenow-config.yml`** (§6). |
 | `GITHUB_INTEGRATION_LOGIN` | yes | The login this service raises issues under, from a case. **Not** `github-actions[bot]` — see §3. |
 | `CSM_PORTAL_BASE_URL` | yes | **Must be the Postgres-backed portal.** Every outbound comment embeds a link built from this; a host backed by another database cannot resolve the record id. |
@@ -92,7 +92,9 @@ SELECT 1 FROM information_schema.columns
 SELECT indexname FROM pg_indexes
  WHERE indexname IN ('work_item_repo_github_issue_uniq', 'work_item_account_github_issue_uniq');
 
--- numbering for issue-raised records (0113)
+-- numbering for issue-raised records (0113): the GitHub series is now only the
+-- fallback for a repository with no project; a project-bound record takes
+-- next_work_item_number('SERVICE_REQUEST') and next_wso2_id(project)
 SELECT proname FROM pg_proc WHERE proname LIKE 'next_github_service_request%';
 --   next_github_service_request_number     -> SR-GH-000001
 --   next_github_service_request_wso2_id    -> WSO2-GH-000001  (required by
@@ -187,7 +189,7 @@ before:
    then creation on the workflow's `labeled` event:
    ```
    event=issues skipped="issue has not passed template validation yet"
-   github: service request created from issue number=SR-GH-0000NN
+   github: service request created from issue number=CS0000NNN
    ```
 4. Confirm the record carries its number, `wso2_id`, account and template fields,
    and that the "Created in CSM" comment reached the issue.
@@ -245,7 +247,7 @@ Against a real repository and database, with GitHub delivering over a webhook:
 
 | | |
 |---|---|
-| issue → service request | 17 template fields, correct account and catalog, `SR-GH-` and `WSO2-GH-` numbering |
+| issue → service request | 17 template fields, correct account and catalog, CS number and `<KEY>-<n>` id (`SR-GH-`/`WSO2-GH-` only for a repository with no project) |
 | validation gate | `opened` skipped; the workflow's `labeled` event creates |
 | creation announced on the issue | number, portal link, catalog/priority/environment |
 | GitHub comment → CSM | relayed once, marked `(GitHub Comment)` |
