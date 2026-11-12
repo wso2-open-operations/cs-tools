@@ -1136,6 +1136,37 @@ describe("direct transfers of large files", () => {
       }
     });
 
+    describe("a download of a known size read in parallel", () => {
+      const BIG = DOWNLOAD_RANGE_BYTES * 2 + 5;
+
+      it("stops the ranges still running when one is refused, and throws that refusal", async () => {
+        const signals: AbortSignal[] = [];
+        const getResponse = vi.fn((_path: string, init: { headers: Record<string, string>; signal: AbortSignal }) => {
+          if (init.headers.Range.startsWith("bytes=0-")) return Promise.reject(apiError(500, "storage busy"));
+          signals.push(init.signal);
+          return new Promise<Response>((_, reject) =>
+            init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))),
+          );
+        });
+        await expect(
+          downloadEntityAttachment(apiFor({ getResponse }), { type: "work_item", id: ID, name: "big.bin", size: BIG }, vi.fn()),
+        ).rejects.toThrow("storage busy");
+        expect(signals.length).toBeGreaterThan(0);
+        expect(signals.every((signal) => signal.aborted)).toBe(true);
+      });
+
+      it("saves the whole file when the server ignores the range and answers 200", async () => {
+        const getResponse = vi.fn(async () => new Response(new Uint8Array(BIG), { status: 200 }));
+        const save = vi.fn();
+        expect(
+          await downloadEntityAttachment(apiFor({ getResponse }), { type: "work_item", id: ID, name: "big.bin", size: BIG }, save),
+        ).toBe(true);
+        expect(save).toHaveBeenCalledTimes(1);
+        expect((save.mock.calls[0][0] as Blob).size).toBe(BIG);
+        expect(save.mock.calls[0][1]).toBe("big.bin");
+      });
+    });
+
     describe("into a picked file", () => {
       const SIZE = DOWNLOAD_RANGE_BYTES * 2 + 5; // above the 16 MiB that skips the dialog
       const LINK = "https://blob.example/x?sig=";

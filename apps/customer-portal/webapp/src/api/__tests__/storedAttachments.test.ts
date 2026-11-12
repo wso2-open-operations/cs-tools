@@ -410,6 +410,50 @@ describe("storedAttachments", () => {
       click.mockRestore();
     });
 
+    describe("a download of a known size read in parallel", () => {
+      const BIG = DOWNLOAD_RANGE_BYTES * 2 + 5;
+
+      it("stops the ranges still running when one is refused, and throws that refusal", async () => {
+        withMode();
+        const { click } = stubSave();
+        const signals: AbortSignal[] = [];
+        authFetch.mockImplementation((_url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => {
+          if (init.headers.Range.startsWith("bytes=0-")) return Promise.resolve(json({ message: "storage busy" }, 500));
+          signals.push(init.signal);
+          return new Promise<Response>((_, reject) =>
+            init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))),
+          );
+        });
+        await expect(
+          downloadStoredAttachment(authFetch, { type: "work_item", id: ID, name: "big.bin", size: BIG }),
+        ).rejects.toThrow("storage busy");
+        expect(signals.length).toBeGreaterThan(0);
+        expect(signals.every((signal) => signal.aborted)).toBe(true);
+        click.mockRestore();
+      });
+
+      it("saves the whole file when the server ignores the range and answers 200", async () => {
+        withMode();
+        const { saved, names, click } = stubSave();
+        authFetch.mockImplementation(async () => new Response(new Uint8Array(BIG), { status: 200 }));
+        await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, name: "big.bin", size: BIG });
+        expect(saved).toHaveLength(1);
+        expect(saved[0].size).toBe(BIG);
+        expect(names).toEqual(["big.bin"]);
+        click.mockRestore();
+      });
+
+      it("takes the file name from the answers when none is given", async () => {
+        withMode();
+        const { names, click } = stubSave();
+        const { fetchRange } = rangeServer(BIG);
+        authFetch.mockImplementation(fetchRange);
+        await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, size: BIG });
+        expect(names).toEqual(["big.bin"]);
+        click.mockRestore();
+      });
+    });
+
     it("takes the file name from the response when none is given", async () => {
       withMode();
       const { names, click } = stubSave();

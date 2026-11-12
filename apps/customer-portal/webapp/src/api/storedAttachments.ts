@@ -189,6 +189,9 @@ function parseContentRange(
   return end >= start && total > end ? { start, end, total } : null;
 }
 
+/** A server answered a range request with the whole file (200), so ranges cannot be read side by side. */
+class RangeIgnoredError extends Error {}
+
 /** Sends one ranged GET: through the backend, or to a signed link. */
 type RangeRequest = (init: RequestInit) => Promise<Response>;
 
@@ -238,7 +241,7 @@ async function readRange(
     } catch (error) {
       takeBackReported();
       if (signal?.aborted) throw downloadCancelledError();
-      if (error instanceof ApiError || isAbortError(error)) throw error;
+      if (error instanceof ApiError || error instanceof RangeIgnoredError || isAbortError(error)) throw error;
     }
     if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) {
       throw new ApiError(0, "Download failed", DOWNLOAD_INTERRUPTED_MESSAGE);
@@ -322,11 +325,22 @@ async function readAndStore(
   };
   const ranges: Uint8Array[][] = [];
 
+  let suggestedName: string | undefined;
+
   // Reads the ranges from `firstIndex` to the end, `downloadParallelism()` at a time.
-  const readRangesFrom = async (firstIndex: number, total: number): Promise<void> => {
+  // The first failure stops the ranges still running and is the one thrown.
+  const readRangesFrom = async (
+    firstIndex: number,
+    total: number,
+    send: RangeRequest = request,
+  ): Promise<void> => {
     const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
     let next = firstIndex;
     let failure: { error: unknown } | undefined;
+    const stop = new AbortController();
+    const stopOnCancel = () => stop.abort();
+    if (input.signal?.aborted) stop.abort();
+    input.signal?.addEventListener("abort", stopOnCancel, { once: true });
     const worker = async (): Promise<void> => {
       while (failure === undefined && next < count) {
         const index = next++;
@@ -334,33 +348,36 @@ async function readAndStore(
         const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
         try {
           const { parts } = await readRange(
-            request,
+            send,
             start,
             end,
             ({ response, parts }) => {
               const range = parseContentRange(response.headers);
-              return (
+              const whole =
                 response.status === 206 &&
                 range !== null &&
                 range.start === start &&
                 range.end === end &&
                 range.total === total &&
-                partsLength(parts) === end - start + 1
-              );
+                partsLength(parts) === end - start + 1;
+              if (whole) suggestedName ??= fileNameFromDisposition(response.headers);
+              return whole;
             },
             report,
-            input.signal,
+            stop.signal,
           );
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
         } catch (error) {
           failure ??= { error };
+          stop.abort();
         }
       }
     };
     await Promise.all(
       Array.from({ length: Math.min(downloadParallelism(), count - firstIndex) }, worker),
     );
+    input.signal?.removeEventListener("abort", stopOnCancel);
     if (failure) throw failure.error;
   };
 
@@ -371,10 +388,26 @@ async function readAndStore(
 
   // Azure and the backend both honour a range, so with the size known no first read is needed.
   if (input.size !== undefined && input.size > DOWNLOAD_RANGE_BYTES) {
+    const rangesOnly: RangeRequest = async (init) => {
+      const response = await request(init);
+      if (response.status === 200) {
+        void response.body?.cancel();
+        throw new RangeIgnoredError();
+      }
+      return response;
+    };
     knownTotal = input.size;
-    await readRangesFrom(0, input.size);
-    await finish(input.name);
-    return;
+    try {
+      await readRangesFrom(0, input.size, rangesOnly);
+      await finish(input.name || suggestedName);
+      return;
+    } catch (error) {
+      if (!(error instanceof RangeIgnoredError)) throw error;
+      // A server that ignores Range sends the whole file: read it with the single request below.
+      ranges.length = 0;
+      received = 0;
+      knownTotal = undefined;
+    }
   }
 
   const first = await readRange(
