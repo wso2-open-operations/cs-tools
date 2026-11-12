@@ -23,7 +23,9 @@ INSERT INTO number_series (series, digits, sequence_name) VALUES ('AMR', 7, 'amr
 ON CONFLICT (series) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS alert_mute_rule (
-    id          UUID          PRIMARY KEY DEFAULT uuidv7(),
+    -- gen_random_uuid(), not uuidv7(): a small configuration table gains nothing from ordered keys (see 0179), and
+    -- this keeps the migration runnable on a server older than PostgreSQL 18.
+    id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
     number      TEXT          NOT NULL DEFAULT next_series_number('AMR'),
     name        VARCHAR(255)  NOT NULL CHECK (btrim(name) <> ''),
     description VARCHAR(1024) NOT NULL DEFAULT '',
