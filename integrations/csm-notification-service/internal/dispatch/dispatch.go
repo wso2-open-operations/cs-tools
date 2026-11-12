@@ -1545,6 +1545,10 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// own case number.
 			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
+		if isAnnouncementCaseType(p.CaseType) {
+			// An announcement's author is not shown to its project contacts.
+			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		}
 		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
@@ -2126,6 +2130,12 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	}
 
 	return errors.Join(errs...)
+}
+
+// isAnnouncementCaseType reports whether caseType is an announcement
+// (case-insensitive, trimmed). An empty or unknown value is not.
+func isAnnouncementCaseType(caseType string) bool {
+	return strings.EqualFold(strings.TrimSpace(caseType), "ANNOUNCEMENT")
 }
 
 // groupByLink resolves each recipient's own case link (see

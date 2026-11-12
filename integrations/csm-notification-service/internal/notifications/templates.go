@@ -891,6 +891,15 @@ func applyOptionalBlock(tmpl, name, value string) string {
 	return tmpl[:si] + tmpl[si+len(start):ei] + tmpl[ei+len(end):]
 }
 
+// boolFlag turns a condition into the non-empty/empty value applyOptionalBlock
+// keys on: true keeps the block, false removes it.
+func boolFlag(keep bool) string {
+	if keep {
+		return "x"
+	}
+	return ""
+}
+
 // RenderCommentAddedEmail fills in the "comment added" HTML email template.
 // name and caseTitle are HTML-escaped as-is; caseComment goes through
 // sanitizeRichText, which preserves the source comment's structure, basic
@@ -905,7 +914,21 @@ func applyOptionalBlock(tmpl, name, value string) string {
 // own EMAIL_DEBUG_MODE handling); empty omits the row entirely rather than
 // rendering it blank, so a real (non-debug) send never shows it.
 func RenderCommentAddedEmail(name, caseNumber, caseTitle, caseComment, commentLink, caseLink, intendedFor string) (string, []InlineImage) {
+	return renderCommentAddedEmail(false, name, caseNumber, caseTitle, caseComment, commentLink, caseLink, intendedFor)
+}
+
+// RenderAnnouncementCommentAddedEmail is RenderCommentAddedEmail for a comment
+// on an announcement: the headline carries no commenter name ("New comment on
+// announcement <number>"), since an announcement's author is not shown to the
+// project contacts it is sent to. Everything else is identical.
+func RenderAnnouncementCommentAddedEmail(caseNumber, caseTitle, caseComment, commentLink, caseLink, intendedFor string) (string, []InlineImage) {
+	return renderCommentAddedEmail(true, "", caseNumber, caseTitle, caseComment, commentLink, caseLink, intendedFor)
+}
+
+func renderCommentAddedEmail(announcement bool, name, caseNumber, caseTitle, caseComment, commentLink, caseLink, intendedFor string) (string, []InlineImage) {
 	tmpl := applyOptionalBlock(commentAddedTemplate, "INTENDED_FOR", intendedFor)
+	tmpl = applyOptionalBlock(tmpl, "NAMED_HEADLINE", boolFlag(!announcement))
+	tmpl = applyOptionalBlock(tmpl, "ANNOUNCEMENT_HEADLINE", boolFlag(announcement))
 	comment, images := sanitizeRichText(caseComment, &inlineImageBudget{})
 	replacer := strings.NewReplacer(
 		"<!-- [INTENDED_FOR] -->", escapeHTML(intendedFor),
@@ -1036,6 +1059,15 @@ func RenderCaseCreatedEmail(data CaseCreatedEmailData) (string, []InlineImage) {
 	tmpl = applyOptionalBlock(tmpl, "PRIORITY", data.Priority)
 	tmpl = applyOptionalBlock(tmpl, "PRODUCT", data.Product)
 	tmpl = applyOptionalBlock(tmpl, "INTENDED_FOR", data.IntendedFor)
+	// An announcement's author is not shown to the project contacts it goes
+	// to: the headline is name-less and the Reported row is dropped.
+	announcement := strings.EqualFold(strings.TrimSpace(data.CaseType), "Announcement")
+	if announcement {
+		data.ReporterName = ""
+	}
+	tmpl = applyOptionalBlock(tmpl, "NAMED_HEADLINE", boolFlag(!announcement))
+	tmpl = applyOptionalBlock(tmpl, "ANNOUNCEMENT_HEADLINE", boolFlag(announcement))
+	tmpl = applyOptionalBlock(tmpl, "REPORTER", boolFlag(!announcement))
 	// Description and IncidentImpactDescription both end up as attachments
 	// on this same outgoing email, so they must share one budget — see
 	// inlineImageBudget's own doc comment for why a fresh one per call
