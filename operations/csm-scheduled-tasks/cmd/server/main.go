@@ -1019,6 +1019,12 @@ func main() {
 	// Removes the files of work items closed for a long time (see above). Daily at
 	// 04:00, after the upload cleanup.
 	if attachmentRetentionEnabled {
+		// A tryout runs against the real entity-service outside the ledger, so it is
+		// always a dry run and can never remove a customer's file.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == attachmentRetentionTaskName && !attachmentRetentionCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is attachment_retention_expire: running as a dry run, nothing will be removed; set ATTACHMENT_RETENTION_DRY_RUN=true explicitly to silence this")
+			attachmentRetentionCfg.DryRun = true
+		}
 		tasks = append(tasks, registry.Task{
 			Name:     attachmentRetentionTaskName,
 			Schedule: scheduleFor(scheduleOverrides, attachmentRetentionTaskName, "0 4 * * *"),

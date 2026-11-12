@@ -119,7 +119,7 @@ only: it calls entity-service's `POST /attachments/retention/expire`, which remo
 the rows `EXPIRED`. It deletes customers' files, so it is **off unless `ATTACHMENT_RETENTION_ENABLED=true`** and it
 **starts as a dry run** (`ATTACHMENT_RETENTION_DRY_RUN` defaults to `true`): read the `expired` count in the log,
 then set it to `false`. It asks for `ATTACHMENT_RETENTION_BATCH_SIZE` (default 100) at a time while entity-service
-says there are more, at most 20 pages a run. A value below 30 days refuses to start. Deploy entity-service with
+says there are more, at most 20 pages a run. A value below 30 days refuses to start. A `TRYOUT_TASK=attachment_retention_expire` is always forced to a dry run. Deploy entity-service with
 migrations 0284 and 0285 first, and this component's client id must be in its `M2M_CLIENT_IDS`.
 
 Cron expressions have no timezone of their own — `internal/schedule.PeriodKey` interprets every
