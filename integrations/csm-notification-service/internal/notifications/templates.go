@@ -196,8 +196,10 @@ func CompanyName() string {
 
 // companyNamePhrases lists every fixed phrase (not a bare "WSO2") that
 // carries the company name in a template body — never a bare "WSO2", since
-// that also appears in places this config must not touch: the logo alt
-// text and "WSO2 Support"/"WSO2 Support Portal" titles and headings.
+// that also appears in a place this config must not touch: the Apache
+// license header every raw template carries as a leading HTML comment. The
+// logo alt text is a generic "Logo" in the source templates, not "WSO2", so
+// it was never at risk of a bare-word replace either.
 func companyNamePhrases(from, to string) [][2]string {
 	return [][2]string{
 		{
@@ -228,6 +230,44 @@ func companyNamePhrases(from, to string) [][2]string {
 			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", from),
 			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", to),
 		},
+		// The four project_contact_* onboarding emails' titles/headings/body
+		// copy. "Invitation to %s Support" also matches as a substring of
+		// project_contact_invited_reminder.html's longer title ("Reminder:
+		// Invitation to WSO2 Support"), and "Welcome to %s Support" matches
+		// both project_contact_registered.html's <title> and its <h1> (same
+		// text, two places) — one phrase entry covers each pair/triple.
+		{
+			fmt.Sprintf("Invitation to %s Support", from),
+			fmt.Sprintf("Invitation to %s Support", to),
+		},
+		{
+			fmt.Sprintf("Welcome to %s Support", from),
+			fmt.Sprintf("Welcome to %s Support", to),
+		},
+		{
+			fmt.Sprintf("You're invited to %s Support", from),
+			fmt.Sprintf("You're invited to %s Support", to),
+		},
+		{
+			fmt.Sprintf("your %s Support Portal account", from),
+			fmt.Sprintf("your %s Support Portal account", to),
+		},
+		{
+			fmt.Sprintf("You already have a %s account.", from),
+			fmt.Sprintf("You already have a %s account.", to),
+		},
+		{
+			fmt.Sprintf("on the %s Support Portal.", from),
+			fmt.Sprintf("on the %s Support Portal.", to),
+		},
+		{
+			fmt.Sprintf("A %s account has been created for you.", from),
+			fmt.Sprintf("A %s account has been created for you.", to),
+		},
+		{
+			fmt.Sprintf("Welcome to the %s Customer Support Portal.", from),
+			fmt.Sprintf("Welcome to the %s Customer Support Portal.", to),
+		},
 	}
 }
 
@@ -245,14 +285,15 @@ func companyNameTemplates() []*string {
 	}
 }
 
-// SetTemplateCompanyName replaces the company name in the handful of fixed
-// phrases every template body carries (the "sent by ... support system"
-// footer disclaimer, the "... Team" signoff, and the "... LLC" copyright
-// line) — not the bare word "WSO2" wherever it appears, which would also
-// corrupt the logo alt text and "WSO2 Support"/"WSO2 Support Portal" titles.
-// An empty value keeps the current name. It rewrites the already-baked
-// templates and updates CompanyName's return value, so call it once at
-// startup, before any email is rendered.
+// SetTemplateCompanyName replaces the company name in the fixed phrases a
+// template body carries (the "sent by ... support system" footer
+// disclaimer, the "... Team" signoff, the "... LLC" copyright line, and the
+// onboarding emails' titles/headings/body copy) — not the bare word "WSO2"
+// wherever it appears, which would also corrupt the Apache license header
+// every raw template carries as a leading HTML comment. An empty value
+// keeps the current name. It rewrites the already-baked templates and
+// updates CompanyName's return value, so call it once at startup, before
+// any email is rendered.
 func SetTemplateCompanyName(name string) {
 	name = strings.TrimSpace(name)
 	if name == "" {

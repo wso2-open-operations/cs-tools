@@ -128,10 +128,38 @@ func TestSetTemplateCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	if !strings.Contains(outageNotificationTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All Rights Reserved.") {
 		t.Errorf("copyright line (capitalized variant) not replaced in outageNotificationTemplate")
 	}
-	// Must not touch the logo alt text or "... Support" titles — only the
-	// disclaimer/signoff/copyright phrases above.
-	if !strings.Contains(projectContactRegisteredTemplate, `alt="WSO2"`) {
-		t.Errorf("unrelated bare \"WSO2\" occurrence (logo alt text) must be left untouched")
+	// The logo alt text is a generic "Logo" (not "WSO2") in the source
+	// templates, so it is never a target of this replacement in the first
+	// place — nothing to assert here beyond the phrases checked above.
+
+	if !strings.Contains(projectContactInvitedNewTemplate, "<title>Invitation to Acme Support</title>") {
+		t.Errorf("title not replaced in projectContactInvitedNewTemplate")
+	}
+	if !strings.Contains(projectContactInvitedReminderTemplate, "<title>Reminder: Invitation to Acme Support</title>") {
+		t.Errorf("reminder title not replaced in projectContactInvitedReminderTemplate")
+	}
+	if !strings.Contains(projectContactRegisteredTemplate, "<title>Welcome to Acme Support</title>") ||
+		!strings.Contains(projectContactRegisteredTemplate, "Welcome to Acme Support</h1>") {
+		t.Errorf("title/heading not replaced in projectContactRegisteredTemplate")
+	}
+	if !strings.Contains(projectContactInvitedNewTemplate, "You're invited to Acme Support</h1>") {
+		t.Errorf("heading not replaced in projectContactInvitedNewTemplate")
+	}
+	if !strings.Contains(projectContactInvitedExistingTemplate, "your Acme Support Portal account") {
+		t.Errorf("\"Support Portal account\" phrase not replaced in projectContactInvitedExistingTemplate")
+	}
+	if !strings.Contains(projectContactInvitedExistingTemplate, "You already have a Acme account.") {
+		t.Errorf("\"already have a\" phrase not replaced in projectContactInvitedExistingTemplate")
+	}
+	if !strings.Contains(projectContactInvitedNewTemplate, "on the Acme Support Portal.") ||
+		!strings.Contains(projectContactInvitedReminderTemplate, "on the Acme Support Portal.") {
+		t.Errorf("\"Support Portal\" phrase not replaced in projectContactInvitedNewTemplate/ReminderTemplate")
+	}
+	if !strings.Contains(projectContactInvitedNewTemplate, "A Acme account has been created for you.") {
+		t.Errorf("\"account has been created\" phrase not replaced in projectContactInvitedNewTemplate")
+	}
+	if !strings.Contains(projectContactRegisteredTemplate, "Welcome to the Acme Customer Support Portal.") {
+		t.Errorf("\"Customer Support Portal\" phrase not replaced in projectContactRegisteredTemplate")
 	}
 }
 
