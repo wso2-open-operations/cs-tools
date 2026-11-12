@@ -149,11 +149,12 @@ var roleLocalParts = map[string]bool{
 }
 
 // splitEmail returns the domain and whether the local part is a role or test
-// mailbox (test+1@, admin2@ included). ok is false for a malformed address.
+// mailbox (test+1@, admin2@ included). ok is false for a malformed address,
+// one with no local part, no domain or more than one @.
 func splitEmail(email string) (domain string, role, ok bool) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	at := strings.LastIndexByte(email, '@')
-	if at <= 0 || at == len(email)-1 {
+	at := strings.IndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 || strings.Count(email, "@") != 1 || strings.ContainsAny(email, " \t\r\n") {
 		return "", false, false
 	}
 	local := email[:at]

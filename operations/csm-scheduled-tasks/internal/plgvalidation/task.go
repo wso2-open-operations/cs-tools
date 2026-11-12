@@ -103,6 +103,10 @@ func Run(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx 
 		opts.Thresholds.Moderate = 5
 	}
 	return func(ctx context.Context) error {
+		// An empty window would read every pairing as inactive and write that.
+		if opts.Window <= 0 {
+			return errors.New("plg registration validation: the activity window must be positive")
+		}
 		var failed []string
 		for _, product := range opts.Products {
 			f, err := runProduct(ctx, src, ent, opts, product, now().UTC())
@@ -164,6 +168,11 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 			failed = append(failed, it.OrgPlatformID)
 			continue
 		}
+		if res.Stale {
+			// The classification changed since the queue was read; the next run decides again.
+			counts["stale"]++
+			continue
+		}
 		counts["written"] += len(res.Written)
 		counts["skipped"] += len(res.Skipped)
 		if res.Abandoned {
@@ -172,7 +181,7 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 	}
 	slog.InfoContext(ctx, "plg registration validation: done", "product", product, "dryRun", opts.DryRun,
 		"pairings", len(items), "eligible", counts[OutcomeEligible], "monitor", counts[OutcomeMonitor],
-		"excluded", counts[OutcomeExcluded], "abandoned", counts["abandoned"], "classified", counts["classified"],
+		"excluded", counts[OutcomeExcluded], "abandoned", counts["abandoned"], "stale", counts["stale"], "classified", counts["classified"],
 		"valuesWritten", counts["written"],
 		"valuesSkipped", counts["skipped"], "failed", len(failed))
 	return failed, nil

@@ -1166,6 +1166,19 @@ func main() {
 		if minutes := envInt("PLG_MOESIF_SYNC_WINDOW_MINUTES", 0); minutes > 0 {
 			window = time.Duration(minutes) * time.Minute
 		}
+		// There is no cursor: a window shorter than the longest time between two
+		// runs (the schedule's gap, plus up to one driver interval of delay) loses events.
+		plgMoesifSyncSchedule := scheduleFor(scheduleOverrides, plgMoesifSyncTaskName, "*/15 * * * *")
+		gap, err := schedule.LongestGap(plgMoesifSyncSchedule, time.Now().UTC())
+		if err != nil {
+			slog.Error("plg moesif sync: invalid schedule", "err", err)
+			os.Exit(1)
+		}
+		if window < gap+driverInterval {
+			slog.Error("PLG_MOESIF_SYNC_WINDOW_MINUTES is shorter than the time between runs; events would be missed",
+				"window", window, "needed", gap+driverInterval)
+			os.Exit(1)
+		}
 		events := splitComma(os.Getenv("PLG_MOESIF_SYNC_EVENTS"))
 		if len(events) == 0 {
 			events = plgsignups.DefaultEvents
@@ -1176,7 +1189,7 @@ func main() {
 		}
 		tasks = append(tasks, registry.Task{
 			Name:     plgMoesifSyncTaskName,
-			Schedule: scheduleFor(scheduleOverrides, plgMoesifSyncTaskName, "*/15 * * * *"),
+			Schedule: plgMoesifSyncSchedule,
 			Handler: plgsignups.Sync(moesifClient, plgSignupsClient, plgsignups.Options{
 				Events:        events,
 				ProductFields: productFields,

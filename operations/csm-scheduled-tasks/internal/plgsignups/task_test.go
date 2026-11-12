@@ -45,6 +45,8 @@ type fakeEntity struct {
 	status   map[string]string // company id -> status; default created
 	err      error
 	failures []Failure
+	refuse   int // RecordFailure calls refused, from the first
+	attempts int
 }
 
 func (f *fakeEntity) Ingest(_ context.Context, regs []Registration) ([]Result, error) {
@@ -64,6 +66,10 @@ func (f *fakeEntity) Ingest(_ context.Context, regs []Registration) ([]Result, e
 }
 
 func (f *fakeEntity) RecordFailure(_ context.Context, fl Failure) error {
+	f.attempts++
+	if f.attempts <= f.refuse {
+		return errors.New("status 400")
+	}
 	f.failures = append(f.failures, fl)
 	return nil
 }
@@ -188,5 +194,19 @@ func TestAWindowLargerThanOneRunFailsAfterLandingWhatItRead(t *testing.T) {
 	}
 	if len(ent.batches) != 1 {
 		t.Errorf("what was read should still land")
+	}
+}
+
+func TestARefusedFailureRecordDoesNotHideTheRest(t *testing.T) {
+	src := &fakeSearcher{hits: []moesif.Hit{
+		registration("1", "c-1", "WSO2Cloud"), registration("2", "c-2", "WSO2Cloud"), registration("3", "c-3", "WSO2Cloud"),
+	}}
+	ent := &fakeEntity{status: map[string]string{"c-1": "FAILED", "c-2": "FAILED", "c-3": "FAILED"}, refuse: 1}
+	err := run(src, ent)
+	if err == nil || !strings.Contains(err.Error(), "record 1 of 3 failures") {
+		t.Fatalf("err = %v, want the one refused record named", err)
+	}
+	if ent.attempts != 3 || len(ent.failures) != 2 {
+		t.Errorf("attempts = %d, recorded = %d; want all 3 attempted, 2 recorded", ent.attempts, len(ent.failures))
 	}
 }

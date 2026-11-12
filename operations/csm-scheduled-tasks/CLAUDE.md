@@ -864,10 +864,13 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
 - **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
   `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only
   refreshes what is stored, and a failed or superseded period is covered by the next run as long as the
-  outage is shorter than the window. The handler reads the wall clock, not the period start.
+  outage is shorter than the window. The handler reads the wall clock, not the period start. Startup
+  refuses a window shorter than the schedule's longest gap between runs plus `DRIVER_INTERVAL`
+  (`schedule.LongestGap`), since events in between would never be read.
 - **Failures.** An event with no company id or product, or one entity-service rejects, is recorded in
   `plg_ingest_failure` under its Moesif event id, by ids only; entity-service keeps one open row per
-  event id, so later runs do not repeat it. Neither fails the run. Moesif or entity-service unreachable,
+  event id (a partial unique index, migration 0288), so later runs do not repeat it. Neither fails the
+  run, but a failure that cannot be recorded does, after every other failure was attempted. Moesif or entity-service unreachable,
   or a window larger than `PLG_MOESIF_SYNC_MAX_PAGES` pages, fails it (retried and alerted as usual).
 - **Personal data.** Only time, action, user id, company id and the product fields are requested from
   Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
@@ -901,6 +904,11 @@ platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the o
   `POST /ai/email-domains/classify`; a PERSONAL domain with a role mailbox becomes DISPOSABLE. A Directory
   or AI failure leaves it unset for the next run. Off, with a warning at start, unless
   `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain.
+- **Queue order**: pairings never validated come first, then the least recently validated, so a
+  queue over `QueueLimit` (1000) cannot starve the same pairings every run.
+- **Stale exclusions**: entity-service abandons only when the classification the run will hold still
+  excludes (an engineer may have changed it since the queue was read). Otherwise it writes nothing and
+  answers `stale`; the job counts it and the next run decides again. A zero `WINDOW_HOURS` fails the run.
 - **Failures**: Moesif or the queue failing fails the run. A failed write is logged and the others go
   on; the run then fails naming at most 10 pairing ids. A product without an active registration
   playbook is skipped with a warning.

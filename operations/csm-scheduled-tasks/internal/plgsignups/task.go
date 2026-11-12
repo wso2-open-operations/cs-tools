@@ -140,12 +140,18 @@ func Sync(src Searcher, ent Entity, opts Options, now func() time.Time) func(ctx
 			}
 		}
 
+		// Every failure is attempted: one refused record must not hide the rest.
+		var recordErrs []error
 		for _, f := range failures {
 			if err := ent.RecordFailure(ctx, f); err != nil {
-				return fmt.Errorf("plg signups: record a failure: %w", err)
+				recordErrs = append(recordErrs, err)
 			}
 		}
-		slog.InfoContext(ctx, "plg signups: synced", "read", read, "accepted", accepted, "failed", len(failures))
+		slog.InfoContext(ctx, "plg signups: synced", "read", read, "accepted", accepted, "failed", len(failures),
+			"unrecorded", len(recordErrs))
+		if len(recordErrs) > 0 {
+			return fmt.Errorf("plg signups: record %d of %d failures: %w", len(recordErrs), len(failures), errors.Join(recordErrs...))
+		}
 
 		if more {
 			return errors.New("plg signups: the window holds more events than one run reads; " +

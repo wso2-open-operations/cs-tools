@@ -263,11 +263,41 @@ func TestSplitEmail(t *testing.T) {
 		"qa2@gmail.com":      {"gmail.com", true, true},
 		"testa@gmail.com":    {"gmail.com", false, true},
 		"no-at-sign":         {"", false, false},
+		"jane@@wso2.com":     {"", false, false},
+		"a@b@wso2.com":       {"", false, false},
 		"trailing@":          {"", false, false},
 	} {
 		d, role, ok := splitEmail(email)
 		if d != want.domain || role != want.role || ok != want.ok {
 			t.Errorf("%s: %q %v %v, want %+v", email, d, role, ok, want)
 		}
+	}
+}
+
+func TestRunRefusesAZeroWindow(t *testing.T) {
+	ent := &fakeEntity{items: []QueueItem{{OrgPlatformID: "p", CompanyID: "c", RegisteredOn: now}}, applied: map[string]ApplyRequest{}}
+	err := Run(&fakeMoesif{}, ent, Options{Products: []string{"AGENT_PLATFORM"}}, func() time.Time { return now })(context.Background())
+	if err == nil || len(ent.applied) != 0 {
+		t.Fatalf("err = %v, applied = %d; want a refusal before any write", err, len(ent.applied))
+	}
+}
+
+// staleEntity answers every write as a withdrawn exclusion.
+type staleEntity struct{ fakeEntity }
+
+func (f *staleEntity) Apply(_ context.Context, id string, req ApplyRequest) (ApplyResult, error) {
+	f.applied[id] = req
+	return ApplyResult{Stale: true}, nil
+}
+
+func TestAStaleExclusionIsNotAFailure(t *testing.T) {
+	disposable := "DISPOSABLE"
+	ent := &staleEntity{fakeEntity{
+		items:   []QueueItem{{OrgPlatformID: "p", CompanyID: "c", RegisteredOn: now, EmailClassification: &disposable}},
+		applied: map[string]ApplyRequest{},
+	}}
+	opts := Options{Products: []string{"AGENT_PLATFORM"}, Window: 12 * time.Hour}
+	if err := Run(&fakeMoesif{}, ent, opts, func() time.Time { return now })(context.Background()); err != nil {
+		t.Fatalf("a stale answer failed the run: %v", err)
 	}
 }

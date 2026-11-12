@@ -131,6 +131,7 @@ type ApplyResult struct {
 		Reason string `json:"reason"`
 	} `json:"skipped"`
 	Abandoned bool `json:"abandoned"`
+	Stale     bool `json:"stale"`
 }
 
 // Queue lists a product's pairings registered after the given time.
@@ -165,9 +166,12 @@ func (c *Client) do(ctx context.Context, method, path string, payload, out any) 
 		return fmt.Errorf("plgvalidation: %s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBytes+1))
 	if err != nil {
 		return fmt.Errorf("plgvalidation: read response body: %w", err)
+	}
+	if len(respBody) > maxReplyBytes {
+		return fmt.Errorf("plgvalidation: %s %s: reply over %d bytes", method, path, maxReplyBytes)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return &apierror.Error{StatusCode: resp.StatusCode, Body: string(respBody)}
