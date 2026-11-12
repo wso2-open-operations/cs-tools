@@ -470,6 +470,10 @@ var validCaseAggregateField = map[string]bool{
 	"state":    true,
 	"severity": true,
 	"type":     true,
+	"product":  true,
+	// productVersion: only with a product filter naming one product.
+	"productVersion": true,
+	"project":        true,
 }
 
 var validCaseIssueType = map[domain.CaseIssueType]bool{
@@ -3762,6 +3766,11 @@ func (s *caseService) AggregateCases(ctx context.Context, req domain.AggregateCa
 	search, err := s.prepareCaseSearch(ctx, domain.SearchCasesRequest{Filters: req.Filters})
 	if err != nil {
 		return domain.AggregateResponse{}, err
+	}
+	// A version is shared by several products, so versions are grouped
+	// within one product only.
+	if req.GroupBy == "productVersion" && !oneProductName(search.Parsed.ProductNames) {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: `groupBy "productVersion" needs a product filter naming exactly one product`}
 	}
 	scope, err := s.access.ResolveScope(ctx)
 	if err != nil {

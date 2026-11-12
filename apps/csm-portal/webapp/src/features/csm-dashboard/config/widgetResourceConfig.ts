@@ -359,6 +359,8 @@ export function translateCaseDashboardFiltersChecked(
   if (types && types.length > 0) out.caseTypes = types as CasesFilters["caseTypes"];
   const productNames = read.first("product", "in")?.values;
   if (productNames && productNames.length > 0) out.productNames = productNames;
+  const projects = read.first("projectId", "in")?.values;
+  if (projects && projects.length > 0) out.projects = projects;
   const assignedUserIds = read.first("assignedUserId", "in")?.values;
   if (assignedUserIds && assignedUserIds.length > 0) out.assignees = ["@me"];
   const engagementTypes = read.first("engagementType", "in")?.values;
@@ -921,8 +923,15 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     // though: that page resolves `resourceType` from `previewSlug` generically
     // and posts raw filters straight to the search endpoint, so it needs no
     // announcement-specific filtered route of its own to render this widget's
-    // exact result set.
-    buildHref: (filters, ctx) => caseFamilyBuildHref("announcements", filters, ctx, () => "/announcements"),
+    // exact result set. A project filter goes there too: the case list holds
+    // it, so the translation is lossless, but this page would drop it and
+    // show every project's announcements.
+    buildHref: (filters, ctx) =>
+      caseFamilyBuildHref("announcements", filters, ctx, () =>
+        translateCaseDashboardFiltersChecked(filters).filters.projects
+          ? widgetPreviewFallbackHref("announcements", "case", filters, ctx)
+          : "/announcements",
+      ),
     icon: Megaphone,
     iconColor: "success",
     previewSlug: "announcements",

@@ -124,6 +124,18 @@ cannot drift apart. After editing it, run the backend's
 `go test ./internal/dashboard`, then the three steps above. In the local stack, an edit to the built-in catalogue needs this service's
 image rebuilt (`docker compose up -d --build csm-ai-integration-service`), not the backend's.
 
+**The model writes names as the user wrote them.** Products, versions, projects (key or name) and
+customers (name or account number) are written as the request gives them, never ids; the backend
+resolves them after the reply and tells the user when one names nothing or several, so the catalogue
+never asks the model to refuse a name as not exact (the backend's
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project}ExamplesAreValid` run section 7's
+examples through its check, as the tests above do for theirs). An edit's draft holds the resolved `projectId` /
+`accountId` filters, which the model keeps as they are. The `{"error": ...}` text is shown to the user
+(section 1: at most two plain sentences, no field names or catalogue words), and a "not", "except" or
+"without" the catalogue has no filter for is declined rather than dropped. Never put a real customer's
+name, project key or account number in the catalogue: the repository is public; the examples use
+made-up or seed names.
+
 The Teams section is not in the file: the backend sends the team list with each request and
 `internal/teams` appends it to the catalogue (the same text the backend wrote before the move).
 

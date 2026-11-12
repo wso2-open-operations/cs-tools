@@ -107,6 +107,16 @@ func ParseGenerated(raw []byte) (Dashboard, error) {
 			return Dashboard{}, err
 		}
 	}
+	for i, w := range d.Widgets {
+		if caseTableResourceTypes[w.ResourceType] {
+			if err := checkGeneratedProductVersions(i, w); err != nil {
+				return Dashboard{}, err
+			}
+			if err := checkGeneratedNamedFilters(i, w); err != nil {
+				return Dashboard{}, err
+			}
+		}
+	}
 	d.ID = GeneratedPlaceholderID
 
 	out, err := finalize([]sourced{{dashboard: d, source: generatedSource}}, true, nil, nil)

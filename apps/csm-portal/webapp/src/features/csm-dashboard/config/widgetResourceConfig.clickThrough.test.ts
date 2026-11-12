@@ -110,6 +110,73 @@ const WIDGETS: WidgetShape[] = [
     lands: "list",
   },
   {
+    // A product bar of "open cases by product": the bucket's own filter
+    // (the product's name) under the widget's.
+    name: "open cases of one product",
+    resourceType: "case",
+    filters: { filters: [entry("state", "in", "open"), entry("product", "in", "WSO2 API Manager"), ...caseScope] },
+    lands: "list",
+  },
+  {
+    // "open cases excluding API Manager": the case list's Products filter only
+    // includes products, so the preview page carries the exclusion.
+    name: "open cases excluding one product",
+    resourceType: "case",
+    filters: { filters: [entry("state", "in", "open"), entry("product", "notIn", "WSO2 API Manager"), ...caseScope] },
+    lands: "preview",
+  },
+  {
+    // A version bar of "API Manager cases by version": the case list has no
+    // version filter, so the preview page carries it with the product.
+    name: "cases of one product version",
+    resourceType: "case",
+    filters: {
+      filters: [
+        entry("product", "in", "WSO2 API Manager"),
+        entry("productVersion", "in", "4.3.0", "4.3.1"),
+        ...caseScope,
+      ],
+    },
+    lands: "preview",
+  },
+  {
+    // A project bar of "open cases by project", or "open cases of one project".
+    name: "open cases of one project",
+    resourceType: "case",
+    filters: {
+      filters: [entry("state", "in", "open"), entry("projectId", "in", "6a0e1b52-0000-4000-8000-000000000001"), ...caseScope],
+    },
+    lands: "list",
+  },
+  {
+    name: "cases of two projects",
+    resourceType: "case",
+    filters: {
+      filters: [
+        entry("projectId", "in", "6a0e1b52-0000-4000-8000-000000000001", "6a0e1b52-0000-4000-8000-000000000002"),
+        ...caseScope,
+      ],
+    },
+    lands: "list",
+  },
+  {
+    // The case list's Projects filter only includes projects.
+    name: "cases outside one project",
+    resourceType: "case",
+    filters: { filters: [entry("projectId", "notIn", "6a0e1b52-0000-4000-8000-000000000001"), ...caseScope] },
+    lands: "preview",
+  },
+  {
+    // An account bar of "open cases by account" that does not link to the
+    // account page: the case list has no account filter.
+    name: "open cases of one account",
+    resourceType: "case",
+    filters: {
+      filters: [entry("state", "in", "open"), entry("accountId", "in", "6a0e1b52-0000-4000-8000-0000000000a1"), ...caseScope],
+    },
+    lands: "preview",
+  },
+  {
     name: "SLA violations (breached SLA, still being worked)",
     resourceType: "case",
     filters: {
