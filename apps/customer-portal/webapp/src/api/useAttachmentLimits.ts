@@ -31,15 +31,18 @@ export interface AttachmentLimits {
   maxFileBytes: number;
   /** Most the inline images of one comment or description may add up to. */
   maxInlineImagesTotalBytes: number;
+  /** Files above this size download straight from storage; 0 when direct transfers are off. */
+  directTransferAboveBytes: number;
 }
 
 /** Used until the limits arrive, and when the request fails. */
 export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
   maxFileBytes: DEFAULT_ENTITY_ATTACHMENT_MAX_MB * MIB,
   maxInlineImagesTotalBytes: DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB * MIB,
+  directTransferAboveBytes: 0,
 };
 
-/** The server's limits, kept for 5 minutes, or the defaults while loading or on error. */
+/** The server's limits, kept for 5 minutes, or the defaults while loading (no direct download then) or on error. */
 export default function useAttachmentLimits(): AttachmentLimits {
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
@@ -64,6 +67,7 @@ export default function useAttachmentLimits(): AttachmentLimits {
           body.maxInlineImagesTotalBytes,
           DEFAULT_ATTACHMENT_LIMITS.maxInlineImagesTotalBytes,
         ),
+        directTransferAboveBytes: positiveOr(body.directTransferAboveBytes, 0),
       };
     },
     enabled: isSignedIn && !isAuthLoading,
