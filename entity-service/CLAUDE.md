@@ -245,8 +245,8 @@ Chat cards in the SR's SRE-team space.
 - `sr.created`: every SR created on the plain-Postgres path
   (`caseService.CreateCase`). Under dual-write the SR is created in ServiceNow
   first and its own flow still runs there, so nothing happens here.
-  **An SR created from a GitHub issue** (`githubSyncService`, the `SR-GH-`
-  series) gets the same `OnCreated` -- assignment, acknowledgement and
+  **An SR created from a GitHub issue** (`githubSyncService`; numbered natively -- CS number and
+  `<KEY>-<n>` id -- when the repository maps to a project, `SR-GH-` series otherwise) gets the same `OnCreated` -- assignment, acknowledgement and
   `sr.created` -- in every mode (`WithGithubSRNotices`, routes.go): it exists
   only in Postgres, so no ServiceNow flow ever announces it. Only a new record;
   a delivery that finds the issue's record already there announces nothing.

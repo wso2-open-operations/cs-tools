@@ -837,7 +837,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.WithServiceNowGithubCases(githubSync, service.NewSNGithubCases(serviceNowIntegrationServiceClient))
 			slog.Info("github: service requests from issues are created in ServiceNow first (dual-write)")
 		} else if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
-			slog.Info("github: service requests from issues are written to Postgres only and numbered SR-GH-<n> (GITHUB_SR_SERVICENOW_FIRST is off)")
+			slog.Info("github: service requests from issues are written to Postgres only and numbered natively, SR-GH-<n> only when the repository has no project (GITHUB_SR_SERVICENOW_FIRST is off)")
 		}
 	}
 
