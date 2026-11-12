@@ -36,7 +36,13 @@ export function useGetSlaReport(
 
   return useQuery<SlaReportDetails, Error>({
     queryKey: ["sla-report", projectId ?? "", period.from, period.to],
-    queryFn: () => api.get<SlaReportDetails>(buildSlaReportPath(projectId ?? "", period)) as Promise<SlaReportDetails>,
+    // api.get resolves a 404 to null; without a report the page has nothing to
+    // show, so it is the error state rather than a blank page.
+    queryFn: async () => {
+      const report = await api.get<SlaReportDetails>(buildSlaReportPath(projectId ?? "", period));
+      if (!report) throw new Error("The SLA report was not found.");
+      return report;
+    },
     enabled: Boolean(projectId && period.from && period.to),
     placeholderData: keepPreviousData,
   });
