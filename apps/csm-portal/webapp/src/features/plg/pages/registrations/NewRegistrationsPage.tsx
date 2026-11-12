@@ -23,7 +23,8 @@ import { useNavigate } from "react-router";
 
 
 import { useAcknowledge, useProducts, useRegistrations } from "@features/plg/api/hooks";
-import { EmptyState, ErrorBlock, LoadingBlock, PageHeader, StatusChip } from "@features/plg/components/common";
+import type { RegistrationItem } from "@features/plg/api/types";
+import { EmptyState, ErrorBlock, LoadingBlock, PageHeader } from "@features/plg/components/common";
 import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
 import { formatDate, formatRelative } from "@features/plg/utils/format";
 import { selectLabelProps } from "@features/plg/components/selectLabelProps";
@@ -31,17 +32,19 @@ import { selectLabelProps } from "@features/plg/components/selectLabelProps";
 const PAGE_SIZE = 25;
 
 /**
- * New registrations.
+ * New registrations, one row per organisation with a chip per platform.
  *
  * "New" is the absence of an acknowledgement, not a status somebody has to
- * remember to change: a pairing leaves this list the moment an engineer claims
- * it. Acknowledging also assigns the organisation's owner if it has none, since
+ * remember to change: a registration leaves this list the moment an engineer
+ * claims it. Acknowledging a row claims each of its unacknowledged
+ * registrations, and assigns the organisation's owner if it has none, since
  * ownership is per customer.
  */
 export default function NewRegistrationsPage() {
   const navigate = useNavigate();
   const { data: products } = useProducts();
   const acknowledge = useAcknowledge();
+  const [acknowledging, setAcknowledging] = useState<string | null>(null);
 
   const [unacknowledgedOnly, setUnacknowledgedOnly] = useState(true);
   const [productCode, setProductCode] = useState("");
@@ -61,6 +64,23 @@ export default function NewRegistrationsPage() {
   );
 
   const { data, isPending, error } = useRegistrations(request);
+
+  const openOrganization = (item: RegistrationItem) =>
+    navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}`);
+
+  // One call per registration: the route claims a single pairing.
+  const acknowledgeAll = async (item: RegistrationItem) => {
+    setAcknowledging(item.organizationId);
+    try {
+      for (const p of item.platforms.filter((p) => p.isNew)) {
+        await acknowledge.mutateAsync({ orgPlatformId: p.orgPlatformId });
+      }
+    } catch {
+      // acknowledge.error shows the failure.
+    } finally {
+      setAcknowledging(null);
+    }
+  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column" }}>
@@ -136,20 +156,16 @@ export default function NewRegistrationsPage() {
               <TableHead>
                 <TableRow>
                   <TableCell>Organisation</TableCell>
-                  <TableCell>Platform</TableCell>
+                  <TableCell>Platforms</TableCell>
                   <TableCell>Registered</TableCell>
-                  <TableCell>Stage</TableCell>
                   <TableCell align="right">Action</TableCell>
                   <TableCell padding="checkbox" aria-label="Reveal" />
                 </TableRow>
               </TableHead>
               <TableBody>
                 {data.registrations.map((item) => (
-                  <TableRow key={item.orgPlatformId} hover>
-                    <TableCell
-                      sx={{ cursor: "pointer" }}
-                      onClick={() => navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}/${item.product.code}`)}
-                    >
+                  <TableRow key={item.organizationId} hover>
+                    <TableCell sx={{ cursor: "pointer" }} onClick={() => openOrganization(item)}>
                       <Stack>
                         <CompanyName
                           organizationId={item.organizationId}
@@ -160,7 +176,17 @@ export default function NewRegistrationsPage() {
                       </Stack>
                     </TableCell>
                     <TableCell>
-                      <Chip size="small" variant="outlined" label={item.product.name} />
+                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                        {item.platforms.map((p) => (
+                          <Chip
+                            key={p.orgPlatformId}
+                            size="small"
+                            variant="outlined"
+                            label={p.product.name}
+                            sx={{ fontWeight: 600 }}
+                          />
+                        ))}
+                      </Stack>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">{formatDate(item.registeredOn)}</Typography>
@@ -168,25 +194,17 @@ export default function NewRegistrationsPage() {
                         {formatRelative(item.registeredOn)}
                       </Typography>
                     </TableCell>
-                    <TableCell>
-                      <StatusChip value={item.lifecycleStage} kind="lifecycle" />
-                    </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={1} justifyContent="flex-end">
                         <Button
                           size="small"
                           variant="contained"
-                          disabled={acknowledge.isPending}
-                          onClick={() => acknowledge.mutate({ orgPlatformId: item.orgPlatformId })}
+                          disabled={acknowledging !== null || !item.platforms.some((p) => p.isNew)}
+                          onClick={() => void acknowledgeAll(item)}
                         >
                           Acknowledge
                         </Button>
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}/${item.product.code}`)
-                          }
-                        >
+                        <Button size="small" onClick={() => openOrganization(item)}>
                           Open
                         </Button>
                       </Stack>

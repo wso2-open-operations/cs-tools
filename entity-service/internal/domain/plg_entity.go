@@ -889,19 +889,32 @@ type CreateNoteRequest struct {
 // Registrations — the New Registrations panel
 // ---------------------------------------------------------------------------
 
-// RegistrationItem is one pairing awaiting acknowledgement.
+// RegistrationItem is one organisation with registrations awaiting
+// acknowledgement. Platforms lists its matching pairings, newest first; the
+// top-level pairing fields are the newest one's.
 type RegistrationItem struct {
-	OrgPlatformID    string         `json:"orgPlatformId"`
-	OrganizationID   string         `json:"organizationId"`
-	OrganizationName *string        `json:"organizationName"`
-	MoesifCompanyID  *string        `json:"moesifCompanyId"`
-	Product          PlgProductRef  `json:"product"`
-	RegisteredEmail  *string        `json:"registeredEmail"`
-	RegisteredName   *string        `json:"registeredName"`
-	RegisteredOn     time.Time      `json:"registeredOn"`
-	LifecycleStage   LifecycleStage `json:"lifecycleStage"`
-	StageName        string         `json:"stageName"`
-	Owner            *UserRef       `json:"owner"`
+	OrgPlatformID    string                 `json:"orgPlatformId"`
+	OrganizationID   string                 `json:"organizationId"`
+	OrganizationName *string                `json:"organizationName"`
+	MoesifCompanyID  *string                `json:"moesifCompanyId"`
+	Product          PlgProductRef          `json:"product"`
+	RegisteredEmail  *string                `json:"registeredEmail"`
+	RegisteredName   *string                `json:"registeredName"`
+	RegisteredOn     time.Time              `json:"registeredOn"`
+	LifecycleStage   LifecycleStage         `json:"lifecycleStage"`
+	StageName        string                 `json:"stageName"`
+	Owner            *UserRef               `json:"owner"`
+	Platforms        []RegistrationPlatform `json:"platforms"`
+}
+
+// RegistrationPlatform is one of an organisation's listed pairings.
+type RegistrationPlatform struct {
+	OrgPlatformID  string         `json:"orgPlatformId"`
+	Product        PlgProductRef  `json:"product"`
+	RegisteredOn   time.Time      `json:"registeredOn"`
+	LifecycleStage LifecycleStage `json:"lifecycleStage"`
+	StageName      string         `json:"stageName"`
+	IsNew          bool           `json:"isNew"`
 }
 
 // SearchRegistrationsRequest is the body of POST /registrations/search.

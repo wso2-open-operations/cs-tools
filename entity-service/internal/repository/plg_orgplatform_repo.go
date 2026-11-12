@@ -1042,7 +1042,8 @@ func (r *orgPlatformRepository) UpdateNote(ctx context.Context, req domain.Updat
 }
 
 // SearchRegistrations backs the New Registrations panel. "New" is the absence of
-// acknowledged_on — nothing stores a flag.
+// acknowledged_on — nothing stores a flag. Matching pairings are grouped by
+// organisation and paged by organisation, newest registration first.
 // buildRegistrationConditions filters the registrations list.
 //
 // It cannot share buildConditions with the organisation list, for two reasons
@@ -1098,24 +1099,32 @@ func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req dom
 	b := &argBuilder{}
 	conds := buildRegistrationConditions(&req.Filters, b)
 	if req.UnacknowledgedOnly {
-		conds = append(conds, `v.is_new`)
+		// An abandoned registration (e.g. an excluded signup) waits for nobody.
+		conds = append(conds, `v.is_new`, `v.lifecycle_stage <> 'ABANDONED'`)
 	}
 
 	limit := b.add(req.Pagination.Limit)
 	offset := b.add(req.Pagination.Offset)
 
 	q := `
+		WITH m AS (
+			SELECT v.* FROM plg_org_platform_v v` + whereClause(conds) + `
+		), page AS (
+			SELECT organization_id, MAX(registered_on) AS newest, COUNT(*) OVER() AS total
+			FROM   m
+			GROUP  BY organization_id
+			ORDER  BY newest DESC, organization_id
+			LIMIT  ` + limit + ` OFFSET ` + offset + `
+		)
 		SELECT v.org_platform_id, v.organization_id, v.organization_name,
 		       (SELECT o.moesif_company_id FROM plg_organization o WHERE o.id = v.organization_id),
 		       v.product_id, v.product_code, v.product_name,
 		       v.registered_email, v.registered_name, v.registered_on,
 		       v.lifecycle_stage::TEXT, v.lifecycle_stage_name,
 		       v.plg_cs_owner::TEXT, v.plg_cs_owner_email, v.plg_cs_owner_name,
-		       COUNT(*) OVER() AS total
-		FROM   plg_org_platform_v v` +
-		whereClause(conds) + `
-		ORDER  BY v.registered_on DESC
-		LIMIT  ` + limit + ` OFFSET ` + offset
+		       v.is_new, page.total
+		FROM   page JOIN m v ON v.organization_id = page.organization_id
+		ORDER  BY page.newest DESC, page.organization_id, v.registered_on DESC`
 
 	rows, err := r.db.Query(ctx, q, b.list()...)
 	if err != nil {
@@ -1130,15 +1139,24 @@ func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req dom
 			it                             domain.RegistrationItem
 			prodID, prodCode, prodName     string
 			ownerID, ownerEmail, ownerName *string
+			isNew                          bool
 		)
 		if err := rows.Scan(&it.OrgPlatformID, &it.OrganizationID, &it.OrganizationName, &it.MoesifCompanyID,
 			&prodID, &prodCode, &prodName,
 			&it.RegisteredEmail, &it.RegisteredName, &it.RegisteredOn,
-			&it.LifecycleStage, &it.StageName, &ownerID, &ownerEmail, &ownerName, &total); err != nil {
+			&it.LifecycleStage, &it.StageName, &ownerID, &ownerEmail, &ownerName, &isNew, &total); err != nil {
 			return nil, 0, fmt.Errorf("scan registration: %w", err)
 		}
 		it.Product = productRef(prodID, prodCode, prodName)
 		it.Owner = userRef(ownerID, ownerEmail, ownerName)
+		platform := domain.RegistrationPlatform{OrgPlatformID: it.OrgPlatformID, Product: it.Product,
+			RegisteredOn: it.RegisteredOn, LifecycleStage: it.LifecycleStage, StageName: it.StageName, IsNew: isNew}
+		// Rows arrive grouped by organisation, newest pairing first.
+		if n := len(items); n > 0 && items[n-1].OrganizationID == it.OrganizationID {
+			items[n-1].Platforms = append(items[n-1].Platforms, platform)
+			continue
+		}
+		it.Platforms = []domain.RegistrationPlatform{platform}
 		items = append(items, it)
 	}
 	return items, total, rows.Err()

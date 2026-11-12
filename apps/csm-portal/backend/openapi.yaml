@@ -31172,6 +31172,7 @@ components:
               type: integer
     PlgRegistrationSearchResponse:
       type: object
+      description: One item per organisation; total counts organisations.
       properties:
         registrations:
           type: array
@@ -31224,6 +31225,37 @@ components:
                     type: string
                   name:
                     type: string
+              platforms:
+                type: array
+                description: >
+                  The organisation's matching registrations, newest first. The
+                  top-level registration fields are the newest one's.
+                items:
+                  type: object
+                  properties:
+                    orgPlatformId:
+                      type: string
+                      format: uuid
+                    product:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        code:
+                          type: string
+                        name:
+                          type: string
+                    registeredOn:
+                      type: string
+                      format: date-time
+                    lifecycleStage:
+                      type: string
+                    stageName:
+                      type: string
+                    isNew:
+                      type: boolean
+                      description: Not acknowledged yet.
         total:
           type: integer
         limit:

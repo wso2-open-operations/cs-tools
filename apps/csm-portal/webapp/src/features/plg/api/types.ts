@@ -527,6 +527,19 @@ export interface RegistrationItem {
   lifecycleStage: LifecycleStage;
   stageName: string;
   owner: UserRef | null;
+  /** The organisation's listed registrations, newest first; the fields above are the newest one's. */
+  platforms: RegistrationPlatform[];
+}
+
+/** One of an organisation's listed registrations. */
+export interface RegistrationPlatform {
+  orgPlatformId: string;
+  product: ProductRef;
+  registeredOn: string;
+  lifecycleStage: LifecycleStage;
+  stageName: string;
+  /** Not acknowledged yet. */
+  isNew: boolean;
 }
 
 export interface SearchRegistrationsRequest {
