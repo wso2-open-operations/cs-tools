@@ -460,7 +460,8 @@ the list.
   stored phone), `sales_region`, `sub_region`, `life_cycle` (`status`),
   `naics_industry`, `sub_industry`, `classification`, `technical_owner_id`, the
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
-  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`.
+  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
+  `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
 - `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
@@ -494,6 +495,18 @@ later CREATED/UPDATED/RESTORED clears `deleted_on`. Never `DELETE FROM account`
 `deleted_on IS NOT NULL`; `GetAccountByID`, `LookupAccountIDBySfID` (so
 `EnsureAccount`), the partner lookup and the joins from projects/cases/global search
 still see the row.
+
+**Primary partner and life cycle on the account reads.** `hasPrimaryPartner` on
+`GET /accounts/{id}` and `POST /accounts/search` is `primary_partner_sf_id IS NOT NULL`;
+it used to be "any partner link in `account_relationship`", which has no primary
+marker and overstated it for an account with a non-primary partner. The column fills
+only when the Account ingest writes the account, so after deploying 0291 replay one
+`UPDATED` `Account` event per account (`POST /salesforce/events`, Account ingest on);
+until then `hasPrimaryPartner` reads false. Its only reader is ACP's CSM-only mode
+(`ACP_SALES_ENTITY_READS=off` in csm-scheduled-tasks), where it moves an invoice
+suspend date. Both reads also return `lifeCycle` (`account.life_cycle`), and the
+opportunity and project-opportunity link reads return `sfId` (`sf_opportunity.sf_id`,
+`sf_opportunity_link.link_sf_id`), all `null` on the ServiceNow data source.
 
 ### One row per sf_id
 
