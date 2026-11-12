@@ -17,8 +17,9 @@
 -- The Salesforce Account Id of the account's primary partner
 -- (Account.Primary_Partner_Name2__c), written by the Salesforce Account
 -- ingest. NULL means no primary partner, or an account the ingest has not
--- written since this column was added: replay an UPDATED event per account
--- to fill it. hasPrimaryPartner on the account reads is this column being
--- set; it used to be "any partner link in account_relationship", which has
--- no primary marker.
+-- written since this column was added. Backfill with
+-- POST /salesforce/accounts/{sfId}/refresh (replaying an UPDATED event is
+-- skipped by the duplicate guard). hasPrimaryPartner on the account reads is
+-- this column being set; it used to be "any partner link in
+-- account_relationship", which has no primary marker.
 ALTER TABLE account ADD COLUMN IF NOT EXISTS primary_partner_sf_id VARCHAR(100);
