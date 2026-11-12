@@ -105,7 +105,7 @@ export interface BackendApi {
    * or POST.
    */
   put<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse>;
-  postEmpty<TResponse>(path: string): Promise<TResponse>;
+  postEmpty<TResponse>(path: string, options?: BackendApiPostOptions): Promise<TResponse>;
   /** Authenticated DELETE. Returns the parsed JSON body (`null` on 204). */
   del<TResponse>(path: string): Promise<TResponse | null>;
   /**
@@ -227,7 +227,7 @@ export function useBackendApi(): BackendApi {
         if (response.status === 204) return null as TResponse;
         return (await response.json()) as TResponse;
       },
-      async postEmpty<TResponse>(path: string): Promise<TResponse> {
+      async postEmpty<TResponse>(path: string, options?: BackendApiPostOptions): Promise<TResponse> {
         const correlationId = newCorrelationId();
         const response = await authFetch(buildUrl(path), {
           method: "POST",
@@ -236,6 +236,7 @@ export function useBackendApi(): BackendApi {
             [CORRELATION_ID_HEADER]: correlationId,
           },
           body: "{}",
+          signal: options?.signal,
         });
         if (!response.ok) throw await readError(response, correlationId);
         return (await response.json()) as TResponse;
