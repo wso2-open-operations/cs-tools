@@ -413,17 +413,30 @@ func (r *IncidentRepo) MutedByRule(ctx context.Context, ruleID string, limit, of
 
 // MutedByRuleSummary counts the incidents ruleID muted by outcome (see model.Incident.MuteOutcome).
 func (r *IncidentRepo) MutedByRuleSummary(ctx context.Context, ruleID string) (map[string]int, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+incidentColumns+` FROM incidents_processed WHERE mute_rule_id = $1`, ruleID)
+	// Counted in SQL, so a busy rule's incidents never leave the database: the CASE is
+	// model.Incident.MuteOutcome, branch for branch (TestIncidentRepo_MutedByRuleSummaryMatchesMuteOutcome).
+	rows, err := r.pool.Query(ctx, `SELECT CASE
+			WHEN muted THEN $2
+			WHEN csm_confirmed THEN $3
+			WHEN unmuted_at IS NOT NULL AND csm_attempts = 0 AND NOT fallback AND lower(trim(status)) = 'closed' THEN $4
+			ELSE $5 END AS outcome, count(*)
+		FROM incidents_processed WHERE mute_rule_id = $1 GROUP BY 1`,
+		ruleID, model.MuteOutcomeMuted, model.MuteOutcomeIncident, model.MuteOutcomeClosedQuietly, model.MuteOutcomeDelivering)
 	if err != nil {
 		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
 	}
-	incs, err := pgx.CollectRows(rows, pgx.RowToStructByName[model.Incident])
-	if err != nil {
-		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
-	}
+	defer rows.Close()
 	counts := map[string]int{}
-	for _, inc := range incs {
-		counts[inc.MuteOutcome()]++
+	for rows.Next() {
+		var outcome string
+		var n int
+		if err := rows.Scan(&outcome, &n); err != nil {
+			return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
+		}
+		counts[outcome] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("summarize incidents muted by rule %s: %w", ruleID, err)
 	}
 	return counts, nil
 }

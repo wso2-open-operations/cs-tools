@@ -116,9 +116,34 @@ func TestCache_MatchesActiveBlocksAndFailsOpenWhenStale(t *testing.T) {
 	if _, ok := c.Match(f); !ok {
 		t.Fatal("a failed refresh must keep the last good rules within max staleness")
 	}
+	if stale, _ := c.Stale(); stale {
+		t.Fatal("Stale within max staleness")
+	}
 	now = now.Add(2 * time.Minute)
 	if _, ok := c.Match(f); ok {
 		t.Fatal("rules older than max staleness must match nothing (fail open)")
+	}
+	if stale, age := c.Stale(); !stale || age != 6*time.Minute {
+		t.Fatalf("Stale = %v, %v; want true, 6m", stale, age)
+	}
+	fetchErr = nil
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _ := c.Stale(); stale {
+		t.Fatal("Stale after a successful refresh")
+	}
+}
+
+func TestCache_StaleBeforeTheFirstFetchAndNilIsNot(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 30, 0, 0, time.UTC)
+	c := testCache(func(context.Context) ([]Rule, error) { return nil, errors.New("down") }, &now)
+	if stale, age := c.Stale(); !stale || age != 0 {
+		t.Fatalf("Stale before any fetch = %v, %v; want true, 0", stale, age)
+	}
+	var none *Cache
+	if stale, _ := none.Stale(); stale {
+		t.Fatal("a nil cache (muting off) is not stale")
 	}
 }
 

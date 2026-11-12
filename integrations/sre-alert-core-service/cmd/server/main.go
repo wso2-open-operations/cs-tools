@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -197,6 +198,17 @@ func main() {
 		if err := dbProbe.Check(r.Context()); err != nil {
 			logger.Warn("db health check failed: postgres unreachable", "error", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	// mutez is 503 while the alert mute rule cache is stale (muting has failed open: alerts a rule should mute page
+	// again), so an uptime monitor can alert on an entity-service / csm-integration outage during maintenance. Not a
+	// readiness or liveness probe: restarting the pod does not fix it. 200 when muting is off.
+	mux.HandleFunc("GET /mutez", func(w http.ResponseWriter, r *http.Request) {
+		if stale, age := rules.Stale(); stale {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "alert mute rules stale (age %s)\n", age.Round(time.Second))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
