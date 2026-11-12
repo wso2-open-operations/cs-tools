@@ -2708,6 +2708,9 @@ type CreateDeployedProductRequest struct {
 	// "write it where the data actually has a column, skip the mirror call
 	// entirely rather than send a field it would ignore or reject" precedent
 	// documented on patchCaseFieldsBundle's own four-of-nine mirrored fields.
+	// Omitted, the deployed product gets its project type's default
+	// (project_type.default_deployed_product_category, migration 0291), or no
+	// category when the type has none.
 	Category *string `json:"category,omitempty"`
 }
 
