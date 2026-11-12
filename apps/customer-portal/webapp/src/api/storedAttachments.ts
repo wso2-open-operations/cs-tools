@@ -306,8 +306,10 @@ export async function downloadStoredAttachment(
 
 async function readAndStore(
   request: RangeRequest,
-  input: { name?: string; onProgress?: DownloadProgress; signal?: AbortSignal },
+  input: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   sink: DiskSink | undefined,
+  /** True for a signed link: Azure honours any range, so no first read is needed to learn the size. */
+  parallelFromStart = false,
 ): Promise<void> {
   // Bytes received so far, counted as each piece arrives; the size of the file
   // is known from the first answer's headers on.
@@ -320,33 +322,12 @@ async function readAndStore(
     }
     if (knownTotal !== undefined) input.onProgress?.(Math.max(0, received), knownTotal);
   };
-  const first = await readRange(
-    request,
-    0,
-    DOWNLOAD_RANGE_BYTES - 1,
-    ({ response, parts }) => {
-      if (response.status !== 206) return true; // the whole file, the range was ignored
-      const range = parseContentRange(response.headers);
-      return (
-        range !== null &&
-        range.start === 0 &&
-        range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
-        partsLength(parts) === range.end + 1
-      );
-    },
-    report,
-    input.signal,
-  );
-  const fileName = input.name || fileNameFromDisposition(first.response.headers);
-  const total =
-    first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
   const ranges: Uint8Array[][] = [];
-  if (sink) await sink.write(0, first.parts);
-  else ranges[0] = first.parts;
 
-  if (total !== undefined && partsLength(first.parts) < total) {
+  // Reads the ranges from `firstIndex` to the end, `downloadParallelism()` at a time.
+  const readRangesFrom = async (firstIndex: number, total: number): Promise<void> => {
     const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
-    let next = 1;
+    let next = firstIndex;
     let failure: { error: unknown } | undefined;
     const worker = async (): Promise<void> => {
       while (failure === undefined && next < count) {
@@ -380,12 +361,48 @@ async function readAndStore(
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(downloadParallelism(), count - 1) }, worker),
+      Array.from({ length: Math.min(downloadParallelism(), count - firstIndex) }, worker),
     );
     if (failure) throw failure.error;
+  };
+
+  const finish = async (fileName: string | undefined): Promise<void> => {
+    if (sink) await sink.close();
+    else saveBlobAs(new Blob(ranges.flat() as BlobPart[]), fileName || "attachment");
+  };
+
+  if (parallelFromStart && input.size !== undefined && input.size > DOWNLOAD_RANGE_BYTES) {
+    knownTotal = input.size;
+    await readRangesFrom(0, input.size);
+    await finish(input.name);
+    return;
   }
-  if (sink) await sink.close();
-  else saveBlobAs(new Blob(ranges.flat() as BlobPart[]), fileName || "attachment");
+
+  const first = await readRange(
+    request,
+    0,
+    DOWNLOAD_RANGE_BYTES - 1,
+    ({ response, parts }) => {
+      if (response.status !== 206) return true; // the whole file, the range was ignored
+      const range = parseContentRange(response.headers);
+      return (
+        range !== null &&
+        range.start === 0 &&
+        range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
+        partsLength(parts) === range.end + 1
+      );
+    },
+    report,
+    input.signal,
+  );
+  const fileName = input.name || fileNameFromDisposition(first.response.headers);
+  const total =
+    first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
+  if (sink) await sink.write(0, first.parts);
+  else ranges[0] = first.parts;
+
+  if (total !== undefined && partsLength(first.parts) < total) await readRangesFrom(1, total);
+  await finish(fileName);
 }
 
 /** The file name a download response suggests, if it names one. */
@@ -471,13 +488,13 @@ function directRangeRequest(
  */
 async function downloadDirect(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; onProgress?: DownloadProgress; signal?: AbortSignal },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   sink: DiskSink | undefined,
 ): Promise<boolean> {
   try {
     const link = await requestDownloadLink(authFetch, input);
     if (sink) {
-      await readAndStore(directRangeRequest(authFetch, input, link), input, sink);
+      await readAndStore(directRangeRequest(authFetch, input, link), input, sink, true);
     } else {
       if (!(await linkWorks(link.url, input.signal))) return false;
       startBrowserDownload(link.url, input.name || link.name || "attachment");
