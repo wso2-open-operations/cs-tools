@@ -59,7 +59,7 @@ describe("useAttachmentLimits", () => {
       json: async () => ({
         maxFileBytes: 1024 * MIB,
         maxInlineImagesTotalBytes: 25 * MIB,
-        directTransferAboveBytes: 16 * MIB,
+        directTransferThresholdBytes: 16 * MIB,
       }),
     });
     const { result } = renderHook(() => useAttachmentLimits(), {
@@ -68,11 +68,11 @@ describe("useAttachmentLimits", () => {
     expect(result.current).toEqual({
       maxFileBytes: 10 * MIB,
       maxInlineImagesTotalBytes: 1 * MIB,
-      directTransferAboveBytes: 0,
+      directTransferThresholdBytes: 0,
     });
     await waitFor(() => expect(result.current.maxFileBytes).toBe(1024 * MIB));
     expect(result.current.maxInlineImagesTotalBytes).toBe(25 * MIB);
-    expect(result.current.directTransferAboveBytes).toBe(16 * MIB);
+    expect(result.current.directTransferThresholdBytes).toBe(16 * MIB);
     expect(mockAuthFetch).toHaveBeenCalledWith("https://api.test/attachments/limits", {
       method: "GET",
     });
@@ -103,11 +103,11 @@ describe("useAttachmentLimits", () => {
     for (const value of [undefined, 0, -1, "16"]) {
       mockAuthFetch.mockResolvedValue({
         ok: true,
-        json: async () => ({ maxFileBytes: 50 * MIB, directTransferAboveBytes: value }),
+        json: async () => ({ maxFileBytes: 50 * MIB, directTransferThresholdBytes: value }),
       });
       const { result } = renderHook(() => useAttachmentLimits(), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.maxFileBytes).toBe(50 * MIB));
-      expect(result.current.directTransferAboveBytes).toBe(0);
+      expect(result.current.directTransferThresholdBytes).toBe(0);
     }
   });
 });

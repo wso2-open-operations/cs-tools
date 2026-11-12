@@ -59,7 +59,7 @@ export function useStoredAttachmentDownload(): {
   cancelDownload: (id: string) => void;
 } {
   const authFetch = useAuthApiClient();
-  const { directTransferAboveBytes } = useAttachmentLimits();
+  const { directTransferThresholdBytes } = useAttachmentLimits();
   // The controller of each running download, so one can be cancelled on its own.
   const controllers = useRef(new Map<string, AbortController>());
   // One entry per running download, so two at once do not overwrite each other.
@@ -75,7 +75,7 @@ export function useStoredAttachmentDownload(): {
       try {
         await downloadStoredAttachment(authFetch, {
           ...input,
-          directAboveBytes: directTransferAboveBytes,
+          directTransferThresholdBytes: directTransferThresholdBytes,
           signal: controller.signal,
           onProgress: (received, total) =>
             setProgress(

@@ -44,11 +44,11 @@ beforeEach(() => {
 
 describe("useGetAttachmentLimits", () => {
   it("reads GET /attachments/limits", async () => {
-    getMock.mockResolvedValue({ maxFileBytes: 100 * MB, maxInlineImagesTotalBytes: 5 * MB, directTransferAboveBytes: 16 * MB });
+    getMock.mockResolvedValue({ maxFileBytes: 100 * MB, maxInlineImagesTotalBytes: 5 * MB, directTransferThresholdBytes: 16 * MB });
     const { result } = renderHook(() => useGetAttachmentLimits(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(getMock).toHaveBeenCalledWith("/attachments/limits");
-    expect(result.current.data).toEqual({ maxFileBytes: 100 * MB, maxInlineImagesTotalBytes: 5 * MB, directTransferAboveBytes: 16 * MB });
+    expect(result.current.data).toEqual({ maxFileBytes: 100 * MB, maxInlineImagesTotalBytes: 5 * MB, directTransferThresholdBytes: 16 * MB });
   });
 
   it("makes no request while disabled", () => {
@@ -59,12 +59,12 @@ describe("useGetAttachmentLimits", () => {
 
 describe("useAttachmentLimits", () => {
   it("uses the defaults (10 MiB file, 1 MiB images) until the server answers", async () => {
-    getMock.mockResolvedValue({ maxFileBytes: 1024 * MB, maxInlineImagesTotalBytes: 25 * MB, directTransferAboveBytes: 16 * MB });
+    getMock.mockResolvedValue({ maxFileBytes: 1024 * MB, maxInlineImagesTotalBytes: 25 * MB, directTransferThresholdBytes: 16 * MB });
     const { result } = renderHook(() => useAttachmentLimits(), { wrapper });
-    expect(result.current).toEqual({ maxFileBytes: 10 * MB, maxInlineImagesBytes: 1 * MB, directTransferAboveBytes: 0 });
+    expect(result.current).toEqual({ maxFileBytes: 10 * MB, maxInlineImagesBytes: 1 * MB, directTransferThresholdBytes: 0 });
     await waitFor(() => expect(result.current.maxFileBytes).toBe(1024 * MB));
     expect(result.current.maxInlineImagesBytes).toBe(25 * MB);
-    expect(result.current.directTransferAboveBytes).toBe(16 * MB);
+    expect(result.current.directTransferThresholdBytes).toBe(16 * MB);
   });
 
   it("keeps the defaults when the request fails", async () => {
@@ -73,13 +73,13 @@ describe("useAttachmentLimits", () => {
     });
     const { result } = renderHook(() => ({ q: useGetAttachmentLimits(), limits: useAttachmentLimits() }), { wrapper });
     await waitFor(() => expect(result.current.q.isError).toBe(true));
-    expect(result.current.limits).toEqual({ maxFileBytes: 10 * MB, maxInlineImagesBytes: 1 * MB, directTransferAboveBytes: 0 });
+    expect(result.current.limits).toEqual({ maxFileBytes: 10 * MB, maxInlineImagesBytes: 1 * MB, directTransferThresholdBytes: 0 });
   });
 
   it("keeps the defaults for an unusable answer", async () => {
-    getMock.mockResolvedValue({ maxFileBytes: 0, maxInlineImagesTotalBytes: "x", directTransferAboveBytes: -1 });
+    getMock.mockResolvedValue({ maxFileBytes: 0, maxInlineImagesTotalBytes: "x", directTransferThresholdBytes: -1 });
     const { result } = renderHook(() => ({ q: useGetAttachmentLimits(), limits: useAttachmentLimits() }), { wrapper });
     await waitFor(() => expect(result.current.q.isSuccess).toBe(true));
-    expect(result.current.limits).toEqual({ maxFileBytes: 10 * MB, maxInlineImagesBytes: 1 * MB, directTransferAboveBytes: 0 });
+    expect(result.current.limits).toEqual({ maxFileBytes: 10 * MB, maxInlineImagesBytes: 1 * MB, directTransferThresholdBytes: 0 });
   });
 });

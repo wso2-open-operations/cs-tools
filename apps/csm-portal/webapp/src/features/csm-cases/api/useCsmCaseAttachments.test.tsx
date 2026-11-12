@@ -232,7 +232,7 @@ describe("useDownloadCsmCaseAttachment", () => {
         id: "att-1",
         name: ATTACHMENT.filename,
         size: ATTACHMENT.size,
-        directAboveBytes: 0,
+        directTransferThresholdBytes: 0,
         onSaved: expect.any(Function),
       }),
     );

@@ -816,7 +816,7 @@ describe("storedAttachments", () => {
           id: ID,
           name: "big.bin",
           size: SIZE,
-          directAboveBytes: ABOVE,
+          directTransferThresholdBytes: ABOVE,
           ...extra,
         });
         const isLinkRequest = (url: string) => String(url).includes("/download-links");
@@ -1057,7 +1057,7 @@ describe("storedAttachments", () => {
           id: ID,
           name: "big.bin",
           size: ABOVE + 1,
-          directAboveBytes: ABOVE,
+          directTransferThresholdBytes: ABOVE,
           onSaved,
         });
         expect(authFetch).toHaveBeenCalledTimes(1);
@@ -1082,7 +1082,7 @@ describe("storedAttachments", () => {
             id: ID,
             name: "a.txt",
             size: 10,
-            directAboveBytes: 5,
+            directTransferThresholdBytes: 5,
           });
           expect(authFetch).toHaveBeenCalledTimes(2);
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
@@ -1105,7 +1105,7 @@ describe("storedAttachments", () => {
             id: ID,
             name: "a.txt",
             size: 10,
-            directAboveBytes: 5,
+            directTransferThresholdBytes: 5,
           });
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
         }
@@ -1115,10 +1115,10 @@ describe("storedAttachments", () => {
       it("does not ask for a link at or below the server's size, with no size, or when it is 0", async () => {
         clickSpy();
         const cases = [
-          { size: 5, directAboveBytes: 5 },
-          { size: undefined, directAboveBytes: 5 },
-          { size: 10, directAboveBytes: 0 }, // direct transfers off
-          { size: 10, directAboveBytes: undefined },
+          { size: 5, directTransferThresholdBytes: 5 },
+          { size: undefined, directTransferThresholdBytes: 5 },
+          { size: 10, directTransferThresholdBytes: 0 }, // direct transfers off
+          { size: 10, directTransferThresholdBytes: undefined },
         ];
         for (const extra of cases) {
           authFetch.mockReset();

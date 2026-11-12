@@ -1498,7 +1498,7 @@ paths:
                   maxInlineImagesTotalBytes:
                     type: integer
                     format: int64
-                  directTransferAboveBytes:
+                  directTransferThresholdBytes:
                     type: integer
                     format: int64
                     description: Size above which a file goes straight to Azure; 0 when direct transfers are off.
