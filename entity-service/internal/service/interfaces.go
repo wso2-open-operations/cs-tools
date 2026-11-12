@@ -1713,11 +1713,10 @@ type StoredAttachmentService interface {
 	// started the upload can confirm it. Repeating a confirm that already
 	// succeeded answers the same.
 	ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error)
-	// DeleteAttachment soft-deletes an attachment: the row is marked DELETED (with
-	// who and when) and the file is returned for the caller to set aside. Only the
-	// person who uploaded it may do so (a ForbiddenError otherwise), and not once
-	// the work item is closed (a ConflictError). Repeating a delete that already
-	// succeeded answers the same, with nothing to set aside.
+	// DeleteAttachment soft-deletes an attachment (marked DELETED, with who and when)
+	// and returns its file to set aside. Only the person who uploaded it may do so
+	// (a ForbiddenError otherwise), and not once the work item is closed (a
+	// ConflictError). Repeating a delete answers the same, with no file.
 	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) (domain.DeletedStoredAttachment, error)
 	// Limits returns the attachment sizes in force, for the portals to show and check
 	// against. It reads configuration only.
