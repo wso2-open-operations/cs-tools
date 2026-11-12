@@ -298,6 +298,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
             className="csm-print-hide"
             component={RouterLink}
             to={`/customers/projects/${p.id}/sla-report/${p.id}`}
+            state={{ from: projectPath, parentState: location.state ?? null }}
           >
             SLA Report
           </Button>
