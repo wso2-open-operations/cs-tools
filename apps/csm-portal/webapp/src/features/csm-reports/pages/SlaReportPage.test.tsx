@@ -179,6 +179,48 @@ describe("SlaReportPage", () => {
     expect(screen.getByLabelText("From")).toHaveAttribute("max", "2026-09-01");
   });
 
+  it("caps both dates at today and ignores a later date typed in", async () => {
+    get.mockResolvedValue(report());
+    renderPage();
+    await screen.findByTestId("sla-report-period");
+    expect(screen.getByLabelText("From")).toHaveAttribute("max", "2026-11-11");
+    expect(screen.getByLabelText("To")).toHaveAttribute("max", "2026-11-11");
+    const calls = get.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-12-31" } });
+
+    expect(screen.getByLabelText("To")).toHaveValue("2026-11-11");
+    expect(get.mock.calls.length).toBe(calls);
+  });
+
+  it("shows the error state when the backend has no report", async () => {
+    get.mockResolvedValue(null);
+    renderPage();
+    expect(await screen.findByText("Could not load the SLA report.")).toBeInTheDocument();
+  });
+
+  it("does not download the previous period while a new one loads", async () => {
+    let release: (value: SlaReportDetails) => void = () => {};
+    get.mockImplementation((path: string) =>
+      path.includes("from=2026-01-01")
+        ? new Promise<SlaReportDetails>((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve(report()),
+    );
+    renderPage();
+    const button = await screen.findByRole("button", { name: "Download PDF" });
+    expect(button).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-01-01" } });
+    await waitFor(() => expect(button).toBeDisabled());
+    fireEvent.click(button);
+    expect(slaReportPDF).not.toHaveBeenCalled();
+
+    release(report({ periodStart: "2026-01-01" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Download PDF" })).toBeEnabled());
+  });
+
   it("says so when no case was opened in the period", async () => {
     get.mockResolvedValue(report({ summary: [], cases: [] }));
     renderPage();
