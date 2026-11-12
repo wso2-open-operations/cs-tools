@@ -382,6 +382,7 @@ func TestBackend_LocateAttachmentGivesAReasonNotAKeyWhenThereIsNoFile(t *testing
 		reason string
 	}{
 		"deleted":            {completeRow("DELETED", stringPtr(workItemKey)), domain.AttachmentUnavailableDeleted},
+		"expired":            {completeRow("EXPIRED", stringPtr(workItemKey)), domain.AttachmentUnavailableExpired},
 		"failed":             {completeRow("FAILED", nil), domain.AttachmentUnavailableFailed},
 		"never confirmed":    {completeRow("PENDING", nil), domain.AttachmentUnavailableNotStored},
 		"complete, no key":   {completeRow("COMPLETE", nil), domain.AttachmentUnavailableNotStored},

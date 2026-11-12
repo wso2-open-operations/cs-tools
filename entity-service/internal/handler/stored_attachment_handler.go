@@ -54,9 +54,10 @@ var storedInlineImageTypes = map[string]bool{
 // StoredAttachmentHandler handles HTTP requests that record and authorize the
 // attachment files the portal backends hold in Azure Blob Storage.
 type StoredAttachmentHandler struct {
-	svc     service.StoredAttachmentService
-	files   service.StoredAttachmentFileService
-	uploads service.AttachmentUploadCleanupService
+	svc       service.StoredAttachmentService
+	files     service.StoredAttachmentFileService
+	uploads   service.AttachmentUploadCleanupService
+	retention service.AttachmentRetentionService
 }
 
 // WithFiles attaches the file service, which backs every route that moves a file
@@ -77,6 +78,12 @@ func (h *StoredAttachmentHandler) WithUploadCleanup(c service.AttachmentUploadCl
 	return h
 }
 
+// WithRetention attaches the closed-work-item file removal, which backs POST /attachments/retention/expire.
+func (h *StoredAttachmentHandler) WithRetention(s service.AttachmentRetentionService) *StoredAttachmentHandler {
+	h.retention = s
+	return h
+}
+
 // Limits handles GET /attachments/limits: the attachment sizes in force. They come
 // from configuration, so the answer may be cached for a few minutes.
 func (h *StoredAttachmentHandler) Limits(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +91,24 @@ func (h *StoredAttachmentHandler) Limits(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(h.svc.Limits())
+}
+
+// ExpireClosedAttachments handles POST /attachments/retention/expire.
+func (h *StoredAttachmentHandler) ExpireClosedAttachments(w http.ResponseWriter, r *http.Request) {
+	if h.retention == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req domain.ExpireAttachmentsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.retention.ExpireClosedWorkItemFiles(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, res)
 }
 
 // CleanupUploads handles POST /attachments/uploads/cleanup.

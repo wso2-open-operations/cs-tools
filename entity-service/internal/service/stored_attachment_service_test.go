@@ -65,15 +65,23 @@ type fakeStoredRepo struct {
 		id, from, to string
 		sys          bool
 	}
-	deleted     map[string]string // id -> deleted_by
-	deleteCtx   []bool            // whether each MarkDeleted ran as the system
-	deleteOK    bool
-	completed   map[string]string // id -> storage key
-	completeCtx []bool            // whether each MarkComplete ran as the system
-	completeOK  bool
-	failed      map[string]string // id -> detail
-	abandoned   []domain.AbandonedUpload
-	abandonedAt time.Time // the cutoff ListAbandoned was asked for
+	deleted map[string]string // id -> deleted_by
+	// closedFiles is what ListClosedWorkItemFiles returns; closedBefore, closedLimit and
+	// closedSys record its last call. expired holds the ids MarkExpired was given.
+	closedFiles  []domain.StoredAttachmentRow
+	closedBefore time.Time
+	closedLimit  int
+	closedSys    bool
+	expired      []string
+	expireErr    error
+	deleteCtx    []bool // whether each MarkDeleted ran as the system
+	deleteOK     bool
+	completed    map[string]string // id -> storage key
+	completeCtx  []bool            // whether each MarkComplete ran as the system
+	completeOK   bool
+	failed       map[string]string // id -> detail
+	abandoned    []domain.AbandonedUpload
+	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
 	// pendingStaged is how many staged uploads the caller already has; pendingAsked is what the insert was limited by.
 	pendingStaged int
 	pendingAsked  struct {
@@ -194,6 +202,21 @@ func (f *fakeStoredRepo) MarkDeleted(ctx context.Context, _ domain.StoredAttachm
 		return false, nil
 	}
 	f.deleted[id] = by
+	return true, nil
+}
+
+func (f *fakeStoredRepo) ListClosedWorkItemFiles(ctx context.Context, closedBefore time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	f.closedSys = ok && scope.Unrestricted
+	f.closedBefore, f.closedLimit = closedBefore, limit
+	return f.closedFiles, nil
+}
+
+func (f *fakeStoredRepo) MarkExpired(_ context.Context, id string) (bool, error) {
+	if f.expireErr != nil {
+		return false, f.expireErr
+	}
+	f.expired = append(f.expired, id)
 	return true, nil
 }
 
@@ -576,6 +599,21 @@ func TestDeleteAttachment_AHiddenOrUnknownAttachmentIsNotFound(t *testing.T) {
 	var nerr *apierror.NotFoundError
 	if !errors.As(err, &nerr) {
 		t.Fatalf("err = %v, want NotFoundError", err)
+	}
+}
+
+// An attachment whose file expired is already gone, so a delete of it changes nothing.
+func TestDeleteAttachment_AnExpiredAttachmentIsAlreadyGone(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	row := repo.rows[saAttID]
+	row.Status = "EXPIRED"
+	repo.rows[saAttID] = row
+	if err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+		t.Fatalf("err = %v, want success", err)
+	}
+	if len(repo.deleteCtx) != 0 {
+		t.Error("a delete of an expired attachment touched something")
 	}
 }
 

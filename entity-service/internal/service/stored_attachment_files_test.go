@@ -35,6 +35,7 @@ type fakeBlob struct {
 	committed  map[string][]byte
 	types      map[string]string
 	deleted    []string
+	deleteErr  error
 	commitErr  error
 	putErr     error
 	opened     []string
@@ -114,6 +115,9 @@ func (b *fakeBlob) Open(_ context.Context, key string, rng *azblobstore.Range) (
 }
 
 func (b *fakeBlob) Delete(_ context.Context, key string) error {
+	if b.deleteErr != nil {
+		return b.deleteErr
+	}
 	b.deleted = append(b.deleted, key)
 	_, had := b.committed[key]
 	delete(b.committed, key)
@@ -389,6 +393,15 @@ func TestFiles_OpenAttachment(t *testing.T) {
 		repo.rows[saAttID] = completeRow("PENDING", nil)
 		_, err = newFileSvc(repo, newFakeBlob()).OpenAttachment(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID, "")
 		wantErr[*apierror.NotFoundError](t, err, "not stored")
+	})
+	t.Run("an expired attachment is gone with its own code", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.rows[saAttID] = completeRow("EXPIRED", &key)
+		_, err := newFileSvc(repo, newFakeBlob()).OpenAttachment(saCtx(t, saEmail), domain.StoredAttachmentWorkItem, saAttID, "")
+		var ge *apierror.GoneError
+		if !errors.As(err, &ge) || ge.Code != apierror.CodeAttachmentExpired {
+			t.Errorf("err = %v, want 410 attachment_expired", err)
+		}
 	})
 	t.Run("the transfer slot is given back when the file is closed", func(t *testing.T) {
 		repo := newFakeStoredRepo()

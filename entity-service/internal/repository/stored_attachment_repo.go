@@ -61,6 +61,14 @@ type StoredAttachmentRepository interface {
 	// and when. It reports false when the row is no longer COMPLETE (already
 	// deleted by another request). Meant for repository.WithSystemIdentity.
 	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
+	// ListClosedWorkItemFiles returns up to limit COMPLETE work item attachments whose
+	// work item was closed before closedBefore, oldest closure first. Meant for
+	// repository.WithSystemIdentity.
+	ListClosedWorkItemFiles(ctx context.Context, closedBefore time.Time, limit int) ([]domain.StoredAttachmentRow, error)
+	// MarkExpired records that a COMPLETE work item attachment's file was removed after
+	// its work item stayed closed: status EXPIRED, with when. It reports false when
+	// the row is no longer COMPLETE. Meant for repository.WithSystemIdentity.
+	MarkExpired(ctx context.Context, id string) (bool, error)
 	// UpdateStorageKey changes the stored key of a COMPLETE attachment from `from`
 	// to `to`, and reports whether it did (false when the row no longer has the key
 	// `from`, so a repeated call is harmless). Meant for repository.WithSystemIdentity.
@@ -533,6 +541,55 @@ func (r *storedAttachmentRepo) MarkDeleted(ctx context.Context, kind domain.Stor
 		WHERE id = $1 AND status = 'COMPLETE'`, id, deletedBy)
 	if err != nil {
 		return false, fmt.Errorf("mark attachment deleted: %w", err)
+	}
+	return ct.RowsAffected() == 1, nil
+}
+
+// ListClosedWorkItemFiles implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListClosedWorkItemFiles(ctx context.Context, closedBefore time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentWorkItem)
+	if err != nil {
+		return nil, err
+	}
+	// The inner query picks the oldest due rows; the outer one reads their columns
+	// without the joined tables' names getting in the way.
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM work_item_attachment
+		WHERE id IN (
+			SELECT wa.id
+			FROM work_item_attachment wa
+			JOIN work_item wi ON wi.id = wa.work_item_id
+			LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
+			WHERE wa.status = 'COMPLETE' AND wa.storage_key IS NOT NULL
+			  AND `+caseLikeOwnStateColumn+` = 'CLOSED'
+			  AND `+caseLikeOwnClosedOnColumn+` < $1
+			ORDER BY `+caseLikeOwnClosedOnColumn+`, wa.created_on
+			LIMIT $2)`, closedBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list closed work item files: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan closed work item file: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate closed work item files: %w", err)
+	}
+	return out, nil
+}
+
+// MarkExpired implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) MarkExpired(ctx context.Context, id string) (bool, error) {
+	ct, err := r.db.Exec(ctx, `
+		UPDATE work_item_attachment
+		SET status = 'EXPIRED', expired_on = now(), updated_on = now(), updated_by = 'attachment-retention'
+		WHERE id = $1 AND status = 'COMPLETE'`, id)
+	if err != nil {
+		return false, fmt.Errorf("mark attachment expired: %w", err)
 	}
 	return ct.RowsAffected() == 1, nil
 }

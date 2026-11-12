@@ -3071,7 +3071,7 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 		       COALESCE(su.id::text, '') AS uploader_id, COALESCE(wa.created_by, '') AS uploader_email,
 		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), '') AS uploader_name,
 		       wa.created_on, NULL::text AS storage_key,
-		       CASE WHEN wa.status = 'DELETED' THEN 'deleted' ELSE 'complete' END AS status,
+		       CASE wa.status WHEN 'DELETED' THEN 'deleted' WHEN 'EXPIRED' THEN 'expired' ELSE 'complete' END AS status,
 		       wa.deleted_on, COALESCE(wa.deleted_by, '') AS deleter_email,
 		       COALESCE(du.id::text, '') AS deleter_id,
 		       COALESCE(du.name, NULLIF(TRIM(CONCAT_WS(' ', du.first_name, du.last_name)), ''), '') AS deleter_name
@@ -3175,11 +3175,12 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 }
 
 // listedStoredAttachmentSQL keeps an attachment out of a list when it should not
-// be shown: one the uploader deleted (status DELETED), one whose upload failed,
+// be shown: one the uploader deleted (status DELETED), one removed after its work
+// item stayed closed (status EXPIRED), one whose upload failed,
 // and an upload still in flight (status PENDING on a row the portal itself
 // created, which is told apart from a migrated row waiting for its file by its
 // legacy state column, always NULL for a row this service wrote).
-const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
+const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'EXPIRED', 'FAILED')
 		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
 
 // listedWithDeletedStoredAttachmentSQL is listedStoredAttachmentSQL for a caller
@@ -3239,7 +3240,7 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
 		       COALESCE(wa.size_bytes, 0), wa.created_by, COALESCE(u.id::text, ''),
 		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
-		       wa.created_on, wa.status = 'DELETED', wa.deleted_on,
+		       wa.created_on, wa.status::text, wa.deleted_on,
 		       COALESCE(wa.deleted_by, ''), COALESCE(d.id::text, ''),
 		       COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', d.first_name, d.last_name)), ''), '')
 		FROM work_item_attachment wa
@@ -3258,7 +3259,7 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			ORDER BY u3.id
 			LIMIT 1
 		) d ON TRUE` + where + `
-		ORDER BY (wa.status = 'DELETED'), wa.created_on DESC, wa.id
+		ORDER BY (wa.status IN ('DELETED', 'EXPIRED')), wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int
@@ -3286,14 +3287,14 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 				a                                    domain.Attachment
 				sizeBytes                            int64
 				createdBy, uploaderID, uploaderName  string
-				deleted                              bool
+				status                               string
 				deletedOn                            *time.Time
 				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
 				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
-				&deleted, &deletedOn, &deleterEmail, &deleterID, &deleterName,
+				&status, &deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan work item attachment: %w", err)
 			}
@@ -3301,10 +3302,13 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			a.ReferenceType = referenceType
 			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
 			a.Status = domain.AttachmentStatusComplete
-			if deleted {
+			switch status {
+			case "DELETED":
 				a.Status = domain.AttachmentStatusDeleted
 				a.DeletedOn = deletedOn
 				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			case "EXPIRED":
+				a.Status = domain.AttachmentStatusExpired
 			}
 			result = append(result, a)
 		}

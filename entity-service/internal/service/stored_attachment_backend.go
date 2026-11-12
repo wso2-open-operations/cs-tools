@@ -221,6 +221,9 @@ func (s *storedAttachmentService) LocateAttachment(ctx context.Context, req doma
 	case row.Status == "DELETED":
 		loc.Reason = domain.AttachmentUnavailableDeleted
 		return loc, nil
+	case row.Status == "EXPIRED":
+		loc.Reason = domain.AttachmentUnavailableExpired
+		return loc, nil
 	case row.Status == "FAILED":
 		loc.Reason = domain.AttachmentUnavailableFailed
 		return loc, nil

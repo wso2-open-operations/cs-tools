@@ -45,6 +45,9 @@ const (
 	// AttachmentUnavailableDeleted: the attachment was deleted by the person who
 	// uploaded it; its file is gone.
 	AttachmentUnavailableDeleted = "DELETED"
+	// AttachmentUnavailableExpired: the file was removed after its work item had
+	// been closed for the retention period.
+	AttachmentUnavailableExpired = "EXPIRED"
 )
 
 // InitiateAttachmentUploadRequest is the body of POST /attachments/upload.
@@ -342,4 +345,30 @@ type UploadChunkList struct {
 type UploadChunk struct {
 	Index int   `json:"index"`
 	Size  int64 `json:"size"`
+}
+
+// ExpireAttachmentsRequest is the body of POST /attachments/retention/expire.
+type ExpireAttachmentsRequest struct {
+	// ClosedForDays is how long a work item must have been closed before its
+	// attachments are removed. At least MinRetentionDays, so a typo cannot remove
+	// recent files.
+	ClosedForDays int `json:"closedForDays"`
+	// Limit bounds the attachments handled in one call (default 100, at most 500).
+	Limit int `json:"limit,omitempty"`
+	// DryRun lists what would be removed and changes nothing.
+	DryRun bool `json:"dryRun,omitempty"`
+}
+
+// ExpireAttachmentsResult is what one retention run did.
+type ExpireAttachmentsResult struct {
+	DryRun bool `json:"dryRun"`
+	// Found is how many attachments were due, Expired how many were removed (or, in
+	// a dry run, would be), Failed how many could not be (tried again next run).
+	Found   int `json:"found"`
+	Expired int `json:"expired"`
+	Failed  int `json:"failed"`
+	// More is true when the page was full, so another call may find more.
+	More bool `json:"more"`
+	// Attachments are the numbers of the ones removed (or that would be).
+	Attachments []string `json:"attachments,omitempty"`
 }

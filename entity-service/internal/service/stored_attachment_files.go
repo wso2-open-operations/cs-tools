@@ -43,6 +43,9 @@ const (
 	relocateDeadline = 2 * time.Minute
 	// removedAttachmentMessage is sent with the 410 for a deleted attachment.
 	removedAttachmentMessage = "This image was removed."
+	// expiredAttachmentMessage is sent with the 410 for an attachment removed after its
+	// work item stayed closed.
+	expiredAttachmentMessage = "This file was removed because the case has been closed for a long time."
 	// defaultMaxTransfers is the number of chunks and downloads moved at once when
 	// the configuration gives no limit.
 	defaultMaxTransfers = 32
@@ -476,8 +479,11 @@ func unavailable(loc domain.AttachmentLocation) error {
 	if loc.Available && loc.StorageKey != "" {
 		return nil
 	}
-	if loc.Reason == domain.AttachmentUnavailableDeleted {
+	switch loc.Reason {
+	case domain.AttachmentUnavailableDeleted:
 		return &apierror.GoneError{Msg: removedAttachmentMessage, Code: apierror.CodeAttachmentRemoved}
+	case domain.AttachmentUnavailableExpired:
+		return &apierror.GoneError{Msg: expiredAttachmentMessage, Code: apierror.CodeAttachmentExpired}
 	}
 	return &apierror.NotFoundError{Msg: "attachment not found"}
 }
