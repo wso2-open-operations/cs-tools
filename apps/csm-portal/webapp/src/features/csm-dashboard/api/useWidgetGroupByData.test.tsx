@@ -509,5 +509,46 @@ describe("useWidgetGroupByData", () => {
       expect(filters.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(filters.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
+
+    it("groups by team over the selected team's or every ABT's group ids, each team's bar opening that team", async () => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "rigel-group", label: "Rigel", count: 6, totalMinutes: 810 },
+          { key: "atlas-group", label: "Atlas", count: 4, totalMinutes: 660 },
+          { key: "vega-group", label: "Vega", count: 0, totalMinutes: 0 },
+        ],
+        othersCount: 0,
+        totalRecords: 10,
+        othersMinutes: 0,
+        totalMinutes: 1470,
+      });
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-abt",
+            "time_card",
+            { teamIds: ["__current_team__"], states: ["approved"] },
+            { field: "team", measure: "hours" },
+            ["rigel-group", "atlas-group", "vega-group"],
+            undefined,
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock.mock.calls[0][1]).toEqual({
+        filters: { teamIds: ["rigel-group", "atlas-group", "vega-group"], states: ["approved"] },
+        groupBy: "team",
+        maxGroups: undefined,
+        measure: "minutes",
+      });
+      expect(result.current.slices.map((s) => [s.label, s.value])).toEqual([
+        ["Rigel", 13.5],
+        ["Atlas", 11],
+        ["Vega", 0],
+      ]);
+      expect(result.current.slices[1].query).toEqual({ teamIds: ["atlas-group"] });
+    });
   });
 });

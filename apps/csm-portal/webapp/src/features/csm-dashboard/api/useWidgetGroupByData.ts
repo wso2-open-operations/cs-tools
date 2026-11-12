@@ -111,6 +111,8 @@ function bucketQuery(
         return { projectIds: [key] };
       case "day":
         return { startDate: key, endDate: key };
+      case "team":
+        return { teamIds: [key] };
     }
   }
   return { [field]: key };

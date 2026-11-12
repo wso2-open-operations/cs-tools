@@ -489,6 +489,24 @@ describe("time card click-throughs", () => {
     expect(body).toEqual({ filters, pagination: { offset: 0, limit: 10 } });
   });
 
+  it("a team filter (a team bar, or a user bar within the teams) survives the round trip", () => {
+    for (const filters of [
+      { teamIds: ["391737f4-0588-2f9f-9bdd-b18d39f83d9a"], startDate: "2026-11-01", endDate: "2026-11-30" },
+      {
+        teamIds: ["391737f4-0588-2f9f-9bdd-b18d39f83d9a", "542b0b7d-e52c-b6e9-a210-d06e57990c7d"],
+        userIds: ["5e636a12-0000-4000-8000-000000000001"],
+        states: ["approved"],
+      },
+    ]) {
+      const href = WIDGET_RESOURCE_CONFIG.time_card.buildHref(filters, ctx);
+      const back = parseWidgetPreviewFilters(hrefParams(href)).filters;
+      expect(WIDGET_RESOURCE_CONFIG.time_card.buildSearchRequestBody?.({ filters: back, offset: 0, limit: 10 })).toEqual({
+        filters,
+        pagination: { offset: 0, limit: 10 },
+      });
+    }
+  });
+
   it("the tile's own fetch body is unchanged", () => {
     const filters = { states: ["approved"], startDate: "2026-07-01" };
     const sortBy = { field: "workDate", order: "desc" };

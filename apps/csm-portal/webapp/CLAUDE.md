@@ -897,7 +897,7 @@ everything past the cap rolls into a response `othersCount`).
   override, not something a widget's config can opt back into. `shape: "pie"` is unaffected and still
   honors `groupBy.hideOthers` as configured.
 - **Time card totals (`groupBy.measure`, `time_card` only).** A `time_card` widget groups through
-  `POST /time-cards/aggregate` (its `groupByEndpoint`) by `state`, `user`, `project` or `day`. With
+  `POST /time-cards/aggregate` (its `groupByEndpoint`) by `state`, `user`, `project`, `day` or `team`. With
   `groupBy.measure: "hours"`, `useWidgetGroupByData` sends `measure: "minutes"` and each slice's
   `value` is the bucket's `totalMinutes / 60`, with Others from `othersMinutes`. With `"count"` it sends
   `measure: "count"`, and with no measure it sends none; both show card counts. Every other widget's
@@ -910,8 +910,16 @@ everything past the cap rolls into a response `othersCount`).
   legend, centre total, and the legend's accessible name in place of "N cases"), and uses it for the
   title's total badge. Without a `formatValue` both charts render exactly as before. A bucket's
   click-through (`bucketQuery`) opens the time card preview list filtered the way the time card search
-  takes it: `states`, `userIds` or `projectIds` as one-item lists, and a day as `startDate` = `endDate` =
-  that day (it wins over the widget's own window when merged). The route is CS engineer and admin
+  takes it: `states`, `userIds`, `projectIds` or `teamIds` as one-item lists, and a day as `startDate` =
+  `endDate` = that day (it wins over the widget's own window when merged). A user bar keeps the widget's
+  own `teamIds`, so it opens that engineer's cards within the teams. **Teams:** a time card widget's flat
+  `teamIds` (Team Schedule team ids: a CRE team's CRE group id, an SRE team's SRE group id) is sent as
+  it is; its `__current_team__` is resolved by `resolveTeamPlaceholder`
+  (`resolveTimeCardTeamIdsPlaceholder`) from `selectedTeamCreGroupId`, or `selectedTeamSreGroupId` when
+  that is empty (an SRE dashboard). Unlike the other team filters, "All ABTs" expands it to every team of the
+  family (a `team` grouping then shows one bar per ABT) instead of dropping it; with no team at all it becomes
+  `NO_TEAM_ID` (a nil UUID no team has), so the tile is empty rather than showing every engineer's
+  cards as the team's (and a `team` grouping gets no bars rather than a 400). The route is CS engineer and admin
   only (`PermViewTimeCardTotals`), so for any other role (time card approver and viewer included) the
   backend answers 403, `useWidgetGroupByData` reports it as `isForbidden`, and the tile says "You don't
   have access to time card totals." in place of the chart, not the error. Any other failure is still

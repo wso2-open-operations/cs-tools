@@ -5413,6 +5413,7 @@ type SearchTimeCardsFilters struct {
 	ApproverID   *string         `json:"approverId,omitempty"`   // eligible approver (SN approver_list); their own cards are always excluded server-side
 	ApprovedByID *string         `json:"approvedById,omitempty"` // who actually approved (SN approved_by)
 	UserIDs      []string        `json:"userIds,omitempty"`      // match cards submitted by any of these users (OR semantics)
+	TeamIDs      []string        `json:"teamIds,omitempty"`      // match cards submitted by a current member (team_member) of any of these teams
 	StartDate    *string         `json:"startDate,omitempty"`
 	EndDate      *string         `json:"endDate,omitempty"`
 	States       []TimeCardState `json:"states,omitempty"`
@@ -5454,6 +5455,7 @@ const (
 	TimeCardGroupByUser    = "user"
 	TimeCardGroupByProject = "project"
 	TimeCardGroupByDay     = "day"
+	TimeCardGroupByTeam    = "team"
 )
 
 // Time card aggregate measures (AggregateTimeCardsRequest.Measure): what the
@@ -5477,6 +5479,10 @@ const MaxTimeCardAggregateDays = 31
 // MaxTimeCardAggregateDays (both inclusive), and returns one bucket per day of
 // that window in date order, including days with no cards; MaxGroups and
 // Measure do not apply to it.
+// "team" requires Filters.TeamIDs and returns one bucket per one of those
+// teams (keyed by its id, labelled with its name, a team with no cards at
+// zero): the cards of its current members, so an engineer in two of the teams
+// counts in both, and the totals are the buckets' sums.
 // Every other grouping returns the top MaxGroups buckets (default 10) ranked
 // by Measure ("count", the default, or "minutes"), the rest folded into
 // OthersCount / OthersMinutes.
