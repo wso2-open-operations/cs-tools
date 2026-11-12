@@ -144,7 +144,7 @@ import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 // deleted); routing/audience-gating for each is isSplAudience, except Usage
 // Metrics (canViewUsageMetrics) and Customer Health (canViewCustomerHealth) —
 // see each flag's own doc comment.
-import SlaReportUpcomingPage from "@features/csm-reports/pages/SlaReportUpcomingPage";
+import SlaReportPage from "@features/csm-reports/pages/SlaReportPage";
 import TimelogsReportPage from "@features/csm-reports/pages/TimelogsReportPage";
 import UsageMetricsPage from "@features/csm-usage-metrics/pages/UsageMetricsPage";
 import CustomerHealthDashboardPage from "@features/csm-customer-health/pages/CustomerHealthDashboardPage";
@@ -734,12 +734,10 @@ export default function App(): JSX.Element {
                     element={<CustomerHealthDetailPage />}
                   />
 
-                  {/* Project reports, launched from a project's own detail page.
-                      The SLA button on that page stays disabled; this route is
-                      the page a direct visit lands on. */}
+                  {/* Project reports, launched from a project's own detail page. */}
                   <Route
                     path="customers/projects/:projectId/sla-report/:sysId"
-                    element={<SlaReportUpcomingPage />}
+                    element={<SlaReportPage />}
                   />
                   <Route
                     path="customers/projects/:projectId/timelogs-report"

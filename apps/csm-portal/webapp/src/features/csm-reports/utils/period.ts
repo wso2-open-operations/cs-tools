@@ -33,3 +33,15 @@ export function formatPeriod(start?: string, end?: string): string {
   if (to) return `Period: up to ${to}`;
   return "Period: all time";
 }
+
+/** A local calendar date as the YYYY-MM-DD an <input type="date"> and the report API use. */
+export function toDateInputValue(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** The first day of the calendar quarter `now` falls in. */
+export function quarterStart(now: Date): Date {
+  return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+}
