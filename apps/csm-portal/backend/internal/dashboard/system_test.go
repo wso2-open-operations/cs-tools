@@ -567,3 +567,41 @@ func TestSystemRegistry_HotReloadReconcilesOnKeySetChange(t *testing.T) {
 		t.Error("old row not deleted on hot reload")
 	}
 }
+
+func TestSystemRegistry_HotReloadRestoresARenamedBackDashboard(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "a.json", csDefinition)
+	src, err := NewDirRegistry(dir, true, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newFakeSystemStore()
+	reg, _ := NewSystemRegistry(store, src)
+	ctx := context.Background()
+	reg.Migrate(ctx)
+
+	renamed := strings.Replace(csDefinition, `"id": "cs-overview"`, `"id": "cs-overview-2"`, 1)
+	if err := os.Remove(filepath.Join(dir, "a.json")); err != nil {
+		t.Fatal(err)
+	}
+	writeDefinition(t, dir, "b.json", renamed)
+	if got, err := reg.List(ctx); err != nil || len(got) != 1 || got[0].ID != "cs-overview-2" {
+		t.Fatalf("after rename: List = %+v, %v", got, err)
+	}
+
+	// Restore the original id with its original definition, drop the rename.
+	if err := os.Remove(filepath.Join(dir, "b.json")); err != nil {
+		t.Fatal(err)
+	}
+	writeDefinition(t, dir, "a.json", csDefinition)
+	got, err := reg.List(ctx)
+	if err != nil || len(got) != 1 || got[0].ID != "cs-overview" {
+		t.Fatalf("after restore: List = %+v, %v; want the restored dashboard", got, err)
+	}
+	if _, ok := store.rows["cs-overview"]; !ok {
+		t.Error("restored dashboard was not written back to the store")
+	}
+	if _, ok := store.rows["cs-overview-2"]; ok {
+		t.Error("renamed dashboard still stored")
+	}
+}

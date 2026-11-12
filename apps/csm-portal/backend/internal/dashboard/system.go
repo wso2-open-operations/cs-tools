@@ -226,6 +226,11 @@ func (b *systemBacking) reconcile(ctx context.Context, keep map[string]string) i
 			continue
 		}
 		slog.InfoContext(ctx, "removed system dashboard with no definition", "key", rec.Key)
+		// Forget the write: a key that comes back later with the same
+		// definition must be upserted again, not skipped as already stored.
+		b.mu.Lock()
+		delete(b.saved, rec.Key)
+		b.mu.Unlock()
 		removed++
 	}
 	if !deleteFailed {
