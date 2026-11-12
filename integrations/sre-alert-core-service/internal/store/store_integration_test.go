@@ -241,6 +241,53 @@ func TestIncidentRepo_FoldAndDelivery(t *testing.T) {
 	}
 }
 
+func TestIncidentRepo_FoldRaisesSeverityImpactAndUrgency(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := repo.Fold(ctx, "fpsev", []string{"S1"}, func(*model.Incident, map[string]bool) FoldPlan {
+		return FoldPlan{New: []NewIncident{{
+			Incident: model.Incident{Fingerprint: "fpsev", IncidentNumber: "PENDING", Severity: 4, Impact: "MEDIUM", Urgency: "LOW",
+				Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, SeverityLabel: "warning"},
+			Notes: []model.Note{{AlertID: "S1", Kind: model.NoteCreated, Text: "created"}},
+		}}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fold := func(alertID string, c CurrentFold) {
+		t.Helper()
+		if _, err := repo.Fold(ctx, "fpsev", []string{alertID}, func(cur *model.Incident, _ map[string]bool) FoldPlan {
+			c.ID, c.Added, c.LastSeen = cur.ID, 1, at.Add(time.Second)
+			c.Notes = []model.Note{{AlertID: alertID, Kind: model.NoteDuplicate, Text: "dup"}}
+			return FoldPlan{Current: &c}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func() model.Incident {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM incidents_processed WHERE fingerprint = 'fpsev'`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inc, _, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inc
+	}
+
+	fold("S2", CurrentFold{SeverityLabel: "critical", Severity: 1, Impact: "HIGH", Urgency: "HIGH"})
+	if inc := get(); inc.SeverityLabel != "critical" || inc.Severity != 1 || inc.Impact != "HIGH" || inc.Urgency != "HIGH" {
+		t.Fatalf("escalated = %+v, want critical with HIGH impact and urgency", inc)
+	}
+	fold("S3", CurrentFold{}) // no escalation: nothing changes
+	if inc := get(); inc.SeverityLabel != "critical" || inc.Severity != 1 || inc.Impact != "HIGH" || inc.Urgency != "HIGH" {
+		t.Fatalf("after a plain duplicate = %+v, want the escalation kept", inc)
+	}
+}
+
 func TestIncidentRepo_MuteLifecycle(t *testing.T) {
 	pool := testDB(t)
 	repo := NewIncidentRepo(pool, testLocker(t, pool))
@@ -323,6 +370,17 @@ func TestIncidentRepo_MuteLifecycle(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT delivery_due_at FROM incidents_processed WHERE id = $1`, cur.ID).Scan(&due)
 	if cur.Muted || cur.Status != "closed" || cur.UnmutedAt == nil || cur.MuteRuleNumber != "AMR0000002" || len(notes) != 0 || due != nil {
 		t.Fatalf("closed = %+v notes = %v due = %v", cur, notes, due)
+	}
+	// An OK folded in after the quiet close is settled by closing again, which keeps the time the mute ended.
+	firstUnmuted := *cur.UnmutedAt
+	addNote(cur, "M4", model.NoteOK)
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	if closed, err := repo.CloseMuted(ctx, cur.ID, cur.FoldVersion); err != nil || !closed {
+		t.Fatalf("second close = %v %v", closed, err)
+	}
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	if cur.UnmutedAt == nil || !cur.UnmutedAt.Equal(firstUnmuted) {
+		t.Fatalf("unmuted_at after a second close = %v, want the first close's %v", cur.UnmutedAt, firstUnmuted)
 	}
 
 	other := newInc("fpu", now, "U1")

@@ -60,9 +60,13 @@ type CurrentFold struct {
 	LastSeen time.Time
 	// Category fills the incident's category only if it is still empty.
 	Category string
-	// SeverityLabel, when set, replaces the incident's severity_label: a later alert of the same fingerprint was more
-	// severe, so alert mute rules match the incident's worst severity, not its first.
+	// SeverityLabel, when set, replaces the incident's severity_label, and Severity, Impact and Urgency its severity,
+	// impact and urgency: a later alert of the same fingerprint was more severe, so alert mute rules match the
+	// incident's worst severity, not its first, and an incident not yet in CSM is created with that priority.
 	SeverityLabel string
+	Severity      int
+	Impact        string
+	Urgency       string
 	Notes         []model.Note
 }
 
@@ -80,6 +84,9 @@ const (
 	updateCurrentQuery = `UPDATE incidents_processed SET alert_count = alert_count + $2, last_seen = greatest(last_seen, $3),
 	category = CASE WHEN category = '' THEN $4 ELSE category END,
 	severity_label = CASE WHEN $5 <> '' THEN $5 ELSE severity_label END,
+	severity = CASE WHEN $5 <> '' THEN $6 ELSE severity END,
+	impact = CASE WHEN $5 <> '' THEN $7 ELSE impact END,
+	urgency = CASE WHEN $5 <> '' THEN $8 ELSE urgency END,
 	fold_version = fold_version + 1, delivery_due_at = least(coalesce(delivery_due_at, now()), now())
 	WHERE id = $1`
 	insertNotesQuery = `INSERT INTO incident_notes (incident, alert_id, kind, note, chat_pending)
@@ -126,7 +133,7 @@ func (r *IncidentRepo) Fold(ctx context.Context, fp string, alertIDs []string, d
 	plan = decide(current, recorded)
 	writes := &pgx.Batch{}
 	if c := plan.Current; c != nil {
-		writes.Queue(updateCurrentQuery, c.ID, c.Added, c.LastSeen, c.Category, c.SeverityLabel)
+		writes.Queue(updateCurrentQuery, c.ID, c.Added, c.LastSeen, c.Category, c.SeverityLabel, c.Severity, c.Impact, c.Urgency)
 		if len(c.Notes) > 0 {
 			writes.Queue(insertNotesQuery, append([]any{c.ID}, noteArrays(c.Notes)...)...)
 		}
@@ -367,11 +374,12 @@ func (r *IncidentRepo) MuteOutcome(ctx context.Context, inc model.Incident) (res
 }
 
 // CloseMuted closes a muted incident without delivering anything: it is marked closed and unmuted, every pending note
-// is settled, and nothing more is due. It does nothing, and returns false, if a fold changed it since foldVersion.
+// is settled, and nothing more is due. Closing it again (an OK folded in after the quiet close) keeps the first
+// unmuted_at, the time the mute ended. It does nothing, and returns false, if a fold changed it since foldVersion.
 func (r *IncidentRepo) CloseMuted(ctx context.Context, id, foldVersion int64) (bool, error) {
 	var closed int
 	err := r.pool.QueryRow(ctx, `WITH inc AS (
-		UPDATE incidents_processed SET muted = false, unmuted_at = now(), status = 'closed', delivery_due_at = NULL
+		UPDATE incidents_processed SET muted = false, unmuted_at = coalesce(unmuted_at, now()), status = 'closed', delivery_due_at = NULL
 		WHERE id = $1 AND fold_version = $2 RETURNING id),
 	notes AS (
 		UPDATE incident_notes SET csm_pending = false, chat_pending = false

@@ -165,8 +165,9 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 	add := func(it Item, kind, label string) {
 		note := model.Note{AlertID: it.ID, Kind: kind, Text: model.BuildWorkNote(label, it.ID, it.Alert.MetricName, it.Alert.Source), ChatPending: true}
 		at := it.Alert.EventTime()
-		// A duplicate that is more severe (warning -> critical) raises the incident's severity label, so an alert mute
-		// rule on severity=warning stops matching once the incident has escalated. An OK never lowers it.
+		// A duplicate that is more severe (warning -> critical) raises the incident's severity, impact and urgency with
+		// its label, so an alert mute rule on severity=warning stops matching once the incident has escalated and the
+		// CSM incident it then becomes carries the escalated priority. An OK never lowers any of them.
 		escalate := kind == model.NoteDuplicate
 		if newIdx >= 0 {
 			n := &p.New[newIdx]
@@ -175,6 +176,8 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 			n.Incident.LastSeen = latest(n.Incident.LastSeen, at)
 			if escalate && model.MoreSevere(it.Alert.Severity, n.Incident.SeverityLabel) {
 				n.Incident.SeverityLabel = it.Alert.Severity
+				n.Incident.Severity, _ = model.SeverityToNumeric(it.Alert.Severity)
+				n.Incident.Impact, n.Incident.Urgency = model.ImpactUrgency(n.Incident.Severity)
 			}
 			return
 		}
@@ -193,6 +196,8 @@ func (e *Engine) plan(fp string, current *model.Incident, recorded map[string]bo
 			}
 			if model.MoreSevere(it.Alert.Severity, worst) {
 				p.Current.SeverityLabel = it.Alert.Severity
+				p.Current.Severity, _ = model.SeverityToNumeric(it.Alert.Severity)
+				p.Current.Impact, p.Current.Urgency = model.ImpactUrgency(p.Current.Severity)
 			}
 		}
 		p.Current.Notes = append(p.Current.Notes, note)

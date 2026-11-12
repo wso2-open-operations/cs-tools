@@ -84,6 +84,7 @@ func (f *fakeIncidents) Fold(_ context.Context, fp string, alertIDs []string, de
 		}
 		if c.SeverityLabel != "" {
 			inc.SeverityLabel = c.SeverityLabel
+			inc.Severity, inc.Impact, inc.Urgency = c.Severity, c.Impact, c.Urgency
 		}
 		inc.FoldVersion++
 		f.due[c.ID] = &now
@@ -717,8 +718,9 @@ func TestFoldRaisesSeverityLabelToTheWorstSeen(t *testing.T) {
 	// In one batch: warning, then a critical duplicate.
 	handle(t, e, item("a1", 0, "warning"), item("a2", time.Second, "critical"))
 	incs := incidents.byFingerprint(fpOf(item("a1", 0, "warning")))
-	if len(incs) != 1 || incs[0].SeverityLabel != "critical" {
-		t.Fatalf("same batch: incidents = %+v, want one with severity_label critical", incs)
+	if len(incs) != 1 || incs[0].SeverityLabel != "critical" || incs[0].Severity != 1 || incs[0].Impact != "HIGH" ||
+		incs[0].Urgency != "HIGH" {
+		t.Fatalf("same batch: incidents = %+v, want one at critical with HIGH impact and urgency", incs)
 	}
 
 	e2, incidents2 := newTestEngine(&fakeNotifier{}, testConfig())
@@ -726,7 +728,8 @@ func TestFoldRaisesSeverityLabelToTheWorstSeen(t *testing.T) {
 	handle(t, e2, item("b2", time.Second, "major"))   // later batch, more severe
 	handle(t, e2, item("b3", 2*time.Second, "minor")) // less severe: no change
 	incs = incidents2.byFingerprint(fpOf(item("b1", 0, "warning")))
-	if len(incs) != 1 || incs[0].SeverityLabel != "major" || incs[0].AlertCount != 3 {
-		t.Fatalf("later batches: incidents = %+v, want one with severity_label major and 3 alerts", incs)
+	if len(incs) != 1 || incs[0].SeverityLabel != "major" || incs[0].Severity != 2 || incs[0].Impact != "MEDIUM" ||
+		incs[0].Urgency != "HIGH" || incs[0].AlertCount != 3 {
+		t.Fatalf("later batches: incidents = %+v, want one at major (MEDIUM impact, HIGH urgency) with 3 alerts", incs)
 	}
 }
