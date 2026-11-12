@@ -83,6 +83,8 @@ import ProblemDetailPage from "@features/csm-operations/pages/ProblemDetailPage"
 import IncidentTaskDetailPage from "@features/csm-operations/pages/IncidentTaskDetailPage";
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
 import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
+import AlertMuteRuleFormPage from "@features/csm-operations/pages/AlertMuteRuleFormPage";
+import AlertMuteRuleDetailPage from "@features/csm-operations/pages/AlertMuteRuleDetailPage";
 import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
 import StandardChangeTemplateDetailPage from "@features/csm-operations/pages/StandardChangeTemplateDetailPage";
 import StandardChangeProposalPage from "@features/csm-operations/pages/StandardChangeProposalPage";
@@ -601,6 +603,23 @@ export default function App(): JSX.Element {
                       element={<CaseDetailRouteSync kind="incident" paramName="id" />}
                     />
                     <Route path="incident-tasks/:id" element={<IncidentTaskDetailPage />} />
+                    <Route
+                      path="alert-mute-rules/new"
+                      element={
+                        <RequireWriteAccess to="/operations/alert-mute-rules">
+                          <AlertMuteRuleFormPage />
+                        </RequireWriteAccess>
+                      }
+                    />
+                    <Route path="alert-mute-rules/:id" element={<AlertMuteRuleDetailPage />} />
+                    <Route
+                      path="alert-mute-rules/:id/edit"
+                      element={
+                        <RequireWriteAccess to="/operations/alert-mute-rules">
+                          <AlertMuteRuleFormPage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route
                       path="problems/new"
                       element={

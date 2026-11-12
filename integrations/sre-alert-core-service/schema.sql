@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS incidents_processed (
   assignment_group        text NOT NULL DEFAULT '',
   source_topic            text NOT NULL DEFAULT '',
   source_account          text NOT NULL DEFAULT '',
+  -- The first alert's raw fields that alert mute rules can match on but the columns above don't hold.
+  unique_identifier       text NOT NULL DEFAULT '',
+  severity_label          text NOT NULL DEFAULT '',
+  -- Alert mute rule muting: muted while an active rule matches; mute_rule_* is the last rule that matched.
+  muted                   boolean NOT NULL DEFAULT false,
+  muted_at                timestamptz,
+  unmuted_at              timestamptz,
+  mute_rule_id            text NOT NULL DEFAULT '',
+  mute_rule_number        text NOT NULL DEFAULT '',
   UNIQUE (fingerprint, first_seen)
 ) WITH (fillfactor = 80, autovacuum_vacuum_scale_factor = 0.05);
 
@@ -73,9 +82,19 @@ CREATE TABLE IF NOT EXISTS incidents_processed (
 ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS assignment_group text NOT NULL DEFAULT '';
 ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS source_topic text NOT NULL DEFAULT '';
 ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS source_account text NOT NULL DEFAULT '';
+-- For a database created before alert mute rule muting; constant defaults, so each is a catalog-only change (no rewrite).
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS unique_identifier text NOT NULL DEFAULT '';
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS severity_label text NOT NULL DEFAULT '';
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS muted boolean NOT NULL DEFAULT false;
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS muted_at timestamptz;
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS unmuted_at timestamptz;
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS mute_rule_id text NOT NULL DEFAULT '';
+ALTER TABLE incidents_processed ADD COLUMN IF NOT EXISTS mute_rule_number text NOT NULL DEFAULT '';
 
 -- The delivery loop reads only incidents whose CSM/Chat work is due.
 CREATE INDEX IF NOT EXISTS incidents_processed_due_idx ON incidents_processed (delivery_due_at) WHERE delivery_due_at IS NOT NULL;
+-- The CSM portal lists the incidents each alert mute rule muted.
+CREATE INDEX IF NOT EXISTS incidents_processed_mute_rule_idx ON incidents_processed (mute_rule_id, first_seen DESC) WHERE mute_rule_id <> '';
 
 -- Append-only log of every alert folded into an incident; alert_id makes a replayed alert a no-op.
 CREATE TABLE IF NOT EXISTS incident_notes (

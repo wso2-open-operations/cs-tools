@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/alertcore"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
@@ -200,6 +201,21 @@ func main() {
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
+	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
+	// Muted alerts live in sre-alert-core-service's database; without both values the route answers 503.
+	var alertCoreClient *alertcore.Client
+	if base, token := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")), strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")); base != "" && token != "" {
+		// The bearer token must never travel over plain HTTP.
+		base = mustHTTPSBaseURL("ALERT_CORE_BASE_URL", base)
+		alertCoreClient = alertcore.NewClient(alertcore.Config{BaseURL: base, Token: token})
+	} else {
+		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set; the muted-alerts and alert-field-values routes answer 503")
+	}
+	// Pass an untyped nil rather than a nil *alertcore.Client, so the handler's nil check sees it.
+	alertMuteRuleMutedAlertsHandler := handler.NewAlertMuteRuleMutedAlertsHandler(nil)
+	if alertCoreClient != nil {
+		alertMuteRuleMutedAlertsHandler = handler.NewAlertMuteRuleMutedAlertsHandler(alertCoreClient)
+	}
 	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
@@ -935,6 +951,18 @@ func main() {
 	route("PATCH /outages/{id}", handler.PermWrite, outageHandler.PatchOutage)
 	route("POST /outages/{id}/communications", handler.PermWrite, outageHandler.AddOutageCommunication)
 	route("POST /outages/{id}/communications/search", handler.PermViewOperations, outageHandler.SearchOutageCommunications)
+	// Alert mute rules: 1:1 proxies to entity-service. GET /alert-mute-rules/active is
+	// deliberately not exposed here; alert-core reads it via csm-integration-service.
+	route("POST /alert-mute-rules/search", handler.PermViewOperations, alertMuteRuleHandler.SearchAlertMuteRules)
+	route("GET /alert-mute-rules/{id}", handler.PermViewOperations, alertMuteRuleHandler.GetAlertMuteRule)
+	route("GET /alert-mute-rules/{id}/muted-alerts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedAlerts)
+	route("GET /alert-field-values", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListAlertFieldValues)
+	route("GET /alert-mute-rules/muted-counts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedCounts)
+	route("POST /alert-mute-rules", handler.PermWrite, alertMuteRuleHandler.CreateAlertMuteRule)
+	route("PATCH /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.PatchAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/extend", handler.PermWrite, alertMuteRuleHandler.ExtendAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/end", handler.PermWrite, alertMuteRuleHandler.EndAlertMuteRule)
+	route("DELETE /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.DeleteAlertMuteRule)
 	// Called manually today; not yet wired into real incident/case creation.
 	route("POST /notifications/google-chat/alerts", handler.PermWrite, notificationHandler.PostGoogleChatAlert)
 
@@ -951,7 +979,7 @@ func main() {
 	// PermViewSharedEntity's own doc comment) -- unlike GET /teams/{id}/members
 	// above, which is a genuinely unconditional CS Portal route (see
 	// teamHandler's own construction) and so is registered outside this
-	// block. The account-scoped escalation list stays here only because CS
+	// rule. The account-scoped escalation list stays here only because CS
 	// Portal's own /cases/{id}/escalations is per-case, not per-account.
 	//
 	// Every route below is registered with PermViewerAccess (Viewer only),

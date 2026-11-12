@@ -14434,6 +14434,420 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/search:
+    post:
+      summary: Search alert mute rules.
+      description: >
+        Alert mute rules newest created first. filters.states takes active, scheduled and expired (expired
+        also returns rules ended early); omitted means every state. filters.searchQuery matches, ignoring case,
+        the name, number, description, condition values and creator. Internal callers only.
+      operationId: searchAlertMuteRules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAlertMuteRulesRequest'
+      responses:
+        "200":
+          description: A page of alert mute rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAlertMuteRulesResponse'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/active:
+    get:
+      summary: Every alert mute rule muting alerts now.
+      description: Rules not ended early whose window contains now. alert-core polls this through csm-integration-service. Internal callers only.
+      operationId: getActiveAlertMuteRules
+      responses:
+        "200":
+          description: The active alert mute rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveAlertMuteRulesResponse'
+        "400":
+          description: Alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules:
+    post:
+      summary: Create an alert mute rule.
+      description: >
+        The rule gets the next number (AMR0000001). A window lasts at most 72 hours, ends in the future and
+        starts no earlier than a minute ago. Conditions must include service and environment, each field at most
+        once. Internal callers only; the caller's email is createdBy.
+      operationId: createAlertMuteRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAlertMuteRuleRequest'
+      responses:
+        "201":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/{id}:
+    get:
+      summary: Get an alert mute rule.
+      operationId: getAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Edit a scheduled alert mute rule.
+      description: >-
+        Partial update: only the fields present change; the others keep their stored values. The result is
+        validated as create is (a conditions list, when present, replaces the whole list). Only while the rule is
+        scheduled (409 otherwise). 409 also when another write changed the rule after it was read; reload and retry.
+      operationId: updateAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchAlertMuteRuleRequest'
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a scheduled alert mute rule.
+      operationId: deleteAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/{id}/extend:
+    post:
+      summary: Move a scheduled or active alert mute rule's end later.
+      description: The new end must be later than the current end and at most 72 hours after the start. 409 when the rule is expired or ended.
+      operationId: extendAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendAlertMuteRuleRequest'
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not scheduled or active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/{id}/end:
+    post:
+      summary: End an active alert mute rule now.
+      description: Sets endedOn to now and endedBy to the caller. 409 unless the rule is active.
+      operationId: endAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /runbooks:
     get:
       summary: List the runbook catalog.
@@ -35254,6 +35668,149 @@ components:
                         properties:
                           id: { type: string }
                           key: { type: string }
+    AlertMuteRuleCondition:
+      type: object
+      required: [field, value]
+      properties:
+        field:
+          type: string
+          enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        value:
+          type: string
+          maxLength: 255
+    AlertMuteRule:
+      type: object
+      required: [id, number, name, description, timeZone, startOn, endOn, conditions, createdBy, createdOn, updatedBy, updatedOn, endedBy, endedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: The rule's own number (AMR0000001).
+        name:
+          type: string
+        description:
+          type: string
+        timeZone:
+          type: string
+          description: IANA zone the times were entered in; startOn and endOn are UTC.
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        endedBy:
+          type: string
+          nullable: true
+        endedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SaveAlertMuteRuleRequest:
+      type: object
+      required: [name, timeZone, startOn, endOn, conditions]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    PatchAlertMuteRuleRequest:
+      type: object
+      description: The fields to change; at least one is normally sent, and an empty body changes nothing but is still validated.
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          description: Replaces the whole list.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    ExtendAlertMuteRuleRequest:
+      type: object
+      required: [endOn]
+      properties:
+        endOn:
+          type: string
+          format: date-time
+    SearchAlertMuteRulesRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            states:
+              type: array
+              items:
+                type: string
+                enum: [active, scheduled, expired]
+            searchQuery:
+              type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    SearchAlertMuteRulesResponse:
+      type: object
+      required: [alertMuteRules, total, offset, limit]
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+    ActiveAlertMuteRulesResponse:
+      type: object
+      required: [alertMuteRules]
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
     Runbook:
       type: object
       required: [id, number, name, runbookUrl, alerts, createdOn, createdBy, updatedOn, updatedBy]

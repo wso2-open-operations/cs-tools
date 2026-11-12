@@ -12302,6 +12302,32 @@ pool and not in the ServiceNow data source (there the two searches read ServiceN
 
 Tests: `product_catalog_service_test.go` (unit).
 
+## Alert mute rules (`/alert-mute-rules`, Postgres only)
+
+An alert mute rule mutes SRE alerts matching every condition for one window (like a CloudWatch mute rule): alert-core still
+records a muted alert but raises no incident, page or chat post. `AlertMuteRuleService` (`internal/service/alert_mute_rule_service.go`)
+over `alert_mute_rule` (migration 0278, RLS internal-only in 100028; the repository goes through `Scoped`). On the
+ServiceNow data source `snAlertMuteRuleService` answers every route 400. Every route is `internalOnly`; the actor
+(`createdBy`/`updatedBy`/`endedBy`) is `actorOf` (the token's email).
+
+- **Routes.** `POST /alert-mute-rules/search`, `GET|PATCH|DELETE /alert-mute-rules/{id}`, `POST /alert-mute-rules`,
+  `POST /alert-mute-rules/{id}/extend`, `POST /alert-mute-rules/{id}/end`, and `GET /alert-mute-rules/active` (alert-core polls it
+  through csm-integration-service; the CSM portal BFF does not expose it).
+- **State is derived, never stored** (`domain.AlertMuteRule.StateAt`): `ended` if `ended_on` is set, else `scheduled` before
+  `start_on`, `active` until `end_on`, then `expired`. The search's `expired` filter also returns rules ended early.
+- **Writes are state-guarded in their own `WHERE`** (edit and delete: scheduled; extend: scheduled or active; end:
+  active), with the service's clock passed as `$1`, so the check and the write are one statement. No row back means
+  missing (404) or wrong state (409); the service re-reads to tell which.
+- **Validation** (400): name 1-255, description <= 1024, an IANA `timeZone`, RFC 3339 times, end after start, at most
+  72 hours long (also a table CHECK), end in the future, start no earlier than 60 s ago. Conditions name one of
+  `service`, `environment`, `source`, `metric_name`, `severity`, `category`, `unique_identifier`, each at most once,
+  values trimmed, non-empty, <= 255; `service` and `environment` are required. Extend: later than the current end and
+  within 72 hours of the start.
+- **Numbers** come from the `AMR` series of `number_series` (AMR0000001).
+
+Tests: `alert_mute_rule_service_test.go`, `domain/alert_mute_rule_test.go` (unit), `alert_mute_rule_repo_integration_test.go`
+(`ALERT_MUTE_RULE_TEST_DSN`, PostgreSQL 18; applies 0278 and 100028 twice in a private schema).
+
 ## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
 
 An admin compares one account's or one project's Salesforce data with the database, sees a field-level diff per
