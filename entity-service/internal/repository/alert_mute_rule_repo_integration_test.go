@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -254,5 +255,17 @@ func TestAlertMuteRuleIntegration_SearchStatesAndQuery(t *testing.T) {
 	if err := pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM pg_policies WHERE schemaname = current_schema() AND tablename = 'alert_mute_rule' AND cmd = 'ALL'`).Scan(&policies); err != nil || policies != 1 {
 		t.Fatalf("alert_mute_rule policies = %d, %v; want one FOR ALL policy", policies, err)
+	}
+	// ... and that policy admits internal callers only, for reads and writes: created_by / updated_by /
+	// ended_by hold the actor's work email, and the free-text search matches created_by.
+	var qual, check string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT coalesce(qual, ''), coalesce(with_check, '') FROM pg_policies
+		 WHERE schemaname = current_schema() AND tablename = 'alert_mute_rule'`).Scan(&qual, &check); err != nil {
+		t.Fatalf("read alert_mute_rule policy: %v", err)
+	}
+	internalOnly := regexp.MustCompile(`^\(?current_setting\('app\.is_internal'::text, true\) = 'true'::text\)?$`)
+	if !internalOnly.MatchString(qual) || !internalOnly.MatchString(check) {
+		t.Fatalf("alert_mute_rule policy USING %q / WITH CHECK %q, want app.is_internal = 'true' only", qual, check)
 	}
 }
