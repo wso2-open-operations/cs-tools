@@ -609,7 +609,7 @@ func TestDeleteAttachment_AnExpiredAttachmentIsAlreadyGone(t *testing.T) {
 	row := repo.rows[saAttID]
 	row.Status = "EXPIRED"
 	repo.rows[saAttID] = row
-	if err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+	if _, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
 		t.Fatalf("err = %v, want success", err)
 	}
 	if len(repo.deleteCtx) != 0 {
