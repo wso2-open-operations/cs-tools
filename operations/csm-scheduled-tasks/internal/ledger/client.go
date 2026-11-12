@@ -243,3 +243,31 @@ func (c *Client) DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (in
 	}
 	return resp.DeletedCount, nil
 }
+
+// AttachmentCleanup is what one upload cleanup run did, as entity-service counts it.
+type AttachmentCleanup struct {
+	Found               int `json:"found"`
+	Cleaned             int `json:"cleaned"`
+	Failed              int `json:"failed"`
+	ImagesRemoved       int `json:"imagesRemoved"`
+	ImagesFailed        int `json:"imagesFailed"`
+	ReportDraftsRemoved int `json:"reportDraftsRemoved"`
+	ReportDraftsFailed  int `json:"reportDraftsFailed"`
+	// Orphans are files entity-service could not remove itself (it has no storage).
+	Orphans []json.RawMessage `json:"orphans"`
+}
+
+// CleanupAttachmentUploads calls POST /attachments/uploads/cleanup: entity-service
+// marks uploads that were never confirmed FAILED and removes unlinked comment
+// images and report drafts from storage.
+func (c *Client) CleanupAttachmentUploads(ctx context.Context) (AttachmentCleanup, error) {
+	respBody, err := c.do(ctx, http.MethodPost, "/attachments/uploads/cleanup", nil)
+	if err != nil {
+		return AttachmentCleanup{}, err
+	}
+	var result AttachmentCleanup
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return AttachmentCleanup{}, fmt.Errorf("ledger: decode CleanupAttachmentUploads response: %w", err)
+	}
+	return result, nil
+}

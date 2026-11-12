@@ -107,6 +107,12 @@ a low-traffic hour); override via `SUB_CRON_SCHEDULES` like any other task. `env
 (`cmd/server/main.go`) parses the retention setting as a plain integer number of days rather than
 requiring Go duration syntax (`"720h"`) — friendlier for a "how many days of history" knob.
 
+`housekeeping.CleanupAttachmentUploads`, registered as `"attachment_upload_cleanup"` (daily at 03:30), is a
+trigger only: it calls entity-service's `POST /attachments/uploads/cleanup`, which marks uploads that were never
+confirmed `FAILED` and removes unlinked comment images and report drafts from Azure itself. This component's
+client id must be in entity-service's `M2M_CLIENT_IDS` (the endpoint is internal-only). A file that could not be
+removed is logged as a warning and tried again next run; only a failed call fails the run.
+
 Cron expressions have no timezone of their own — `internal/schedule.PeriodKey` interprets every
 schedule (this one included) in whatever `time.Time.Location()` the process's clock returns, i.e.
 the container's local time. "03:00" only means 03:00 UTC if the deployment actually runs with

@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 )
 
 // Client is the subset of *ledger.Client this package depends on —
@@ -49,6 +51,32 @@ func CleanupResolvedRuns(client Client, retention time.Duration) func(ctx contex
 			return fmt.Errorf("housekeeping: delete resolved runs before %s: %w", cutoff.Format(time.RFC3339), err)
 		}
 		slog.InfoContext(ctx, "housekeeping: deleted resolved scheduled_task_run rows", "cutoff", cutoff.Format(time.RFC3339), "deleted", deleted)
+		return nil
+	}
+}
+
+// AttachmentCleaner asks entity-service to clean up abandoned attachment uploads.
+type AttachmentCleaner interface {
+	CleanupAttachmentUploads(ctx context.Context) (ledger.AttachmentCleanup, error)
+}
+
+// CleanupAttachmentUploads returns a registry.Task.Handler that runs entity-service's
+// attachment upload cleanup. Entity-service does the work; this only triggers it.
+// A file that could not be removed is tried again on the next run, so it is logged
+// as a warning, not failed.
+func CleanupAttachmentUploads(client AttachmentCleaner) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		result, err := client.CleanupAttachmentUploads(ctx)
+		if err != nil {
+			return fmt.Errorf("housekeeping: attachment upload cleanup: %w", err)
+		}
+		slog.InfoContext(ctx, "housekeeping: attachment upload cleanup done",
+			"uploadsCleaned", result.Cleaned, "imagesRemoved", result.ImagesRemoved, "reportDraftsRemoved", result.ReportDraftsRemoved)
+		failed := result.Failed + result.ImagesFailed + result.ReportDraftsFailed
+		if failed > 0 || len(result.Orphans) > 0 {
+			slog.WarnContext(ctx, "housekeeping: some attachment files were not removed and will be tried again",
+				"failed", failed, "orphans", len(result.Orphans))
+		}
 		return nil
 	}
 }
