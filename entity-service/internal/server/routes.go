@@ -1500,13 +1500,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		snCatalogMirrorSvc := service.NewServiceNowCatalogService(serviceNowIntegrationServiceClient)
 		activeCatalogSvc = service.NewCatalogServiceWithSNFallback(catalogRepo, snCatalogMirrorSvc)
 	default:
-		activeCatalogSvc = service.NewCatalogService(catalogRepo)
+		activeCatalogSvc = service.NewCatalogService(catalogRepo, accessSvc)
 	}
 	catalogHandler := handler.NewCatalogHandler(activeCatalogSvc)
 	// After the switch above: a service request raised from the catalog form
 	// takes its subject and description from its answers. activeCaseSvc is the
 	// same *caseService the case handler already holds, so this reaches it.
 	activeCaseSvc = service.WithServiceRequestCatalog(activeCaseSvc, activeCatalogSvc)
+	// A service request raised from a catalog item marked csm_only (migration
+	// 0291) is refused for anyone but WSO2 staff in the CSM portal. The flag is
+	// Postgres-only, so the plain servicenow data source has nothing to check.
+	if cfg.DataSource != config.DataSourceServiceNow {
+		activeCaseSvc = service.WithCSMOnlyCatalogItemCheck(activeCaseSvc, catalogRepo)
+	}
 
 	// Case auto-closure (reminders and automatic closure of Awaiting Info /
 	// Solution Proposed tickets). Needs the Postgres case tables. It acts as the
