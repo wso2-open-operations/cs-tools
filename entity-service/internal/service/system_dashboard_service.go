@@ -117,6 +117,25 @@ func (s *systemDashboardService) Save(ctx context.Context, key string, req domai
 	return *d, nil
 }
 
+// Delete removes the system dashboard with this key; a NotFoundError when there
+// is none.
+func (s *systemDashboardService) Delete(ctx context.Context, key string) error {
+	if err := s.requireCSMPortalBackendCaller(ctx); err != nil {
+		return err
+	}
+	if err := validateSystemDashboardKey(key); err != nil {
+		return err
+	}
+	ok, err := s.repo.Delete(ctx, key)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &apierror.NotFoundError{Msg: "system dashboard not found"}
+	}
+	return nil
+}
+
 // validateSystemDashboardKey refuses a key that is empty, too long or has
 // characters outside systemDashboardKeyPattern, as a 400.
 func validateSystemDashboardKey(key string) error {
@@ -129,7 +148,7 @@ func validateSystemDashboardKey(key string) error {
 }
 
 // normalizeSystemDashboard trims the name and checks both fields against the
-// limits migration 100029 enforces, as normalizeCustomDashboard does for a
+// limits migration 0294 enforces, as normalizeCustomDashboard does for a
 // user's dashboard, except that the definition may be up to
 // MaxSystemDashboardDefinitionBytes.
 func normalizeSystemDashboard(req domain.SaveSystemDashboardRequest) (domain.SaveSystemDashboardRequest, error) {

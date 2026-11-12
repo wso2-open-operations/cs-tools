@@ -165,7 +165,7 @@ type SharedCustomDashboard struct {
 	UpdatedOn     time.Time                     `json:"updatedOn"`
 }
 
-// Limits on a system dashboard (migration 100029). The key and definition
+// Limits on a system dashboard (migration 0294). The key and definition
 // limits match its CHECK constraints; the name limit is a custom dashboard's.
 const (
 	// MaxSystemDashboardKeyLength is in characters.
@@ -177,7 +177,7 @@ const (
 )
 
 // SystemDashboard is a dashboard the CSM backend ships with the product
-// (migration 100029), kept in custom_dashboard with no owner. Key is its stable
+// (migration 0294), kept in custom_dashboard with no owner. Key is its stable
 // identity: the backend upserts it by key on every startup, overwriting Name
 // and Definition. Definition is opaque text, as in CustomDashboard.
 type SystemDashboard struct {

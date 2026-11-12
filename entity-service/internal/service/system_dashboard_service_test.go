@@ -38,6 +38,10 @@ type fakeSystemDashboardRepo struct {
 	upserted     domain.SaveSystemDashboardRequest
 	upsertErr    error
 	getCalled    bool
+
+	deleteCalled bool
+	deletedKey   string
+	deleteFound  bool
 }
 
 func (f *fakeSystemDashboardRepo) List(context.Context) ([]domain.SystemDashboard, error) {
@@ -46,6 +50,11 @@ func (f *fakeSystemDashboardRepo) List(context.Context) ([]domain.SystemDashboar
 func (f *fakeSystemDashboardRepo) Get(context.Context, string) (*domain.SystemDashboard, error) {
 	f.getCalled = true
 	return f.get, nil
+}
+func (f *fakeSystemDashboardRepo) Delete(_ context.Context, key string) (bool, error) {
+	f.deleteCalled = true
+	f.deletedKey = key
+	return f.deleteFound, nil
 }
 func (f *fakeSystemDashboardRepo) Upsert(_ context.Context, key string, req domain.SaveSystemDashboardRequest) (*domain.SystemDashboard, error) {
 	f.upsertCalled = true
@@ -88,12 +97,15 @@ func TestSystemDashboardService_OnlyTheCSMPortalBackendIsAdmitted(t *testing.T) 
 		if _, err := svc.Save(ctx, "overview.json", req); err == nil {
 			t.Errorf("%s: Save admitted", name)
 		}
+		if err := svc.Delete(ctx, "overview.json"); err == nil {
+			t.Errorf("%s: Delete admitted", name)
+		}
 	}
 	var forbidden *apierror.ForbiddenError
 	if _, err := svc.Save(callers["another client"], "overview.json", req); !errors.As(err, &forbidden) {
 		t.Errorf("another client = %v, want a ForbiddenError", err)
 	}
-	if repo.upsertCalled || repo.getCalled {
+	if repo.upsertCalled || repo.getCalled || repo.deleteCalled {
 		t.Error("the repository was reached by a refused caller")
 	}
 
@@ -167,5 +179,25 @@ func TestSystemDashboardService_ListNeverNilAndGetNotFound(t *testing.T) {
 	var nf *apierror.NotFoundError
 	if _, err := svc.Get(systemDashboardBackendCtx(), "missing.json"); !errors.As(err, &nf) {
 		t.Errorf("Get missing = %v, want a NotFoundError", err)
+	}
+}
+
+func TestSystemDashboardService_Delete(t *testing.T) {
+	repo := &fakeSystemDashboardRepo{deleteFound: true}
+	svc := newTestSystemDashboardService(repo)
+	if err := svc.Delete(systemDashboardBackendCtx(), "overview.json"); err != nil || repo.deletedKey != "overview.json" {
+		t.Errorf("Delete = %v key %q", err, repo.deletedKey)
+	}
+
+	repo = &fakeSystemDashboardRepo{}
+	var nf *apierror.NotFoundError
+	if err := newTestSystemDashboardService(repo).Delete(systemDashboardBackendCtx(), "missing.json"); !errors.As(err, &nf) {
+		t.Errorf("Delete missing = %v, want a NotFoundError", err)
+	}
+
+	repo = &fakeSystemDashboardRepo{deleteFound: true}
+	var verr *apierror.ValidationError
+	if err := newTestSystemDashboardService(repo).Delete(systemDashboardBackendCtx(), "a/b"); !errors.As(err, &verr) || repo.deleteCalled {
+		t.Errorf("Delete bad key = %v (repository reached: %v), want a ValidationError", err, repo.deleteCalled)
 	}
 }

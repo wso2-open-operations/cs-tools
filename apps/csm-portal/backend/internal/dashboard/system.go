@@ -75,6 +75,7 @@ var (
 type SystemStore interface {
 	ListSystemDashboards(ctx context.Context) ([]entity.SystemDashboard, error)
 	SaveSystemDashboard(ctx context.Context, key, name, definition string) (entity.SystemDashboard, error)
+	DeleteSystemDashboard(ctx context.Context, key string) error
 }
 
 // SystemKey derives the database key of the dashboard with this id. An id
@@ -111,6 +112,11 @@ type systemBacking struct {
 	cache     []Dashboard
 	fetchedAt time.Time
 	saved     map[string]string // key -> definition this process last upserted
+
+	// reconciled is the key set the last successful reconcile ran for; the
+	// hot-reload path reconciles again only when the directory's key set
+	// differs from it. Guarded by syncMu.
+	reconciled map[string]bool
 }
 
 // NewSystemRegistry builds a registry that serves from store. src is the
@@ -174,9 +180,61 @@ func (b *systemBacking) migrate(ctx context.Context) int {
 				"id", d.ID, "key", b.keys[d.ID], "err", err)
 		}
 	}
+	removed := 0
+	// A partial migration must delete nothing: only reconcile once every
+	// upsert succeeded and the migration was not cut short.
+	if failed == 0 && ctx.Err() == nil {
+		b.syncMu.Lock()
+		removed = b.reconcile(ctx, b.keys)
+		b.syncMu.Unlock()
+	}
 	b.invalidate()
-	slog.InfoContext(ctx, "system dashboards migrated from definitions", "count", len(dashboards), "failed", failed)
+	slog.InfoContext(ctx, "system dashboards migrated from definitions", "count", len(dashboards), "failed", failed, "removed", removed)
 	return failed
+}
+
+// reconcile deletes the stored system dashboards whose key is not in keep, so a
+// definition file that was removed or renamed stops being served: while files
+// are mounted they are authoritative. It returns how many were deleted. It
+// deletes nothing when keep is empty (a mounted but empty directory must not
+// wipe the table) or when the stored list cannot be read, and a failed delete
+// is logged per key without stopping the others. The caller has already
+// established that every upsert succeeded. When nothing failed it records keep as
+// the reconciled set, and it drops the list cache after deleting. Needs syncMu.
+func (b *systemBacking) reconcile(ctx context.Context, keep map[string]string) int {
+	if len(keep) == 0 {
+		slog.WarnContext(ctx, "no dashboard definitions were found; keeping every stored system dashboard")
+		return 0
+	}
+	keepKeys := make(map[string]bool, len(keep))
+	for _, key := range keep {
+		keepKeys[key] = true
+	}
+	records, err := b.store.ListSystemDashboards(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "system dashboards: not removing stale ones, the stored list could not be read", "err", err)
+		return 0
+	}
+	removed, deleteFailed := 0, false
+	for _, rec := range records {
+		if keepKeys[rec.Key] {
+			continue
+		}
+		if err := b.store.DeleteSystemDashboard(ctx, rec.Key); err != nil {
+			slog.ErrorContext(ctx, "system dashboard removal failed", "key", rec.Key, "err", err)
+			deleteFailed = true
+			continue
+		}
+		slog.InfoContext(ctx, "removed system dashboard with no definition", "key", rec.Key)
+		removed++
+	}
+	if !deleteFailed {
+		b.reconciled = keepKeys
+	}
+	if removed > 0 {
+		b.invalidate()
+	}
+	return removed
 }
 
 // upsert writes one dashboard, skipping the call when this process already
@@ -254,18 +312,40 @@ func (b *systemBacking) syncHotReload(ctx context.Context) {
 		return
 	}
 	b.keys = keys
-	changed := false
+	changed, failed := false, false
 	for _, d := range dashboards {
 		before := b.saved[keys[d.ID]]
 		if err := b.upsert(ctx, keys[d.ID], d); err != nil {
 			slog.ErrorContext(ctx, "dashboard hot reload: system dashboard upsert failed", "id", d.ID, "err", err)
+			failed = true
 			continue
 		}
 		changed = changed || before != b.saved[keys[d.ID]]
 	}
+	// Stale rows are looked for only when the directory's key set differs from
+	// the one last reconciled, so an unchanged directory costs no list or
+	// delete per request; and never after a failed upsert.
+	if !failed && ctx.Err() == nil && !sameKeySet(b.reconciled, keys) {
+		if b.reconcile(ctx, keys) > 0 {
+			changed = true
+		}
+	}
 	if changed {
 		b.invalidate()
 	}
+}
+
+// sameKeySet reports whether done holds exactly the keys of keys' values.
+func sameKeySet(done map[string]bool, keys map[string]string) bool {
+	if len(done) != len(keys) {
+		return false
+	}
+	for _, key := range keys {
+		if !done[key] {
+			return false
+		}
+	}
+	return true
 }
 
 // list returns the stored dashboards, ordered by display name then id (the

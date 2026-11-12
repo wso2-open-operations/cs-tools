@@ -19,9 +19,12 @@ package entity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
 
 // SystemDashboard is a dashboard definition entity-service stores as a system
@@ -89,4 +92,15 @@ func (c *CustomerEntityClient) SaveSystemDashboard(ctx context.Context, key, nam
 		return SystemDashboard{}, fmt.Errorf("entity: decode saved system dashboard: %w", err)
 	}
 	return d, nil
+}
+
+// DeleteSystemDashboard calls DELETE /system-dashboards/{key} (204). A key with
+// no system dashboard (404) is already gone and is not an error.
+func (c *CustomerEntityClient) DeleteSystemDashboard(ctx context.Context, key string) error {
+	_, err := c.do(serviceContext(ctx), http.MethodDelete, systemDashboardPath(key), nil)
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
 }

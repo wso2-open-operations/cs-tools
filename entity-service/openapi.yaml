@@ -3776,6 +3776,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: "Delete a system dashboard."
+      description: "Postgres-only. Removes the system dashboard with this key; the CSM portal backend calls it when a dashboard file it loaded has been removed or renamed. Only a system dashboard can be removed this way: a user's saved dashboard is never matched, whatever its id. Service to service: only the CSM portal backend's own client credential is admitted."
+      operationId: deleteSystemDashboard
+      responses:
+        "204":
+          description: "The system dashboard was deleted."
+        "400":
+          description: "Bad request: the key is not a valid system dashboard key."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Forbidden: the caller is not the CSM portal backend."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: there is no system dashboard with that key."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/me/dashboards/{id}:
     parameters:
       - name: id
@@ -31381,6 +31413,7 @@ components:
           format: date-time
     SystemDashboard:
       type: object
+      additionalProperties: false
       required: [id, systemKey, isSystem, name, definition, createdOn, updatedOn]
       properties:
         id:
@@ -31404,6 +31437,7 @@ components:
           format: date-time
     SystemDashboardList:
       type: object
+      additionalProperties: false
       required: [dashboards]
       properties:
         dashboards:
@@ -31412,6 +31446,7 @@ components:
             $ref: '#/components/schemas/SystemDashboard'
     SaveSystemDashboardRequest:
       type: object
+      additionalProperties: false
       required: [name, definition]
       properties:
         name:

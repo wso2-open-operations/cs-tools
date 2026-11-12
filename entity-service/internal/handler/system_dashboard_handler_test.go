@@ -39,6 +39,7 @@ type stubSystemDashboardService struct {
 	getResp  domain.SystemDashboard
 	saveResp domain.SystemDashboard
 	err      error
+	deleted  bool
 }
 
 func (s *stubSystemDashboardService) List(context.Context) (domain.SystemDashboardList, error) {
@@ -56,6 +57,12 @@ func (s *stubSystemDashboardService) Save(_ context.Context, key string, req dom
 	return s.saveResp, s.err
 }
 
+func (s *stubSystemDashboardService) Delete(_ context.Context, key string) error {
+	s.gotKey = key
+	s.deleted = s.err == nil
+	return s.err
+}
+
 // serveSystemDashboard registers the handler with the same patterns as
 // routes.go, so r.PathValue("key") is filled in as in production.
 func serveSystemDashboard(svc *stubSystemDashboardService, method, path, body string) *httptest.ResponseRecorder {
@@ -64,6 +71,7 @@ func serveSystemDashboard(svc *stubSystemDashboardService, method, path, body st
 	mux.HandleFunc("GET /system-dashboards", h.List)
 	mux.HandleFunc("GET /system-dashboards/{key}", h.Get)
 	mux.HandleFunc("PUT /system-dashboards/{key}", h.Save)
+	mux.HandleFunc("DELETE /system-dashboards/{key}", h.Delete)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
 	return rec
@@ -126,6 +134,22 @@ func TestSystemDashboardHandler_SaveErrors(t *testing.T) {
 	}
 	svc.err = &apierror.ForbiddenError{Msg: "not the backend"}
 	if rec := serveSystemDashboard(svc, http.MethodPut, "/system-dashboards/overview.json", `{"name":"a","definition":"{}"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestSystemDashboardHandler_Delete(t *testing.T) {
+	svc := &stubSystemDashboardService{}
+	rec := serveSystemDashboard(svc, http.MethodDelete, "/system-dashboards/overview.json", "")
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || svc.gotKey != "overview.json" || !svc.deleted {
+		t.Fatalf("status = %d key = %q body = %q", rec.Code, svc.gotKey, rec.Body.String())
+	}
+	svc.err = &apierror.NotFoundError{Msg: "system dashboard not found"}
+	if rec := serveSystemDashboard(svc, http.MethodDelete, "/system-dashboards/x", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	svc.err = &apierror.ForbiddenError{Msg: "not the backend"}
+	if rec := serveSystemDashboard(svc, http.MethodDelete, "/system-dashboards/x", ""); rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rec.Code)
 	}
 }

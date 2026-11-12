@@ -74,3 +74,13 @@ func (h *SystemDashboardHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	writeCustomDashboardJSON(w, http.StatusOK, resp)
 }
+
+// Delete handles DELETE /system-dashboards/{key}: 204, or 404 when no system
+// dashboard has that key.
+func (h *SystemDashboardHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.Delete(r.Context(), r.PathValue("key")); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

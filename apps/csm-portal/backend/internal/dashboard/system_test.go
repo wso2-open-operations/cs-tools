@@ -42,6 +42,9 @@ type fakeSystemStore struct {
 	lists    int
 	saveErrs []error
 	listErr  error
+	deleted  []string
+	// deleteErrs maps a key to the error its delete returns.
+	deleteErrs map[string]error
 }
 
 func newFakeSystemStore() *fakeSystemStore {
@@ -62,6 +65,17 @@ func (f *fakeSystemStore) SaveSystemDashboard(_ context.Context, key, name, defi
 	rec := entity.SystemDashboard{Key: key, IsSystem: true, Name: name, Definition: definition}
 	f.rows[key] = rec
 	return rec, nil
+}
+
+func (f *fakeSystemStore) DeleteSystemDashboard(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.deleteErrs[key]; err != nil {
+		return err
+	}
+	f.deleted = append(f.deleted, key)
+	delete(f.rows, key)
+	return nil
 }
 
 func (f *fakeSystemStore) ListSystemDashboards(context.Context) ([]entity.SystemDashboard, error) {
@@ -359,6 +373,7 @@ func TestSystemRegistry_CacheIsShortLivedAndInvalidatedByUpsert(t *testing.T) {
 	ctx := context.Background()
 
 	reg.Migrate(ctx)
+	store.lists = 0 // Migrate's own reconcile read is not under test here
 	_, _ = reg.List(ctx)
 	_, _ = reg.List(ctx)
 	if store.lists != 1 {
@@ -374,8 +389,9 @@ func TestSystemRegistry_CacheIsShortLivedAndInvalidatedByUpsert(t *testing.T) {
 	}
 
 	reg.Migrate(ctx) // same definition: no write, but the cache is dropped
+	store.lists = 0
 	_, _ = reg.List(ctx)
-	if store.lists != 3 || store.saves != 1 {
+	if store.lists != 1 || store.saves != 1 {
 		t.Errorf("lists = %d, saves = %d; want a refetch after Migrate and no repeat write", store.lists, store.saves)
 	}
 }
@@ -408,5 +424,146 @@ func TestSystemRegistry_HotReloadUpsertsChangedDefinitions(t *testing.T) {
 	_, _ = reg.List(ctx)
 	if store.saves != 2 {
 		t.Errorf("saves = %d, an unchanged definition must not be re-written", store.saves)
+	}
+}
+
+func stale(f *fakeSystemStore, keys ...string) {
+	for _, k := range keys {
+		f.rows[k] = entity.SystemDashboard{Key: k, Name: k, Definition: `{"id":"` + k + `","displayName":"` + k + `"}`}
+	}
+}
+
+func TestSystemRegistry_ReconcileRemovesStaleRows(t *testing.T) {
+	t.Run("a renamed file replaces its old row", func(t *testing.T) {
+		store := newFakeSystemStore()
+		stale(store, "old-id", "kept-elsewhere")
+		src := dirSource(t, map[string]string{"a.json": csDefinition}, false, "", "")
+		reg, _ := NewSystemRegistry(store, src)
+		reg.Migrate(context.Background())
+		if _, ok := store.rows["cs-overview"]; !ok {
+			t.Error("new key not stored")
+		}
+		if _, ok := store.rows["old-id"]; ok {
+			t.Error("old key still stored")
+		}
+		got, err := reg.List(context.Background())
+		if err != nil || len(got) != 1 || got[0].ID != "cs-overview" {
+			t.Errorf("List = %+v, %v; want only the migrated dashboard", got, err)
+		}
+		if len(store.deleted) != 2 {
+			t.Errorf("deleted = %v", store.deleted)
+		}
+	})
+
+	t.Run("no source mounted keeps every row", func(t *testing.T) {
+		store := newFakeSystemStore()
+		stale(store, "a", "b")
+		reg, _ := NewSystemRegistry(store, nil)
+		reg.Migrate(context.Background())
+		if len(store.deleted) != 0 || len(store.rows) != 2 {
+			t.Errorf("deleted = %v, rows = %d", store.deleted, len(store.rows))
+		}
+	})
+
+	t.Run("a failed upsert deletes nothing", func(t *testing.T) {
+		noBackoff(t)
+		store := newFakeSystemStore()
+		stale(store, "old-id")
+		store.saveErrs = []error{errors.New("down"), errors.New("down"), errors.New("down")}
+		src := dirSource(t, map[string]string{"a.json": csDefinition}, false, "", "")
+		reg, _ := NewSystemRegistry(store, src)
+		reg.Migrate(context.Background())
+		if len(store.deleted) != 0 {
+			t.Errorf("deleted = %v after a failed upsert", store.deleted)
+		}
+	})
+
+	t.Run("a timed out migration deletes nothing", func(t *testing.T) {
+		store := newFakeSystemStore()
+		stale(store, "old-id")
+		src := dirSource(t, map[string]string{"a.json": csDefinition}, false, "", "")
+		reg, _ := NewSystemRegistry(store, src)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		reg.Migrate(ctx)
+		if len(store.deleted) != 0 {
+			t.Errorf("deleted = %v after the context ended", store.deleted)
+		}
+	})
+
+	t.Run("a failed list read deletes nothing", func(t *testing.T) {
+		store := newFakeSystemStore()
+		stale(store, "old-id")
+		store.listErr = errors.New("down")
+		src := dirSource(t, map[string]string{"a.json": csDefinition}, false, "", "")
+		reg, _ := NewSystemRegistry(store, src)
+		if failed := reg.Migrate(context.Background()); failed != 0 {
+			t.Errorf("failed = %d; a list failure is not an upsert failure", failed)
+		}
+		if len(store.deleted) != 0 {
+			t.Errorf("deleted = %v", store.deleted)
+		}
+	})
+
+	t.Run("an empty mounted directory deletes nothing", func(t *testing.T) {
+		store := newFakeSystemStore()
+		stale(store, "a", "b")
+		reg, _ := NewSystemRegistry(store, dirSource(t, nil, false, "", ""))
+		reg.Migrate(context.Background())
+		if len(store.deleted) != 0 || len(store.rows) != 2 {
+			t.Errorf("deleted = %v, rows = %d", store.deleted, len(store.rows))
+		}
+	})
+
+	t.Run("a failed delete is tolerated and the others continue", func(t *testing.T) {
+		store := newFakeSystemStore()
+		stale(store, "bad", "good")
+		store.deleteErrs = map[string]error{"bad": &apierror.Error{StatusCode: http.StatusInternalServerError}}
+		src := dirSource(t, map[string]string{"a.json": csDefinition}, false, "", "")
+		reg, _ := NewSystemRegistry(store, src)
+		if failed := reg.Migrate(context.Background()); failed != 0 {
+			t.Errorf("failed = %d", failed)
+		}
+		if _, ok := store.rows["bad"]; !ok {
+			t.Error("bad should remain")
+		}
+		if _, ok := store.rows["good"]; ok {
+			t.Error("good should be deleted despite the other failure")
+		}
+	})
+}
+
+func TestSystemRegistry_HotReloadReconcilesOnKeySetChange(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "a.json", csDefinition)
+	src, err := NewDirRegistry(dir, true, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newFakeSystemStore()
+	reg, _ := NewSystemRegistry(store, src)
+	ctx := context.Background()
+	reg.Migrate(ctx)
+
+	// Unchanged directory: further reads must not list for reconciliation.
+	_, _ = reg.List(ctx)
+	before := store.lists
+	reg.system.invalidate()
+	_, _ = reg.List(ctx)
+	if store.lists != before+1 {
+		t.Errorf("lists = %d, want exactly the one serving read", store.lists-before)
+	}
+
+	// Rename the dashboard: new id in a new file, old file gone.
+	if err := os.Remove(filepath.Join(dir, "a.json")); err != nil {
+		t.Fatal(err)
+	}
+	writeDefinition(t, dir, "b.json", strings.Replace(csDefinition, `"id": "cs-overview"`, `"id": "cs-overview-2"`, 1))
+	got, err := reg.List(ctx)
+	if err != nil || len(got) != 1 || got[0].ID != "cs-overview-2" {
+		t.Fatalf("List = %+v, %v; want only the renamed dashboard", got, err)
+	}
+	if _, ok := store.rows["cs-overview"]; ok {
+		t.Error("old row not deleted on hot reload")
 	}
 }

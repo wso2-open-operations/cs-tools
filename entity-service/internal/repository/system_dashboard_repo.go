@@ -27,7 +27,7 @@ import (
 )
 
 // SystemDashboardRepository reads and writes system dashboards: the
-// custom_dashboard rows with is_system set and no owner (migration 100029).
+// custom_dashboard rows with is_system set and no owner (migration 0294).
 // It never reads or writes any other row of the table.
 type SystemDashboardRepository interface {
 	// List is every system dashboard with its definition, ordered by key.
@@ -37,6 +37,10 @@ type SystemDashboardRepository interface {
 	// Upsert creates the system dashboard, or overwrites its name and
 	// definition (keeping its id and created_on) when the key already exists.
 	Upsert(ctx context.Context, key string, req domain.SaveSystemDashboardRequest) (*domain.SystemDashboard, error)
+	// Delete removes the system dashboard with this key; false when there is
+	// none. It matches only is_system rows, so a user's dashboard is never
+	// removed through it.
+	Delete(ctx context.Context, key string) (bool, error)
 }
 
 type systemDashboardRepo struct {
@@ -110,4 +114,15 @@ func (r *systemDashboardRepo) Upsert(ctx context.Context, key string, req domain
 		return nil, fmt.Errorf("upsert system dashboard: %w", err)
 	}
 	return &d, nil
+}
+
+// Delete removes the system dashboard with this key. The is_system condition
+// keeps every other row of the table out of reach.
+func (r *systemDashboardRepo) Delete(ctx context.Context, key string) (bool, error) {
+	tag, err := r.db.Exec(ctx,
+		`DELETE FROM custom_dashboard WHERE is_system AND system_key = $1`, key)
+	if err != nil {
+		return false, fmt.Errorf("delete system dashboard: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }

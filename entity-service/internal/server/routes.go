@@ -2340,10 +2340,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if systemDashboardHandler != nil {
 		// System dashboards (no owner): the CSM portal backend upserts them
-		// on startup and reads them back; no other caller is admitted.
+		// on startup, reads them back and removes the ones whose file is gone;
+		// no other caller is admitted.
 		mux.HandleFunc("GET /system-dashboards", systemDashboardHandler.List)
 		mux.HandleFunc("GET /system-dashboards/{key}", systemDashboardHandler.Get)
 		mux.HandleFunc("PUT /system-dashboards/{key}", systemDashboardHandler.Save)
+		mux.HandleFunc("DELETE /system-dashboards/{key}", systemDashboardHandler.Delete)
 	}
 	if customDashboardShareHandler != nil {
 		// Sharing the caller's saved dashboards (owner) and the ones shared

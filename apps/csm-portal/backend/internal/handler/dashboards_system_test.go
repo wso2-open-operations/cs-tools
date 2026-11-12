@@ -35,6 +35,8 @@ func (f failingSystemStore) ListSystemDashboards(context.Context) ([]entity.Syst
 	return nil, f.err
 }
 
+func (f failingSystemStore) DeleteSystemDashboard(context.Context, string) error { return f.err }
+
 func (f failingSystemStore) SaveSystemDashboard(context.Context, string, string, string) (entity.SystemDashboard, error) {
 	return entity.SystemDashboard{}, f.err
 }

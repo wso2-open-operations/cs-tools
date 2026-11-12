@@ -80,3 +80,27 @@ func TestListSystemDashboards_StatusErrorPassesThrough(t *testing.T) {
 		t.Fatal("expected an error for a 403")
 	}
 }
+
+func TestDeleteSystemDashboard(t *testing.T) {
+	client, got := newCustomDashboardTestClient(t, http.StatusNoContent, "")
+	if err := client.DeleteSystemDashboard(userContext(), "old-key"); err != nil {
+		t.Fatalf("DeleteSystemDashboard: %v", err)
+	}
+	if got.method != http.MethodDelete || got.path != "/system-dashboards/old-key" || got.userToken != "" {
+		t.Errorf("request = %+v", got)
+	}
+}
+
+func TestDeleteSystemDashboard_NotFoundIsSuccess(t *testing.T) {
+	client, _ := newCustomDashboardTestClient(t, http.StatusNotFound, `{"code":404}`)
+	if err := client.DeleteSystemDashboard(context.Background(), "gone"); err != nil {
+		t.Fatalf("404 should be tolerated, got %v", err)
+	}
+}
+
+func TestDeleteSystemDashboard_OtherErrorsPassThrough(t *testing.T) {
+	client, _ := newCustomDashboardTestClient(t, http.StatusForbidden, `{"code":403}`)
+	if err := client.DeleteSystemDashboard(context.Background(), "k"); err == nil {
+		t.Fatal("expected an error for a 403")
+	}
+}

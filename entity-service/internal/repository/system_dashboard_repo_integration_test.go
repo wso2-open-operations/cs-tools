@@ -28,7 +28,7 @@ import (
 )
 
 // These run SystemDashboardRepository against a live PostgreSQL instance, with
-// every migration applied up to 100029, and check that the user-facing
+// every migration applied up to 0294, and check that the user-facing
 // dashboard code and the orphan cleanup of migrations 0255, 0276 and 0277 never
 // see or remove a system row. They reuse the orphan fixture (owner G,
 // recipient H, teams Orion and Lyra). Skipped unless ENTITY_TEST_DATABASE_URL
@@ -350,4 +350,61 @@ func domainSaveSystem(name, definition string) domain.SaveSystemDashboardRequest
 
 func domainSaveCustom(name, definition string) domain.SaveCustomDashboardRequest {
 	return domain.SaveCustomDashboardRequest{Name: name, Definition: definition}
+}
+
+// Delete removes only the system row with that key: user rows are untouched,
+// whatever id or key is passed, and deleting twice finds nothing the second
+// time.
+func TestSystemDashboardIntegration_DeleteRemovesOnlyTheSystemRow(t *testing.T) {
+	f := newSystemDashboardFixture(t)
+	sysID := f.save(t, sdbKeyA, "Overview", `{"a":1}`)
+	f.save(t, sdbKeyB, "Cases", `{"b":1}`)
+	saveCustomDashboard(t, f.dashboards, cdbOwnerG, cdbOrphanX, "Mine", `{"m":1}`)
+	// A shared user dashboard; and one whose owner is gone (0255 keeps it, ownerless).
+	saveCustomDashboard(t, f.dashboards, cdbOwnerG, cdbOrphanY, "Ownerless", `{"o":1}`)
+	f.shareWith(t, cdbOrphanY, cdbRecipientH)
+	f.exec(t, "orphan it", `UPDATE custom_dashboard SET owner_user_id = NULL WHERE id = $1`, cdbOrphanY)
+
+	// A user's dashboard id, or a user dashboard's name, is not a key.
+	for _, key := range []string{cdbOrphanX, cdbOrphanY, "Mine", "Ownerless"} {
+		if ok, err := f.system.Delete(f.ctx, key); err != nil || ok {
+			t.Errorf("Delete(%q) = %v, %v; want false", key, ok, err)
+		}
+	}
+	if !f.exists(t, cdbOrphanX) || !f.exists(t, cdbOrphanY) {
+		t.Fatal("a user dashboard was removed")
+	}
+
+	if ok, err := f.system.Delete(f.ctx, sdbKeyA); err != nil || !ok {
+		t.Fatalf("Delete(%q) = %v, %v; want true", sdbKeyA, ok, err)
+	}
+	if f.exists(t, sysID) {
+		t.Error("the system row is still there")
+	}
+	if ok, err := f.system.Delete(f.ctx, sdbKeyA); err != nil || ok {
+		t.Errorf("second Delete = %v, %v; want false", ok, err)
+	}
+	if got, err := f.system.Get(f.ctx, sdbKeyA); err != nil || got != nil {
+		t.Errorf("Get after Delete = %+v, %v; want nil", got, err)
+	}
+	list, err := f.system.List(f.ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found []string
+	for _, d := range list {
+		if strings.HasPrefix(d.SystemKey, "sdb-test-") {
+			found = append(found, d.SystemKey)
+		}
+	}
+	if len(found) != 1 || found[0] != sdbKeyB {
+		t.Errorf("List keys = %v, want only %s", found, sdbKeyB)
+	}
+	// Recreating the key makes a new row.
+	if newID := f.save(t, sdbKeyA, "Overview", `{"a":2}`); newID == sysID {
+		t.Error("recreated key reused the deleted row's id")
+	}
+	if !f.exists(t, cdbOrphanX) || !f.exists(t, cdbOrphanY) {
+		t.Error("a user dashboard went with the system rows")
+	}
 }
