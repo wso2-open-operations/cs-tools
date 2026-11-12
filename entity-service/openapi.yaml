@@ -23887,7 +23887,10 @@ components:
           description: >-
             Optional product category/classification (PDP/MS/PS/CL/PC). Postgres-only --
             never forwarded to the ServiceNow mirror under dual-write, since ServiceNow's own
-            create payload has no equivalent field.
+            create payload has no equivalent field. Omitted, the deployed product gets the
+            default category of its project's type (Managed Cloud Subscription: ms;
+            Subscription, Professional Services, Evaluation Subscription, Internal: ps;
+            Cloud Support, Cloud Evaluation Support: cl), or none when the type has no default.
 
     CreateDeployedProductResponse:
       type: object
