@@ -5449,8 +5449,13 @@ paths:
         is derived from the three closure sub-states (by an SN business rule, or on
         Postgres by the same rule in the same transaction) and returned. Sub-states
         are accepted and returned in ServiceNow Title Case, e.g. "Pending Notified".
-        On Postgres, an allow-listed internal client may call without
-        x-user-id-token, and suspensionProcessState is accepted but not stored.
+        On Postgres, endDateClosureState, invoiceDueDateClosureState,
+        suspensionProcessState and suspensionProcessOverridden are stored.
+        Changing endDateClosureState, invoiceDueDateClosureState or
+        complianceViolationClosureState also recomputes the overall
+        closureState in the same transaction. A caller
+        whose client id is in the internal-client allow-list (M2M_CLIENT_IDS)
+        may call without x-user-id-token.
       operationId: updateProject
       parameters:
         - name: id
@@ -22850,7 +22855,7 @@ components:
             not defined or validated by this layer.
         suspensionProcessOverridden:
           type: boolean
-          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. On Postgres data sources it is writable via PATCH /projects/{id}; otherwise always false."
         onboardingOwner:
           description: >
             The person assigned to run this project's onboarding. Null when
@@ -22994,10 +22999,11 @@ components:
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
-            not defined or validated by this layer. Always null on Postgres.
+            not defined or validated by this layer. On Postgres it is the stored
+            value, set via PATCH /projects/{id}.
         suspensionProcessOverridden:
           type: boolean
-          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. On Postgres data sources it is writable via PATCH /projects/{id}; otherwise always false."
 
     SearchProjectsResponse:
       type: object
@@ -23063,6 +23069,7 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+            On Postgres data sources it is stored as sent, and returned by reads.
         onboardingStatus:
           type: string
           description: >
