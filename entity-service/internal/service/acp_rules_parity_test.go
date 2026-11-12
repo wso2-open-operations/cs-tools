@@ -31,6 +31,11 @@ type acpRulesParity struct {
 		End  time.Time `json:"end"`
 		Want int       `json:"want"`
 	} `json:"daysBetween"`
+	SuspensionBoundary []struct {
+		Now      time.Time `json:"now"`
+		End      time.Time `json:"end"`
+		Suspends bool      `json:"suspends"`
+	} `json:"suspensionBoundary"`
 	OpportunityCounts []struct {
 		Stage *string `json:"stage"`
 		EULA  *string `json:"eula"`
@@ -81,6 +86,13 @@ func TestACPRulesParity(t *testing.T) {
 	for _, tc := range c.DaysBetween {
 		if got := acpDaysBetween(tc.Now, tc.End); got != tc.Want {
 			t.Errorf("daysBetween(%s, %s) = %d, want %d", tc.Now, tc.End, got, tc.Want)
+		}
+	}
+	for _, tc := range c.SuspensionBoundary {
+		// The reopen check treats a track as clear exactly when ACP would not
+		// suspend it, so "clear" is the opposite of "suspends".
+		if got := acpDaysBetween(tc.Now, tc.End) >= 0; got == tc.Suspends {
+			t.Errorf("suspensionBoundary(%s, %s): clear = %v, but ACP suspends = %v", tc.Now, tc.End, got, tc.Suspends)
 		}
 	}
 	for _, tc := range c.OpportunityCounts {
