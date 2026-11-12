@@ -138,18 +138,6 @@ declare global {
        */
       CSM_MIGRATION_ONBOARDING_STATUS_ENABLED?: boolean | string;
       /**
-       * Largest file, in megabytes, offered for upload (default 10, the
-       * entity-service default). A number or numeric
-       * string. See `attachmentLimitsConfig.ts`.
-       */
-      CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
-      /**
-       * Most image megabytes one comment or description may hold in total, and
-       * so the largest single image (default 1). A number or numeric
-       * string. See `attachmentLimitsConfig.ts`.
-       */
-      CSM_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
-      /**
        * How many 8 MiB ranges of one attachment download are fetched at the
        * same time (default 4, kept between 1 and 8; 1 fetches one at a time).
        * A number or numeric string. See `attachmentLimitsConfig.ts`.

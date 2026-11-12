@@ -21,6 +21,10 @@ import { CaseDetailsSection } from "@features/support/components/case-creation-l
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 
+vi.mock("@api/useAttachmentLimits", () => ({
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024 }),
+}));
+
 vi.mock("@components/rich-text-editor/Editor", () => ({
   __esModule: true,
   default: vi.fn(({ value, onChange, disabled }: any) => (

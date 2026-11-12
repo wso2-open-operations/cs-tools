@@ -141,21 +141,9 @@ window.config = {
   // are sent in 8 MiB chunks and downloads stream from the backend, so no
   // storage address is exposed to the browser.
   //
-  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
-  //   Largest case or deployment file offered for upload, in MB. Set it to
-  //   entity-service's ATTACHMENT_DIRECT_UPLOAD_MAX_MB when direct uploads are on and
-  //   that is above ATTACHMENT_VIA_PORTAL_MAX_MB (up to 1024), and to
-  //   ATTACHMENT_VIA_PORTAL_MAX_MB otherwise; the service stays authoritative and
-  //   this only refuses a file early. A number or numeric string; anything else
-  //   (zero, negative, text) or above 1024 uses the default.
-  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
-
-  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB  (optional — default: 1)
-  //   Most the images pasted or inserted into one comment or description may add
-  //   up to, in MB (at most 5 images each). Same value rules as above. The older
-  //   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB still works when this is not set, but
-  //   now means the same total, not a per-image limit. Above 25 uses the default.
-  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
+  // The size limits for files and inline images are not set here: the portal
+  // reads them from the backend (GET /attachments/limits), which gets them from
+  // entity-service's ATTACHMENT_* and INLINE_IMAGES_TOTAL_MAX_MB settings.
 
   // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM  (optional — default: 4)
   //   How many 8 MiB ranges of one attachment download are fetched at the same

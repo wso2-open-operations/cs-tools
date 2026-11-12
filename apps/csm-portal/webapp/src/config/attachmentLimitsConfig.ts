@@ -15,65 +15,20 @@
 // under the License.
 
 
-const BYTES_PER_MB = 1024 * 1024;
+export const BYTES_PER_MB = 1024 * 1024;
 
-/** Largest stored attachment (entity-service `ATTACHMENT_VIA_PORTAL_MAX_MB` default, 10 MiB). */
+/** Largest attachment (10 MiB) used until the server's limit is loaded. */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 
-/** Most inline-image bytes in one comment or description (1 MiB). */
+/** Most inline-image bytes in one comment or description (1 MiB) used until the server's limit is loaded. */
 export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
 
-/** Ceilings: a configured value above one is ignored and the default is used. */
+/**
+ * Ceiling for one stored attachment, used only to cap the ranges of a download
+ * whose size is unknown. The real limits come from the server
+ * (`useAttachmentLimits`); the defaults above apply until they are loaded.
+ */
 export const MAX_ENTITY_ATTACHMENT_MAX_MB = 1024;
-export const MAX_INLINE_IMAGE_MAX_MB = 25;
-
-/** A positive number of megabytes, at most `max`, from a number or numeric string, else `fallback`. */
-function megabytes(raw: unknown, fallback: number, max: number): number {
-  const value =
-    typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
-  return Number.isFinite(value) && value > 0 && value <= max ? value : fallback;
-}
-
-/**
- * Largest file, in bytes, the portal offers to upload as an attachment.
- *
- * Read from the runtime `window.config.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB`
- * key (a number of megabytes, or a numeric string). A missing, unparseable, zero,
- * negative or above-1024 value gives {@link DEFAULT_ENTITY_ATTACHMENT_MAX_MB}. Keep it equal
- * to the entity-service's `ATTACHMENT_VIA_PORTAL_MAX_MB`, or, when it sends large files
- * straight to Azure, to its `ATTACHMENT_DIRECT_UPLOAD_MAX_MB` (up to 1024): the server stays the authority,
- * this only refuses an oversized file before the upload starts.
- *
- * Read at call time (not module load) so a test can set `window.config` per case.
- */
-export function entityAttachmentMaxBytes(): number {
-  return (
-    megabytes(
-      window.config?.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB,
-      DEFAULT_ENTITY_ATTACHMENT_MAX_MB,
-      MAX_ENTITY_ATTACHMENT_MAX_MB,
-    ) *
-    BYTES_PER_MB
-  );
-}
-
-/**
- * Most bytes of inline images one comment or description may hold in total (so
- * also the largest single image), from
- * `window.config.CSM_PORTAL_INLINE_IMAGE_MAX_MB` (same rules as above, default
- * {@link DEFAULT_INLINE_IMAGE_MAX_MB}; keep it equal to the entity-service's
- * limit). Read at call time.
- */
-export function inlineImageMaxBytes(): number {
-  return (
-    megabytes(
-      window.config?.CSM_PORTAL_INLINE_IMAGE_MAX_MB,
-      DEFAULT_INLINE_IMAGE_MAX_MB,
-      MAX_INLINE_IMAGE_MAX_MB,
-    ) *
-    BYTES_PER_MB
-  );
-}
 
 /** Ranges of one download fetched at once when nothing is configured. */
 export const DEFAULT_DOWNLOAD_PARALLELISM = 4;

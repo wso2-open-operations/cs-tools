@@ -573,6 +573,47 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/limits:
+    get:
+      summary: The attachment sizes in force, for a portal to show and check against.
+      description: >-
+        maxFileBytes is the largest file that may be uploaded as an attachment: the
+        direct-upload maximum while direct uploads are on and above the portal limit
+        (ATTACHMENT_VIA_PORTAL_MAX_MB), else the portal limit. maxInlineImagesTotalBytes
+        is the most image bytes one comment or description may hold in total, and so the
+        largest single image. The values come from configuration, so the answer may be
+        cached for a few minutes. The server stays the authority: it checks the real size
+        when an upload starts and again at confirm.
+      operationId: getAttachmentLimits
+      responses:
+        "200":
+          description: "The limits."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "private, max-age=300"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [maxFileBytes, maxInlineImagesTotalBytes]
+                properties:
+                  maxFileBytes:
+                    type: integer
+                    format: int64
+                    example: 1073741824
+                  maxInlineImagesTotalBytes:
+                    type: integer
+                    format: int64
+                    example: 1048576
+        "401":
+          description: "The caller is not authenticated."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/{id}/upload-links:
     post:
       summary: >-

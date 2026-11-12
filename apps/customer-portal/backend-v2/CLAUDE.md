@@ -1056,6 +1056,9 @@ startup on an ambiguous pair.
   `X-Content-Type-Options: nosniff` and a sandboxing CSP are always set here too. A 416 from entity-service becomes
   `entity.RangeNotSatisfiableError` so its `Content-Range` reaches the browser.
 
+**Limits.** `GET /attachments/limits` relays entity-service's `{maxFileBytes, maxInlineImagesTotalBytes}` untouched, for any
+signed-in caller (no module permission). Unlike the other answers it is sent with `Cache-Control: private, max-age=300`.
+
 **Direct links for large files.** When entity-service has direct transfers on, the upload start answers
 `directUpload: true` for a large file, and two more routes relay entity-service's signed links untouched:
 `POST /attachments/{id}/upload-links?type=` (one write-only link per chunk) and

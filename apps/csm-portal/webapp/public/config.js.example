@@ -235,22 +235,6 @@ window.config = {
   // reads "Unavailable". Off means no column and no request.
   CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: true,
 
-  // Early size checks for attachments (stored in Azure Blob Storage by the
-  // portal backend), in megabytes. Optional:
-  // leave unset for the defaults below (10 MB file, 1 MB images), which match the entity-service's own
-  // defaults. Set the file limit to the entity-service's
-  // ATTACHMENT_DIRECT_UPLOAD_MAX_MB when direct uploads are on and that is above
-  // ATTACHMENT_VIA_PORTAL_MAX_MB (up to 1024), and to ATTACHMENT_VIA_PORTAL_MAX_MB
-  // otherwise; set the image limit to its inline image limit. The server stays the
-  // authority, these only refuse an oversized file before the upload starts.
-  // CSM_PORTAL_INLINE_IMAGE_MAX_MB is the most image megabytes one comment or
-  // description may hold in total (also the largest single image); each may
-  // hold at most 5 images.
-  // Values above 1024 (file) or 25 (images), zero, negative or text are ignored
-  // and the default (10 / 1) is used.
-  // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
-  // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
-
   // How many 8 MiB ranges of one attachment download are fetched at the same
   // time. Optional: default 4, kept between 1 and 8. 1 fetches one range at a
   // time. A number or numeric string; anything else uses the default.

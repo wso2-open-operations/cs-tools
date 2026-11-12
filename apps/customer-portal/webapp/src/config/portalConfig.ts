@@ -91,22 +91,6 @@ export interface CustomerPortalWindowConfig {
    */
   CUSTOMER_PORTAL_STREAM_ENABLED?: boolean;
   /**
-   * Largest work item or deployment file offered for upload, in MB (a number or
-   * numeric string). Defaults to 100, entity-service's own default; set it to
-   * match the service's `ATTACHMENT_VIA_PORTAL_MAX_MB`. The service stays authoritative.
-   */
-  CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
-  /**
-   * Most the inline images of one comment or description may add up to, in MB
-   * (a number or numeric string). Defaults to 25.
-   */
-  CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB?: number | string;
-  /**
-   * Older name of CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB, used when that is
-   * not set. It is now the total per comment or description, not per image.
-   */
-  CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
-  /**
    * How many 8 MiB ranges of one attachment download are fetched at the same
    * time (a number or numeric string). Defaults to 4, kept between 1 and 8;
    * 1 fetches one range at a time.

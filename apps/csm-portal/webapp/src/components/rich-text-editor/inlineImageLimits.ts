@@ -15,7 +15,7 @@
 // under the License.
 
 import { $nodesOfType, type LexicalEditor } from "lexical";
-import { formatMegabytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { formatMegabytes } from "@config/attachmentLimitsConfig";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import {
   ALLOWED_IMAGE_TYPES_LABEL,
@@ -25,7 +25,8 @@ import {
 
 /**
  * What one comment or description may hold in inline images: at most
- * {@link MAX_COMMENT_IMAGES} of them and `inlineImageMaxBytes()` in total. The
+ * {@link MAX_COMMENT_IMAGES} of them and the server's inline-image limit
+ * (`useAttachmentLimits`) in total. The
  * editor refuses the image that would go over, before anything is uploaded.
  */
 
@@ -67,31 +68,35 @@ export function inlineImagesInEditor(editor: LexicalEditor): InlineImageRoom {
 }
 
 /** Whether one more image of `bytes` fits after `room`; the reason if not. */
-export function inlineImageRefusal(room: InlineImageRoom, bytes: number): InlineImageRefusal | null {
+export function inlineImageRefusal(
+  room: InlineImageRoom,
+  bytes: number,
+  maxBytes: number,
+): InlineImageRefusal | null {
   if (room.count >= MAX_COMMENT_IMAGES) return "count";
-  if (room.bytes + bytes > inlineImageMaxBytes()) return "total";
+  if (room.bytes + bytes > maxBytes) return "total";
   return null;
 }
 
-export function inlineImagesTotalMessage(): string {
-  return `Images in one comment or description can't exceed ${formatMegabytes(inlineImageMaxBytes())} in total.`;
+export function inlineImagesTotalMessage(maxBytes: number): string {
+  return `Images in one comment or description can't exceed ${formatMegabytes(maxBytes)} in total.`;
 }
 
 /** Why a pasted image was refused. */
 export type ImagePasteRefusal = "size" | "type" | "count" | "total" | "disabled";
 
 /** The message for a refused pasted image. */
-export function imagePasteRefusalMessage(reason: ImagePasteRefusal): string {
+export function imagePasteRefusalMessage(reason: ImagePasteRefusal, maxBytes: number): string {
   switch (reason) {
     case "count":
       return MAX_COMMENT_IMAGES_MESSAGE;
     case "total":
-      return inlineImagesTotalMessage();
+      return inlineImagesTotalMessage(maxBytes);
     case "disabled":
       return "Images can't be added to this field.";
     case "type":
       return `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`;
     default:
-      return `Pasted image exceeds the maximum allowed size of ${formatMegabytes(inlineImageMaxBytes())}.`;
+      return `Pasted image exceeds the maximum allowed size of ${formatMegabytes(maxBytes)}.`;
   }
 }

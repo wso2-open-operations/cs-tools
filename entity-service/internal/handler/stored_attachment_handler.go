@@ -77,6 +77,15 @@ func (h *StoredAttachmentHandler) WithUploadCleanup(c service.AttachmentUploadCl
 	return h
 }
 
+// Limits handles GET /attachments/limits: the attachment sizes in force. They come
+// from configuration, so the answer may be cached for a few minutes.
+func (h *StoredAttachmentHandler) Limits(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(h.svc.Limits())
+}
+
 // CleanupUploads handles POST /attachments/uploads/cleanup.
 func (h *StoredAttachmentHandler) CleanupUploads(w http.ResponseWriter, r *http.Request) {
 	if h.uploads == nil {

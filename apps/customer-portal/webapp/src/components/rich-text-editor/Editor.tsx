@@ -70,7 +70,7 @@ import {
 } from "lexical";
 import { $isListItemNode } from "@lexical/list";
 import { $findMatchingParent } from "@lexical/utils";
-import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import useAttachmentLimits from "@api/useAttachmentLimits";
 
 /**
  * Internal component to handle editable state changes.
@@ -228,6 +228,7 @@ const ClipboardImagePlugin = ({
   const [editor] = useLexicalComposerContext();
   // Callers pass fresh closures on every render; read them through a ref so the
   // paste listener is registered once.
+  const { maxInlineImagesTotalBytes } = useAttachmentLimits();
   const handlersRef = useRef({ onPasteError, onImageUpload });
   useEffect(() => {
     handlersRef.current = { onPasteError, onImageUpload };
@@ -240,11 +241,11 @@ const ClipboardImagePlugin = ({
       if (!items) return;
 
       const ALLOWED_PASTE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-      const maxPasteImageSize = inlineImageMaxBytes();
+      const maxPasteImageSize = maxInlineImagesTotalBytes;
       // Only the upload-on-paste flow is capped here; base64 images have a server cap.
       // Read once: an image added in this loop may not be in the editor yet.
       let slots = handlers.onImageUpload ? remainingImageSlots(editor) : Infinity;
-      let bytesLeft = handlers.onImageUpload ? remainingImageBytes(editor) : Infinity;
+      let bytesLeft = handlers.onImageUpload ? remainingImageBytes(editor, maxInlineImagesTotalBytes) : Infinity;
       let refusalReported = false;
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
@@ -301,7 +302,7 @@ const ClipboardImagePlugin = ({
         rootElement?.addEventListener("paste", handlePaste);
       },
     );
-  }, [editor]);
+  }, [editor, maxInlineImagesTotalBytes]);
 
   return null;
 };
