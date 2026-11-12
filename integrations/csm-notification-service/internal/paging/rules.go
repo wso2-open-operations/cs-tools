@@ -67,6 +67,12 @@ const (
 	// rather than every ABT's one lead. Selectable per rule from the
 	// configuration file.
 	SourceAmericasTeamLeads LevelSource = "americas_team_leads"
+	// SourceShiftLeads is the leads of whoever is on shift, for a case on no
+	// ABT (teams.unassignedLeads: shift_leads): every ABT team's lead through
+	// the IST day (morning, day, evening and weekend), plus the Australia
+	// team's lead on the IST morning; the Americas team's leads through the
+	// night. Every lead, not teams.teamLeadsToCall of them.
+	SourceShiftLeads LevelSource = "shift_leads"
 
 	// -- Levels 3 and 4: the heads, outside any ABT. --
 
@@ -169,6 +175,36 @@ var DefaultRules = []Rule{
 	},
 }
 
+// Rule IDs of the two rows a case on no ABT routes by when
+// teams.unassignedLeads is shift_leads: U1 through the IST day, U2 through the
+// night. They replace R1a/R1b/R3/R4b and R5/R6 for such a case only.
+const (
+	RuleUnassignedDay   = "U1"
+	RuleUnassignedNight = "U2"
+)
+
+// UnassignedRule is the row a case on no ABT routes by when
+// teams.unassignedLeads is shift_leads: the shift's leads, then the heads.
+//
+// There is no Level 0 and no Level 2: a case nobody owns goes straight to the
+// people who lead the shift, and the heads hear of it only after them. The
+// leads are all of them (seven ABT leads by day), which is why plan.go calls a
+// rung of more than three leads once rather than three times.
+func UnassignedRule(shift Shift) Rule {
+	levels := [5]LevelSource{SourceNone, SourceShiftLeads, SourceNone, SourceCREHead, SourceCSHead}
+	switch shift {
+	case ShiftUSA, ShiftUSAWeekend:
+		return Rule{ID: RuleUnassignedNight, Shift: shift, ABT: ABTNo, Levels: levels, ExpectedCalls: [5]int{0, 3, 0, 1, 1}}
+	default:
+		return Rule{ID: RuleUnassignedDay, Shift: shift, ABT: ABTNo, Levels: levels, ExpectedCalls: [5]int{0, 7, 0, 1, 1}}
+	}
+}
+
+// IsUnassignedRule reports whether a rule ID is one of UnassignedRule's.
+func IsUnassignedRule(id string) bool {
+	return id == RuleUnassignedDay || id == RuleUnassignedNight
+}
+
 // MatchRule picks the row an incident routes by.
 //
 // abtKnown distinguishes "this incident is not on an ABT team" from "we could
@@ -237,7 +273,7 @@ func (s LevelSource) valid() bool {
 	case SourceNone, SourceRotaMembers, SourceRotaPair, SourceAlertDutyOwnABT,
 		SourceAlertDutyEachABT, SourceAlertDutyAmericas,
 		SourceRotaMemberAndAlertDutyAmericas, SourceTeamLead, SourceAllTeamLeads,
-		SourceAmericasTeamLead, SourceAmericasTeamLeads, SourceCREHead, SourceCSHead:
+		SourceAmericasTeamLead, SourceAmericasTeamLeads, SourceShiftLeads, SourceCREHead, SourceCSHead:
 		return true
 	}
 	return false
@@ -272,6 +308,8 @@ func (s LevelSource) Describe() string {
 		return "Americas team lead"
 	case SourceAmericasTeamLeads:
 		return "Americas team leads"
+	case SourceShiftLeads:
+		return "Team leads on shift"
 	case SourceCREHead:
 		return "CRE head"
 	case SourceCSHead:

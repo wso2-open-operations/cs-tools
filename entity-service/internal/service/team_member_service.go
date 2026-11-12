@@ -86,7 +86,12 @@ func (s *teamMemberService) MembersByTeamKeys(ctx context.Context, teamKeys, rol
 		return domain.TeamMembersResponse{}, err
 	}
 	teamKeys = nonEmptyTrimmed(teamKeys)
+	// Lower-cased: the query compares lower(team.type), as the Team Schedule
+	// does, so "cre-abt" finds a team the sync spelt "CRE-ABT".
 	teamTypes = nonEmptyTrimmed(teamTypes)
+	for i, t := range teamTypes {
+		teamTypes[i] = strings.ToLower(t)
+	}
 	// One selector or the other, but never neither: an unfiltered read would
 	// hand back every membership in the organisation, which is precisely the
 	// staff data this endpoint's internal-caller check exists to protect.

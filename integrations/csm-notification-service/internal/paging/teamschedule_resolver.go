@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -82,6 +83,11 @@ type TeamScheduleResolver struct {
 	unassignedTeamLead string
 	// unassignedTeamLeadCount is how many of the pool that case calls.
 	unassignedTeamLeadCount int
+	// unassignedLeads is how a case on no ABT routes: "shift_leads"
+	// (UnassignedRule, the default: anything but "rules", the zero value
+	// included) or "rules" (the rule table's R3/R4b/R1/R5/R6 rows). See
+	// TeamKeys.UnassignedLeads.
+	unassignedLeads string
 	// americasLead is the single lead above the Americas team's own leads.
 	americasLead Person
 	// heads are the last two rungs when configuration names them outright,
@@ -195,6 +201,7 @@ func NewTeamScheduleResolver(entity teamScheduleReader, teams TeamKeys, rules []
 		americasWeekendRotaShifts: americasWeekendShifts(teams.AmericasWeekendRotaShifts),
 		unassignedTeamLead:        unassignedLeadMode(teams.UnassignedTeamLead),
 		unassignedTeamLeadCount:   unassignedLeadCount(teams.UnassignedTeamLeadCount),
+		unassignedLeads:           unassignedLeadsMode(teams.UnassignedLeads),
 		tiers:                     alertTiers,
 		entity:                    entity,
 		rules:                     rules,
@@ -322,6 +329,22 @@ type TeamKeys struct {
 	// says one at Level 1 against three at Level 2, which is what keeps the
 	// two rungs distinct; raising it blurs them.
 	UnassignedTeamLeadCount int `yaml:"unassignedTeamLeadCount"`
+	// UnassignedLeads is how a case on no ABT team is alerted.
+	//
+	//	shift_leads  UnassignedRule, the default: the leads of whoever is on
+	//	             shift (every ABT lead by IST day, plus the Australia
+	//	             lead on the IST morning; the Americas leads at night),
+	//	             then the heads
+	//	rules        the rule table's rows for it (R1a/R1b/R3/R4b by day,
+	//	             R5/R6 at night), the behaviour before this existed
+	//
+	// A case on no ABT has nobody of its own to call, and the rule table's
+	// answer for it leans on a lead pool and alert-duty nominees that resolve
+	// to nobody when the ABT teams cannot be found -- the ladder then reached
+	// the CRE head first. shift_leads is the simple answer: whoever leads the
+	// shift hears of it before the heads do. Saved on Alert Settings, where
+	// "rules" brings the rule table back without a release.
+	UnassignedLeads string `yaml:"unassignedLeads"`
 	// TeamLeads overrides the pool itself. Empty means every ABT team's lead.
 	//
 	// It is configurable because the spreadsheet and the roster disagree and
@@ -463,7 +486,76 @@ func (r TeamScheduleResolver) RuleForCtx(ctx context.Context, rc RoutingContext)
 	// an unassigned incident during business hours matched nothing, every rung
 	// resolved to nobody, and it was never paged at all. Not being on a team
 	// is exactly the case R3 and R4b exist for.
-	return MatchRule(r.rules, rc.Shift, r.isABT(ctx, key), true)
+	onABT := r.isABT(ctx, key)
+	if !onABT && r.unassignedLeads != unassignedLeadsRules && rc.Shift.Known() {
+		// Every shift, the ABTAny rows (R1a/R1b, R5/R6) included: a case on
+		// no ABT goes to the shift's leads, then the heads.
+		return UnassignedRule(rc.Shift), true
+	}
+	return MatchRule(r.rules, rc.Shift, onABT, true)
+}
+
+const (
+	unassignedLeadsRules = "rules"
+	unassignedLeadsShift = "shift_leads"
+)
+
+// unassignedLeadsMode defaults an unset or unknown value to "shift_leads":
+// a case nobody owns goes to the shift's leads before the heads unless a
+// deployment explicitly asks for the rule table.
+func unassignedLeadsMode(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), unassignedLeadsRules) {
+		return unassignedLeadsRules
+	}
+	return unassignedLeadsShift
+}
+
+// australiaTeam matches the Australia team's key, in the shapes entity-service
+// migration 0269 links the AEST hours by ("australia", "australia_cre_team").
+// It is a CRE team (type cre), on no ABT, so it is found among the CRE teams'
+// leads rather than configured.
+var australiaTeam = regexp.MustCompile(`^australia([ _-]+cre)?([ _-]+team)?$`)
+
+// shiftLeads answers SourceShiftLeads: every ABT team's lead through the IST
+// day, plus the Australia team's lead on the IST morning (its AEST working
+// day), and the Americas team's leads through the night.
+func (r TeamScheduleResolver) shiftLeads(ctx context.Context, shift Shift) ([]Recipient, error) {
+	switch shift {
+	case ShiftUSA, ShiftUSAWeekend:
+		return r.leadsOf(ctx, r.americasKeys())
+	}
+	leads, err := r.teamLeadPool(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if shift == ShiftLKMorning {
+		aus, err := r.australiaLeads(ctx)
+		if err != nil {
+			// The ABT leads still go out: the Australia lead is one more
+			// person, not a reason to call nobody.
+			slog.WarnContext(ctx, "escalation: could not read the Australia team's lead for the morning shift", "err", err)
+		}
+		leads = append(leads, aus...)
+	}
+	out := dedupeRecipients(leads)
+	sortRecipients(out)
+	return out, nil
+}
+
+// australiaLeads is the Australia team's lead(s), found among the CRE (type
+// cre) teams by key, or nobody when there is no such team.
+func (r TeamScheduleResolver) australiaLeads(ctx context.Context) ([]Recipient, error) {
+	members, err := r.entity.TeamMembers(ctx, nil, []string{roleLead}, nil, []string{"cre"})
+	if err != nil {
+		return nil, err
+	}
+	var aus []teamMember
+	for _, m := range members {
+		if australiaTeam.MatchString(strings.ToLower(strings.TrimSpace(m.TeamKey))) {
+			aus = append(aus, m)
+		}
+	}
+	return recipientsOf(aus), nil
 }
 
 // isABT answers the rule table's "is this assigned to a team in the ABT"
@@ -513,6 +605,9 @@ func (r TeamScheduleResolver) fromSource(ctx context.Context, src LevelSource, r
 
 	case SourceAlertDutyEachABT:
 		return r.oneNomineePerABTTeam(ctx)
+
+	case SourceShiftLeads:
+		return r.shiftLeads(ctx, rc.Shift)
 
 	case SourceAlertDutyAmericas:
 		return r.alertDuty(ctx, r.americasKeys())

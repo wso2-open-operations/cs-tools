@@ -128,6 +128,9 @@ func TestRulesSheet(t *testing.T) {
 	if !ok {
 		t.Fatal("shipped paging-alert.yaml has no enabled cre ladder")
 	}
+	// The sheet is the rule table, so a case on no ABT is held to its R3/R4b
+	// rows; by default it goes to the shift's leads (unassigned_leads_test.go).
+	cre.Teams.UnassignedLeads = "rules"
 	reported := time.Date(2026, 10, 10, 16, 30, 0, 0, time.UTC) // any instant; the shift is given
 
 	for _, row := range sheetCalls {

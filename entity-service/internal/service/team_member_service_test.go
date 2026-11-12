@@ -28,12 +28,13 @@ import (
 type stubTeamMemberRepo struct {
 	gotTeamKeys []string
 	gotRoles    []string
+	gotTypes    []string
 	members     []domain.TeamMemberEntry
 	err         error
 }
 
 func (s *stubTeamMemberRepo) MembersByTeamKeys(_ context.Context, teamKeys, roles, alertTiers, teamTypes []string) ([]domain.TeamMemberEntry, error) {
-	s.gotTeamKeys, s.gotRoles = teamKeys, roles
+	s.gotTeamKeys, s.gotRoles, s.gotTypes = teamKeys, roles, teamTypes
 	return s.members, s.err
 }
 
@@ -144,5 +145,20 @@ func TestMembersByTeamKeys_ScopeErrorIsNotAllowed(t *testing.T) {
 	}
 	if repo.gotTeamKeys != nil {
 		t.Error("the repository was reached despite the scope being unknown")
+	}
+}
+
+// A team type reaches the query lower-cased, which compares lower(team.type):
+// the Case Alerts lead pool asks for "cre-abt" while the sync can spell the
+// ABTs "CRE-ABT", and the exact match found no lead at all.
+func TestMembersByTeamKeys_LowerCasesTeamTypes(t *testing.T) {
+	repo := &stubTeamMemberRepo{}
+	_, err := NewTeamMemberService(repo, alwaysUnrestrictedAccess{}).MembersByTeamKeys(
+		context.Background(), nil, []string{"lead"}, nil, []string{" CRE-ABT ", "Cre"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.gotTypes) != 2 || repo.gotTypes[0] != "cre-abt" || repo.gotTypes[1] != "cre" {
+		t.Errorf("teamTypes = %v, want [cre-abt cre]", repo.gotTypes)
 	}
 }

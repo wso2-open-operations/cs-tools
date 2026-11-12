@@ -750,6 +750,22 @@ is keyed by the case id, and `Trigger.Record` is `case`.
   never paged). S0 pages CRE and SRE, S1-S4 CRE only; which severities CRE pages
   is `cre.trigger.priorities` (the local file leaves S4 out: paging S4 is
   optional).
+- **A case on no ABT team** (no CRE team on the case's account, or one that is
+  not an ABT) routes by `UnassignedRule` (`U1` by IST day, `U2` at night)
+  unless `cre.teams.unassignedLeads` is `rules` (Alert Settings, "Case with no
+  ABT team"; default `shift_leads`, so the zero value too), which brings back
+  the rule table's R1a/R1b/R3/R4b/R5/R6 rows. `UnassignedRule`: no Level 0 or 2, Level 1 the shift's leads
+  (`SourceShiftLeads`: every ABT lead, not `teamLeadsToCall` of them, plus the
+  Australia team's lead -- found among the `cre` teams by key -- on
+  LK_MORNING; the Americas leads at night), then the heads. A rung of more than
+  three leads is called once (`shiftLeadsRepeatMax`, plan.go), so seven leads
+  and both heads fit a cap of 12. The L1 email goes to those leads with every
+  ABT list in Cc by day. The ABT lead pool is found by team type when
+  `teams.abts` is empty; entity-service compares `team.type` lower-cased, so a
+  synced `CRE-ABT` matches `cre-abt`. `TestNoCRECaseCallsTheHeadsFirst` pins,
+  for every shift, ABT and no ABT, both modes, that a head is never a chain's
+  first call; with nobody below at all the heads' calls stay held
+  (`Safety.CallHeadsWithoutLowerTiers`, off).
 - **Severity change**: a change stops the running chain and starts a new one
   for the new severity, from the first tier, even after acknowledgement. A
   severity a ladder does not page stops its chain (SRE below S0; S4 while it is

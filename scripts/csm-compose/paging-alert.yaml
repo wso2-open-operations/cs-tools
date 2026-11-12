@@ -168,6 +168,13 @@ cre:
     # against three at Level 2 -- which is what keeps the two rungs distinct.
     unassignedTeamLeadCount: 1
 
+    # How a case on no ABT team is alerted (Alert Settings: "Case with no ABT
+    # team"). shift_leads (the default) calls the shift's leads, then the
+    # heads: every ABT lead through the IST day (plus the Australia lead
+    # 06:00-09:00 IST), the Americas leads at night, more than three called
+    # once. rules goes back to the rule table above (R3 and the others).
+    # unassignedLeads: rules
+
   # rules: the R1-R6 table. Omitted here, which uses the shipped
   # transcription of the spreadsheet (see internal/paging/rules.go).
   # Override a row only to correct it ahead of a release; the shape is
