@@ -807,6 +807,122 @@ describe("storedAttachments", () => {
         expect(saved).toHaveLength(1);
         click.mockRestore();
       });
+
+      describe("direct, from a signed link", () => {
+        const SIZE = DOWNLOAD_RANGE_BYTES * 3;
+        const ABOVE = DIRECT_TRANSFER_MIN_BYTES;
+        const input = (extra: object = {}) => ({
+          type: "work_item" as const,
+          id: ID,
+          name: "big.bin",
+          size: SIZE,
+          directAboveBytes: ABOVE,
+          ...extra,
+        });
+        const isLinkRequest = (url: string) => String(url).includes("/download-links");
+        const linkRequests = () => authFetch.mock.calls.filter(([u]) => isLinkRequest(u));
+        const backendReads = () => authFetch.mock.calls.filter(([u]) => String(u).includes("/content?"));
+        /** The backend: a link per request (the last one repeats), and the ranges of the content route. */
+        const backendWith = (linkUrls: string[]) => {
+          const server = rangeServer(SIZE);
+          let links = 0;
+          authFetch.mockImplementation(async (url: string, init?: { headers?: Record<string, string> }) =>
+            isLinkRequest(url)
+              ? json({ url: linkUrls[Math.min(links++, linkUrls.length - 1)], name: "big.bin" })
+              : server.fetchRange(url, init),
+          );
+          return server;
+        };
+        const offsets = (disk: ReturnType<typeof fakeDisk>) =>
+          disk.writes.map((w) => w.position).sort((x, y) => x - y);
+        const allOffsets = [0, DOWNLOAD_RANGE_BYTES, 2 * DOWNLOAD_RANGE_BYTES];
+
+        it("opens the save dialog before the link is asked for, then reads every range from the link without credentials", async () => {
+          withMode();
+          const disk = fakeDisk();
+          backendWith(["https://blob.example/x?sig=s"]);
+          const server = rangeServer(SIZE);
+          rawFetch.mockImplementation((url: string, init?: { headers?: Record<string, string> }) =>
+            server.fetchRange(url, init),
+          );
+          const onSaved = vi.fn();
+          await downloadStoredAttachment(authFetch, input({ onSaved }));
+          expect(disk.picker.mock.invocationCallOrder[0]).toBeLessThan(authFetch.mock.invocationCallOrder[0]);
+          expect(authFetch).toHaveBeenCalledTimes(1); // only the link; the bytes did not pass the backend
+          expect(rawFetch).toHaveBeenCalledTimes(3);
+          for (const [url, init] of rawFetch.mock.calls) {
+            expect(url).toBe("https://blob.example/x?sig=s");
+            expect(Object.keys(init.headers)).toEqual(["Range"]); // the link is the credential
+          }
+          expect(offsets(disk)).toEqual(allOffsets);
+          expect(disk.writable.close).toHaveBeenCalledTimes(1);
+          expect(onSaved).toHaveBeenCalledWith("saved");
+        });
+
+        it("asks for a new link when the link expires, and carries on", async () => {
+          withMode();
+          const disk = fakeDisk();
+          backendWith(["https://blob.example/x?sig=old", "https://blob.example/x?sig=fresh"]);
+          const server = rangeServer(SIZE);
+          rawFetch.mockImplementation(async (url: string, init?: { headers?: Record<string, string> }) =>
+            String(url).includes("fresh") ? server.fetchRange(url, init) : new Response(null, { status: 403 }),
+          );
+          await downloadStoredAttachment(authFetch, input());
+          expect(linkRequests()).toHaveLength(2); // one replacement, shared by the ranges in flight
+          expect(backendReads()).toHaveLength(0); // never fell back
+          expect(offsets(disk)).toEqual(allOffsets);
+        });
+
+        it("reads the file through the backend from the start when the link does not work", async () => {
+          withMode();
+          const disk = fakeDisk();
+          backendWith(["https://blob.example/x?sig=s"]);
+          rawFetch.mockRejectedValue(new TypeError("blocked by CORS"));
+          const onSaved = vi.fn();
+          await downloadStoredAttachment(authFetch, input({ onSaved }));
+          expect(linkRequests()).toHaveLength(1);
+          expect(backendReads().length).toBeGreaterThan(0);
+          expect(offsets(disk)).toEqual(allOffsets);
+          expect(disk.writable.close).toHaveBeenCalledTimes(1);
+          expect(onSaved).toHaveBeenCalledWith("saved");
+        });
+
+        it("reads through the backend when the link keeps expiring", async () => {
+          withMode();
+          const disk = fakeDisk();
+          backendWith(["https://blob.example/x?sig=s"]);
+          rawFetch.mockImplementation(async () => new Response(null, { status: 403 }));
+          await downloadStoredAttachment(authFetch, input());
+          expect(linkRequests()).toHaveLength(4); // the first link and three replacements
+          expect(backendReads().length).toBeGreaterThan(0);
+          expect(disk.writable.close).toHaveBeenCalledTimes(1);
+        });
+
+        it("stops and does not fall back when the download is cancelled", async () => {
+          withMode();
+          const disk = fakeDisk();
+          backendWith(["https://blob.example/x?sig=s"]);
+          const controller = new AbortController();
+          rawFetch.mockImplementation(async () => {
+            controller.abort();
+            throw new DOMException("aborted", "AbortError");
+          });
+          const outcome = await downloadStoredAttachment(authFetch, input({ signal: controller.signal })).catch(
+            (e: unknown) => e,
+          );
+          expect(isAbortError(outcome)).toBe(true);
+          expect(backendReads()).toHaveLength(0);
+          expect(disk.writable.abort).toHaveBeenCalledTimes(1);
+        });
+
+        it("returns quietly, without asking for a link, when the save dialog is closed", async () => {
+          withMode();
+          const disk = fakeDisk();
+          disk.picker.mockRejectedValue(new DOMException("closed", "AbortError"));
+          await downloadStoredAttachment(authFetch, input());
+          expect(authFetch).not.toHaveBeenCalled();
+        });
+      });
     });
   });
 
@@ -928,6 +1044,7 @@ describe("storedAttachments", () => {
     });
 
     describe("download", () => {
+      const ABOVE = DIRECT_TRANSFER_MIN_BYTES;
       const clickSpy = () => vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
       it("hands a large file's signed link to the browser as a download", async () => {
@@ -939,7 +1056,8 @@ describe("storedAttachments", () => {
           type: "work_item",
           id: ID,
           name: "big.bin",
-          size: DIRECT_TRANSFER_MIN_BYTES + 1,
+          size: ABOVE + 1,
+          directAboveBytes: ABOVE,
           onSaved,
         });
         expect(authFetch).toHaveBeenCalledTimes(1);
@@ -963,7 +1081,8 @@ describe("storedAttachments", () => {
             type: "work_item",
             id: ID,
             name: "a.txt",
-            size: DIRECT_TRANSFER_MIN_BYTES + 1,
+            size: ABOVE + 1,
+          directAboveBytes: ABOVE,
           });
           expect(authFetch).toHaveBeenCalledTimes(2);
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
@@ -985,19 +1104,26 @@ describe("storedAttachments", () => {
             type: "work_item",
             id: ID,
             name: "a.txt",
-            size: DIRECT_TRANSFER_MIN_BYTES + 1,
+            size: ABOVE + 1,
+          directAboveBytes: ABOVE,
           });
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
         }
         click.mockRestore();
       });
 
-      it("does not ask for a link for a small file, or when the size is not known", async () => {
+      it("does not ask for a link at or below the server's size, with no size, or when it is 0", async () => {
         clickSpy();
-        for (const size of [DIRECT_TRANSFER_MIN_BYTES, undefined]) {
+        const cases = [
+          { size: ABOVE, directAboveBytes: ABOVE },
+          { size: undefined, directAboveBytes: ABOVE },
+          { size: ABOVE + 1, directAboveBytes: 0 }, // direct transfers off
+          { size: ABOVE + 1, directAboveBytes: undefined },
+        ];
+        for (const extra of cases) {
           authFetch.mockReset();
           authFetch.mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
-          await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, name: "a.txt", size });
+          await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, name: "a.txt", ...extra });
           expect(authFetch.mock.calls.some(([u]) => String(u).includes("/link"))).toBe(false);
         }
       });
