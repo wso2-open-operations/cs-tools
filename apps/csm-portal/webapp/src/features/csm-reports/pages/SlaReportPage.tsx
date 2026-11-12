@@ -40,7 +40,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
-import { useParams } from "react-router";
+import { useLocation, useParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { useGetSlaReport } from "@features/csm-reports/api/useGetSlaReport";
 import type {
@@ -328,6 +328,17 @@ export default function SlaReportPage(): JSX.Element {
   const { projectId: id } = useParams<{ projectId: string }>();
   const projectId = id ? DOMPurify.sanitize(id) : "";
   const navigate = useNavTransition();
+  const location = useLocation();
+  // The project page passes the tab it was on, and its own state, so Back
+  // returns there; a direct visit falls back to the project.
+  const backState = location.state as { from?: string; parentState?: unknown } | null;
+  const handleBack = () => {
+    if (backState?.from) {
+      navigate(backState.from, { state: backState.parentState ?? undefined });
+    } else {
+      navigate(projectId ? `/customers/projects/${projectId}` : "/customers/projects");
+    }
+  };
   const theme = useTheme();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState("");
@@ -387,7 +398,7 @@ export default function SlaReportPage(): JSX.Element {
         size="small"
         className="csm-print-hide"
         startIcon={<ArrowLeft size={16} />}
-        onClick={() => navigate(projectId ? `/customers/projects/${projectId}` : "/customers/projects")}
+        onClick={handleBack}
         sx={{ alignSelf: "flex-start" }}
       >
         Back
@@ -473,7 +484,8 @@ export default function SlaReportPage(): JSX.Element {
           </Box>
           <ProjectCard data={data} />
           <SummaryCard rows={data.summary} />
-          <CasesCard cases={data.cases} onOpenCase={handleOpenCase} />
+          {/* Keyed by period so a new period opens on its first page of cases. */}
+          <CasesCard key={`${data.periodStart}_${data.periodEnd}`} cases={data.cases} onOpenCase={handleOpenCase} />
         </Box>
       )}
     </Box>
