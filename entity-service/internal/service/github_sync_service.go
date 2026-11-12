@@ -210,6 +210,12 @@ type githubSyncService struct {
 	// portal-created one does (github_sn_case.go). Nil writes Postgres only
 	// and numbers the record SR-GH-<n>. Set with WithServiceNowGithubCases.
 	snCases snGithubCaseAPI
+	// nativeNumbers numbers a new service request from the ServiceNow-style
+	// series (CS<7 digits>, <project key>-<n>), as a portal-created SR is on
+	// plain Postgres (#3363), instead of the GitHub series. Set with
+	// WithNativeGithubSRNumbers, for DATA_SOURCE=postgres only: under
+	// dual-write ServiceNow still allocates that series.
+	nativeNumbers bool
 	// slaEngine registers the CSM SLA clocks for a service request created
 	// from an issue, as caseService.CreateCase does for one created in the
 	// portal. Nil (CSM_SLA_ENGINE_ENABLED off, or no database) registers
@@ -258,6 +264,20 @@ func (s *githubSyncService) registerServiceRequestClocks(ctx context.Context, id
 func WithServiceNowGithubCases(svc GithubSyncService, api snGithubCaseAPI) GithubSyncService {
 	if s, ok := svc.(*githubSyncService); ok && api != nil {
 		s.snCases = api
+	}
+	return svc
+}
+
+// WithNativeGithubSRNumbers makes a new service request raised from an issue
+// take the ServiceNow-style number and WSO2 id (next_work_item_number,
+// next_wso2_id) a portal-created SR takes on DATA_SOURCE=postgres, so the two
+// read alike. Only for that data source: under dual-write ServiceNow still
+// allocates the same series and the ids would collide. A repository mapped
+// without a project keeps the GitHub series, as next_wso2_id needs one. A
+// no-op if svc is not a *githubSyncService.
+func WithNativeGithubSRNumbers(svc GithubSyncService) GithubSyncService {
+	if s, ok := svc.(*githubSyncService); ok {
+		s.nativeNumbers = true
 	}
 	return svc
 }
@@ -468,7 +488,8 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 			SRType:       srType,
 			Fields:       extractTemplateFields(p.Issue.Body, issue.Headings),
 		}
-		if s.snCases != nil {
+		if s.snCases != nil || s.nativeNumbers {
+			// Used only for a record outside the GitHub series (see UpdateFromIssue).
 			update.ServiceNowDescription = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
 		}
 		if err := s.mutate.UpdateFromIssue(ctx, existing, update); err != nil {
@@ -526,6 +547,12 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		in.ServiceNowWSO2ID = res.WSO2CaseID
 		// The same text ServiceNow holds, so both stores read alike and the
 		// portal renders it as it renders every ServiceNow-numbered record.
+		in.Description = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
+	} else if s.nativeNumbers && mapping.ProjectID != "" {
+		// Plain Postgres: the series a portal-created SR takes (CS..., <key>-<n>),
+		// with the description ServiceNow would have held, so the record reads
+		// like every other CS-numbered one.
+		in.NativeNumbers = true
 		in.Description = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
 	}
 

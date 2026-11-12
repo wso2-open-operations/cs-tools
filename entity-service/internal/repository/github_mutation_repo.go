@@ -69,6 +69,12 @@ type NewServiceRequestFromIssue struct {
 	ServiceNowID     string
 	ServiceNowNumber string
 	ServiceNowWSO2ID string
+	// NativeNumbers numbers the record from the ServiceNow-style series
+	// (migration 0180) -- CS<7 digits> and <project key>-<n> -- as a
+	// portal-created record is on plain Postgres. Needs ProjectID; ignored
+	// when the ServiceNow ids above are set. False keeps the GitHub series
+	// (SR-GH-<n> / WSO2-GH-<n>).
+	NativeNumbers bool
 }
 
 type NewChangeRequestFromIssue struct {
@@ -515,12 +521,18 @@ func (r *githubMutationRepository) CreateServiceRequestFromIssue(ctx context.Con
 			                       account_id, github_issue_number,
 			                       project_id, github_owner, github_repository)
 			VALUES (COALESCE(NULLIF($9, '')::uuid, gen_random_uuid()), NOW(), NOW(), $1, $1,
-			        -- ServiceNow's numbers when it created the record first. COALESCE
-			        -- stops at the first non-null argument, so the GitHub series is not
-			        -- advanced for a record that does not use it.
-			        COALESCE(NULLIF($10, ''), next_github_service_request_number()),
+			        -- ServiceNow's numbers when it created the record first; otherwise the
+			        -- native ServiceNow-style series a portal-created SR takes, or the
+			        -- GitHub series. COALESCE stops at the first non-null argument and
+			        -- CASE evaluates only the branch it picks, so no series is advanced
+			        -- for a record that does not use it.
+			        COALESCE(NULLIF($10, ''), CASE WHEN $12::boolean
+			            THEN next_work_item_number('SERVICE_REQUEST'::work_item_type_enum)
+			            ELSE next_github_service_request_number() END),
 			        -- Required for SERVICE_REQUEST by work_item_wso2_id_required_by_type.
-			        COALESCE(NULLIF($11, ''), next_github_service_request_wso2_id()),
+			        COALESCE(NULLIF($11, ''), CASE WHEN $12::boolean
+			            THEN next_wso2_id(NULLIF($6, '')::uuid)
+			            ELSE next_github_service_request_wso2_id() END),
 			        $2, 'SERVICE_REQUEST', $3,
 			        NULLIF($4, '')::uuid, $5,
 			        NULLIF($6, '')::uuid, NULLIF($7, ''), NULLIF($8, ''))
@@ -530,6 +542,7 @@ func (r *githubMutationRepository) CreateServiceRequestFromIssue(ctx context.Con
 			in.CreatedBy, in.Subject, nullable(in.Description), in.AccountID, in.IssueNumber,
 			in.ProjectID, in.Owner, in.Repository,
 			in.ServiceNowID, in.ServiceNowNumber, in.ServiceNowWSO2ID,
+			in.NativeNumbers && in.ProjectID != "",
 		).Scan(&id, &number); err != nil {
 			// A concurrent delivery for the same issue got here first. GitHub sends
 			// an issue as several events (opened, then labeled), so this is the

@@ -832,6 +832,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// Under dual-write, a new SR raised from a GitHub issue is created in
 	// ServiceNow first, through the integration service's /github-cases, and
 	// takes ServiceNow's CS number and WSO2 Case ID, as a portal-created one does.
+	// On plain Postgres it takes the ServiceNow-style series a portal-created SR
+	// takes (CS..., <project key>-<n>), not the GitHub one.
+	if githubSync != nil && cfg.DataSource == config.DataSourcePostgres {
+		service.WithNativeGithubSRNumbers(githubSync)
+		slog.Info("github: service requests from issues take the ServiceNow-style number and WSO2 id (postgres)")
+	}
 	if githubSync != nil && serviceNowIntegrationServiceClient != nil {
 		if cfg.GithubServiceNowFirst() {
 			service.WithServiceNowGithubCases(githubSync, service.NewSNGithubCases(serviceNowIntegrationServiceClient))

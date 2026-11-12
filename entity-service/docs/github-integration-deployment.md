@@ -257,6 +257,11 @@ Against a real repository and database, with GitHub delivering over a webhook:
 
 Keep this list current — it is how the next deploy knows what changed.
 
+- **2026-11-12** — On `DATA_SOURCE=postgres`, an issue's SR takes the ServiceNow-style
+  number and WSO2 id a portal-created SR takes (`CS<7 digits>` / `<KEY>-<n>`, #3363's
+  generators) instead of `SR-GH-`/`WSO2-GH-`, with the ServiceNow-format description.
+  No setting; a repository mapped without a project keeps the GitHub series. Existing
+  `SR-GH-` records are not renumbered.
 - **2026-10-12** — ServiceNow-first SRs under dual-write
   (`GITHUB_SR_SERVICENOW_FIRST`): an issue's SR is created through the integration
   service's `/github-cases` (ServiceNow's GitHub case API, M2M) and takes its CS number

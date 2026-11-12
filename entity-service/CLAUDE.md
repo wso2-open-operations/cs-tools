@@ -260,6 +260,11 @@ Chat cards in the SR's SRE-team space.
   the assignment stays Postgres-only (the case API has no group). Its description is
   ServiceNow's HTML (the workflow's FORMATTED_DESCRIPTION, ported byte for byte), kept on
   edits; issue edits go to `PATCH /github-cases`, issue comments to `POST /comments`.
+  **On `DATA_SOURCE=postgres`** (`WithNativeGithubSRNumbers`, routes.go) a GitHub SR with a
+  project takes the series a portal-created SR takes since #3363 --
+  `next_work_item_number('SERVICE_REQUEST')` / `next_wso2_id(project)`, i.e. `CS<7 digits>` /
+  `<KEY>-<n>` -- and the same ServiceNow-format description; not under dual-write, where
+  ServiceNow still allocates that series. A project-less mapping keeps `SR-GH-`/`WSO2-GH-`.
 - `sr.acknowledged`: when the SR's account SRE team is in
   `SR_ALERT_SRE_TEAM_IDS`, the SR is first assigned to that team, then gets
   ServiceNow's acknowledgement comment (word for word) and is moved to OPEN --

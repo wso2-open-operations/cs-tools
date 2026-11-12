@@ -370,3 +370,47 @@ func TestGithubSNFirst_CommentReachesTheServiceNowJournal(t *testing.T) {
 		t.Errorf("ServiceNow comments %q, want %q", sn.comments, want)
 	}
 }
+
+// On plain Postgres a GitHub-raised SR takes the series a portal-created SR
+// takes (CS..., <key>-<n>) and ServiceNow's description format; without a
+// project, or without the option, it keeps the GitHub series and the issue's
+// Markdown.
+func TestGithubNativeNumbers(t *testing.T) {
+	mut := &fakeGhMutations{}
+	svc := WithNativeGithubSRNumbers(writingSvc(&fakeGhRepo{mapping: mappedWithProject()}, mut, &fakeGhClient{}))
+	if _, err := svc.HandleWebhook(context.Background(), srDelivery("labeled")); err != nil {
+		t.Fatal(err)
+	}
+	if !mut.lastSR.NativeNumbers || mut.lastSR.ServiceNowID != "" {
+		t.Errorf("NativeNumbers=%v ServiceNowID=%q, want native numbers and no ServiceNow ids", mut.lastSR.NativeNumbers, mut.lastSR.ServiceNowID)
+	}
+	if !strings.HasPrefix(mut.lastSR.Description, `<span style="color:red;font-weight:bold;font-size:2em;">ENVIRONMENT:`) {
+		t.Errorf("description is not ServiceNow's format: %q", mut.lastSR.Description)
+	}
+
+	// An edit carries ServiceNow's text too; UpdateFromIssue applies it only to
+	// a record outside the GitHub series.
+	edit := srDelivery("edited")
+	edit.ID = "d2"
+	if _, err := WithNativeGithubSRNumbers(writingSvc(&fakeGhRepo{mapping: mappedWithProject(), caseID: "sr-1"}, mut, &fakeGhClient{})).
+		HandleWebhook(context.Background(), edit); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(mut.lastUpdate.ServiceNowDescription, "<span ") {
+		t.Errorf("edit carried no ServiceNow description: %q", mut.lastUpdate.ServiceNowDescription)
+	}
+
+	for name, svc := range map[string]GithubSyncService{
+		"no project":     WithNativeGithubSRNumbers(writingSvc(&fakeGhRepo{mapping: mapped()}, &fakeGhMutations{}, &fakeGhClient{})),
+		"option not set": writingSvc(&fakeGhRepo{mapping: mappedWithProject()}, &fakeGhMutations{}, &fakeGhClient{}),
+	} {
+		m := svc.(*githubSyncService).mutate.(*fakeGhMutations)
+		if _, err := svc.HandleWebhook(context.Background(), srDelivery("labeled")); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if m.lastSR.NativeNumbers || m.lastSR.Description != snGithubFixtureBody {
+			t.Errorf("%s: NativeNumbers=%v, description changed=%v; want the GitHub series and the issue's Markdown",
+				name, m.lastSR.NativeNumbers, m.lastSR.Description != snGithubFixtureBody)
+		}
+	}
+}
