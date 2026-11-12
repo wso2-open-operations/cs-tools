@@ -444,10 +444,11 @@ function startBrowserDownload(url: string, name: string): void {
 /** Asks the backend for a signed Azure link, after it has checked access; null when there is none. */
 async function requestDownloadLink(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string },
+  args: { type: EntityAttachmentType; id: string; signal?: AbortSignal },
 ): Promise<{ url: string; name?: string } | null> {
   const link = await api.postEmpty<{ url?: string; name?: string }>(
     `/attachments/${encodeURIComponent(args.id)}/download-links?type=${encodeURIComponent(args.type)}`,
+    { signal: args.signal },
   );
   return link?.url ? { url: link.url, name: link.name } : null;
 }
@@ -471,6 +472,22 @@ async function downloadFromLink(
   let link = await requestDownloadLink(api, args);
   if (!link) throw new Error("No download link.");
   let refreshes = 0;
+  // One replacement at a time: workers that find the link expired together wait for the same request.
+  let refreshing: Promise<void> | null = null;
+  const replaceLink = (): Promise<void> => {
+    if (!refreshing) {
+      refreshes += 1;
+      refreshing = requestDownloadLink(api, args)
+        .then((fresh) => {
+          if (!fresh) throw new Error("No download link.");
+          link = fresh;
+        })
+        .finally(() => {
+          refreshing = null;
+        });
+    }
+    return refreshing;
+  };
   const fetchRange: RangeFetcher = async (range, signal) => {
     for (;;) {
       const used = link;
@@ -478,12 +495,8 @@ async function downloadFromLink(
       if (response.ok) return response;
       void response.body?.cancel();
       // Another range may already have replaced this link.
-      if (isExpiredLinkStatus(response.status) && (link !== used || refreshes < MAX_LINK_REFRESHES)) {
-        if (link === used) {
-          refreshes += 1;
-          link = await requestDownloadLink(api, args);
-          if (!link) throw new Error("No download link.");
-        }
+      if (isExpiredLinkStatus(response.status) && (link !== used || refreshing || refreshes < MAX_LINK_REFRESHES)) {
+        if (link === used) await replaceLink();
         continue;
       }
       throw new BackendApiError(response.status, `Download link refused (${response.status}).`);

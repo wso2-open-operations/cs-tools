@@ -1061,7 +1061,7 @@ describe("direct transfers of large files", () => {
         onSaved,
       });
       expect(done).toBe(true);
-      expect(postEmpty).toHaveBeenCalledWith(`/attachments/${ID}/download-links?type=work_item`);
+      expect(postEmpty).toHaveBeenCalledWith(`/attachments/${ID}/download-links?type=work_item`, { signal: undefined });
       // The link is checked with a one-byte read before the browser is handed it.
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0][0]).toBe("https://blob.example/x?sig=s");
