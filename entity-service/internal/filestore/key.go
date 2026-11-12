@@ -39,6 +39,8 @@ const (
 	// attachmentDir holds a work item's own files, inlineDir its comments' files.
 	attachmentDir = "attachments"
 	inlineDir     = "inline_attachments"
+	// archiveDir holds the files of deleted attachments until they are removed for good.
+	archiveDir = "archive"
 )
 
 // KeyParts is what a file's final path is built from.
@@ -85,6 +87,13 @@ func Key(p KeyParts) string {
 		kind = inlineDir
 	}
 	return path.Join(base, workItemDir, folderName(p.WorkItemNumber), kind, file)
+}
+
+// ArchiveKey is where a deleted attachment's file is kept until it is removed for
+// good: csm/archive/<attachment number>_<name>. The number is unique, so the key
+// can be rebuilt from the row alone, and one prefix is enough for a retention rule.
+func ArchiveKey(attachmentNumber, name string) string {
+	return path.Join(rootDir, archiveDir, strings.ToLower(SanitizeName(attachmentNumber))+"_"+SanitizeName(name))
 }
 
 // folderName turns a project or record number into one lowercase snake_case

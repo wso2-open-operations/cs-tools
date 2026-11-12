@@ -61,9 +61,9 @@ func (f *fakeStoredAttachmentSvc) InlineImageRelocated(context.Context, string, 
 	return f.err
 }
 
-func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
+func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) (domain.DeletedStoredAttachment, error) {
 	f.deleted = req
-	return f.err
+	return domain.DeletedStoredAttachment{}, f.err
 }
 
 func (f *fakeStoredAttachmentSvc) InitiateUpload(context.Context, domain.InitiateAttachmentUploadRequest) (domain.InitiateAttachmentUploadResponse, error) {
