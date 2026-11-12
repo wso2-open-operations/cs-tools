@@ -22165,8 +22165,15 @@ components:
           type: boolean
           nullable: true
           description: >-
-            Whether this account has a primary partner account set. Postgres approximates
-            this as having any partner in account_relationship.
+            Whether this account has a primary partner account set. On Postgres, whether
+            the Salesforce primary partner (Account.Primary_Partner_Name2__c) was stored
+            by the Salesforce Account ingest.
+        lifeCycle:
+          type: string
+          nullable: true
+          description: >-
+            The account's life cycle (Salesforce account status), e.g. Customer, Prospect,
+            Partner, Lost Customer, Lost Prospect. Always null on the ServiceNow data source.
         healthSummary:
           description: Present only when the search set filters.includeHealthSummary.
           allOf:
@@ -22248,8 +22255,15 @@ components:
           type: boolean
           nullable: true
           description: >-
-            Whether this account has a primary partner account set. Postgres approximates
-            this as having any partner in account_relationship.
+            Whether this account has a primary partner account set. On Postgres, whether
+            the Salesforce primary partner (Account.Primary_Partner_Name2__c) was stored
+            by the Salesforce Account ingest.
+        lifeCycle:
+          type: string
+          nullable: true
+          description: >-
+            The account's life cycle (Salesforce account status), e.g. Customer, Prospect,
+            Partner, Lost Customer, Lost Prospect. Always null on the ServiceNow data source.
 
     SearchAccountsResponse:
       type: object
@@ -25158,6 +25172,10 @@ components:
         stage:
           type: string
           nullable: true
+        sfId:
+          type: string
+          nullable: true
+          description: The Salesforce Opportunity Id. Always null on the ServiceNow data source.
 
     SearchOpportunitiesResponse:
       type: object
@@ -25282,6 +25300,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/EntityRef'
+        sfId:
+          type: string
+          nullable: true
+          description: The Salesforce Linked_Opportunity__c Id. Always null on the ServiceNow data source.
 
     SearchProjectOpportunityLinksResponse:
       type: object
