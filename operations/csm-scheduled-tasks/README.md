@@ -74,6 +74,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | Task name (ledger key) | Default schedule | Enabled | What it does |
 |---|---|---|---|
 | `housekeeping_cleanup` | `0 3 * * *` | Always | Deletes resolved (succeeded or superseded) ledger rows older than `HOUSEKEEPING_RETENTION_DAYS`. Open or failed rows are never deleted. |
+| `attachment_retention_expire` | `0 4 * * *` | Only when `ATTACHMENT_RETENTION_ENABLED=true` | Asks entity-service to remove the files of work items closed for `ATTACHMENT_RETENTION_DAYS` (default 90). Starts as a dry run (`ATTACHMENT_RETENTION_DRY_RUN=true`). |
 | `attachment_upload_cleanup` | `30 3 * * *` | Always | Asks entity-service to clean up attachment uploads that were never confirmed and comment images and report drafts that were never linked. Entity-service removes the files itself. |
 | `stale_cases_report` | `0 7 * * *` | Always | Emails the long-open cases report from entity-service (`GET /reports/long-open-cases`, deploy entity-service first): cases open for more than 30 days (fixed window), in two tables, "Ongoing cases" and "Ongoing cases on onboarding projects". Sends nothing and still succeeds when both tables are empty or the task has no `to` recipients. |
 | `open_cases_report` | `0 8 * * *` | Always | Emails a report of cases still in the `open` state that were created before the start of yesterday (UTC calendar-day boundary). Does nothing and still succeeds if the task has no `to` recipients. |
@@ -336,6 +337,10 @@ treated as unset, except where noted. All example values are placeholders.
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | empty | The support portal's case page prefix; the migration case scan links each issue to `<prefix>/<case UUID>`. Unset leaves the keys as plain text. Must be https. | `https://support.example.com/cases` |
 | `SUB_CRON_SCHEDULES` | No | empty | JSON object overriding task schedules by name: `{"<task>": "<cron>"}`. Unlisted tasks keep their built-in default. An invalid cron expression stops startup. | `{"housekeeping_cleanup":"0 4 * * *"}` |
 | `DRIVER_INTERVAL` | No | `1h` | Expected invocation cadence; must match the platform trigger. Go duration syntax, must be positive. Used as the default retry backoff and to size the orphaned-claim safety margin. | `15m` |
+| `ATTACHMENT_RETENTION_ENABLED` | No | `false` | Registers `attachment_retention_expire`, which removes the files of work items closed for a long time. | `true` |
+| `ATTACHMENT_RETENTION_DAYS` | No | `90` | Days a work item must have been closed before its files are removed. At least 30, else startup is refused. | `90` |
+| `ATTACHMENT_RETENTION_DRY_RUN` | No | `true` | Count what would be removed and remove nothing. Set `false` only after reviewing the count. | `false` |
+| `ATTACHMENT_RETENTION_BATCH_SIZE` | No | `100` | Attachments handled per call to entity-service (at most 500). | `100` |
 | `HOUSEKEEPING_RETENTION_DAYS` | No | `30` | Days of resolved ledger history kept by `housekeeping_cleanup`. Plain positive integer, not a duration string. | `30` |
 | `AVAILABILITY_RECALC_ENABLED` | No | `false` | Registers `availability_recalculation`. Enable only once no other process writes the same availability data, otherwise rows can be duplicated. | `true` |
 | `USAGE_ROLLUP_ENABLED` | No | `false` | Registers `usage_rollup_daily` and `usage_rollup_monthly`. Enable only once ServiceNow's usage aggregation jobs and csm-sync-service's mirroring of the same tables are off, otherwise the rows are fought over. | `true` |

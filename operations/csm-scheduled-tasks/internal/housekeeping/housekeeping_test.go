@@ -59,3 +59,57 @@ func TestCleanupAttachmentUploads_ACallFailureFailsTheRun(t *testing.T) {
 		t.Error("err = nil, want the run to fail so it is retried")
 	}
 }
+
+type fakeRetention struct {
+	pages []ledger.AttachmentRetention
+	calls int
+	dry   []bool
+	err   error
+}
+
+func (f *fakeRetention) ExpireClosedAttachments(_ context.Context, _, _ int, dryRun bool) (ledger.AttachmentRetention, error) {
+	f.dry = append(f.dry, dryRun)
+	if f.err != nil {
+		return ledger.AttachmentRetention{}, f.err
+	}
+	page := f.pages[f.calls]
+	f.calls++
+	return page, nil
+}
+
+func TestExpireClosedAttachments_AsksAgainWhileThePageIsFull(t *testing.T) {
+	client := &fakeRetention{pages: []ledger.AttachmentRetention{{Expired: 100, More: true}, {Expired: 30}}}
+	cfg := AttachmentRetentionConfig{ClosedForDays: 90, BatchSize: 100}
+	if err := ExpireClosedAttachments(client, cfg)(context.Background()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if client.calls != 2 {
+		t.Errorf("calls = %d, want 2", client.calls)
+	}
+}
+
+// A dry run changes nothing, so a second page would show the same rows.
+func TestExpireClosedAttachments_ADryRunAsksOnce(t *testing.T) {
+	client := &fakeRetention{pages: []ledger.AttachmentRetention{{Expired: 100, More: true, DryRun: true}, {}}}
+	cfg := AttachmentRetentionConfig{ClosedForDays: 90, BatchSize: 100, DryRun: true}
+	if err := ExpireClosedAttachments(client, cfg)(context.Background()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if client.calls != 1 || !client.dry[0] {
+		t.Errorf("calls = %d, dry = %v; want one dry call", client.calls, client.dry)
+	}
+}
+
+func TestExpireClosedAttachments_APartialFailureDoesNotFailTheRun(t *testing.T) {
+	client := &fakeRetention{pages: []ledger.AttachmentRetention{{Expired: 3, Failed: 2}}}
+	if err := ExpireClosedAttachments(client, AttachmentRetentionConfig{ClosedForDays: 90})(context.Background()); err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+}
+
+func TestExpireClosedAttachments_ACallFailureFailsTheRun(t *testing.T) {
+	client := &fakeRetention{err: errors.New("entity-service is down")}
+	if err := ExpireClosedAttachments(client, AttachmentRetentionConfig{ClosedForDays: 90})(context.Background()); err == nil {
+		t.Error("err = nil, want the run to fail so it is retried")
+	}
+}

@@ -482,6 +482,9 @@ func main() {
 	const housekeepingTaskName = "housekeeping_cleanup"
 	housekeepingTo, housekeepingCc := recipientsFor(recipientOverrides, housekeepingTaskName)
 
+	const attachmentRetentionTaskName = "attachment_retention_expire"
+	attachmentRetentionTo, attachmentRetentionCc := recipientsFor(recipientOverrides, attachmentRetentionTaskName)
+
 	const attachmentCleanupTaskName = "attachment_upload_cleanup"
 	attachmentCleanupTo, attachmentCleanupCc := recipientsFor(recipientOverrides, attachmentCleanupTaskName)
 
@@ -691,6 +694,23 @@ func main() {
 	rotaWeekendReminderTo, rotaWeekendReminderCc := recipientsFor(recipientOverrides, rotaWeekendReminderTaskName)
 	const rotaManualTaskName = "rota_manual_reminder"
 	rotaManualTo, rotaManualCc := recipientsFor(recipientOverrides, rotaManualTaskName)
+
+	// Attachment retention: removes the files of work items that have been closed for
+	// ATTACHMENT_RETENTION_DAYS. It deletes customers' files, so it is OFF unless
+	// ATTACHMENT_RETENTION_ENABLED=true and it starts as a dry run: review the count in
+	// the log, then set ATTACHMENT_RETENTION_DRY_RUN=false. This component's client id
+	// must be in entity-service's M2M_CLIENT_IDS.
+	attachmentRetentionEnabled := envBool("ATTACHMENT_RETENTION_ENABLED", false)
+	attachmentRetentionCfg := housekeeping.AttachmentRetentionConfig{
+		ClosedForDays: envInt("ATTACHMENT_RETENTION_DAYS", 90),
+		BatchSize:     envInt("ATTACHMENT_RETENTION_BATCH_SIZE", 100),
+		DryRun:        envBool("ATTACHMENT_RETENTION_DRY_RUN", true),
+	}
+	// entity-service refuses fewer than 30 days; failing here is clearer than alerting every night.
+	if attachmentRetentionEnabled && attachmentRetentionCfg.ClosedForDays < 30 {
+		slog.Error("ATTACHMENT_RETENTION_DAYS must be at least 30; refusing to start", "value", attachmentRetentionCfg.ClosedForDays)
+		os.Exit(1)
+	}
 
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
@@ -956,6 +976,18 @@ func main() {
 		// which send them seconds after the change rather than on this tick.
 	}
 	tasks = append(tasks, regressionTasks...)
+
+	// Removes the files of work items closed for a long time (see above). Daily at
+	// 04:00, after the upload cleanup.
+	if attachmentRetentionEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     attachmentRetentionTaskName,
+			Schedule: scheduleFor(scheduleOverrides, attachmentRetentionTaskName, "0 4 * * *"),
+			Handler:  housekeeping.ExpireClosedAttachments(ledgerClient, attachmentRetentionCfg),
+			To:       attachmentRetentionTo,
+			Cc:       attachmentRetentionCc,
+		})
+	}
 
 	// Registered only when enabled, rather than registered-and-inert, so the
 	// ledger shows no run at all for a task that is switched off -- an inert
