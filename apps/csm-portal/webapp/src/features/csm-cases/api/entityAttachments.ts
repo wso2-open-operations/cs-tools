@@ -340,11 +340,57 @@ async function readUntilEnd(
  */
 async function readAndStore(
   fetchRange: RangeFetcher,
-  args: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
+  args: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal; parallelFromStart?: boolean },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
   const knownSize = knownSizeOf(args.size);
+  const ranges: Uint8Array[][] = [];
+  let received = 0;
+
+  // Reads the ranges from `firstIndex` to the end, `downloadParallelism()` at a time.
+  const readRangesFrom = async (firstIndex: number, total: number): Promise<void> => {
+    const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
+    let next = firstIndex;
+    let failure: { error: unknown } | undefined;
+    const worker = async (): Promise<void> => {
+      while (failure === undefined && next < count) {
+        const index = next++;
+        const start = index * DOWNLOAD_RANGE_BYTES;
+        const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
+        try {
+          const { parts } = await readRange(fetchRange, start, end, ({ response, parts }) => {
+            if (response.status !== 206 || partsLength(parts) !== end - start + 1) return false;
+            const range = parseContentRange(response.headers);
+            // With Content-Range hidden the length and the 206 are all there is to check.
+            return range === null || (range.start === start && range.end === end && range.total === total);
+          }, args.signal);
+          if (sink) await sink.write(start, parts);
+          else ranges[index] = parts;
+          received += end - start + 1;
+          args.onProgress?.(received, total);
+        } catch (error) {
+          failure ??= { error };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(downloadParallelism(), count - firstIndex) }, worker));
+    if (failure) throw failure.error;
+  };
+
+  const finish = async (fileName: string): Promise<void> => {
+    if (sink) await sink.close();
+    else save(new Blob(ranges.flat() as BlobPart[]), fileName);
+  };
+
+  // Azure always honours a range, so when the size is known every range, the first
+  // included, is read at once instead of waiting for the first one to finish.
+  if (args.parallelFromStart && knownSize !== undefined && knownSize > DOWNLOAD_RANGE_BYTES) {
+    await readRangesFrom(0, knownSize);
+    await finish(args.name || "attachment");
+    return true;
+  }
+
   let first: RangeRead;
   try {
     first = await readRange(fetchRange, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
@@ -371,39 +417,13 @@ async function readAndStore(
       knownSize ??
       (partsLength(first.parts) < DOWNLOAD_RANGE_BYTES ? partsLength(first.parts) : undefined);
   }
-  const ranges: Uint8Array[][] = [];
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
 
-  let received = partsLength(first.parts);
+  received = partsLength(first.parts);
   if (total !== undefined) args.onProgress?.(received, total);
   if (total !== undefined && partsLength(first.parts) < total) {
-    const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
-    let next = 1;
-    let failure: { error: unknown } | undefined;
-    const worker = async (): Promise<void> => {
-      while (failure === undefined && next < count) {
-        const index = next++;
-        const start = index * DOWNLOAD_RANGE_BYTES;
-        const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
-        try {
-          const { parts } = await readRange(fetchRange, start, end, ({ response, parts }) => {
-            if (response.status !== 206 || partsLength(parts) !== end - start + 1) return false;
-            const range = parseContentRange(response.headers);
-            // With Content-Range hidden the length and the 206 are all there is to check.
-            return range === null || (range.start === start && range.end === end && range.total === total);
-          }, args.signal);
-          if (sink) await sink.write(start, parts);
-          else ranges[index] = parts;
-          received += end - start + 1;
-          args.onProgress?.(received, total);
-        } catch (error) {
-          failure ??= { error };
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(downloadParallelism(), count - 1) }, worker));
-    if (failure) throw failure.error;
+    await readRangesFrom(1, total);
   } else if (total === undefined && first.response.status === 206 && partsLength(first.parts) === DOWNLOAD_RANGE_BYTES) {
     // A full first range and no way to learn the size: read on until the file ends.
     await readUntilEnd(fetchRange, async (index, start, parts) => {
@@ -411,8 +431,7 @@ async function readAndStore(
       else ranges[index] = parts;
     }, args.signal);
   }
-  if (sink) await sink.close();
-  else save(new Blob(ranges.flat() as BlobPart[]), fileName);
+  await finish(fileName);
   return true;
 }
 
@@ -502,7 +521,7 @@ async function downloadFromLink(
       throw new BackendApiError(response.status, `Download link refused (${response.status}).`);
     }
   };
-  if (!(await readAndStore(fetchRange, args, save, sink))) throw new Error("Attachment not found.");
+  if (!(await readAndStore(fetchRange, { ...args, parallelFromStart: true }, save, sink))) throw new Error("Attachment not found.");
 }
 
 /**
