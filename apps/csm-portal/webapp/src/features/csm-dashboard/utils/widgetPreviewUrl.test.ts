@@ -284,6 +284,16 @@ describe("widget preview URL — filter op round-trip", () => {
     const entries = (parsed.filters as { filters: unknown[] }).filters;
     expect(entries).toEqual(input);
   });
+
+  it("round-trips the states a case entered and the window it entered them in", () => {
+    const input = [
+      { field: "stateEntered", op: "in", values: ["waiting_on_wso2", "awaiting_info"] },
+      { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+      { field: "stateEnteredOn", op: "lte", values: ["2026-11-30"] },
+    ];
+    const entries = (roundTrip(input).filters as { filters: unknown[] }).filters;
+    expect(entries).toEqual(input);
+  });
 });
 
 /**
@@ -501,6 +511,17 @@ describe("describeWidgetFilters", () => {
     ]);
   });
 
+  it("shows the states a case entered and the window in words", () => {
+    expect(
+      describeWidgetFilters({
+        filters: [
+          { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+          { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+        ],
+      }).map(widgetFilterChipLabel),
+    ).toEqual(["stateEntered: waiting_on_wso2", "stateEnteredOn on or after Today"]);
+  });
+
   it("still shows a value-less op (isEmpty/isNotEmpty) rather than silently dropping it", () => {
     expect(
       describeWidgetFilters({
@@ -649,5 +670,31 @@ describe("widget preview URL — non-case resourceType's own filters array (chan
     const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
     expect(filters.states).toEqual(["scheduled"]);
     expect(filters.filters).toEqual([{ field: "approval", op: "eq", values: ["approved"] }]);
+  });
+});
+
+describe("a case widget on one product's versions", () => {
+  const filters = [
+    { field: "product", op: "in", values: ["WSO2 API Manager"] },
+    { field: "productVersion", op: "in", values: ["4.3.0", "4.3.1"] },
+  ];
+
+  it("round-trips the product and its versions through the preview URL", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      widgetId: "w1",
+      displayName: "W",
+      filters: { filters },
+      resourceType: "case",
+    });
+
+    expect(parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters).toEqual({ filters });
+  });
+
+  it("shows the product and its versions as chips", () => {
+    expect(describeWidgetFilters({ filters }).map(widgetFilterChipLabel)).toEqual([
+      "product: WSO2 API Manager",
+      "productVersion: 4.3.0, 4.3.1",
+    ]);
   });
 });

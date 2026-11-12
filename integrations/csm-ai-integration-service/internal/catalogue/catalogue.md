@@ -28,10 +28,15 @@ not in this catalogue. A dashboard may mix them.
   grouping by team cannot be expressed, show only the viewer's own records (`__current_user__`), never
   everyone's. It never guesses who or what the user named: decline a person named without an email
   address and a team not in the Teams section.
-- Reply instead with `{"error": "<one sentence: what is missing>"}` only when nothing close answers the
+- Reply instead with `{"error": "<why, and what to ask instead>"}` only when nothing close answers the
   request: it is not about this portal's data (e.g. "a+b", a general question, writing text), it names
   a person, team or filter that cannot be used (above), or a substitute would show other data than the
   user meant.
+- The `error` text is shown to the user as it is, after "The dashboard cannot be generated from the
+  input.": at most two short sentences in plain words, saying why and, when there is one, what they
+  could ask instead. Never field names, values or ids from this catalogue (`productVersion`,
+  `waiting_on_wso2`, `creTeam`), JSON, or this catalogue's own words ("section 5", "not expressible").
+  Example: `{"error": "Revenue isn't part of the case data. Try open cases by account instead."}`
 
 ---
 
@@ -101,7 +106,7 @@ Do not use any other dashboard field.
 | `line` | Cases opened vs closed per day, week or month; or PLG sign-ups per day, week or month (section 5e). | **Only with `resourceType: "case"` or `"plg_registration"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series` (cases only): `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
-state, user, project or day, counting cards or summing hours; no `line`).
+state, user, project, day or team, counting cards or summing hours; no `line`).
 An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`/`bar` with `slices` or
 `groupBy` by `state` only (no `line`). An `account` or `project` widget is `count`, `list`, or `pie`/`bar`
 with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
@@ -159,9 +164,15 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `escalationLevel` | `in` | `"0"` to `"5"` (as strings) |
 | `slaBreached` | `eq` | `["true"]` or `["false"]` (exactly one) |
 | `taskSLABusinessElapsedPercent` | `gte`, `lte` | one number as a string, e.g. `["80"]` |
-| `tag` | `in`, `notIn` | tag names, **only if the request gives them** |
-| `product` | `in` | exact product names, **only if the request gives them** |
+| `tag` | `in`, `notIn` | tag names, **only if the request gives them** or uses a word for one of the portal's own tags (section 8: `patch`, `s_dip`, `s_rg`) |
+| `product` | `in`, `notIn` | product names as the request writes them, abbreviations spelt out (section 8), **only if the request names a product**; `notIn` leaves those products' cases out |
+| `productVersion` | `in` | versions as the request writes them (`"4.3"`, `"4.x"`, `"7.0.0"`), only beside a `product` filter naming **one** product in the same search; never in an `anyOf` branch (section 8) |
+| `account` | `in`, `notIn` | customer (account) names or account numbers as the request writes them (`"Example Corp"`, `"ACC-0001"`), **only if the request names a customer**; `notIn` leaves those customers' cases out; never in an `anyOf` branch (section 8) |
+| `projectOnboardingStatus` | `in` | the case's project's onboarding status: `In-Progress`, `Not-Started`, `Completed`, `Not-Applicable` (exact case); never `notIn` (section 8) |
+| `project` | `in`, `notIn` | project keys or names as the request writes them (`"EXCORP-PROJ-1"`, `"Example Corp Production"`), **only if the request names a project**; `notIn` leaves those projects' cases out; never in an `anyOf` branch (section 8) |
 | `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date (below) |
+| `stateEntered` | `in` | states a case **moved to**, values as for `state` (see "Moved to a state" below) |
+| `stateEnteredOn` | `gte`, `lte` | one date (below): when it moved there; only with a `stateEntered` |
 | `creTeam`, `sreTeam` | `in` | team **keys** from the Teams section (the last section), each in its team's field: e.g. `creTeam in ["rigel"]`, `creTeam in ["sirius", "draco"]`, `sreTeam in ["apollo"]` |
 | `creTeam`, `sreTeam` | `in` | `["__current_team__"]` ("my team"), **only on a `"cre"` dashboard**, never together with a team key |
 
@@ -201,16 +212,45 @@ is December 2025 and "October" is October 2026). Today's date is given after the
                           { "field": "createdOn", "op": "lte", "values": ["2025-12-31"] } ] } }
 ```
 
+**Moved to a state.** `state` is where a case is **now**. `stateEntered` is a state the case **moved
+to**, read from its state history: with `stateEnteredOn` it counts the cases that moved to one of those
+states in that period (dates as above), whether they are still there or have moved on since; a case
+that moved there several times counts once. Without `stateEnteredOn` it means at any time. "... and
+still there" adds `state in` the same state(s). A slice may carry only the `stateEnteredOn` window when
+the widget's own `query` has the `stateEntered`. The state history starts on **2026-10-11**: a period
+(or no period) reaching before that day misses the earlier moves, so that dashboard is a closest one
+(section 1) with a `note` such as "State changes are only known from 11 October 2026, so earlier moves
+are not counted." A case's first state is not in the history, so "moved to Open" cannot be expressed
+("reopened" can).
+
+```json
+{ "id": "moved-to-wow-today", "displayName": "Moved to Waiting on WSO2 Today", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "stateEntered", "op": "in", "values": ["waiting_on_wso2"] },
+                          { "field": "stateEnteredOn", "op": "gte", "values": ["__today__"] } ] } }
+```
+
+```json
+{ "id": "moved-to-wow-by-period", "displayName": "Moved to Waiting on WSO2", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "stateEntered", "op": "in", "values": ["waiting_on_wso2"] } ] },
+  "slices": [
+    { "label": "Today", "query": { "filters": [ { "field": "stateEnteredOn", "op": "gte", "values": ["__today__"] } ] } },
+    { "label": "This Week", "query": { "filters": [ { "field": "stateEnteredOn", "op": "gte", "values": ["__startOfWeek:0__"] } ] } },
+    { "label": "This Month", "query": { "filters": [ { "field": "stateEnteredOn", "op": "gte", "values": ["__startOfMonth:0__"] } ] } } ] }
+```
+
 **OR across fields** (use sparingly): add `"anyOf": [{"filters": [...]}, {"filters": [...]}]`
 beside `filters`. Each branch is ANDed inside; branches are ORed; the result is ANDed with
 `filters`. **Inside an `anyOf` branch only these fields are allowed:** `state`, `severity`,
 `issueType`, `workState`, `engagementType`, `assignedUserId`, `escalation`, `escalationLevel`,
-`slaBreached`, `taskSLABusinessElapsedPercent`, `tag`. Dates, `createdBy`, `product`, `creTeam`
-and `sreTeam` must go in the top-level `filters`, never in a branch.
+`slaBreached`, `taskSLABusinessElapsedPercent`, `tag`. Dates, `createdBy`, `product`, `creTeam`,
+`sreTeam`, `stateEntered` and `stateEnteredOn` must go in the top-level `filters`, never in a branch.
 
 Never use: ids of projects, accounts, deployments or users; `number`; `internalId`; `parentId`;
 `projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`; or any
-field / op not in the table.
+field / op not in the table. The one exception: a `projectId` or `accountId` filter already in the dashboard
+being edited (the portal writes it for a `project` or `account` filter) is kept exactly as it is.
 
 
 ### 5a. Time cards (`resourceType: "time_card"`)
@@ -226,6 +266,7 @@ A time card's `query` is a **flat object**, never a `filters` array, and takes o
 |---|---|
 | `states` | a non-empty list of `pending`, `submitted`, `approved`, `rejected`, `processed`, `recalled` |
 | `userIds` | **only** `["__current_user__"]`: the viewer's own time cards ("my time cards") |
+| `teamIds` | the time cards of a team's members: team **keys** from the Teams section, CRE or SRE (e.g. `["rigel"]`, `["rigel", "sirius"]`, `["apollo"]`), or `["__current_team__"]` ("my team's", **only on a `"cre"` dashboard**, never together with a key) |
 | `startDate` | the work date from (inclusive): one date (section 5) |
 | `endDate` | the work date to (inclusive): one date (section 5) |
 
@@ -237,6 +278,9 @@ A time card's `query` is a **flat object**, never a `filters` array, and takes o
 Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pie`/`bar` with
 `slices` (each slice's `query` also a flat object, e.g. one slice per state) or `groupBy` (below).
 
+A team's time cards are those of the people **on the team today** (its current members, as the Team
+Schedule lists them), whenever the cards were logged: someone who moved teams counts in the new team.
+
 **Totals: grouping on the server.** A `pie`/`bar` time card widget may group with
 `"groupBy": {"field": "<field>", "measure": "count" | "hours", "maxGroups": N}`:
 
@@ -246,6 +290,7 @@ Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pi
 | `project` | project the cards were logged on | "per project"; `bar`, `maxGroups` 5 to 12; cards with no project count under "Others" |
 | `day` | work date, every day of the window in date order (days with nothing at 0) | "per day", "daily"; always `bar`, no `maxGroups`; the window rules below |
 | `state` | time card state, as stored (approved and processed apart) | only for **hours** by state; card **counts** by state use the state slices of section 8 |
+| `team` | team in the widget's own `query.teamIds`, every one of them (a team with nothing at 0) | "by ABT", "per team", "by team"; **needs `query.teamIds`** (the teams to show); `bar`; someone on two of the teams counts in both |
 
 `measure`: `"hours"` sums the time logged on the cards ("hours", "time logged", "time spent", "effort");
 `"count"` (or leaving `measure` out) counts the cards ("number of time cards", "how many"). With
@@ -291,9 +336,27 @@ from the cases' `__daysAgo:N__` (section 8) on purpose: a time card window must 
   "groupBy": { "field": "project", "measure": "count", "maxGroups": 10 } }
 ```
 
+```json
+{ "id": "hours-by-abt", "displayName": "Hours Logged by ABT This Month", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "teamIds": ["rigel", "sirius", "draco"], "startDate": "__startOfMonth:0__", "endDate": "__today__" },
+  "groupBy": { "field": "team", "measure": "hours" } }
+```
+
+```json
+{ "id": "rigel-hours-per-member", "displayName": "Rigel: Hours per Member This Month", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "teamIds": ["rigel"], "startDate": "__startOfMonth:0__", "endDate": "__today__" },
+  "groupBy": { "field": "user", "measure": "hours", "maxGroups": 12 } }
+```
+
+(In these examples `rigel`, `sirius` and `draco` stand for the CRE ABT keys of the Teams section: use
+the real keys, and for "by ABT" every CRE ABT key, in the order of the Teams section.)
+
 **Not expressible for time cards** (section 1):
-- another named person's time cards (only "my" time cards, or everyone's);
-- per account, per case or per approver, or a team's (Rigel's, my team's) time cards;
+- another named person's time cards (only "my" time cards, a team's, or everyone's);
+- per account, per case or per approver;
+- a team's members as they were on a past date (a team is its members today);
 - one total as a single number ("my total hours this month"): a `count` counts cards, not hours;
 - billable hours (billable and non-billable are not told apart);
 - per day over more than 31 days (above).
@@ -573,7 +636,7 @@ or breached group, `warning` next, otherwise leave it out.
 ```
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
-`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
+`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day`, `state` or `team` with
 `measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` or `playbookAnswer` (with `playbookTask`), section 5e; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
 section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
@@ -582,6 +645,67 @@ that account:
 
 ```json
 "groupBy": { "field": "account", "maxGroups": 10, "linkResourceType": "account" }
+```
+
+A case-family widget may also group by `product`, `productVersion` and `project`, besides the four
+fields above. By `product` ("cases by product", "top products by open cases"):
+one bar or slice per product, named as the product is; cases without a product are in none of them.
+
+```json
+{ "id": "open-cases-by-product", "displayName": "Open Cases by Product", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] } ] },
+  "groupBy": { "field": "product", "maxGroups": 10 } }
+```
+
+Grouping by `productVersion` ("API Manager cases by version") is one bar per version of **one** product:
+the widget's own `query` has a `product` filter naming that product.
+
+```json
+{ "id": "api-manager-cases-by-version", "displayName": "API Manager Cases by Version", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "product", "op": "in", "values": ["API Manager"] } ] },
+  "groupBy": { "field": "productVersion", "maxGroups": 10 } }
+```
+
+A version filter sits beside its product the same way ("open API Manager 4.x cases"):
+
+```json
+{ "id": "open-api-manager-4-cases", "displayName": "Open API Manager 4.x Cases", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] },
+                          { "field": "product", "op": "in", "values": ["API Manager"] },
+                          { "field": "productVersion", "op": "in", "values": ["4.x"] } ] } }
+```
+
+A case-family widget may group by `project` too ("cases by project", "top projects by open cases"):
+one bar per project, named as the project is; cases without a project are in none of them.
+
+```json
+{ "id": "open-cases-by-project", "displayName": "Open Cases by Project", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] } ] },
+  "groupBy": { "field": "project", "maxGroups": 10 } }
+```
+
+A named project's cases are a `project` filter ("active EXCORP-PROJ-1 cases"):
+
+```json
+{ "id": "active-excorp-proj-1-cases", "displayName": "Active EXCORP-PROJ-1 Cases", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "project", "op": "in", "values": ["EXCORP-PROJ-1"] },
+                          { "field": "state", "op": "notIn", "values": ["closed"] } ] } }
+```
+
+Projects left out are a `notIn` ("Sirius cases opened this month, excluding the ACMESUB and EXCORP-PROJ-1 cases"):
+
+```json
+{ "id": "sirius-cases-opened-this-month", "displayName": "Sirius: Cases Opened This Month", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "description": "Excludes the ACMESUB and EXCORP-PROJ-1 projects",
+  "query": { "filters": [ { "field": "creTeam", "op": "in", "values": ["sirius"] },
+                          { "field": "createdOn", "op": "gte", "values": ["__startOfMonth:0__"] },
+                          { "field": "project", "op": "notIn", "values": ["ACMESUB", "EXCORP-PROJ-1"] } ] } }
 ```
 
 `maxGroups` 5 to 12.
@@ -599,6 +723,9 @@ Never set both `slices` and `groupBy`.
 | "raised by person@example.com", "created by <email>" | `createdBy in ["person@example.com"]` (several people: one `in` with all their emails) |
 | "raised by Alex" (a name, no email) | not expressible: reply with `{"error": ...}` asking for the email address |
 | no creator mentioned | no `createdBy` filter at all (records raised by anyone) |
+| "not assigned to me", "assigned to someone else", "not raised by me", "raised by others" | not expressible: reply with `{"error": ...}`. Never "unassigned" (`assignedUserId isEmpty`) instead: that is cases assigned to no one |
+| "excluding migrations" / "excluding engagements" on cases | no filter: a `case` widget counts cases only, never engagements; say so in the `description` |
+| any other "not", "except", "excluding" or "without" this file has no filter for | never drop it: reply with `{"error": ...}`, as the dashboard would count what the user asked to leave out |
 | "open", "new" (state) | `state in ["open"]`: the Open state only |
 | "active", "outstanding", "not closed", "ongoing", "unresolved" | `state notIn ["closed"]`: every state except Closed |
 | "CSAT", "customer satisfaction", "feedback", "ratings", "survey responses" | `resourceType: "case_feedback"` (section 5d) |
@@ -667,16 +794,26 @@ Never set both `slices` and `groupBy`.
 | "this month", "last month", "past 30 days", "this week", "December 2025" (time cards) | `startDate` (and `endDate`) with the dates of section 5, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
 | "hours", "time logged", "time spent", "effort" (time cards, per something) | `groupBy` with `"measure": "hours"` (section 5a) |
 | time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
+| a team's time cards or hours ("Rigel's", "team Rigel", "Rigel and Sirius") | `teamIds` with the teams' keys (section 5a), on a `"cs"` dashboard; the team names start `displayName`. "Rigel's hours per member": that plus `groupBy` `user` |
+| "my team's" time cards or hours | a `"cre"` dashboard with `teamIds ["__current_team__"]` |
+| time cards or hours "by ABT", "per ABT", "per team", "for each ABT" (the only grouping) | one `bar` with `groupBy` `team` and `teamIds` the keys of **every** CRE ABT team (or only the teams named; "by SRE ABT": every SRE ABT team), on a `"cs"` dashboard; never one slice or widget per team |
+| time cards or hours by state, user, project or day **together with** "by ABT", e.g. "hours by state, separated by ABT" | **one widget per CRE ABT team** (or only the teams named; "by SRE ABT": every SRE ABT team), on a `"cs"` dashboard: each widget's flat `query` carries `teamIds ["<key>"]` (never `creTeam`), its `groupBy` is the other grouping (as in the rows above), its `displayName` starts with the team name (e.g. "Rigel: Hours by State"); `gridWidth` 4 |
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
 | time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
 | "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
-| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible (section 5a) |
+| time cards per account, per case, per approver or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible (section 5a) |
 | "my open", "open ... assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]`: "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
 | "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn` with that period's dates (section 5) |
+| "moved to", "went to", "changed to", "put in", "entered" a state, in a period ("moved to WOW today", "went to Awaiting Info this week") | `stateEntered in` that state plus `stateEnteredOn` with the period's dates (section 5), **not** `state in`; no period: `stateEntered` alone ("closed" in a period stays `closedOn`, above) |
+| "reopened today / this week / in March" | `stateEntered in ["reopened"]` plus `stateEnteredOn` with the period's dates |
+| "... and still there", "moved to WOW today and still waiting on WSO2" | the `stateEntered` filters plus `state in` the same state(s) |
+| "in WOW", "WOW cases", "currently waiting on WSO2" (no word for moving) | `state in ["waiting_on_wso2"]`: where cases are now |
+| "moved out of" / "left" a state, the state a case came from ("from WOW to In Progress"), how many times cases changed state | not expressible: only the state a case moved to is known, and each case counts once; the closest is `stateEntered` with the new state, with a `note` |
+| "moved to Open", "opened" as a state change | not expressible (a case's first state is not in its history); "opened" / "created" in a period is `createdOn`, "reopened" is `stateEntered in ["reopened"]` |
 | "unassigned", "no assignee" | `assignedUserId isEmpty` (case family only) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
@@ -695,18 +832,40 @@ Never set both `slices` and `groupBy`.
 | a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
+| a customer by name or account number: "Example Corp's cases", "cases of the customer Other Corp", "ACC-0001 cases" | `account in` the name or number as the request writes it, in **every** widget the request is about; several customers: one `in` with all of them. The portal matches it to the account and tells the user if it names none or several, so never refuse a customer as not exact |
+| customers left out: "excluding Example Corp", "except the customer Other Corp", "without ACC-0001's cases" | `account notIn` with every name or number as written (one `notIn` with all of them), in **every** widget the request is about |
+| a name that could be a customer or a project | a customer (`account`), unless the request calls it a project, writes a project key, or names a project the customer has ("Example Corp Production"); a customer's own name is never a `project` filter |
+| "by product", "per product", "top products by ..." (cases) | `bar` (or `pie` for a share) with `groupBy: {"field": "product", "maxGroups": 10}` (section 7) |
+| a product by name, in full, in part or abbreviated ("WSO2 API Manager", "API Manager", "APIM", "Identity Server", "IS") | `product in` the name as the request writes it, an abbreviation spelt out: APIM `"API Manager"`, IS `"Identity Server"`, MI `"Micro Integrator"`, EI `"Enterprise Integrator"`, SI `"Streaming Integrator"`. The portal matches it to the product's full name and tells the user if it names no product or several, so never refuse a product name as not exact. A family of products ("the identity products") is the shared word as written (`["Identity"]`), never one product picked from it |
+| products left out: "excluding API Manager", "except Identity Server", "without the APIM and IS cases", "every product but API Manager" | `product notIn` with every product as written, abbreviations spelt out (one `notIn` with all of them), in **every** widget the request is about; never a `product in` listing the other products |
+| a product with a version: "API Manager 4.3", "APIM 4.x", "IS 7.0.0", "version 4.3 of API Manager" | `product in` the product (above) plus `productVersion in` the version as written, without the product name: `["4.3"]`, `["4.x"]`, `["7.0.0"]`. "4.3" means every 4.3.x and "4.x" or "4" every 4.*; the portal matches it to the product's versions and tells the user if it has none such. Several versions of one product: one `productVersion` filter with all of them |
+| "<product> cases by version", "<product> versions", "per version" | `bar` with the `product` filter and `groupBy: {"field": "productVersion", "maxGroups": 10}` (section 7) |
+| versions of several products ("APIM 4.3 and IS 7") | one widget per product, each with its own `product` and `productVersion` filters; never two products beside one `productVersion` |
+| a version of a product left out ("excluding API Manager 4.3") | not expressible: a version only narrows a product kept; reply with `{"error": ...}` |
+| a version without a product ("cases on 4.3"); "latest", "newest", "older than" or "before" a version | not expressible: reply with `{"error": ...}` asking which product (with no product), or saying only named versions can be used |
+| "by project", "per project", "top projects by ..." (cases) | `bar` with `groupBy: {"field": "project", "maxGroups": 10}` (section 7) |
+| a project by key or name: "EXCORP-PROJ-1 cases", "cases of the Example Corp Production project", "project Summit's open cases" | `project in` the key or name as the request writes it, in **every** widget the request is about; several projects: one `in` with all of them. The portal matches it to the project and tells the user if it names no project or several, so never refuse a project as not exact. Cases of a project are case-family widgets; `resourceType: "project"` is for the projects themselves (section 5c) |
+| cases of customers "still onboarding", "in onboarding" / "whose onboarding has not started" / "onboarded", "fully onboarded" | `projectOnboardingStatus in ["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
+| cases of customers "not onboarded yet", "excluding onboarded customers" | `projectOnboardingStatus in ["In-Progress", "Not-Started"]`, never `notIn`; the widget's `description` says which statuses it counts |
+| projects left out: "excluding EXCORP-PROJ-1", "except the Summit project", "without the ACMESUB and EXCORP-PROJ-1 cases", "remove the ACMESUB cases" | `project notIn` with every key or name as written (one `notIn` with all of them), in **every** widget the request is about; never a `project in` listing the other projects |
+| a code-like word in capitals ("ACMESUB", "EXCORP-PROJ-1") the request uses for cases to include or leave out | a project key, unless this file gives the word a meaning ("ABT", "CSAT", "SLA") or the request calls it something else (a tag, a team) |
+| "patch cases", "patch tag cases", "cases with a patch" (a Patch Git issue was filed from them) | `tag in ["patch"]` |
+| "internal discussion cases", "discussion cases" (a discussion Git issue was filed from them) | `tag in ["s_dip"]` |
+| "cases with a Git issue", "GitHub issue cases" | `tag in ["patch", "s_dip"]`; "without a Git issue": `tag notIn ["patch", "s_dip"]` |
+| "regression cases" | `tag in ["s_rg"]` |
 | "cases" with no other type named | `resourceType: "case"` |
 | "service requests", "SRs" | `resourceType: "service_request"` |
 | "engagements", "migrations" | `resourceType: "engagement"` (migrations add `engagementType in ["migration"]`) |
-| "my team's" | a `"cre"` dashboard with `creTeam in ["__current_team__"]` |
+| "my team's" | a `"cre"` dashboard with `creTeam in ["__current_team__"]` (time cards: `teamIds`, above) |
 | a team by name: "Rigel", "Rigel's", "team Rigel", "the Rigel team", "Sirius and Draco" (any case) | that team's **key** in that team's **field** from the Teams section, on a `"cs"` dashboard, in **every** widget the request is about; several teams: one `in` with all their keys; the team names start `displayName` |
 | "ABT", "ABT team", "account based team", "CRE ABT" | a team whose **family is CRE ABT** in the Teams section. Teams of any other family (e.g. a CRE team such as Americas, or an SRE ABT team) are **not** ABT teams |
 | "my ABT", "my ABT team" | same as "my team's" |
 | a named team with "ABT": "Rigel ABT", "the Sirius ABT" | same as the team by name |
 | "all ABTs", "every ABT" (no grouping) | one `creTeam in [...]` with the keys of **every** CRE ABT team |
-| "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section |
-| "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some |
+| "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section (time cards: `groupBy` `team`, above) |
+| "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some. Time cards: the time card row for this above (`teamIds`, not `creTeam`) |
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
+| a team left out: "all ABTs except Sirius", "every CRE team but Rigel" | `creTeam` (or `sreTeam`) `in` every **other** key of that family, only when the request names the team as a team; the widget's `description` names the teams counted. Cases of accounts with no team of that family are not counted |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
 | "last calendar month", "previous month" | `createdOn gte __startOfMonth:-1__` and `createdOn lte __endOfMonth:-1__` |
 | "this week", "this year", "last week", "last year", a named month, quarter, year, day or range | `createdOn` (or the date the request names) with the dates of section 5 |
@@ -731,7 +890,10 @@ If two readings are plausible and the table does not settle it, pick the one abo
    months); `series` only on a case line, absent (both lines) or exactly `["opened"]` or `["closed"]`;
    `chart` absent or `"bar"`. An edit keeps
    a line widget's `series`, window and `chart` unless the request changes them.
-6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
+6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`. `stateEntered`
+   (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, one date) only in the top-level `filters` of
+   a case-family widget or its slices, never an `anyOf` branch; `stateEnteredOn` only with a
+   `stateEntered` in the widget.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),
    op `in`, in the top-level `filters` (never an `anyOf` branch), never a team id; `__current_team__`
@@ -739,10 +901,12 @@ If two readings are plausible and the table does not settle it, pick the one abo
    "ABT" means only the teams whose family is CRE ABT; a team filter may sit in a slice's query
    ("by ABT"), never in an `anyOf` branch.
 9. A `time_card` widget: a flat `query` with only `states`, `userIds` (`["__current_user__"]` only),
-   `startDate`, `endDate`; shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with
-   flat-query `slices` or `groupBy` (`user`, `project`, `day`, `state`; `measure` `hours` or `count`); a
-   `day` grouping has both dates from section 5a's window table (31 days at most); never `line`, a
-   `filters` array or a team filter. `measure` appears on no other resourceType.
+   `teamIds` (team keys, CRE or SRE, or `["__current_team__"]` on a `"cre"` dashboard), `startDate`, `endDate`;
+   shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with flat-query `slices` or
+   `groupBy` (`user`, `project`, `day`, `state`, `team`; `measure` `hours` or `count`); a `team` grouping
+   has `teamIds` in the widget's own `query` and is a `bar`, never a `pie`; a `day` grouping has both
+   dates from section 5a's window table (31 days at most); never `line`, a `filters` array or a `creTeam` / `sreTeam` filter. `measure`
+   appears on no other resourceType.
 10. An `incident` / `change_request` / `problem` widget: only the keys, fields, ops and **exact-case
     values** of section 5b; change request state in the flat `states`, never in `filters`; `groupBy` by
     `state` only; a problem list has no `sortBy`; no ids, no `anyOf`, no `line`.

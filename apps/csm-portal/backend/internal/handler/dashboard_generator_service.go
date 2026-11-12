@@ -113,7 +113,7 @@ func (g *serviceDashboardGenerator) Generate(ctx context.Context, prompt string,
 		"cacheReadInputTokens", res.Usage.CacheReadInputTokens,
 		"outputTokens", res.Usage.OutputTokens, "candidates", len(res.Candidates))
 	if res.Declined != "" {
-		return GeneratedDashboard{}, &generateDeclinedError{Reason: res.Declined}
+		return GeneratedDashboard{}, &generateDeclinedError{Reason: declineMessage(res.Declined)}
 	}
 	if len(res.Candidates) == 0 {
 		return GeneratedDashboard{}, fmt.Errorf("%w: no JSON object in the reply", errGenerateUnusable)

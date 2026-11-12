@@ -19,6 +19,8 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"unicode"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 )
@@ -46,13 +48,44 @@ var (
 
 // generateDeclinedError is the model answering, as the catalogue tells it
 // to when a request cannot be met, with what is missing instead of a
-// dashboard. Reason is the model's sentence.
+// dashboard. Reason is the model's sentence as the chat shows it
+// (declineMessage).
 type generateDeclinedError struct {
 	Reason string
 }
 
 func (e *generateDeclinedError) Error() string {
 	return "model declined: " + e.Reason
+}
+
+// maxDeclineRunes is the longest decline sentence the chat shows; a longer
+// one is cut at a word and ends with "…".
+const maxDeclineRunes = 300
+
+// declineMessage is the model's decline sentence made fit to show in the
+// chat: on one line (line breaks, tabs and runs of spaces become one space,
+// other control characters are dropped) and at most maxDeclineRunes long. A
+// sentence with nothing left is errMsgGenerateRefused.
+func declineMessage(reason string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && !unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, reason)
+	msg := strings.Join(strings.Fields(cleaned), " ")
+	if msg == "" {
+		return errMsgGenerateRefused
+	}
+	runes := []rune(msg)
+	if len(runes) <= maxDeclineRunes {
+		return msg
+	}
+	cut := string(runes[:maxDeclineRunes])
+	if i := strings.LastIndex(cut, " "); i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimRightFunc(cut, func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) }) + "…"
 }
 
 // generatedReply is the chat message shown with a generated dashboard.

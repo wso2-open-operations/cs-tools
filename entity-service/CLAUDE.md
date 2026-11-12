@@ -4282,7 +4282,7 @@ already use — no route path, request, or response shape changed.
 ## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
 
 Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
-the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+the minutes logged on them, per `groupBy`: `state`, `user`, `project`, `day` or `team`. It reuses
 `timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
 `project_stats_repo.go`), so the aggregate can never count a different set of cards from
 the search, or a different total from the search's `totalTime`; keep it that way.
@@ -4305,15 +4305,28 @@ the search, or a different total from the search's `totalTime`; keep it that way
   `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
   The query runs `generate_series` over the window, so every day comes back in date order,
   days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`teamIds` (search and aggregate):** the cards of the people on any of the teams **today**:
+  `EXISTS` over `team_member` (the Team Schedule's roster, the list `GET /teams/{id}/members`
+  shows; it can hold a person twice and includes engineers moved onto a team), so a card is
+  matched once however many of the teams, or rows of one team, list its engineer. A team id is
+  the Team Schedule's `team.id`, which is a CRE team's CRE group id or an SRE team's SRE group
+  id. There is no membership
+  history: someone who moved teams counts in the new one, for old cards too.
+- **`team`:** needs `filters.teamIds` and returns one bucket per one of those teams (key the
+  team id, label its name), a team without cards at 0 and an id with no team left out
+  (`aggregateTimeCardsByTeam`). A card counts in every one of the teams its engineer is on, so
+  unlike the other groupings the buckets may overlap: `totalRecords` and `totalMinutes` are the
+  buckets' sums, not the search's total. `measure` and `maxGroups` apply as for `user`.
 - **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
-  time card aggregate.
+  time card aggregate. Its time card search refuses `teamIds` (400) too.
 - **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
   (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
   `CLAUDE.md`).
 
 Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
-check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
-(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+check, the ServiceNow refusal, `teamIds` and `team`), `time_card_aggregate_integration_test.go`
+and `time_card_team_filter_integration_test.go` (both `CASE_STATS_TEST_DSN`; the latter seeds
+teams with a duplicated member, a shared member and no members). The integration fixture is built so that ranking by count and
 ranking by minutes disagree, it has a card with all five minute columns NULL, and the
 search-parity test compares both counts and minutes with `SearchTimeCards`.
 
@@ -10616,6 +10629,45 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   one endpoint reads Postgres directly (unlike `SearchCatalogs`, which still
   falls back to ServiceNow -- see `catalogService.snMirror`'s own doc comment).
 
+## Case search `stateEntered` / `stateEnteredOn`: cases that entered a state in a window
+
+"Cases moved to Waiting on WSO2 today" is not "cases in Waiting on WSO2 now": a case that moved there
+this morning may have left again, and one that has been there for a week did not move today. The
+case search's `stateEntered` (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, `createdOn`'s
+date forms and relative placeholders) answer the first: `buildCaseSearchWhere` adds `EXISTS` over
+`work_item_activity` (`field_name = 'state'`, `LOWER(new_value)` one of the states' display labels,
+`created_on` in the window), so the search, count, aggregate and volume trend all see it.
+
+- **Values:** the history records a state under its display label (`caseStateDisplayLabel`,
+  "Waiting on WSO2"), so `ParseCaseFieldFilters` turns each state into its label, lower-cased, in
+  `ParsedCaseFilters.EnteredStateLabels`, and the query compares lower-cased, in case a sync writes
+  another letter case. An unknown state is a 400.
+- **Meaning:** whatever the case's state is now, and once per case however many times it entered
+  (`EXISTS`). Add `state in` for "entered today and still there".
+- **Rules:** `stateEnteredOn` needs `stateEntered`; a `lte` before its `gte` is refused; both are top
+  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` (the legacy data source) refuses both
+  (search and aggregate) before any call: it keeps no history, and dropping them would widen the result.
+- **Coverage:** only what was logged, so a period reaching further back undercounts.
+  - The history starts when the portal began logging (2026-10-11). Whether csm-sync-service copies
+    changes made in the legacy data source into this table is not known here.
+  - `caseService.UpdateCase` logs every state change made through the portal, including the automatic
+    moves to Waiting on WSO2 on a customer's reply or attachment, best effort: a failed write is
+    logged and dropped, and `recordFieldChangeActivity` skips the row when no actor email is resolved.
+  - Case creation logs no state row, so `stateEntered in [open]` matches only cases moved back to
+    Open, never one created and left there. The AI catalogue treats "moved to Open" as not expressible.
+- **Cost:** `idx_work_item_activity_state_entered` (migration 0283, partial on `field_name = 'state'`,
+  keyed `LOWER(new_value), created_on`) serves the predicate. Without it the planner seq-scanned the whole
+  table: on 100k cases and 1.5M activity rows, "moved to Waiting on WSO2 today" went from ~100 ms to
+  2-3 ms, and "this month" takes ~25 ms. There is no `updated_on` pre-filter, because it is not confirmed
+  that every writer bumps `updated_on` with the state.
+
+Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the legacy data source's
+refusal) and `repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`, run locally:
+no CI workflow runs the entity-service Go tests; left again, entered twice, yesterday, an upper-case
+label, a non-state row and a change out of the state, created in the state with no history row, window
+edges, the aggregate, and a customer caller inside and outside the case's project, since
+`work_item_activity` has forced row-level security).
+
 ## Case search `countOnly`, and the projectOnboardingStatus `in` filter's exclusion-list rewrite
 
 Reported as a dashboard-performance finding, measured against a real load test and the perf
@@ -10870,6 +10922,31 @@ by always checking every table regardless of the request's own type filter
 -- that would reproduce the exact cost this rewrite exists to avoid, to
 compensate for a handful of rows a separate sync-side data-quality issue
 produced, not something every case search should pay for indefinitely.
+
+## Case search and aggregate: products, versions and projects (AI dashboards)
+
+The CSM portal's generated dashboards filter and group cases by product, product version and project
+(the backend turns the names the user wrote into what these match; its `CLAUDE.md`, "Custom dashboards",
+has that side). Everything here is new to these fields, so no request that worked before changes.
+
+- **`product` `in` / `notIn`.** `in` matches the deployed product's catalog name exactly (`prod.name`,
+  every catalog row of that name). `notIn` (`ParsedCaseFilters.ExcludeProductNames`) keeps the cases
+  whose product is none of them, a case without a deployed product included, as `projectId notIn` does.
+  Neither is allowed in an `anyOf` branch. The ServiceNow data source has no exclusion and refuses
+  `notIn` (`refuseSNProductFilters`) rather than drop it and count every product.
+- **`productVersion` `in`** matches `product_version.version` exactly ("4.3.0"). A version is shared by
+  many products, so it needs a product filter naming exactly one product in the same search
+  (`checkProductVersionFilters`; only `product in` counts, a `notIn` names no product); never in an
+  `anyOf` branch; refused by the ServiceNow data source.
+- **`groupBy`** (`POST /cases/aggregate`, `caseAggregateColumns`): `product` (key and label the name,
+  as the product filter takes it), `productVersion` (needs one product, as above) and `project` (key the
+  project's id, as `projectId` takes it; label its name, else its key). A case without one is in no
+  bucket. The ServiceNow data source refuses all three. Each bucket's count is the matching filter's
+  total: the real-database tests (`case_product_aggregate_integration_test.go`,
+  `case_product_version_integration_test.go`, `case_project_aggregate_integration_test.go`) check it
+  bucket by bucket.
+- `projectId` and `accountId` (`in` / `notIn`) are unchanged; the dashboards use them for projects and
+  customers named by the user.
 
 ## Announcement requests
 

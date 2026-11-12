@@ -4602,6 +4602,19 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 	}
 }
 
+// refuseSNProductFilters refuses a productVersion filter and a product notIn
+// filter, which ServiceNow's case search has no field for: refused rather
+// than dropped, which would widen the result to every version or product.
+func refuseSNProductFilters(parsed domain.ParsedCaseFilters) error {
+	if len(parsed.ProductVersions) > 0 {
+		return &apierror.ValidationError{Msg: `field "productVersion" is not supported by this data source`}
+	}
+	if len(parsed.ExcludeProductNames) > 0 {
+		return &apierror.ValidationError{Msg: `field "product" (notIn) is not supported by this data source`}
+	}
+	return nil
+}
+
 // SearchCases implements CaseService by calling the Choreo POST /cases/search endpoint.
 func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if err := validateSearchExcludeFields(req.ExcludeFields); err != nil {
@@ -4618,6 +4631,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	callerEmail, callerEmailErr := resolveCaseFilterCallerEmail(token)
 	parsed, err := ParseCaseFieldFilters(req.Filters.Filters, callerEmail, callerEmailErr, time.Now().UTC())
 	if err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := refuseSNProductFilters(parsed); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
 	req.Parsed = parsed
@@ -4643,6 +4659,12 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	if req.Parsed.EndUpdatedDate != nil && req.Parsed.StartUpdatedDate != nil &&
 		req.Parsed.EndUpdatedDate.Before(*req.Parsed.StartUpdatedDate) {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "updatedOn: lte value must not be before gte value"}
+	}
+	// stateEntered / stateEnteredOn read the case's logged state history
+	// (work_item_activity), which this data source does not keep: refused
+	// rather than dropped, which would widen the result.
+	if len(req.Parsed.EnteredStateLabels) > 0 || req.Parsed.EnteredStartDate != nil || req.Parsed.EnteredEndDate != nil {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `fields "stateEntered" and "stateEnteredOn" are not supported by this data source`}
 	}
 
 	for _, ws := range req.Parsed.WorkStates {
@@ -4943,6 +4965,12 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if !validCaseAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
+	// ServiceNow's aggregate has no product, version or project grouping;
+	// refuse it here rather than pass on a groupBy it would not answer as
+	// this one does.
+	if req.GroupBy == "product" || req.GroupBy == "productVersion" || req.GroupBy == "project" {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy %q is not supported by this data source", req.GroupBy)}
+	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.AggregateResponse{}, err
 	}
@@ -4951,6 +4979,9 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	callerEmail, callerEmailErr := resolveCaseFilterCallerEmail(token)
 	parsed, err := ParseCaseFieldFilters(req.Filters.Filters, callerEmail, callerEmailErr, time.Now().UTC())
 	if err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := refuseSNProductFilters(parsed); err != nil {
 		return domain.AggregateResponse{}, err
 	}
 
@@ -4975,6 +5006,12 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if parsed.EndUpdatedDate != nil && parsed.StartUpdatedDate != nil &&
 		parsed.EndUpdatedDate.Before(*parsed.StartUpdatedDate) {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "updatedOn: lte value must not be before gte value"}
+	}
+	// stateEntered / stateEnteredOn read the case's logged state history
+	// (work_item_activity), which this data source does not keep: refused
+	// rather than dropped, which would widen the result.
+	if len(parsed.EnteredStateLabels) > 0 || parsed.EnteredStartDate != nil || parsed.EnteredEndDate != nil {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: `fields "stateEntered" and "stateEnteredOn" are not supported by this data source`}
 	}
 	for _, ws := range parsed.WorkStates {
 		if ws != domain.CaseWorkStateOngoing && ws != domain.CaseWorkStatePaused {

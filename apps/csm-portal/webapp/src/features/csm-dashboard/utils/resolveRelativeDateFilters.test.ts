@@ -53,6 +53,24 @@ describe("resolveRelativeDateFilters", () => {
     });
   });
 
+  it("resolves a stateEnteredOn 'today' window to the viewer's local day, leaving stateEntered alone", () => {
+    const filters = {
+      filters: [
+        { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+        { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+        { field: "stateEnteredOn", op: "lte", values: ["__today__"] },
+      ],
+    };
+
+    expect(resolveRelativeDateFilters(filters, NOW)).toEqual({
+      filters: [
+        { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+        { field: "stateEnteredOn", op: "gte", values: [localMidnightIso(2026, 7, 15)] },
+        { field: "stateEnteredOn", op: "lte", values: [localEndOfDayIso(2026, 7, 15)] },
+      ],
+    });
+  });
+
   it("resolves placeholders in a mixed array, leaving non-predicate entries untouched", () => {
     const filters = {
       filters: [

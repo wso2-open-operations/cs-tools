@@ -3054,6 +3054,50 @@ describe("DashboardWidgetTile", () => {
         expect(params.get(field)).toBeNull();
       });
     }
+
+    it("team grouping capped below the team count: only the named teams' bars, no Others bar, each opening its team", async () => {
+      // maxGroups 2 over three teams: the third team comes back folded into
+      // Others, which has no team to open. A bar chart leaves Others out, so
+      // there is no Others bar to click, and the total is the shown teams'.
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "rigel-group", label: "Rigel", count: 3, totalMinutes: 300 },
+          { key: "atlas-group", label: "Atlas", count: 2, totalMinutes: 120 },
+        ],
+        othersCount: 1,
+        totalRecords: 6,
+        othersMinutes: 60,
+        totalMinutes: 480,
+      });
+
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="hours-by-abt"
+          displayName="Hours by ABT"
+          resourceType="time_card"
+          shape="bar"
+          filters={{ teamIds: ["rigel-group", "atlas-group", "vega-group"], startDate: "2026-10-01", endDate: "2026-10-31" }}
+          groupBy={{ field: "team", measure: "hours", maxGroups: 2 }}
+        />,
+        "*",
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Rigel:5 label:5 h")).toBeInTheDocument());
+      const bars = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((t) => t.startsWith("bar:"));
+      expect(bars).toEqual(["bar:Rigel:5 label:5 h", "bar:Atlas:2 label:2 h"]);
+      expect(screen.queryByText(/^bar:Others/)).not.toBeInTheDocument();
+      expect(screen.getByText("7 h")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("bar:Atlas:2 label:2 h"));
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probe = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probe).toContain("/time-cards");
+      const params = new URLSearchParams(probe.split("?")[1]);
+      // The bucket's team wins over the widget's three teams.
+      expect(params.getAll("teamIds")).toEqual(["atlas-group"]);
+      expect(params.get("startDate")).toBe("2026-10-01");
+      expect(params.get("team")).toBeNull();
+    });
   });
 });
 

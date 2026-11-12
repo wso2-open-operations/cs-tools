@@ -209,7 +209,7 @@ bridges read the identical config; they just project it onto two different, non-
 ## Time card totals (POST /time-cards/aggregate)
 
 `TimeCardHandler.AggregateTimeCards` forwards the body to entity-service's `POST /time-cards/aggregate`
-(counts and summed minutes per `state`, `user`, `project` or `day`; the rules are in entity-service's
+(counts and summed minutes per `state`, `user`, `project`, `day` or `team`; the rules are in entity-service's
 `CLAUDE.md`) and passes the response through unchanged. It needs `PermViewTimeCardTotals`, held by the CS engineer
 and admin only. That is narrower on purpose than `PermTimeCardsAndUpdates`, which every other time card
 route uses and which the time card approver also holds. Who may see totals per user is still to be
@@ -884,6 +884,21 @@ draft, a save and a share never carry one, and `ParseGenerated` stays strict: a 
 `note` is refused like any unknown field. A note that is not a string or is over
 `generatedNoteMaxChars` (500) makes that candidate invalid.
 
+**Cases that moved to a state.** A case-family widget may filter on `stateEntered` (`in`, case states)
+and `stateEnteredOn` (`gte` / `lte`, one date): the cases whose logged state history has a change to one of
+those states in that window ("moved to Waiting on WSO2 today"), whatever their state now (entity-service's
+`CLAUDE.md` has the search side). Case queries are otherwise passed through unchecked, so
+`checkGeneratedStateEntered` (`internal/dashboard/generated_state_entered.go`) checks just these two at
+generation, where the model can retry, rather than leaving a tile to fail on load: `in` with case states,
+`gte` / `lte` with one date, a window only with a `stateEntered` in the widget (a slice's window may lean on
+the widget's own `stateEntered`, as the webapp merges slices by field), a window of two plain dates or
+instants that does not end before it starts (read as entity-service reads it: the last bound wins, a
+date-only `lte` covers its day; a relative date is not compared), and neither in an `anyOf` branch. A
+widget without them is not touched, so no saved dashboard changes. The catalogue (sections 5, 8 and 9)
+teaches the model these widgets, and `TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid` runs
+every section 5 example that uses them through `ParseGenerated`. Deploy entity-service (which must accept
+the fields) before the catalogue that teaches them.
+
 **Time card totals widgets.** A time card widget may group on the server (`groupBy.field` `state`,
 `user`, `project` or `day`, through `POST /time-cards/aggregate`, see "Time card totals" above), and only
 a time card widget grouped by a field may set `groupBy.measure`: `count` (the default) or `hours`. The
@@ -902,6 +917,16 @@ could not group before this, so no saved dashboard changes. The AI integration s
 (section 5a) teaches the model these widgets, and
 `TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` runs every grouped time card example
 there through `ParseGenerated`, so the catalogue cannot teach a widget the save would refuse.
+
+**Time cards by team.** A generated time card widget may hold `query.teamIds`: 1 to 20 team keys or names
+(`valuesTeamNames`), or `["__current_team__"]`, the cards of those teams' current members. `groupBy.field`
+`team` (one bar per team) needs the widget's own `query.teamIds`. Right after generation `WithDashboardTeams`
+(`resolveTimeCardTeams` in `internal/handler/dashboard_teams.go`) swaps each key or name for the team's
+group id (a CRE team's CRE group id, an SRE team's SRE group id), which is the Team Schedule's team id
+that entity-service's `teamIds` matches; a group id already there is kept and `__current_team__` is left
+for the webapp. An unknown team, or a team with no group configured, is an `errDashboardTeam` (422 with
+the reason), as for a case's team filter. Only the generator checks these keys, so no saved dashboard
+changes.
 
 **Line widgets: `series`.** A `line` widget may set `series` to `["opened"]` or `["closed"]` to draw only
 that line ("new cases per day", "cases closed per day", or an Edit with AI request such as "remove the closed
@@ -1002,6 +1027,47 @@ entity-service does not tell them apart) gets its own readable message (`errMsgD
 everything else goes through `mapUpstreamErrorGeneric`. `sharedViaLink` on both Shared responses says
 the caller has the dashboard only through its link. The routes are in
 `cmd/server/custom_dashboard_routes_test.go`'s must-exist list.
+
+**Why a dashboard cannot be generated.** A 422 carries a reason the webapp shows under its lead line.
+The model's own sentence (`{"error": ...}`, catalogue section 1: why, and what to ask instead) goes through
+`declineMessage` (`dashboard_generate_errors.go`): control characters dropped, whitespace collapsed, cut at
+`maxDeclineRunes` (300) on a word with "…", and `errMsgGenerateRefused` when nothing is left. The name
+resolvers below give their own reasons.
+
+**Names in a generated case filter become what the case search matches.** The model only knows what the
+user wrote, so wrappers around the generator (`cmd/server/main.go`, in this order) resolve it once, right
+after generation; from then on the dashboard holds what the search matches, so the reply, Save, a share
+and every read need nothing more:
+
+- `WithDashboardTeams`: a `creTeam` / `sreTeam` key or name becomes the team's group id.
+- `WithDashboardProducts` (`dashboard_products.go`): each `product` value (`in` or `notIn`) becomes the
+  product's catalog name ("API Manager" -> "WSO2 API Manager": the search matches it exactly), and a
+  `productVersion` value becomes that product's recorded versions ("4.3" every 4.3.x, "4.x" every 4.*).
+- `WithDashboardProjects` / `WithDashboardAccounts` (`dashboard_projects.go`, `dashboard_accounts.go`,
+  one shared `namedResolver` in `dashboard_named_filters.go`): a `project` (key or name) or `account`
+  (name or account number) filter becomes `projectId` / `accountId` with the same op, on the record's
+  id, so a renamed project still matches. An exact key / number wins, then one exact name, then the only
+  match of the caller's own search (`/projects/search`, `/accounts/search`, scoped to what they may see).
+  The search is read page by page, up to `namedSearchPages` (10 pages of 50): a key is taken as soon as
+  it is seen, but one exact name only once every page has been read, since another record of that name
+  (or the key) may be on a later page; a name matching more than those pages hold is "matches several".
+
+A value that names nothing, or several, is a 422 (`generate_product`, `generate_project`,
+`generate_account`) naming the candidates, e.g. `"quartz labs" matches several projects (Quartz Labs
+(QRTZ-PROJ1), Quartz Labs (QRTZ-PROJ2)); name the one you mean.`; a search that fails is a 502 (`_lookup`).
+The 422 is logged as which filter it was only, never its reason: that names what the user typed and the
+records it matched, such as a customer's name. Never
+dropped: a `notIn` that left out nothing would count every product or project under a title that says
+otherwise. `ParseGenerated` checks the shapes first (`generated_product_version.go`,
+`generated_project.go`): `product`, `project` and `account` are `in` or `notIn` with names, the last two
+never in an `anyOf` branch; `productVersion` is `in`, never in an `anyOf` branch, and needs exactly one
+product kept (`in`) in the same search (a slice's product filter of any op replaces its widget's, as the
+webapp merges a slice by field); a grouping by `productVersion` needs it in the widget's own query.
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project}ExamplesAreValid` run the catalogue's
+section 7 examples through the same check. An edit sends the resolved ids back to the model; the
+catalogue tells it to keep `projectId` / `accountId` filters as they are. Nothing saved before these
+filters had them, so no saved dashboard changes. Deploy entity-service first (product `notIn`,
+`productVersion`, grouping by `project` and `productVersion`), then this backend, then the AI service.
 
 **What one user can spend on model calls.** Every `POST /dashboards/generate` that passes the prompt
 checks counts against the caller's `handler.GenerateRateLimiter` (keyed by the token's user id):

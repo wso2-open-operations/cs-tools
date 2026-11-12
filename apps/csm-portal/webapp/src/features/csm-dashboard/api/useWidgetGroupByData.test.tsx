@@ -177,6 +177,114 @@ describe("useWidgetGroupByData", () => {
     ]);
   });
 
+  it("groups cases by product, each bar opening that product's cases by its name as it is", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "WSO2 API Manager", label: "WSO2 API Manager", count: 4 },
+        { key: "WSO2 Identity Server", label: "WSO2 Identity Server", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "case", { filters: [] }, { field: "product", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      { filters: { filters: [] }, groupBy: "product", maxGroups: 10 },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices).toEqual([
+      {
+        label: "WSO2 API Manager",
+        query: { filters: [{ field: "product", op: "in", values: ["WSO2 API Manager"] }] },
+        value: 4,
+        linkId: "WSO2 API Manager",
+      },
+      {
+        label: "WSO2 Identity Server",
+        query: { filters: [{ field: "product", op: "in", values: ["WSO2 Identity Server"] }] },
+        value: 2,
+        linkId: "WSO2 Identity Server",
+      },
+    ]);
+  });
+
+  it("groups one product's cases by version, each bar opening that version under the widget's product", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "4.3.0", label: "4.3.0", count: 5 },
+        { key: "4.2.0", label: "4.2.0", count: 1 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+    const widgetFilters = { filters: [{ field: "product", op: "in", values: ["WSO2 API Manager"] }] };
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "case", widgetFilters, { field: "productVersion", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      { filters: widgetFilters, groupBy: "productVersion", maxGroups: 10 },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query])).toEqual([
+      ["4.3.0", 5, { filters: [{ field: "productVersion", op: "in", values: ["4.3.0"] }] }],
+      ["4.2.0", 1, { filters: [{ field: "productVersion", op: "in", values: ["4.2.0"] }] }],
+    ]);
+  });
+
+  it("groups cases by project, each bar opening that project's cases by its id", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "6a0e1b52-0000-4000-8000-000000000001", label: "Example Corp Production", count: 5 },
+        { key: "6a0e1b52-0000-4000-8000-000000000002", label: "EXCORP-PROJ-2", count: 1 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "case", {}, { field: "project", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      { filters: {}, groupBy: "project", maxGroups: 10 },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query])).toEqual([
+      ["Example Corp Production", 5, { filters: [{ field: "projectId", op: "in", values: ["6a0e1b52-0000-4000-8000-000000000001"] }] }],
+      ["EXCORP-PROJ-2", 1, { filters: [{ field: "projectId", op: "in", values: ["6a0e1b52-0000-4000-8000-000000000002"] }] }],
+    ]);
+  });
+
+  it("keeps the groupBy field as the filter field outside the case family", async () => {
+    postMock.mockResolvedValue({ groups: [{ key: "acme", label: "Acme", count: 2 }], othersCount: 0, totalRecords: 2 });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "incident", {}, { field: "account", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices[0].query).toEqual({ filters: [{ field: "account", op: "in", values: ["acme"] }] });
+  });
+
   it("marks the synthetic Others bucket non-navigable rather than giving it an unscoped query", async () => {
     postMock.mockResolvedValue({
       groups: [{ key: "critical", label: "Critical", count: 3 }],
@@ -247,7 +355,7 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.slices).toEqual([
       {
         label: "Acme Corp",
-        query: { filters: [{ field: "account", op: "in", values: ["acme"] }] },
+        query: { filters: [{ field: "accountId", op: "in", values: ["acme"] }] },
         value: 10,
         linkId: "acme",
       },
@@ -701,6 +809,47 @@ describe("useWidgetGroupByData", () => {
       expect(filters.userIds).toEqual(["user-123"]);
       expect(filters.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(filters.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it("groups by team over the selected team's or every ABT's group ids, each team's bar opening that team", async () => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "rigel-group", label: "Rigel", count: 6, totalMinutes: 810 },
+          { key: "atlas-group", label: "Atlas", count: 4, totalMinutes: 660 },
+          { key: "vega-group", label: "Vega", count: 0, totalMinutes: 0 },
+        ],
+        othersCount: 0,
+        totalRecords: 10,
+        othersMinutes: 0,
+        totalMinutes: 1470,
+      });
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-abt",
+            "time_card",
+            { teamIds: ["__current_team__"], states: ["approved"] },
+            { field: "team", measure: "hours" },
+            ["rigel-group", "atlas-group", "vega-group"],
+            undefined,
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock.mock.calls[0][1]).toEqual({
+        filters: { teamIds: ["rigel-group", "atlas-group", "vega-group"], states: ["approved"] },
+        groupBy: "team",
+        maxGroups: undefined,
+        measure: "minutes",
+      });
+      expect(result.current.slices.map((s) => [s.label, s.value])).toEqual([
+        ["Rigel", 13.5],
+        ["Atlas", 11],
+        ["Vega", 0],
+      ]);
+      expect(result.current.slices[1].query).toEqual({ teamIds: ["atlas-group"] });
     });
   });
 });

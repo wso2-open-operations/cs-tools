@@ -24580,6 +24580,7 @@ components:
             - closedOn
             - resolvedOn
             - product
+            - productVersion
             - projectOnboardingStatus
             - projectType
             - creTeam
@@ -24594,6 +24595,8 @@ components:
             - internalId
             - slaBreached
             - accountEscalationActive
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -24675,9 +24678,41 @@ components:
           service requests, security report analyses and announcements do not
           match it. Cases that never reached a resolved or closed state never
           match.
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change into any of them, whatever
+          the case's state is now; a case that entered one several times
+          matches once. Only logged changes are seen: the history starts when
+          the portal began logging (2026-10-11), a case's creation state is
+          not logged (so "entered open" matches only cases moved back to
+          open), and a change made in the legacy data source without being
+          logged is not seen.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged:
+          a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
+          placeholder (`__today__`, `__daysAgo:7__`, `__startOfMonth:-1__`, ...;
+          resolved against UTC, as for createdOn; a caller wanting another
+          time zone's day sends the resolved date instead, as the CSM portal
+          does with the viewer's local day). gte is inclusive "on or
+          after"; a date-only lte covers the whole day. Needs a stateEntered
+          filter; a lte bound earlier than its gte bound is rejected. E.g.
+          "moved to Waiting on WSO2 today": stateEntered in [waiting_on_wso2]
+          with stateEnteredOn gte `__today__`.
+          Neither is supported inside an anyOf branch, or by the legacy data
+          source (400).
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
-          product. Only applied by the ServiceNow data source.
+          product. The Postgres data source matches the deployed product's
+          catalog name exactly as recorded (e.g. "WSO2 API Manager"); the
+          ServiceNow data source takes the family names. Not supported inside
+          an anyOf branch.
+        - **product** (notIn): cases whose deployed product is none of the
+          named products, including cases without a deployed product. Not
+          supported inside an anyOf branch, or by the ServiceNow data source
+          (400).
+        - **productVersion** (in): versions of the case's deployed product,
+          exactly as recorded (e.g. "4.3.0"). Needs a product filter naming
+          exactly one product, as a version is shared by several products.
+          Not supported inside an anyOf branch, or by the ServiceNow data
+          source (400).
         - **projectOnboardingStatus** (in / notIn): free-text SN choice labels
           for the parent project's onboarding status (e.g. "Completed",
           "In-Progress", "Not-Applicable" -- not a closed enum at this
@@ -24862,8 +24897,18 @@ components:
           $ref: '#/components/schemas/SearchCasesFilters'
         groupBy:
           type: string
-          enum: [account, state, severity, type]
-          description: The field to aggregate case counts by.
+          enum: [account, state, severity, type, product, productVersion, project]
+          description: >-
+            The field to aggregate case counts by. product groups by the
+            deployed product's name (the value the product filter takes);
+            cases without a deployed product are in no bucket, as for
+            account. productVersion groups by the deployed product's version
+            (the value the productVersion filter takes) and needs a product
+            filter naming exactly one product; cases without a version are in
+            no bucket. project groups by the case's project: the key is the
+            project's id (the value the projectId filter takes) and the label
+            its name, else its key. product, productVersion and project are
+            not supported by the ServiceNow data source.
         maxGroups:
           type: integer
           description: >-
@@ -27970,6 +28015,19 @@ components:
             type: string
             format: uuid
           description: Return only time cards submitted by any of these users.
+        teamIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only time cards of the people on any of these teams today (the
+            Team Schedule's team ids: a CRE team's CRE group id, an SRE team's
+            SRE group id; a person counts
+            once however many of the teams list them). Membership is the
+            current roster, whenever the card was logged. Not supported on
+            the legacy data source (400).
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -28001,12 +28059,17 @@ components:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
         groupBy:
           type: string
-          enum: [state, user, project, day]
+          enum: [state, user, project, day, team]
           description: >-
             What to group by. "day" groups by work date and requires
             filters.startDate and filters.endDate (at most 31 days, both
             inclusive). A card with no project has no "project" bucket;
-            it is counted in othersCount and othersMinutes.
+            it is counted in othersCount and othersMinutes. "team" requires
+            filters.teamIds and returns one bucket per one of those teams
+            (key the team id, label its name, a team with no cards at 0, an
+            unknown id left out); a card counts in every one of the teams
+            its engineer is on, so totalRecords and totalMinutes are the
+            buckets' sums.
         measure:
           type: string
           enum: [count, minutes]
@@ -28020,7 +28083,8 @@ components:
           default: 10
           description: >-
             How many buckets to return; the rest are folded into othersCount
-            and othersMinutes. Ignored for "day".
+            and othersMinutes. Ignored for "day". For "team" the default is
+            every team in filters.teamIds.
 
     SearchTimeCardsRequest:
       type: object

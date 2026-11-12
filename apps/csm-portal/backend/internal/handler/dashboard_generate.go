@@ -93,6 +93,12 @@ const (
 	errCodeGeneratePlaybook      = "generate_playbook"
 	errCodeGenerateRefused       = "generate_refused"
 	errCodeGenerateUnusable      = "generate_unusable"
+	errCodeGenerateProduct       = "generate_product"
+	errCodeGenerateProductLookup = "generate_product_lookup"
+	errCodeGenerateProject       = "generate_project"
+	errCodeGenerateProjectLookup = "generate_project_lookup"
+	errCodeGenerateAccount       = "generate_account"
+	errCodeGenerateAccountLookup = "generate_account_lookup"
 	errCodeGenerateTruncated     = "generate_truncated"
 	errCodeGenerateUsageLimit    = "generate_usage_limit"
 	errCodeGenerateTimeout       = "generate_timeout"
@@ -112,6 +118,16 @@ const (
 //     filter no active playbook has)                    task or answer, the known ones)
 //   - errGenerateRefused                             422
 //   - errGenerateUnusable                            502
+//   - errDashboardProduct (a product filter naming  422, the reason (no product,
+//     no product or several, or a version the           the candidates, or the
+//     product does not have: productResolver)           product's versions)
+//   - errDashboardProductLookup                      502
+//   - errDashboardProject (a project filter naming  422, the reason (no project,
+//     no project or several: namedResolver)             or the candidates)
+//   - errDashboardProjectLookup                      502
+//   - errDashboardAccount (an account filter naming 422, the reason (no account,
+//     no account or several: namedResolver)             or the candidates)
+//   - errDashboardAccountLookup                      502
 //   - errGenerateTruncated (the reply was cut off)   502, its own message
 //   - errGenerateUsageLimit (the AI side's limit,    503 (429 stays this
 //     not the per-user one)                              backend's own limit)
@@ -144,6 +160,26 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, errGenerateRefused):
 		slog.InfoContext(ctx, "dashboard generate: model refused")
 		writeErrorCode(w, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused)
+	case errors.Is(err, errDashboardProduct):
+		// The reason names what the user typed and the records it matched
+		// (a customer's name, say): the caller gets it, the log does not.
+		slog.InfoContext(ctx, "dashboard generate: unusable product filter")
+		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateProduct)
+	case errors.Is(err, errDashboardProductLookup):
+		slog.WarnContext(ctx, "dashboard generate: product lookup failed", "err", err)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateProductLookup, errCodeGenerateProductLookup)
+	case errors.Is(err, errDashboardProject):
+		slog.InfoContext(ctx, "dashboard generate: unusable project filter")
+		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateProject)
+	case errors.Is(err, errDashboardProjectLookup):
+		slog.WarnContext(ctx, "dashboard generate: project lookup failed", "err", err)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateProjectLookup, errCodeGenerateProjectLookup)
+	case errors.Is(err, errDashboardAccount):
+		slog.InfoContext(ctx, "dashboard generate: unusable account filter")
+		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateAccount)
+	case errors.Is(err, errDashboardAccountLookup):
+		slog.WarnContext(ctx, "dashboard generate: account lookup failed", "err", err)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateAccountLookup, errCodeGenerateAccountLookup)
 	case errors.Is(err, errGenerateTruncated):
 		slog.WarnContext(ctx, "dashboard generate: model reply cut off", "err", err)
 		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateTruncated, errCodeGenerateTruncated)

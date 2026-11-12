@@ -110,6 +110,73 @@ const WIDGETS: WidgetShape[] = [
     lands: "list",
   },
   {
+    // A product bar of "open cases by product": the bucket's own filter
+    // (the product's name) under the widget's.
+    name: "open cases of one product",
+    resourceType: "case",
+    filters: { filters: [entry("state", "in", "open"), entry("product", "in", "WSO2 API Manager"), ...caseScope] },
+    lands: "list",
+  },
+  {
+    // "open cases excluding API Manager": the case list's Products filter only
+    // includes products, so the preview page carries the exclusion.
+    name: "open cases excluding one product",
+    resourceType: "case",
+    filters: { filters: [entry("state", "in", "open"), entry("product", "notIn", "WSO2 API Manager"), ...caseScope] },
+    lands: "preview",
+  },
+  {
+    // A version bar of "API Manager cases by version": the case list has no
+    // version filter, so the preview page carries it with the product.
+    name: "cases of one product version",
+    resourceType: "case",
+    filters: {
+      filters: [
+        entry("product", "in", "WSO2 API Manager"),
+        entry("productVersion", "in", "4.3.0", "4.3.1"),
+        ...caseScope,
+      ],
+    },
+    lands: "preview",
+  },
+  {
+    // A project bar of "open cases by project", or "open cases of one project".
+    name: "open cases of one project",
+    resourceType: "case",
+    filters: {
+      filters: [entry("state", "in", "open"), entry("projectId", "in", "6a0e1b52-0000-4000-8000-000000000001"), ...caseScope],
+    },
+    lands: "list",
+  },
+  {
+    name: "cases of two projects",
+    resourceType: "case",
+    filters: {
+      filters: [
+        entry("projectId", "in", "6a0e1b52-0000-4000-8000-000000000001", "6a0e1b52-0000-4000-8000-000000000002"),
+        ...caseScope,
+      ],
+    },
+    lands: "list",
+  },
+  {
+    // The case list's Projects filter only includes projects.
+    name: "cases outside one project",
+    resourceType: "case",
+    filters: { filters: [entry("projectId", "notIn", "6a0e1b52-0000-4000-8000-000000000001"), ...caseScope] },
+    lands: "preview",
+  },
+  {
+    // An account bar of "open cases by account" that does not link to the
+    // account page: the case list has no account filter.
+    name: "open cases of one account",
+    resourceType: "case",
+    filters: {
+      filters: [entry("state", "in", "open"), entry("accountId", "in", "6a0e1b52-0000-4000-8000-0000000000a1"), ...caseScope],
+    },
+    lands: "preview",
+  },
+  {
     name: "SLA violations (breached SLA, still being worked)",
     resourceType: "case",
     filters: {
@@ -408,8 +475,27 @@ describe("translateCaseDashboardFiltersChecked — `lossless`", () => {
     ["entries that are not an array", { filters: "state=open" }],
     ["a state the list's URL reader does not know", { filters: [entry("state", "in", "no-such-state")] }],
     ["a work state without the single in-progress state", { filters: [entry("workState", "in", "paused")] }],
+    ["the states a case entered and when", {
+      filters: [entry("stateEntered", "in", "waiting_on_wso2"), entry("stateEnteredOn", "gte", "__today__")],
+    }],
   ])("is false for %s", (_label, filters) => {
     expect(lossless(filters as Record<string, unknown>)).toBe(false);
+  });
+});
+
+describe("a case widget on the states cases entered", () => {
+  it("opens the preview page with every filter, since the case list has none for them", () => {
+    const filters = {
+      filters: [
+        entry("stateEntered", "in", "waiting_on_wso2"),
+        entry("stateEnteredOn", "gte", "__today__"),
+        entry("state", "in", "waiting_on_wso2"),
+      ],
+    };
+    const href = WIDGET_RESOURCE_CONFIG.case.buildHref(filters, ctx);
+
+    expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
+    expect(parseWidgetPreviewFilters(hrefParams(href)).filters).toEqual(filters);
   });
 });
 
@@ -487,6 +573,24 @@ describe("time card click-throughs", () => {
     const back = parseWidgetPreviewFilters(hrefParams(href)).filters;
     const body = WIDGET_RESOURCE_CONFIG.time_card.buildSearchRequestBody?.({ filters: back, offset: 0, limit: 10 });
     expect(body).toEqual({ filters, pagination: { offset: 0, limit: 10 } });
+  });
+
+  it("a team filter (a team bar, or a user bar within the teams) survives the round trip", () => {
+    for (const filters of [
+      { teamIds: ["391737f4-0588-2f9f-9bdd-b18d39f83d9a"], startDate: "2026-11-01", endDate: "2026-11-30" },
+      {
+        teamIds: ["391737f4-0588-2f9f-9bdd-b18d39f83d9a", "542b0b7d-e52c-b6e9-a210-d06e57990c7d"],
+        userIds: ["5e636a12-0000-4000-8000-000000000001"],
+        states: ["approved"],
+      },
+    ]) {
+      const href = WIDGET_RESOURCE_CONFIG.time_card.buildHref(filters, ctx);
+      const back = parseWidgetPreviewFilters(hrefParams(href)).filters;
+      expect(WIDGET_RESOURCE_CONFIG.time_card.buildSearchRequestBody?.({ filters: back, offset: 0, limit: 10 })).toEqual({
+        filters,
+        pagination: { offset: 0, limit: 10 },
+      });
+    }
   });
 
   it("the tile's own fetch body is unchanged", () => {

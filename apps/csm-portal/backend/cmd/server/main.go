@@ -413,6 +413,17 @@ func main() {
 	// A team named in a generated dashboard's creTeam / sreTeam filter (its
 	// registry key) becomes the team's group id, once, here.
 	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	// A product named in a generated dashboard's product filter ("API
+	// Manager") becomes the product's own name ("WSO2 API Manager"), once,
+	// here: the case search matches product names exactly.
+	dashboardGenerator = handler.WithDashboardProducts(dashboardGenerator, customerEntityClient)
+	// A project named in a generated dashboard's project filter (its key or
+	// name) becomes a projectId filter on the project's id, once, here: the
+	// case search filters projects by id.
+	dashboardGenerator = handler.WithDashboardProjects(dashboardGenerator, customerEntityClient)
+	// Likewise an account (a customer's name or account number) becomes an
+	// accountId filter on the account's id.
+	dashboardGenerator = handler.WithDashboardAccounts(dashboardGenerator, customerEntityClient)
 	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
 		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
 	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())

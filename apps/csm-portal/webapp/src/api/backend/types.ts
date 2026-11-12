@@ -1063,7 +1063,13 @@ export type BeCaseFieldFilterField =
   /** `eq` `"true"`/`"false"`: the case's account has an active escalation.
    * Only the ServiceNow data source can answer it; a Postgres-backed
    * entity-service rejects the request, so the cases list never offers it. */
-  | "accountEscalationActive";
+  | "accountEscalationActive"
+  /** `in` case states: the case's logged state history has a change into one
+   * of them ("moved to Waiting on WSO2"), whatever its state is now. */
+  | "stateEntered"
+  /** `gte` / `lte` one date: when that change was logged. Only with a
+   * `stateEntered`. */
+  | "stateEnteredOn";
 
 /**
  * `op` enum accepted by {@link BeCaseFieldFilter}, independent of `field` —

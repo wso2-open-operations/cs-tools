@@ -3332,6 +3332,14 @@ type ParsedCaseFilters struct {
 	WorkStates      []CaseWorkState
 	AssignedUserIDs []string
 	ProductNames    []string
+	// ProductVersions (productVersion in) keeps the cases whose deployed
+	// product has one of these versions, exactly as product_version records
+	// them ("4.3.0"). Only with ProductNames naming one product.
+	ProductVersions []string
+	// ExcludeProductNames (product notIn) keeps the cases whose deployed
+	// product's name is none of these, including cases without a deployed
+	// product. Inverse of ProductNames.
+	ExcludeProductNames []string
 	// ExcludeStates filters to cases whose state is NOT one of these values
 	// (optional). Inverse of States, and the two are independent: a request may
 	// carry either, both, or neither. Only the backing data source that models
@@ -3428,6 +3436,17 @@ type ParsedCaseFilters struct {
 	// OrGroups: see SearchCasesFilters.AnyOf doc comment. Each entry is one
 	// parsed, ANDed branch; branches are OR'd together by the SN adapter.
 	OrGroups []CaseFilterGroup
+
+	// EnteredStateLabels (stateEntered in) keeps the cases whose logged state
+	// history (work_item_activity "state" rows) has a change INTO one of these
+	// states, whatever the case's state is now, and EnteredStartDate /
+	// EnteredEndDate (stateEnteredOn gte / lte) bound when that change was
+	// logged. Each value is the state's display label, lower-cased, as the
+	// history records it ("waiting on wso2"). A case that entered a state
+	// several times matches once.
+	EnteredStateLabels []string
+	EnteredStartDate   *time.Time
+	EnteredEndDate     *time.Time
 }
 
 // CaseFilterGroup is one ANDed branch of a SearchCasesFilters.AnyOf entry.
@@ -5413,6 +5432,7 @@ type SearchTimeCardsFilters struct {
 	ApproverID   *string         `json:"approverId,omitempty"`   // eligible approver (SN approver_list); their own cards are always excluded server-side
 	ApprovedByID *string         `json:"approvedById,omitempty"` // who actually approved (SN approved_by)
 	UserIDs      []string        `json:"userIds,omitempty"`      // match cards submitted by any of these users (OR semantics)
+	TeamIDs      []string        `json:"teamIds,omitempty"`      // match cards submitted by a current member (team_member) of any of these teams
 	StartDate    *string         `json:"startDate,omitempty"`
 	EndDate      *string         `json:"endDate,omitempty"`
 	States       []TimeCardState `json:"states,omitempty"`
@@ -5454,6 +5474,7 @@ const (
 	TimeCardGroupByUser    = "user"
 	TimeCardGroupByProject = "project"
 	TimeCardGroupByDay     = "day"
+	TimeCardGroupByTeam    = "team"
 )
 
 // Time card aggregate measures (AggregateTimeCardsRequest.Measure): what the
@@ -5477,6 +5498,10 @@ const MaxTimeCardAggregateDays = 31
 // MaxTimeCardAggregateDays (both inclusive), and returns one bucket per day of
 // that window in date order, including days with no cards; MaxGroups and
 // Measure do not apply to it.
+// "team" requires Filters.TeamIDs and returns one bucket per one of those
+// teams (keyed by its id, labelled with its name, a team with no cards at
+// zero): the cards of its current members, so an engineer in two of the teams
+// counts in both, and the totals are the buckets' sums.
 // Every other grouping returns the top MaxGroups buckets (default 10) ranked
 // by Measure ("count", the default, or "minutes"), the rest folded into
 // OthersCount / OthersMinutes.

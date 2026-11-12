@@ -3613,6 +3613,32 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		filterArgs = append(filterArgs, req.Parsed.EndUpdatedDate)
 		argIdx++
 	}
+	// stateEntered / stateEnteredOn: the case's logged state history (the
+	// append-only work_item_activity, one "state" row per change, written by
+	// caseService.UpdateCase under the state's display label) has a change
+	// INTO one of the states, logged in the window. Whatever the case's state
+	// is now, and once however many such changes it has (EXISTS). Served by
+	// idx_work_item_activity_state_entered (migration 0283: the state rows by
+	// LOWER(new_value), created_on), or per case through
+	// idx_work_item_activity_work_item_id when other filters leave few. Top
+	// level only: rejectUnsupportedOrGroupFields refuses both inside an anyOf
+	// branch.
+	if len(req.Parsed.EnteredStateLabels) > 0 {
+		pred := fmt.Sprintf("EXISTS (SELECT 1 FROM work_item_activity sa WHERE sa.work_item_id = wi.id AND sa.field_name = 'state' AND LOWER(sa.new_value) = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.EnteredStateLabels)
+		argIdx++
+		if req.Parsed.EnteredStartDate != nil {
+			pred += fmt.Sprintf(" AND sa.created_on >= $%d", argIdx)
+			filterArgs = append(filterArgs, req.Parsed.EnteredStartDate)
+			argIdx++
+		}
+		if req.Parsed.EnteredEndDate != nil {
+			pred += fmt.Sprintf(" AND sa.created_on <= $%d", argIdx)
+			filterArgs = append(filterArgs, req.Parsed.EnteredEndDate)
+			argIdx++
+		}
+		where += " AND " + pred + ")"
+	}
 
 	// projectOnboardingStatus: the parent project's onboarding_status (p is
 	// the LEFT JOIN below). A case whose project has no status set (NULL)
@@ -3685,6 +3711,22 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	if len(req.Parsed.ProductNames) > 0 {
 		where += fmt.Sprintf(" AND prod.name = ANY($%d::text[])", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ProductNames)
+		argIdx++
+	}
+	// product notIn: a case without a deployed product (prod.name NULL) has
+	// none of the named products, so it is kept, as for projectId notIn.
+	if len(req.Parsed.ExcludeProductNames) > 0 {
+		where += fmt.Sprintf(" AND (prod.name IS NULL OR prod.name <> ALL($%d::text[]))", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.ExcludeProductNames)
+		argIdx++
+	}
+	// productVersion: the deployed product's version (pv is the LEFT JOIN
+	// below), exact match against the version the case detail shows beside
+	// the product name. The parser allows it only beside a product filter
+	// naming one product.
+	if len(req.Parsed.ProductVersions) > 0 {
+		where += fmt.Sprintf(" AND pv.version = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.ProductVersions)
 		argIdx++
 	}
 
@@ -5339,6 +5381,17 @@ var caseAggregateColumns = map[string]struct{ key, label string }{
 	"issueType":      {"c.issue_type::TEXT", "c.issue_type::TEXT"},
 	"workState":      {caseLikeWorkStateColumn, caseLikeWorkStateColumn},
 	"account":        {"wi.account_id::TEXT", "a.name"},
+	// product: the deployed product's catalog name, as the product filter
+	// matches it, so a bucket's count is that filter's total. Products that
+	// share a name are one bucket, as the filter matches them all.
+	"product": {"prod.name", "prod.name"},
+	// productVersion: the deployed product's version, as the productVersion
+	// filter matches it. Only within one product (caseService.AggregateCases),
+	// as a version is shared by several products.
+	"productVersion": {"pv.version", "pv.version"},
+	// project: keyed on the project's id, as the projectId filter takes it,
+	// and labelled with its name, else its key (the name is optional).
+	"project": {"wi.project_id::TEXT", "COALESCE(NULLIF(p.name, ''), p.key)"},
 }
 
 // AggregateCases implements CaseRepository. It shares buildCaseSearchWhere with
@@ -5375,7 +5428,7 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 			return nil, fmt.Errorf("scan case bucket: %w", err)
 		}
 		k, l := aggregateBucketKey(groupBy, key), stringOrEmpty(label)
-		if l == "" || groupBy != "account" {
+		if l == "" || (groupBy != "account" && groupBy != "project") {
 			l = k
 		}
 		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: l, Count: count})
@@ -5388,10 +5441,12 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 
 // aggregateBucketKey converts a stored enum label to the domain value the
 // case search contract uses (lower-case, severity via caseSeverityFromEnum);
-// account keys are UUIDs and pass through.
+// account and project keys (UUIDs), product keys (names, as the product
+// filter takes them) and product version keys (as the productVersion filter
+// takes them) pass through.
 func aggregateBucketKey(groupBy, raw string) string {
 	switch groupBy {
-	case "account":
+	case "account", "project", "product", "productVersion":
 		return raw
 	case "severity":
 		if v, ok := caseSeverityFromEnum[raw]; ok {

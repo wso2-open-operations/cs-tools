@@ -679,10 +679,13 @@ A failed `POST /dashboards/generate` turn keeps the draft and answers in the cha
 `generateErrorMessage` (`features/csm-custom-dashboards/utils`), which says what actually went wrong and
 never that the user's input did not work when the failure was elsewhere:
 
-- **A 422 is the request itself not working** (the model declining it, a refusal, or a team it cannot
-  filter by): "The dashboard cannot be generated from the input." ("This dashboard cannot be modified
-  with your input." with a draft on screen), not the backend's sentence (the model's reason stays in the
-  backend's response and logs).
+- **A 422 is the request itself not working** (the model declining it, a refusal, or a team, product,
+  project or account it cannot filter by): "The dashboard cannot be generated from the input." ("This
+  dashboard cannot be modified with your input." with a draft on screen), then, on the next line, the
+  backend's reason when the body's `errorCode` starts with `generate_` and it has a `message` (the
+  model's own sentence, e.g. "Revenue isn't part of the case data. Try open cases by account instead.",
+  or the backend's, e.g. `"Quartz" matches several projects (...); name the one you mean.`). The chat
+  bubble is `pre-wrap`, so the line break shows. Without one, the lead line alone.
 - **The backend's own message** (its JSON body's `message`, `BackendApiError.payload.message`), only
   when the body's `errorCode` starts with `generate_` (the backend puts one on every generate failure it
   words; a proxy or gateway can answer JSON with a `message` of its own, which is never shown), for 400
@@ -859,8 +862,9 @@ Four of the five shapes do the same thing — issue that `resourceType`'s own `P
 
 **A tile and the list it opens must show the same records.** The tile counts with the widget's own filters; the list is rebuilt from the URL `buildHref` writes, and a filter the URL scheme or the list has no place for used to vanish without a trace, so the list held more than the tile counted (reported live: an "SLA violations" tile reading 739 opened a list of 836). The rule now is lossless-or-preview:
 
-- Case-family widgets: `translateCaseDashboardFiltersChecked(filters)` returns the `CasesFilters` it could build and `lossless`. `lossless` is false when any entry of the widget's `filters.filters` was not taken (a field with no `CasesFilters` home such as `accountEscalationActive`, a second `in` entry on one field, a bound given twice, an unknown severity), when another top-level key (an `anyOf` OR group, a flat legacy key) holds a value, or when the filters do not come back unchanged from `readCasesFiltersFromUrl(writeCasesFiltersToUrl(...))` (a state the list's URL reader does not know, a work state without the single in-progress state it needs). `caseFamilyBuildHref` then opens the generic preview page (`/dashboard/preview/...`), which sends the widget's own filters to the search endpoint verbatim, and `DashboardWidgetPreviewPage` skips the editable `CasesFilterBar` for the same widget. Never add a translation that quietly drops a predicate: add the field to the translator AND to the list (`CasesFilters`, or a row in `advancedFilters.ts`'s catalogue, which is what `slaBreached` and `resolvedOn` do) or leave it untranslated so the click goes to the preview page.
+- Case-family widgets: `translateCaseDashboardFiltersChecked(filters)` returns the `CasesFilters` it could build and `lossless`. `lossless` is false when any entry of the widget's `filters.filters` was not taken (a field with no `CasesFilters` home such as `accountEscalationActive` or `stateEntered` / `stateEnteredOn`, a second `in` entry on one field, a bound given twice, an unknown severity), when another top-level key (an `anyOf` OR group, a flat legacy key) holds a value, or when the filters do not come back unchanged from `readCasesFiltersFromUrl(writeCasesFiltersToUrl(...))` (a state the list's URL reader does not know, a work state without the single in-progress state it needs). `caseFamilyBuildHref` then opens the generic preview page (`/dashboard/preview/...`), which sends the widget's own filters to the search endpoint verbatim, and `DashboardWidgetPreviewPage` skips the editable `CasesFilterBar` for the same widget. Never add a translation that quietly drops a predicate: add the field to the translator AND to the list (`CasesFilters`, or a row in `advancedFilters.ts`'s catalogue, which is what `slaBreached` and `resolvedOn` do) or leave it untranslated so the click goes to the preview page.
 - Several `notIn` entries on one field are one exclusion (`tag notIn [patch]` plus `tag notIn [s_dip]` means neither); the translator and `buildWidgetPreviewHref` merge them. Repeated `in` entries are an intersection and cannot be merged, hence the fallback.
+- A case-family `groupBy` bar opens its bucket by the field the case search takes for it: an `account` or `project` bucket's key is an id, so `bucketQuery` (`useWidgetGroupByData.ts`, `CASE_GROUP_BY_FILTER_FIELD`) filters `accountId` / `projectId`, not the groupBy field (the search has no `account` filter: such a bar used to open a list that failed to load). The translator takes `projectId in` into the list's Projects filter, so a project bar or a generated project tile opens the cases list; `projectId notIn`, `accountId` and `product notIn` have no list home and open the preview page. An announcement tile is the exception: `/announcements` holds no filters, so its `projectId` tile opens the preview page too.
 - `incident`, `change_request` and `problem` lists read only a few named filters from their URL (`INCIDENT_LIST_FILTER_KEYS`, `CHANGE_REQUEST_LIST_FILTER_KEYS`, none for problems); any other filter value sends the click to the preview page via `hasFiltersBeyond`. `buildHref`'s `ctx` (widget id and name) is what the preview link needs, so every caller passes it; without one the link gets a generic title instead of a dead end.
 - `reopened` is a real case state (cases carried over from the previous system hold it and the tiles count them), so it is in `PRIMARY_STATES` and the URL reader, not only a `nextStates` marker.
 - `widgetResourceConfig.clickThrough.test.ts` holds one fixture per widget shape of a real overview dashboard and asserts, for each, that the list sends the widget's own request or the click opens the preview page with every filter intact. Add a fixture there when a dashboard grows a new filter shape.
@@ -938,7 +942,7 @@ everything past the cap rolls into a response `othersCount`).
   override, not something a widget's config can opt back into. `shape: "pie"` is unaffected and still
   honors `groupBy.hideOthers` as configured.
 - **Time card totals (`groupBy.measure`, `time_card` only).** A `time_card` widget groups through
-  `POST /time-cards/aggregate` (its `groupByEndpoint`) by `state`, `user`, `project` or `day`. With
+  `POST /time-cards/aggregate` (its `groupByEndpoint`) by `state`, `user`, `project`, `day` or `team`. With
   `groupBy.measure: "hours"`, `useWidgetGroupByData` sends `measure: "minutes"` and each slice's
   `value` is the bucket's `totalMinutes / 60`, with Others from `othersMinutes`. With `"count"` it sends
   `measure: "count"`, and with no measure it sends none; both show card counts. Every other widget's
@@ -951,8 +955,16 @@ everything past the cap rolls into a response `othersCount`).
   legend, centre total, and the legend's accessible name in place of "N cases"), and uses it for the
   title's total badge. Without a `formatValue` both charts render exactly as before. A bucket's
   click-through (`bucketQuery`) opens the time card preview list filtered the way the time card search
-  takes it: `states`, `userIds` or `projectIds` as one-item lists, and a day as `startDate` = `endDate` =
-  that day (it wins over the widget's own window when merged). The route is CS engineer and admin
+  takes it: `states`, `userIds`, `projectIds` or `teamIds` as one-item lists, and a day as `startDate` =
+  `endDate` = that day (it wins over the widget's own window when merged). A user bar keeps the widget's
+  own `teamIds`, so it opens that engineer's cards within the teams. **Teams:** a time card widget's flat
+  `teamIds` (Team Schedule team ids: a CRE team's CRE group id, an SRE team's SRE group id) is sent as
+  it is; its `__current_team__` is resolved by `resolveTeamPlaceholder`
+  (`resolveTimeCardTeamIdsPlaceholder`) from `selectedTeamCreGroupId`, or `selectedTeamSreGroupId` when
+  that is empty (an SRE dashboard). Unlike the other team filters, "All ABTs" expands it to every team of the
+  family (a `team` grouping then shows one bar per ABT) instead of dropping it; with no team at all it becomes
+  `NO_TEAM_ID` (a nil UUID no team has), so the tile is empty rather than showing every engineer's
+  cards as the team's (and a `team` grouping gets no bars rather than a 400). The route is CS engineer and admin
   only (`PermViewTimeCardTotals`), so for any other role (time card approver and viewer included) the
   backend answers 403, `useWidgetGroupByData` reports it as `isForbidden`, and the tile says "You don't
   have access to time card totals." in place of the chart, not the error. Any other failure is still
