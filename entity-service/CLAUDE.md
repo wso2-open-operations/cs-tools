@@ -1079,9 +1079,10 @@ reopen logs a WARN at every start as the reminder.
   `acp_reopen_rules.go`; `testdata/acp_rules_parity.json` holds the cases both copies must agree on
   (`TestACPRulesParity` here, ACP's parity tests over the same file), since a disagreement makes ACP
   suspend a project every day and this check reopen it:
-  - end-date track: the Salesforce project end date is set and in the future (`acpDaysBetween > 0`;
-    ACP suspends at 0 or less);
-  - invoice track: no counted invoice is past its suspend date. Counted = opportunity stage
+  - end-date track: the Salesforce project end date is set and not yet past (`acpDaysBetween >= 0`;
+    ACP suspends only once the date is past, `acpDaysBetween < 0`, so a project renewed to an end date
+    of today reopens and is not suspended again);
+  - invoice track: no counted invoice is past its suspend date (`acpDaysBetween(suspend date) >= 0`, same boundary). Counted = opportunity stage
     "50 - Closed Won" with a EULA that is present and not "Customer contract" (an empty EULA text
     counts, as in ACP); invoice unpaid, has a due date, not PP/CO/TAM, not "Auto Created PS", not due
     before the project start. The earliest due one decides; its suspend date is the due date, or with
