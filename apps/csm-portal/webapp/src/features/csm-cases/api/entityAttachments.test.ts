@@ -1137,7 +1137,7 @@ describe("direct transfers of large files", () => {
     });
 
     describe("into a picked file", () => {
-      const SIZE = DOWNLOAD_RANGE_BYTES * 2 + 5; // above the 15 MiB that skips the dialog
+      const SIZE = DOWNLOAD_RANGE_BYTES * 2 + 5; // above the 16 MiB that skips the dialog
       const LINK = "https://blob.example/x?sig=";
       const writable = { write: vi.fn(async () => undefined), close: vi.fn(async () => undefined), abort: vi.fn(async () => undefined) };
       const picker = vi.fn(async (_options?: unknown) => ({ createWritable: async () => writable }));
