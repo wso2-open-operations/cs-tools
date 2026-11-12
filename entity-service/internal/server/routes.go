@@ -762,7 +762,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		uploadCleanup := service.WithFileStore(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc), attachmentStore)
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
 			WithFiles(attachmentFiles).
-			WithUploadCleanup(uploadCleanup)
+			WithUploadCleanup(uploadCleanup).
+			WithRetention(service.NewAttachmentRetentionService(storedAttachmentRepo, accessSvc, attachmentStore))
 	}
 
 	// The portal-driven membership writes. Gated on a pool AND
@@ -2070,6 +2071,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
 		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
 		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
+		mux.HandleFunc("POST /attachments/retention/expire", storedAttachmentHandler.ExpireClosedAttachments)
 		// The files themselves: this service is the only one that reads or writes
 		// Azure Blob Storage. The portal backends forward a browser's bytes here and
 		// stream the answer back; the notification service reads an email's images.

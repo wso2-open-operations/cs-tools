@@ -780,7 +780,7 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 	}
 
 	switch row.Status {
-	case "DELETED":
+	case "DELETED", "EXPIRED":
 		// A delete that is repeated (a retry after a timeout) answers the same.
 		return domain.DeletedStoredAttachment{}, nil
 	case "COMPLETE":

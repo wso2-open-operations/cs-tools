@@ -1688,6 +1688,16 @@ type AttachmentUploadCleanupService interface {
 	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
 }
 
+// AttachmentRetentionService removes the files of work items that have been closed
+// for a long time.
+type AttachmentRetentionService interface {
+	// ExpireClosedWorkItemFiles removes from storage the files of work item
+	// attachments whose work item has been closed for req.ClosedForDays, and marks
+	// each row EXPIRED. At most a bounded number per call. Internal callers only
+	// (a ForbiddenError otherwise).
+	ExpireClosedWorkItemFiles(ctx context.Context, req domain.ExpireAttachmentsRequest) (domain.ExpireAttachmentsResult, error)
+}
+
 // ReportDraftLinker attaches the files a record's creator uploaded BEFORE the record
 // existed (draft work item attachments, migration 0280) to the record being created.
 // storedAttachmentService implements it beside InlineImageLinker; the case service
