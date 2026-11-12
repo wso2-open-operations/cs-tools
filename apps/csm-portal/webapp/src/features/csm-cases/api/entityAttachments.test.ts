@@ -917,7 +917,7 @@ describe("direct transfers of large files", () => {
   });
 
   it("sends each chunk to its own signed link without the session's token, then confirms", async () => {
-    const fetchMock = vi.fn(okResponse);
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => okResponse());
     vi.stubGlobal("fetch", fetchMock);
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
     const postEmpty = vi.fn().mockResolvedValue(linksFor(3));
@@ -1057,10 +1057,11 @@ describe("direct transfers of large files", () => {
         id: ID,
         name: "big.bin",
         size: DIRECT_TRANSFER_MIN_BYTES + 1,
+        directAboveBytes: DIRECT_TRANSFER_MIN_BYTES,
         onSaved,
       });
       expect(done).toBe(true);
-      expect(postEmpty).toHaveBeenCalledWith(`/attachments/${ID}/download-links?type=work_item`);
+      expect(postEmpty).toHaveBeenCalledWith(`/attachments/${ID}/download-links?type=work_item`, { signal: undefined });
       // The link is checked with a one-byte read before the browser is handed it.
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0][0]).toBe("https://blob.example/x?sig=s");
@@ -1082,7 +1083,7 @@ describe("direct transfers of large files", () => {
         const save = vi.fn();
         const done = await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
+          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
           save,
         );
         expect(done).toBe(true);
@@ -1105,7 +1106,7 @@ describe("direct transfers of large files", () => {
         const getResponse = vi.fn().mockResolvedValue(body());
         const done = await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1 },
+          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
           vi.fn(),
         );
         expect(done).toBe(true);
@@ -1114,16 +1115,144 @@ describe("direct transfers of large files", () => {
       expect(clicked).not.toHaveBeenCalled();
     });
 
-    it("does not ask for a link for a small file, or when the size is not known", async () => {
+    it("goes direct only above the server's size, never when it is 0 or the size is unknown", async () => {
       click();
-      for (const size of [DIRECT_TRANSFER_MIN_BYTES, undefined]) {
+      const cases = [
+        { size: DIRECT_TRANSFER_MIN_BYTES, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
+        { size: DIRECT_TRANSFER_MIN_BYTES + 1, directAboveBytes: 0 },
+        { size: undefined, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
+      ];
+      for (const { size, directAboveBytes } of cases) {
         const postEmpty = vi.fn();
         const getResponse = vi.fn().mockResolvedValue(
           new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } }),
         );
-        await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), { type: "work_item", id: ID, size }, vi.fn());
+        await downloadEntityAttachment(
+          apiFor({ postEmpty, getResponse }),
+          { type: "work_item", id: ID, size, directAboveBytes },
+          vi.fn(),
+        );
         expect(postEmpty).not.toHaveBeenCalled();
       }
+    });
+
+    describe("into a picked file", () => {
+      const SIZE = DOWNLOAD_RANGE_BYTES * 2 + 5; // above the 15 MiB that skips the dialog
+      const LINK = "https://blob.example/x?sig=";
+      const writable = { write: vi.fn(async () => undefined), close: vi.fn(async () => undefined), abort: vi.fn(async () => undefined) };
+      const picker = vi.fn(async (_options?: unknown) => ({ createWritable: async () => writable }));
+      const dlArgs = (over: Record<string, unknown> = {}) => ({
+        type: "work_item" as const,
+        id: ID,
+        name: "big.bin",
+        size: SIZE,
+        directAboveBytes: DIRECT_TRANSFER_MIN_BYTES,
+        ...over,
+      });
+      const backendBody = () =>
+        new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } });
+      /** Serves ranges of a SIZE-byte file; `refuse` decides a response status per call. */
+      const linkFetch = (refuse: (url: string, call: number) => number = () => 0) => {
+        let call = 0;
+        return vi.fn(async (url: string, init?: RequestInit) => {
+          const status = refuse(url, call++);
+          if (status) return new Response("<Error/>", { status });
+          const [, a, b] = /bytes=(\d+)-(\d+)/.exec((init?.headers as Record<string, string>).Range)!;
+          const end = Math.min(Number(b), SIZE - 1);
+          return new Response(new Uint8Array(end - Number(a) + 1), {
+            status: 206,
+            headers: { "Content-Range": `bytes ${a}-${end}/${SIZE}` },
+          });
+        });
+      };
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+        (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = picker;
+      });
+      afterEach(() => {
+        delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+      });
+
+      it("opens the picker before the link request and reads the ranges from the link with no Authorization header", async () => {
+        const fetchMock = linkFetch();
+        vi.stubGlobal("fetch", fetchMock);
+        const postEmpty = vi.fn().mockResolvedValue({ url: `${LINK}1` });
+        const getResponse = vi.fn();
+        const onSaved = vi.fn();
+        const onProgress = vi.fn();
+        expect(
+          await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ onSaved, onProgress }), vi.fn()),
+        ).toBe(true);
+        expect(picker.mock.invocationCallOrder[0]).toBeLessThan(postEmpty.mock.invocationCallOrder[0]);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        for (const call of fetchMock.mock.calls) {
+          expect(call[0]).toBe(`${LINK}1`);
+          expect(Object.keys(call[1]!.headers as object)).toEqual(["Range"]);
+        }
+        expect(getResponse).not.toHaveBeenCalled();
+        expect(writable.write).toHaveBeenCalledTimes(3);
+        expect(writable.close).toHaveBeenCalledTimes(1);
+        expect(onProgress).toHaveBeenLastCalledWith(SIZE, SIZE);
+        expect(onSaved).toHaveBeenCalledExactlyOnceWith("saved");
+      });
+
+      it("asks for a fresh link when the link is refused as expired, and carries on", async () => {
+        const fetchMock = linkFetch((url) => (url === `${LINK}1` ? 403 : 0));
+        vi.stubGlobal("fetch", fetchMock);
+        const postEmpty = vi.fn().mockResolvedValueOnce({ url: `${LINK}1` }).mockResolvedValue({ url: `${LINK}2` });
+        const getResponse = vi.fn();
+        expect(await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs(), vi.fn())).toBe(true);
+        expect(postEmpty).toHaveBeenCalledTimes(2);
+        expect(getResponse).not.toHaveBeenCalled();
+        expect(writable.close).toHaveBeenCalledTimes(1);
+      });
+
+      it("falls back to the backend, into the same file, when the direct download fails", async () => {
+        const onSaved = vi.fn();
+        const refusals = [
+          { fetch: linkFetch(() => 403), postEmpty: vi.fn().mockResolvedValue({ url: `${LINK}1` }) }, // refreshes run out
+          { fetch: vi.fn(() => Promise.reject(new TypeError("blocked by CORS"))), postEmpty: vi.fn().mockResolvedValue({ url: `${LINK}1` }) },
+          { fetch: linkFetch(), postEmpty: vi.fn().mockResolvedValue(null) }, // no link
+        ];
+        for (const { fetch: fetchMock, postEmpty } of refusals) {
+          vi.stubGlobal("fetch", fetchMock);
+          const getResponse = vi.fn().mockResolvedValue(backendBody());
+          await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ onSaved }), vi.fn());
+          expect(getResponse).toHaveBeenCalledTimes(1);
+          expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
+        }
+        expect(picker).toHaveBeenCalledTimes(3);
+        expect(writable.abort).not.toHaveBeenCalled();
+        expect(onSaved).toHaveBeenCalledTimes(3);
+      });
+
+      it("stays a cancel, with no fallback, when the download is cancelled", async () => {
+        const controller = new AbortController();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(() => {
+            controller.abort();
+            return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }),
+        );
+        const postEmpty = vi.fn().mockResolvedValue({ url: `${LINK}1` });
+        const getResponse = vi.fn();
+        const onSaved = vi.fn();
+        await expect(
+          downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ signal: controller.signal, onSaved }), vi.fn()),
+        ).rejects.toSatisfy(isDownloadAbort);
+        expect(getResponse).not.toHaveBeenCalled();
+        expect(writable.abort).toHaveBeenCalled();
+        expect(onSaved).not.toHaveBeenCalled();
+      });
+
+      it("makes no request when the picker is closed", async () => {
+        picker.mockRejectedValueOnce(new DOMException("Closed.", "AbortError"));
+        const postEmpty = vi.fn();
+        expect(await downloadEntityAttachment(apiFor({ postEmpty }), dlArgs(), vi.fn())).toBe(true);
+        expect(postEmpty).not.toHaveBeenCalled();
+      });
     });
   });
 });

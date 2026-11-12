@@ -1437,8 +1437,8 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	}
 
 	clear()
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
-		t.Errorf("defaults = %v, want 10 / 1 MiB", g)
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
+		t.Errorf("defaults = %v, want 16 / 1 MiB", g)
 	}
 
 	// The megabyte settings: a whole number or a decimal.
@@ -1469,7 +1469,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "1048576")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
 	}
 
@@ -1478,7 +1478,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "100.5")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "26")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("above the ceiling = %v, want the defaults", g)
 	}
 	t.Setenv("ATTACHMENT_MAX_MB", "100")
@@ -1489,7 +1489,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_BYTES", "209715200")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "52428800")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("bytes above the ceiling = %v, want the defaults", g)
 	}
 
@@ -1497,7 +1497,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "-5")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("bad values did not fall back to the defaults: %v", g)
 	}
 }
@@ -1592,23 +1592,36 @@ func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
 }
 
 // TestLoad_AttachmentDirectTransfers: off unless asked for, and the size above
-// which a file goes direct is 8 MiB unless set.
+// which a file goes direct is 16 MiB unless set.
 func TestLoad_AttachmentDirectTransfers(t *testing.T) {
 	cfg := Load()
-	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 8<<20 {
-		t.Errorf("defaults = %v, %d; want off and 8 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 16<<20 {
+		t.Errorf("defaults = %v, %d; want off and 16 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
 	}
 	t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", " TRUE ")
-	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "16")
+	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "12")
 	cfg = Load()
-	if !cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 16<<20 {
-		t.Errorf("set = %v, %d; want on and 16 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	if !cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 12<<20 {
+		t.Errorf("set = %v, %d; want on and 12 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
 	}
 	t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "yes")
 	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "not a number")
 	cfg = Load()
-	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 8<<20 {
-		t.Errorf("bad values = %v, %d; want off and the 8 MiB default", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 16<<20 {
+		t.Errorf("bad values = %v, %d; want off and the 16 MiB default", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+}
+
+// TestLoad_AttachmentDirectAboveFollowsLowerPortalCap: unset, the direct-transfer
+// size is the lower of 16 MiB and the portal cap; an explicit value is kept.
+func TestLoad_AttachmentDirectAboveFollowsLowerPortalCap(t *testing.T) {
+	t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "8")
+	if got := Load().AttachmentDirectMinBytes; got != 8<<20 {
+		t.Errorf("default with an 8 MiB portal cap = %d, want 8 MiB", got)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "12")
+	if got := Load().AttachmentDirectMinBytes; got != 12<<20 {
+		t.Errorf("explicit = %d, want 12 MiB", got)
 	}
 }
 

@@ -67,13 +67,13 @@ func TestWarnAttachmentSizeSettings(t *testing.T) {
 		warnAttachmentSizeSettings(&config.Config{AttachmentMaxBytes: max * mib, AttachmentDirectMinBytes: above * mib, AttachmentDirectMaxBytes: directMax * mib})
 		return buf.String()
 	}
-	if got := warned(10, 8, 1024); got != "" {
+	if got := warned(16, 16, 1024); got != "" {
 		t.Errorf("defaults warned: %s", got)
 	}
-	if got := warned(5, 8, 1024); !strings.Contains(got, "ATTACHMENT_VIA_PORTAL_MAX_MB and ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB") {
+	if got := warned(10, 16, 1024); !strings.Contains(got, "ATTACHMENT_VIA_PORTAL_MAX_MB and ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB") {
 		t.Errorf("no warning for a size gap: %q", got)
 	}
-	if got := warned(10, 8, 10); !strings.Contains(got, "does not raise the limit for large files") {
+	if got := warned(16, 16, 16); !strings.Contains(got, "does not raise the limit for large files") {
 		t.Errorf("no warning for an ignored direct maximum: %q", got)
 	}
 }
