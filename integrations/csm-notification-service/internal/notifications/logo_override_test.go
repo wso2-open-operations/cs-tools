@@ -113,13 +113,25 @@ func TestSetTemplateCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
 	if !strings.Contains(projectContactRegisteredTemplate, "Cheers!<br>The Acme Team") {
 		t.Errorf("Cheers signoff not replaced")
 	}
-	// Must not touch the logo alt text, copyright line, or "... Support" titles —
-	// only the disclaimer/signoff phrases above.
+	// Note: every template's raw file also carries an Apache license header
+	// ("Copyright (c) 2026 WSO2 LLC. ...") as a leading HTML comment, which
+	// also contains the literal text "WSO2 LLC" — unrelated to the footer
+	// copyright line and never touched by SetTemplateCompanyName. So these
+	// checks assert the specific footer phrase, not a blanket absence of
+	// "WSO2 LLC" anywhere in the template.
+	if !strings.Contains(projectContactRegisteredTemplate, "&copy; 2026 Acme LLC. All rights reserved.") {
+		t.Errorf("copyright line not replaced in projectContactRegisteredTemplate")
+	}
+	if !strings.Contains(casePagingTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All rights reserved.") {
+		t.Errorf("copyright line (YEAR-placeholder variant) not replaced in casePagingTemplate")
+	}
+	if !strings.Contains(outageNotificationTemplate, "&copy; <!-- [YEAR] --> Acme LLC. All Rights Reserved.") {
+		t.Errorf("copyright line (capitalized variant) not replaced in outageNotificationTemplate")
+	}
+	// Must not touch the logo alt text or "... Support" titles — only the
+	// disclaimer/signoff/copyright phrases above.
 	if !strings.Contains(projectContactRegisteredTemplate, `alt="WSO2"`) {
 		t.Errorf("unrelated bare \"WSO2\" occurrence (logo alt text) must be left untouched")
-	}
-	if !strings.Contains(projectContactRegisteredTemplate, "WSO2 LLC. All rights reserved.") {
-		t.Errorf("unrelated bare \"WSO2\" occurrence (copyright line) must be left untouched")
 	}
 }
 

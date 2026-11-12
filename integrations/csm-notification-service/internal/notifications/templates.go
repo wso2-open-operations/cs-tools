@@ -197,10 +197,9 @@ func CompanyName() string {
 // companyNamePhrases lists every fixed phrase (not a bare "WSO2") that
 // carries the company name in a template body — never a bare "WSO2", since
 // that also appears in places this config must not touch: the logo alt
-// text, "WSO2 LLC" copyright lines, and "WSO2 Support"/"WSO2 Support
-// Portal" titles and headings.
-func companyNamePhrases(from, to string) [4][2]string {
-	return [4][2]string{
+// text and "WSO2 Support"/"WSO2 Support Portal" titles and headings.
+func companyNamePhrases(from, to string) [][2]string {
+	return [][2]string{
 		{
 			fmt.Sprintf("This message was sent by %s's support system.", from),
 			fmt.Sprintf("This message was sent by %s's support system.", to),
@@ -217,6 +216,18 @@ func companyNamePhrases(from, to string) [4][2]string {
 			fmt.Sprintf("Best Regards,<br>%s Team", from),
 			fmt.Sprintf("Best Regards,<br>%s Team", to),
 		},
+		{
+			fmt.Sprintf("&copy; 2026 %s LLC. All rights reserved.", from),
+			fmt.Sprintf("&copy; 2026 %s LLC. All rights reserved.", to),
+		},
+		{
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All rights reserved.", from),
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All rights reserved.", to),
+		},
+		{
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", from),
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", to),
+		},
 	}
 }
 
@@ -230,14 +241,15 @@ func companyNameTemplates() []*string {
 		&slaBreachAssigneeTemplate, &statusChangedTemplate,
 		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
 		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
+		&casePagingTemplate, &outageNotificationTemplate, &outageCommunicationTemplate,
 	}
 }
 
 // SetTemplateCompanyName replaces the company name in the handful of fixed
 // phrases every template body carries (the "sent by ... support system"
-// footer disclaimer and the "... Team" signoff) — not the bare word "WSO2"
-// wherever it appears, which would also corrupt the logo alt text, "WSO2
-// LLC" copyright lines, and "WSO2 Support"/"WSO2 Support Portal" titles.
+// footer disclaimer, the "... Team" signoff, and the "... LLC" copyright
+// line) — not the bare word "WSO2" wherever it appears, which would also
+// corrupt the logo alt text and "WSO2 Support"/"WSO2 Support Portal" titles.
 // An empty value keeps the current name. It rewrites the already-baked
 // templates and updates CompanyName's return value, so call it once at
 // startup, before any email is rendered.
