@@ -30,7 +30,7 @@ export function useDownloadDeploymentAttachment(): (
   attachment: DeploymentAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
-  const { directTransferAboveBytes } = useAttachmentLimits();
+  const { directTransferThresholdBytes } = useAttachmentLimits();
 
   return useCallback(
     async (attachment: DeploymentAttachment): Promise<void> => {
@@ -42,9 +42,9 @@ export function useDownloadDeploymentAttachment(): (
         id: attachment.id,
         name: attachment.name,
         size: attachment.sizeBytes,
-        directAboveBytes: directTransferAboveBytes,
+        directTransferThresholdBytes: directTransferThresholdBytes,
       });
     },
-    [api, directTransferAboveBytes],
+    [api, directTransferThresholdBytes],
   );
 }

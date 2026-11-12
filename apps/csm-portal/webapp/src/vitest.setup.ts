@@ -32,5 +32,5 @@ window.config = {
 // this module itself; the hook's own test calls `vi.unmock` to use the real one.
 vi.mock("@api/useGetAttachmentLimits", () => ({
   useGetAttachmentLimits: () => ({ data: undefined }),
-  useAttachmentLimits: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesBytes: 1024 * 1024, directTransferAboveBytes: 0 }),
+  useAttachmentLimits: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesBytes: 1024 * 1024, directTransferThresholdBytes: 0 }),
 }));

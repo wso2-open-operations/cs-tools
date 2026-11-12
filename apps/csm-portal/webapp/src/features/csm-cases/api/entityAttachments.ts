@@ -201,6 +201,9 @@ interface RangeRead {
   parts: Uint8Array[];
 }
 
+/** A server answered a range request with the whole file (200), so ranges cannot be read side by side. */
+class RangeIgnoredError extends Error {}
+
 /** Requests one `Range` header value (`bytes=a-b`); throws a {@link BackendApiError} for a refusal. */
 type RangeFetcher = (range: string, signal?: AbortSignal) => Promise<Response>;
 
@@ -232,7 +235,7 @@ async function readRange(
     } catch (err) {
       // A cancelled download is not tried again; neither is a refusal from the backend.
       if (signal?.aborted || isDownloadAbort(err)) throw downloadCancelledError();
-      if (err instanceof BackendApiError) throw err;
+      if (err instanceof BackendApiError || err instanceof RangeIgnoredError) throw err;
     }
     if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) throw new Error(DOWNLOAD_INTERRUPTED_MESSAGE);
   }
@@ -340,7 +343,7 @@ async function readUntilEnd(
  */
 async function readAndStore(
   fetchRange: RangeFetcher,
-  args: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal; parallelFromStart?: boolean },
+  args: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
@@ -348,33 +351,43 @@ async function readAndStore(
   const ranges: Uint8Array[][] = [];
   let received = 0;
 
+  let suggestedName: string | undefined;
+
   // Reads the ranges from `firstIndex` to the end, `downloadParallelism()` at a time.
-  const readRangesFrom = async (firstIndex: number, total: number): Promise<void> => {
+  // The first failure stops the ranges still running and is the one thrown.
+  const readRangesFrom = async (firstIndex: number, total: number, read: RangeFetcher = fetchRange): Promise<void> => {
     const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
     let next = firstIndex;
     let failure: { error: unknown } | undefined;
+    const stop = new AbortController();
+    const stopOnCancel = (): void => stop.abort();
+    if (args.signal?.aborted) stop.abort();
+    args.signal?.addEventListener("abort", stopOnCancel, { once: true });
     const worker = async (): Promise<void> => {
       while (failure === undefined && next < count) {
         const index = next++;
         const start = index * DOWNLOAD_RANGE_BYTES;
         const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
         try {
-          const { parts } = await readRange(fetchRange, start, end, ({ response, parts }) => {
+          const { parts } = await readRange(read, start, end, ({ response, parts }) => {
             if (response.status !== 206 || partsLength(parts) !== end - start + 1) return false;
+            suggestedName ??= fileNameFromDisposition(response.headers);
             const range = parseContentRange(response.headers);
             // With Content-Range hidden the length and the 206 are all there is to check.
             return range === null || (range.start === start && range.end === end && range.total === total);
-          }, args.signal);
+          }, stop.signal);
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
           received += end - start + 1;
           args.onProgress?.(received, total);
         } catch (error) {
           failure ??= { error };
+          stop.abort();
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(downloadParallelism(), count - firstIndex) }, worker));
+    args.signal?.removeEventListener("abort", stopOnCancel);
     if (failure) throw failure.error;
   };
 
@@ -383,12 +396,27 @@ async function readAndStore(
     else save(new Blob(ranges.flat() as BlobPart[]), fileName);
   };
 
-  // Azure always honours a range, so when the size is known every range, the first
-  // included, is read at once instead of waiting for the first one to finish.
-  if (args.parallelFromStart && knownSize !== undefined && knownSize > DOWNLOAD_RANGE_BYTES) {
-    await readRangesFrom(0, knownSize);
-    await finish(args.name || "attachment");
-    return true;
+  // Azure and the backend both honour a range, so when the size is known every range,
+  // the first included, is read at once instead of waiting for the first one to finish.
+  if (knownSize !== undefined && knownSize > DOWNLOAD_RANGE_BYTES) {
+    const rangesOnly: RangeFetcher = async (range, signal) => {
+      const response = await fetchRange(range, signal);
+      if (response.status === 200) {
+        void response.body?.cancel();
+        throw new RangeIgnoredError();
+      }
+      return response;
+    };
+    try {
+      await readRangesFrom(0, knownSize, rangesOnly);
+      await finish(args.name || suggestedName || "attachment");
+      return true;
+    } catch (err) {
+      if (!(err instanceof RangeIgnoredError)) throw err;
+      // A server that ignores Range sends the whole file: read it with the single request below.
+      ranges.length = 0;
+      received = 0;
+    }
   }
 
   let first: RangeRead;
@@ -521,7 +549,7 @@ async function downloadFromLink(
       throw new BackendApiError(response.status, `Download link refused (${response.status}).`);
     }
   };
-  if (!(await readAndStore(fetchRange, { ...args, parallelFromStart: true }, save, sink))) throw new Error("Attachment not found.");
+  if (!(await readAndStore(fetchRange, args, save, sink))) throw new Error("Attachment not found.");
 }
 
 /**
@@ -553,8 +581,8 @@ type DownloadArgs = {
 
 /**
  * Downloads an attachment under its own name. The save dialog (if the browser has
- * one) opens first, inside the person's click. A file above `directAboveBytes`
- * (the server's `directTransferAboveBytes`; 0 or none means never) is then read straight
+ * one) opens first, inside the person's click. A file above `directTransferThresholdBytes`
+ * (the server's `directTransferThresholdBytes`; 0 or none means never) is then read straight
  * from Azure through signed links: ranged into the picked file, or, with no file
  * to write to, handed to the browser as a download (outcome `started`, no in-page
  * progress). If that fails for any reason but a cancel, the file is streamed
@@ -563,15 +591,15 @@ type DownloadArgs = {
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
-  args: DownloadArgs & { directAboveBytes?: number },
+  args: DownloadArgs & { directTransferThresholdBytes?: number },
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
   if (args.signal?.aborted) throw downloadCancelledError();
   const target = await openDiskTarget(args.name || "attachment", args.size);
   if (target.kind === "cancelled") return true;
   const sink = target.kind === "sink" ? target.sink : undefined;
-  const { directAboveBytes = 0 } = args;
-  const direct = directAboveBytes > 0 && args.size !== undefined && args.size > directAboveBytes;
+  const { directTransferThresholdBytes = 0 } = args;
+  const direct = directTransferThresholdBytes > 0 && args.size !== undefined && args.size > directTransferThresholdBytes;
   if (direct && sink) {
     try {
       await downloadFromLink(api, args, sink, save);
@@ -776,7 +804,7 @@ export async function sendFileInChunks(
 /**
  * A directly uploaded file (the server said `directUpload`) is sent to Azure
  * through signed links only above this size, one chunk. Downloads take their
- * threshold from the server instead (`directTransferAboveBytes`).
+ * threshold from the server instead (`directTransferThresholdBytes`).
  */
 export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
 

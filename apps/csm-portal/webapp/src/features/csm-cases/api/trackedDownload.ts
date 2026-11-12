@@ -43,8 +43,8 @@ export async function downloadWithProgress(
     id: string;
     name?: string;
     size?: number;
-    /** The server's `directTransferAboveBytes`; 0 keeps the download on the backend. */
-    directAboveBytes: number;
+    /** The server's `directTransferThresholdBytes`; 0 keeps the download on the backend. */
+    directTransferThresholdBytes: number;
     onSaved?: (outcome: DownloadSaveOutcome) => void;
   },
 ): Promise<void> {
