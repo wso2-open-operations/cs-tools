@@ -2072,6 +2072,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	taskSlaHandler := handler.NewTaskSlaHandler(activeTaskSlaSvc)
 
+	// The project SLA report reads the Postgres clocks, so it is switched off
+	// (a 400 saying so) when SLA data is read from ServiceNow, like the task SLA
+	// reads above. It is also switched off when the cases themselves are read
+	// from ServiceNow (DATA_SOURCE=servicenow): the local project and case rows
+	// can be incomplete then, and a report must not silently omit cases.
+	var activeSlaReportSvc service.SlaReportService
+	if cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.DataSource == config.DataSourceServiceNow {
+		activeSlaReportSvc = service.NewSlaReportUnsupportedService()
+	} else {
+		activeSlaReportSvc = service.NewSlaReportService(repository.NewSlaReportRepository(repository.NewScoped(db)))
+	}
+	slaReportHandler := handler.NewSlaReportHandler(activeSlaReportSvc)
+
 	var snUserHandler *handler.SNUserHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		snUserHandler = handler.NewSNUserHandler(snUserService)
@@ -2751,6 +2764,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	mux.HandleFunc("GET /slas/{id}", internalOnly(accessSvc, taskSlaHandler.GetTaskSla))
 	mux.HandleFunc("POST /slas/search", internalOnly(accessSvc, taskSlaHandler.SearchTaskSlas))
+	mux.HandleFunc("GET /projects/{id}/slas/report", internalOnly(accessSvc, slaReportHandler.GetProjectSlaReport))
 
 	// Registered unconditionally; the non-ServiceNow data source is served by
 	// service.NewUnavailableTaskService, which answers 503 (see above).
