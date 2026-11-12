@@ -1197,6 +1197,23 @@ describe("direct transfers of large files", () => {
         expect(onSaved).toHaveBeenCalledExactlyOnceWith("saved");
       });
 
+      it("requests every range at once, the first included, when the size is known", async () => {
+        const answer = linkFetch();
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+          await held;
+          return answer(url, init);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const postEmpty = vi.fn().mockResolvedValue({ url: `${LINK}1` });
+        const download = downloadEntityAttachment(apiFor({ postEmpty }), dlArgs(), vi.fn());
+        // No response has arrived, yet all three ranges are already asked for.
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+        release();
+        expect(await download).toBe(true);
+      });
+
       it("asks for a fresh link when the link is refused as expired, and carries on", async () => {
         const fetchMock = linkFetch((url) => (url === `${LINK}1` ? 403 : 0));
         vi.stubGlobal("fetch", fetchMock);
