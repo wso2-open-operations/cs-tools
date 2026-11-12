@@ -14540,8 +14540,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Replace every field of a scheduled alert mute rule.
-      description: Same body and rules as create. Only while the rule is scheduled (409 otherwise).
+      summary: Edit a scheduled alert mute rule.
+      description: >-
+        Partial update: only the fields present change; the others keep their stored values. The result is
+        validated as create is (a conditions list, when present, replaces the whole list). Only while the rule is
+        scheduled (409 otherwise). 409 also when another write changed the rule after it was read; reload and retry.
       operationId: updateAlertMuteRule
       parameters:
         - name: id
@@ -14555,7 +14558,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SaveAlertMuteRuleRequest'
+              $ref: '#/components/schemas/PatchAlertMuteRuleRequest'
       responses:
         "200":
           description: The alert mute rule.
@@ -35658,6 +35661,29 @@ components:
           format: date-time
         conditions:
           type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    PatchAlertMuteRuleRequest:
+      type: object
+      description: The fields to change; at least one is normally sent, and an empty body changes nothing but is still validated.
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          description: Replaces the whole list.
           items:
             $ref: '#/components/schemas/AlertMuteRuleCondition'
     ExtendAlertMuteRuleRequest:
