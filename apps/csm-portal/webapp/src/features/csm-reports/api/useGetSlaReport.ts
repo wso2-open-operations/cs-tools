@@ -44,6 +44,8 @@ export function useGetSlaReport(
       return report;
     },
     enabled: Boolean(projectId && period.from && period.to),
-    placeholderData: keepPreviousData,
+    // Keep the previous period on screen, but never another project's report.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === (projectId ?? "") ? keepPreviousData(previous) : undefined,
   });
 }
