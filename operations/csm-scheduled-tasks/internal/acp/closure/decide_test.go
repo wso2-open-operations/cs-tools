@@ -189,3 +189,44 @@ func TestDecide_Day0ReportsNotifyAndSuspendIndependently(t *testing.T) {
 		})
 	}
 }
+
+// TestDecide_SuspendsTheDayAfterTheDate pins the boundary: the date itself is
+// still the 7-day reminder window and the project is suspended the day after
+// (a day count of -1 or less), for the subscription end date and for the
+// invoice due date alike, as the process this replaces counted.
+func TestDecide_SuspendsTheDayAfterTheDate(t *testing.T) {
+	now := time.Date(2026, 7, 24, 4, 0, 0, 0, time.UTC)
+	date := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC) // today's date, at midnight
+
+	tests := []struct {
+		name          string
+		date          time.Time
+		wantDays      int
+		wantWindow    NoticeWindow
+		wantSuspend   bool
+		wantNotifyNow bool
+	}{
+		{"two days ahead: 7-day reminder", date.AddDate(0, 0, 2), 2, NoticeWindow7, false, true},
+		{"the date is today: still the 7-day reminder, no suspension", date, 0, NoticeWindow7, false, true},
+		{"the date was yesterday: terminal window, suspend", date.AddDate(0, 0, -1), -1, NoticeWindow0, true, true},
+		{"the date was a week ago: terminal window, suspend", date.AddDate(0, 0, -7), -7, NoticeWindow0, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			check := func(t *testing.T, got Decision) {
+				t.Helper()
+				if got.DaysRemaining != tt.wantDays || got.Window != tt.wantWindow ||
+					got.ShouldSuspend != tt.wantSuspend || got.ShouldNotify != tt.wantNotifyNow || !got.Fires {
+					t.Errorf("got %+v, want days %d window %v suspend %v notify %v",
+						got, tt.wantDays, tt.wantWindow, tt.wantSuspend, tt.wantNotifyNow)
+				}
+			}
+			t.Run("end date", func(t *testing.T) { check(t, Decide(now, tt.date, nil)) })
+			t.Run("invoice due date", func(t *testing.T) {
+				// EULA 3.4, no primary partner: the due date is the anchor as is.
+				check(t, DecideInvoice(now, date.AddDate(0, 0, -100), tt.date, 3.4, false, nil))
+			})
+		})
+	}
+}

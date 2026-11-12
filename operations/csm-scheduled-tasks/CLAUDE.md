@@ -730,6 +730,17 @@ both places.
   Salesforce read. `ACP_EXCLUDED_PROJECT_IDS` stays as the manual per-project exclusion (no flag needed).
   One difference remains: the legacy process evaluated Open and Restricted projects; the list here asks
   for Open only.
+- **Parity with the previous process (checked 2026-11, rule tests updated).** The date itself is still the
+  7-day window: a project is suspended the day AFTER its end date or invoice due date (`daysRemaining < 0`
+  in `closure.decideFromDaysRemaining`, shared by both tracks, which the previous process counted alike).
+  A customer contact's email must match `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$` as stored
+  (`recipients.validEmail`, both tiers); a malformed one counts as no address, so its tier falls through.
+  Checked and already matching, no change: partner accounts are never selected by the previous process either
+  (a customer with a primary partner is, and keeps the grace-period rule); the four excluded project types are
+  the same set; its internal-account special case never applies, since that account has no `Customer` status
+  and is filtered by the status rule above. entity-service's reopen copy still reads "reopen only above 0
+  days" (`acpDaysBetween`'s comment): that is safe (a project is never suspended on day 0 now) but is
+  conservative by one day for a paid project.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
