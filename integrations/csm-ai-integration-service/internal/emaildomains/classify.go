@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -65,6 +66,7 @@ var (
 	ErrInvalidDomain = errors.New("not a valid domain")
 	ErrNotConfigured = errors.New("model calls are not configured")
 	ErrCall          = errors.New("model call failed")
+	ErrUsageLimit    = errors.New("model usage limit reached")
 	ErrRefused       = errors.New("model refused the request")
 	ErrTruncated     = errors.New("model reply was cut off")
 	ErrUnusable      = errors.New("model reply is not usable")
@@ -230,6 +232,11 @@ func (c *Classifier) ask(ctx context.Context, domain string) (Result, error) {
 	})
 	took := time.Since(start)
 	if err != nil {
+		var apiErr *anthropic.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests {
+			logUsage(ctx, c.model, "usage_limit", "", anthropic.Usage{}, took)
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrCall, ErrUsageLimit, err)
+		}
 		logUsage(ctx, c.model, "failed", "", anthropic.Usage{}, took)
 		return Result{}, fmt.Errorf("%w: %w", ErrCall, err)
 	}

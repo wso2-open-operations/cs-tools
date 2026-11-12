@@ -304,6 +304,15 @@ func (c *CustomerEntityClient) GetProject(ctx context.Context, id string) ([]byt
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s", url.PathEscape(id)), nil)
 }
 
+// GetProjectSLAReport calls GET /projects/{id}/slas/report on the entity service.
+// from and to are YYYY-MM-DD dates; the response is returned as raw JSON.
+func (c *CustomerEntityClient) GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error) {
+	q := url.Values{}
+	q.Set("from", from)
+	q.Set("to", to)
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s/slas/report?%s", url.PathEscape(id), q.Encode()), nil)
+}
+
 // GetProjectMetadata calls GET /projects/{id}/metadata on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) GetProjectMetadata(ctx context.Context, id string) ([]byte, error) {
@@ -611,6 +620,13 @@ func (c *CustomerEntityClient) SearchTimeCards(ctx context.Context, body []byte)
 	return c.do(ctx, http.MethodPost, "/time-cards/search", body)
 }
 
+// AggregateTimeCards calls POST /time-cards/aggregate on the entity service:
+// the cards POST /time-cards/search matches, counted and their logged minutes
+// summed per state, user, project or day. Response is returned as raw JSON.
+func (c *CustomerEntityClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/time-cards/aggregate", body)
+}
+
 // CreateTimeCard calls POST /time-cards on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) CreateTimeCard(ctx context.Context, body []byte) ([]byte, error) {
@@ -747,6 +763,14 @@ func (c *CustomerEntityClient) SearchScheduleAbsences(ctx context.Context, body 
 // window. Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/search", body)
+}
+
+// DismissScheduleEngagementAllocation calls
+// POST /team-schedule/engagement-allocations/dismiss on the entity service:
+// take a synced allocation off a person's roster for some days, or put them
+// back. Response is returned as raw JSON.
+func (c *CustomerEntityClient) DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/dismiss", body)
 }
 
 // GetScheduleOnDuty calls GET /team-schedule/on-duty on the entity service, passing

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -40,6 +41,7 @@ type entitySkillClient interface {
 	RemoveMySkill(ctx context.Context, skillID string) ([]byte, error)
 	GetMySkillHistory(ctx context.Context, skillID, limit, offset string) ([]byte, error)
 	SearchUserSkills(ctx context.Context, body []byte) ([]byte, error)
+	SkillCall(ctx context.Context, method, path string, body []byte) ([]byte, error)
 }
 
 // SkillHandler proxies the skills module: the catalogue, a person's own
@@ -220,4 +222,122 @@ func (h *SkillHandler) GetMySkillHistory(w http.ResponseWriter, r *http.Request)
 func (h *SkillHandler) SearchUserSkills(w http.ResponseWriter, r *http.Request) {
 	h.skillBodyCall(w, r, "SearchUserSkills", "Failed to search people's skills.", http.StatusOK,
 		func(body []byte) ([]byte, error) { return h.entity.SearchUserSkills(r.Context(), body) })
+}
+
+// skillProxy forwards one skill management call. path is built by the caller
+// from fixed segments and validated UUIDs only.
+func (h *SkillHandler) skillProxy(w http.ResponseWriter, r *http.Request, op, fallback string, status int, method, path string, withBody bool) {
+	if !withBody {
+		h.skillCall(w, r, op, fallback, status, func() ([]byte, error) {
+			return h.entity.SkillCall(r.Context(), method, path, nil)
+		})
+		return
+	}
+	h.skillBodyCall(w, r, op, fallback, status, func(body []byte) ([]byte, error) {
+		return h.entity.SkillCall(r.Context(), method, path, body)
+	})
+}
+
+// GetMySkillCapabilities handles GET /skills/me/capabilities.
+func (h *SkillHandler) GetMySkillCapabilities(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "GetMySkillCapabilities", "Failed to load your skills access.", http.StatusOK, http.MethodGet, "/skills/me/capabilities", false)
+}
+
+// CreateSkillCategory handles POST /skills/categories.
+func (h *SkillHandler) CreateSkillCategory(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "CreateSkillCategory", "Failed to create the category.", http.StatusCreated, http.MethodPost, "/skills/categories", true)
+}
+
+// UpdateSkillCategory handles PATCH /skills/categories/{id}.
+func (h *SkillHandler) UpdateSkillCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := skillPathID(w, r, "id")
+	if !ok {
+		return
+	}
+	h.skillProxy(w, r, "UpdateSkillCategory", "Failed to update the category.", http.StatusOK, http.MethodPatch, "/skills/categories/"+url.PathEscape(id), true)
+}
+
+// CheckSkillRequest handles POST /skills/requests/check.
+func (h *SkillHandler) CheckSkillRequest(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "CheckSkillRequest", "Failed to check the skill name.", http.StatusOK, http.MethodPost, "/skills/requests/check", true)
+}
+
+// CreateSkillRequest handles POST /skills/requests.
+func (h *SkillHandler) CreateSkillRequest(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "CreateSkillRequest", "Failed to send the skill request.", http.StatusCreated, http.MethodPost, "/skills/requests", true)
+}
+
+// ListMySkillRequests handles GET /skills/requests/mine.
+func (h *SkillHandler) ListMySkillRequests(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "ListMySkillRequests", "Failed to load your skill requests.", http.StatusOK, http.MethodGet, "/skills/requests/mine", false)
+}
+
+// SearchSkillRequests handles POST /skills/requests/search.
+func (h *SkillHandler) SearchSkillRequests(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "SearchSkillRequests", "Failed to load skill requests.", http.StatusOK, http.MethodPost, "/skills/requests/search", true)
+}
+
+// skillRequestAction handles POST /skills/requests/{id}/<action>.
+func (h *SkillHandler) skillRequestAction(w http.ResponseWriter, r *http.Request, action, fallback string, withBody bool) {
+	id, ok := skillPathID(w, r, "id")
+	if !ok {
+		return
+	}
+	h.skillProxy(w, r, "SkillRequest:"+action, fallback, http.StatusOK, http.MethodPost, "/skills/requests/"+url.PathEscape(id)+"/"+action, withBody)
+}
+
+// WithdrawSkillRequest handles POST /skills/requests/{id}/withdraw.
+func (h *SkillHandler) WithdrawSkillRequest(w http.ResponseWriter, r *http.Request) {
+	h.skillRequestAction(w, r, "withdraw", "Failed to withdraw the request.", false)
+}
+
+// ApproveSkillRequest handles POST /skills/requests/{id}/approve.
+func (h *SkillHandler) ApproveSkillRequest(w http.ResponseWriter, r *http.Request) {
+	h.skillRequestAction(w, r, "approve", "Failed to approve the request.", true)
+}
+
+// RejectSkillRequest handles POST /skills/requests/{id}/reject.
+func (h *SkillHandler) RejectSkillRequest(w http.ResponseWriter, r *http.Request) {
+	h.skillRequestAction(w, r, "reject", "Failed to reject the request.", true)
+}
+
+// SearchSkillDirectory handles POST /skills/directory/search.
+func (h *SkillHandler) SearchSkillDirectory(w http.ResponseWriter, r *http.Request) {
+	h.skillProxy(w, r, "SearchSkillDirectory", "Failed to search the skill directory.", http.StatusOK, http.MethodPost, "/skills/directory/search", true)
+}
+
+// GetUserSkillProfile handles GET /skills/users/{userId}.
+func (h *SkillHandler) GetUserSkillProfile(w http.ResponseWriter, r *http.Request) {
+	id, ok := skillPathID(w, r, "userId")
+	if !ok {
+		return
+	}
+	h.skillProxy(w, r, "GetUserSkillProfile", "Failed to load the person's skills.", http.StatusOK, http.MethodGet, "/skills/users/"+url.PathEscape(id), false)
+}
+
+// GetUserSkillHistory handles GET /skills/users/{userId}/history?skillId=&limit=&offset=.
+func (h *SkillHandler) GetUserSkillHistory(w http.ResponseWriter, r *http.Request) {
+	id, ok := skillPathID(w, r, "userId")
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	out := url.Values{}
+	if v := q.Get("skillId"); v != "" {
+		if !uuidRe.MatchString(v) {
+			writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+			return
+		}
+		out.Set("skillId", v)
+	}
+	for _, k := range []string{"limit", "offset"} {
+		if v := q.Get(k); v != "" {
+			out.Set(k, v)
+		}
+	}
+	path := "/skills/users/" + url.PathEscape(id) + "/history"
+	if len(out) > 0 {
+		path += "?" + out.Encode()
+	}
+	h.skillProxy(w, r, "GetUserSkillHistory", "Failed to load the person's skill history.", http.StatusOK, http.MethodGet, path, false)
 }

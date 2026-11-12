@@ -215,7 +215,8 @@ func TestScheduleIntegration_TeamMemberAddAndRemove(t *testing.T) {
 		t.Fatal("adding to a team that does not exist succeeded")
 	}
 
-	// An upcoming turn keeps them on; a past one does not.
+	// Their upcoming turn on the team goes with them; a past one stays as
+	// history, and the deletion is in the roster's history with the caller.
 	mustExec(t, pool, `
 		INSERT INTO team_schedule_assignment
 		  (user_id, team_id, team_key, shift_id, rota_date, starts_at, ends_at, created_by, updated_by)
@@ -229,13 +230,25 @@ func TestScheduleIntegration_TeamMemberAddAndRemove(t *testing.T) {
 		       NOW() - interval '9 days', NOW() - interval '9 days' + interval '4 hours', 'member-fixture', 'member-fixture'
 		  FROM team_schedule_shift s ORDER BY s.code LIMIT 1`, schedOutsiderID, schedTeamID, schedTeamKey)
 	res, err := access.RemoveTeamMember(ctx, schedOutsiderID, schedTeamKey, schedMarkerActor, true)
-	if err != nil || res.Removed || !res.Member || res.UpcomingTurns != 1 {
-		t.Fatalf("remove with an upcoming turn = %+v, %v; want kept with 1 upcoming turn", res, err)
+	if err != nil || !res.Removed || res.RemovedTurns != 1 {
+		t.Fatalf("remove with an upcoming turn = %+v, %v; want removed with 1 turn", res, err)
 	}
-	if n := members(schedOutsiderID); n != 1 {
-		t.Fatalf("a kept member was removed (%d rows)", n)
+	if n := members(schedOutsiderID); n != 0 {
+		t.Fatalf("membership rows after the removal = %d, want 0", n)
 	}
-	mustExec(t, pool, `DELETE FROM team_schedule_assignment WHERE created_by = 'member-fixture' AND ends_at > NOW()`)
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_assignment
+		WHERE created_by = 'member-fixture' AND ends_at > NOW()`); n != 0 {
+		t.Fatalf("upcoming turns after the removal = %d, want 0", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_assignment
+		WHERE created_by = 'member-fixture' AND ends_at <= NOW()`); n != 1 {
+		t.Fatalf("past turns after the removal = %d, want 1 (kept as history)", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_assignment_activity
+		WHERE user_id = $1 AND team_key = $2 AND action = 'DELETED' AND actor_email = $3
+		  AND note = 'taken off the team'`, schedOutsiderID, schedTeamKey, schedMarkerActor); n != 1 {
+		t.Fatalf("history rows for the removed turn = %d, want 1", n)
+	}
 
 	// A responder tier keeps them on.
 	mustExec(t, pool, `UPDATE team_member m SET alert_tier = 'T3' FROM team t
@@ -411,18 +424,6 @@ func TestScheduleIntegration_TeamMemberMove(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO team_schedule_rota_marker (created_by, updated_by, user_id, team_key)
 		VALUES ('move-fixture', 'move-fixture', $1, $2)`, schedOutsiderID, schedTeamKey)
 
-	// An upcoming turn keeps them where they are.
-	mustExec(t, pool, `
-		INSERT INTO team_schedule_assignment
-		  (user_id, team_id, team_key, shift_id, rota_date, starts_at, ends_at, created_by, updated_by)
-		SELECT $1::uuid, $2::uuid, $3, s.id, (NOW() + interval '2 days')::date,
-		       NOW() + interval '2 days', NOW() + interval '2 days 4 hours', 'move-fixture', 'move-fixture'
-		  FROM team_schedule_shift s ORDER BY s.code LIMIT 1`, schedOutsiderID, schedTeamID, schedTeamKey)
-	if res := move(); res.Moved || res.UpcomingTurns != 1 || len(onTarget()) != 0 || len(onSource()) != 1 {
-		t.Fatalf("move with a turn = %+v, source %v, target %v; want refused, nothing written", res, onSource(), onTarget())
-	}
-	mustExec(t, pool, `DELETE FROM team_schedule_assignment WHERE created_by = 'move-fixture'`)
-
 	// A tier on the source keeps them.
 	mustExec(t, pool, `UPDATE team_member m SET alert_tier = 'T2' FROM team t
 		WHERE t.id = m.team_id AND t.key = $1 AND m.user_id = $2`, schedTeamKey, schedOutsiderID)
@@ -453,9 +454,34 @@ func TestScheduleIntegration_TeamMemberMove(t *testing.T) {
 	mustExec(t, pool, `DROP TRIGGER move_fixture_fail ON team_member`)
 
 	// Nothing keeps them: they arrive as sub_lead with no tier, and leave.
+	// Their upcoming turn on the source goes with them; a past one stays.
+	for _, at := range []string{"2 days", "-9 days"} {
+		mustExec(t, pool, `
+			INSERT INTO team_schedule_assignment
+			  (user_id, team_id, team_key, shift_id, rota_date, starts_at, ends_at, created_by, updated_by)
+			SELECT $1::uuid, $2::uuid, $3, s.id, (NOW() + $4::interval)::date,
+			       NOW() + $4::interval, NOW() + $4::interval + interval '4 hours', 'move-fixture', 'move-fixture'
+			  FROM team_schedule_shift s ORDER BY s.code LIMIT 1`, schedOutsiderID, schedTeamID, schedTeamKey, at)
+	}
 	res := move()
 	if !res.Moved || res.Membership.Role != "sub_lead" || res.Membership.TeamKey != schedOtherTeam || res.Membership.AlertTier != nil {
 		t.Fatalf("move = %+v; want moved as sub_lead", res)
+	}
+	if res.RemovedTurns != 1 {
+		t.Fatalf("turns removed by the move = %d, want 1", res.RemovedTurns)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_assignment
+		WHERE created_by = 'move-fixture' AND ends_at > NOW()`); n != 0 {
+		t.Fatalf("upcoming turns on the source after the move = %d, want 0", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_assignment
+		WHERE created_by = 'move-fixture' AND ends_at <= NOW()`); n != 1 {
+		t.Fatalf("past turns after the move = %d, want 1 (kept as history)", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_assignment_activity
+		WHERE user_id = $1 AND team_key = $2 AND action = 'DELETED' AND note = $3`,
+		schedOutsiderID, schedTeamKey, "moved to "+schedOtherTeam); n != 1 {
+		t.Fatalf("history rows for the moved turn = %d, want 1", n)
 	}
 	if got := onTarget(); len(got) != 1 || got[0] != [2]string{"sub_lead", ""} {
 		t.Fatalf("target rows = %v, want [[sub_lead ]]", got)

@@ -293,20 +293,35 @@ func appendSLAStatusFilterSQL(f domain.SLAStatusFilters, args *[]any) string {
 }
 
 // slaElapsedBucketMatches reports whether pct falls in the named bucket --
-// the four fixed ranges the CSM Portal's SLA Engine admin table filters by
+// the eleven fixed ranges the CSM Portal's SLA Engine admin table filters by
 // (domain.SLAElapsedBucket* constants). "" (no bucket filter requested)
 // always matches, so a caller that never asks for one can share this
-// unconditionally. 75to100 is inclusive of exactly 100% (its own label reads
-// "75% - 100%"); over100 is exclusive of it (its own label reads "Over
-// 100%") -- a clock at exactly 100% belongs in the former, not the latter.
+// unconditionally. Each ten-point bucket's lower bound is inclusive, upper
+// bound exclusive, except 90to100 (inclusive of exactly 100%) and over100
+// (exclusive of it) -- a clock at exactly 100% belongs in the former, not
+// the latter.
 func slaElapsedBucketMatches(bucket string, pct float64) bool {
 	switch bucket {
-	case domain.SLAElapsedBucketUnder50:
-		return pct < 50
-	case domain.SLAElapsedBucket50To75:
-		return pct >= 50 && pct < 75
-	case domain.SLAElapsedBucket75To100:
-		return pct >= 75 && pct <= 100
+	case domain.SLAElapsedBucketUnder10:
+		return pct < 10
+	case domain.SLAElapsedBucket10To20:
+		return pct >= 10 && pct < 20
+	case domain.SLAElapsedBucket20To30:
+		return pct >= 20 && pct < 30
+	case domain.SLAElapsedBucket30To40:
+		return pct >= 30 && pct < 40
+	case domain.SLAElapsedBucket40To50:
+		return pct >= 40 && pct < 50
+	case domain.SLAElapsedBucket50To60:
+		return pct >= 50 && pct < 60
+	case domain.SLAElapsedBucket60To70:
+		return pct >= 60 && pct < 70
+	case domain.SLAElapsedBucket70To80:
+		return pct >= 70 && pct < 80
+	case domain.SLAElapsedBucket80To90:
+		return pct >= 80 && pct < 90
+	case domain.SLAElapsedBucket90To100:
+		return pct >= 90 && pct <= 100
 	case domain.SLAElapsedBucketOver100:
 		return pct > 100
 	default:
@@ -314,22 +329,44 @@ func slaElapsedBucketMatches(bucket string, pct float64) bool {
 	}
 }
 
+// slaStatusMatches reports whether a row's already-corrected IsPaused/
+// HasBreached pair satisfies the named status filter (domain.SLAStatus*
+// constants). "" (no status filter requested) always matches. StatusPaused
+// and StatusBreached are not mutually exclusive against the same row -- a
+// clock can be paused after its own wall-clock time already ran out, and
+// such a row matches either filter if selected, the same way the CSM
+// Portal's own status chips show both at once for it (see
+// domain.SLAStatus*'s own doc comment).
+func slaStatusMatches(status string, isPaused, hasBreached bool) bool {
+	switch status {
+	case domain.SLAStatusPaused:
+		return isPaused
+	case domain.SLAStatusBreached:
+		return hasBreached
+	case domain.SLAStatusInProgress:
+		return !isPaused && !hasBreached
+	default:
+		return true
+	}
+}
+
 // SearchActiveSLAStatuses implements SLAStatusRepository.
 //
-// ElapsedBucket can't be a SQL WHERE/HAVING clause the way the other three
-// filters are: scanSLAStatus's own BusinessElapsedPercent is only final
-// after its Go-side business-day correction (see that function's own doc
-// comment) -- the raw column a SQL predicate would have to filter on,
-// als.business_elapsed_percentage, is wrong for exactly the still-running,
-// 'WSO2 Business days'-scheduled clocks a bucket filter most needs to get
-// right. So whenever ElapsedBucket is set, this fetches every row matching
-// the OTHER filters with no SQL LIMIT/OFFSET, corrects and buckets each one
-// in Go (scanSLAStatus already does the correction), and paginates the
-// filtered slice in Go instead -- bounded by the same modest active-clock
-// total maxSLAStatusLimit's own doc comment already describes (around 5,500
-// rows checked live), not a new, unbounded read.
+// ElapsedBucket/Stage can't be a SQL WHERE/HAVING clause the way
+// Severity/CaseType/Search are: scanSLAStatus's own BusinessElapsedPercent
+// and HasBreached are only final after their Go-side business-day
+// correction (see that function's own doc comment) -- the raw columns a SQL
+// predicate would have to filter on, als.business_elapsed_percentage/
+// als.has_breached, are wrong for exactly the still-running, 'WSO2 Business
+// days'-scheduled clocks a bucket/status filter most needs to get right. So
+// whenever either is set, this fetches every row matching the OTHER filters
+// with no SQL LIMIT/OFFSET, corrects and buckets/matches each one in Go
+// (scanSLAStatus already does the correction), and paginates the filtered
+// slice in Go instead -- bounded by the same modest active-clock total
+// maxSLAStatusLimit's own doc comment already describes (around 5,500 rows
+// checked live), not a new, unbounded read.
 func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error) {
-	bucketed := filters.ElapsedBucket != ""
+	bucketed := filters.ElapsedBucket != "" || filters.Stage != ""
 
 	countArgs := []any{}
 	countFilterSQL := appendSLAStatusFilterSQL(filters, &countArgs)
@@ -392,7 +429,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 			if err != nil {
 				return nil, 0, fmt.Errorf("scan sla status: %w", err)
 			}
-			if slaElapsedBucketMatches(filters.ElapsedBucket, st.BusinessElapsedPercent) {
+			if slaElapsedBucketMatches(filters.ElapsedBucket, st.BusinessElapsedPercent) && slaStatusMatches(filters.Stage, st.IsPaused, st.HasBreached) {
 				matched = append(matched, st)
 			}
 		}

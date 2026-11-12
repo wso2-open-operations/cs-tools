@@ -12,11 +12,6 @@ test: vet
 build: test
 	go build -o $(BINARY) ./cmd/server
 
-# Writes catalogue-parts/ from internal/catalogue/catalogue.md, the files
-# mounted in Choreo. Run after editing catalogue.md and commit the result.
-catalogue-parts:
-	go run ./cmd/splitcatalogue
-
 # Refreshes the committed disposable-domain list from the curated
 # disposable-email-domains blocklist (CC0). Review the diff before committing:
 # a listed domain's signups are abandoned.
@@ -32,4 +27,4 @@ disposable-list:
 clean:
 	rm -f $(BINARY)
 
-.PHONY: setup vet test build catalogue-parts disposable-list clean
+.PHONY: setup vet test build disposable-list clean

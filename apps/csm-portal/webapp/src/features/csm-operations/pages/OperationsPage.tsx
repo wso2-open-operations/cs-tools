@@ -21,6 +21,7 @@ import { useLocation, useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import ChangeRequestsArea from "@features/csm-operations/components/ChangeRequestsArea";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
+import AlertMuteRulesTab from "@features/csm-operations/components/AlertMuteRulesTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import RunbooksTab from "@features/csm-operations/components/RunbooksTab";
@@ -129,6 +130,8 @@ export default function OperationsPage(): JSX.Element {
       {activeTab === "change-requests" && <ChangeRequestsArea />}
 
       {activeTab === "incidents" && <IncidentsTab />}
+
+      {activeTab === "alert-mute-rules" && <AlertMuteRulesTab />}
 
       {activeTab === "problems" && <ProblemsTab />}
 

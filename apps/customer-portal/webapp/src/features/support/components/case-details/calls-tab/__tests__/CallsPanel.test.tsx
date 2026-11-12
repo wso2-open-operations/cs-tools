@@ -15,9 +15,10 @@
 // under the License.
 
 import type { ReactElement } from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { format } from "date-fns";
 import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import {
@@ -657,11 +658,13 @@ describe("CallsPanel", () => {
       />);
     fireEvent.click(screen.getByRole("button", { name: /Approve/i }));
 
-    const preferredTimeInput = screen.getByLabelText(/Preferred Time \*/i);
+    const preferredTimeInput = screen
+      .getAllByLabelText(/Preferred Time \*/i)
+      .find((el) => el.tagName === "INPUT") as HTMLInputElement;
     const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const localValue = `${future.getFullYear()}-${pad(future.getMonth() + 1)}-${pad(future.getDate())}T${pad(future.getHours())}:${pad(future.getMinutes())}`;
-    fireEvent.change(preferredTimeInput, { target: { value: localValue } });
+    fireEvent.change(preferredTimeInput, {
+      target: { value: format(future, "MM/dd/yyyy hh:mm a") },
+    });
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Approve$/i }).at(-1)!);
 
@@ -835,7 +838,7 @@ describe("CallsPanel", () => {
   // Catastrophic/P0. CALL_REQUEST_LEAD_MINUTES_BY_PRIORITY_ID mirrors
   // ServiceNow's own per-priority lead-time table so each severity gets its
   // real minimum, confirmed here against the picker's actual rendered min.
-  it("floors the preferred time by the case's own severity (Catastrophic/P0 = 15 minutes)", () => {
+  it("floors the preferred time by the case's own severity (Catastrophic/P0 = 15 minutes)", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-11T09:00:00.000Z"));
     try {
@@ -868,10 +871,15 @@ describe("CallsPanel", () => {
       const input = document.getElementById(
         "preferred-time-0",
       ) as HTMLInputElement;
+      // The create form is seeded with the floor in a microtask.
+      await act(async () => {});
       // 09:00 UTC + 15 minutes (Catastrophic/P0's real ServiceNow offset,
       // not the 300-minute flat default a lower-severity case would still
-      // fall back to) = 09:15.
-      expect(input.min).toBe("2026-10-11T09:15");
+      // fall back to) = 09:15. The new form starts on that floor, and a time
+      // picked before it is moved back up to it.
+      expect(input.value).toBe("10/11/2026 09:15 AM");
+      fireEvent.change(input, { target: { value: "10/11/2026 08:00 AM" } });
+      expect(input.value).toBe("10/11/2026 09:15 AM");
     } finally {
       vi.useRealTimers();
     }
@@ -886,7 +894,7 @@ describe("CallsPanel", () => {
   // the correct 15 minutes. (A negative value alone would have been caught
   // downstream by that same guard either way -- Infinity is the case that
   // actually depends on CallsPanel.tsx's own check.)
-  it("falls through to the priority table when the API's own allocation is invalid (non-finite)", () => {
+  it("falls through to the priority table when the API's own allocation is invalid (non-finite)", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-11T09:00:00.000Z"));
     try {
@@ -927,9 +935,11 @@ describe("CallsPanel", () => {
       const input = document.getElementById(
         "preferred-time-0",
       ) as HTMLInputElement;
+      // The create form is seeded with the floor in a microtask.
+      await act(async () => {});
       // Must still be 09:15 (the mapped 15-minute Catastrophic/P0 value),
       // not a floor computed from Infinity minutes.
-      expect(input.min).toBe("2026-10-11T09:15");
+      expect(input.value).toBe("10/11/2026 09:15 AM");
     } finally {
       vi.useRealTimers();
     }

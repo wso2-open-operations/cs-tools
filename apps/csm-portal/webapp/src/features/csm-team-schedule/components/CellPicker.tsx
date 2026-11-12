@@ -29,8 +29,22 @@ import {
 import RequiredMark from "@components/RequiredMark";
 import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } from "../types";
 import { escalationGrid } from "../utils/rota";
+import { INDIA_HOURS_CODE, REGULAR_HOURS_CODE } from "../utils/standingDay";
 import { useTeamName } from "../utils/teamColourContext";
 
+
+/** A customer engagement allocation (from the allocation app) covering the
+ *  clicked day, offered for removal -- or, once removed, for restoring. */
+export interface CellEngagement {
+  /** The allocation's id, as the engagement allocation read returns it. */
+  id: string;
+  /** The chip: Allo- and the engagement id. */
+  label: string;
+  /** The allocation's full line (account, engagement, type, %, dates). */
+  title: string;
+  /** Taken off this person's roster on the clicked day. */
+  dismissed: boolean;
+}
 
 export interface CellPickerTarget {
   userId: string;
@@ -52,6 +66,9 @@ export interface CellPickerTarget {
   /** The leave or allocation this day is part of, if any -- the whole span,
    *  so it can be removed in one click. */
   absence?: CellAbsence;
+  /** Customer engagements from the allocation app covering the day: the
+   *  ones on the roster can be taken off it, removed ones put back. */
+  engagements?: CellEngagement[];
   /** Where on screen the cell is, so the picker can grow out of it. */
   anchor: { top: number; left: number; bottom: number; right: number };
   /** The standing window this engineer sits in on an ordinary weekday, so
@@ -88,6 +105,9 @@ interface CellPickerProps {
   onClear: (shiftCode: string, from: string, to: string) => void;
   /** Remove the whole absence this cell is part of, every day of it. */
   onRemoveAbsence?: (absenceId: string) => void;
+  /** Take a synced engagement allocation off the roster over the picked
+   *  days, or (restore) put those days back. Absent hides the controls. */
+  onDismissEngagement?: (engagement: CellEngagement, from: string, to: string, restore: boolean) => void;
   /** Add a leave or allocation tag to the shared catalogue. Resolves once it
    *  exists; rejects with a message the form can show. Absent hides the
    *  "New tag" control. */
@@ -227,6 +247,7 @@ export default function CellPicker({
   onMarkAway,
   onClear,
   onRemoveAbsence,
+  onDismissEngagement,
   onCreateKind,
   onDeleteKind,
   onClose,
@@ -355,6 +376,24 @@ export default function CellPicker({
     return out;
   }, [allKinds, awayKinds, shifts, target.teamKey]);
 
+  /** What a window move's button names. The team whose ordinary day is the
+   *  India region shift is the India team, whatever its own name: "India
+   *  Team (Phoenix)". Every other move names the team. */
+  const windowMoveTeam = (kind: ScheduleAbsenceKind, shift: ScheduleShift): string =>
+    shift.code === INDIA_HOURS_CODE
+      ? `India Team (${teamNameOf(kind.movesToTeamKey ?? "")})`
+      : asTeam(kind.movesToTeamKey ?? "");
+
+  /** Somebody on the India team: the India region shift is moved to, not
+   *  picked, so their standing hours are Regular hours only (IST). */
+  const onIndiaTeam = (allKinds ?? awayKinds).some(
+    (k) =>
+      k.showsAsShiftCode === INDIA_HOURS_CODE &&
+      k.worksRotaThere &&
+      !k.retired &&
+      k.movesToTeamKey?.toLowerCase() === target.teamKey.toLowerCase(),
+  );
+
   /** The move this day is part of, where it is one. On a move to a team that
    *  works no rota (Migration) they take no rotation -- the server refuses
    *  one too -- and either way they can be moved back from here. */
@@ -378,10 +417,17 @@ export default function CellPicker({
       { heading: "Rotations", items: decorate(shifts.filter((s) => s.isRotation && !s.isEscalation)) },
       {
         heading: "Standing hours",
-        items: decorate(shifts.filter((s) => !s.isRotation && !windowMoves.some((m) => m.shift.code === s.code))),
+        items: decorate(
+          shifts.filter(
+            (s) =>
+              !s.isRotation &&
+              !windowMoves.some((m) => m.shift.code === s.code) &&
+              (!onIndiaTeam || s.code === REGULAR_HOURS_CODE),
+          ),
+        ),
       },
     ].filter((g) => g.items.length > 0);
-  }, [shifts, firstDay, offRota, windowMoves]);
+  }, [shifts, firstDay, offRota, windowMoves, onIndiaTeam]);
 
   /** L1, L2 and L3 for every zone worked on the span's first day. */
   const grid = useMemo(() => escalationGrid(shifts, firstDay), [shifts, firstDay]);
@@ -638,6 +684,30 @@ export default function CellPicker({
           </div>
         ) : null}
 
+        {target.engagements?.length && onDismissEngagement ? (
+          // Synced from the allocation app, so never edited here: a removal
+          // takes the picked days (the range below) off this roster and the
+          // timesheet, and Restore puts them back.
+          <div className="pk-remove pk-eng" role="group" aria-label="Customer engagements from the allocation app">
+            {target.engagements.map((en) => (
+              <div className="pkeng-row" key={en.id}>
+                <span className={`chip sm eng${en.dismissed ? " gone" : ""}`}>{en.label}</span>
+                <span className="pkrm-t" title={en.title}>
+                  <b>{en.dismissed ? "Removed from the roster" : "Customer engagement (allocation app)"}</b>
+                  <small>{en.title}</small>
+                </span>
+                <button
+                  type="button"
+                  className={`pkrm-b${en.dismissed ? " back" : ""}`}
+                  disabled={busy}
+                  onClick={() => onDismissEngagement(en, firstDay, lastDay, en.dismissed)}
+                >
+                  {en.dismissed ? "Restore" : "Remove"} {firstDay === lastDay ? shortDate(firstDay) : `${shortDate(firstDay)} – ${shortDate(lastDay)}`}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div className="pk-body">
           <section className="pk-col" aria-labelledby="pk-rota-t">
@@ -838,7 +908,7 @@ export default function CellPicker({
                       </p>
                       {windowMoves.map(({ kind, shift }) => {
                         const ok = allowedOn(shift, firstDay);
-                        const to = asTeam(kind.movesToTeamKey ?? "");
+                        const to = windowMoveTeam(kind, shift);
                         return (
                           <button
                             key={`window:${shift.code}`}

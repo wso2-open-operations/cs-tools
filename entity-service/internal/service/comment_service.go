@@ -315,7 +315,7 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 	// At most MaxInlineImagesPerContent images and the total size limit, checked
 	// before the comment is saved.
 	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
-		if err := s.imageLinker.ValidateCommentImages(ctx, req.ReferenceID, createdBy, req.Content); err != nil {
+		if err := s.imageLinker.ValidateCommentImages(ctx, "", req.ReferenceID, createdBy, req.Content); err != nil {
 			return domain.CreateCommentResponse{}, err
 		}
 	}
@@ -456,7 +456,7 @@ func (s *commentService) UpdateComment(ctx context.Context, req domain.UpdateCom
 		if err != nil {
 			return domain.UpdateCommentResponse{}, err
 		}
-		if err := s.imageLinker.ValidateCommentImages(ctx, current.WorkItemID, actorEmail, req.Content); err != nil {
+		if err := s.imageLinker.ValidateCommentImages(ctx, req.ID, current.WorkItemID, actorEmail, req.Content); err != nil {
 			return domain.UpdateCommentResponse{}, err
 		}
 	}

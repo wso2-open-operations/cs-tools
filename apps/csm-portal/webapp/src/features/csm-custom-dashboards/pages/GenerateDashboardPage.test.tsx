@@ -23,15 +23,16 @@ import type { BeDashboard } from "@api/backend/types";
 const generateMock = vi.fn();
 const saveMock = vi.fn();
 const showSuccess = vi.fn();
-const showError = vi.fn();
 let savePending = false;
 
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
-    constructor(status: number, message: string) {
+    payload?: { message?: string; errorCode?: string };
+    constructor(status: number, message: string, payload?: { message?: string; errorCode?: string }) {
       super(message);
       this.status = status;
+      this.payload = payload;
     }
   },
 }));
@@ -42,7 +43,6 @@ vi.mock("@features/csm-custom-dashboards/api/useCustomDashboards", () => ({
   usePutCustomDashboard: () => ({ mutateAsync: saveMock, isPending: savePending }),
 }));
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({ useSuccessBanner: () => ({ showSuccess }) }));
-vi.mock("@context/error-banner/ErrorBannerContext", () => ({ useErrorBanner: () => ({ showError }) }));
 // The preview's widgets fetch their own data; the grid is not under test here.
 vi.mock("@features/csm-dashboard/components/DashboardWidgetGrid", () => ({
   default: ({ widgets }: { widgets: unknown[] }) => <div>{widgets.length} widgets</div>,
@@ -79,12 +79,17 @@ async function sendMessage(text: string, reply: string) {
   await screen.findByText(reply);
 }
 
+// Clicks the header's Save, then returns the name dialog it opens.
+async function openSaveDialog() {
+  fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+  return screen.getByRole("dialog");
+}
+
 describe("GenerateDashboardPage: Save", () => {
   beforeEach(() => {
     generateMock.mockReset();
     saveMock.mockReset();
     showSuccess.mockReset();
-    showError.mockReset();
     savePending = false;
   });
 
@@ -93,37 +98,81 @@ describe("GenerateDashboardPage: Save", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("saves the draft, says so, and opens the saved dashboard", async () => {
+  it("asks for the name first, starting from the model's, and keeping it saves in one click", async () => {
     const first = dashboard("My Cases");
     generateMock.mockResolvedValueOnce({ dashboard: first, reply: "Here it is." });
     saveMock.mockResolvedValue({ dashboard: first, createdOn: "a", updatedOn: "b" });
     renderPage();
 
     await sendMessage("My cases", "Here it is.");
-    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+    const dialog = await openSaveDialog();
+    expect(within(dialog).getByText("Save dashboard")).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("My Cases");
+    expect(saveMock).not.toHaveBeenCalled();
 
-    expect(saveMock).toHaveBeenCalledWith(first);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
     expect(await screen.findByText(`Opened ${first.id}`)).toBeInTheDocument();
+    expect(saveMock).toHaveBeenCalledWith(first);
     expect(showSuccess).toHaveBeenCalledWith('"My Cases" was saved to My Dashboards.');
   });
 
-  it("explains a name that is already taken, and keeps Save available", async () => {
-    generateMock.mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." });
-    const err = new BackendApiError(409, "you already have a dashboard named: My Cases");
-    saveMock.mockRejectedValue(err);
+  it("saves under the name typed, trimmed", async () => {
+    const first = dashboard("My Cases");
+    generateMock.mockResolvedValueOnce({ dashboard: first, reply: "Here it is." });
+    saveMock.mockResolvedValue({ dashboard: { ...first, displayName: "Severity board" }, createdOn: "a", updatedOn: "b" });
     renderPage();
 
     await sendMessage("My cases", "Here it is.");
-    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+    const dialog = await openSaveDialog();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Name" }), { target: { value: "  Severity board " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect(showError).toHaveBeenCalledWith(
-        'You already have a dashboard named "My Cases". Ask for a different name in the chat, then save again.',
-        err,
-      ),
-    );
+    expect(await screen.findByText(`Opened ${first.id}`)).toBeInTheDocument();
+    expect(saveMock).toHaveBeenCalledWith({ ...first, displayName: "Severity board" });
+    expect(showSuccess).toHaveBeenCalledWith('"Severity board" was saved to My Dashboards.');
+  });
+
+  it("Cancel saves nothing and keeps the draft", async () => {
+    generateMock.mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." });
+    renderPage();
+
+    await sendMessage("My cases", "Here it is.");
+    const dialog = await openSaveDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(saveMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
+  });
+
+  it("shows a taken name in the dialog, which stays open, and leaves the preview as it is", async () => {
+    generateMock.mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." });
+    saveMock.mockRejectedValue(new BackendApiError(409, "you already have a dashboard named: My Cases"));
+    renderPage();
+
+    await sendMessage("My cases", "Here it is.");
+    const dialog = await openSaveDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(
+      await within(dialog).findByText('You already have a dashboard named "My Cases". Choose a different name.'),
+    ).toBeInTheDocument();
     expect(showSuccess).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    // The preview keeps the model's name (the dialog hides the page, hence `hidden`).
+    expect(screen.getByRole("heading", { name: "My Cases", hidden: true })).toBeInTheDocument();
+  });
+
+  it("shows another refusal in the dialog with the backend's message", async () => {
+    generateMock.mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." });
+    saveMock.mockRejectedValue(new BackendApiError(400, "at most 50 saved dashboards are allowed"));
+    renderPage();
+
+    await sendMessage("My cases", "Here it is.");
+    const dialog = await openSaveDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await within(dialog).findByText("At most 50 saved dashboards are allowed.")).toBeInTheDocument();
   });
 
   it("shows Saving… while the save is in flight", () => {
@@ -138,7 +187,6 @@ describe("GenerateDashboardPage: editing a saved dashboard", () => {
     generateMock.mockReset();
     saveMock.mockReset();
     showSuccess.mockReset();
-    showError.mockReset();
     savePending = false;
   });
 
@@ -161,10 +209,29 @@ describe("GenerateDashboardPage: editing a saved dashboard", () => {
     await sendMessage("Only open ones", "Changed.");
     expect(generateMock).toHaveBeenCalledWith("Only open ones", saved);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const dialog = await openSaveDialog();
+    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("My Open Cases");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(await screen.findByText(`Opened ${saved.id}`)).toBeInTheDocument();
     expect(saveMock).toHaveBeenCalledWith(changed);
     expect(showSuccess).toHaveBeenCalledWith('"My Open Cases" was updated.');
+  });
+
+  it("can rename the dashboard while saving the change, still in place", async () => {
+    const saved = dashboard("My Cases");
+    const changed = { ...dashboard("My Cases"), id: saved.id, widgets: [{ widgetId: "w1" }] } as BeDashboard;
+    generateMock.mockResolvedValueOnce({ dashboard: changed, reply: "Changed." });
+    saveMock.mockResolvedValue({ dashboard: changed, createdOn: "a", updatedOn: "b" });
+    renderPage(saved);
+
+    await sendMessage("Add a widget", "Changed.");
+    const dialog = await openSaveDialog();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Name" }), { target: { value: "Cases board" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(`Opened ${saved.id}`)).toBeInTheDocument();
+    expect(saveMock).toHaveBeenCalledWith({ ...changed, displayName: "Cases board" });
+    expect(showSuccess).toHaveBeenCalledWith('"Cases board" was updated.');
   });
 
   it("goes back to the dashboard without asking when nothing changed", () => {
@@ -190,7 +257,6 @@ describe("GenerateDashboardPage: the chat", () => {
     generateMock.mockReset();
     saveMock.mockReset();
     showSuccess.mockReset();
-    showError.mockReset();
     savePending = false;
   });
 
@@ -208,34 +274,84 @@ describe("GenerateDashboardPage: the chat", () => {
   });
 
   it("says so when the first message can't be turned into a dashboard", async () => {
-    generateMock.mockRejectedValueOnce(new Error("refused"));
+    const message = "A cases-per-month line chart can cover at most 24 months.";
+    generateMock.mockRejectedValueOnce(new BackendApiError(422, message, { message }));
     renderPage();
 
     await sendMessage("Hello", "The dashboard cannot be generated from the input.");
 
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
     expect(screen.getByText("Your dashboard will appear here")).toBeInTheDocument();
+  });
+
+  it("says the change can't be made when a follow-up message is declined", async () => {
+    const message = "A cases-per-month line chart can cover at most 24 months.";
+    generateMock
+      .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
+      .mockRejectedValueOnce(new BackendApiError(422, message, { message }));
+    renderPage();
+    await sendMessage("My cases", "Here it is.");
+
+    await sendMessage("Per month for 3 years", "This dashboard cannot be modified with your input.");
+
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
   });
 
   it.each([
     [429, "You've sent a lot of messages in a short time. Try again in 42 seconds."],
     [413, "The dashboard being edited is too large to change in the chat. Start a new one."],
+    [400, "The description is too long: keep it under 2,000 characters."],
+    [502, "The AI assistant can't be reached right now. Try again in a few minutes."],
+    [502, "The dashboard was too large to create in one go. Ask for fewer widgets, or build it in steps."],
+    [503, "The AI assistant has reached its usage limit. Try again later."],
+    [504, "The AI assistant took too long to answer. Try again."],
   ])("shows the backend's message for a %d", async (status, message) => {
-    generateMock.mockRejectedValueOnce(new BackendApiError(status, message));
+    generateMock.mockRejectedValueOnce(new BackendApiError(status, message, { message, errorCode: "generate_call_failed" }));
     renderPage();
 
     await sendMessage("My cases", message);
 
-    expect(screen.queryByText("The dashboard cannot be generated from the input.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Something went wrong/)).not.toBeInTheDocument();
+  });
+
+  it("shows the backend's message for a follow-up message too", async () => {
+    const message = "The AI assistant has reached its usage limit. Try again later.";
+    generateMock
+      .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
+      .mockRejectedValueOnce(new BackendApiError(503, message, { message, errorCode: "generate_usage_limit" }));
+    renderPage();
+    await sendMessage("My cases", "Here it is.");
+
+    await sendMessage("Make it purple", message);
+
+    expect(screen.queryByText(/Something went wrong/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a proxy's own 504 (no JSON message)", new BackendApiError(504, "Gateway Timeout"), "The AI assistant took too long to answer. Try again."],
+    ["a proxy's own 502", new BackendApiError(502, "Bad Gateway"), "The AI assistant can't be reached right now. Try again in a few minutes."],
+    ["no answer at all", new TypeError("Failed to fetch"), "The portal didn't get an answer. Check your connection and try again."],
+    ["an internal error", new BackendApiError(500, "Internal error", { message: "Internal error" }), "Something went wrong while creating the dashboard. Try again."],
+  ])("says where it failed for %s, never that the input did not work", async (_name, err, message) => {
+    generateMock.mockRejectedValueOnce(err);
+    renderPage();
+
+    await sendMessage("My cases", message);
+
+    expect(screen.queryByText(/input/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Bad Gateway")).not.toBeInTheDocument();
   });
 
   it("keeps the preview when a follow-up message fails", async () => {
     generateMock
       .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
-      .mockRejectedValueOnce(new Error("timeout"));
+      .mockRejectedValueOnce(new BackendApiError(500, "Internal error", { message: "Internal error" }));
     renderPage();
     await sendMessage("My cases", "Here it is.");
 
-    await sendMessage("Make it purple", "This dashboard cannot be modified with your input.");
+    await sendMessage("Make it purple", "Something went wrong while changing the dashboard. Try again.");
 
     expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();

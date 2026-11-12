@@ -40,12 +40,10 @@ const (
 	// MaxInlineImagesPerContent is the most images one comment or one description
 	// may show. Beyond it the comment or record is refused (a 400).
 	MaxInlineImagesPerContent = 5
-	// DefaultInlineImageMaxBytes is the default size limit of one inline image
-	// (INLINE_IMAGE_MAX_BYTES), and DefaultInlineImagesTotalMaxBytes the default
-	// total of all images in one comment or description
-	// (INLINE_IMAGES_TOTAL_MAX_BYTES). Both 25 MiB.
-	DefaultInlineImageMaxBytes       int64 = 25 << 20
-	DefaultInlineImagesTotalMaxBytes int64 = 25 << 20
+	// DefaultInlineImagesTotalMaxBytes is the default total of all images in one
+	// comment or description (INLINE_IMAGES_TOTAL_MAX_MB), 1 MiB. It is also the
+	// most one image can be: there is no separate per-image limit.
+	DefaultInlineImagesTotalMaxBytes int64 = 1 << 20
 	// maxInlineLookupIDs bounds how many referenced ids one validation looks up;
 	// a comment naming more distinct ids than this is far over the limit anyway.
 	maxInlineLookupIDs = 200
@@ -80,11 +78,11 @@ var newInlineImageTypes = map[string]string{
 
 // StoredAttachmentLimits are the settings the service runs under.
 type StoredAttachmentLimits struct {
-	// MaxBytes caps one file; InlineMaxBytes caps one comment image.
-	MaxBytes       int64
-	InlineMaxBytes int64
+	// MaxBytes caps one file.
+	MaxBytes int64
 	// InlineTotalMaxBytes caps the images of ONE comment or description together
-	// (0 means DefaultInlineImagesTotalMaxBytes).
+	// (0 means DefaultInlineImagesTotalMaxBytes). One image can be at most this
+	// big too.
 	InlineTotalMaxBytes int64
 }
 
@@ -104,6 +102,46 @@ type storedAttachmentService struct {
 	limits StoredAttachmentLimits
 	now    func() time.Time
 	shares *shareLimiter
+	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
+	// ask for an admin delete (DeleteStoredAttachmentRequest.AsAdmin).
+	csmPortalClientID string
+	// caseStates applies the customer-attachment state rule to a case once a work
+	// item attachment is COMPLETE. nil leaves a case's state alone. Set with
+	// WithStoredAttachmentCaseStates.
+	caseStates customerAttachmentStateMover
+}
+
+// customerAttachmentStateMover is the part of the case service a stored work item attachment needs.
+type customerAttachmentStateMover interface {
+	ApplyCustomerAttachmentStateTransition(ctx context.Context, caseID string)
+}
+
+// WithStoredAttachmentCaseStates lets a customer's completed work item attachment move its case from Awaiting
+// Info or Solution Proposed to Waiting on WSO2, by the same rule as a customer's comment. Applied after
+// construction because the case service is built later. A no-op unless both sides are the Postgres services.
+func WithStoredAttachmentCaseStates(svc StoredAttachmentService, cases CaseService) StoredAttachmentService {
+	s, ok := svc.(*storedAttachmentService)
+	if !ok {
+		return svc
+	}
+	if m, ok := cases.(customerAttachmentStateMover); ok {
+		s.caseStates = m
+	}
+	return svc
+}
+
+// WithStoredAttachmentAdminDelete lets the CSM portal backend (the caller with
+// this client id) delete an attachment on behalf of a portal admin. Who is an
+// admin is decided once, in that backend, from the person's token roles; this
+// service only trusts the caller, like portal banners do, rather than keeping a
+// second AUTH_ADMIN_ROLES list that could disagree. Applied after construction
+// so the constructor's callers keep compiling; a service it does not recognise
+// is returned unchanged.
+func WithStoredAttachmentAdminDelete(svc StoredAttachmentService, csmPortalClientID string) StoredAttachmentService {
+	if s, ok := svc.(*storedAttachmentService); ok {
+		s.csmPortalClientID = csmPortalClientID
+	}
+	return svc
 }
 
 // NewStoredAttachmentService constructs a StoredAttachmentService.
@@ -191,8 +229,8 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	draft := req.ProjectID != ""
 	switch {
-	case draft && req.Kind != domain.StoredAttachmentComment:
-		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "projectId can only be used for a comment image"}
+	case draft && req.Kind != domain.StoredAttachmentComment && req.Kind != domain.StoredAttachmentWorkItem:
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "projectId can only be used for a comment image or a work item attachment"}
 	case draft && req.ParentID != "":
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "send either parentId or projectId, not both"}
 	case draft && !validate.IsUUID(req.ProjectID):
@@ -461,6 +499,78 @@ func (s *storedAttachmentService) ValidateDescriptionImages(ctx context.Context,
 	return nil
 }
 
+// MaxCreateAttachments is how many draft files one create request may link.
+const MaxCreateAttachments = 10
+
+// ValidateReportDrafts implements ReportDraftLinker.
+//
+// It runs BEFORE a record is created, so a bad request leaves nothing behind. Every
+// id must be a COMPLETE draft work item attachment uploaded to this project by
+// authorEmail and not linked anywhere yet.
+func (s *storedAttachmentService) ValidateReportDrafts(ctx context.Context, projectID, authorEmail string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) > MaxCreateAttachments {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("At most %d attachments can be added when creating a record.", MaxCreateAttachments)}
+	}
+	if err := validateUUIDs("attachmentIds", ids); err != nil {
+		return err
+	}
+	if authorEmail == "" || !validate.IsUUID(projectID) {
+		return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project."}
+	}
+	drafts, err := s.repo.ListReportDrafts(repository.WithSystemIdentity(ctx), projectID, authorEmail, ids, s.now().Add(-reportDraftUsableAge))
+	if err != nil {
+		return err
+	}
+	found := map[string]bool{}
+	for _, d := range drafts {
+		found[strings.ToLower(d.ID)] = true
+	}
+	for _, id := range ids {
+		if !found[strings.ToLower(id)] {
+			return &apierror.ValidationError{Msg: "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, was uploaded more than 24 hours ago, or is already used by another record."}
+		}
+	}
+	return nil
+}
+
+// LinkReportDrafts implements ReportDraftLinker. The caller validated the ids first,
+// so a link that does not take every one of them means the database failed or a
+// draft was taken in between: it is an error, for the caller to log loudly.
+func (s *storedAttachmentService) LinkReportDrafts(ctx context.Context, workItemID, projectID, authorEmail string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	linked, err := s.repo.LinkReportDrafts(repository.WithSystemIdentity(ctx), workItemID, projectID, authorEmail, ids)
+	if err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "report attachments linked",
+		"audit", true, "action", "link", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"workItemId", workItemID, "referenced", len(ids), "linked", len(linked))
+	if len(linked) != len(distinctLower(ids)) {
+		return fmt.Errorf("linked %d of %d report attachments", len(linked), len(distinctLower(ids)))
+	}
+	return nil
+}
+
+// distinctLower is ids lower-cased with duplicates removed.
+func distinctLower(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		k := strings.ToLower(id)
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // LinkDescriptionImages implements InlineImageLinker. Best effort, like
 // LinkFromContent: a failure is logged and the record is not affected (the image
 // then stays a draft, visible to its uploader only, and is removed by the upload
@@ -533,7 +643,13 @@ func (s *storedAttachmentService) ValidateEmbeddedImages(_ context.Context, auth
 // on its work item, of no more than the total limit together. Images that are not
 // the author's, or not on this work item, are not counted: they are never linked
 // to the comment (LinkFromContent), so they do not weigh on it.
-func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error {
+//
+// commentID is the comment being edited, or "" for a new one. Images already
+// linked to that comment are kept as they are: they count toward the number of
+// images but not toward the size limit, which then applies to what the edit
+// adds. Otherwise lowering the limit would make every older comment with large
+// images impossible to edit.
+func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, commentID, workItemID, authorEmail, content string) error {
 	if !mayHaveInlineImages(content) || authorEmail == "" {
 		return nil
 	}
@@ -545,6 +661,16 @@ func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, wor
 	if err != nil {
 		return err
 	}
+	retained := map[string]bool{}
+	if commentID != "" {
+		linked, err := s.repo.LinkedImageIDs(ctx, commentID, ids)
+		if err != nil {
+			return err
+		}
+		for _, id := range linked {
+			retained[strings.ToLower(id)] = true
+		}
+	}
 	var count int
 	var total int64
 	for _, r := range rows {
@@ -552,7 +678,9 @@ func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, wor
 			continue
 		}
 		count++
-		total += sizeOrZero(r.SizeBytes)
+		if !retained[strings.ToLower(r.ID)] {
+			total += sizeOrZero(r.SizeBytes)
+		}
 	}
 	if count > MaxInlineImagesPerContent {
 		return &apierror.ValidationError{Msg: fmt.Sprintf("A comment can show at most %d images.", MaxInlineImagesPerContent)}
@@ -593,8 +721,9 @@ func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID
 //
 // Who may delete is decided here, not by row-level security: UPDATE on these
 // tables is internal-only, so the soft delete runs as the system after the checks
-// below. For now only the person who uploaded an attachment may delete it, and
-// never once the work item is closed. Only the row is marked here; the portal
+// below. Only the person who uploaded an attachment may delete it, or a portal
+// admin through the CSM portal backend (req.AsAdmin), and never once the work
+// item is closed. Only the row is marked here; the portal
 // backend removes the file afterwards.
 func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
@@ -620,8 +749,12 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		return &apierror.NotFoundError{Msg: "attachment not found"}
 	}
 	row := rows[0]
+	adminOverride := false
 	if !strings.EqualFold(row.CreatedBy, email) {
-		return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+		if !s.mayDeleteAsAdmin(ctx, req) {
+			return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+		}
+		adminOverride = true
 	}
 
 	switch row.Status {
@@ -658,8 +791,19 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 	slog.InfoContext(ctx, "attachment deleted",
 		"audit", true, "action", "delete", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
-		"attachmentId", row.ID, "path", path)
+		"attachmentId", row.ID, "path", path, "adminOverride", adminOverride)
 	return nil
+}
+
+// mayDeleteAsAdmin is whether this delete may skip the "only the uploader" rule:
+// the request says the person is a portal admin AND the caller is the CSM portal
+// backend, which is where that is decided. A request that sets the flag from any
+// other caller is not an admin delete, so it gets the ordinary refusal.
+func (s *storedAttachmentService) mayDeleteAsAdmin(ctx context.Context, req domain.DeleteStoredAttachmentRequest) bool {
+	if !req.AsAdmin || s.csmPortalClientID == "" {
+		return false
+	}
+	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
 }
 
 // formatByteLimit renders a size limit for a message: "100 MB", or "512 KB"
@@ -679,7 +823,7 @@ const closedParentDeleteMessage = "This case is closed, so attachments can't be 
 
 func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int64 {
 	if kind == domain.StoredAttachmentComment {
-		return s.limits.InlineMaxBytes
+		return s.limits.inlineTotalMax()
 	}
 	return s.limits.MaxBytes
 }

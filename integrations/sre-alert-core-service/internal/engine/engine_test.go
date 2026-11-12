@@ -46,6 +46,8 @@ type fakeIncidents struct {
 	nextID    int64
 	locked    map[int64]bool
 	folds     int
+	// beforeUnmute, if set, runs as Unmute starts, standing in for a fold that lands between MuteOutcome and Unmute.
+	beforeUnmute func()
 }
 
 func newFakeIncidents() *fakeIncidents {
@@ -79,6 +81,10 @@ func (f *fakeIncidents) Fold(_ context.Context, fp string, alertIDs []string, de
 		}
 		if inc.Category == "" {
 			inc.Category = c.Category
+		}
+		if c.SeverityLabel != "" {
+			inc.SeverityLabel = c.SeverityLabel
+			inc.Severity, inc.Impact, inc.Urgency = c.Severity, c.Impact, c.Urgency
 		}
 		inc.FoldVersion++
 		f.due[c.ID] = &now
@@ -704,5 +710,26 @@ func TestDeliverDue_CSMConfirmingInsideGracePeriodNeverUsesChat(t *testing.T) {
 	inc := incidents.byFingerprint(fpOf(item("ALT1", 0, "")))[0]
 	if !inc.CSMConfirmed || n.chatCalls != 0 || inc.Fallback {
 		t.Fatalf("confirmed = %v chat = %d, want CSM to win without any Chat post", inc.CSMConfirmed, n.chatCalls)
+	}
+}
+
+func TestFoldRaisesSeverityLabelToTheWorstSeen(t *testing.T) {
+	e, incidents := newTestEngine(&fakeNotifier{}, testConfig())
+	// In one batch: warning, then a critical duplicate.
+	handle(t, e, item("a1", 0, "warning"), item("a2", time.Second, "critical"))
+	incs := incidents.byFingerprint(fpOf(item("a1", 0, "warning")))
+	if len(incs) != 1 || incs[0].SeverityLabel != "critical" || incs[0].Severity != 1 || incs[0].Impact != "HIGH" ||
+		incs[0].Urgency != "HIGH" {
+		t.Fatalf("same batch: incidents = %+v, want one at critical with HIGH impact and urgency", incs)
+	}
+
+	e2, incidents2 := newTestEngine(&fakeNotifier{}, testConfig())
+	handle(t, e2, item("b1", 0, "warning"))
+	handle(t, e2, item("b2", time.Second, "major"))   // later batch, more severe
+	handle(t, e2, item("b3", 2*time.Second, "minor")) // less severe: no change
+	incs = incidents2.byFingerprint(fpOf(item("b1", 0, "warning")))
+	if len(incs) != 1 || incs[0].SeverityLabel != "major" || incs[0].Severity != 2 || incs[0].Impact != "MEDIUM" ||
+		incs[0].Urgency != "HIGH" || incs[0].AlertCount != 3 {
+		t.Fatalf("later batches: incidents = %+v, want one at major (MEDIUM impact, HIGH urgency) with 3 alerts", incs)
 	}
 }

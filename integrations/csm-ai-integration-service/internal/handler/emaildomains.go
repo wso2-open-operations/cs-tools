@@ -56,7 +56,7 @@ type classifyResponse struct {
 //   - 200 {domain, classification, source, usage}
 //   - 400 invalid_request     the body or the domain
 //   - 503 not_configured      the model is needed and no API key is set
-//   - 422, 502, 504           the model call, as for dashboards
+//   - 422, 429, 502, 504      the model call, as for dashboards
 func (h *EmailDomainHandler) Classify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
@@ -94,6 +94,9 @@ func writeClassifyError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, emaildomains.ErrUnusable):
 		slog.WarnContext(ctx, "email domain classify: unusable reply", "err", err)
 		writeError(w, http.StatusBadGateway, CodeUnusable, "the model's reply could not be used")
+	case errors.Is(err, emaildomains.ErrUsageLimit):
+		slog.WarnContext(ctx, "email domain classify: model usage limit reached", "err", err)
+		writeError(w, http.StatusTooManyRequests, CodeUsageLimit, "the model's usage limit was reached")
 	case errors.Is(err, emaildomains.ErrCall) && isTimeout(err):
 		writeError(w, http.StatusGatewayTimeout, CodeTimeout, "the model call timed out")
 	case errors.Is(err, emaildomains.ErrCall):

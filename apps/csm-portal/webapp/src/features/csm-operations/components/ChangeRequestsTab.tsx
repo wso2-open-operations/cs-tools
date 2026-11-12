@@ -147,6 +147,7 @@ function renderOptionalCell(
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
 
+/** A backend timestamp as a short date ("Nov 4, 2026"), or "—" when it is missing or cannot be read. */
 function formatDate(value?: string | null): string {
   return (
     formatBackendTimestampForDisplay(value, {
@@ -157,11 +158,6 @@ function formatDate(value?: string | null): string {
   );
 }
 
-/**
- * Change-requests listing for the Operations → Change requests tab. Searches
- * `POST /change-requests/search` with server-side pagination and filters
- * (state, impact, closed date range, free-text search).
- */
 type CrSortField = "createdOn" | "updatedOn" | "plannedStartOn" | "plannedEndOn";
 
 /** The optional columns that are dates, and the sort field each one sorts by. */
@@ -171,6 +167,13 @@ const CR_SORT_FIELD_BY_COLUMN: Partial<Record<ChangeRequestOptionalColumnId, CrS
   createdOn: "createdOn",
 };
 
+/**
+ * Change-requests listing for the Operations → Change requests tab. Searches
+ * `POST /change-requests/search` with server-side pagination and filters
+ * (state, impact, closed date range, free-text search). A row opens its change
+ * request with `{ from, parentState }`, so its Back returns here with this
+ * page's own Back intact.
+ */
 export default function ChangeRequestsTab(): JSX.Element {
   const navigate = useNavTransition();
   const api = useBackendApi();
@@ -521,7 +524,12 @@ export default function ChangeRequestsTab(): JSX.Element {
                     hover
                     onClick={() =>
                       navigate(`/operations/change-requests/${cr.id}`, {
-                        state: { from: `${location.pathname}${location.search}` },
+                        // `parentState` keeps this tab's own state (e.g.
+                        // `{ from: <dashboard> }`) for the detail page's Back.
+                        state: {
+                          from: `${location.pathname}${location.search}`,
+                          parentState: location.state ?? null,
+                        },
                       })
                     }
                     selected={selection.isSelected(cr)}

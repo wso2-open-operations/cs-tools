@@ -67,6 +67,16 @@ function isAncestor(nodes: Map<string, CategoryNode>, ofId: string, candidateId:
 }
 
 /** Depth-first flattening of {@link buildCategoryTree}, for an indented option list. */
+/**
+ * The categories a skill can be filed under: active, with no sub-category.
+ * The backend refuses any other (and a parent with skills cannot get children).
+ */
+export function fileableCategoryIds(categories: readonly SkillCategory[] | undefined): Set<string> {
+  const all = categories ?? [];
+  const parents = new Set(all.map((c) => c.parentId).filter((id): id is string => !!id));
+  return new Set(all.filter((c) => c.active !== false && !parents.has(c.id)).map((c) => c.id));
+}
+
 export function flattenCategoryTree(roots: readonly CategoryNode[]): FlatCategory[] {
   const out: FlatCategory[] = [];
   const walk = (list: readonly CategoryNode[], depth: number): void => {

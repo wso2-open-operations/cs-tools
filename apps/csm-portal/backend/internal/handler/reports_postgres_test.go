@@ -41,6 +41,8 @@ type mockEntityReportsClient struct {
 
 	searchTimeCardsPages     [][]byte
 	searchTimeCardsCallCount int
+
+	getProjectSLAReportFn func(ctx context.Context, id, from, to string) ([]byte, error)
 }
 
 func (m *mockEntityReportsClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
@@ -134,7 +136,7 @@ func TestGetTimeLogBreakdown_PagesThroughAllCasesAndTimeCards(t *testing.T) {
 	}
 
 	c := NewPostgresReportsClient(entity)
-	got, err := c.GetTimeLogBreakdown(context.Background(), "PRJ001")
+	got, err := c.GetTimeLogBreakdown(context.Background(), "PRJ001", TimeLogPeriod{})
 	if err != nil {
 		t.Fatalf("GetTimeLogBreakdown: %v", err)
 	}
@@ -243,7 +245,7 @@ func TestGetTimeLogBreakdown_AcceptsProjectUUID(t *testing.T) {
 		},
 		searchCasesPages: [][]byte{[]byte(`{"cases":[],"total":0}`)},
 	}
-	result, err := NewPostgresReportsClient(mock).GetTimeLogBreakdown(context.Background(), projectID)
+	result, err := NewPostgresReportsClient(mock).GetTimeLogBreakdown(context.Background(), projectID, TimeLogPeriod{})
 	if err != nil {
 		t.Fatalf("GetTimeLogBreakdown: %v", err)
 	}
@@ -258,8 +260,15 @@ func TestGetTimeLogBreakdown_UnknownProjectUUIDIsNotFound(t *testing.T) {
 			return nil, &apierror.Error{StatusCode: http.StatusNotFound, Body: `{"message":"project not found"}`}
 		},
 	}
-	_, err := NewPostgresReportsClient(mock).GetTimeLogBreakdown(context.Background(), "90269291-b2c3-46cb-9214-ee52c70f861d")
+	_, err := NewPostgresReportsClient(mock).GetTimeLogBreakdown(context.Background(), "90269291-b2c3-46cb-9214-ee52c70f861d", TimeLogPeriod{})
 	if !errors.Is(err, viewer.ErrProjectNotFound) {
 		t.Fatalf("err = %v, want viewer.ErrProjectNotFound", err)
 	}
+}
+
+func (m *mockEntityReportsClient) GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error) {
+	if m.getProjectSLAReportFn == nil {
+		return nil, errors.New("GetProjectSLAReport not stubbed")
+	}
+	return m.getProjectSLAReportFn(ctx, id, from, to)
 }

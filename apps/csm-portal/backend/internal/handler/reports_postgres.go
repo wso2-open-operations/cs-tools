@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/viewer"
@@ -38,6 +39,7 @@ type entityReportsClient interface {
 	SearchTimeCards(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
+	GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error)
 }
 
 type entityTimeCardRef struct {
@@ -72,8 +74,8 @@ type entitySearchTimeCardsResponse struct {
 
 // postgresReportsClient implements reportsClient by calling entity-service
 // (Postgres). The CS report is built from the project, its cases, and its
-// deployments. SLA percentile clocks are not stored in Postgres, so that
-// report stays retired.
+// deployments. The SLA report is built from entity-service's own SLA report
+// read (GetSLAReport in reports_sla.go).
 type postgresReportsClient struct {
 	entity entityReportsClient
 }
@@ -107,16 +109,31 @@ func displayTimeCardState(state string) string {
 }
 
 // formatHoursMinutes converts a fractional-hours value to the report's
-// "1h 2m"/"2m" display format, the same one the original SupportPortalLite
-// report used.
+// "1h 2m"/"2m" display format.
 func formatHoursMinutes(hours float64) string {
-	totalMinutes := int(hours*60 + 0.5) // round to nearest minute
+	return formatMinutes(hours * 60)
+}
+
+// formatMinutes renders a duration given in minutes as "1h 2m"/"2m". Callers
+// sum raw minutes and format once, so rounding never accumulates. A negative
+// duration formats its magnitude behind a single "-" ("-1h 30m"); a value that
+// rounds to zero carries no sign.
+func formatMinutes(minutes float64) string {
+	sign := ""
+	if minutes < 0 {
+		minutes = -minutes
+		sign = "-"
+	}
+	totalMinutes := int(minutes + 0.5) // round to nearest minute
+	if totalMinutes == 0 {
+		sign = ""
+	}
 	h := totalMinutes / 60
 	m := totalMinutes % 60
 	if h == 0 {
-		return strconv.Itoa(m) + "m"
+		return sign + strconv.Itoa(m) + "m"
 	}
-	return strconv.Itoa(h) + "h " + strconv.Itoa(m) + "m"
+	return sign + strconv.Itoa(h) + "h " + strconv.Itoa(m) + "m"
 }
 
 // resolveProject resolves the report's projectId query parameter to
@@ -256,10 +273,45 @@ func (c *postgresReportsClient) searchAllProjectTimeCards(ctx context.Context, p
 	}
 }
 
+// TimeLogPeriod is the optional period filter of the time-log breakdown.
+// From and To are inclusive YYYY-MM-DD dates, empty meaning "not given".
+// AllTime disables the project-date defaults for the bounds that are empty.
+type TimeLogPeriod struct {
+	From, To string
+	AllTime  bool
+}
+
+const dateLayout = "2006-01-02"
+
+// dayOf returns the YYYY-MM-DD prefix of a date or RFC 3339 timestamp, or ""
+// when the value does not start with a valid date.
+func dayOf(v string) string {
+	if len(v) < len(dateLayout) {
+		return ""
+	}
+	d := v[:len(dateLayout)]
+	if _, err := time.Parse(dateLayout, d); err != nil {
+		return ""
+	}
+	return d
+}
+
+// inPeriod reports whether day (YYYY-MM-DD) lies within the inclusive bounds;
+// an empty bound is open. An unparseable day is never in a bounded period.
+func inPeriod(day, from, to string) bool {
+	if from == "" && to == "" {
+		return true
+	}
+	if day == "" {
+		return false
+	}
+	return (from == "" || day >= from) && (to == "" || day <= to)
+}
+
 // GetTimeLogBreakdown implements reportsClient. Cases are paged through
 // searchAllCases. Time cards are one project search, then attached to the
 // case they belong to.
-func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string) (viewer.TimeLogBreakdownDetails, error) {
+func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string, period TimeLogPeriod) (viewer.TimeLogBreakdownDetails, error) {
 	project, err := c.resolveProject(ctx, projectID)
 	if err != nil {
 		return viewer.TimeLogBreakdownDetails{}, err
@@ -287,12 +339,32 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 		}
 	}
 
+	// Period actually used: an explicit bound wins, otherwise the project's
+	// subscription dates, otherwise unbounded.
+	from, to := period.From, period.To
+	if !period.AllTime {
+		if from == "" {
+			from = dayOf(derefStr(project.StartDate))
+		}
+		if to == "" {
+			to = dayOf(derefStr(project.EndDate))
+		}
+	}
+	// A project whose own dates are inverted yields an empty result when the
+	// caller gave no bound. Once the caller supplied a bound, an inverted
+	// effective range (the defaulted side crossing it) is a bad request.
+	if (period.From != "" || period.To != "") && from != "" && to != "" && from > to {
+		return viewer.TimeLogBreakdownDetails{}, viewer.ErrInvalidTimeLogPeriod
+	}
+
 	result := viewer.TimeLogBreakdownDetails{
 		ProjectName:         project.Name,
 		ProjectKey:          project.Key,
 		ProjectType:         project.SubscriptionType,
-		RemainingQueryHours: hoursOrEmpty(project.RemainingQueryHours),
-		TotalQueryHours:     hoursOrEmpty(project.TotalQueryHours),
+		RemainingQueryHours: queryHoursDisplay(project.RemainingQueryHours),
+		TotalQueryHours:     queryHoursDisplay(project.TotalQueryHours),
+		PeriodStart:         from,
+		PeriodEnd:           to,
 		Cases:               make([]viewer.TimeLogBreakdownCase, 0, len(cases)),
 	}
 
@@ -303,7 +375,16 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 			displayState = state
 		}
 
-		timeCards := cardsByCase[cv.ID]
+		var timeCards []entityTimeCardView
+		for _, tc := range cardsByCase[cv.ID] {
+			if inPeriod(dayOf(tc.WorkDate), from, to) {
+				timeCards = append(timeCards, tc)
+			}
+		}
+		// A case is listed when it has an in-period card or was created in the period.
+		if len(timeCards) == 0 && !inPeriod(dayOf(cv.CreatedOn), from, to) {
+			continue
+		}
 		_, caseType := reportCaseKind(cv)
 		caseResult := viewer.TimeLogBreakdownCase{
 			CaseSysID:        cv.ID,
@@ -315,12 +396,13 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 			TimeCards:        make([]viewer.TimeCardDetails, 0, len(timeCards)),
 		}
 
-		var totalHours, consumedHours float64
+		// totalTime is minutes. Sum raw minutes, format once.
+		var totalMinutes, consumedMinutes float64
 		for _, tc := range timeCards {
-			totalHours += tc.TotalTime
+			totalMinutes += tc.TotalTime
 			tcState := derefStr(tc.State)
 			if tc.HasBillable && strings.EqualFold(tcState, "approved") {
-				consumedHours += tc.TotalTime
+				consumedMinutes += tc.TotalTime
 			}
 			isBillable := "false"
 			if tc.HasBillable {
@@ -331,18 +413,27 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 				loggedBy = tc.User.Name
 			}
 			caseResult.TimeCards = append(caseResult.TimeCards, viewer.TimeCardDetails{
-				Total:      formatHoursMinutes(tc.TotalTime),
+				Total:      formatMinutes(tc.TotalTime),
 				CreatedOn:  tc.WorkDate,
 				CreatedBy:  loggedBy,
 				IsBillable: isBillable,
 				State:      displayTimeCardState(tcState),
 			})
 		}
-		caseResult.TotalHours = formatHoursMinutes(totalHours)
-		caseResult.ConsumedQueryHours = formatHoursMinutes(consumedHours)
+		caseResult.TotalHours = formatMinutes(totalMinutes)
+		caseResult.ConsumedQueryHours = formatMinutes(consumedMinutes)
 
 		result.Cases = append(result.Cases, caseResult)
 	}
 
 	return result, nil
+}
+
+// queryHoursDisplay formats a project's query-hours figure (decimal hours)
+// as "1h 2m"; nil stays empty.
+func queryHoursDisplay(h *float64) string {
+	if h == nil {
+		return ""
+	}
+	return formatHoursMinutes(*h)
 }

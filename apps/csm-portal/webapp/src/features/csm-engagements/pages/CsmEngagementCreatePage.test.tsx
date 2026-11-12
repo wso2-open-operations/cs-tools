@@ -106,24 +106,6 @@ vi.mock("@api/backend/client", () => ({
   },
 }));
 
-vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({
-    value,
-    onChange,
-    ariaRequired,
-  }: {
-    value: string;
-    onChange: (v: string) => void;
-    ariaRequired?: boolean;
-  }) => (
-    <textarea
-      aria-label="editor"
-      aria-required={ariaRequired ? "true" : undefined}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  ),
-}));
 
 import CsmEngagementCreatePage from "@features/csm-engagements/pages/CsmEngagementCreatePage";
 

@@ -23,33 +23,12 @@ See `CLAUDE.md` for what lives here and what stays in the backend.
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model id |
 | `CLAUDE_TIMEOUT` | `45s` | One model call's timeout (Go duration, > 0) |
 | `EMAIL_DOMAIN_MODEL` | `claude-haiku-5-5` | Model asked about email domains the rules leave open |
-| `CATALOGUE_DIR` | built-in | A directory of catalogue parts replacing the built-in dashboard catalogue: its `*.md` files, joined in name order (Choreo file mounts, see below). Read once at start: restart to apply a change |
 
-A bad value, a key without `CLAUDE_BASE_URL`, a catalogue directory that cannot be read, has no `*.md` file
-or has an empty one, or the old `CATALOGUE_FILE` set without `CATALOGUE_DIR`, fails the start. Left set next
-to `CATALOGUE_DIR`, `CATALOGUE_FILE` is ignored, with a warning at start: remove it.
+A bad value or a key without `CLAUDE_BASE_URL` fails the start.
 
-## Mounting the catalogue in Choreo
-
-Choreo limits the size of a mounted file (about 20 KB; the catalogue is larger), so the catalogue is mounted
-in parts. The parts are in **`catalogue-parts/`** (`catalogue-01.md`, `catalogue-02.md`, ...), each at most
-20,000 bytes, generated from `internal/catalogue/catalogue.md` by `make catalogue-parts`.
-
-1. In the component's Configs & Secrets, add one file mount per file in `catalogue-parts/`, with that
-   file's content, all under the same directory and keeping the file names, e.g.
-   `/mnt/catalogue/catalogue-01.md`, `/mnt/catalogue/catalogue-02.md`.
-2. Set `CATALOGUE_DIR` to that directory (`/mnt/catalogue`).
-3. After the restart, check the startup log line `model calls`: `catalogue` names the directory and
-   `catalogueParts` lists the parts in the order they were joined.
-
-The service joins the directory's `*.md` files in name order, with one blank line between them, back into
-the catalogue. Files starting with `.` or `_`, other files and subdirectories are skipped.
-
-**When `catalogue.md` changes, the mounts must be updated too.** Run `make catalogue-parts`, commit
-`catalogue-parts/` (a test fails until you do), then in every environment that mounts the catalogue,
-replace each mount's content with the new part, add a mount for a new part and remove one for a part that
-is gone. Until then that environment keeps the old catalogue: nothing updates the mounts or flags them as
-old.
+The dashboard catalogue is built into the binary (`internal/catalogue/catalogue.md`): a change to it ships
+with the next build. `CATALOGUE_DIR` and `CATALOGUE_FILE` are no longer read; left set, they are ignored
+with a warning at start: remove them.
 
 ## Updating the disposable-domain list
 
@@ -79,7 +58,6 @@ See `CLAUDE.md`.
 cp .env.example .env
 go run ./cmd/server
 make test
-make catalogue-parts   # after editing internal/catalogue/catalogue.md; commit catalogue-parts/
 ```
 
 In the local compose stack (`apps/csm-portal/README.md`) it runs as `csm-ai-integration-service` on

@@ -188,6 +188,9 @@ func TestClassifyErrors(t *testing.T) {
 	if _, err := newTestClassifier(t, reachable, &fakeModel{status: 500}).Classify(ctx, "acme.example"); !errors.Is(err, ErrCall) {
 		t.Errorf("gateway 500: %v", err)
 	}
+	if _, err := newTestClassifier(t, reachable, &fakeModel{status: 429}).Classify(ctx, "acme.example"); !errors.Is(err, ErrUsageLimit) {
+		t.Errorf("gateway 429: %v, want ErrUsageLimit", err)
+	}
 	if _, err := newTestClassifier(t, reachable, &fakeModel{category: "spam"}).Classify(ctx, "acme.example"); !errors.Is(err, ErrUnusable) {
 		t.Errorf("unexpected category: %v", err)
 	}

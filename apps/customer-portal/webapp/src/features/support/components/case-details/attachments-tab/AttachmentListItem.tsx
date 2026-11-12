@@ -15,6 +15,7 @@
 // under the License.
 
 import type { AttachmentListItemProps } from "@features/support/types/supportComponents";
+import DownloadCancelButton from "@components/download-progress/DownloadCancelButton";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import {
@@ -81,6 +82,7 @@ export default function AttachmentListItem({
   hideDescription = false,
   isDownloadLoading = false,
   downloadProgress = null,
+  onCancelDownload,
 }: AttachmentListItemProps): JSX.Element {
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
@@ -229,6 +231,12 @@ export default function AttachmentListItem({
                 <Download size={16} aria-hidden />
               )}
             </IconButton>
+            {isDownloadLoading && onCancelDownload && (
+              <DownloadCancelButton
+                name={attachment.name}
+                onCancel={() => onCancelDownload(attachment)}
+              />
+            )}
           </Stack>
         </Box>
 

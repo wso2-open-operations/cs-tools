@@ -1136,10 +1136,20 @@ func (m *mockEntityConfigurationItemClient) SearchConfigurationItems(ctx context
 // ----- mock entity time-card client -----
 
 type mockEntityTimeCardClient struct {
-	searchTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
-	createTimeCardFn  func(ctx context.Context, body []byte) ([]byte, error)
-	updateTimeCardFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
-	deleteTimeCardFn  func(ctx context.Context, id string) ([]byte, error)
+	searchTimeCardsFn    func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
+	createTimeCardFn     func(ctx context.Context, body []byte) ([]byte, error)
+	updateTimeCardFn     func(ctx context.Context, id string, body []byte) ([]byte, error)
+	deleteTimeCardFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+// AggregateTimeCards calls aggregateTimeCardsFn when set, else answers an
+// empty aggregate (no groups, zero totals).
+func (m *mockEntityTimeCardClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateTimeCardsFn != nil {
+		return m.aggregateTimeCardsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0,"othersMinutes":0,"totalMinutes":0}`), nil
 }
 
 func (m *mockEntityTimeCardClient) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {
@@ -1357,4 +1367,65 @@ func (m *mockEntityCommentClient) DeleteComment(ctx context.Context, id string) 
 		return m.deleteCommentFn(ctx, id)
 	}
 	return nil, nil
+}
+
+// ----- mockEntityAlertMuteRuleClient -----
+
+type mockEntityAlertMuteRuleClient struct {
+	searchFn func(ctx context.Context, body []byte) ([]byte, error)
+	getFn    func(ctx context.Context, id string) ([]byte, error)
+	createFn func(ctx context.Context, body []byte) ([]byte, error)
+	patchFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
+	extendFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	endFn    func(ctx context.Context, id string) ([]byte, error)
+	deleteFn func(ctx context.Context, id string) error
+}
+
+func (m *mockEntityAlertMuteRuleClient) SearchAlertMuteRules(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchFn != nil {
+		return m.searchFn(ctx, body)
+	}
+	return []byte(`{"alertMuteRules":[],"total":0,"offset":0,"limit":20}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) GetAlertMuteRule(ctx context.Context, id string) ([]byte, error) {
+	if m.getFn != nil {
+		return m.getFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) CreateAlertMuteRule(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createFn != nil {
+		return m.createFn(ctx, body)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","number":"AMR0000001"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) PatchAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.patchFn != nil {
+		return m.patchFn(ctx, id, body)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) ExtendAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.extendFn != nil {
+		return m.extendFn(ctx, id, body)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) EndAlertMuteRule(ctx context.Context, id string) ([]byte, error) {
+	if m.endFn != nil {
+		return m.endFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) DeleteAlertMuteRule(ctx context.Context, id string) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, id)
+	}
+	return nil
 }

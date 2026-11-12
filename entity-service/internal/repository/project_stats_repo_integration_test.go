@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -234,4 +235,110 @@ func TestProjectStatsIntegration_Aggregations(t *testing.T) {
 			t.Skip("deployment_node.project_key exists -- schema reconciled with the live one")
 		}
 	})
+}
+
+const (
+	reportProjectA = "41111111-1111-1111-1111-111111111111"
+	reportProjectB = "41111111-1111-1111-1111-222222222222"
+	reportUser     = "42222222-0000-0000-0000-000000000001"
+)
+
+// TestProjectStatsIntegration_TimeCardReport seeds approved and non-approved,
+// billable and non-billable cards across two projects and two months, and
+// checks the per-case aggregation: only APPROVED cards, only the requested
+// project, inclusive date bounds, billable + non-billable = total, patching
+// summed, cases ordered by number.
+func TestProjectStatsIntegration_TimeCardReport(t *testing.T) {
+	pool := caseStatsPool(t)
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+
+	cleanup := func() {
+		_, _ = scoped.Exec(ctx, `DELETE FROM time_card WHERE created_by = 'report-test'`)
+		_, _ = scoped.Exec(ctx, `DELETE FROM work_item WHERE created_by = 'report-test'`)
+		_, _ = pool.Exec(ctx, `DELETE FROM "user" WHERE user_name = 'report-test@example.com'`)
+		_, _ = pool.Exec(ctx, `DELETE FROM project WHERE id IN ($1, $2)`, reportProjectA, reportProjectB)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	mustExec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := scoped.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed (%.60s): %v", sql, err)
+		}
+	}
+	mustExec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, sf_id, name)
+	          VALUES ($1, now(), now(), 'report-test', 'report-test', 'RPTTEST-A', 'sf-rpttest-a', 'Acme Corp Support'),
+	                 ($2, now(), now(), 'report-test', 'report-test', 'RPTTEST-B', 'sf-rpttest-b', 'Other Project')`,
+		reportProjectA, reportProjectB)
+	mustExec(`INSERT INTO "user" (id, created_on, updated_on, user_name, email, is_active)
+	          VALUES ($1, now(), now(), 'report-test@example.com', 'report-test@example.com', true)`, reportUser)
+
+	// Case numbers sort 'CSRPT01' < 'CSRPT02'; inserted in reverse to prove ordering.
+	for _, c := range []struct{ id, number, wso2, project string }{
+		{"43333333-0000-0000-0000-000000000002", "CSRPT02", "RPT-2", reportProjectA},
+		{"43333333-0000-0000-0000-000000000001", "CSRPT01", "RPT-1", reportProjectA},
+		{"43333333-0000-0000-0000-000000000003", "CSRPT03", "RPT-3", reportProjectB},
+	} {
+		mustExec(`INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, wso2_id, subject, type, project_id)
+		          VALUES ($1, now(), now(), 'report-test', 'report-test', $2, $3, 'a case', 'CASE', $4)`,
+			c.id, c.number, c.wso2, c.project)
+	}
+
+	card := func(n int, caseID, workDate string, billable bool, state string, analyzing, patching int) {
+		t.Helper()
+		mustExec(`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by, case_id, user_id,
+		              work_date, is_billable, state, analyzing_minutes, patching_minutes)
+		          VALUES ($1::uuid, now(), now(), 'report-test', 'report-test', $2::uuid, $3::uuid,
+		              $4::date, $5, $6::time_card_state_enum, $7, $8)`,
+			"44444444-0000-0000-0000-00000000000"+string(rune('0'+n)), caseID, reportUser, workDate, billable, state, analyzing, patching)
+	}
+	const c1, c2, c3 = "43333333-0000-0000-0000-000000000001", "43333333-0000-0000-0000-000000000002", "43333333-0000-0000-0000-000000000003"
+	card(1, c1, "2026-01-01", true, "APPROVED", 60, 0)   // lower bound, inclusive
+	card(2, c1, "2026-01-31", false, "APPROVED", 20, 10) // upper bound, inclusive; 10 patching
+	card(3, c1, "2026-02-01", true, "APPROVED", 500, 0)  // next month, excluded
+	card(4, c1, "2026-01-15", true, "SUBMITTED", 700, 0) // not approved, excluded
+	card(5, c2, "2026-01-10", true, "APPROVED", 30, 15)  // 15 patching
+	card(6, c3, "2026-01-10", true, "APPROVED", 999, 0)  // other project, excluded
+
+	repo := repository.NewProjectStatsRepository(scoped)
+
+	got, err := repo.TimeCardReport(ctx, reportProjectA, "2026-01-01", "2026-01-31")
+	if err != nil {
+		t.Fatalf("TimeCardReport: %v", err)
+	}
+	if got == nil {
+		t.Fatal("TimeCardReport = nil for an existing project")
+	}
+	if got.Project.Key != "RPTTEST-A" || got.Project.Name == nil || *got.Project.Name != "Acme Corp Support" {
+		t.Errorf("project = %+v", got.Project)
+	}
+	if len(got.Cases) != 2 || got.Cases[0].CaseNumber != "CSRPT01" || got.Cases[1].CaseNumber != "CSRPT02" {
+		t.Fatalf("cases = %+v, want CSRPT01 then CSRPT02", got.Cases)
+	}
+	if c := got.Cases[0]; c.TotalMinutes != 90 || c.BillableMinutes != 60 || c.NonBillableMinutes != 30 || c.PatchingMinutes != 10 ||
+		c.ExternalCaseID == nil || *c.ExternalCaseID != "RPT-1" || c.CaseType == nil || *c.CaseType != "case" {
+		t.Errorf("CSRPT01 = %+v, want 90/60/30/10", c)
+	}
+	if c := got.Cases[1]; c.TotalMinutes != 45 || c.BillableMinutes != 45 || c.NonBillableMinutes != 0 || c.PatchingMinutes != 15 {
+		t.Errorf("CSRPT02 = %+v, want 45/45/0/15", c)
+	}
+	want := domain.ProjectTimeCardReportTotals{TotalMinutes: 135, BillableMinutes: 105, NonBillableMinutes: 30, PatchingMinutes: 25}
+	if got.Totals != want {
+		t.Errorf("totals = %+v, want %+v", got.Totals, want)
+	}
+
+	empty, err := repo.TimeCardReport(ctx, reportProjectA, "2020-01-01", "2020-01-31")
+	if err != nil {
+		t.Fatalf("TimeCardReport(empty): %v", err)
+	}
+	if empty == nil || empty.Cases == nil || len(empty.Cases) != 0 || empty.Totals != (domain.ProjectTimeCardReportTotals{}) {
+		t.Errorf("empty range = %+v, want zero totals and an empty non-nil cases slice", empty)
+	}
+
+	missing, err := repo.TimeCardReport(ctx, "49999999-9999-9999-9999-999999999999", "2026-01-01", "2026-01-31")
+	if err != nil || missing != nil {
+		t.Errorf("unknown project = (%v, %v), want (nil, nil)", missing, err)
+	}
 }

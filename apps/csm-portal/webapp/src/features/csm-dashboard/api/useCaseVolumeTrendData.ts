@@ -17,7 +17,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
-import type { BeCaseVolumeTrendResponse } from "@api/backend/types";
+import type { BeCaseVolumeTrendResponse, BeLineBucket } from "@api/backend/types";
+import { resolveRelativeDatePlaceholderToUtcDate } from "@utils/resolveRelativeDatePlaceholder";
 import {
   hasTeamPlaceholder,
   resolveTeamPlaceholder,
@@ -35,14 +36,33 @@ import {
 /** Matches the backend's own default (see entity-service's `/cases/volume-trend`). */
 const DEFAULT_DAYS = 30;
 
-/** One day's point, after the two named series in {@link BeCaseVolumeTrendResponse}
+/** One point, after the two named series in {@link BeCaseVolumeTrendResponse}
  * are merged by date into a single row — the shape `DashboardLineChart`'s
  * underlying chart library wants (one data array, one line per series key). */
 export interface CaseVolumeTrendChartPoint {
-  /** `YYYY-MM-DD`, UTC. */
+  /** `YYYY-MM-DD`, UTC; a week or month point's first day in the window. */
   date: string;
+  /** A week or month point's last day in the window; absent for a day. */
+  endDate?: string;
   opened: number;
   closed: number;
+}
+
+/** A `shape: "line"` widget's fixed window (`BeDashboardWidget.startDate`/
+ * `endDate`/`bucket`), sent instead of `days`. */
+export interface CaseVolumeTrendWindow {
+  startDate: string;
+  endDate: string;
+  bucket?: BeLineBucket;
+}
+
+/** A window bound as the plain date the endpoint takes: a relative date
+ * placeholder becomes a UTC calendar day, because the endpoint counts by UTC
+ * day (so "this week" starts on the same Monday for every viewer, and
+ * "today" is never a day the service has not reached yet); a plain date is
+ * sent as it is. */
+function windowDate(value: string): string {
+  return resolveRelativeDatePlaceholderToUtcDate(value, new Date()) ?? value;
 }
 
 export interface CaseVolumeTrendData {
@@ -65,6 +85,10 @@ export interface CaseVolumeTrendData {
  * already is (see `BeDashboardWidget.query`'s own doc comment) — resolved
  * for the `__current_team__`/`__current_user__`/relative-date placeholders
  * first, exactly like `useWidgetData` does for `case`-resourceType widgets.
+ *
+ * `fixedWindow` (a widget's `startDate`/`endDate`/`bucket`) asks for a fixed
+ * window instead of the trailing `days`: one point per day, week or month,
+ * a week or month point carrying its last day as `endDate`.
  */
 export function useCaseVolumeTrendData(
   widgetId: string,
@@ -74,9 +98,17 @@ export function useCaseVolumeTrendData(
   selectedTeamSreGroupId?: string | string[],
   currentUserId?: string,
   enabled = true,
+  fixedWindow?: CaseVolumeTrendWindow,
 ): CaseVolumeTrendData {
   const api = useBackendApi();
-  const effectiveDays = days ?? DEFAULT_DAYS;
+  // A fixed window replaces `days` (the backend refuses both together).
+  const range = fixedWindow
+    ? {
+        startDate: windowDate(fixedWindow.startDate),
+        endDate: windowDate(fixedWindow.endDate),
+        ...(fixedWindow.bucket && { bucket: fixedWindow.bucket }),
+      }
+    : { days: days ?? DEFAULT_DAYS };
 
   const resolvedFilters = resolveCurrentUserPlaceholder(
     resolveRelativeDateFilters(
@@ -94,14 +126,14 @@ export function useCaseVolumeTrendData(
       "case-volume-trend",
       widgetId,
       resolvedFilters,
-      effectiveDays,
+      range,
     ],
     queryFn: async (): Promise<BeCaseVolumeTrendResponse> => {
       return withWidgetFetchSlot(async (signal) => {
         return api.post<
-          { filters: Record<string, unknown>; days: number },
+          { filters: Record<string, unknown> } & typeof range,
           BeCaseVolumeTrendResponse
-        >("/cases/volume-trend", { filters: resolvedFilters, days: effectiveDays }, { signal });
+        >("/cases/volume-trend", { filters: resolvedFilters, ...range }, { signal });
       }, teamKey);
     },
     enabled: enabled && !awaitingCurrentUser,
@@ -120,6 +152,7 @@ export function useCaseVolumeTrendData(
   const closedByDate = new Map(closed.map((p) => [p.date, p.count]));
   const points: CaseVolumeTrendChartPoint[] = opened.map((p) => ({
     date: p.date,
+    ...(p.endDate && { endDate: p.endDate }),
     opened: p.count,
     closed: closedByDate.get(p.date) ?? 0,
   }));

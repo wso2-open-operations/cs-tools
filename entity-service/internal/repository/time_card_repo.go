@@ -51,6 +51,13 @@ type TimeCardRepository interface {
 	// threaded down for the same future-authorization reason as
 	// SearchTimeCards.
 	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest, callerEmail string) ([]domain.CaseTimeCardSummary, int, error)
+	// AggregateTimeCards counts the time cards SearchTimeCards would match
+	// for req.Filters, and sums their logged minutes, per value of
+	// req.GroupBy. The service has already validated req (GroupBy, Measure,
+	// and for "day" both dates and the window size); maxGroups is the
+	// resolved cap (ignored for "day"). See domain.AggregateTimeCardsRequest
+	// for the result's shape.
+	AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error)
 	// CreateTimeCard inserts a new time card in the "submitted" state,
 	// submitted by userID, plus one time_card_approver row per
 	// req.ApproverIDs, all in one transaction. When req.ProjectID is
@@ -430,6 +437,155 @@ func (r *timeCardRepo) SearchTimeCards(ctx context.Context, req domain.SearchTim
 	}
 
 	return views, total, nil
+}
+
+// timeCardAggregateColumns maps an AggregateTimeCardsRequest.GroupBy value
+// (other than "day", which has its own query) to the key and label it
+// groups by. A card with no project has no "project" bucket; it is counted
+// in "others", so every grouping adds up to the same totals. A label never
+// reads empty or NULL: a user with no name falls back to their email, then
+// user name; a project with no name to its key.
+var timeCardAggregateColumns = map[string]struct{ key, label string }{
+	domain.TimeCardGroupByState: {"tc.state::TEXT", "tc.state::TEXT"},
+	domain.TimeCardGroupByUser: {"u.id::TEXT",
+		"COALESCE(NULLIF(TRIM(COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name))), ''), u.email, u.user_name, u.id::TEXT)"},
+	domain.TimeCardGroupByProject: {"p.id::TEXT", "COALESCE(NULLIF(TRIM(p.name), ''), p.key, p.id::TEXT)"},
+}
+
+// AggregateTimeCards implements TimeCardRepository.
+func (r *timeCardRepo) AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error) {
+	if req.GroupBy == domain.TimeCardGroupByDay {
+		return r.aggregateTimeCardsByDay(ctx, req)
+	}
+	col, ok := timeCardAggregateColumns[req.GroupBy]
+	if !ok {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	}
+	rank := "bucket_count DESC, bucket_minutes DESC"
+	if req.Measure == domain.TimeCardMeasureMinutes {
+		rank = "bucket_minutes DESC, bucket_count DESC"
+	}
+
+	where, args := timeCardWhereClause(req.Filters)
+	query := fmt.Sprintf(`
+		SELECT %s AS bucket, %s AS bucket_label, COUNT(*) AS bucket_count, SUM(%s) AS bucket_minutes
+		%s %s
+		GROUP BY 1, 2
+		ORDER BY %s, bucket_label, bucket`, col.key, col.label, timeCardMinutesExpr, timeCardFromJoins, where, rank)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate time cards: %w", err)
+	}
+	defer rows.Close()
+
+	buckets, keyless, err := scanTimeCardBuckets(rows, req.GroupBy == domain.TimeCardGroupByState)
+	if err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	shown := buckets
+	if maxGroups > 0 && maxGroups < len(buckets) {
+		shown = buckets[:maxGroups]
+	}
+	resp := timeCardAggregateResponse(shown)
+	othersCount, othersMinutes := 0, 0
+	for _, b := range buckets[len(shown):] {
+		othersCount += b.Count
+		othersMinutes += *b.TotalMinutes
+	}
+	othersCount += keyless.Count
+	othersMinutes += *keyless.TotalMinutes
+	resp.OthersCount = othersCount
+	resp.OthersMinutes = &othersMinutes
+	resp.TotalRecords += othersCount
+	*resp.TotalMinutes += othersMinutes
+	return resp, nil
+}
+
+// aggregateTimeCardsByDay is AggregateTimeCards for the "day" grouping: one
+// bucket per day from Filters.StartDate to Filters.EndDate (the service has
+// required both), in date order, a day with no cards included at zero.
+func (r *timeCardRepo) aggregateTimeCardsByDay(ctx context.Context, req domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error) {
+	if req.Filters == nil || req.Filters.StartDate == nil || req.Filters.EndDate == nil {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy day requires filters.startDate and filters.endDate"}
+	}
+	where, args := timeCardWhereClause(req.Filters)
+	args = append(args, *req.Filters.StartDate, *req.Filters.EndDate)
+	// ::text::date for the series bounds, as in timeCardWhereClause's own
+	// date filters.
+	query := fmt.Sprintf(`
+		WITH matched AS (
+			SELECT tc.work_date AS work_date, %s AS minutes
+			%s %s
+		)
+		SELECT to_char(d, 'YYYY-MM-DD') AS bucket, to_char(d, 'YYYY-MM-DD') AS bucket_label,
+		       COUNT(m.work_date) AS bucket_count, COALESCE(SUM(m.minutes), 0) AS bucket_minutes
+		FROM generate_series($%d::text::date, $%d::text::date, interval '1 day') AS d
+		LEFT JOIN matched m ON m.work_date = d::date
+		GROUP BY d
+		ORDER BY d`, timeCardMinutesExpr, timeCardFromJoins, where, len(args)-1, len(args))
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate time cards by day: %w", err)
+	}
+	defer rows.Close()
+
+	buckets, _, err := scanTimeCardBuckets(rows, false)
+	if err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	resp := timeCardAggregateResponse(buckets)
+	zero := 0
+	resp.OthersMinutes = &zero
+	return resp, nil
+}
+
+// scanTimeCardBuckets reads AggregateTimeCards' (bucket, bucket_label,
+// bucket_count, bucket_minutes) rows. lower lower-cases key and label, for
+// the state grouping: time_card_state_enum's labels are UPPER_SNAKE_CASE,
+// domain.TimeCardState's values (what the states filter accepts) lowercase.
+// A row with no key (the cards with no project) is no bucket: its count and
+// minutes come back as the second result, for the caller's "others".
+func scanTimeCardBuckets(rows pgx.Rows, lower bool) ([]domain.AggregateBucket, domain.AggregateBucket, error) {
+	var buckets []domain.AggregateBucket
+	keylessMinutes := 0
+	keyless := domain.AggregateBucket{TotalMinutes: &keylessMinutes}
+	for rows.Next() {
+		var key, label *string
+		var count, minutes int
+		if err := rows.Scan(&key, &label, &count, &minutes); err != nil {
+			return nil, keyless, fmt.Errorf("scan time card bucket: %w", err)
+		}
+		if key == nil || label == nil {
+			keyless.Count += count
+			keylessMinutes += minutes
+			continue
+		}
+		k, l := *key, *label
+		if lower {
+			k, l = strings.ToLower(k), strings.ToLower(l)
+		}
+		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: l, Count: count, TotalMinutes: &minutes})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, keyless, fmt.Errorf("iterate time card buckets: %w", err)
+	}
+	return buckets, keyless, nil
+}
+
+// timeCardAggregateResponse is the response for buckets with nothing folded
+// into "others" yet: totals are the buckets' own sums.
+func timeCardAggregateResponse(buckets []domain.AggregateBucket) domain.AggregateResponse {
+	total, minutes := 0, 0
+	for _, b := range buckets {
+		total += b.Count
+		minutes += *b.TotalMinutes
+	}
+	if buckets == nil {
+		buckets = []domain.AggregateBucket{}
+	}
+	return domain.AggregateResponse{Groups: buckets, TotalRecords: total, TotalMinutes: &minutes}
 }
 
 // SearchCaseTimeCards implements TimeCardRepository.

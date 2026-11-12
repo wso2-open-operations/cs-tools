@@ -62,6 +62,8 @@ paths:
           $ref: '#/components/responses/Error'
         "422":
           $ref: '#/components/responses/Error'
+        "429":
+          $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
         "502":
@@ -96,6 +98,8 @@ paths:
           $ref: '#/components/responses/Error'
         "422":
           $ref: '#/components/responses/Error'
+        "429":
+          $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
         "502":
@@ -109,8 +113,9 @@ components:
     Error:
       description: >
         The request could not be answered; code says why (invalid_request,
-        not_configured, refused, truncated, unusable, timeout,
-        model_call_failed, internal).
+        not_configured, refused, truncated, unusable, usage_limit, timeout,
+        model_call_failed, internal). usage_limit (429) is the AI side's
+        request, token or spend limit, not the caller's.
       content:
         application/json:
           schema:
@@ -191,10 +196,20 @@ components:
           $ref: '#/components/schemas/Usage'
     Usage:
       type: object
-      description: The model call's tokens; zero when no call was made.
+      description: >-
+        The model call's token counts; zero when no call was made. The input is in three parts:
+        inputTokens is the input that was neither read from nor written to the prompt cache
+        (mostly the user message, once the system prompt is cached), and the two cache counts
+        are the rest.
       properties:
         inputTokens:
           type: integer
+        cacheCreationInputTokens:
+          type: integer
+          description: Input written to the prompt cache (the system prompt, on a call that found no cache).
+        cacheReadInputTokens:
+          type: integer
+          description: Input read from the prompt cache (the system prompt, on a call within the cache's lifetime).
         outputTokens:
           type: integer
     Error:

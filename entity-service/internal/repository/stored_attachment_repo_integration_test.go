@@ -377,6 +377,112 @@ func TestStoredAttachment_MarkDeletedAndTheLists(t *testing.T) {
 	}
 }
 
+// The deleted-only list: with WithDeletedAttachmentsOnly the case and the work
+// item (incident) searches return ONLY the deleted rows, most recently deleted
+// first, with who deleted them and when, and their total and paging count only
+// those; without it the deleted rows never appear and the total ignores them.
+func TestStoredAttachment_DeletedOnlyLists(t *testing.T) {
+	pool, _ := storedAttachmentFixture(t)
+	ctx := saSystemCtx()
+	scoped := repository.NewScoped(pool)
+	cases := repository.NewCaseRepository(scoped)
+
+	const incidentID = "5a000000-0000-0000-0000-0000000000a1"
+	if _, err := scoped.Exec(ctx, `
+		INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, wso2_id, subject, type, project_id)
+		VALUES ($1, now(), now(), 't', 't', 'SA-INC-1', 'WSO2-SAINC1', 'incident', 'INCIDENT', $2)`, incidentID, saProject1); err != nil {
+		t.Fatalf("seed incident: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = scoped.Exec(ctx, `DELETE FROM work_item_attachment WHERE work_item_id = $1`, incidentID)
+		_, _ = scoped.Exec(ctx, `DELETE FROM work_item WHERE id = $1`, incidentID)
+	})
+
+	base := time.Now().UTC().Add(-48 * time.Hour)
+	seed := func(workItemID, id, status string, deletedOn *time.Time, deletedBy string) {
+		t.Helper()
+		if _, err := scoped.Exec(ctx, `
+			INSERT INTO work_item_attachment (id, created_on, updated_on, created_by, updated_by, name, content_type, work_item_id, size_bytes, status, deleted_on, deleted_by)
+			VALUES ($1, $2, $2, 'sa-seed', 'sa-seed', 'seed.txt', 'text/plain', $3, 5, $4::attachment_status_enum, $5, NULLIF($6, ''))`,
+			id, base, workItemID, status, deletedOn, deletedBy); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	at := func(h int) *time.Time { v := base.Add(time.Duration(h) * time.Hour); return &v }
+
+	for _, wi := range []string{saWIOpen, incidentID} {
+		p := wi[len(wi)-2:] // keeps each work item's ids distinct
+		seed(wi, "5a0000d0-0000-0000-0000-0000000000"+p, "COMPLETE", nil, "")
+		seed(wi, "5a0000d1-0000-0000-0000-0000000000"+p, "COMPLETE", nil, "")
+		seed(wi, "5a0000d2-0000-0000-0000-0000000000"+p, "DELETED", at(1), "sa-del-1@example.com") // oldest deletion
+		seed(wi, "5a0000d3-0000-0000-0000-0000000000"+p, "DELETED", at(5), "sa-del-3@example.com") // newest deletion
+		seed(wi, "5a0000d4-0000-0000-0000-0000000000"+p, "DELETED", at(3), "sa-del-2@example.com")
+	}
+
+	search := func(name string, ctx context.Context, p domain.Pagination) ([]domain.Attachment, int) {
+		t.Helper()
+		var (
+			got   []domain.Attachment
+			total int
+			err   error
+		)
+		if name == "case" {
+			got, total, err = cases.SearchCaseAttachments(ctx, saWIOpen, p)
+		} else {
+			got, total, err = cases.SearchWorkItemAttachments(ctx, incidentID, domain.ReferenceTypeIncident, p)
+		}
+		if err != nil {
+			t.Fatalf("%s search: %v", name, err)
+		}
+		return got, total
+	}
+
+	for _, name := range []string{"case", "incident"} {
+		t.Run(name, func(t *testing.T) {
+			// Without the flag: the two available rows only, no deleted one, total 2.
+			got, total := search(name, ctx, domain.Pagination{Limit: 50})
+			if total != 2 || len(got) != 2 {
+				t.Fatalf("available list: total %d, %d rows; want 2 and 2", total, len(got))
+			}
+			for _, a := range got {
+				if a.Status == domain.AttachmentStatusDeleted || a.DeletedOn != nil {
+					t.Errorf("a deleted attachment %s leaked into the available list", a.ID)
+				}
+			}
+
+			// With the flag: only the three deleted rows, newest deletion first.
+			delCtx := repository.WithDeletedAttachmentsOnly(ctx)
+			got, total = search(name, delCtx, domain.Pagination{Limit: 50})
+			if total != 3 || len(got) != 3 {
+				t.Fatalf("deleted list: total %d, %d rows; want 3 and 3", total, len(got))
+			}
+			var by []string
+			for i, a := range got {
+				if a.Status != domain.AttachmentStatusDeleted || a.DeletedOn == nil || a.DeletedBy == nil {
+					t.Fatalf("row %d is not a fully described deleted attachment: %+v", i, a)
+				}
+				by = append(by, a.DeletedBy.Email)
+				if i > 0 && got[i-1].DeletedOn.Before(*a.DeletedOn) {
+					t.Errorf("deleted rows are not newest-first: %v before %v", got[i-1].DeletedOn, a.DeletedOn)
+				}
+			}
+			if want := []string{"sa-del-3@example.com", "sa-del-2@example.com", "sa-del-1@example.com"}; strings.Join(by, ",") != strings.Join(want, ",") {
+				t.Errorf("deleted by, in order = %v, want %v", by, want)
+			}
+
+			// Paging walks the deleted rows alone: the total stays 3 and the pages are in order.
+			first, total := search(name, delCtx, domain.Pagination{Limit: 2, Offset: 0})
+			second, _ := search(name, delCtx, domain.Pagination{Limit: 2, Offset: 2})
+			if total != 3 || len(first) != 2 || len(second) != 1 {
+				t.Fatalf("paged deleted list: total %d, pages of %d and %d; want 3, 2 and 1", total, len(first), len(second))
+			}
+			if first[0].DeletedBy.Email != "sa-del-3@example.com" || second[0].DeletedBy.Email != "sa-del-1@example.com" {
+				t.Errorf("paging order wrong: first page starts %s, second is %s", first[0].DeletedBy.Email, second[0].DeletedBy.Email)
+			}
+		})
+	}
+}
+
 // A draft description image: uploaded to a project before the record exists,
 // private to its uploader, then linked to the work item, after which every member
 // of the project sees it and the 24h cleanup never lists it.
@@ -530,5 +636,133 @@ func TestStoredAttachment_LinkedDescriptionImageOfAChangeRequestIsInternalOnly(t
 	}
 	if rows, _ := repo.GetByIDs(saSystemCtx(), kind, []string{onChange}); len(rows) != 1 {
 		t.Errorf("internal callers must see it, got %d rows", len(rows))
+	}
+}
+
+// A security report's file is uploaded before its case exists (migration 0280,
+// policy 100028): a draft under the project, private to its uploader, never listed
+// on a case, linked to the case when it is created.
+func TestStoredAttachment_DraftReportLifecycle(t *testing.T) {
+	pool, repo := storedAttachmentFixture(t)
+	kind := domain.StoredAttachmentWorkItem
+	var nf *apierror.NotFoundError
+
+	// A member can start a draft; one for a project they are not in is refused,
+	// and so is one recorded as somebody else's.
+	in := domain.StoredAttachmentInsert{ParentID: saProject1, Name: "report.pdf", ContentType: "application/pdf", SizeBytes: 10, CreatedBy: saCustomer, Draft: true}
+	row, err := repo.InsertPending(saCustomerCtx(), kind, in)
+	if err != nil {
+		t.Fatalf("InsertPending(draft): %v", err)
+	}
+	if !row.Draft || row.ParentID != saProject1 || !strings.HasPrefix(row.Number, "WIA") {
+		t.Errorf("row = %+v, want a draft whose parent is the project", row)
+	}
+	foreign := in
+	foreign.ParentID = saProject2
+	if _, err := repo.InsertPending(saCustomerCtx(), kind, foreign); !errors.As(err, &nf) {
+		t.Errorf("InsertPending(draft in a foreign project) err = %v, want NotFoundError", err)
+	}
+	other := in
+	other.CreatedBy = saStranger
+	if _, err := repo.InsertPending(saCustomerCtx(), kind, other); err == nil {
+		t.Error("a draft recorded under another email must be refused")
+	}
+
+	// Private to its uploader.
+	if rows, _ := repo.GetByIDs(saStrangerCtx(), kind, []string{row.ID}); len(rows) != 0 {
+		t.Error("a draft must not be visible to someone else")
+	}
+	if rows, err := repo.GetByIDs(saCustomerCtx(), kind, []string{row.ID}); err != nil || len(rows) != 1 || !rows[0].Draft {
+		t.Fatalf("the uploader's own draft = %+v, %v", rows, err)
+	}
+
+	// Not stored yet: it is not a usable draft.
+	ids := []string{row.ID}
+	if got, err := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Time{}); err != nil || len(got) != 0 {
+		t.Fatalf("a PENDING draft listed as usable: %+v, %v", got, err)
+	}
+	if ok, err := repo.MarkComplete(saSystemCtx(), kind, row.ID, "csm/projects/sa-prj-1/workitems/drafts/attachments/wia_report.pdf", 10); err != nil || !ok {
+		t.Fatalf("MarkComplete = %v, %v", ok, err)
+	}
+	got, err := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Time{})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("a stored draft of the uploader: %+v, %v", got, err)
+	}
+	// A draft uploaded before the cutoff is not usable (it is on its way to the cleanup).
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Now().Add(time.Hour)); len(got) != 0 {
+		t.Error("a draft older than the cutoff is still listed as usable")
+	}
+	// The cleanup queue lists an unlinked, stored draft once it is old enough, and
+	// not before.
+	inQueue := func(olderThan time.Time) bool {
+		rows, err := repo.ListUnlinkedReportDrafts(saSystemCtx(), olderThan, 100)
+		if err != nil {
+			t.Fatalf("ListUnlinkedReportDrafts: %v", err)
+		}
+		for _, r := range rows {
+			if r.ID == row.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if inQueue(time.Now().Add(-time.Hour)) {
+		t.Error("a fresh draft must not be in the cleanup queue yet")
+	}
+	if !inQueue(time.Now().Add(time.Hour)) {
+		t.Error("an old unlinked draft must be in the cleanup queue")
+	}
+	// Not for another project, another uploader.
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject2, saCustomer, ids, time.Time{}); len(got) != 0 {
+		t.Error("a draft listed for a project it was not uploaded to")
+	}
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saStranger, ids, time.Time{}); len(got) != 0 {
+		t.Error("a draft listed for someone who did not upload it")
+	}
+
+	// Linking: only the uploader's draft of the same project is taken.
+	if linked, err := repo.LinkReportDrafts(saSystemCtx(), saWIOpen, saProject1, saStranger, ids); err != nil || len(linked) != 0 {
+		t.Fatalf("someone else linked the draft: %v, %v", linked, err)
+	}
+	if linked, err := repo.LinkReportDrafts(saSystemCtx(), saWIOpen, saProject2, saCustomer, ids); err != nil || len(linked) != 0 {
+		t.Fatalf("a draft linked through the wrong project: %v, %v", linked, err)
+	}
+	// Before it is linked it is on no case's list.
+	listed := func() int {
+		var n int
+		// As the system: the pool's own role has no app.* settings, so RLS shows it nothing.
+		if err := repository.NewScoped(pool).QueryRow(saSystemCtx(),
+			`SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id WHERE wa.work_item_id = $1 AND wa.id = $2`,
+			saWIOpen, row.ID).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	if listed() != 0 {
+		t.Fatal("a draft showed up on a case before it was linked")
+	}
+	linked, err := repo.LinkReportDrafts(saSystemCtx(), saWIOpen, saProject1, saCustomer, ids)
+	if err != nil || len(linked) != 1 {
+		t.Fatalf("LinkReportDrafts = %v, %v; want the draft linked", linked, err)
+	}
+	if listed() != 1 {
+		t.Error("a linked draft must be on the case")
+	}
+	// Repeating the call returns it again; another case cannot take it.
+	if again, err := repo.LinkReportDrafts(saSystemCtx(), saWIOpen, saProject1, saCustomer, ids); err != nil || len(again) != 1 {
+		t.Errorf("repeating the link = %v, %v; want it returned again", again, err)
+	}
+	if taken, err := repo.LinkReportDrafts(saSystemCtx(), saWIClosed, saProject1, saCustomer, ids); err != nil || len(taken) != 0 {
+		t.Errorf("a linked file was taken by another case: %v, %v", taken, err)
+	}
+	if inQueue(time.Now().Add(time.Hour)) {
+		t.Error("a linked file must never be in the cleanup queue")
+	}
+	// Once linked it is no longer a draft, and no longer usable as one.
+	if got, _ := repo.ListReportDrafts(saSystemCtx(), saProject1, saCustomer, ids, time.Time{}); len(got) != 0 {
+		t.Error("a linked file is still listed as a usable draft")
+	}
+	if rows, _ := repo.GetByIDs(saCustomerCtx(), kind, ids); len(rows) != 1 || rows[0].Draft || rows[0].ParentID != saWIOpen {
+		t.Errorf("after linking: %+v, want the case as parent and not a draft", rows)
 	}
 }

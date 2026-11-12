@@ -507,6 +507,11 @@ type CreateCaseRequest struct {
 	RelatedCaseID     string            `json:"relatedCaseId,omitempty"`
 	ConversationID    string            `json:"conversationId,omitempty"`
 	WatchList         []string          `json:"watchList,omitempty"`
+	// AttachmentIDs are files already uploaded as drafts of ProjectID (POST
+	// /attachments/upload with type work_item and projectId). A security report
+	// is created with them, because it must never exist without its report file;
+	// entity-service checks them and links them to the new case.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }
 
 // BuildEntityCreateCaseRequest translates the portal's request into
@@ -537,6 +542,7 @@ func BuildEntityCreateCaseRequest(req CreateCaseRequest) entity.CreateCaseReques
 		RelatedCaseID:     req.RelatedCaseID,
 		ConversationID:    req.ConversationID,
 		WatchList:         req.WatchList,
+		AttachmentIDs:     req.AttachmentIDs,
 	}
 }
 

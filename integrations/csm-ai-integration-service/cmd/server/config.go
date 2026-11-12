@@ -40,21 +40,18 @@ const (
 // to the Anthropic API, where the gateway's key would only fail every call. It
 // is deployment configuration: keep internal addresses out of committed files.
 //
-// CatalogueDir, when set, is a directory of catalogue parts that replaces the
-// catalogue built into the binary (see package catalogue); in Choreo, one file
-// mount per part. OldCatalogueFile is set when CATALOGUE_FILE is still set
-// next to CATALOGUE_DIR, so the start can warn that it is ignored.
+// IgnoredCatalogueVars names CATALOGUE_DIR and CATALOGUE_FILE when either is
+// still set: the catalogue is the one built into the binary (see package
+// catalogue) and they are no longer read, so the start warns rather than fails.
 //
 // EmailDomainModel is the model asked about email domains.
 type config struct {
-	APIKey           string
-	Model            string
-	Timeout          time.Duration
-	BaseURL          string
-	CatalogueDir     string
-	OldCatalogueFile bool
-
-	EmailDomainModel string
+	APIKey               string
+	Model                string
+	Timeout              time.Duration
+	BaseURL              string
+	IgnoredCatalogueVars []string
+	EmailDomainModel     string
 }
 
 // GatewayHost is the host model calls go to, for the startup log line:
@@ -77,11 +74,9 @@ func (c config) Enabled() bool { return c.APIKey != "" }
 // loadConfig reads ANTHROPIC_API_KEY, CLAUDE_MODEL (default
 // defaultClaudeModel), CLAUDE_TIMEOUT (a Go duration, default
 // defaultClaudeTimeout, must be > 0), CLAUDE_BASE_URL (an absolute http or
-// https URL; required when ANTHROPIC_API_KEY is set), CATALOGUE_DIR
-// (optional) and EMAIL_DOMAIN_MODEL (default defaultEmailDomainModel). CATALOGUE_FILE, the single catalogue file it replaced, is an
-// error when CATALOGUE_DIR is unset, so a deployment still setting only it does
-// not quietly fall back to the built-in catalogue; next to CATALOGUE_DIR it is
-// ignored.
+// https URL; required when ANTHROPIC_API_KEY is set) and EMAIL_DOMAIN_MODEL
+// (default defaultEmailDomainModel), and notes CATALOGUE_DIR and
+// CATALOGUE_FILE when set, which are no longer read.
 // Values are trimmed, so a key pasted with a trailing newline still works.
 // Pure, so tests pass their own getenv.
 func loadConfig(getenv func(string) string) (config, error) {
@@ -107,19 +102,19 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if apiKey != "" && baseURL == "" {
 		return config{}, fmt.Errorf("CLAUDE_BASE_URL is required when ANTHROPIC_API_KEY is set: the URL of the CSM AI gateway the key belongs to")
 	}
-	catalogueDir := strings.TrimSpace(getenv("CATALOGUE_DIR"))
-	oldCatalogueFile := strings.TrimSpace(getenv("CATALOGUE_FILE")) != ""
-	if oldCatalogueFile && catalogueDir == "" {
-		return config{}, fmt.Errorf("CATALOGUE_FILE is no longer read: mount the catalogue's parts in one directory and set CATALOGUE_DIR to it")
+	var ignored []string
+	for _, name := range []string{"CATALOGUE_DIR", "CATALOGUE_FILE"} {
+		if strings.TrimSpace(getenv(name)) != "" {
+			ignored = append(ignored, name)
+		}
 	}
 	return config{
-		APIKey:           apiKey,
-		Model:            orDefault(getenv("CLAUDE_MODEL"), defaultClaudeModel),
-		Timeout:          timeout,
-		BaseURL:          baseURL,
-		CatalogueDir:     catalogueDir,
-		OldCatalogueFile: oldCatalogueFile,
-		EmailDomainModel: orDefault(getenv("EMAIL_DOMAIN_MODEL"), defaultEmailDomainModel),
+		APIKey:               apiKey,
+		Model:                orDefault(getenv("CLAUDE_MODEL"), defaultClaudeModel),
+		Timeout:              timeout,
+		BaseURL:              baseURL,
+		IgnoredCatalogueVars: ignored,
+		EmailDomainModel:     orDefault(getenv("EMAIL_DOMAIN_MODEL"), defaultEmailDomainModel),
 	}, nil
 }
 

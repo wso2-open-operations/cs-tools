@@ -348,7 +348,7 @@ func (e *Engine) startSMELadder(ctx context.Context, t Trigger, p specialOpsPres
 			if is.Reason == "RESOLVE_FAILED" {
 				return false, fmt.Errorf("escalation: resolve the SME on duty for %s: %s", t.IncidentID, is.Detail)
 			}
-			if is.Reason == "NO_NUMBER" || is.Reason == "NUMBER_NOT_ALLOWED" {
+			if isPhoneProblem(is.Reason) {
 				reason, detail = is.Reason, is.Detail
 			}
 		}
@@ -435,9 +435,10 @@ func (e *Engine) applySMESafety(plan *Plan) {
 	for _, c := range plan.Calls {
 		switch {
 		case c.Recipient.Phone != "" && !sme.Dialable(c.Recipient.Phone):
-			plan.Issues = append(plan.Issues, PlanIssue{Level: c.Level, At: c.At, Reason: "NUMBER_NOT_ALLOWED", Detail: c.Recipient.Email})
+			plan.Issues = append(plan.Issues, PlanIssue{Level: c.Level, At: c.At, Reason: PhoneNotAllowed, Detail: c.Recipient.Email})
 			if sme.Channel != ChannelCall {
 				c.Recipient.Phone = ""
+				c.Recipient.PhoneRejected = PhoneNotAllowed
 				kept = append(kept, c)
 			}
 		case c.Recipient.Phone == "" && sme.Channel == ChannelCall:
@@ -497,6 +498,11 @@ func (e *Engine) writeSMENote(ctx context.Context, t Trigger, p specialOpsPress,
 	const stamp = "2006-01-02 15:04:05"
 	var b strings.Builder
 	b.WriteString("Execution Summary Of the Special Ops (SME) Page\n\n")
+	// A call channel with nothing to dial is a problem, not a page.
+	noCall := who != nil && failure == "" && e.cfg.SME.Channel.Uses(ChannelCall) && who.Phone == ""
+	if noCall || (who != nil && failure != "" && isPhoneProblem(failure)) {
+		b.WriteString(callProblemsLine(1))
+	}
 	b.WriteString(fmt.Sprintf("Escalated to Special Ops: %s by %s\n", t.At.Format(stamp), orNone(p.ChangedBy)))
 	b.WriteString(fmt.Sprintf("Special Ops team: %s; SME team: %s; previous assignment group: %s\n\n",
 		orNone(t.Team), orNone(t.Routing.SMETeam), orNone(p.PreviousGroup)))
@@ -508,6 +514,8 @@ func (e *Engine) writeSMENote(ctx context.Context, t Trigger, p specialOpsPress,
 		if detail != "" {
 			b.WriteString(fmt.Sprintf("[%s]", detail))
 		}
+	case noCall:
+		b.WriteString(fmt.Sprintf("[%s][SME][ERROR][%s][%s][shift %s]", t.At.Format(stamp), who.phoneProblem(), who.Email, orNone(who.ShiftCode)))
 	default:
 		b.WriteString(fmt.Sprintf("[%s][SME][OK][Page via %s][%s][shift %s]",
 			t.At.Format(stamp), e.cfg.SME.Channel, who.Email, orNone(who.ShiftCode)))

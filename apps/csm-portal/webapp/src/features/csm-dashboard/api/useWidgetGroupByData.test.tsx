@@ -364,4 +364,150 @@ describe("useWidgetGroupByData", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
   });
+
+  describe("time card totals", () => {
+    const hoursPerUser = {
+      groups: [
+        { key: "u-bob", label: "Bob", count: 2, totalMinutes: 255 },
+        { key: "u-ann", label: "Ann", count: 4, totalMinutes: 135 },
+      ],
+      othersCount: 3,
+      totalRecords: 9,
+      othersMinutes: 90,
+      totalMinutes: 480,
+    };
+
+    it("posts to /time-cards/aggregate with measure minutes and shows hours, Others included", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData("hours", "time_card", { startDate: "2026-10-01", endDate: "2026-10-31" }, {
+            field: "user",
+            measure: "hours",
+            maxGroups: 2,
+          }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledWith(
+        "/time-cards/aggregate",
+        {
+          filters: { startDate: "2026-10-01", endDate: "2026-10-31" },
+          groupBy: "user",
+          maxGroups: 2,
+          measure: "minutes",
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.slices.map((s) => [s.label, s.value])).toEqual([
+        ["Bob", 4.25],
+        ["Ann", 2.25],
+        ["Others", 1.5],
+      ]);
+      expect(result.current.total).toBe(8);
+    });
+
+    it("sends measure count and shows card counts when the widget counts", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("cards", "time_card", {}, { field: "user", measure: "count" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock.mock.calls[0][1]).toEqual({ filters: {}, groupBy: "user", maxGroups: undefined, measure: "count" });
+      expect(result.current.slices.map((s) => s.value)).toEqual([2, 4, 3]);
+      expect(result.current.total).toBe(9);
+    });
+
+    it("sends no measure and shows counts when the widget sets none", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("by-state", "time_card", {}, { field: "state" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock.mock.calls[0][1]).not.toHaveProperty("measure");
+      expect(result.current.slices.map((s) => s.value)).toEqual([2, 4, 3]);
+    });
+
+    it("keeps a day grouping in the aggregate's date order, empty days at zero, labelled as short dates", async () => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "2026-10-30", label: "2026-10-30", count: 1, totalMinutes: 30 },
+          { key: "2026-10-31", label: "2026-10-31", count: 0, totalMinutes: 0 },
+          { key: "2026-11-01", label: "2026-11-01", count: 3, totalMinutes: 300 },
+        ],
+        othersCount: 0,
+        totalRecords: 4,
+        othersMinutes: 0,
+        totalMinutes: 330,
+      });
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData("per-day", "time_card", { startDate: "2026-10-30", endDate: "2026-11-01" }, {
+            field: "day",
+            measure: "hours",
+          }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.slices.map((s) => [s.label, s.value])).toEqual([
+        ["Oct 30", 0.5],
+        ["Oct 31", 0],
+        ["Nov 1", 5],
+      ]);
+      // Each day opens as a one-day date range.
+      expect(result.current.slices[2].query).toEqual({ startDate: "2026-11-01", endDate: "2026-11-01" });
+    });
+
+    it("formats only a day grouping's labels: a project named like a date stays as it is", async () => {
+      postMock.mockResolvedValue({
+        groups: [{ key: "p-1", label: "2026-10-30", count: 1, totalMinutes: 60 }],
+        othersCount: 0,
+        totalRecords: 1,
+        othersMinutes: 0,
+        totalMinutes: 60,
+      });
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("per-project", "time_card", {}, { field: "project", measure: "hours" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.slices[0].label).toBe("2026-10-30");
+    });
+
+    it("resolves relative dates and the signed-in user before the request", async () => {
+      postMock.mockResolvedValue({ groups: [], othersCount: 0, totalRecords: 0, othersMinutes: 0, totalMinutes: 0 });
+
+      renderHook(
+        () =>
+          useWidgetGroupByData(
+            "mine",
+            "time_card",
+            { userIds: [CURRENT_USER_PLACEHOLDER], startDate: "__daysAgo:6__", endDate: "__today__" },
+            { field: "day", measure: "hours" },
+            undefined,
+            undefined,
+            "user-123",
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+      const filters = postMock.mock.calls[0][1].filters as Record<string, unknown>;
+      expect(filters.userIds).toEqual(["user-123"]);
+      expect(filters.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(filters.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
 });

@@ -52,8 +52,8 @@ func NewProjectHandler(entity entityProjectClient) *ProjectHandler {
 }
 
 // WithAccessGuard attaches the access guard UpdateProject consults to decide
-// whether a caller may set closureState -- see projectUpdateTargetsClosureState's
-// own doc comment. Mirrors CaseHandler.WithAccessGuard's own shape.
+// whether a caller may set closureState or suspensionProcessOverridden -- see
+// projectUpdateAdminOnlyField's own doc comment. Mirrors CaseHandler.WithAccessGuard's own shape.
 func (h *ProjectHandler) WithAccessGuard(g *AccessGuard) *ProjectHandler {
 	h.access = g
 	return h
@@ -92,16 +92,27 @@ func projectUpdateKeys(body []byte) []string {
 	return keys
 }
 
-// projectUpdateTargetsClosureState reports whether a PATCH /projects/{id}
-// body sets closureState -- entity-service's domain.ProjectUpdateRequest
-// field for directly overriding a project's overall closure status, rather
-// than letting it derive from the three closure sub-state fields. Key
-// matching is case-insensitive -- see projectUpdateKeys. Presence alone is
-// enough to require admin -- even an explicit "closureState": null is treated
-// as targeting it, since there is no legitimate reason a non-admin caller
-// sends this field at all.
-func projectUpdateTargetsClosureState(body []byte) bool {
-	return hasProjectUpdateKey(projectUpdateKeys(body), "closureState")
+// projectAdminOnlyKeys are the PATCH /projects/{id} request keys that need
+// PermAdmin: closureState (entity-service's direct override of a project's
+// overall closure status, rather than letting it derive from the three closure
+// sub-state fields) and suspensionProcessOverridden (the flag that exempts a
+// project from the automatic Account Closure Process).
+var projectAdminOnlyKeys = []string{"closureState", "suspensionProcessOverridden"}
+
+// projectUpdateAdminOnlyField returns the first projectAdminOnlyKeys name the
+// PATCH /projects/{id} body sets, or "" when it sets none. Key matching is
+// case-insensitive -- see projectUpdateKeys. Presence alone is enough to
+// require admin -- even an explicit null (e.g. "closureState": null) is
+// treated as targeting the field, since there is no legitimate reason a
+// non-admin caller sends these fields at all.
+func projectUpdateAdminOnlyField(body []byte) string {
+	keys := projectUpdateKeys(body)
+	for _, name := range projectAdminOnlyKeys {
+		if hasProjectUpdateKey(keys, name) {
+			return name
+		}
+	}
+	return ""
 }
 
 // hasProjectUpdateKey reports whether keys contains name, matching the way
@@ -120,7 +131,7 @@ var projectOnboardingKeys = []string{
 // projectUpdateTargets reports whether a PATCH /projects/{id} body sets any
 // onboarding field (see projectOnboardingKeys) and whether it sets
 // any other field. Same presence-only, case-insensitive matching as
-// projectUpdateTargetsClosureState. An empty object targets neither, so it
+// projectUpdateAdminOnlyField. An empty object targets neither, so it
 // falls through to the PermWrite check and entity-service's own "at least one
 // field" validation.
 func projectUpdateTargets(body []byte) (onboarding, other bool) {
@@ -302,9 +313,11 @@ func (h *ProjectHandler) GetProjectContact(w http.ResponseWriter, r *http.Reques
 // least one field must be provided); the backend has no role-based access control
 // layer for most of this route's fields, so any authenticated user may set them
 // today, matching the existing convention on other PATCH endpoints in this
-// codebase. closureState is the one exception: it directly overrides a
-// project's overall closure status (bypassing the usual derivation from its
-// three sub-state fields), so it is narrowed to PermAdmin in-handler --
+// codebase. closureState and suspensionProcessOverridden are the exceptions:
+// the first directly overrides a project's overall closure status (bypassing
+// the usual derivation from its three sub-state fields), the second exempts the
+// project from the automatic Account Closure Process, so both are narrowed to
+// PermAdmin in-handler --
 // mirroring CaseHandler.SearchCases' own caseSearchTargetsSecurityReports
 // pattern -- rather than re-gating this whole, otherwise cs_engineer-reachable
 // route.
@@ -337,8 +350,8 @@ func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if projectUpdateTargetsClosureState(body) && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
-		slog.WarnContext(r.Context(), "access denied: non-admin attempted to set project closureState", "userID", user.UserID, "projectID", id)
+	if field := projectUpdateAdminOnlyField(body); field != "" && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
+		slog.WarnContext(r.Context(), "access denied: non-admin attempted to set admin-only project field "+field, "userID", user.UserID, "projectID", id)
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}

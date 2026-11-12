@@ -15,9 +15,9 @@
 // under the License.
 
 // This is an integration test: SearchCaseActivities' UNION ALL feed has to
-// merge case_attachment and the synced work_item_attachment table, and
-// whether its count and rows agree (no fan-out, no duplicate, no PENDING) can
-// only be shown by real SQL against the real schema. Same DSN and
+// merge comments and the work_item_attachment table (the older case_attachment
+// table is not read), and whether its count and rows agree (no fan-out, no
+// PENDING) can only be shown by real SQL against the real schema. Same DSN and
 // skip-when-unset pattern as case_attachment_sn_repo_integration_test.go
 // (same package, so caseStatsPool is reused):
 //
@@ -108,15 +108,16 @@ func TestCaseActivitySyncedAttachmentsIntegration(t *testing.T) {
 	synced(syncedOnly, at(1), "synced.txt", activityAttUploader, "AVAILABLE")
 	comment(commentTwo, at(2), "second")
 	synced(syncedPending, at(3), "pending.txt", activityAttUploader, "PENDING")
-	// The same file as a dual-write upload: one row in each table, one id.
+	// An old upload left in case_attachment under the same id as a stored
+	// attachment: only the work_item_attachment row is in the feed.
 	mustExec(`INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, uploaded_by, status, created_on)
 	          VALUES ($1, $2, NULL, 'both.txt', 'text/plain', 42, $3, 'complete', $4)`,
 		inBothTables, activityAttCaseID, activityAttUserID1, at(4))
 	synced(inBothTables, at(4), "both.txt", activityAttUploader, "AVAILABLE")
 	// Uploader with no user row at all.
 	synced(syncedGhost, at(5), "ghost.txt", "nobody@example.com", "AVAILABLE")
-	// A native upload that carries a description, and a synced row with a
-	// blank name.
+	// An old upload with a description (not in the feed any more), and a
+	// stored row with a blank name.
 	mustExec(`INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status, created_on)
 	          VALUES ($1, $2, 'cases/native/log.txt', 'log.txt', 'text/plain', 7, 'build log', $3, 'complete', $4)`,
 		nativeWithDsc, activityAttCaseID, activityAttUserID1, at(6))
@@ -131,9 +132,9 @@ func TestCaseActivitySyncedAttachmentsIntegration(t *testing.T) {
 		t.Fatalf("SearchCaseActivities: %v", err)
 	}
 
-	// Newest first. The PENDING row is absent, the both-tables file shows
-	// once, and the unresolved uploader's row is still returned.
-	wantIDs := []string{syncedNoName, nativeWithDsc, syncedGhost, inBothTables, commentTwo, syncedOnly, commentOne}
+	// Newest first. The PENDING row and the case_attachment rows are absent,
+	// and the unresolved uploader's row is still returned.
+	wantIDs := []string{syncedNoName, syncedGhost, inBothTables, commentTwo, syncedOnly, commentOne}
 	if total != len(wantIDs) {
 		t.Errorf("total = %d, want %d", total, len(wantIDs))
 	}
@@ -168,11 +169,10 @@ func TestCaseActivitySyncedAttachmentsIntegration(t *testing.T) {
 	// Attachment entries never come back with empty content: the customer
 	// portal's activity tab hides any entry with no displayable text.
 	for id, want := range map[string]string{
-		syncedOnly:    "synced.txt",
-		inBothTables:  "both.txt",  // case_attachment, empty description: the file name
-		nativeWithDsc: "build log", // description wins over the file name
-		syncedGhost:   "ghost.txt",
-		syncedNoName:  "Attachment", // blank name: the fixed label
+		syncedOnly:   "synced.txt",
+		inBothTables: "both.txt",
+		syncedGhost:  "ghost.txt",
+		syncedNoName: "Attachment", // blank name: the fixed label
 	} {
 		if got := byID[id].Content; got != want {
 			t.Errorf("content of %s = %q, want %q", id, got, want)
@@ -187,7 +187,10 @@ func TestCaseActivitySyncedAttachmentsIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchCaseActivities (paged): %v", err)
 	}
-	if pageTotal != len(wantIDs) || len(page) != 2 || page[0].ID != nativeWithDsc {
+	if _, ok := byID[nativeWithDsc]; ok {
+		t.Errorf("case_attachment row %s should not be in the feed", nativeWithDsc)
+	}
+	if pageTotal != len(wantIDs) || len(page) != 2 || page[0].ID != syncedGhost {
 		t.Errorf("paged: total=%d rows=%d first=%v", pageTotal, len(page), page)
 	}
 }
