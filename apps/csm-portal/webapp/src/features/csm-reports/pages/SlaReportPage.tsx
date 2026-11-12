@@ -43,7 +43,6 @@ import DOMPurify from "dompurify";
 import { useParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { useGetSlaReport } from "@features/csm-reports/api/useGetSlaReport";
-import { slaReportPDF } from "@features/csm-reports/components/SlaReportPDF";
 import type {
   SlaClockStatus,
   SlaReportCase,
@@ -78,6 +77,11 @@ function defaultPeriod(): SlaReportPeriodParams {
   return { from: toDateInputValue(quarterStart(now)), to: toDateInputValue(now) };
 }
 
+/** Today as YYYY-MM-DD, read on every call so a page left open past midnight moves with it. */
+function today(): string {
+  return toDateInputValue(new Date());
+}
+
 function SlaPeriodControl({
   from,
   to,
@@ -90,6 +94,9 @@ function SlaPeriodControl({
   onReset: () => void;
 }): JSX.Element {
   const invalid = Boolean(from && to && from > to);
+  // No case can be opened in the future, so neither end goes past today.
+  const max = today();
+  const fromMax = to && to < max ? to : max;
   return (
     <Box role="group" aria-label="Report period" sx={{ display: "flex", gap: 1, alignItems: "flex-start", flexWrap: "wrap" }}>
       <TextField
@@ -99,7 +106,7 @@ function SlaPeriodControl({
         value={from}
         error={invalid}
         onChange={(e) => onChange({ from: e.target.value, to })}
-        slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: to || undefined } }}
+        slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: fromMax } }}
         sx={{ width: 170 }}
       />
       <TextField
@@ -110,7 +117,7 @@ function SlaPeriodControl({
         error={invalid}
         helperText={invalid ? "To must be on or after From." : undefined}
         onChange={(e) => onChange({ from, to: e.target.value })}
-        slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: from || undefined } }}
+        slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: from || undefined, max } }}
         sx={{ width: 170 }}
       />
       <Button variant="text" size="small" onClick={onReset} sx={{ height: 40 }}>
@@ -331,6 +338,8 @@ export default function SlaReportPage(): JSX.Element {
   const [applied, setApplied] = useState<SlaReportPeriodParams>(draft);
 
   const handlePeriodChange = (next: SlaReportPeriodParams) => {
+    // A date typed into the field is not held back by the input's max.
+    if (next.from > today() || next.to > today()) return;
     setDraft(next);
     if (next.from && next.to && next.from <= next.to) setApplied(next);
   };
@@ -360,10 +369,13 @@ export default function SlaReportPage(): JSX.Element {
   };
 
   const handleDownload = () => {
-    if (!data) return;
+    // While a new period loads, `data` is still the previous period's report.
+    if (!data || isPlaceholderData) return;
     setDownloadError("");
     setDownloading(true);
-    void slaReportPDF(data, theme.palette.primary.main)
+    // Loaded on click so jsPDF and html2canvas stay out of the main bundle.
+    void import("@features/csm-reports/components/SlaReportPDF")
+      .then(({ slaReportPDF }) => slaReportPDF(data, theme.palette.primary.main))
       .catch(() => setDownloadError("Could not download the SLA report."))
       .finally(() => setDownloading(false));
   };
@@ -452,7 +464,7 @@ export default function SlaReportPage(): JSX.Element {
               variant="contained"
               className="csm-print-hide"
               onClick={handleDownload}
-              disabled={downloading}
+              disabled={downloading || isPlaceholderData}
               startIcon={downloading ? <CircularProgress size={16} color="inherit" /> : undefined}
               sx={{ flexShrink: 0 }}
             >
