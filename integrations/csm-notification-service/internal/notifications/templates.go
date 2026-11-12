@@ -89,6 +89,11 @@ const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/lo
 // onboarding emails, written straight into those templates' HTML.
 const wso2LogoWhiteURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
 
+// wso2FooterIconURL is the small decorative icon next to the copyright line
+// in the onboarding emails' footer, written straight into those templates'
+// HTML the same way wso2LogoWhiteURL is.
+const wso2FooterIconURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/WSO2-Pulse-Orange.png"
+
 // bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder.
 // Done once per template at package init rather than on every Render* call,
 // since the logo never varies between emails.
@@ -142,6 +147,167 @@ func SetLogoURLs(logo, logoWhite string) {
 			*t = strings.ReplaceAll(*t, wso2LogoWhiteURL, html.EscapeString(logoWhite))
 		}
 	}
+}
+
+// footerIconTemplates lists every template that carries the onboarding
+// emails' footer icon.
+func footerIconTemplates() []*string {
+	return []*string{
+		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
+		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
+	}
+}
+
+// SetFooterIconURL replaces the small decorative icon next to the copyright
+// line in the onboarding emails' footer. An empty value keeps the default.
+// It rewrites the already-baked templates, so call it once at startup,
+// before any email is rendered.
+func SetFooterIconURL(icon string) {
+	icon = strings.TrimSpace(icon)
+	if icon == "" {
+		return
+	}
+	for _, t := range footerIconTemplates() {
+		*t = strings.ReplaceAll(*t, wso2FooterIconURL, html.EscapeString(icon))
+	}
+}
+
+// defaultCompanyName is the name baked into every template by default.
+const defaultCompanyName = "WSO2"
+
+// companyName is the name every Render* subject/body currently carries,
+// read by CompanyName (e.g. for the dispatch package's email subjects).
+// companyNameHTML is the same name HTML-escaped, the baseline the next
+// SetTemplateCompanyName call rewrites from — tracking it (rather than
+// always diffing from defaultCompanyName) is what makes repeated calls
+// correctly reversible, instead of only ever matching the original bake.
+// Both are written only by SetTemplateCompanyName, so call it once at
+// startup, before any email is rendered, and never concurrently with one.
+var (
+	companyName     = defaultCompanyName
+	companyNameHTML = defaultCompanyName
+)
+
+// CompanyName returns the name configured by SetTemplateCompanyName (or
+// defaultCompanyName if it was never called, or called with an empty value).
+func CompanyName() string {
+	return companyName
+}
+
+// companyNamePhrases lists every fixed phrase (not a bare "WSO2") that
+// carries the company name in a template body — never a bare "WSO2", since
+// that also appears in a place this config must not touch: the Apache
+// license header every raw template carries as a leading HTML comment. The
+// logo alt text is a generic "Logo" in the source templates, not "WSO2", so
+// it was never at risk of a bare-word replace either.
+func companyNamePhrases(from, to string) [][2]string {
+	return [][2]string{
+		{
+			fmt.Sprintf("This message was sent by %s's support system.", from),
+			fmt.Sprintf("This message was sent by %s's support system.", to),
+		},
+		{
+			fmt.Sprintf("This automated message was sent by %s's support system. Please do not reply to this email.", from),
+			fmt.Sprintf("This automated message was sent by %s's support system. Please do not reply to this email.", to),
+		},
+		{
+			fmt.Sprintf("Cheers!<br>The %s Team", from),
+			fmt.Sprintf("Cheers!<br>The %s Team", to),
+		},
+		{
+			fmt.Sprintf("Best Regards,<br>%s Team", from),
+			fmt.Sprintf("Best Regards,<br>%s Team", to),
+		},
+		{
+			fmt.Sprintf("&copy; 2026 %s LLC. All rights reserved.", from),
+			fmt.Sprintf("&copy; 2026 %s LLC. All rights reserved.", to),
+		},
+		{
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All rights reserved.", from),
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All rights reserved.", to),
+		},
+		{
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", from),
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", to),
+		},
+		// The four project_contact_* onboarding emails' titles/headings/body
+		// copy. "Invitation to %s Support" also matches as a substring of
+		// project_contact_invited_reminder.html's longer title ("Reminder:
+		// Invitation to WSO2 Support"), and "Welcome to %s Support" matches
+		// both project_contact_registered.html's <title> and its <h1> (same
+		// text, two places) — one phrase entry covers each pair/triple.
+		{
+			fmt.Sprintf("Invitation to %s Support", from),
+			fmt.Sprintf("Invitation to %s Support", to),
+		},
+		{
+			fmt.Sprintf("Welcome to %s Support", from),
+			fmt.Sprintf("Welcome to %s Support", to),
+		},
+		{
+			fmt.Sprintf("You're invited to %s Support", from),
+			fmt.Sprintf("You're invited to %s Support", to),
+		},
+		{
+			fmt.Sprintf("your %s Support Portal account", from),
+			fmt.Sprintf("your %s Support Portal account", to),
+		},
+		{
+			fmt.Sprintf("You already have a %s account.", from),
+			fmt.Sprintf("You already have a %s account.", to),
+		},
+		{
+			fmt.Sprintf("on the %s Support Portal.", from),
+			fmt.Sprintf("on the %s Support Portal.", to),
+		},
+		{
+			fmt.Sprintf("A %s account has been created for you.", from),
+			fmt.Sprintf("A %s account has been created for you.", to),
+		},
+		{
+			fmt.Sprintf("Welcome to the %s Customer Support Portal.", from),
+			fmt.Sprintf("Welcome to the %s Customer Support Portal.", to),
+		},
+	}
+}
+
+// companyNameTemplates lists every template that carries one of
+// companyNamePhrases' fixed phrases.
+func companyNameTemplates() []*string {
+	return []*string{
+		&caseCreatedTemplate, &caseEscalatedTemplate, &internalNoteTemplate, &caseAssignedTemplate,
+		&crApprovalRequestedTemplate, &crPlanDateNoticeTemplate, &commentAddedTemplate,
+		&severityChangedTemplate, &projectReactivatedTemplate, &slaBreachTeamTemplate,
+		&slaBreachAssigneeTemplate, &statusChangedTemplate,
+		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
+		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
+		&casePagingTemplate, &outageNotificationTemplate, &outageCommunicationTemplate,
+	}
+}
+
+// SetTemplateCompanyName replaces the company name in the fixed phrases a
+// template body carries (the "sent by ... support system" footer
+// disclaimer, the "... Team" signoff, the "... LLC" copyright line, and the
+// onboarding emails' titles/headings/body copy) — not the bare word "WSO2"
+// wherever it appears, which would also corrupt the Apache license header
+// every raw template carries as a leading HTML comment. An empty value
+// keeps the current name. It rewrites the already-baked templates and
+// updates CompanyName's return value, so call it once at startup, before
+// any email is rendered.
+func SetTemplateCompanyName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	escaped := html.EscapeString(name)
+	phrases := companyNamePhrases(companyNameHTML, escaped)
+	for _, t := range companyNameTemplates() {
+		for _, phrase := range phrases {
+			*t = strings.ReplaceAll(*t, phrase[0], phrase[1])
+		}
+	}
+	companyName = name
+	companyNameHTML = escaped
 }
 
 // safeLinkSchemes is the allow-list of URL schemes sanitizeRichText permits
