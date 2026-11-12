@@ -424,7 +424,7 @@ func TestPgProjectUpdateService_MirrorDropsOnboardingFieldsFromMixedRequest(t *t
 	hasAgent := true
 	status := "In-Progress"
 	owner := "00000000-0000-0000-0000-000000000001"
-	start, planned, golive, expiry := "2026-03-01", "2026-05-01", "2026-05-15", "2027-03-01"
+	start, planned, golive, expiry, readiness := "2026-03-01", "2026-05-01", "2026-05-15", "2027-03-01", "2026-04-15"
 	repo := &stubProjectUpdateRepo{}
 	mirror := &stubProjectMirror{}
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
@@ -435,6 +435,7 @@ func TestPgProjectUpdateService_MirrorDropsOnboardingFieldsFromMixedRequest(t *t
 		HasAgent: &hasAgent, OnboardingStatus: &status, OnboardingOwner: &owner,
 		OnboardingStartDate: &start, OnboardingGoLivePlanDate: &planned,
 		OnboardingGoLiveDate: &golive, OnboardingExpiryDate: &expiry,
+		OnboardingProductionReadinessCompletionDate: &readiness,
 	}
 	if _, err := svc.UpdateProject(ctx, "11111111-1111-1111-1111-111111111111", req); err != nil {
 		t.Fatalf("UpdateProject() error = %v, want success", err)
@@ -515,6 +516,7 @@ func TestSNProjectUpdateService_RejectsOnboardingFields(t *testing.T) {
 		"go-live plan date": {OnboardingGoLivePlanDate: &date},
 		"go-live date":      {OnboardingGoLiveDate: &date},
 		"expiry date":       {OnboardingExpiryDate: &date},
+		"readiness date":    {OnboardingProductionReadinessCompletionDate: &date},
 		"with other fields": {HasAgent: &hasAgent, OnboardingStatus: &status},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -541,13 +543,21 @@ func TestPgProjectUpdateService_OnboardingDates(t *testing.T) {
 	if _, err := svc.UpdateProject(ctx, id, req); err != nil || !repo.called {
 		t.Fatalf("valid dates: err = %v, repo called = %v", err, repo.called)
 	}
+	// A readiness-date-only request counts as a stored field too.
+	repo = &stubProjectUpdateRepo{}
+	svc = NewProjectUpdateService(repo, testProjectUserRepo(), alwaysUnrestrictedAccess{})
+	if _, err := svc.UpdateProject(ctx, id, domain.ProjectUpdateRequest{OnboardingProductionReadinessCompletionDate: str("2026-04-01")}); err != nil || !repo.called {
+		t.Fatalf("readiness date only: err = %v, repo called = %v", err, repo.called)
+	}
 
 	for name, bad := range map[string]domain.ProjectUpdateRequest{
-		"malformed":      {OnboardingStartDate: str("01/03/2026")},
-		"impossible":     {OnboardingExpiryDate: str("2026-02-30")},
-		"timestamp":      {OnboardingGoLivePlanDate: str("2026-03-01T00:00:00Z")},
-		"plan < start":   {OnboardingStartDate: str("2026-03-01"), OnboardingGoLivePlanDate: str("2026-02-28")},
-		"expiry < start": {OnboardingStartDate: str("2026-03-01"), OnboardingExpiryDate: str("2026-01-01")},
+		"malformed":           {OnboardingStartDate: str("01/03/2026")},
+		"impossible":          {OnboardingExpiryDate: str("2026-02-30")},
+		"timestamp":           {OnboardingGoLivePlanDate: str("2026-03-01T00:00:00Z")},
+		"plan < start":        {OnboardingStartDate: str("2026-03-01"), OnboardingGoLivePlanDate: str("2026-02-28")},
+		"expiry < start":      {OnboardingStartDate: str("2026-03-01"), OnboardingExpiryDate: str("2026-01-01")},
+		"readiness malformed": {OnboardingProductionReadinessCompletionDate: str("01/03/2026")},
+		"readiness < start":   {OnboardingStartDate: str("2026-03-01"), OnboardingProductionReadinessCompletionDate: str("2026-02-01")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &stubProjectUpdateRepo{}

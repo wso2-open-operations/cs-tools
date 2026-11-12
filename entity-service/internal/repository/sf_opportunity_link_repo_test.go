@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -34,11 +35,16 @@ type linkQuerier struct {
 	links      map[string]domain.SalesforceOpportunityLinkUpsert
 	statements []string
 	ledger     []string
+	derived    []string // project ids the onboarding rule ran for
+	hours      []string // project ids the project hours hook ran for
 }
 
 func (q *linkQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	q.statements = append(q.statements, sql)
 	switch sql {
+	case deriveOnboardingForProjectQuery:
+		q.derived = append(q.derived, args[1].(string))
+		return pgconn.NewCommandTag("UPDATE 0"), nil
 	case insertSfOpportunityLinkQuery:
 		q.put(args)
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
@@ -52,12 +58,48 @@ func (q *linkQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.C
 	return pgconn.NewCommandTag("SELECT 1"), nil
 }
 
-func (q *linkQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	return nil, fmt.Errorf("unexpected Query")
+// Query answers the project hours hook's "projects linked to this opportunity".
+func (q *linkQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if !strings.Contains(sql, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+		return nil, fmt.Errorf("unexpected Query")
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, l := range q.links {
+		if l.OpportunityID == args[0].(string) && l.ProjectID != "" && !seen[l.ProjectID] {
+			seen[l.ProjectID] = true
+			ids = append(ids, l.ProjectID)
+		}
+	}
+	sort.Strings(ids)
+	var rows [][]any
+	for _, id := range ids {
+		rows = append(rows, []any{id})
+	}
+	return &fakeRows{rows: rows}, nil
 }
 
 func (q *linkQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
+	if sql == projectHoursStateQuery {
+		// The project hours hook; an unknown project is a no-op.
+		q.hours = append(q.hours, args[0].(string))
+		return scanRow{err: pgx.ErrNoRows}
+	}
+	if sql == previousLinkProjectsQuery {
+		prev := []string{}
+		if l, ok := q.links[args[0].(string)]; ok && l.ProjectID != "" {
+			prev = append(prev, l.ProjectID)
+		}
+		return scanRow{vals: []any{prev}}
+	}
+	if sql == previousLinkOpportunitiesQuery {
+		prev := []string{}
+		if l, ok := q.links[args[0].(string)]; ok && l.OpportunityID != "" {
+			prev = append(prev, l.OpportunityID)
+		}
+		return scanRow{vals: []any{prev}}
+	}
 	if sql == updateSfOpportunityLinkQuery {
 		if _, ok := q.links[args[4].(string)]; !ok {
 			return scanRow{err: pgx.ErrNoRows}
@@ -100,6 +142,54 @@ func TestWriteSfOpportunityLink_InsertThenUpdate(t *testing.T) {
 	}
 	if !strings.Contains(q.statements[0], "pg_advisory_xact_lock") || !reflect.DeepEqual(q.ledger, []string{"CREATED", "UPDATED"}) {
 		t.Errorf("first statement %.40s ledger %v", q.statements[0], q.ledger)
+	}
+	// Insert derives p1; the move to p2 derives p2 and then the previous owner p1.
+	if want := []string{"p1", "p2", "p1"}; !reflect.DeepEqual(q.derived, want) {
+		t.Errorf("derived projects = %v, want %v", q.derived, want)
+	}
+	// Project hours: the insert recomputes p1; the move recomputes the previous
+	// owner p1 (as having lost lines), then p2, each once.
+	if want := []string{"p1", "p1", "p2"}; !reflect.DeepEqual(q.hours, want) {
+		t.Errorf("project hours recomputed for %v, want %v", q.hours, want)
+	}
+}
+
+// Linking a project changes the shared pools of every project on the same
+// opportunity, so those siblings are recomputed too, and so are the siblings
+// left on the opportunity the link moved away from.
+func TestWriteSfOpportunityLink_RecomputesSiblingProjects(t *testing.T) {
+	q := &linkQuerier{links: map[string]domain.SalesforceOpportunityLinkUpsert{
+		"sib-new": {LinkSfID: "sib-new", OpportunityID: "opp-new", ProjectID: "s-new"},
+		"sib-old": {LinkSfID: "sib-old", OpportunityID: "opp-old", ProjectID: "s-old"},
+		"a3Uxx":   {LinkSfID: "a3Uxx", OpportunityID: "opp-old", ProjectID: "p-old"},
+	}}
+	if _, err := writeSfOpportunityLink(context.Background(), q,
+		domain.SalesforceOpportunityLinkUpsert{LinkSfID: "a3Uxx", OpportunityID: "opp-new", ProjectID: "p-new"}, linkState("UPDATED")); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, id := range q.hours {
+		got[id]++
+	}
+	for _, want := range []string{"p-old", "p-new", "s-new", "s-old"} {
+		if got[want] != 1 {
+			t.Errorf("project %s recomputed %d times, want once (all: %v)", want, got[want], q.hours)
+		}
+	}
+}
+
+// Deleting a link recomputes the project that lost it and the siblings that
+// stay on its opportunity.
+func TestDeleteSfOpportunityLink_RecomputesOwnerAndSiblings(t *testing.T) {
+	q := &linkQuerier{links: map[string]domain.SalesforceOpportunityLinkUpsert{
+		"a3Uxx": {LinkSfID: "a3Uxx", OpportunityID: "opp", ProjectID: "p1"},
+		"sib":   {LinkSfID: "sib", OpportunityID: "opp", ProjectID: "p2"},
+	}}
+	if _, err := deleteSfOpportunityLink(context.Background(), q, "a3Uxx", linkState("DELETED")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"p1", "p2"}; !reflect.DeepEqual(q.hours, want) {
+		t.Errorf("project hours recomputed for %v, want %v", q.hours, want)
 	}
 }
 

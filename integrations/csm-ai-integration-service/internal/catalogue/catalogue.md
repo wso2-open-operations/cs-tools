@@ -370,14 +370,25 @@ values are case-sensitive exactly as written.
 | `onboardingStatus` | a list of `Not-Started`, `In-Progress`, `Completed`, `Not-Applicable` |
 | `closureStatus` | one of `"Open"`, `"Suspended"`, `"Restricted"` |
 | `excludeClosureStates` | a list of `Open`, `Suspended`, `Restricted` to leave out |
+| `closureStates` | a list of `Open`, `Suspended`, `Restricted` to keep (the inverse of `excludeClosureStates`) |
 | `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date (section 5) |
+| `onboardingStartDateFrom`, `onboardingStartDateTo` | the onboarding start date, from / to (inclusive): one date (section 5) |
+| `goLivePlanDateFrom`, `goLivePlanDateTo` | the planned go-live date, from / to (inclusive): one date (section 5) |
+| `goLiveDateFrom`, `goLiveDateTo` | the actual go-live date, from / to (inclusive): one date (section 5) |
+| `onboardingExpiryDateFrom`, `onboardingExpiryDateTo` | the onboarding expiry date, from / to (inclusive): one date (section 5) |
+| `productionReadinessCompletionDateFrom`, `productionReadinessCompletionDateTo` | the production readiness completion date, from / to (inclusive): one date (section 5) |
+
+Each From / To pair is optional on either side (a missing side is open-ended), and the date filters, the
+closure keys and `onboardingStatus` combine in one widget (all must hold). A project with no value for a
+date never matches that date's filter.
 
 ```json
 { "resourceType": "account", "shape": "count", "query": { "abtTeam": "rigel", "healthStatus": "at_risk" } }
 ```
 
 **Shapes.** `count`; `list` with `listLimit`: **an account list sets no `sortBy`**, a project list may
-sort only by `endDate` ("ending soonest" is `asc`); `pie`/`bar` with `slices` only (each slice's `query`
+sort only by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or
+`productionReadinessCompletionDate` ("ending soonest" is `endDate` `asc`; projects with no value sort last); `pie`/`bar` with `slices` only (each slice's `query`
 flat too), e.g. one slice per risk or per onboarding status.
 
 **Not expressible** (section 1): "my accounts" or a
@@ -531,7 +542,7 @@ sign-ups per month.
 
 Fields: `createdOn`, `updatedOn`, `severity`, `state`, `assignee`. For `time_card`: `workDate` or
 `updatedOn` only ("recent time cards" means `workDate` `desc`). For operations see section 5b (a
-problem list has no `sortBy`); an `account` list has no `sortBy`; a `project` list sorts by `endDate` only; a `case_feedback`
+problem list has no `sortBy`); an `account` list has no `sortBy`; a `project` list sorts by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or `productionReadinessCompletionDate` only; a `case_feedback`
 list has no `sortBy`. A `plg_organization` list sorts by `name` or `registeredOn` only, and a
 `plg_registration` list has no `sortBy` (section 5e).
 "Recent" means `{"field": "createdOn", "order": "desc"}`, and for PLG organisations `registeredOn` `desc`;
@@ -606,8 +617,12 @@ Never set both `slices` and `groupBy`.
 | "projects", "subscriptions" | `resourceType: "project"` (section 5c) |
 | "projects in onboarding" / "onboarding not started" / "onboarded" | `onboardingStatus` `["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
 | "projects by onboarding status" | a `pie` with one slice each for Not started, In progress, Completed |
-| "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStatus` |
+| "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStates ["Suspended"]` / `["Restricted"]` (or `closureStatus`); "suspended or restricted": `closureStates ["Suspended", "Restricted"]` |
 | "projects ending this month / this quarter", "expiring", "renewals due" | `endDateFrom` / `endDateTo` with the month or quarter tokens; a list sorted by `endDate` `asc` |
+| "projects going live this month / next quarter", "go-live this month" | `goLivePlanDateFrom` / `goLivePlanDateTo` with the month or quarter tokens (next: `:1`); a list sorted by `goLivePlanDate` `asc`. "Went live" / "live since": `goLiveDateFrom` / `goLiveDateTo` instead |
+| "onboarding expiring soon / this month" | `onboardingExpiryDateFrom` `__today__` and `onboardingExpiryDateTo` with the period's end token; a list sorted by `onboardingExpiryDate` `asc`; add `onboardingStatus ["In-Progress"]` when asked for projects still in onboarding |
+| "production readiness completed last month" | `productionReadinessCompletionDateFrom` / `productionReadinessCompletionDateTo` with `__startOfMonth:-1__` / `__endOfMonth:-1__`; "onboarding started in ..." likewise with `onboardingStartDateFrom` / `onboardingStartDateTo` |
+| "projects not yet live", "no go-live date", "no end date" | **not expressible** as a date check (no filter tests a date being set or empty): the closest is `onboardingStatus ["Not-Started", "In-Progress"]`, with a `note` saying so |
 | "my accounts", accounts by region, product, owner or ARR | not expressible (section 5c) |
 | "PLG", "cloud", "self sign-up", "product-led" organisations; organisations with a tier, a PLG product or a lifecycle stage | `resourceType: "plg_organization"` (section 5e). "Organisations" or "customers" with none of these words stay `account` |
 | "registrations", "sign-ups", "new registrations" (PLG or cloud) | `resourceType: "plg_registration"` (section 5e) |
@@ -733,7 +748,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `state` only; a problem list has no `sortBy`; no ids, no `anyOf`, no `line`.
 11. An `account` / `project` widget: a flat `query` with only the keys of section 5c; single values as
     one string, booleans as `true` / `false`, `abtTeam` a team key; no `groupBy`; an account list has
-    no `sortBy`, a project list sorts by `endDate` only.
+    no `sortBy`, a project list sorts by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or
+    `productionReadinessCompletionDate` only.
 12. A `case_feedback` widget: a flat `query` with only `rating` (a number 1-5); no `dateFrom` / `dateTo`;
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
     `sortBy`; no `line`.

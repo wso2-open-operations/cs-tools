@@ -260,16 +260,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var scheduledTaskRunHandler *handler.ScheduledTaskRunHandler
 	var worklogReportHandler *handler.WorklogReportHandler
 	var queryHourHandler *handler.QueryHourHandler
+	// queryHourSvc is also what refreshes a project's hours when a time card
+	// is approved or rejected (nil without a database).
+	var queryHourSvc service.QueryHourService
 	if db != nil {
 		// Query-hour utilisation. No table of its own: the entitlement
 		// comes from the Salesforce mirror, the consumption from time
 		// cards, and the result is written back to columns that already
 		// exist -- sf_opportunity.query_hour_state and project's three
 		// duration fields.
-		queryHourHandler = handler.NewQueryHourHandler(
-			service.NewQueryHourService(
-				repository.NewQueryHourRepository(repository.NewScoped(db)),
-				cfg.QueryHourInternalEmailDomain))
+		queryHourSvc = service.NewQueryHourService(
+			repository.NewQueryHourRepository(repository.NewScoped(db)),
+			cfg.QueryHourInternalEmailDomain)
+		queryHourHandler = handler.NewQueryHourHandler(queryHourSvc)
 		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
 		// Which teams the CS Worklogs reports cover is deployment
 		// configuration, not a constant: the default is the CRE
@@ -1440,6 +1443,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	default:
 		activeTimeCardSvc = service.NewTimeCardService(timeCardRepo, userRepo)
 	}
+	if queryHourSvc != nil {
+		activeTimeCardSvc = service.WithTimeCardProjectHours(activeTimeCardSvc, queryHourSvc)
+	}
 	timeCardHandler := handler.NewTimeCardHandler(activeTimeCardSvc)
 
 	// sr_category/catalog_item/catalog_item_category/catalog_variable/
@@ -2078,7 +2084,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
 	if caseSLARecalcHandler != nil {
-		mux.HandleFunc("POST /cases/{id}/sla/recalculate-pause", caseSLARecalcHandler.RecalculatePauseTotals)
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate", caseSLARecalcHandler.RecalculatePauseTotals)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)

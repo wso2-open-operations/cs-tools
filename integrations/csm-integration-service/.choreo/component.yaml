@@ -10,3 +10,12 @@ endpoints:
     networkVisibilities:
       - Public
     schemaFilePath: openapi.yaml
+  - name: csm-cloud-status-api
+    displayName: CSM Cloud Status API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: cloud-status.openapi.yaml

@@ -34,7 +34,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
 	acpnotify "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/sweep"
 )
 
@@ -50,9 +49,19 @@ type EmailSender interface {
 // sales-entity-service) has the dates, people, opportunities and invoices,
 // and takes State__c=Suspended on suspension.
 type Clients struct {
-	CSM         *entity.Client
-	SalesEntity *salesentity.Client
+	CSM *entity.Client
+	// SalesEntity is read by the live path and takes the State__c write of a
+	// suspension. Nil only with Config.NoSalesEntityReads in a dry run.
+	SalesEntity SalesEntity
 	Email       EmailSender
+}
+
+// SalesEntity is the sales-entity-service client: the reads of the live path
+// and the one write, a suspended project's State__c. Satisfied by
+// *salesentity.Client.
+type SalesEntity interface {
+	sweep.SalesforceReader
+	UpdateProjectStatus(ctx context.Context, id, status string) error
 }
 
 // Config is the ACP_* configuration, read in cmd/server/main.go.
@@ -84,6 +93,59 @@ type Config struct {
 	// someone trying it out on a weekend must not read an empty run as "no
 	// projects due".
 	RunOnWeekends bool
+	// DailyLimit caps how many projects one run acts on (a notice sent or
+	// recorded, or a suspension attempted), most overdue first; 0 is no cap.
+	// ACP_DAILY_LIMIT.
+	DailyLimit int
+	// Screening turns on hybrid evaluation: projects CSM's copy of the
+	// Salesforce data shows cannot be acted on are skipped before any live
+	// read (sweep.screen). ACP_SCREENING, default on.
+	Screening bool
+	// FullSweepWeekday is the Colombo weekday on which a screening run
+	// evaluates every project live. ACP_SCREENING_FULL_SWEEP_WEEKDAY, default
+	// Monday.
+	FullSweepWeekday time.Weekday
+	// FullSweep forces every project live for this run (--run-now
+	// --full-sweep). It can only widen the live scope.
+	FullSweep bool
+	// Repair posts, for each record a live read shows has drifted from CSM's
+	// copy, one Salesforce change event to entity-service's existing ingest.
+	// ACP_REPAIR, default on. RepairMaxEvents bounds the events one run posts;
+	// 0 is repair off. ACP_REPAIR_MAX_EVENTS, default 200.
+	Repair          bool
+	RepairMaxEvents int
+	// NoSalesEntityReads (ACP_SALES_ENTITY_READS=off) makes no
+	// sales-entity-service read at all: every decision is taken from CSM's
+	// copy through entity-service, so there is no live confirmation, and
+	// screening, the full sweep and the repair have nothing to compare and are
+	// off. The State__c write of a suspension is a write and stays. The zero
+	// value is reads on.
+	NoSalesEntityReads bool
+}
+
+// repairFor is the run's repair setup, nil when repair is off.
+func repairFor(clients Clients, cfg Config) *sweep.Repair {
+	if !cfg.Repair || cfg.RepairMaxEvents <= 0 || clients.CSM == nil {
+		return nil
+	}
+	return &sweep.Repair{Poster: clients.CSM, MaxEvents: cfg.RepairMaxEvents, DryRun: cfg.DryRun}
+}
+
+// screeningApplies reports whether this run screens, and when it does not
+// although ACP_SCREENING is on, why. A run scoped to one test project is
+// always live.
+func screeningApplies(cfg Config, now time.Time) (apply bool, whyNot string) {
+	switch {
+	case !cfg.Screening:
+		return false, ""
+	case cfg.TestProjectID != "":
+		return false, "a single-project run is always live"
+	case cfg.FullSweep:
+		return false, "--full-sweep"
+	case now.In(operationsZone).Weekday() == cfg.FullSweepWeekday:
+		return false, "the weekly full sweep weekday"
+	}
+	return true, ""
 }
 
 // Run returns the acp_closure handler. A sweep that could not list the
@@ -101,6 +163,10 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"emailEnabled", cfg.EmailEnabled,
 			"testProjectID", cfg.TestProjectID,
 			"excludedProjectIDs", sortedKeys(cfg.ExcludedProjectIDs),
+			"dailyLimit", cfg.DailyLimit,
+			"screening", cfg.Screening,
+			"repair", cfg.Repair && cfg.RepairMaxEvents > 0 && !cfg.NoSalesEntityReads,
+			"salesEntityReads", !cfg.NoSalesEntityReads,
 			"standingRecipientsCount", len(cfg.StandingRecipients),
 		)
 
@@ -141,8 +207,28 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			}
 		}
 
+		var details sweep.DetailSource
+		screening, whyNot := screeningApplies(cfg, now)
+		repair := repairFor(clients, cfg)
+		if cfg.NoSalesEntityReads {
+			// Nothing live to confirm or compare against.
+			details = sweep.CSMOnlyDetails(clients.CSM, clients.CSM)
+			screening, whyNot, repair = false, "", nil
+		} else {
+			if clients.SalesEntity == nil {
+				return fmt.Errorf("acp run %s: no sales-entity-service client: set ACP_SALES_ENTITY_* or ACP_SALES_ENTITY_READS=off in a dry run", runID)
+			}
+			details = sweep.NewSalesforceDetails(clients.SalesEntity)
+		}
+		if !cfg.DryRun && clients.SalesEntity == nil {
+			return fmt.Errorf("acp run %s: a real run needs the sales-entity-service client for the State__c write of a suspension", runID)
+		}
+		if whyNot != "" {
+			slog.InfoContext(ctx, "acp: screening is on but this run evaluates every project live", "runID", runID, "reason", whyNot)
+		}
 		ctx = entity.WithCorrelationID(ctx, runID)
-		result, err := sweep.Run(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs)
+		result, err := sweep.RunWith(ctx, clients.CSM, details, updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs,
+			sweep.Options{Limit: cfg.DailyLimit, Screening: screening, Repair: repair})
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,
@@ -150,6 +236,9 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"stoppedEarly", err != nil,
 			"projectsEvaluated", result.ProjectsEvaluated,
 			"projectsExcluded", result.ProjectsExcluded,
+			"projectsActed", result.ProjectsActed,
+			"projectsScreenedOut", result.ProjectsScreenedOut,
+			"projectsNotEvaluatedByLimit", result.NotEvaluatedByLimit,
 			"projectsSkipped", len(result.Skipped),
 			"failureCount", len(result.Failures),
 		)

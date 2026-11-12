@@ -29,6 +29,10 @@ import {
   translateCallRequestDashboardFilters,
   WIDGET_RESOURCE_CONFIG,
 } from "@features/csm-dashboard/config/widgetResourceConfig";
+import {
+  projectFiltersToRequest,
+  readProjectFilters,
+} from "@features/csm-projects/utils/projectFilters";
 import { readCasesFiltersFromUrl } from "@features/csm-cases/utils/casesFiltersUrl";
 import { WIDGET_TITLE_PARAM, parseWidgetPreviewFilters } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 
@@ -656,6 +660,45 @@ describe("WIDGET_RESOURCE_CONFIG.project.buildSearchRequestBody", () => {
     });
   });
 
+  it("accepts each of the five project sort fields and flattens them to plain strings", () => {
+    for (const field of [
+      "endDate",
+      "goLivePlanDate",
+      "goLiveDate",
+      "onboardingExpiryDate",
+      "productionReadinessCompletionDate",
+    ]) {
+      expect(build({ filters: {}, offset: 0, limit: 10, sortBy: { field, order: "asc" } })).toEqual({
+        sortBy: field,
+        sortOrder: "asc",
+        pagination: { offset: 0, limit: 10 },
+      });
+    }
+  });
+
+  it("unwraps array-wrapped onboarding date bounds from the preview round trip, keeping closureStates as an array", () => {
+    const body = build({
+      filters: {
+        goLiveDateFrom: ["2026-01-01"],
+        goLiveDateTo: ["2026-01-31"],
+        productionReadinessCompletionDateFrom: ["2026-02-01"],
+        closureStates: ["Open", "Restricted"],
+        closureStatus: ["Open"],
+      },
+      offset: 0,
+      limit: 10,
+    });
+
+    expect(body).toEqual({
+      goLiveDateFrom: "2026-01-01",
+      goLiveDateTo: "2026-01-31",
+      productionReadinessCompletionDateFrom: "2026-02-01",
+      closureStates: ["Open", "Restricted"],
+      closureStatus: "Open",
+      pagination: { offset: 0, limit: 10 },
+    });
+  });
+
   it("never lets a stray filter key override pagination", () => {
     const body = build({ filters: { pagination: { offset: 99, limit: 99 } }, offset: 0, limit: 5 });
 
@@ -698,6 +741,70 @@ describe("WIDGET_RESOURCE_CONFIG.project.buildHref", () => {
   // project matching the status, not just the ones the tile's other filter
   // also scoped to -- the same lossy-link bug `incident_task`/`problem`'s
   // own `hasFiltersBeyond` fallback above exists to avoid.
+  describe("click-through for the onboarding date and state filters", () => {
+    it("carries closureStates and every date range into the list's own URL format", () => {
+      const href = buildHref({
+        onboardingStatus: ["In-Progress"],
+        closureStates: ["Open", "Restricted"],
+        onboardingStartDateFrom: "2026-01-01",
+        onboardingStartDateTo: "2026-01-31",
+        goLivePlanDateFrom: "2026-02-01",
+        goLivePlanDateTo: "2026-02-28",
+        goLiveDateFrom: "2026-03-01",
+        goLiveDateTo: "2026-03-31",
+        onboardingExpiryDateFrom: "2026-04-01",
+        onboardingExpiryDateTo: "2026-04-30",
+        productionReadinessCompletionDateFrom: "2026-05-01",
+        productionReadinessCompletionDateTo: "2026-05-31",
+        endDateFrom: "2026-06-01",
+        endDateTo: "2026-06-30",
+      });
+      expect(href.startsWith("/customers/projects?")).toBe(true);
+      const params = hrefParams(href);
+      expect(params.get("onboardingStatus")).toBe("In-Progress");
+      expect(params.get("closureStates")).toBe("Open,Restricted");
+      expect(params.get("onboardingStartDateFrom")).toBe("2026-01-01");
+      expect(params.get("goLivePlanDateTo")).toBe("2026-02-28");
+      expect(params.get("goLiveDateFrom")).toBe("2026-03-01");
+      expect(params.get("onboardingExpiryDateTo")).toBe("2026-04-30");
+      expect(params.get("productionReadinessCompletionDateFrom")).toBe("2026-05-01");
+      expect(params.get("endDateTo")).toBe("2026-06-30");
+    });
+
+    it("round-trips through the projects list's own URL reader", () => {
+      const filters = {
+        closureStates: ["Suspended"],
+        closureStatus: "Open",
+        excludeClosureStates: ["Restricted"],
+        goLiveDateFrom: "2026-03-01",
+        productionReadinessCompletionDateTo: "2026-05-31",
+      };
+      const read = readProjectFilters(hrefParams(buildHref(filters)));
+      expect(projectFiltersToRequest(read)).toEqual(filters);
+    });
+
+    it("sends a widget with an unresolved date placeholder to the preview page rather than a broader list", () => {
+      const href = buildHref(
+        { goLiveDateFrom: "__daysAgo:30__" },
+        { widgetId: "widget-8", displayName: "Recent go-lives" },
+      );
+      expect(href.startsWith("/dashboard/preview/projects?")).toBe(true);
+    });
+
+    it("sends a widget with a state outside the enum to the preview page", () => {
+      const href = buildHref({ closureStates: ["Closed"] }, { widgetId: "widget-9", displayName: "x" });
+      expect(href.startsWith("/dashboard/preview/projects?")).toBe(true);
+    });
+
+    it("still sends a widget with a filter the list cannot read (subRegion) to the preview page", () => {
+      const href = buildHref(
+        { goLiveDateFrom: "2026-03-01", subRegion: "APAC" },
+        { widgetId: "widget-10", displayName: "x" },
+      );
+      expect(href.startsWith("/dashboard/preview/projects?")).toBe(true);
+    });
+  });
+
   it("routes to the widget preview page when a filter beyond onboardingStatus is present", () => {
     const href = buildHref(
       { onboardingStatus: ["In-Progress"], accountId: "acc-1" },

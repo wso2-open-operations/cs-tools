@@ -15,7 +15,7 @@
 // under the License.
 
 import { UserMenu } from "@wso2/oxygen-ui";
-import { FlaskConical, LogOut, Settings, User } from "@wso2/oxygen-ui-icons-react";
+import { Bug, FlaskConical, LogOut, Settings, User } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
@@ -25,6 +25,7 @@ import PreferencesDialog from "@components/header/PreferencesDialog";
 import FeaturePreviewDialog from "@components/header/FeaturePreviewDialog";
 import { resolveUserInfo } from "@utils/userClaims";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
+import { getReportIssueUrl } from "@config/reportIssueConfig";
 
 interface UserProfileProps {
   /** Hides Profile/Preferences (nothing meaningful to view/configure without
@@ -53,6 +54,7 @@ export default function UserProfile({
   };
 
   const info = resolveUserInfo(claims);
+  const reportIssueUrl = getReportIssueUrl();
 
   return (
     <>
@@ -84,6 +86,18 @@ export default function UserProfile({
             label="Feature Preview"
             onClick={() => setFeaturePreviewOpen(true)}
           />
+        )}
+        {reportIssueUrl && (
+          <>
+            <UserMenu.Divider />
+            <UserMenu.Item
+              icon={<Bug size={16} />}
+              label="Report an issue"
+              onClick={() =>
+                window.open(reportIssueUrl, "_blank", "noopener,noreferrer")
+              }
+            />
+          </>
         )}
         <UserMenu.Logout
           icon={<LogOut size={16} />}

@@ -20,14 +20,15 @@
 //
 //   - WeekdayReminder: the next working day's Morning (with its on-call
 //     person) and Evening windows, one email per window carrying its
-//     invitation. A Monday is announced on the Friday before it.
-//   - WeekendNotice: runs every evening from Sunday to Thursday for the coming
+//     invitation. Runs Sunday to Thursday, so a Monday is announced on the
+//     Sunday before it.
+//   - WeekendNotice: runs every morning from Monday to Thursday for the coming
 //     weekend. Once the weekend is fully marked (Config.Required: by default
 //     3 on LK Weekend and 1 on Americas Weekend, each day) it sends one summary
 //     email to everybody on the weekend and one invitation email per team per
 //     day (LK Saturday, Americas Saturday, LK Sunday, Americas Sunday), then
-//     records the send so later evenings send nothing. Until then it emails
-//     the family's rota admins what is missing, every evening.
+//     records the send so later mornings send nothing. Until then it emails
+//     the family's rota admins what is missing, every morning.
 //   - WeekendReminder: Friday's reminder. The summary again, the invitations
 //     again as updates (same event identities), and a cancellation for
 //     anybody taken off a window since the last send. With gaps it still

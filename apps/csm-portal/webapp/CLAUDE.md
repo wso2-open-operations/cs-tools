@@ -145,6 +145,25 @@ cs_engineer || admin || comment_updater || security_team`), used in place of the
 keep a multi-type/unfiltered search from being rejected, it must mirror the *exact* backend permission that
 search actually checks — not a nearby, semantically-similar one that happens to cover most of the same roles.
 
+**The same mismatch recurred one layer up, in the route guard.** The fix above made a `viewer` able to see a
+security report row in a project's Work Items list, but clicking it still bounced to the Dashboard — reported
+live. `caseTypeDetailBasePath` (`caseType.ts`) routes a `security_report_analysis` case's detail page to
+`/security-center/security-reports/:caseId`, and `csmNavItems.ts`'s `security-center.reports` node (the
+Security Reports tab) is what's supposed to own that path, but its `routes` array only listed
+`/security-center/reports` (its own create route) — a different literal segment, not a typo of it; nothing
+matched the detail path except the parent `security-center` node, gated by the section's own
+`canUseSecurityCenter`. Fixed by adding the missing route prefix *and* giving this node its own
+`requires: "canViewSecurityReportCases"` (the same broader flag the search fix above already established) —
+`FeatureRouteGuard` resolves a path's gate from the single most-specific matching node, not an AND of the
+whole ancestor chain, so this only widens the detail-page deep link; the section's own landing page and tab
+strip are reached through the bare `/security-center` pathname, which this child contributes no route prefix
+for, and stay gated by `canUseSecurityCenter` as before. The create route (`/security-center/reports/new`)
+shares the same node and is incidentally widened too, but stays correctly blocked by its own, separate
+`RequireWriteAccess` wrapper. The lesson generalizes once more: a frontend permission mismatch of this shape
+rarely lives in just one place — the list visibility, the route guard, and any other gate the same page passes
+through each need their own check against the *exact* backend permission, not an assumption that fixing one
+fixes the page.
+
 ## `useRouteTabs`: must read `PortalAccess`/Feature Preview itself, not rely on its caller to
 
 `useSectionTabs.ts`'s shared `tabsFor` helper used to call `visibleNavChildren(section)`/`featureState(node.id)`

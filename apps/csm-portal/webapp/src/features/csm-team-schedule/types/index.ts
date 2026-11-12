@@ -107,6 +107,11 @@ export interface ScheduleAbsenceKind {
   /** The standing window a span of this kind is drawn as on the roster: on
    *  the team it moves someone to, they work its normal hours (NLK, LK). */
   showsAsShiftCode?: string;
+  /** The tag's days take a person off the worklog timesheet (an SRE
+   *  rotation, a customer allocation). Never set on leave. */
+  excludesFromTimesheet?: boolean;
+  /** What the tag is for, shown when hovering it. */
+  description?: string;
 }
 
 /** One team the rota is run for, served so no client holds the list. */

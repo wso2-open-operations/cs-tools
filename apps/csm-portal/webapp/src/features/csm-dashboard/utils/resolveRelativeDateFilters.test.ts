@@ -161,6 +161,40 @@ describe("resolveRelativeDateFilters", () => {
       ).toEqual({ onboardingStatus: ["In-Progress"], endDateFrom: "2026-07-01", endDateTo: "2026-09-30" });
     });
 
+    it("resolves every onboarding date bound of a project search to a plain local date", () => {
+      const filters = {
+        onboardingStatus: ["In-Progress"],
+        onboardingStartDateFrom: "__startOfQuarter:0__",
+        onboardingStartDateTo: "__today__",
+        goLivePlanDateFrom: "__today__",
+        goLivePlanDateTo: "__endOfQuarter:0__",
+        goLiveDateFrom: "__daysAgo:30__",
+        goLiveDateTo: "__today__",
+        onboardingExpiryDateFrom: "__today__",
+        onboardingExpiryDateTo: "__endOfMonth:0__",
+        productionReadinessCompletionDateFrom: "__startOfMonth:0__",
+        productionReadinessCompletionDateTo: "__today__",
+      };
+      expect(resolveRelativeDateFilters(filters, NOW)).toEqual({
+        onboardingStatus: ["In-Progress"],
+        onboardingStartDateFrom: "2026-07-01",
+        onboardingStartDateTo: "2026-08-15",
+        goLivePlanDateFrom: "2026-08-15",
+        goLivePlanDateTo: "2026-09-30",
+        goLiveDateFrom: "2026-07-16",
+        goLiveDateTo: "2026-08-15",
+        onboardingExpiryDateFrom: "2026-08-15",
+        onboardingExpiryDateTo: "2026-08-31",
+        productionReadinessCompletionDateFrom: "2026-08-01",
+        productionReadinessCompletionDateTo: "2026-08-15",
+      });
+    });
+
+    it("leaves literal onboarding date bounds untouched", () => {
+      const filters = { goLiveDateFrom: "2026-01-01", closureStates: ["Open"] };
+      expect(resolveRelativeDateFilters(filters, NOW)).toBe(filters);
+    });
+
     it("resolves a PLG widget's registeredFrom / registeredTo against the UTC date", () => {
       // 23:30 UTC on Aug 31 is already Sep 1 for a viewer east of UTC (05:00
       // in Colombo); the bounds are UTC days, as the trend's window is, so

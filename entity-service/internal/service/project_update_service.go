@@ -150,6 +150,7 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		mirrorReq.OnboardingGoLivePlanDate = nil
 		mirrorReq.OnboardingGoLiveDate = nil
 		mirrorReq.OnboardingExpiryDate = nil
+		mirrorReq.OnboardingProductionReadinessCompletionDate = nil
 		s.snWriteback.Dispatch(ctx, "project", id, "update", mirrorReq, func(writeCtx context.Context) error {
 			_, err := s.snMirror.UpdateProject(writeCtx, id, mirrorReq)
 			return err
@@ -199,10 +200,11 @@ func hasStoredProjectFields(req domain.ProjectUpdateRequest) bool {
 		req.SuspensionProcessOverridden != nil || req.OnboardingStatus != nil || req.OnboardingOwner != nil || hasOnboardingDates(req)
 }
 
-// hasOnboardingDates reports whether req sets any of the four onboarding dates.
+// hasOnboardingDates reports whether req sets any of the five onboarding dates.
 func hasOnboardingDates(req domain.ProjectUpdateRequest) bool {
 	return req.OnboardingStartDate != nil || req.OnboardingGoLivePlanDate != nil ||
-		req.OnboardingGoLiveDate != nil || req.OnboardingExpiryDate != nil
+		req.OnboardingGoLiveDate != nil || req.OnboardingExpiryDate != nil ||
+		req.OnboardingProductionReadinessCompletionDate != nil
 }
 
 // hasSNMirrorableProjectFields reports whether req sets a field the

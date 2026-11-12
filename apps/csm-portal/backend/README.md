@@ -451,7 +451,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `security_center` | `/products/vulnerabilities` routes. Security-report cases are gated inside the case handler |
 | `create_announcement` | Writes on `/announcement-requests` (together with `write`), and `POST /cases` with `type: announcement` |
 | `update_delete_comment` | `PATCH`/`DELETE /comments/{id}`; which comment may be touched is decided per comment (see `AUTH_COMMENT_UPDATER_ROLES`) |
-| `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`); checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
+| `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the five onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`, `onboardingProductionReadinessCompletionDate`); checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
 | `use_plg`, `manage_playbooks` | The `/plg/*` routes: `cs_engineer` and `admin` use them; authoring playbook templates is `admin` only |
 
 A caller with none of the required roles gets `403`. Some actions need more than the role: posting a

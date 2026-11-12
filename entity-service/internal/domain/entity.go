@@ -1446,6 +1446,16 @@ type Project struct {
 	// portal backend's customer-health risk flags) search by account rather
 	// than fetching one project at a time.
 	GoLiveDate *time.Time `json:"goLiveDate"`
+	// GoLivePlanDate, OnboardingExpiryDate, OnboardingStartDate and
+	// ProductionReadinessCompletionDate are the project's other onboarding
+	// dates (project.onboarding_go_live_plan_date, onboarding_expiry_date,
+	// onboarding_start_date, onboarding_production_readiness_completion_date),
+	// selected so a project list can show them without a GetProjectByID call per
+	// row. Nil when not set.
+	GoLivePlanDate                    *time.Time `json:"goLivePlanDate"`
+	OnboardingExpiryDate              *time.Time `json:"onboardingExpiryDate"`
+	OnboardingStartDate               *time.Time `json:"onboardingStartDate"`
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate"`
 }
 
 // ProjectAccountRef is the embedded account summary returned in project detail responses.
@@ -1528,7 +1538,10 @@ type ProjectEngagementFields struct {
 	// OnboardingStartDate is populated on Postgres data sources only (nil
 	// elsewhere).
 	OnboardingStartDate *time.Time `json:"onboardingStartDate"`
-	OnboardingStatus    *string    `json:"onboardingStatus"`
+	// ProductionReadinessCompletionDate is populated on Postgres data sources
+	// only (nil elsewhere).
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate"`
+	OnboardingStatus                  *string    `json:"onboardingStatus"`
 }
 
 type ProjectDetailsView struct {
@@ -1621,16 +1634,18 @@ type ProjectUpdateRequest struct {
 	// Must be an active internal user. Clearing the owner is not supported:
 	// null and omitted both leave it unchanged.
 	OnboardingOwner *string `json:"onboardingOwner,omitempty"`
-	// OnboardingStartDate, OnboardingGoLivePlanDate, OnboardingGoLiveDate and
-	// OnboardingExpiryDate set the project's onboarding dates, as "YYYY-MM-DD"
-	// (Postgres data sources only; rejected on the ServiceNow data source). A
-	// malformed date is a 400, as is a go-live plan, go-live or expiry date
-	// earlier than the (supplied or stored) start date. Clearing a date is not
+	// OnboardingStartDate, OnboardingGoLivePlanDate, OnboardingGoLiveDate,
+	// OnboardingExpiryDate and OnboardingProductionReadinessCompletionDate set
+	// the project's onboarding dates, as "YYYY-MM-DD"
+	// (Postgres data sources only; rejected on the legacy data source). A
+	// malformed date is a 400, as is any other date earlier than the (supplied
+	// or stored) start date. Clearing a date is not
 	// supported: null and omitted both leave it unchanged.
-	OnboardingStartDate      *string `json:"onboardingStartDate,omitempty"`
-	OnboardingGoLivePlanDate *string `json:"onboardingGoLivePlanDate,omitempty"`
-	OnboardingGoLiveDate     *string `json:"onboardingGoLiveDate,omitempty"`
-	OnboardingExpiryDate     *string `json:"onboardingExpiryDate,omitempty"`
+	OnboardingStartDate                         *string `json:"onboardingStartDate,omitempty"`
+	OnboardingGoLivePlanDate                    *string `json:"onboardingGoLivePlanDate,omitempty"`
+	OnboardingGoLiveDate                        *string `json:"onboardingGoLiveDate,omitempty"`
+	OnboardingExpiryDate                        *string `json:"onboardingExpiryDate,omitempty"`
+	OnboardingProductionReadinessCompletionDate *string `json:"onboardingProductionReadinessCompletionDate,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -1660,10 +1675,11 @@ type ProjectUpdateResult struct {
 	OnboardingOwner  *PersonRef `json:"onboardingOwner,omitempty"`
 	// The onboarding dates are named as the project read names them
 	// (goLiveDate, goLivePlanDate, onboardingExpiryDate).
-	OnboardingStartDate  *time.Time `json:"onboardingStartDate,omitempty"`
-	GoLivePlanDate       *time.Time `json:"goLivePlanDate,omitempty"`
-	GoLiveDate           *time.Time `json:"goLiveDate,omitempty"`
-	OnboardingExpiryDate *time.Time `json:"onboardingExpiryDate,omitempty"`
+	OnboardingStartDate               *time.Time `json:"onboardingStartDate,omitempty"`
+	GoLivePlanDate                    *time.Time `json:"goLivePlanDate,omitempty"`
+	GoLiveDate                        *time.Time `json:"goLiveDate,omitempty"`
+	OnboardingExpiryDate              *time.Time `json:"onboardingExpiryDate,omitempty"`
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate,omitempty"`
 }
 
 // ProjectConsumptionStatus represents the product consumption state and keys for a project.
@@ -1703,7 +1719,10 @@ type SearchProjectsRequest struct {
 	// EndDateTo filters projects with an end date on or before this date
 	// (yyyy-MM-dd).
 	EndDateTo string `json:"endDateTo"`
-	// SortBy is the field to sort results by. Only "endDate" is accepted.
+	// SortBy is the field to sort results by: "endDate" on every data source;
+	// "goLivePlanDate", "goLiveDate", "onboardingExpiryDate" and
+	// "productionReadinessCompletionDate" on Postgres data sources only (nulls
+	// last).
 	SortBy string `json:"sortBy"`
 	// SortOrder is the sort direction ("asc" or "desc").
 	SortOrder string `json:"sortOrder"`
@@ -1761,6 +1780,26 @@ type SearchProjectsRequest struct {
 	// in Go by paging through every match, with the same page-bound caveat as
 	// ExcludeClosureStates.
 	SfIDs []string `json:"sfIds,omitempty"`
+	// ClosureStates is the include-side counterpart of ExcludeClosureStates:
+	// keeps only projects whose closure state is any of the given values
+	// ("Open"/"Suspended"/"Restricted"). Postgres data sources only; rejected
+	// on the legacy data source. A project with no recorded closure state
+	// matches none.
+	ClosureStates []string `json:"closureStates,omitempty"`
+	// The *From/*To fields below filter on the project's onboarding dates, as
+	// inclusive yyyy-MM-dd bounds; a project with no such date never matches a
+	// bound, and From must not be after To. Postgres data sources only;
+	// rejected on the legacy data source.
+	OnboardingStartDateFrom               string `json:"onboardingStartDateFrom"`
+	OnboardingStartDateTo                 string `json:"onboardingStartDateTo"`
+	GoLivePlanDateFrom                    string `json:"goLivePlanDateFrom"`
+	GoLivePlanDateTo                      string `json:"goLivePlanDateTo"`
+	GoLiveDateFrom                        string `json:"goLiveDateFrom"`
+	GoLiveDateTo                          string `json:"goLiveDateTo"`
+	OnboardingExpiryDateFrom              string `json:"onboardingExpiryDateFrom"`
+	OnboardingExpiryDateTo                string `json:"onboardingExpiryDateTo"`
+	ProductionReadinessCompletionDateFrom string `json:"productionReadinessCompletionDateFrom"`
+	ProductionReadinessCompletionDateTo   string `json:"productionReadinessCompletionDateTo"`
 }
 
 // ProjectSearchAccountRef is the account reference embedded in a project
@@ -1823,6 +1862,14 @@ type ProjectView struct {
 	// populated on GetProjectByID; added here so an account-scoped search
 	// doesn't need one GetProjectByID call per project just to know this.
 	GoLiveDate *time.Time `json:"goLiveDate"`
+	// GoLivePlanDate, OnboardingExpiryDate, OnboardingStartDate and
+	// ProductionReadinessCompletionDate are the project's other onboarding
+	// dates, as on ProjectDetailsView. Populated on Postgres data sources
+	// only; the legacy data source's project search carries none of them (nil).
+	GoLivePlanDate                    *time.Time `json:"goLivePlanDate"`
+	OnboardingExpiryDate              *time.Time `json:"onboardingExpiryDate"`
+	OnboardingStartDate               *time.Time `json:"onboardingStartDate"`
+	ProductionReadinessCompletionDate *time.Time `json:"productionReadinessCompletionDate"`
 	// VerificationEnabled mirrors ProjectDetailsView's own field of the same
 	// name -- see domain.Project.VerificationEnabled's own doc comment.
 	// Previously selected by SearchProjects into the internal Project
@@ -3451,6 +3498,27 @@ type SearchCasesRequest struct {
 	// Rejected together with SkipTotal (there would be nothing left to
 	// compute); Postgres data source only.
 	CountOnly bool `json:"countOnly,omitempty"`
+	// ExcludeFields names response fields to leave out of every returned row,
+	// for a list that never shows them and would otherwise download them for
+	// nothing (a case description can be megabytes of rich text). Only
+	// SearchExcludeFieldDescription is supported; any other value is rejected.
+	// An excluded field comes back null, the same as a case with no value, and
+	// the Postgres data source does not read the column at all. Filtering on the
+	// field (searchQuery) is unaffected. Omitted or empty changes nothing.
+	ExcludeFields []string `json:"excludeFields,omitempty"`
+}
+
+// SearchExcludeFieldDescription is the one ExcludeFields value supported today.
+const SearchExcludeFieldDescription = "description"
+
+// ExcludesField reports whether name is listed in ExcludeFields.
+func (r SearchCasesRequest) ExcludesField(name string) bool {
+	for _, f := range r.ExcludeFields {
+		if f == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AggregateCasesRequest is the input for the dedicated case aggregate
@@ -8751,7 +8819,16 @@ type SLAStatus struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle,omitempty"`
 	CaseType   string `json:"caseType,omitempty"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CaseCreatedPayload.EngagementType's own
+	// convention (engagement.engagement_type, lowercased, e.g. "migration";
+	// "" for every non-engagement case-like type) -- exists so
+	// csm-notification-service's startup reconciliation (Engine.Reconcile,
+	// GetActiveCSMSLAClocks) can rebuild a clock's Redis-held EngagementType
+	// from this same durable source instead of silently dropping it to ""
+	// on every restart, the identical reasoning CaseType itself already has
+	// here.
+	EngagementType string `json:"engagementType,omitempty"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (account.cre_team_id
 	// joined to "group") -- "" when the case has no account, or the account
 	// has no CRE team assigned.
@@ -9003,6 +9080,27 @@ type SLAClockState struct {
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
 	TeamLeadName  string `json:"teamLeadName,omitempty"`
+	// ProjectOnboardingStatus/IsEvaluationAccount mirror SLAStatus's own
+	// fields of the same name and the same resolution (project.onboarding_status,
+	// project_type.name = "Evaluation Subscription") -- added so
+	// csm-notification-service's SLA breach Chat-alert routing can read real
+	// team/onboarding/evaluation facts from this same call (GetClockState,
+	// made right before sending a breach alert) instead of the hardcoded
+	// false/"" it used to pass to chataudience.Resolve, now that
+	// case.created no longer carries either fact itself.
+	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
+	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// OnboardingTeamEmail is the Customer Onboarding team's own group_email
+	// (team.key = "customer_onboarding_team"), populated only when
+	// ProjectOnboardingStatus is IN_PROGRESS/NOT_STARTED -- "" otherwise,
+	// including when that team has no group_email configured. TeamEmail
+	// above is always the case's real CRE team, never swapped for this one
+	// -- csm-notification-service's breach email is meant to reach BOTH
+	// inboxes for an onboarding-stage case (the team actually working the
+	// case, and whoever is running the onboarding), not one in place of the
+	// other, so it sends to TeamEmail and OnboardingTeamEmail together
+	// rather than this service picking one.
+	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

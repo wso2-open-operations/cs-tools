@@ -60,6 +60,14 @@ import {
   type ChangeRequestFilters,
 } from "@features/csm-operations/utils/changeRequests";
 import { writeChangeRequestFiltersToUrl } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
+import {
+  EMPTY_PROJECT_FILTERS,
+  PROJECT_DATE_FILTER_KEYS,
+  projectFiltersToRequest,
+  readProjectFilters,
+  writeProjectFilters,
+  type ProjectFilters,
+} from "@features/csm-projects/utils/projectFilters";
 import { taskStateLabel } from "@features/csm-cases/utils/taskState";
 import { callRequestStateLabel } from "@features/csm-cases/utils/callRequestState";
 import type { BeTaskState } from "@api/backend/types";
@@ -641,8 +649,38 @@ function hasFiltersBeyond(filters: Record<string, unknown>, listKeys: readonly s
 const INCIDENT_LIST_FILTER_KEYS = ["priorities"] as const;
 /** The only filter keys the change requests list reads from its URL. */
 const CHANGE_REQUEST_LIST_FILTER_KEYS = ["states", "impacts"] as const;
-/** The only filter key the projects list reads from its URL. */
-const PROJECT_LIST_FILTER_KEYS = ["onboardingStatus"] as const;
+/** The only filter keys the projects list reads from its URL (see
+ * `readProjectFilters`): the same names a widget's `project` query uses. */
+const PROJECT_LIST_FILTER_KEYS = [
+  "onboardingStatus",
+  "closureStates",
+  "closureStatus",
+  "excludeClosureStates",
+  ...PROJECT_DATE_FILTER_KEYS.flatMap((k) => [`${k}From`, `${k}To`]),
+] as const;
+
+/** The `sortBy` values `POST /projects/search` accepts. */
+const PROJECT_SORT_FIELDS: readonly string[] = [
+  "endDate",
+  "goLivePlanDate",
+  "goLiveDate",
+  "onboardingExpiryDate",
+  "productionReadinessCompletionDate",
+];
+
+/** A widget's `project` filters as the projects list's own filter state. */
+function translateProjectDashboardFilters(filters: Record<string, unknown>): ProjectFilters {
+  const out: ProjectFilters = { ...EMPTY_PROJECT_FILTERS };
+  out.onboardingStatus = asStringArray(filters.onboardingStatus) ?? [];
+  out.closureStates = asStringArray(filters.closureStates) ?? [];
+  out.excludeClosureStates = asStringArray(filters.excludeClosureStates) ?? [];
+  out.closureStatus = asString(filters.closureStatus) ?? "";
+  for (const k of PROJECT_DATE_FILTER_KEYS) {
+    out[`${k}From`] = asString(filters[`${k}From`]) ?? "";
+    out[`${k}To`] = asString(filters[`${k}To`]) ?? "";
+  }
+  return out;
+}
 
 /** Dashboard incident filters already use the real `BeIncidentPriority`
  * wire values (`CRITICAL`/`HIGH`/...), same as `IncidentFilters.priorities` —
@@ -1078,46 +1116,48 @@ export const WIDGET_RESOURCE_CONFIG: Record<
       for (const key of [
         "searchQuery",
         "closureStatus",
-        "endDateFrom",
-        "endDateTo",
         "accountId",
         "arrTodayGte",
         "subRegion",
-      ] as const) {
+        ...PROJECT_DATE_FILTER_KEYS.flatMap((k) => [`${k}From`, `${k}To`]),
+      ]) {
         const v = body[key];
         if (Array.isArray(v)) body[key] = v[0];
       }
       // The endpoint takes `sortBy`/`sortOrder` as plain strings and only
-      // accepts `sortBy: "endDate"`; a widget's `{field, order}` sort is
-      // flattened to that, and anything else is dropped rather than sent
-      // to be rejected.
-      if (sortBy?.field === "endDate") {
-        body.sortBy = "endDate";
+      // accepts the dates in `PROJECT_SORT_FIELDS`; a widget's `{field, order}`
+      // sort is flattened to that, and anything else is dropped rather than
+      // sent to be rejected.
+      if (typeof sortBy?.field === "string" && PROJECT_SORT_FIELDS.includes(sortBy.field)) {
+        body.sortBy = sortBy.field;
         if (sortBy.order === "asc" || sortBy.order === "desc") body.sortOrder = sortBy.order;
       }
       return { ...body, pagination: { offset, limit } };
     },
-    // Unlike every other resourceType here, this used to ignore `filters`
-    // entirely and always return the bare path — a real gap, not a
-    // deliberate "no filter support" choice (there was no comment saying
-    // so, unlike e.g. `problem`/`task`/`call_request` below, each of which
-    // explains why it has none): clicking a dashboard tile like "Active
-    // Onboarding" (`query: {onboardingStatus: ["In-Progress"]}`) landed on
-    // the plain, unfiltered Projects page. `onboardingStatus` is the only
-    // filter `CsmProjectsPage` knows how to read back out of its URL — same
-    // shape as `incident`/`change_request`/`problem` below: a widget
-    // filtering by anything else (`accountId`, `subRegion`, ...; see
-    // `buildSearchRequestBody` above for the full set this endpoint takes)
-    // would otherwise land on a broader, unscoped list than the tile
-    // counted, so that case goes to the preview page instead.
+    // Opens the projects list with the tile's filters in the URL, in the
+    // list's own scheme (`projectFilters.ts`, the same names as the tile's
+    // query: `onboardingStatus`, `closureStates`, the `<date>From`/`To` ranges,
+    // ...). A widget filtering by anything the list cannot read back
+    // (`accountId`, `subRegion`, ...; see `buildSearchRequestBody` above for
+    // the full set this endpoint takes), or by a value the list would drop
+    // as malformed (an unresolved date, a state outside the enum), would
+    // otherwise land on a broader list than the tile counted, so that case
+    // goes to the preview page instead.
     buildHref: (filters, ctx) => {
       if (hasFiltersBeyond(filters, PROJECT_LIST_FILTER_KEYS)) {
         return widgetPreviewFallbackHref("projects", "project", filters, ctx);
       }
-      const statuses = asStringArray(filters.onboardingStatus);
-      return statuses && statuses.length > 0
-        ? `/customers/projects?onboardingStatus=${encodeURIComponent(statuses.join(","))}`
-        : "/customers/projects";
+      const wanted = translateProjectDashboardFilters(filters);
+      const query = writeProjectFilters(new URLSearchParams(), wanted);
+      const readBack = readProjectFilters(query);
+      if (
+        JSON.stringify(projectFiltersToRequest(readBack)) !==
+        JSON.stringify(projectFiltersToRequest(wanted))
+      ) {
+        return widgetPreviewFallbackHref("projects", "project", filters, ctx);
+      }
+      const qs = query.toString();
+      return qs ? `/customers/projects?${qs}` : "/customers/projects";
     },
     icon: FolderKanban,
     iconColor: "secondary",

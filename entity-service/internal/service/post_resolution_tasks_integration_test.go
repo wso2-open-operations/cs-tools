@@ -113,7 +113,7 @@ func TestPostResolutionIntegration_WorkaroundCreatesTheProblem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the problem: %v", err)
 	}
-	if !strings.HasPrefix(number, "CS-PORTAL-") || subject != "Fix the root cause of INC-PR-0001" || createdBy != "system" {
+	if !strings.HasPrefix(number, "PRB") || subject != "Fix the root cause of INC-PR-0001" || createdBy != "system" {
 		t.Errorf("number/subject/createdBy = %s / %q / %s", number, subject, createdBy)
 	}
 	if group != groupChoreoSpecialOps || service != postResolutionServiceChoreo {

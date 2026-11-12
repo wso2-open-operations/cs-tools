@@ -1350,6 +1350,7 @@ func publishCaseCreatedEvent(
 		WSO2CaseID:           cv.InternalID,
 		CaseTitle:            cv.Subject,
 		CaseType:             strings.ToUpper(req.Type),
+		EngagementType:       derefString(cv.EngagementType),
 		Priority:             strings.ToUpper(string(derefSeverity(cv.Severity))),
 		Product:              product,
 		Team:                 caseTeamName(cv),
@@ -1899,14 +1900,20 @@ func publishStatusChangedEvent(ctx context.Context, publisher EventPublisherServ
 		return
 	}
 
+	previousStatus := ""
+	if before.State != nil {
+		previousStatus = caseStateDisplayLabel[*before.State]
+	}
+
 	payload, err := json.Marshal(events.StatusChangedPayload{
-		ProjectID:  before.ProjectDetails.ID,
-		CaseID:     caseID,
-		CaseNumber: before.Number,
-		WSO2CaseID: before.InternalID,
-		CaseTitle:  before.Subject,
-		NewStatus:  newStatus,
-		Recipients: recipients,
+		ProjectID:      before.ProjectDetails.ID,
+		CaseID:         caseID,
+		CaseNumber:     before.Number,
+		WSO2CaseID:     before.InternalID,
+		CaseTitle:      before.Subject,
+		NewStatus:      newStatus,
+		PreviousStatus: previousStatus,
+		Recipients:     recipients,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "update case: encode case.status_changed payload failed", "caseId", caseID, "error", err)
@@ -4597,6 +4604,9 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 
 // SearchCases implements CaseService by calling the Choreo POST /cases/search endpoint.
 func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
+	if err := validateSearchExcludeFields(req.ExcludeFields); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
@@ -4890,6 +4900,11 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		}
 		if c.RelatedCase != nil {
 			cv.RelatedCase = &domain.EntityRef{ID: sysidToUUID(c.RelatedCase.ID), Name: c.RelatedCase.Number}
+		}
+		if req.ExcludesField(domain.SearchExcludeFieldDescription) {
+			// The backing source has no way to leave the field out of its own
+			// response, so it is dropped here to keep the contract uniform.
+			cv.Description = nil
 		}
 		views = append(views, cv)
 	}

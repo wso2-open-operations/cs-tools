@@ -62,19 +62,31 @@ export function resolveRelativeDateFilters(
 /**
  * The flat date keys a non-case resourceType's filters may carry a
  * relative-date placeholder in: a time card search's `startDate` / `endDate`
- * (work date), a project search's `endDateFrom` / `endDateTo` (the
- * project's end date) and a PLG search's `registeredFrom` / `registeredTo`
- * (the registration date), all whole days and inclusive. They resolve to a
- * plain `YYYY-MM-DD`, not an instant: the time card and project searches
- * compare dates, and the PLG request body turns a plain date into that whole
- * UTC day (`plgSearchFilters`). The PLG bounds therefore resolve against the
- * UTC date (UTC_DATE_FILTER_KEYS), the others against the viewer's local one.
+ * (work date), a project search's `<date>From` / `<date>To` bounds (the
+ * project's end date and its onboarding start, go-live plan, go-live,
+ * onboarding expiry and production readiness completion dates) and a PLG
+ * search's `registeredFrom` / `registeredTo` (the registration date), all
+ * whole days and inclusive. They resolve to a plain `YYYY-MM-DD`, not an
+ * instant: the time card and project searches compare dates, and the PLG
+ * request body turns a plain date into that whole UTC day
+ * (`plgSearchFilters`). The PLG bounds therefore resolve against the UTC
+ * date (UTC_DATE_FILTER_KEYS), the others against the viewer's local one.
  */
 const FLAT_DATE_FILTER_KEYS = [
   "startDate",
   "endDate",
   "endDateFrom",
   "endDateTo",
+  "onboardingStartDateFrom",
+  "onboardingStartDateTo",
+  "goLivePlanDateFrom",
+  "goLivePlanDateTo",
+  "goLiveDateFrom",
+  "goLiveDateTo",
+  "onboardingExpiryDateFrom",
+  "onboardingExpiryDateTo",
+  "productionReadinessCompletionDateFrom",
+  "productionReadinessCompletionDateTo",
   "registeredFrom",
   "registeredTo",
 ] as const;
