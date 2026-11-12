@@ -44,6 +44,8 @@ export interface AttachmentLimits {
   maxFileBytes: number;
   /** Most inline-image bytes in one comment or description (and the largest single image). */
   maxInlineImagesBytes: number;
+  /** Files above this size are downloaded straight from storage; 0 (also while loading) means always through the backend. */
+  directTransferAboveBytes: number;
 }
 
 /** The server's limits, or the built-in defaults while loading or on error. */
@@ -53,6 +55,7 @@ export function useAttachmentLimits(): AttachmentLimits {
     maxFileBytes: positive(data?.maxFileBytes) ?? DEFAULT_ENTITY_ATTACHMENT_MAX_MB * BYTES_PER_MB,
     maxInlineImagesBytes:
       positive(data?.maxInlineImagesTotalBytes) ?? DEFAULT_INLINE_IMAGE_MAX_MB * BYTES_PER_MB,
+    directTransferAboveBytes: positive(data?.directTransferAboveBytes) ?? 0,
   };
 }
 
