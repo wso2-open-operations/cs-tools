@@ -20,15 +20,16 @@ import "fmt"
 
 // namedFilterValues is, for each filter field naming records as the user
 // wrote them (the handler's WithDashboardProjects / WithDashboardAccounts
-// turn them into projectId / accountId filters right after generation), what
-// its values are.
+// turn them into projectId / accountId filters right after generation, and
+// WithDashboardRegions checks the regions), what its values are.
 var namedFilterValues = []struct{ field, values string }{
 	{"project", "project names or keys"},
 	{"account", "account names or numbers"},
+	{"region", "regions"},
 }
 
-// checkGeneratedNamedFilters checks a generated case-family widget's project
-// and account filters: each is "in" or "notIn" with one or more names, and
+// checkGeneratedNamedFilters checks a generated case-family widget's project,
+// account and region filters: each is "in" or "notIn" with one or more names, and
 // only in a query's top-level filters, never in an anyOf branch. A widget
 // without one is not touched.
 func checkGeneratedNamedFilters(i int, w WidgetTemplate) error {
@@ -44,7 +45,8 @@ func checkGeneratedNamedFilters(i int, w WidgetTemplate) error {
 	return nil
 }
 
-// checkNamedFilterQuery checks one query's project and account entries.
+// checkNamedFilterQuery checks one query's project, account and region
+// entries.
 func checkNamedFilterQuery(at string, query map[string]any) error {
 	branches, _ := query["anyOf"].([]any)
 	for k, b := range branches {

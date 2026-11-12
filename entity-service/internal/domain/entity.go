@@ -3340,6 +3340,14 @@ type ParsedCaseFilters struct {
 	// product's name is none of these, including cases without a deployed
 	// product. Inverse of ProductNames.
 	ExcludeProductNames []string
+	// Regions (region in) keeps the cases whose account's region
+	// (account.region, as the account page shows it) is one of these,
+	// ignoring case and surrounding spaces.
+	Regions []string
+	// ExcludeRegions (region notIn) keeps the cases whose account's region is
+	// none of these, including cases without an account or a region. Inverse
+	// of Regions.
+	ExcludeRegions []string
 	// ExcludeStates filters to cases whose state is NOT one of these values
 	// (optional). Inverse of States, and the two are independent: a request may
 	// carry either, both, or neither. Only the backing data source that models

@@ -128,11 +128,11 @@ out), so the catalogue and the rules that judge the model's output cannot drift 
 `go test ./internal/dashboard`, then the three steps above. In the local stack, an edit to the built-in catalogue needs this service's
 image rebuilt (`docker compose up -d --build csm-ai-integration-service`), not the backend's.
 
-**The model writes names as the user wrote them.** Products, versions, projects (key or name) and
-customers (name or account number) are written as the request gives them, never ids; the backend
+**The model writes names as the user wrote them.** Products, versions, projects (key or name),
+customers (name or account number) and regions (the customer's sales region) are written as the request gives them, never ids; the backend
 resolves them after the reply and tells the user when one names nothing or several, so the catalogue
 never asks the model to refuse a name as not exact (the backend's
-`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project}ExamplesAreValid` run section 7's
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project,Region}ExamplesAreValid` run section 7's
 examples through its check, as the tests above do for theirs). An edit's draft holds the resolved `projectId` /
 `accountId` filters, which the model keeps as they are. The `{"error": ...}` text is shown to the user
 (section 1: at most two plain sentences, no field names or catalogue words), and a "not", "except" or

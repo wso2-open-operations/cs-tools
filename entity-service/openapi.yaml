@@ -24581,6 +24581,7 @@ components:
             - resolvedOn
             - product
             - productVersion
+            - region
             - projectOnboardingStatus
             - projectType
             - creTeam
@@ -24713,6 +24714,11 @@ components:
           exactly one product, as a version is shared by several products.
           Not supported inside an anyOf branch, or by the ServiceNow data
           source (400).
+        - **region** (in / notIn): the region of the case's account, as the
+          account record holds it (e.g. "APAC"), ignoring case and
+          surrounding spaces. notIn keeps cases without an account or a
+          region. Not supported inside an anyOf branch, or by a data source
+          that holds no account region (400).
         - **projectOnboardingStatus** (in / notIn): free-text SN choice labels
           for the parent project's onboarding status (e.g. "Completed",
           "In-Progress", "Not-Applicable" -- not a closed enum at this
@@ -24897,7 +24903,7 @@ components:
           $ref: '#/components/schemas/SearchCasesFilters'
         groupBy:
           type: string
-          enum: [account, state, severity, type, product, productVersion, project]
+          enum: [account, state, severity, type, product, productVersion, project, region]
           description: >-
             The field to aggregate case counts by. product groups by the
             deployed product's name (the value the product filter takes);
@@ -24909,6 +24915,12 @@ components:
             project's id (the value the projectId filter takes) and the label
             its name, else its key. product, productVersion and project are
             not supported by the ServiceNow data source.
+            region groups by the region of the case's account: the key is the
+            region as the region filter compares it (no surrounding spaces,
+            lower-cased) and the label the region as most of its cases'
+            accounts write it; cases without an account or a region are in no
+            bucket. Not
+            supported by a data source that holds no account region.
         maxGroups:
           type: integer
           description: >-

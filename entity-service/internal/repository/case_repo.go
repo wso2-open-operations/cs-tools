@@ -434,7 +434,8 @@ type CaseRepository interface {
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope SearchScope) ([]domain.SearchCaseView, int, error)
 	// AggregateCases counts the cases matching req's filters per value of
 	// groupBy (state, severity, type, engagementType, issueType, workState,
-	// account), largest bucket first. Rows with no value for the field are
+	// account, product, productVersion, project, region), largest bucket
+	// first. Rows with no value for the field are
 	// not counted. The caller applies any top-N cap.
 	AggregateCases(ctx context.Context, req domain.SearchCasesRequest, groupBy string, scope SearchScope) ([]domain.AggregateBucket, error)
 	// CaseVolumeTrend computes the opened and closed counts for each of the
@@ -3398,6 +3399,16 @@ func lowerAll(values []string) []string {
 	return out
 }
 
+// lowerTrimmed returns a lower-cased copy of values without surrounding
+// spaces.
+func lowerTrimmed(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = strings.ToLower(strings.TrimSpace(v))
+	}
+	return out
+}
+
 var onboardingStatusKeyStripper = strings.NewReplacer("-", "", "_", "", " ", "")
 
 // onboardingStatusEnumLabels translates field's onboarding status filter values
@@ -3718,6 +3729,19 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	if len(req.Parsed.ExcludeProductNames) > 0 {
 		where += fmt.Sprintf(" AND (prod.name IS NULL OR prod.name <> ALL($%d::text[]))", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ExcludeProductNames)
+		argIdx++
+	}
+	// region: the account's region (a is the LEFT JOIN below), ignoring case
+	// and surrounding spaces, as people type it in the account record. notIn
+	// keeps a case without an account or a region, as product notIn does.
+	if len(req.Parsed.Regions) > 0 {
+		where += fmt.Sprintf(" AND LOWER(TRIM(a.region)) = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, lowerTrimmed(req.Parsed.Regions))
+		argIdx++
+	}
+	if len(req.Parsed.ExcludeRegions) > 0 {
+		where += fmt.Sprintf(" AND (a.region IS NULL OR LOWER(TRIM(a.region)) <> ALL($%d::text[]))", argIdx)
+		filterArgs = append(filterArgs, lowerTrimmed(req.Parsed.ExcludeRegions))
 		argIdx++
 	}
 	// productVersion: the deployed product's version (pv is the LEFT JOIN
@@ -5372,7 +5396,8 @@ func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain
 
 // caseAggregateColumns maps an aggregate/group-by field to the SQL expression
 // buckets are keyed on (over caseSearchJoins) and the expression the bucket
-// label is read from.
+// label is read from (its MAX, unless caseAggregateLabels gives the label's
+// aggregate).
 var caseAggregateColumns = map[string]struct{ key, label string }{
 	"state":          {caseLikeStateColumn, caseLikeStateColumn},
 	"severity":       {"c.severity::TEXT", "c.severity::TEXT"},
@@ -5392,6 +5417,19 @@ var caseAggregateColumns = map[string]struct{ key, label string }{
 	// project: keyed on the project's id, as the projectId filter takes it,
 	// and labelled with its name, else its key (the name is optional).
 	"project": {"wi.project_id::TEXT", "COALESCE(NULLIF(p.name, ''), p.key)"},
+	// region: the account's region as the region filter compares it (no
+	// surrounding spaces, lower-cased), so a bucket's count is that filter's
+	// total, labelled as most of its cases' accounts write it ("APAC" over
+	// " apac "). A blank region is in no bucket, as the filter takes no blank
+	// value.
+	"region": {"NULLIF(LOWER(TRIM(a.region)), '')", "TRIM(a.region)"},
+}
+
+// caseAggregateLabels is the label aggregate of a field whose bucket is not
+// labelled by its label expression's MAX: a region's by the spelling most of
+// its cases have.
+var caseAggregateLabels = map[string]string{
+	"region": "mode() WITHIN GROUP (ORDER BY TRIM(a.region))",
 }
 
 // AggregateCases implements CaseRepository. It shares buildCaseSearchWhere with
@@ -5408,11 +5446,15 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 	if err != nil {
 		return nil, err
 	}
+	labelAgg, ok := caseAggregateLabels[groupBy]
+	if !ok {
+		labelAgg = "MAX(" + col.label + ")"
+	}
 	query := fmt.Sprintf(`
-		SELECT %s AS bucket_key, MAX(%s) AS bucket_label, COUNT(*) AS bucket_count
+		SELECT %s AS bucket_key, %s AS bucket_label, COUNT(*) AS bucket_count
 		FROM work_item wi %s %s AND %s IS NOT NULL
 		GROUP BY bucket_key
-		ORDER BY bucket_count DESC, bucket_key`, col.key, col.label, caseSearchJoins, where, col.key)
+		ORDER BY bucket_count DESC, bucket_key`, col.key, labelAgg, caseSearchJoins, where, col.key)
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate cases: %w", err)
@@ -5428,7 +5470,7 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 			return nil, fmt.Errorf("scan case bucket: %w", err)
 		}
 		k, l := aggregateBucketKey(groupBy, key), stringOrEmpty(label)
-		if l == "" || (groupBy != "account" && groupBy != "project") {
+		if l == "" || (groupBy != "account" && groupBy != "project" && groupBy != "region") {
 			l = k
 		}
 		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: l, Count: count})
@@ -5442,11 +5484,12 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 // aggregateBucketKey converts a stored enum label to the domain value the
 // case search contract uses (lower-case, severity via caseSeverityFromEnum);
 // account and project keys (UUIDs), product keys (names, as the product
-// filter takes them) and product version keys (as the productVersion filter
-// takes them) pass through.
+// filter takes them), product version keys (as the productVersion filter
+// takes them) and region keys (already as the region filter compares them)
+// pass through.
 func aggregateBucketKey(groupBy, raw string) string {
 	switch groupBy {
-	case "account", "project", "product", "productVersion":
+	case "account", "project", "product", "productVersion", "region":
 		return raw
 	case "severity":
 		if v, ok := caseSeverityFromEnum[raw]; ok {
