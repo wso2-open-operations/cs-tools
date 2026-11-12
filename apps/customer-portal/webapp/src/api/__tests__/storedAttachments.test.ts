@@ -1081,8 +1081,8 @@ describe("storedAttachments", () => {
             type: "work_item",
             id: ID,
             name: "a.txt",
-            size: ABOVE + 1,
-          directAboveBytes: ABOVE,
+            size: 10,
+            directAboveBytes: 5,
           });
           expect(authFetch).toHaveBeenCalledTimes(2);
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
@@ -1104,8 +1104,8 @@ describe("storedAttachments", () => {
             type: "work_item",
             id: ID,
             name: "a.txt",
-            size: ABOVE + 1,
-          directAboveBytes: ABOVE,
+            size: 10,
+            directAboveBytes: 5,
           });
           expect(String(authFetch.mock.calls[1][0])).toContain("/content?type=work_item");
         }
@@ -1115,10 +1115,10 @@ describe("storedAttachments", () => {
       it("does not ask for a link at or below the server's size, with no size, or when it is 0", async () => {
         clickSpy();
         const cases = [
-          { size: ABOVE, directAboveBytes: ABOVE },
-          { size: undefined, directAboveBytes: ABOVE },
-          { size: ABOVE + 1, directAboveBytes: 0 }, // direct transfers off
-          { size: ABOVE + 1, directAboveBytes: undefined },
+          { size: 5, directAboveBytes: 5 },
+          { size: undefined, directAboveBytes: 5 },
+          { size: 10, directAboveBytes: 0 }, // direct transfers off
+          { size: 10, directAboveBytes: undefined },
         ];
         for (const extra of cases) {
           authFetch.mockReset();
