@@ -671,8 +671,13 @@ type AccountView struct {
 	// customer_account.partner, or account.classification = 'Partner' on Postgres.
 	IsPartner *bool `json:"isPartner"`
 	// HasPrimaryPartner is whether this account has a primary partner account set. On
-	// Postgres it approximates this as "has any partner in account_relationship".
+	// Postgres it is whether account.primary_partner_sf_id is set (Salesforce
+	// Account.Primary_Partner_Name2__c, written by the Salesforce Account ingest).
 	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
+	// LifeCycle is the account's life cycle (account.life_cycle, Salesforce's
+	// account status: "Customer", "Prospect", ...). Nil when unknown, and
+	// always nil on the ServiceNow data source.
+	LifeCycle *string `json:"lifeCycle"`
 	// HealthSummary is set only when the search asked for it
 	// (filters.includeHealthSummary); omitted otherwise.
 	HealthSummary *AccountSearchHealthSummary `json:"healthSummary,omitempty"`
@@ -733,8 +738,10 @@ type AccountDetail struct {
 	// AccountView.IsPartner.
 	IsPartner *bool `json:"isPartner"`
 	// HasPrimaryPartner is whether this account has a primary partner account set.
-	// Mirrors AccountView.HasPrimaryPartner, including its Postgres approximation.
+	// Mirrors AccountView.HasPrimaryPartner.
 	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
+	// LifeCycle mirrors AccountView.LifeCycle.
+	LifeCycle *string `json:"lifeCycle"`
 }
 
 // UpdateAccountTeamsRequest is the input for PATCH /accounts/{id} (Postgres
@@ -847,6 +854,9 @@ type SalesforceAccountUpsert struct {
 	ActivationDate    *time.Time
 	LostDate          *time.Time
 	LostReason        *string
+	// PrimaryPartnerSfID is the Salesforce Account Id of the primary partner
+	// (primaryPartnerAccountId), nil when there is none.
+	PrimaryPartnerSfID *string
 
 	// The fields below come from the Sales Entity SE-1 change. Until it is
 	// deployed they are always nil, so the upsert writes them as
@@ -1906,6 +1916,9 @@ type Opportunity struct {
 	EulaVersionDecimal *string    `json:"eulaVersionDecimal"`
 	// Stage is the opportunity's sales stage (e.g. "50 - Closed Won"), nil when absent.
 	Stage *string `json:"stage"`
+	// SfID is the Salesforce Opportunity Id (sf_opportunity.sf_id), nil when not
+	// linked and always nil on the ServiceNow data source.
+	SfID *string `json:"sfId"`
 }
 
 // SearchOpportunitiesRequest is the input for searching opportunities.
@@ -1972,6 +1985,9 @@ type ProjectOpportunityLink struct {
 	ID          string     `json:"id"`
 	Project     *EntityRef `json:"project"`
 	Opportunity *EntityRef `json:"opportunity"`
+	// SfID is the Salesforce Linked_Opportunity__c Id (sf_opportunity_link.link_sf_id),
+	// nil when not linked and always nil on the ServiceNow data source.
+	SfID *string `json:"sfId"`
 }
 
 // SearchProjectOpportunityLinksRequest is the input for searching project-opportunity links.
