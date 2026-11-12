@@ -511,7 +511,7 @@ func TestBackend_DeleteMarksTheRowAndLeavesTheFileToTheBackend(t *testing.T) {
 	repo := newFakeStoredRepo()
 	repo.rows[saAttID] = completeRow("COMPLETE", stringPtr(workItemKey))
 
-	err := newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	_, err := newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
 	if err != nil {
 		t.Fatalf("DeleteAttachment: %v", err)
 	}
@@ -526,11 +526,11 @@ func TestBackend_DeleteMarksTheRowAndLeavesTheFileToTheBackend(t *testing.T) {
 func TestBackend_DeleteKeepsItsRules(t *testing.T) {
 	repo := newFakeStoredRepo()
 	repo.rows[saAttID] = completeRow("COMPLETE", stringPtr(workItemKey))
-	err := newBackendSvc(repo).DeleteAttachment(saCtx(t, "other@example.com"), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	_, err := newBackendSvc(repo).DeleteAttachment(saCtx(t, "other@example.com"), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
 	wantErr[*apierror.ForbiddenError](t, err, "someone else's attachment")
 
 	repo.parent.Closed = true
-	err = newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	_, err = newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
 	wantErr[*apierror.ConflictError](t, err, "a closed work item")
 	if len(repo.deleted) != 0 {
 		t.Error("an attachment was deleted from a closed work item")

@@ -1013,7 +1013,8 @@ paths:
       summary: >-
         Delete an attachment (soft delete). Marks the attachment DELETED; the row
         stays, with who deleted it and when, and no list includes it afterwards.
-        The file is not removed here: the portal backend removes it. Only the person
+        The file is moved to an archive folder (csm/archive/<attachment number>_<name>)
+        and is not removed for good until a retention rule deletes it. Only the person
         who uploaded the attachment can delete it, or a portal admin through the CSM
         portal backend (asAdmin), and not once its work item is closed. Repeating a delete that already succeeded answers the same. An image
         embedded in a comment cannot be deleted on its own.

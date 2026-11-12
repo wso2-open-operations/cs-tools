@@ -164,7 +164,7 @@ func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *htt
 	if h.files != nil {
 		err = h.files.DeleteAttachment(r.Context(), req)
 	} else {
-		err = h.svc.DeleteAttachment(r.Context(), req)
+		_, err = h.svc.DeleteAttachment(r.Context(), req)
 	}
 	if err != nil {
 		writeServiceError(w, r, err)

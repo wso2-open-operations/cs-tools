@@ -503,7 +503,7 @@ func TestFiles_OpenInlineImage(t *testing.T) {
 	})
 }
 
-func TestFiles_DeleteRemovesTheRowThenTheFile(t *testing.T) {
+func TestFiles_DeleteRemovesTheRowThenArchivesTheFile(t *testing.T) {
 	repo := newFakeStoredRepo()
 	key := workItemKey
 	repo.rows[saAttID] = completeRow("COMPLETE", &key)
@@ -516,8 +516,16 @@ func TestFiles_DeleteRemovesTheRowThenTheFile(t *testing.T) {
 	if repo.deleted[saAttID] == "" {
 		t.Error("the row must be marked DELETED")
 	}
+	// The file is moved to the archive folder, not removed: copied there, then the original goes.
+	archived := "csm/archive/wia0000042_report.pdf"
+	if len(blob.copied) != 1 || blob.copied[0] != [2]string{key, archived} {
+		t.Errorf("copied = %v, want %q to %q", blob.copied, key, archived)
+	}
+	if _, ok := blob.committed[archived]; !ok {
+		t.Error("the archived file is missing")
+	}
 	if len(blob.deleted) != 1 || blob.deleted[0] != key {
-		t.Errorf("deleted files = %v, want %q", blob.deleted, key)
+		t.Errorf("deleted files = %v, want only the original %q", blob.deleted, key)
 	}
 
 	// Someone who may not delete leaves the file alone.
@@ -550,5 +558,98 @@ func TestParseRange(t *testing.T) {
 		if ok != tc.ok || bad != tc.bad || (ok && (rng.Offset != tc.off || rng.Length != tc.length)) {
 			t.Errorf("%s: parseRange(%q) = %+v ok=%v bad=%v, want off=%d len=%d ok=%v bad=%v", name, tc.header, rng, ok, bad, tc.off, tc.length, tc.ok, tc.bad)
 		}
+	}
+}
+
+// When the copy cannot be made (it needs an account key) the file is left where it
+// is rather than lost, and the delete still succeeds: the row is already DELETED.
+func TestFiles_DeleteKeepsTheFileWhenItCannotBeArchived(t *testing.T) {
+	repo := newFakeStoredRepo()
+	key := workItemKey
+	repo.rows[saAttID] = completeRow("COMPLETE", &key)
+	blob := newFakeBlob()
+	blob.committed[key] = []byte("x")
+	blob.copyErr = errors.New("signing is not supported")
+	err := newFileSvc(repo, blob).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	if err != nil {
+		t.Fatalf("DeleteAttachment: %v", err)
+	}
+	if repo.deleted[saAttID] == "" {
+		t.Error("the row must be marked DELETED")
+	}
+	if len(blob.deleted) != 0 {
+		t.Errorf("deleted files = %v, the file must stay when it could not be archived", blob.deleted)
+	}
+}
+
+// Row-level security hides an attachment, or the record it hangs from, from someone
+// with no access to its project. Every step then stops before anything reaches Azure:
+// no block is written, no link signed, nothing read, copied or removed.
+func TestFiles_NoProjectAccessStopsEveryStepBeforeAzure(t *testing.T) {
+	hidden := &apierror.NotFoundError{Msg: "not found"}
+	key := workItemKey
+	steps := map[string]func(StoredAttachmentFileService, context.Context) error{
+		"chunk": func(svc StoredAttachmentFileService, ctx context.Context) error {
+			return svc.PutChunk(ctx, domain.StoredAttachmentWorkItem, saAttID, 0, 5, strings.NewReader("hello"))
+		},
+		"chunk list": func(svc StoredAttachmentFileService, ctx context.Context) error {
+			_, err := svc.ListChunks(ctx, domain.StoredAttachmentWorkItem, saAttID)
+			return err
+		},
+		"upload links": func(svc StoredAttachmentFileService, ctx context.Context) error {
+			_, err := svc.DirectUploadLinks(ctx, domain.StoredAttachmentWorkItem, saAttID)
+			return err
+		},
+		"confirm": func(svc StoredAttachmentFileService, ctx context.Context) error {
+			_, err := svc.CompleteUpload(ctx, domain.CompleteAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID, Chunks: 1})
+			return err
+		},
+		"delete": func(svc StoredAttachmentFileService, ctx context.Context) error {
+			return svc.DeleteAttachment(ctx, domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+		},
+	}
+	// The caller cannot see the attachment row, or can see it but not what it hangs from.
+	cases := map[string]func(*fakeStoredRepo){
+		"row hidden":    func(*fakeStoredRepo) {},
+		"parent hidden": func(r *fakeStoredRepo) { r.parentErr = hidden },
+	}
+	for caseName, setup := range cases {
+		for stepName, step := range steps {
+			t.Run(caseName+"/"+stepName, func(t *testing.T) {
+				repo := newFakeStoredRepo()
+				if caseName == "parent hidden" {
+					if stepName == "delete" {
+						repo.rows[saAttID] = completeRow("COMPLETE", &key)
+					} else {
+						pendingUpload(repo, 5)
+					}
+				}
+				setup(repo)
+				blob := newFakeBlob()
+				blob.committed[key] = []byte("x")
+				err := step(newFileSvc(repo, blob), saCtx(t, saEmail))
+				var nerr *apierror.NotFoundError
+				if !errors.As(err, &nerr) {
+					t.Fatalf("err = %v, want NotFoundError", err)
+				}
+				if len(blob.staged) != 0 || len(blob.copied) != 0 || len(blob.deleted) != 0 || len(blob.opened) != 0 {
+					t.Errorf("Azure was touched: staged=%d copied=%v deleted=%v opened=%v", len(blob.staged), blob.copied, blob.deleted, blob.opened)
+				}
+				if len(repo.deleted) != 0 || len(repo.completed) != 0 {
+					t.Error("a row was changed")
+				}
+			})
+		}
+	}
+
+	// Starting an upload on a record the caller cannot see writes nothing at all.
+	repo := newFakeStoredRepo()
+	repo.parentErr = hidden
+	_, err := newBackendSvc(repo).InitiateUpload(saCtx(t, saEmail), domain.InitiateAttachmentUploadRequest{
+		Kind: domain.StoredAttachmentWorkItem, ParentID: saParentID, Name: "a.pdf", ContentType: "application/pdf", SizeBytes: 5,
+	})
+	var nerr *apierror.NotFoundError
+	if !errors.As(err, &nerr) || len(repo.inserted) != 0 {
+		t.Errorf("start: err = %v, inserted = %d; want NotFound and no row", err, len(repo.inserted))
 	}
 }
