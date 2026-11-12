@@ -2126,6 +2126,17 @@ Acknowledge only marks an id that is still an orphan (re-read from the unlinked 
 used to delete an arbitrary image; others are counted as `skipped`. An unlinked image with no file is
 marked `DELETED` straight away. A draft description image (no work item, `project_id` set) is abandoned after 24 hours like an unlinked comment image; a LINKED one (`description_image = true`) is never listed (`ListUnlinkedImages` filters `description_image = false`).
 
+**Retention.** `POST /attachments/retention/expire` (internal callers only, meant for a scheduled job) removes the
+files of work item attachments whose work item has been closed for `closedForDays` (at least 30, so a typo cannot
+remove recent files): it deletes the file from Azure, then marks the row `EXPIRED` with `expired_on` (migrations 0284 and 0285),
+at most `limit` (default 100, max 500) per call, with a `dryRun` that only lists the numbers. A file that cannot be
+removed keeps its row `COMPLETE` and is tried again next run. "Closed" is the work item's own `state = 'CLOSED'` and
+`closed_on` (`caseLikeOwnStateColumn`, `caseLikeOwnClosedOnColumn`), so it covers the five case-like types (case,
+engagement, service request, security report analysis, announcement); other work item types are not covered yet.
+An `EXPIRED` row is hidden from customers' lists like a deleted one, shown to internal callers with status `expired`,
+and a download answers 410 `attachment_expired`. Comment images are not touched. This is the permanent removal; it is
+separate from a person's delete, which moves the file to the archive folder.
+
 **Audit.** Each upload start, link, delete and cleanup writes an `audit: true` line with the
 `callerId` (the user's UUID, else the client id of a machine caller), the `correlationId`, the kind and
 the attachment id. The email is not logged (personal data) and a storage key is never logged.

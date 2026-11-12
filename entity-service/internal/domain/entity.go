@@ -4444,6 +4444,10 @@ const (
 	// when the CSM portal backend asks for deleted rows (see
 	// SearchAttachmentsRequest.IncludeDeleted); it has no file and no link.
 	AttachmentStatusDeleted AttachmentStatus = "deleted"
+	// AttachmentStatusExpired marks a row whose file was removed because its work
+	// item stayed closed past the retention period. Listed like a deleted one, and
+	// told apart from it so a client can say why the file is gone.
+	AttachmentStatusExpired AttachmentStatus = "expired"
 )
 
 // Attachment represents a file attachment linked to a reference entity.

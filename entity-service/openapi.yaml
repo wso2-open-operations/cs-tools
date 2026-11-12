@@ -1005,6 +1005,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/retention/expire:
+    post:
+      summary: >-
+        Remove the files of work items that have been closed for a long time. The files
+        of the COMPLETE attachments of work items closed for at least closedForDays
+        (case, engagement, service request, security report analysis, announcement)
+        are removed from storage and the rows marked EXPIRED, at most limit per call.
+        A file that cannot be removed now is tried again on a later run. Internal
+        callers only. Meant to be called on a schedule; a dry run lists what would go.
+      operationId: expireClosedWorkItemAttachments
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [closedForDays]
+              properties:
+                closedForDays:
+                  type: integer
+                  minimum: 30
+                  example: 90
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 500
+                  description: Attachments handled per call (default 100).
+                dryRun:
+                  type: boolean
+                  description: List what would be removed and change nothing.
+      responses:
+        "200":
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dryRun, found, expired, failed, more]
+                properties:
+                  dryRun: {type: boolean}
+                  found: {type: integer}
+                  expired:
+                    type: integer
+                    description: Attachments removed, or in a dry run the ones that would be.
+                  failed: {type: integer}
+                  more:
+                    type: boolean
+                    description: True when the page was full, so another call may find more.
+                  attachments:
+                    type: array
+                    description: The numbers of the attachments removed (or that would be).
+                    items: {type: string}
+        "400":
+          description: closedForDays is below 30.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable or not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/uploads/cleanup:
     post:
       summary: >-
