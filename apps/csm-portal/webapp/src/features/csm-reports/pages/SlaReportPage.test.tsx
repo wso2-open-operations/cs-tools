@@ -22,12 +22,17 @@ import "@testing-library/jest-dom/vitest";
 const get = vi.fn();
 const slaReportPDF = vi.fn();
 const navigate = vi.fn();
+let routeProjectId = "p-1";
+let routeState: unknown = null;
 
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {},
   useBackendApi: () => ({ get }),
 }));
-vi.mock("react-router", () => ({ useParams: () => ({ projectId: "p-1" }) }));
+vi.mock("react-router", () => ({
+  useParams: () => ({ projectId: routeProjectId }),
+  useLocation: () => ({ pathname: "/", search: "", hash: "", state: routeState }),
+}));
 vi.mock("@hooks/useNavTransition", () => ({ useNavTransition: () => navigate }));
 vi.mock("@features/csm-reports/components/SlaReportPDF", () => ({
   slaReportPDF: (...args: unknown[]) => slaReportPDF(...args),
@@ -77,11 +82,18 @@ function report(over: Partial<SlaReportDetails> = {}): SlaReportDetails {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <SlaReportPage />
     </QueryClientProvider>,
   );
+  const rerender = () =>
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <SlaReportPage />
+      </QueryClientProvider>,
+    );
+  return { ...view, rerender };
 }
 
 const lastPath = (): string => get.mock.calls[get.mock.calls.length - 1][0] as string;
@@ -91,6 +103,8 @@ describe("SlaReportPage", () => {
     get.mockReset();
     slaReportPDF.mockReset();
     navigate.mockReset();
+    routeProjectId = "p-1";
+    routeState = null;
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 10, 11, 12, 0, 0));
   });
@@ -282,6 +296,48 @@ describe("SlaReportPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));
     await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(calls));
     expect(await screen.findByTestId("sla-report-period")).toBeInTheDocument();
+  });
+
+  it("goes back to the project tab it was opened from, with that page's own state", async () => {
+    routeState = { from: "/customers/projects/p-1?tab=workItems&subTab=engagements", parentState: { from: "/customers/projects" } };
+    get.mockResolvedValue(report());
+    renderPage();
+    await screen.findByTestId("sla-report-period");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigate).toHaveBeenCalledWith("/customers/projects/p-1?tab=workItems&subTab=engagements", {
+      state: { from: "/customers/projects" },
+    });
+  });
+
+  it("opens a new period on its first page of cases", async () => {
+    const cases = Array.from({ length: 12 }, (_, i) => caseRow(i + 1));
+    get.mockImplementation((path: string) =>
+      Promise.resolve(path.includes("from=2026-01-01") ? report({ periodStart: "2026-01-01", cases }) : report({ cases })),
+    );
+    renderPage();
+    await screen.findByRole("button", { name: "CS0001" });
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    expect(await screen.findByRole("button", { name: "CS0011" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-01-01" } });
+    await waitFor(() => expect(screen.getByTestId("sla-report-period")).toHaveTextContent("1 Jan 2026"));
+    expect(screen.getByRole("button", { name: "CS0001" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "CS0011" })).not.toBeInTheDocument();
+  });
+
+  it("never shows another project's report while a project loads", async () => {
+    get.mockImplementation((path: string) =>
+      path.includes("projectId=p-2") ? new Promise(() => {}) : Promise.resolve(report()),
+    );
+    const view = renderPage();
+    await screen.findByRole("button", { name: "CS0001" });
+
+    routeProjectId = "p-2";
+    view.rerender();
+
+    await waitFor(() => expect(lastPath()).toContain("projectId=p-2"));
+    expect(screen.queryByRole("button", { name: "CS0001" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download PDF" })).not.toBeInTheDocument();
   });
 
   it("goes back to the project", async () => {
