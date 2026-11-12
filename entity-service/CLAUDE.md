@@ -2172,7 +2172,7 @@ marked `DELETED` straight away. A draft description image (no work item, `projec
 
 **Retention.** `POST /attachments/retention/expire` (internal callers only, meant for a scheduled job) removes the
 files of work item attachments whose work item has been closed for `closedForDays` (at least 30, so a typo cannot
-remove recent files): it deletes the file from Azure, then marks the row `EXPIRED` with `expired_on` (migration 0284),
+remove recent files): it deletes the file from Azure, then marks the row `EXPIRED` with `expired_on` (migrations 0284 and 0285),
 at most `limit` (default 100, max 500) per call, with a `dryRun` that only lists the numbers. A file that cannot be
 removed keeps its row `COMPLETE` and is tried again next run. "Closed" is the work item's own `state = 'CLOSED'` and
 `closed_on` (`caseLikeOwnStateColumn`, `caseLikeOwnClosedOnColumn`), so it covers the five case-like types (case,

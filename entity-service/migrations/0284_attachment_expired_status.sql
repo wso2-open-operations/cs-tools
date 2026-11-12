@@ -17,12 +17,6 @@
 
 -- A work item's attachments are removed from storage a set time after the work item
 -- is closed (the attachment retention job). The row stays, so a list can say why the
--- file is gone, and is told apart from a delete by a person.
---
---   status      gains EXPIRED.
---   expired_on  when the file was removed; NULL otherwise.
+-- file is gone, and is told apart from a delete by a person. status gains EXPIRED.
 
 ALTER TYPE attachment_status_enum ADD VALUE IF NOT EXISTS 'EXPIRED';
-
-ALTER TABLE work_item_attachment
-    ADD COLUMN IF NOT EXISTS expired_on TIMESTAMPTZ;
