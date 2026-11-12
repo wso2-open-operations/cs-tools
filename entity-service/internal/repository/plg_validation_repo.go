@@ -49,8 +49,8 @@ func (r *validationRepository) Queue(ctx context.Context, productCode string, re
 		        JOIN   plg_playbook pb ON pb.id = run.playbook_id
 		        JOIN   plg_playbook_run_task t ON t.playbook_run_id = run.id
 		        WHERE  run.org_platform_id = op.id AND run.detached_on IS NULL
-		          AND  pb.lifecycle_stage = 'REGISTRATION'
-		          AND  t.code = $4 AND t.value_text IS NOT NULL
+		          AND  pb.lifecycle_stage = 'REGISTRATION' AND pb.playbook_type = 'PROGRESSIVE'
+		          AND  t.code = $4
 		        ORDER  BY run.created_at
 		        LIMIT  1),
 		       s.computed_on
@@ -62,7 +62,7 @@ func (r *validationRepository) Queue(ctx context.Context, productCode string, re
 		  AND  op.lifecycle_stage = 'REGISTRATION'
 		  AND  op.registered_on >= $2
 		  AND  o.moesif_company_id IS NOT NULL
-		ORDER  BY op.registered_on, op.id
+		ORDER  BY s.computed_on NULLS FIRST, op.registered_on, op.id
 		LIMIT  $3`, productCode, registeredAfter, limit, domain.TaskCodeEmailClassification)
 	if err != nil {
 		return nil, fmt.Errorf("validation queue: %w", err)
@@ -86,6 +86,7 @@ type runTaskState struct {
 	valueType domain.TaskValueType
 	options   map[string]bool
 	source    *string
+	text      *string
 }
 
 func (r *validationRepository) Apply(ctx context.Context, req domain.ApplyValidationRequest) (domain.ApplyValidationResult, error) {
@@ -140,6 +141,13 @@ func (r *validationRepository) Apply(ctx context.Context, req domain.ApplyValida
 		return res, err
 	}
 
+	// An exclusion stands only on the classification the run will hold; one an
+	// engineer changed since the job read the queue withdraws it, writing nothing.
+	if req.Abandon && !closed && !excludingClassification(req, tasks) {
+		res.Stale = true
+		return res, nil
+	}
+
 	for _, v := range req.Values {
 		task, ok := tasks[v.Code]
 		switch {
@@ -149,7 +157,7 @@ func (r *validationRepository) Apply(ctx context.Context, req domain.ApplyValida
 		case !ok:
 			res.Skipped = append(res.Skipped, domain.SkippedValue{Code: v.Code, Reason: domain.SkipMissing})
 			continue
-		case task.source != nil && *task.source == domain.ValueSourceManual:
+		case isManual(task):
 			res.Skipped = append(res.Skipped, domain.SkippedValue{Code: v.Code, Reason: domain.SkipManual})
 			continue
 		}
@@ -164,8 +172,14 @@ func (r *validationRepository) Apply(ctx context.Context, req domain.ApplyValida
 
 	// Only when the job's own EXCLUDED outcome landed: an engineer's outcome
 	// (MANUAL) or a closed run keeps the pairing where it is.
-	if req.Abandon && !closed && wrote(res.Written, domain.TaskCodeEligibilityOutcome) {
-		if err := abandonPairing(ctx, tx, req, tasks); err != nil {
+	closeTask, hasClose := tasks[domain.TaskCodeClose]
+	switch {
+	case !req.Abandon || closed || !wrote(res.Written, domain.TaskCodeEligibilityOutcome):
+	case hasClose && isManual(closeTask):
+		// An engineer reopened the run; they decide whether it closes.
+		res.Skipped = append(res.Skipped, domain.SkippedValue{Code: domain.TaskCodeClose, Reason: domain.SkipManual})
+	default:
+		if err := abandonPairing(ctx, tx, req.OrgPlatformID, runID, tasks); err != nil {
 			return res, err
 		}
 		res.Abandoned = true
@@ -179,7 +193,7 @@ func (r *validationRepository) Apply(ctx context.Context, req domain.ApplyValida
 
 // abandonPairing closes the run and moves the pairing out of REGISTRATION, with
 // the history row every stage change carries (changed_by NULL: no user).
-func abandonPairing(ctx context.Context, tx pgx.Tx, req domain.ApplyValidationRequest, tasks map[string]runTaskState) error {
+func abandonPairing(ctx context.Context, tx pgx.Tx, pairingID, runID string, tasks map[string]runTaskState) error {
 	if task, ok := tasks[domain.TaskCodeClose]; ok {
 		yes := true
 		if err := writeValidationValue(ctx, tx, task.id, domain.ValidationValue{Code: domain.TaskCodeClose, BoolValue: &yes}); err != nil {
@@ -189,25 +203,61 @@ func abandonPairing(ctx context.Context, tx pgx.Tx, req domain.ApplyValidationRe
 	tag, err := tx.Exec(ctx, `
 		UPDATE plg_org_platform
 		SET    lifecycle_stage = 'ABANDONED', stage_entered_on = NOW(), stage_updated_by = NULL
-		WHERE  id::TEXT = $1 AND lifecycle_stage = 'REGISTRATION'`, req.OrgPlatformID)
+		WHERE  id::TEXT = $1 AND lifecycle_stage = 'REGISTRATION'`, pairingID)
 	if err != nil {
 		return fmt.Errorf("abandon pairing: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return &apierror.ConflictError{Msg: "pairing has left REGISTRATION"}
 	}
+	// The reason the run now holds, which may be an engineer's rather than the job's.
+	var codes []string
+	err = tx.QueryRow(ctx, `
+		SELECT value_checked FROM plg_playbook_run_task
+		WHERE  playbook_run_id = $1::UUID AND code = $2`, runID, domain.TaskCodeEligibilityReason).Scan(&codes)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("read eligibility reason: %w", err)
+	}
 	reason := "Excluded by registration validation"
-	for _, v := range req.Values {
-		if v.Code == domain.TaskCodeEligibilityReason && v.CheckedCodes != nil && len(*v.CheckedCodes) > 0 {
-			reason += ": " + strings.Join(*v.CheckedCodes, ", ")
-		}
+	if len(codes) > 0 {
+		reason += ": " + strings.Join(codes, ", ")
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO plg_lifecycle_history (org_platform_id, from_stage, to_stage, reason, changed_by)
-		VALUES ($1::UUID, 'REGISTRATION', 'ABANDONED', $2, NULL)`, req.OrgPlatformID, reason); err != nil {
+		VALUES ($1::UUID, 'REGISTRATION', 'ABANDONED', $2, NULL)`, pairingID, reason); err != nil {
 		return fmt.Errorf("record lifecycle history: %w", err)
 	}
 	return nil
+}
+
+func isManual(t runTaskState) bool {
+	return t.source != nil && *t.source == domain.ValueSourceManual
+}
+
+// excludingClassification reports whether the classification the run will hold
+// after this write is one that excludes: the engineer's when they set it, else
+// the job's new value, else the stored one. A run with no such task trusts the job.
+func excludingClassification(req domain.ApplyValidationRequest, tasks map[string]runTaskState) bool {
+	effective := func() *string {
+		task, ok := tasks[domain.TaskCodeEmailClassification]
+		if ok && isManual(task) {
+			return task.text
+		}
+		for _, v := range req.Values {
+			if v.Code == domain.TaskCodeEmailClassification && v.TextValue != nil {
+				return v.TextValue
+			}
+		}
+		if ok {
+			return task.text
+		}
+		return nil
+	}()
+	_, hasTask := tasks[domain.TaskCodeEmailClassification]
+	if effective == nil {
+		return !hasTask
+	}
+	return *effective == "INTERNAL" || *effective == "DISPOSABLE"
 }
 
 func wrote(written []string, code string) bool {
@@ -294,7 +344,7 @@ func upsertActivitySummary(ctx context.Context, tx pgx.Tx, pairingID string, s d
 
 func loadRunTaskStates(ctx context.Context, tx pgx.Tx, runID string) (map[string]runTaskState, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT code, id::TEXT, value_type::TEXT, options, value_source::TEXT
+		SELECT code, id::TEXT, value_type::TEXT, options, value_source::TEXT, value_text
 		FROM   plg_playbook_run_task WHERE playbook_run_id = $1::UUID`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("load run tasks: %w", err)
@@ -308,7 +358,7 @@ func loadRunTaskStates(ctx context.Context, tx pgx.Tx, runID string) (map[string
 			t       runTaskState
 			rawOpts []byte
 		)
-		if err := rows.Scan(&code, &t.id, &t.valueType, &rawOpts, &t.source); err != nil {
+		if err := rows.Scan(&code, &t.id, &t.valueType, &rawOpts, &t.source, &t.text); err != nil {
 			return nil, fmt.Errorf("scan run task: %w", err)
 		}
 		opts, err := scanOptions(rawOpts)

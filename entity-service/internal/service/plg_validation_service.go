@@ -136,6 +136,16 @@ func validateValues(values []domain.ValidationValue) error {
 		if seen[v.Code] {
 			return invalidField("values repeats " + v.Code)
 		}
+		// Checked here too: a MANUAL task is skipped before the repository's shape check.
+		sent := 0
+		for _, set := range []bool{v.BoolValue != nil, v.NumberValue != nil, v.TextValue != nil, v.CheckedCodes != nil} {
+			if set {
+				sent++
+			}
+		}
+		if sent > 1 {
+			return invalidField(v.Code + ": send one value field")
+		}
 		seen[v.Code] = true
 	}
 	return nil

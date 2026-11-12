@@ -20673,6 +20673,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found. Unknown ids are left out of the answer rather than refused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized.
           content:
@@ -21729,6 +21735,12 @@ paths:
                 $ref: "#/components/schemas/PlgValidationQueueResult"
         "400":
           description: Missing productCode or registeredAfter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found — an unknown product code answers an empty queue rather than 404.
           content:
             application/json:
               schema:
@@ -44491,6 +44503,12 @@ components:
         abandoned:
           type: boolean
           description: True when this call closed the run and moved the pairing to ABANDONED.
+        stale:
+          type: boolean
+          description: >
+            True when the exclusion no longer matched the classification the run
+            holds (an engineer changed it); nothing was written and the next run
+            decides again.
     PlgRunTaskShape:
       type: object
       properties:

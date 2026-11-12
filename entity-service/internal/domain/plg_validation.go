@@ -115,4 +115,7 @@ type ApplyValidationResult struct {
 	Skipped       []SkippedValue `json:"skipped"`
 	// Abandoned is true when this call closed the run and moved the pairing to ABANDONED.
 	Abandoned bool `json:"abandoned"`
+	// Stale is true when the exclusion no longer matched the run's
+	// classification; nothing was written and the next run decides again.
+	Stale bool `json:"stale"`
 }
