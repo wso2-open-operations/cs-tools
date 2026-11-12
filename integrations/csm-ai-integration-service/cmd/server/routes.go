@@ -23,11 +23,12 @@ import (
 )
 
 // newMux is the service's routes.
-func newMux(dashboards *handler.DashboardHandler) *http.ServeMux {
+func newMux(dashboards *handler.DashboardHandler, emailDomains *handler.EmailDomainHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("POST /ai/dashboards/generate", dashboards.Generate)
+	mux.HandleFunc("POST /ai/email-domains/classify", emailDomains.Classify)
 	return mux
 }

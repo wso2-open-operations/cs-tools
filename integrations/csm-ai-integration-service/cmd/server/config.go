@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	defaultClaudeModel   = "claude-sonnet-5-5"
-	defaultClaudeTimeout = 45 * time.Second
+	defaultClaudeModel      = "claude-sonnet-5-5"
+	defaultEmailDomainModel = "claude-haiku-5-5"
+	defaultClaudeTimeout    = 45 * time.Second
 )
 
 // config is the model call's configuration, shared by every feature.
@@ -43,6 +44,8 @@ const (
 // catalogue built into the binary (see package catalogue); in Choreo, one file
 // mount per part. OldCatalogueFile is set when CATALOGUE_FILE is still set
 // next to CATALOGUE_DIR, so the start can warn that it is ignored.
+//
+// EmailDomainModel is the model asked about email domains.
 type config struct {
 	APIKey           string
 	Model            string
@@ -50,6 +53,8 @@ type config struct {
 	BaseURL          string
 	CatalogueDir     string
 	OldCatalogueFile bool
+
+	EmailDomainModel string
 }
 
 // GatewayHost is the host model calls go to, for the startup log line:
@@ -72,8 +77,8 @@ func (c config) Enabled() bool { return c.APIKey != "" }
 // loadConfig reads ANTHROPIC_API_KEY, CLAUDE_MODEL (default
 // defaultClaudeModel), CLAUDE_TIMEOUT (a Go duration, default
 // defaultClaudeTimeout, must be > 0), CLAUDE_BASE_URL (an absolute http or
-// https URL; required when ANTHROPIC_API_KEY is set) and CATALOGUE_DIR
-// (optional). CATALOGUE_FILE, the single catalogue file it replaced, is an
+// https URL; required when ANTHROPIC_API_KEY is set), CATALOGUE_DIR
+// (optional) and EMAIL_DOMAIN_MODEL (default defaultEmailDomainModel). CATALOGUE_FILE, the single catalogue file it replaced, is an
 // error when CATALOGUE_DIR is unset, so a deployment still setting only it does
 // not quietly fall back to the built-in catalogue; next to CATALOGUE_DIR it is
 // ignored.
@@ -107,16 +112,21 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if oldCatalogueFile && catalogueDir == "" {
 		return config{}, fmt.Errorf("CATALOGUE_FILE is no longer read: mount the catalogue's parts in one directory and set CATALOGUE_DIR to it")
 	}
-	model := strings.TrimSpace(getenv("CLAUDE_MODEL"))
-	if model == "" {
-		model = defaultClaudeModel
-	}
 	return config{
 		APIKey:           apiKey,
-		Model:            model,
+		Model:            orDefault(getenv("CLAUDE_MODEL"), defaultClaudeModel),
 		Timeout:          timeout,
 		BaseURL:          baseURL,
 		CatalogueDir:     catalogueDir,
 		OldCatalogueFile: oldCatalogueFile,
+		EmailDomainModel: orDefault(getenv("EMAIL_DOMAIN_MODEL"), defaultEmailDomainModel),
 	}, nil
+}
+
+// orDefault is raw trimmed, or def when that is empty.
+func orDefault(raw, def string) string {
+	if v := strings.TrimSpace(raw); v != "" {
+		return v
+	}
+	return def
 }

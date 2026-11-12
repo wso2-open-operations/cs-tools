@@ -3,9 +3,10 @@ info:
   title: CSM AI Integration Service API
   version: 1.0.0
   description: >
-    The CSM platform's calls to Claude (dashboard generation; other AI features
-    can join under /ai/). Called only by the CSM portal backend, which
-    authenticates and authorises the end user first. Organization-visible behind
+    The CSM platform's calls to Claude (dashboard generation and email domain
+    classification; other AI features can join under /ai/). Called by the CSM
+    portal backend, which authenticates and authorises the end user first, and
+    by csm-scheduled-tasks. Organization-visible behind
     Choreo's gateway; this service performs no inbound auth of its own.
 security:
   - oauth2ClientCredentials: []
@@ -69,6 +70,40 @@ paths:
           $ref: '#/components/responses/Error'
         "504":
           $ref: '#/components/responses/Error'
+  /ai/email-domains/classify:
+    post:
+      summary: Classify one email domain.
+      description: >
+        Rules first (WSO2 domains, the disposable list, free providers, a
+        domain that does not exist), then one model call for the rest. Model
+        answers other than UNKNOWN are cached for 24 hours. Send the domain
+        only, never an email address.
+      operationId: classifyEmailDomain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClassifyEmailDomainRequest'
+      responses:
+        "200":
+          description: The domain's classification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassifyEmailDomainResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+        "502":
+          $ref: '#/components/responses/Error'
+        "503":
+          $ref: '#/components/responses/Error'
+        "504":
+          $ref: '#/components/responses/Error'
 components:
   responses:
     Error:
@@ -81,6 +116,30 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    ClassifyEmailDomainRequest:
+      type: object
+      required: [domain]
+      additionalProperties: false
+      properties:
+        domain:
+          type: string
+          maxLength: 253
+          example: example.com
+    ClassifyEmailDomainResponse:
+      type: object
+      required: [domain, classification, source, usage]
+      properties:
+        domain:
+          type: string
+          description: The domain, lower-cased.
+        classification:
+          type: string
+          enum: [CORPORATE, PERSONAL, DISPOSABLE, INTERNAL, UNKNOWN]
+        source:
+          type: string
+          enum: [rules, cache, model]
+        usage:
+          $ref: '#/components/schemas/Usage'
     Team:
       type: object
       required: [key, name, field]
@@ -129,12 +188,15 @@ components:
           type: string
           description: The model's sentence when it declined the request.
         usage:
-          type: object
-          properties:
-            inputTokens:
-              type: integer
-            outputTokens:
-              type: integer
+          $ref: '#/components/schemas/Usage'
+    Usage:
+      type: object
+      description: The model call's tokens; zero when no call was made.
+      properties:
+        inputTokens:
+          type: integer
+        outputTokens:
+          type: integer
     Error:
       type: object
       required: [code, message]
