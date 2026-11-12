@@ -242,9 +242,8 @@ own `CLAUDE.md`): `csm-customer-health`, `csm-usage-metrics`, `csm-reports`. Fou
 interchangeable:
 
 - **`isSplAudience`** — true for anyone holding the `viewer` role, regardless of what else they hold.
-  Gates the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx`
-  and the Time report button added to `CsmProjectDetailPage.tsx` — all of it invisible to a caller
-  who has never held `viewer`. The SLA, Time and CS report buttons on `CsmProjectDetailPage.tsx` are not
+  Gates the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx` — invisible
+  to a caller who has never held `viewer`. The SLA, Time and CS report buttons on `CsmProjectDetailPage.tsx` are not
   gated by it: anyone who can open the project sees them (their routes are `PermView` on the backend).
 - **`canViewCustomerHealth`** — the Customer Health dashboard: `viewer` as well as `cs_engineer`/`admin`
   (mirrors the backend's `PermViewCustomerHealth`). Wider than `isSplAudience` on purpose, so a
