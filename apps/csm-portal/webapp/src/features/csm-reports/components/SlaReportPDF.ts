@@ -35,6 +35,8 @@ const DEFAULT_ACCENT = "#fa7b3f";
 // of being sliced out of one long screenshot (same size the CS report uses).
 const PAGE_W = 1120;
 const PAGE_H = 790;
+// How long a capture waits for one of the page's stylesheets to load in the frame.
+const STYLESHEET_WAIT_MS = 5000;
 
 // Names and dates come from the data. Escaping first means a project or case
 // name can never be read as markup when the sheets are put together.
@@ -226,12 +228,31 @@ export async function slaReportPDF(data: SlaReportDetails, accent = DEFAULT_ACCE
   const base = frameDoc.createElement("base");
   base.href = document.baseURI;
   frameDoc.head.appendChild(base);
+  const sheetsLoaded: Promise<void>[] = [];
   document.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => {
-    frameDoc.head.appendChild(node.cloneNode(true));
+    const copy = node.cloneNode(true) as HTMLElement;
+    // A cloned <link> fetches its sheet again inside the frame; capturing
+    // before it lands draws the pages unstyled. One that never answers is
+    // given up on rather than holding the download.
+    if (copy instanceof HTMLLinkElement) {
+      sheetsLoaded.push(
+        new Promise((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(done, STYLESHEET_WAIT_MS);
+          copy.addEventListener("load", done, { once: true });
+          copy.addEventListener("error", done, { once: true });
+        }),
+      );
+    }
+    frameDoc.head.appendChild(copy);
   });
   frameDoc.documentElement.style.setProperty("--report-accent", safeAccent);
 
   try {
+    await Promise.all(sheetsLoaded);
     let started = false;
     for (const el of sheets) {
       frameDoc.body.replaceChildren(el);
