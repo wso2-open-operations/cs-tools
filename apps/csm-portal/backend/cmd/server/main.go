@@ -390,8 +390,24 @@ func main() {
 	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
 	// answers with a fixed sample. This backend holds no model client.
 	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	// PLG reaches entity-service as csm-portal does (see plg.Mount below).
+	plgEntityDefaults := plgconfig.EntityDefaults{
+		BaseURL:      customerEntityCfg.BaseURL,
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
+	}
 	if aiClient != nil {
 		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+		// The PLG playbooks' answer fields go with every generate request,
+		// read with PLG's own entity-service configuration (see plg.Mount).
+		playbooks, err := plg.NewPlaybookLister(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults)
+		if err != nil {
+			slog.Error("failed to configure the PLG playbook list", "err", err)
+			os.Exit(1)
+		}
+		dashboardGenerator = handler.WithPlaybooks(dashboardGenerator, playbooks)
 	}
 	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
 	// A team named in a generated dashboard's creTeam / sreTeam filter (its
@@ -516,6 +532,8 @@ func main() {
 	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
 	// the webapp's `canWrite` on that menu section. A literal path, so it never
 	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	// A generated dashboard may hold PLG widgets; every PermWrite role also
+	// holds PermUsePlg (TestAccessGuard_DashboardWritersCanReadPlg).
 	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
 	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
 	// Same permission as generating one. "custom" is a literal segment, so it
@@ -982,13 +1000,7 @@ func main() {
 	// its own copy: it reaches the same service as the same OAuth2 application
 	// as every other upstream client above. PLG_* overrides exist but are not
 	// normally set.
-	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgconfig.EntityDefaults{
-		BaseURL:      customerEntityCfg.BaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
-	}, route); err != nil {
+	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults, route); err != nil {
 		slog.Error("failed to mount PLG", "err", err)
 		os.Exit(1)
 	}

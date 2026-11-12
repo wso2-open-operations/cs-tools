@@ -90,6 +90,7 @@ const (
 	errCodeGenerateDraftTooBig   = "generate_draft_too_large"
 	errCodeGenerateDeclined      = "generate_declined"
 	errCodeGenerateTeam          = "generate_team"
+	errCodeGeneratePlaybook      = "generate_playbook"
 	errCodeGenerateRefused       = "generate_refused"
 	errCodeGenerateUnusable      = "generate_unusable"
 	errCodeGenerateProduct       = "generate_product"
@@ -113,6 +114,8 @@ const (
 //   - generateDeclinedError (the model's {"error"})  422, the model's sentence
 //   - errDashboardTeam (a team filter that cannot   422, the reason (an unknown
 //     work: see dashboardTeams)                         team, the wrong field, ...)
+//   - errDashboardPlaybook (a playbook answer        422, the reason (an unknown
+//     filter no active playbook has)                    task or answer, the known ones)
 //   - errGenerateRefused                             422
 //   - errGenerateUnusable                            502
 //   - errDashboardProduct (a product filter naming  422, the reason (no product,
@@ -151,6 +154,9 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, errDashboardTeam):
 		slog.InfoContext(ctx, "dashboard generate: unusable team filter", "err", err)
 		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateTeam)
+	case errors.Is(err, errDashboardPlaybook):
+		slog.InfoContext(ctx, "dashboard generate: unusable playbook answer filter", "err", err)
+		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGeneratePlaybook)
 	case errors.Is(err, errGenerateRefused):
 		slog.InfoContext(ctx, "dashboard generate: model refused")
 		writeErrorCode(w, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused)

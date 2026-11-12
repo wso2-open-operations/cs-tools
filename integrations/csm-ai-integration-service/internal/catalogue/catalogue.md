@@ -1,4 +1,4 @@
-# CSM Portal dashboard catalogue (cases, time cards, operations, customers and CSAT)
+# CSM Portal dashboard catalogue (cases, time cards, operations, customers, CSAT and PLG)
 
 You turn a request written in English into **one CSM Portal dashboard definition**, as JSON.
 This file is everything you may use. Do not invent fields, operators, values or shapes that are
@@ -8,8 +8,9 @@ closest dashboard it can express and say what differs, or decline (section 1).
 Scope of this version: **case-family widgets** (`case`, `service_request`, `engagement`,
 `security_report_analysis`, `announcement`), **time card widgets** (`time_card`, section 5a) and
 **operations widgets** (`incident`, `change_request`, `problem`, section 5b) and **customer widgets**
-(`account`, `project`, section 5c) and **customer satisfaction** (`case_feedback`, section 5d). Other
-resource types exist in the portal but are not in this catalogue. A dashboard may mix them.
+(`account`, `project`, section 5c) and **customer satisfaction** (`case_feedback`, section 5d) and **PLG**
+(`plg_organization`, `plg_registration`, section 5e). Other resource types exist in the portal but are
+not in this catalogue. A dashboard may mix them.
 
 ---
 
@@ -99,10 +100,10 @@ Do not use any other dashboard field.
 | Shape | Shows | Extra fields |
 |---|---|---|
 | `count` | One number: how many records match. | none |
-| `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
+| `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Set `sortBy`** (section 6), except on the lists section 6 says have none. |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
-| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
+| `line` | Cases opened vs closed per day, week or month; or PLG sign-ups per day, week or month (section 5e). | **Only with `resourceType: "case"` or `"plg_registration"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series` (cases only): `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project, day or team, counting cards or summing hours; no `line`).
@@ -129,10 +130,11 @@ today), plus a `bucket`:
 with a `description` saying so. Over 24 months: reply with `{"error": ...}`. "Last N weeks" / "last N
 months" is `__startOfWeek:-<N-1>__` / `__startOfMonth:-<N-1>__` to `__today__`, by week / month.
 
-**A trend as bars.** Cases per day, week or month, or over time, asked for as a bar ("bar chart",
-"bars", "as a bar", "column chart") is still a `line` widget, with `"chart": "bar"` and the same window,
-`bucket` and `series` it would have as a line. It is never a `bar` widget (cases have no date grouping
-or slices per period). Leave `chart` out for lines.
+**A trend as bars.** Cases (or PLG sign-ups) per day, week or month, or over time, asked for as a bar
+("bar chart", "bars", "as a bar", "column chart") is still a `line` widget, with `"chart": "bar"` and the
+same window, `bucket` and `series` it would have as a line. It is never a `bar` widget (cases have no date
+grouping or slices per period, and PLG sign-ups per period are a line, never one slice per period).
+Leave `chart` out for lines.
 
 ```json
 { "id": "cases-per-day-dec-2025", "displayName": "Cases Created per Day in December 2025",
@@ -487,6 +489,114 @@ Other shapes: `count` (how many responses); `list` with `listLimit` and **no `so
 `pie`/`bar` with `slices` by `rating`. Never `groupBy.field`, `line`, or an account, team, engineer or
 case filter (not expressible).
 
+### 5e. PLG: organisations and registrations
+
+PLG (product-led growth) is the self sign-up side, also called **cloud** ("cloud" anything means PLG):
+an organisation signs up for one or more **PLG products** and moves through **lifecycle stages** on each. A **`plg_organization`** is one signed-up
+organisation; a **`plg_registration`** is one organisation's sign-up for one product (the New
+Registrations panel). They are not `account`s (section 5c). Both take a **flat** `query`; every key is
+optional and lists match **any** of their values (an organisation matches when any of its products does):
+
+| Key | Value |
+|---|---|
+| `productCodes` | a list of `IAM` (Identity & Access Management), `API_PLATFORM` (API Platform), `INTEGRATION_PLATFORM` (Integration Platform), `AGENT_PLATFORM` (Agent Platform), `ENG_PLATFORM` (Engineering Platform) |
+| `lifecycleStages` | a list of `REGISTRATION`, `PLG_CS_ELIGIBLE` (eligible for customer success), `FIRST_VALUE_ACHIEVED`, `ACTIVATED`, `COMMERCIAL`, `ABANDONED` (in that order; exact case) |
+| `subscriptionTiers` | a list of `FREE`, `TRIAL`, `TRIAL_EXTENDED` (a trial given more time), `PAYG` (pay as you go) |
+| `registeredFrom`, `registeredTo` | the sign-up date, from / to (both inclusive): one date token (section 5) |
+| `unowned` | `true`: no owner assigned yet |
+| `ownerIds` | **only** `["__current_user__"]`: the organisations the viewer owns ("my PLG organisations"); on `plg_registration`, those organisations' sign-ups |
+| `ownerEmails` | a list of owners' email addresses, **only those the request gives** ("owned by person@example.com"): the organisations those people own; on `plg_registration`, those organisations' sign-ups; never with `unowned` |
+| `countryNames` | a list of countries, each its common English name as the request names it ("Sri Lanka", "India", "United States", "United Kingdom"; "US" / "UK" written out); case does not matter; a registration matches by its organisation's country |
+| `countryUnknown` | `true`: no country recorded ("unknown country"); never with `countryNames` |
+| `unacknowledgedOnly` | **`plg_registration` only**, `true`: not yet acknowledged by the team |
+| `playbookTask` | one playbook task's **code**, from the "PLG playbook answers" section at the end; needed by the two keys below and by a grouping by answer |
+| `playbookAnswers` | a list of that task's answer **codes** (any of them): the sign-ups (or organisations with one) that answered so |
+| `playbookUnanswered` | `true`: no answer to that task yet (never assessed); never with `playbookAnswers` |
+
+```json
+{ "resourceType": "plg_organization", "shape": "count", "query": { "productCodes": ["IAM"], "subscriptionTiers": ["TRIAL", "TRIAL_EXTENDED"] } }
+```
+
+**Shapes.** `count`; `list` with `listLimit`: an organisation list may sort by `name` or
+`registeredOn` ("newest" is `registeredOn` `desc`), a **registration list sets no `sortBy`** (newest
+first); `pie`/`bar` with **`slices`**, each slice's `query` flat too and
+added to the widget's, or `groupBy` by owner (organisations only), by country or by playbook answer (registrations only), below. A split by product, stage or tier is one slice per value, in the order of the
+table, labelled with the names above ("Trial" is `TRIAL` + `TRIAL_EXTENDED`):
+
+```json
+{ "resourceType": "plg_organization", "shape": "pie", "query": {}, "slices": [
+  { "label": "Free", "query": { "subscriptionTiers": ["FREE"] } },
+  { "label": "Trial", "query": { "subscriptionTiers": ["TRIAL", "TRIAL_EXTENDED"] } },
+  { "label": "Pay as you go", "query": { "subscriptionTiers": ["PAYG"] } } ] }
+```
+
+**By owner.** Organisations per owner ("by owner", "per CS owner", "who owns the most") are a
+`plg_organization` `pie` or `bar` with `"groupBy": { "field": "owner", "maxGroups": 10 }` and no
+slices; organisations with no owner are their own "Unowned" group. Only organisations group by owner:
+a split of registrations by owner is not expressible (the closest is organisations by owner).
+
+```json
+{ "resourceType": "plg_organization", "shape": "bar", "query": {}, "groupBy": { "field": "owner", "maxGroups": 10 } }
+```
+
+**A named owner.** Another person's organisations ("owned by", "assigned to" or "<email>'s" PLG
+organisations or sign-ups) are `ownerEmails` with the email addresses the request gives, several
+people in one list; a person named without an email address is declined, asking for it (section 1).
+
+```json
+{ "resourceType": "plg_organization", "shape": "list", "listLimit": 10, "sortBy": { "field": "name", "order": "asc" }, "query": { "ownerEmails": ["person@example.com"] } }
+```
+
+**By country.** Organisations or registrations per country ("by country", "per country", "which
+countries") are a `pie` or `bar` with `"groupBy": { "field": "country", "maxGroups": 10 }` and no
+slices, on `plg_organization` or `plg_registration` (sign-ups by country); the ones with no country are
+their own "Unknown" group. "In <country>" or "from <country>" is `countryNames`; a few named countries
+compared side by side are slices, one `countryNames` per slice.
+
+```json
+{ "resourceType": "plg_registration", "shape": "pie", "query": {}, "groupBy": { "field": "country", "maxGroups": 10 } }
+```
+
+**Playbook answers.** The PLG team assesses sign-ups by running playbooks on them; the tasks whose
+answers a widget can use, with their answer codes and labels, are listed in the **"PLG playbook
+answers"** section at the end of this catalogue (with no such section, playbook answers are not
+expressible). Match the request's words to a task's name or an answer's label: "eligible", "monitor",
+"excluded" or "assessment outcome" are the answers of an eligibility assessment task; "disposable" or
+"personal email" an email classification task's. A filter names the task's code in `playbookTask`
+and the answers' codes in `playbookAnswers`; "not assessed", "not answered" or "no outcome yet" is
+`playbookUnanswered: true`. Sign-ups **by** a task ("by assessment outcome", "by email
+classification", "eligible vs monitor vs excluded") are a `plg_registration` `pie` or `bar` with
+`"groupBy": { "field": "playbookAnswer", "maxGroups": 10 }`, `playbookTask` in its `query` and no
+slices: one group per answer, and "Not answered" for the sign-ups with none (including those never
+assessed, at any stage). Organisations by answer are slices, one `playbookAnswers` per slice (an
+organisation counts when any of its sign-ups answered so). A trend of an answer ("excluded sign-ups
+per month") is a `line` with the filter. Only the listed tasks and codes exist: never a label as a
+code, never a task the section does not list. For example, if the section lists an
+`ELIGIBILITY_ASSESSMENT_OUTCOME` task:
+
+```json
+{ "resourceType": "plg_registration", "shape": "bar", "query": { "playbookTask": "ELIGIBILITY_ASSESSMENT_OUTCOME" },
+  "groupBy": { "field": "playbookAnswer", "maxGroups": 10 } }
+```
+
+"Eligible" alone, "eligible for CS" or "PLG CS eligible" is the lifecycle stage `PLG_CS_ELIGIBLE`;
+it is the assessment answer only beside "assessment", "assessed", "outcome", "monitor" or "excluded".
+
+**Sign-ups over time.** Registrations (sign-ups) per day, week or month, or a sign-up trend, are one
+`plg_registration` **`line`**: one line, registrations by sign-up date, with section 4's window (`days`,
+or `startDate` + `endDate` + `bucket`) and `"chart": "bar"` when bars are asked for; never `series`, and
+never slices per period. Its `query` takes the keys above ("IAM sign-ups" add `productCodes`); it adds
+`unacknowledgedOnly` only for "unacknowledged" or "not yet acknowledged" sign-ups, never for "new" ones
+(over time, every sign-up is new in its own period). There is no `plg_organization` line: "organisations per month" is
+sign-ups per month.
+
+```json
+{ "resourceType": "plg_registration", "shape": "line", "query": {},
+  "startDate": "__startOfMonth:-2__", "endDate": "__today__", "bucket": "month", "chart": "bar" }
+```
+
+**Not expressible** (section 1): an owner named without an email address (decline, asking for it); registrations split by owner; a region or continent ("Asia", "EMEA"; the closest is by country); an organisation by name or email; health or "at risk"; playbook progress, or a task not in the "PLG playbook answers" section (a number or text one: session minutes, exit point); usage, revenue or ARR.
+
 ---
 
 ## 6. Sorting (lists only)
@@ -496,8 +606,10 @@ case filter (not expressible).
 Fields: `createdOn`, `updatedOn`, `severity`, `state`, `assignee`. For `time_card`: `workDate` or
 `updatedOn` only ("recent time cards" means `workDate` `desc`). For operations see section 5b (a
 problem list has no `sortBy`); an `account` list has no `sortBy`; a `project` list sorts by `endDate`, `goLivePlanDate`, `goLiveDate`, `onboardingExpiryDate` or `productionReadinessCompletionDate` only; a `case_feedback`
-list has no `sortBy`.
-"Recent" means `{"field": "createdOn", "order": "desc"}`; "recently updated" means `updatedOn`.
+list has no `sortBy`. A `plg_organization` list sorts by `name` or `registeredOn` only, and a
+`plg_registration` list has no `sortBy` (section 5e).
+"Recent" means `{"field": "createdOn", "order": "desc"}`, and for PLG organisations `registeredOn` `desc`;
+"recently updated" means `updatedOn`.
 
 ---
 
@@ -525,7 +637,7 @@ or breached group, `warning` next, otherwise leave it out.
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
 `change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day`, `state` or `team` with
-`measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+`measure`, section 5a; `plg_organization`: `owner` or `country`, `plg_registration`: `country` or `playbookAnswer` (with `playbookTask`), section 5e; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
 section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
 add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
@@ -639,6 +751,24 @@ Never set both `slices` and `groupBy`.
 | "production readiness completed last month" | `productionReadinessCompletionDateFrom` / `productionReadinessCompletionDateTo` with `__startOfMonth:-1__` / `__endOfMonth:-1__`; "onboarding started in ..." likewise with `onboardingStartDateFrom` / `onboardingStartDateTo` |
 | "projects not yet live", "no go-live date", "no end date" | **not expressible** as a date check (no filter tests a date being set or empty): the closest is `onboardingStatus ["Not-Started", "In-Progress"]`, with a `note` saying so |
 | "my accounts", accounts by region, product, owner or ARR | not expressible (section 5c) |
+| "PLG", "cloud", "self sign-up", "product-led" organisations; organisations with a tier, a PLG product or a lifecycle stage | `resourceType: "plg_organization"` (section 5e). "Organisations" or "customers" with none of these words stay `account` |
+| "registrations", "sign-ups", "new registrations" (PLG or cloud) | `resourceType: "plg_registration"` (section 5e) |
+| "not acknowledged", "unacknowledged", "awaiting acknowledgement" (registrations) | `unacknowledgedOnly: true` |
+| "trial", "on a trial" (PLG) | `subscriptionTiers ["TRIAL", "TRIAL_EXTENDED"]`; "free" / "pay as you go", "PAYG", "paying" are `["FREE"]` / `["PAYG"]` |
+| "activated" / "commercial" / "abandoned" / "first value" / "eligible for CS" (PLG) | `lifecycleStages` `["ACTIVATED"]` / `["COMMERCIAL"]` / `["ABANDONED"]` / `["FIRST_VALUE_ACHIEVED"]` / `["PLG_CS_ELIGIBLE"]` |
+| "unowned", "no owner", "unassigned" (PLG) | `unowned: true` |
+| "my PLG / cloud organisations", "organisations I own", "my sign-ups" (PLG) | `ownerIds ["__current_user__"]` (section 5e) |
+| PLG organisations or sign-ups "owned by <email>", "assigned to <email>", "<email>'s" | `ownerEmails ["<email>"]` (several people: one list with all their emails) (section 5e) |
+| PLG "owned by Bob" (a name, no email) | not expressible: reply with `{"error": ...}` asking for the email address |
+| PLG organisations "by owner", "per owner", "per CS owner" | a `plg_organization` `pie` or `bar` with `groupBy` `owner` (section 5e) |
+| PLG organisations or sign-ups "by country", "per country" | a `pie` or `bar` with `groupBy` `country` (section 5e) |
+| PLG "in <country>", "from <country>"; "no country", "unknown country" | `countryNames ["<country>"]`; `countryUnknown: true` (section 5e) |
+| PLG "eligible / monitor / excluded" with "assessment", "assessed" or "outcome", or "monitor" / "excluded"; "disposable email", "personal email" | `playbookTask` and `playbookAnswers` from the "PLG playbook answers" section (section 5e) |
+| PLG sign-ups "by assessment outcome", "by email classification", by any listed task; "not assessed" | a `plg_registration` `pie` or `bar` with `groupBy` `playbookAnswer` and that `playbookTask`; `playbookUnanswered: true` (section 5e) |
+| a PLG product: "IAM", "identity" / "API platform" / "integration platform" / "agent platform" / "engineering platform" | `productCodes` `["IAM"]` / `["API_PLATFORM"]` / `["INTEGRATION_PLATFORM"]` / `["AGENT_PLATFORM"]` / `["ENG_PLATFORM"]` |
+| "signed up this month / last 30 days" (PLG) | `registeredFrom` (and `registeredTo`) with the date tokens of section 5 |
+| PLG "by product / stage / tier" | a `pie` (share) or `bar` (comparison) with one slice per value (section 5e) |
+| PLG sign-ups or registrations "per day / week / month", "over time", a sign-up trend, over a period ("PLG sign-ups per month in the last 3 months", "new registrations per week this year") | a `plg_registration` `line` with that period's window and `bucket` (sections 4 and 5e); as bars: `"chart": "bar"` |
 | "incidents", "outages" (as incidents), "faults" | `resourceType: "incident"` (section 5b) |
 | "open", "active", "ongoing", "unresolved" incidents | `state in ["NEW", "IN_PROGRESS", "ON_HOLD"]` |
 | "new" / "on hold" / "resolved" / "closed" incidents | `state in` `["NEW"]` / `["ON_HOLD"]` / `["RESOLVED"]` / `["CLOSED"]` |
@@ -690,7 +820,7 @@ Never set both `slices` and `groupBy`.
 | "about to breach", "near SLA" | `taskSLABusinessElapsedPercent gte ["80"]` plus `slaBreached eq ["false"]` |
 | "P1" / "S1" / "critical" | `severity in ["critical"]` ("catastrophic" only when asked for) |
 | "high and above" | `severity in ["catastrophic", "critical", "high"]` |
-| "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 |
+| "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 (PLG: section 6) |
 | "last N days/weeks" | `createdOn gte __daysAgo:N__` (weeks x 7) |
 | "trend", "over time", "opened vs closed" | a `line` widget, no `series` (both lines) |
 | "new cases per day", "cases opened per day", "case intake trend" | a `line` widget with `series: ["opened"]` |
@@ -749,14 +879,16 @@ If two readings are plausible and the table does not settle it, pick the one abo
 
 1. Only fields, ops, values and shapes from this file. No ids. A date is a token of section 5 for a
    period counted from today, or a plain `YYYY-MM-DD` date only for a period the request names. Email addresses only in
-   `createdBy in`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
+   `createdBy in` and PLG `ownerEmails`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
 2. Every widget has `id`, `displayName`, `resourceType`, `shape`, `gridWidth` 1-12, `query`.
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
-   except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
-5. `line` only on `resourceType: "case"`, with `days` 1-90 or `startDate` + `endDate` (both plain
-   dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
-   absent (both lines) or exactly `["opened"]` or `["closed"]`; `chart` absent or `"bar"`. An edit keeps
+   except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12), and a
+   `plg_registration` list, which has none either (item 13).
+5. `line` only on `resourceType: "case"` or `"plg_registration"`, with `days` 1-90 or `startDate` +
+   `endDate` (both plain dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24
+   months); `series` only on a case line, absent (both lines) or exactly `["opened"]` or `["closed"]`;
+   `chart` absent or `"bar"`. An edit keeps
    a line widget's `series`, window and `chart` unless the request changes them.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`. `stateEntered`
    (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, one date) only in the top-level `filters` of
@@ -785,8 +917,17 @@ If two readings are plausible and the table does not settle it, pick the one abo
 12. A `case_feedback` widget: a flat `query` with only `rating` (a number 1-5); no `dateFrom` / `dateTo`;
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
     `sortBy`; no `line`.
-13. The output is a single JSON object.
-14. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
+13. A `plg_organization` / `plg_registration` widget: a flat `query` with only the keys of section 5e and
+    their exact-case values, in its `query` and every slice's; `unacknowledgedOnly` only on
+    `plg_registration`; shape `count`, `list` (organisations sort by `name` / `registeredOn`,
+    registrations no `sortBy`) or `pie`/`bar` with `slices`, or a registration `line` (item 5, no
+    `series`); `groupBy` only on a `pie`/`bar`: organisations by `owner` or `country`, registrations by
+    `country` or `playbookAnswer` (with `playbookTask` in the `query`), `maxGroups` at most 50; `ownerIds` only
+    `["__current_user__"]`; `ownerEmails` only addresses the request gave, never with `unowned`; `countryNames` never with `countryUnknown`; `playbookAnswers` and
+    `playbookUnanswered` only with `playbookTask`, never together, and every code from the "PLG playbook
+    answers" section; never an organisation `line`.
+14. The output is a single JSON object.
+15. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).
 
 ---

@@ -31,6 +31,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
+	plgdomain "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/domain"
 )
 
 // aiDashboardClient is csmai.Client: the model calls, made by
@@ -49,8 +50,22 @@ type aiDashboardClient interface {
 // serviceGenerateError), so writeGenerateError maps them and the user sees
 // the same messages as before the model call moved.
 type serviceDashboardGenerator struct {
-	client aiDashboardClient
-	teams  []csmai.Team
+	client    aiDashboardClient
+	teams     []csmai.Team
+	playbooks func(context.Context) ([]plgdomain.Playbook, error)
+}
+
+// WithPlaybooks makes each Generate read the PLG playbooks with list, send
+// the model their answer fields (playbookAnswerFields), and refuse a
+// dashboard whose playbook answer filter names a task or an answer they do
+// not have (checkPlaybookAnswers). Without it, the model is sent none. g is
+// a generator from NewServiceDashboardGenerator; any other is returned as it
+// is.
+func WithPlaybooks(g DashboardGenerator, list func(context.Context) ([]plgdomain.Playbook, error)) DashboardGenerator {
+	if s, ok := g.(*serviceDashboardGenerator); ok {
+		s.playbooks = list
+	}
+	return g
 }
 
 // NewServiceDashboardGenerator returns the generator calling the AI
@@ -77,7 +92,18 @@ func (g *serviceDashboardGenerator) Generate(ctx context.Context, prompt string,
 	if len(draft) > generateDraftMaxBytes {
 		return GeneratedDashboard{}, fmt.Errorf("%w: %d bytes", errDraftTooLarge, len(draft))
 	}
-	res, err := g.client.GenerateDashboard(ctx, csmai.DashboardRequest{Prompt: prompt, Draft: draft, Teams: g.teams})
+	// The playbooks are read on every message (an admin may have edited
+	// one); when they cannot be, the model is sent none, and a playbook
+	// answer filter in its reply is refused below.
+	var answers []csmai.PlaybookAnswerField
+	if g.playbooks != nil {
+		playbooks, err := g.playbooks(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "dashboard generate: PLG playbooks unavailable; sending no playbook answers", "err", err)
+		}
+		answers = playbookAnswerFields(playbooks)
+	}
+	res, err := g.client.GenerateDashboard(ctx, csmai.DashboardRequest{Prompt: prompt, Draft: draft, Teams: g.teams, PlaybookAnswers: answers})
 	if err != nil {
 		return GeneratedDashboard{}, serviceGenerateError(err)
 	}
@@ -112,6 +138,11 @@ func (g *serviceDashboardGenerator) Generate(ctx context.Context, prompt string,
 		if len(res.Candidates) > 1 {
 			slog.InfoContext(ctx, "dashboard generate: reply held several JSON objects; using the last valid one",
 				"count", len(res.Candidates), "used", i+1)
+		}
+		if g.playbooks != nil {
+			if err := checkPlaybookAnswers(d, answers); err != nil {
+				return GeneratedDashboard{}, err
+			}
 		}
 		reply := generatedReply(d)
 		if note != "" {

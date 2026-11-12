@@ -128,6 +128,27 @@ type DashboardRequest struct {
 	Prompt string          `json:"prompt"`
 	Draft  json.RawMessage `json:"draft,omitempty"`
 	Teams  []Team          `json:"teams"`
+	// PlaybookAnswers are the PLG playbook tasks a widget can filter or group
+	// by. Left out when there are none, so a service without the field still
+	// takes the request.
+	PlaybookAnswers []PlaybookAnswerField `json:"playbookAnswers,omitempty"`
+}
+
+// PlaybookAnswerField is one PLG playbook task whose answers a widget can
+// filter or group by: its code (playbookTask), name, type ("SINGLE_SELECT"
+// or "CHECKLIST") and answers.
+type PlaybookAnswerField struct {
+	Code      string                 `json:"code"`
+	Name      string                 `json:"name"`
+	ValueType string                 `json:"valueType"`
+	Options   []PlaybookAnswerOption `json:"options"`
+}
+
+// PlaybookAnswerOption is one answer a task offers: its code
+// (playbookAnswers) and label.
+type PlaybookAnswerOption struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
 }
 
 // Usage is the model call's token counts. The input is InputTokens (neither

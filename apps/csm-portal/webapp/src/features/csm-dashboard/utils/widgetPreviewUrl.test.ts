@@ -15,6 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
+import type { BeWidgetResourceType } from "@api/backend/types";
 import {
   appendWidgetTitleParam,
   buildWidgetPreviewHref,
@@ -373,6 +374,61 @@ describe("widget preview URL — anyOf round-trip", () => {
     expect(() => parseWidgetPreviewFilters(searchParams)).not.toThrow();
     const { filters } = parseWidgetPreviewFilters(searchParams);
     expect(filters.anyOf).toBeUndefined();
+  });
+});
+
+describe("widget preview URL — a value holding a comma", () => {
+  function roundTrip(filters: Record<string, unknown>, resourceType: BeWidgetResourceType) {
+    const href = buildWidgetPreviewHref({ previewSlug: "p", widgetId: "w1", displayName: "W", filters, resourceType });
+    return parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters;
+  }
+
+  it("keeps a PLG country with a comma one country", () => {
+    expect(
+      roundTrip({ countryNames: ["Korea, Republic of", "Sri Lanka"] }, "plg_organization").countryNames,
+    ).toEqual(["Korea, Republic of", "Sri Lanka"]);
+  });
+
+  it("keeps a single string value with a comma one value", () => {
+    expect(roundTrip({ organizationName: "Example, Inc." }, "plg_organization").organizationName).toEqual([
+      "Example, Inc.",
+    ]);
+  });
+
+  it("keeps commas in a case filter's values, and still adds up repeated notIn entries", () => {
+    const filters = roundTrip(
+      {
+        filters: [
+          { field: "product", op: "notIn", values: ["Example, Gateway"] },
+          { field: "product", op: "notIn", values: ["Other", "Example, Gateway"] },
+          { field: "tag", op: "in", values: ["a,b", "c"] },
+        ],
+      },
+      "case",
+    );
+    expect(filters.filters).toEqual([
+      { field: "product", op: "notIn", values: ["Example, Gateway", "Other"] },
+      { field: "tag", op: "in", values: ["a,b", "c"] },
+    ]);
+  });
+
+  it("keeps commas in a non-case resourceType's own filters array", () => {
+    const filters = roundTrip(
+      { filters: [{ field: "assignmentGroupId", op: "in", values: ["x, y", "z"] }] },
+      "change_request",
+    );
+    expect(filters.filters).toEqual([{ field: "assignmentGroupId", op: "in", values: ["x, y", "z"] }]);
+  });
+
+  it("keeps backslashes, including one at a value's end or before a comma", () => {
+    const values = ["C:\\dir", "ends\\", "\\,", "plain"];
+    expect(roundTrip({ countryNames: values }, "plg_registration").countryNames).toEqual(values);
+  });
+
+  it("reads a URL written before values were escaped as it did", () => {
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams("severities=critical,high&q=a\\b,c"));
+    expect(filters.severities).toEqual(["critical", "high"]);
+    expect(filters.q).toEqual(["a\\b", "c"]);
   });
 });
 

@@ -35,6 +35,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/playbooks"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/teams"
 )
 
@@ -72,6 +73,9 @@ type Request struct {
 	Prompt string
 	Draft  json.RawMessage
 	Teams  []teams.Team
+	// PlaybookAnswers are the PLG playbook tasks a widget can filter or
+	// group by; none leaves the catalogue without that section.
+	PlaybookAnswers []playbooks.Field
 }
 
 // Result is what the model answered: Declined holds its sentence when it
@@ -107,7 +111,7 @@ func NewGenerator(client anthropic.Client, model string, timeout time.Duration, 
 
 // Generate makes one model call for one chat message.
 func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
-	system := teams.WithTeams(g.catalogue.Text(), req.Teams)
+	system := playbooks.WithPlaybookAnswers(teams.WithTeams(g.catalogue.Text(), req.Teams), req.PlaybookAnswers)
 
 	if g.timeout > 0 {
 		var cancel context.CancelFunc
@@ -119,8 +123,9 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 		Model:     anthropic.Model(g.model),
 		MaxTokens: maxTokens,
 		// The system prompt is the same for every user and call of one
-		// deployment (the catalogue, and the team list the backend builds
-		// once at start), so it is cached: a call within the cache's lifetime
+		// deployment (the catalogue, the team list the backend builds once
+		// at start, and the playbook answers, which change only when a PLG
+		// admin edits a playbook), so it is cached: a call within the cache's lifetime
 		// (5 minutes, renewed by each hit) reads it at the model's cache-hit
 		// price: 0.05 times the input price on Sonnet 5.5 (the default) and
 		// Opus 5.5, 0.1 times on most other models. Nothing that changes per

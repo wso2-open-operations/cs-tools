@@ -34,7 +34,7 @@ import {
   readProjectFilters,
 } from "@features/csm-projects/utils/projectFilters";
 import { readCasesFiltersFromUrl } from "@features/csm-cases/utils/casesFiltersUrl";
-import { WIDGET_TITLE_PARAM } from "@features/csm-dashboard/utils/widgetPreviewUrl";
+import { WIDGET_TITLE_PARAM, parseWidgetPreviewFilters } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 
 function hrefParams(href: string): URLSearchParams {
   const [, qs] = href.split("?");
@@ -901,5 +901,214 @@ describe("callRequestWidgetFiltersToQuery", () => {
     };
 
     expect(callRequestWidgetFiltersToQuery(seeded)).toEqual(widgetFilters);
+  });
+});
+
+describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
+  const config = WIDGET_RESOURCE_CONFIG.plg_organization;
+  const build = config.buildSearchRequestBody!;
+
+  it("searches the PLG organisation list and reads its organizations page", () => {
+    expect(config.searchEndpoint).toBe("/plg/organizations/search");
+    expect(config.itemsKey).toBe("organizations");
+  });
+
+  it("sends the filters under `filters`, with the page as offset and limit", () => {
+    expect(
+      build({ filters: { productCodes: ["IAM"], lifecycleStages: ["TRIAL"] }, offset: 10, limit: 5 }),
+    ).toEqual({
+      filters: { productCodes: ["IAM"], lifecycleStages: ["TRIAL"] },
+      pagination: { offset: 10, limit: 5 },
+    });
+  });
+
+  it("unwraps single-valued filters and `unowned` from the preview URL round trip, keeping list filters as arrays", () => {
+    expect(
+      build({
+        filters: { query: ["acme"], unowned: ["true"], subscriptionTiers: ["PAID", "TRIAL"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ query: "acme", unowned: true, subscriptionTiers: ["PAID", "TRIAL"] });
+    expect(build({ filters: { unowned: false }, offset: 0, limit: 5 }).filters).toEqual({
+      unowned: false,
+    });
+  });
+
+  it("turns `countryUnknown` back into a boolean and keeps `countryNames` a list", () => {
+    expect(
+      build({ filters: { countryUnknown: ["true"], productCodes: ["IAM"] }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ countryUnknown: true, productCodes: ["IAM"] });
+    expect(
+      build({ filters: { countryNames: ["Sri Lanka", "India"] }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ countryNames: ["Sri Lanka", "India"] });
+    expect(build({ filters: { countryUnknown: ["maybe"] }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
+  it("keeps `ownerEmails` a list through View more's URL round trip", () => {
+    const ownerEmails = ["bob@example.com", "Alice.Perera@example.com"];
+    const href = config.buildHref({ ownerEmails, productCodes: ["IAM"] }, { widgetId: "w", displayName: "W" });
+    expect(href.startsWith("/dashboard/preview/plg-organizations?")).toBe(true);
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
+    expect(build({ filters, offset: 0, limit: 5 }).filters).toEqual({ ownerEmails, productCodes: ["IAM"] });
+    expect(build({ filters: { ownerEmails: ["bob@example.com"] }, offset: 0, limit: 5 }).filters).toEqual({
+      ownerEmails: ["bob@example.com"],
+    });
+  });
+
+  it("unwraps `playbookTask`, turns `playbookUnanswered` back into a boolean and keeps `playbookAnswers` a list", () => {
+    expect(
+      build({
+        filters: { playbookTask: ["ELIGIBILITY_ASSESSMENT_OUTCOME"], playbookUnanswered: ["true"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", playbookUnanswered: true });
+    expect(
+      build({
+        filters: { playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", playbookAnswers: ["MONITOR", "EXCLUDED"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", playbookAnswers: ["MONITOR", "EXCLUDED"] });
+    expect(build({ filters: { playbookUnanswered: ["maybe"] }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
+  it("sends the View more search box's searchQuery as the search's query", () => {
+    expect(
+      build({ filters: { productCodes: ["IAM"], searchQuery: " acme " }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ productCodes: ["IAM"], query: "acme" });
+    expect(build({ filters: { searchQuery: "" }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
+  it("sends a plain registration date as a timestamp that includes the whole day", () => {
+    expect(
+      build({
+        filters: { registeredFrom: ["2026-01-01"], registeredTo: "2026-03-31" },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ registeredFrom: "2026-01-01T00:00:00Z", registeredTo: "2026-03-31T23:59:59.999999Z" });
+  });
+
+  it("passes a registration timestamp through unchanged", () => {
+    expect(
+      build({ filters: { registeredFrom: "2026-01-01T05:30:00Z" }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ registeredFrom: "2026-01-01T05:30:00Z" });
+  });
+
+  it("sorts by name or, by default, registration date, with the order beside it", () => {
+    expect(
+      build({ filters: {}, offset: 0, limit: 5, sortBy: { field: "name", order: "asc" } }),
+    ).toMatchObject({ sortBy: "name", sortOrder: "asc" });
+    const byDate = build({
+      filters: {},
+      offset: 0,
+      limit: 5,
+      sortBy: { field: "registeredOn", order: "desc" },
+    });
+    expect(byDate).not.toHaveProperty("sortBy");
+    expect(byDate.sortOrder).toBe("desc");
+    expect(build({ filters: {}, offset: 0, limit: 5 })).toEqual({
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+    });
+  });
+
+  it("opens the Organizations page unfiltered, and the preview page once the widget filters", () => {
+    expect(config.buildHref({})).toBe("/plg/organizations");
+    const href = config.buildHref(
+      { productCodes: ["IAM"] },
+      { widgetId: "iam-orgs", displayName: "IAM organisations" },
+    );
+    expect(href).toBe("/dashboard/preview/plg-organizations?w=iam-orgs&n=IAM+organisations&productCodes=IAM");
+  });
+
+  it("labels a row with its name and email, and links it to the organisation's page", () => {
+    const item = { id: "org-1", organizationName: "Acme", registeredEmail: "a@acme.test" };
+    expect(config.primaryLabel(item)).toBe("Acme");
+    expect(config.secondaryLabel?.(item)).toBe("a@acme.test");
+    expect(config.detailHref?.(item)).toBe("/plg/organizations/org-1");
+    expect(config.detailHref?.({})).toBeUndefined();
+  });
+});
+
+describe("WIDGET_RESOURCE_CONFIG.plg_registration", () => {
+  const config = WIDGET_RESOURCE_CONFIG.plg_registration;
+  const build = config.buildSearchRequestBody!;
+
+  it("searches the PLG registration list and reads its registrations page", () => {
+    expect(config.searchEndpoint).toBe("/plg/registrations/search");
+    expect(config.itemsKey).toBe("registrations");
+  });
+
+  it("moves unacknowledgedOnly out of the filters, beside them", () => {
+    expect(
+      build({ filters: { unacknowledgedOnly: true, productCodes: ["IAM"] }, offset: 0, limit: 5 }),
+    ).toEqual({
+      unacknowledgedOnly: true,
+      filters: { productCodes: ["IAM"] },
+      pagination: { offset: 0, limit: 5 },
+    });
+    expect(build({ filters: { unacknowledgedOnly: ["true"] }, offset: 0, limit: 5 })).toEqual({
+      unacknowledgedOnly: true,
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+    });
+    expect(build({ filters: { unacknowledgedOnly: false }, offset: 0, limit: 5 })).toEqual({
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+    });
+  });
+
+  it("cleans its filters the way the organisation search does", () => {
+    expect(
+      build({
+        filters: { searchQuery: "acme", unowned: ["true"], registeredFrom: ["2026-07-01"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ query: "acme", unowned: true, registeredFrom: "2026-07-01T00:00:00Z" });
+  });
+
+  it("keeps `ownerEmails` a list through View more's URL round trip", () => {
+    const ownerEmails = ["bob@example.com", "alice@example.com"];
+    const href = config.buildHref({ ownerEmails, unacknowledgedOnly: true }, { widgetId: "w", displayName: "W" });
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
+    expect(build({ filters, offset: 0, limit: 5 })).toEqual({
+      unacknowledgedOnly: true,
+      filters: { ownerEmails },
+      pagination: { offset: 0, limit: 5 },
+    });
+  });
+
+  it("never sends a sort, which the registration search does not take", () => {
+    expect(
+      build({ filters: {}, offset: 0, limit: 5, sortBy: { field: "name", order: "asc" } }),
+    ).toEqual({ filters: {}, pagination: { offset: 0, limit: 5 } });
+  });
+
+  it("opens New Registrations only for exactly the new registrations, and the preview page otherwise", () => {
+    expect(config.buildHref({ unacknowledgedOnly: true })).toBe("/plg/new-registrations");
+    const ctx = { widgetId: "w", displayName: "W" };
+    expect(config.buildHref({ unacknowledgedOnly: true, productCodes: ["IAM"] }, ctx)).toBe(
+      "/dashboard/preview/plg-registrations?w=w&n=W&unacknowledgedOnly=true&productCodes=IAM",
+    );
+    // The page opens on its "new only" view, so all registrations go to the preview.
+    expect(config.buildHref({}, ctx)).toBe("/dashboard/preview/plg-registrations?w=w&n=W");
+  });
+
+  it("labels a row with its organisation and product, and links it to that product's tab", () => {
+    const item = {
+      orgPlatformId: "op-1",
+      organizationId: "org-1",
+      organizationName: "Acme",
+      product: { id: "p-1", code: "IAM", name: "Identity" },
+    };
+    expect(config.primaryLabel(item)).toBe("Acme");
+    expect(config.secondaryLabel?.(item)).toBe("Identity");
+    expect(config.detailHref?.(item)).toBe("/plg/organizations/org-1/IAM");
+    expect(config.detailHref?.({ organizationId: "org-1" })).toBe("/plg/organizations/org-1");
+    expect(config.detailHref?.({})).toBeUndefined();
   });
 });
