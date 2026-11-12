@@ -79,7 +79,7 @@ without it will pass validation and create nothing.
 
 ## 4. Migrations
 
-Apply `0108`–`0115` in order. Then verify the objects exist — applying
+Apply `0108`–`0115` in order, and make sure `0180` (native number series) is applied too: a project-bound record takes its functions. Then verify the objects exist — applying
 cleanly says nothing about what a migration contained:
 
 ```sql
@@ -99,6 +99,10 @@ SELECT proname FROM pg_proc WHERE proname LIKE 'next_github_service_request%';
 --   next_github_service_request_number     -> SR-GH-000001
 --   next_github_service_request_wso2_id    -> WSO2-GH-000001  (required by
 --                                             work_item_wso2_id_required_by_type)
+
+-- project-bound records (0180): the work item number and the project's WSO2 id
+SELECT proname FROM pg_proc
+ WHERE proname IN ('next_work_item_number', 'next_wso2_id');
 
 SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%github%';
 --   change_request_github_outbound          CR state and planned dates
