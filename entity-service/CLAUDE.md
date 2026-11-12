@@ -65,7 +65,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_VIA_PORTAL_MAX_MB` | no | 10 | Largest file sent through the portal backend, in megabytes (named `ATTACHMENT_MAX_MB` before, which still works) (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `ATTACHMENT_VIA_PORTAL_MAX_MB` | no | 16 | Largest file sent through the portal backend, in megabytes (named `ATTACHMENT_MAX_MB` before, which still works) (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
@@ -1967,8 +1967,8 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
 
 **Attachment limits for the portals.** `GET /attachments/limits` (any authenticated caller, `Cache-Control: private, max-age=300`)
-answers `{maxFileBytes, maxInlineImagesTotalBytes}`: the largest attachment (the direct-upload maximum while direct uploads are on and above
-`ATTACHMENT_VIA_PORTAL_MAX_MB`, else that limit) and the inline-image total. The portal webapps read it through their backends instead of
+answers `{maxFileBytes, maxInlineImagesTotalBytes, directTransferAboveBytes}`: the largest attachment (the direct-upload maximum while direct uploads are on and above
+`ATTACHMENT_VIA_PORTAL_MAX_MB`, else that limit), the inline-image total, and the size above which a file goes direct (`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`, 0 while direct transfers are off; the webapps use it to pick the download path). The portal webapps read it through their backends instead of
 keeping a copy in their own `window.config`; the checks at upload start and confirm stay the authority.
 
 **Direct transfers (large files, off by default).** The settings are `ATTACHMENT_DIRECT_UPLOAD_ENABLED`, `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` and
@@ -1976,7 +1976,7 @@ keeping a copy in their own `window.config`; the checks at upload start and conf
 with a logged warning, and the new name wins when both are set. At startup a warning (`warnAttachmentSizeSettings`) names a
 size gap (`ATTACHMENT_VIA_PORTAL_MAX_MB` below `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`: a file in between is refused) or an
 `ATTACHMENT_DIRECT_UPLOAD_MAX_MB` that does not raise the limit (not above the portal limit). With `ATTACHMENT_DIRECT_UPLOAD_ENABLED=true` a file above
-`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` (default 8) can go between the browser and Azure through short-lived signed links, so
+`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` (default 16) can go between the browser and Azure through short-lived signed links, so
 its bytes pass through neither a portal backend nor this service (`WithDirectTransfers`, `LinkStore`,
 `azblobstore.UploadLinks` / `DownloadLink`). Smaller files and every inline image keep the path above, where each
 chunk and read is checked. Links are signed with the account key, so this needs `AZURE_STORAGE_KEY` or a

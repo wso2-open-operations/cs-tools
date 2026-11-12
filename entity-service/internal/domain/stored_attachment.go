@@ -267,6 +267,9 @@ type AttachmentLimits struct {
 	// MaxInlineImagesTotalBytes is the most image bytes one comment or description
 	// may hold in total (and so the largest single image).
 	MaxInlineImagesTotalBytes int64 `json:"maxInlineImagesTotalBytes"`
+	// DirectTransferAboveBytes is the size above which a file goes straight between
+	// the browser and Azure. 0 when direct transfers are off.
+	DirectTransferAboveBytes int64 `json:"directTransferAboveBytes"`
 }
 
 // AbandonedUpload is an upload that was started and never confirmed.

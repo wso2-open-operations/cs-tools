@@ -840,7 +840,7 @@ type Config struct {
 	SalesEntityScopes       string
 
 	// AttachmentMaxBytes caps a file sent through the portal backend
-	// (ATTACHMENT_VIA_PORTAL_MAX_MB, default 10, at most 100; the older name
+	// (ATTACHMENT_VIA_PORTAL_MAX_MB, default 16, at most 100; the older name
 	// ATTACHMENT_MAX_MB still works).
 	// The declared size is checked when an upload starts and the real size when
 	// it is confirmed. Provisional default, to be set from the real size
@@ -877,7 +877,7 @@ type Config struct {
 	// account; without a key it stays off and logs why.
 	AttachmentDirectTransfers bool
 	// AttachmentDirectMinBytes is the size above which a file uses a direct link
-	// (ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB, default 8 MiB, one chunk).
+	// (ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB, default 16 MiB).
 	AttachmentDirectMinBytes int64
 	// AttachmentDirectMaxBytes is the largest file that may be sent that way
 	// (ATTACHMENT_DIRECT_UPLOAD_MAX_MB, default and at most 1024 MB). Only used while
@@ -1142,7 +1142,7 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.AttachmentMaxBytes = envMegabytesRenamed("ATTACHMENT_VIA_PORTAL_MAX_MB", "ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10, maxAttachmentMB)
+	cfg.AttachmentMaxBytes = envMegabytesRenamed("ATTACHMENT_VIA_PORTAL_MAX_MB", "ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 16, maxAttachmentMB)
 	cfg.AzureStorageAccount = strings.TrimSpace(os.Getenv("AZURE_STORAGE_ACCOUNT"))
 	cfg.AzureStorageContainer = strings.TrimSpace(os.Getenv("AZURE_STORAGE_CONTAINER"))
 	cfg.AzureTenantID = strings.TrimSpace(os.Getenv("AZURE_TENANT_ID"))
@@ -1154,7 +1154,7 @@ func Load() *Config {
 	cfg.AzureStorageCreateContainer = strings.EqualFold(strings.TrimSpace(os.Getenv("AZURE_STORAGE_CREATE_CONTAINER")), "true")
 	cfg.AttachmentMaxConcurrentTransfers = envPositiveInt("ATTACHMENT_MAX_CONCURRENT_TRANSFERS", 32)
 	cfg.AttachmentDirectTransfers = strings.EqualFold(strings.TrimSpace(envRenamed("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "ATTACHMENT_DIRECT_TRANSFERS_ENABLED")), "true")
-	cfg.AttachmentDirectMinBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES", 8, 100)
+	cfg.AttachmentDirectMinBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES", 16, 100)
 	cfg.AttachmentDirectMaxBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_MAX_MB", "ATTACHMENT_DIRECT_MAX_MB", "ATTACHMENT_DIRECT_MAX_BYTES", maxAttachmentDirectMB, maxAttachmentDirectMB)
 	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()

@@ -581,7 +581,9 @@ paths:
         direct-upload maximum while direct uploads are on and above the portal limit
         (ATTACHMENT_VIA_PORTAL_MAX_MB), else the portal limit. maxInlineImagesTotalBytes
         is the most image bytes one comment or description may hold in total, and so the
-        largest single image. The values come from configuration, so the answer may be
+        largest single image. directTransferAboveBytes is the size above which a file goes
+        straight between the browser and Azure (0 when direct transfers are off), so a
+        portal decides the same way for downloads. The values come from configuration, so the answer may be
         cached for a few minutes. The server stays the authority: it checks the real size
         when an upload starts and again at confirm.
       operationId: getAttachmentLimits
@@ -597,7 +599,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [maxFileBytes, maxInlineImagesTotalBytes]
+                required: [maxFileBytes, maxInlineImagesTotalBytes, directTransferAboveBytes]
                 properties:
                   maxFileBytes:
                     type: integer
@@ -607,6 +609,10 @@ paths:
                     type: integer
                     format: int64
                     example: 1048576
+                  directTransferAboveBytes:
+                    type: integer
+                    format: int64
+                    example: 16777216
         "401":
           description: "The caller is not authenticated."
           content:
