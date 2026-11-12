@@ -1705,6 +1705,10 @@ paths:
                   maxInlineImagesTotalBytes:
                     type: integer
                     format: int64
+                  directTransferAboveBytes:
+                    type: integer
+                    format: int64
+                    description: Size above which a file goes straight to Azure; 0 when direct transfers are off.
         "401":
           description: Unauthorized
           content:
