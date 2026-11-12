@@ -746,8 +746,7 @@ func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID
 // tables is internal-only, so the soft delete runs as the system after the checks
 // below. Only the person who uploaded an attachment may delete it, or a portal
 // admin through the CSM portal backend (req.AsAdmin), and never once the work
-// item is closed. Only the row is marked here; the portal
-// backend removes the file afterwards.
+// item is closed. Only the row is marked here; the file service archives the file.
 func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) (domain.DeletedStoredAttachment, error) {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
 		return domain.DeletedStoredAttachment{}, err
