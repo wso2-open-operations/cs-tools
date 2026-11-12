@@ -103,6 +103,12 @@ notifications independently until they're actually delivered.
   `/livez` doesn't, so a transient DB blip triggers a readiness dip rather than a
   pod restart. `/dbz` reports only database reachability (`200` or `503`) for monitoring; it
   reuses one ping per second, so frequent checks hold at most one connection.
+  `/mutez` is `503` while the alert mute rule cache is stale: rules could not be refreshed
+  for longer than `notify.mute_rule_max_staleness`, so muting has failed open and alerts a
+  rule should mute create incidents again. Point an uptime monitor at it; it is not a
+  readiness or liveness probe (a restart does not fix an entity-service outage). The switch
+  to stale is also logged once at Error (`event=alert_mute_rules_stale`), and the recovery
+  at Info (`event=alert_mute_rules_recovered`). `200` when muting is off.
 
 ## Multi-container support
 

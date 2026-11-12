@@ -128,6 +128,24 @@ type Cache struct {
 	mu        sync.RWMutex
 	rules     []Rule
 	fetchedAt time.Time
+	// staleReported is set once the stale state has been logged at Error, so the
+	// switch is logged once (and its recovery once), not on every failed refresh.
+	staleReported bool
+}
+
+// Stale reports whether the cache matches nothing because its rules are missing or older than max staleness
+// (muting has failed open), and how old they are (0 when none was ever fetched). /mutez reports it.
+func (c *Cache) Stale() (stale bool, age time.Duration) {
+	if c == nil {
+		return false, 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.fetchedAt.IsZero() {
+		return true, 0
+	}
+	age = c.now().Sub(c.fetchedAt)
+	return age > c.maxStale, age
 }
 
 // NewCache returns an empty cache; call Refresh or Run to fill it.
@@ -139,21 +157,35 @@ func NewCache(logger *slog.Logger, fetch Fetch, maxStale time.Duration) *Cache {
 func (c *Cache) Refresh(ctx context.Context) error {
 	rules, err := c.fetch(ctx)
 	if err != nil {
-		c.mu.RLock()
+		c.mu.Lock()
 		age := c.now().Sub(c.fetchedAt)
 		stale := c.fetchedAt.IsZero() || age > c.maxStale
-		c.mu.RUnlock()
-		if stale {
-			c.logger.Warn("alert mute rules: refresh failed and cache is stale, muting nothing until a refresh succeeds", "error", err, "max_staleness", c.maxStale.String())
-		} else {
+		report := stale && !c.staleReported
+		if report {
+			c.staleReported = true
+		}
+		c.mu.Unlock()
+		switch {
+		case report:
+			// Muting has failed open: alerts a rule would mute create incidents and pages again. Error, once, so a
+			// log-based alert can fire on it; /mutez reports the same state for a probe.
+			c.logger.Error("alert mute rules: refresh failed and cache is stale, muting nothing until a refresh succeeds",
+				"error", err, "max_staleness", c.maxStale.String(), "event", "alert_mute_rules_stale")
+		case stale:
+			c.logger.Warn("alert mute rules: refresh failed, cache still stale", "error", err)
+		default:
 			c.logger.Warn("alert mute rules: refresh failed, keeping last fetched rules", "error", err, "age", age.String())
 		}
 		return err
 	}
 	c.mu.Lock()
 	changed := !sameIDs(c.rules, rules)
-	c.rules, c.fetchedAt = rules, c.now()
+	recovered := c.staleReported
+	c.rules, c.fetchedAt, c.staleReported = rules, c.now(), false
 	c.mu.Unlock()
+	if recovered {
+		c.logger.Info("alert mute rules: refresh succeeded, muting again", "event", "alert_mute_rules_recovered")
+	}
 	if changed {
 		numbers := make([]string, len(rules))
 		for i, b := range rules {

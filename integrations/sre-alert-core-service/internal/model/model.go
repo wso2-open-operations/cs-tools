@@ -180,6 +180,7 @@ const (
 )
 
 // MuteOutcome reports what happened to an incident an alert mute rule muted.
+// store.MutedByRuleSummary counts the same branches in SQL: change both together.
 func (i Incident) MuteOutcome() string {
 	switch {
 	case i.Muted:

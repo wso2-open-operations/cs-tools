@@ -401,6 +401,56 @@ func TestIncidentRepo_MuteLifecycle(t *testing.T) {
 	}
 }
 
+// The SQL summary must classify exactly as model.Incident.MuteOutcome does.
+func TestIncidentRepo_MutedByRuleSummaryMatchesMuteOutcome(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	shapes := []string{
+		`muted = true`,
+		`muted = false, unmuted_at = now(), csm_confirmed = true`,
+		`muted = false, unmuted_at = now(), status = ' Closed '`,
+		`muted = false, unmuted_at = now(), status = 'closed', csm_attempts = 1`,
+		`muted = false, unmuted_at = now(), status = 'closed', fallback = true`,
+		`muted = false, unmuted_at = now(), status = 'new'`,
+		`muted = false, status = 'closed'`,
+	}
+	for i, set := range shapes {
+		fp := fmt.Sprintf("fpsum%d", i)
+		if _, err := repo.Fold(ctx, fp, []string{fp}, func(*model.Incident, map[string]bool) FoldPlan {
+			return FoldPlan{New: []NewIncident{{
+				Incident: model.Incident{Fingerprint: fp, IncidentNumber: "PENDING", Severity: 1, Impact: "HIGH", Urgency: "HIGH",
+					Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, SeverityLabel: "critical"},
+				Notes: []model.Note{{AlertID: fp, Kind: model.NoteCreated, Text: "created"}},
+			}}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE incidents_processed SET mute_rule_id = 'sum-rule', `+set+` WHERE fingerprint = $1`, fp); err != nil {
+			t.Fatalf("shape %q: %v", set, err)
+		}
+	}
+	got, err := repo.MutedByRuleSummary(ctx, "sum-rule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incs, total, err := repo.MutedByRule(ctx, "sum-rule", 100, 0)
+	if err != nil || total != len(shapes) {
+		t.Fatalf("muted by rule = %d, %v; want %d", total, err, len(shapes))
+	}
+	want := map[string]int{}
+	for _, inc := range incs {
+		want[inc.MuteOutcome()]++
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("summary = %v, want what MuteOutcome gives: %v", got, want)
+	}
+	if want[model.MuteOutcomeClosedQuietly] != 1 || want[model.MuteOutcomeDelivering] != 4 {
+		t.Fatalf("shapes classify as %v; the test no longer covers every branch", want)
+	}
+}
+
 func TestIncidentRepo_ConcurrentFoldsSerializePerFingerprint(t *testing.T) {
 	pool := testDB(t)
 	repo := NewIncidentRepo(pool, testLocker(t, pool))
