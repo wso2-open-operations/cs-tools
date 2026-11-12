@@ -273,8 +273,13 @@ schedules assume `TZ=UTC` like every other here.
   `windows` override `ROTA_REMINDER_WEEKEND_REQUIRED` / `ROTA_REMINDER_WINDOWS` code by code
   (a code the saved settings do not name keeps the configured value; the card saves a code
   only once somebody changes it there), and `copyTo` is copied on top of the configured copy
-  list, `weekendCopyTo` (migration 0271) on the weekend summary only (`Config.WeekendCopy`: never on
-  a weekday reminder, an invitation email or a cancellation). So saving one field never replaces a deployment setting nobody changed. **Nothing
+  list on the reminder emails only (`Config.Copy`: the weekday reminders, the weekend summary and the
+  rota admins' email, never an email carrying an invitation or a cancellation; a weekday reminder
+  that carries its invitation goes to its people Cc the invitation copies, and the `copyTo` addresses
+  not on it get a separate copy without the invitation, `buildReminderCopy`, uncounted and never
+  failing the run), `weekendCopyTo` (migration 0271) on the weekend summary only (`Config.WeekendCopy`: never on
+  a weekday reminder, an invitation email or a cancellation), and `inviteCopyTo` (migration 0284) on
+  the emails carrying an invitation or a cancellation only (`Config.InviteCopy`; Cc, never a guest). So saving one field never replaces a deployment setting nobody changed. **Nothing
   saved (a 404, also from an entity-service without the route) sends no scheduled reminder**:
   only the card's switches turn them on. Send now still goes out, with the environment's values.
   A failed read fails the run, so it is retried

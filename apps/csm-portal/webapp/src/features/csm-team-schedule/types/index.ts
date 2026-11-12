@@ -742,10 +742,16 @@ export type SaveRotaReminderSettings = {
   inviteRotations?: Record<string, boolean>;
   copyTo: string[];
   /**
-   * Copied (Cc) on the weekend summary email only; copyTo is copied on every
-   * reminder. Absent on settings saved before it existed.
+   * Copied (Cc) on the weekend summary email only, beside copyTo (the
+   * reminder emails). Absent on settings saved before it existed.
    */
   weekendCopyTo?: string[];
+  /**
+   * Copied (Cc) on the emails that carry a calendar invitation or its
+   * cancellation, and on no other; never a guest. Absent on settings saved
+   * before it existed.
+   */
+  inviteCopyTo?: string[];
 };
 
 /** The saved settings of one group, with who last changed them. */

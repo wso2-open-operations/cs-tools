@@ -14797,8 +14797,9 @@ paths:
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
         by shift code), inviteRotations (whether each rotation's reminders carry a calendar
-        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
-        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        invitation, by shift code), copyTo (copied on the reminder emails, never with the
+        invitation), weekendCopyTo (copied on the weekend summary only), inviteCopyTo (copied on
+        the emails that carry an invitation or a cancellation only), updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -14887,6 +14888,9 @@ paths:
                   example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  description: >-
+                    Copied (Cc) on the reminder emails (weekday reminders and the weekend summary),
+                    never with the calendar invitation attached.
                   maxItems: 20
                   items: { type: string, format: email }
                 weekendCopyTo:
@@ -14894,6 +14898,13 @@ paths:
                   description: >-
                     Copied (Cc) on the weekend summary email only. Optional: when absent the stored
                     value is kept.
+                  maxItems: 20
+                  items: { type: string, format: email }
+                inviteCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the emails that carry a calendar invitation or its cancellation,
+                    and on no other; never a guest. Optional: when absent the stored value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:
