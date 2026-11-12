@@ -198,6 +198,42 @@ describe("slaReportPDF", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("waits for the page's stylesheets to load in the frame before capturing", async () => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "/assets/app.css";
+    document.head.appendChild(link);
+    try {
+      const done = slaReportPDF(report());
+      await Promise.resolve();
+      expect(addElementPages).not.toHaveBeenCalled();
+      const frameLink = document.querySelector("iframe")?.contentDocument?.querySelector('link[rel="stylesheet"]');
+      expect(frameLink).not.toBeNull();
+      frameLink?.dispatchEvent(new Event("load"));
+      await done;
+      expect(pages).toHaveLength(4);
+    } finally {
+      link.remove();
+    }
+  });
+
+  it("does not hold the download for a stylesheet that never loads", async () => {
+    vi.useFakeTimers();
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "/assets/app.css";
+    document.head.appendChild(link);
+    try {
+      const done = slaReportPDF(report());
+      await vi.advanceTimersByTimeAsync(5000);
+      await done;
+      expect(save).toHaveBeenCalledTimes(1);
+    } finally {
+      link.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it("paints the dividers in the accent colour, and refuses one that is not a colour", async () => {
     let divider = "";
     addElementPages.mockImplementation((_pdf: unknown, el: HTMLElement) => {
