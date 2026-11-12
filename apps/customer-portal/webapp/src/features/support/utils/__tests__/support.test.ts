@@ -17,6 +17,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   downloadSizeOf,
+  getAvailableCaseActions,
   collapseCodeBlockWhitespace,
   collapseCommentSourceWhitespace,
   collapseHtmlSourceWhitespace,
@@ -734,5 +735,24 @@ describe("resolveActionStateKey", () => {
 
   it("returns undefined for an action with no state", () => {
     expect(resolveActionStateKey("Open Related Case", caseStates)).toBeUndefined();
+  });
+});
+
+describe("getAvailableCaseActions", () => {
+  it("offers only Close on an Awaiting Info case by default", () => {
+    expect(getAvailableCaseActions("Awaiting Info")).toEqual(["Closed"]);
+  });
+
+  it("adds Waiting on WSO2 on an Awaiting Info case for an internal user", () => {
+    expect(getAvailableCaseActions("Awaiting Info", true)).toEqual([
+      "Closed",
+      "Waiting on WSO2",
+    ]);
+  });
+
+  it("leaves every other status the same for an internal user", () => {
+    for (const status of ["Open", "Work in Progress", "Reopened", "Solution Proposed", "Closed"]) {
+      expect(getAvailableCaseActions(status, true)).toEqual(getAvailableCaseActions(status));
+    }
   });
 });

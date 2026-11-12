@@ -116,7 +116,7 @@ export default function CaseDetailsActionRow({
   const theme = useTheme();
   const { data: filterMetadata } = useGetProjectFilters(projectId);
   const caseStates = filterMetadata?.caseStates;
-  const { isExternalUser, canCreateCase, canUpdateCase } =
+  const { isExternalUser, isInternalUser, canCreateCase, canUpdateCase } =
     useCustomerPermissions();
 
   const { showSuccess } = useSuccessBanner();
@@ -214,7 +214,7 @@ export default function CaseDetailsActionRow({
     );
   };
 
-  const availableActions = getAvailableCaseActions(statusLabel).filter(
+  const availableActions = getAvailableCaseActions(statusLabel, isInternalUser).filter(
     (label) => {
       if (label === "Open Related Case") {
         if (!onOpenRelatedCase) return false;

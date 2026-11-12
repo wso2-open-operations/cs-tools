@@ -1727,10 +1727,12 @@ export const ACTION_TO_CASE_STATE_LABEL: Record<string, string> = {
  * Returns the list of available action button labels based on the case status.
  *
  * @param status - Current status of the case.
+ * @param isInternalUser - True for WSO2 staff, who alone get "Waiting on WSO2".
  * @returns {string[]} Array of action button labels to display.
  */
 export function getAvailableCaseActions(
   status: string | null | undefined,
+  isInternalUser = false,
 ): string[] {
   const normalized = status?.toLowerCase() || "";
 
@@ -1742,7 +1744,8 @@ export function getAvailableCaseActions(
       return ["Accept Solution", "Reject Solution"];
 
     case CaseStatus.AWAITING_INFO.toLowerCase():
-      return ["Closed", "Waiting on WSO2"];
+      // Handing the case back to WSO2 is a staff action; customers only close.
+      return isInternalUser ? ["Closed", "Waiting on WSO2"] : ["Closed"];
 
     default:
       // Covers Open, Work in Progress, Waiting on WSO2, Reopened.
