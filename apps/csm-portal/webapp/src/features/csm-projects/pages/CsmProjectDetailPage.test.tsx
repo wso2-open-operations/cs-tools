@@ -204,6 +204,7 @@ function renderPage(initialEntry = "/customers/projects/proj-1") {
             }
           />
           <Route path="/cases/new" element={<LocationProbe />} />
+          <Route path="/customers/projects/:id/sla-report/:sysId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -354,6 +355,18 @@ describe("CsmProjectDetailPage — report buttons", () => {
     expect(screen.getByRole("link", { name: "Time Report" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "CS Report" })).toBeInTheDocument();
     expect(screen.queryByText(/Coming soon/)).not.toBeInTheDocument();
+  });
+
+  it("opens the SLA report with the tab it was opened from, so Back returns there", () => {
+    renderPage(`/customers/projects/${PROJECT.id}?tab=workItems&subTab=engagements`);
+    fireEvent.click(screen.getByRole("link", { name: "SLA Report" }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      `/customers/projects/${PROJECT.id}/sla-report/${PROJECT.id}`,
+    );
+    expect(JSON.parse(screen.getByTestId("location-state-probe").textContent ?? "null")).toEqual({
+      from: `/customers/projects/${PROJECT.id}?tab=workItems&subTab=engagements`,
+      parentState: null,
+    });
   });
 });
 
