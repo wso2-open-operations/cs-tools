@@ -36,6 +36,7 @@ import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
 import { downloadWithProgress } from "@features/csm-cases/api/trackedDownload";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
@@ -254,6 +255,7 @@ export function useDownloadCsmCaseAttachment(): (
   attachment: CaseAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
+  const { directTransferAboveBytes } = useAttachmentLimits();
   const { showSuccess } = useSuccessBanner();
   const notify = useCallback(
     (name: string, outcome: DownloadSaveOutcome) =>
@@ -268,9 +270,10 @@ export function useDownloadCsmCaseAttachment(): (
         id: attachment.id,
         name: attachment.filename,
         size: attachment.size,
+        directAboveBytes: directTransferAboveBytes,
         onSaved: (outcome) => notify(attachment.filename, outcome),
       }),
-    [api, notify],
+    [api, directTransferAboveBytes, notify],
   );
 }
 

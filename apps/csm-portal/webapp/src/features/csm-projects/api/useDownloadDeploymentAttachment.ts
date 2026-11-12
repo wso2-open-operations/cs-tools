@@ -16,12 +16,13 @@
 
 import { useCallback } from "react";
 import { useBackendApi } from "@api/backend/client";
+import { useAttachmentLimits } from "@api/useGetAttachmentLimits";
 import { downloadWithProgress } from "@features/csm-cases/api/trackedDownload";
 import type { DeploymentAttachment } from "@features/csm-projects/types/csmProjects";
 
 /**
  * Returns a function that downloads a deployment attachment: it is streamed
- * through the portal backend (which checks access) and saved under its own name.
+ * through the portal backend (which checks access), or from storage above the server's direct-transfer size, and saved under its own name.
  * Its progress is in the shared store, so the row shows the percentage and a
  * Cancel button; a download the person cancels ends quietly.
  */
@@ -29,6 +30,7 @@ export function useDownloadDeploymentAttachment(): (
   attachment: DeploymentAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
+  const { directTransferAboveBytes } = useAttachmentLimits();
 
   return useCallback(
     async (attachment: DeploymentAttachment): Promise<void> => {
@@ -40,8 +42,9 @@ export function useDownloadDeploymentAttachment(): (
         id: attachment.id,
         name: attachment.name,
         size: attachment.sizeBytes,
+        directAboveBytes: directTransferAboveBytes,
       });
     },
-    [api],
+    [api, directTransferAboveBytes],
   );
 }
