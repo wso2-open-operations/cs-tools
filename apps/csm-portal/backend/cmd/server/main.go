@@ -57,8 +57,6 @@ func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
 
-	dashboard.SetActive(loadDashboards())
-
 	// Reference data is resolved once, here, and then only ever read from
 	// memory: the team registry (key <-> display name <-> backing group id <->
 	// platform UUID) and the assignable-role allow-list are both derivable from
@@ -142,6 +140,10 @@ func main() {
 	}
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
+
+	// The dashboards API serves from the database; any mounted definition
+	// files are migrated into it first. Needs the entity client above.
+	dashboard.SetActive(loadDashboards(customerEntityClient))
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
 	// Optional: with the engineering entity service configured, "Open Git issue"
@@ -1067,7 +1069,50 @@ func main() {
 	slog.Info("CSM Portal Backend stopped")
 }
 
-// loadDashboards builds the dashboard registry from configuration, and exits
+// loadDashboards builds the registry the dashboards API serves, and exits the
+// process on any failure to read or validate the definition files.
+//
+// The database is the source of truth: the registry serves the system
+// dashboards stored through the entity service. Definition files are only a
+// migration source. When DASHBOARDS_DIR (or the deprecated DASHBOARDS_CONFIG)
+// is set, every definition, fully expanded (shared sections, presets and
+// all), is upserted at startup, overwriting what the database holds under the
+// same key (see dashboard.SystemKey), so while files are mounted they are
+// authoritative. When neither is set nothing is migrated and the registry
+// serves whatever the database already holds; removing the variables never
+// stops the service starting.
+//
+// Failure behaviour:
+//
+//   - A bad definition file, a duplicate id or two ids that map to the same
+//     key are misconfigured deploys and fatal, exactly as before.
+//   - A failed upsert (entity service down, rejected) is NOT fatal: each
+//     dashboard is retried a few times, then the failure is logged per
+//     dashboard and startup continues, serving what the database has. There
+//     is no in-memory fallback to the files. The whole migration is bounded by
+//     dashboard.SystemMigrationTimeout.
+//   - A failed read of the database at request time is an upstream error
+//     response, never an empty list.
+//
+// A dashboard list read from the database is cached for a few seconds
+// (invalidated right after the startup upsert); see dashboard.NewSystemRegistry.
+func loadDashboards(store dashboard.SystemStore) *dashboard.Registry {
+	src := loadDashboardSource()
+	registry, err := dashboard.NewSystemRegistry(store, src)
+	if err != nil {
+		slog.Error("invalid dashboard definitions", "err", err)
+		os.Exit(1)
+	}
+	if src != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), dashboard.SystemMigrationTimeout)
+		defer cancel()
+		registry.Migrate(ctx)
+	}
+	return registry
+}
+
+// loadDashboardSource builds the file-backed registry the system dashboards are
+// migrated from, and exits
 // the process on any failure. Every failure mode here is a misconfigured
 // deploy, and the alternative — starting up with dashboards silently missing
 // — is exactly the class of quiet failure this codebase keeps getting bitten
@@ -1105,12 +1150,19 @@ func main() {
 //	                       DASHBOARD_PRESETS_FILE: DASHBOARDS_DIR path only,
 //	                       unset is legal and means no shared sections.
 //
-// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and yields no
-// dashboards: a deployment that has not configured any must still start and
-// serve every other endpoint.
-func loadDashboards() *dashboard.Registry {
+// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and returns nil:
+// a deployment that has not configured any must still start and serve every
+// other endpoint, with the dashboards the database already holds.
+//
+// With DASHBOARDS_HOT_RELOAD on, each dashboards request re-reads the
+// directory and upserts only the definitions that changed since this process
+// last wrote them, then serves from the database. Local development only.
+func loadDashboardSource() *dashboard.Registry {
 	dir := strings.TrimSpace(os.Getenv("DASHBOARDS_DIR"))
 	if dir == "" {
+		if strings.TrimSpace(os.Getenv("DASHBOARDS_CONFIG")) == "" {
+			return nil
+		}
 		dashboards, err := dashboard.ParseDashboardsConfig(os.Getenv("DASHBOARDS_CONFIG"))
 		if err != nil {
 			slog.Error("invalid DASHBOARDS_CONFIG", "err", err)
@@ -1143,7 +1195,7 @@ func loadDashboards() *dashboard.Registry {
 		os.Exit(1)
 	}
 	if hotReload {
-		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request. Intended for local development only",
+		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request and changed ones upserted into the database. Intended for local development only",
 			"dir", dir)
 	}
 	slog.Info("loaded dashboard definitions", "dir", dir, "presetsFile", presetsFile, "count", len(registry.Dashboards()), "hotReload", hotReload)

@@ -350,7 +350,8 @@ any API change: new, removed or changed endpoints, request/response shapes and e
   the server log line for the failed call.
 - **Slow uploads cut off.** Raise `REST_WRITE_TIMEOUT` and `ENTITY_SERVICE_TIMEOUT` (keep the second
   shorter).
-- **Re-reading dashboards without restarting.** Set `DASHBOARDS_HOT_RELOAD=true` (local only).
+- **Re-reading dashboards without restarting.** Set `DASHBOARDS_HOT_RELOAD=true` (local only); changed definitions are upserted into the database and served from there.
+- **Dashboards missing or stale.** The API serves the database. Check the startup log for `system dashboard upsert failed` (entity service unreachable or rejecting this backend's credentials) and that `DASHBOARDS_DIR` points where you expect.
 - Logs are text on stderr via `log/slog`.
 
 ## Configuration reference
@@ -539,11 +540,11 @@ starting with `_` and non-`.json` files are ignored by the directory loader.
 
 | Variable | Required | Default | Description | Example |
 |---|---|---|---|---|
-| `DASHBOARDS_DIR` | No | unset (no dashboards unless `DASHBOARDS_CONFIG` is set) | Directory with one `*.json` per dashboard. A set but missing directory is fatal | `./dashboards.example` |
-| `DASHBOARDS_HOT_RELOAD` | No | `false` | Re-read `DASHBOARDS_DIR` on every request instead of serving the startup snapshot. `strconv.ParseBool` values; an unparseable non-empty value warns and is `false`. A failed re-read keeps serving the last good definitions. **Local development only** | `true` |
-| `DASHBOARD_PRESETS_FILE` | No | none | JSON file of `presetKey` to literal filter fragment, shared by every dashboard and referenced as `{"preset": "key"}`. A dashboard's own `filterPresets` shadows it. Only read when `DASHBOARDS_DIR` is set | `./dashboards.example/_presets.json` |
-| `DASHBOARD_SECTIONS_FILE` | No | none | JSON file of reusable widget sections (`sectionKey` to `{displayName, widgets}`) that a dashboard pulls in through `includeSections`. Only read when `DASHBOARDS_DIR` is set | `./dashboards.example/_sections.json` |
-| `DASHBOARDS_CONFIG` | No | none | **Deprecated.** The whole registry as one JSON array. Used only when `DASHBOARDS_DIR` is unset; malformed content is fatal | `[...]` |
+| `DASHBOARDS_DIR` | No | unset (serve only the dashboards already in the database) | Migration source, not the live source. Directory with one `*.json` per dashboard; at startup each is expanded and upserted into the database (entity service `/system-dashboards`, key = the dashboard `id`, slugged to `[A-Za-z0-9._-]` if needed), overwriting the stored copy, and the API serves the database. Two ids with the same key, or a bad file, are fatal; a failed upsert is retried, logged and startup continues. A set but missing directory is fatal | `./dashboards.example` |
+| `DASHBOARDS_HOT_RELOAD` | No | `false` | Re-read `DASHBOARDS_DIR` on every dashboards request and upsert the definitions that changed into the database before serving. `strconv.ParseBool` values; an unparseable non-empty value warns and is `false`. A failed re-read keeps serving the last good definitions. **Local development only** | `true` |
+| `DASHBOARD_PRESETS_FILE` | No | none | JSON file of `presetKey` to literal filter fragment, shared by every dashboard and referenced as `{"preset": "key"}`. A dashboard's own `filterPresets` shadows it. Only read when `DASHBOARDS_DIR` is set; not stored in the database, so the presets endpoint is empty without it | `./dashboards.example/_presets.json` |
+| `DASHBOARD_SECTIONS_FILE` | No | none | JSON file of reusable widget sections (`sectionKey` to `{displayName, widgets}`) that a dashboard pulls in through `includeSections`. Only read when `DASHBOARDS_DIR` is set; not stored in the database, so the sections endpoint is empty without it | `./dashboards.example/_sections.json` |
+| `DASHBOARDS_CONFIG` | No | none | **Deprecated.** The whole set as one JSON array, migrated into the database like `DASHBOARDS_DIR`. Used only when `DASHBOARDS_DIR` is unset; malformed content is fatal | `[...]` |
 
 A definition may set `"restricted": true`: only callers holding `cs_engineer` or `admin` see it in
 `GET /dashboards`, and `GET /dashboards/{id}` returns `403` to everyone else.

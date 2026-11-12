@@ -3672,6 +3672,110 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /system-dashboards:
+    get:
+      summary: "List the system dashboards."
+      description: "Postgres-only. System dashboards belong to nobody: the CSM portal backend stores them here and overwrites them by key on every startup. Service to service: only the CSM portal backend's own client credential (x-jwt-assertion) is admitted, with no x-user-id-token needed. Never lists a user's saved dashboard."
+      operationId: listSystemDashboards
+      responses:
+        "200":
+          description: "Every system dashboard with its definition, ordered by key; an empty list when there are none."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemDashboardList'
+        "403":
+          description: "Forbidden: the caller is not the CSM portal backend."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /system-dashboards/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: "The system dashboard's stable key: 1 to 255 letters, digits, dots, underscores or hyphens, starting with a letter or digit."
+        schema:
+          type: string
+          maxLength: 255
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    get:
+      summary: "Get one system dashboard."
+      description: "Postgres-only. Service to service: only the CSM portal backend's own client credential is admitted."
+      operationId: getSystemDashboard
+      responses:
+        "200":
+          description: "The system dashboard, with its definition."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemDashboard'
+        "400":
+          description: "Bad request: the key is not a valid system dashboard key."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Forbidden: the caller is not the CSM portal backend."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found: there is no system dashboard with that key."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: "Create or overwrite a system dashboard."
+      description: "Postgres-only. Creates the system dashboard with this key, or overwrites its name and definition when it exists (its id and creation time are kept); 200 either way. The definition is opaque text of at most 1048576 bytes, larger than a user's saved dashboard. Service to service: only the CSM portal backend's own client credential is admitted. Cannot touch a user's saved dashboard."
+      operationId: saveSystemDashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveSystemDashboardRequest'
+      responses:
+        "200":
+          description: "The stored system dashboard."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemDashboard'
+        "400":
+          description: "Bad request: invalid key, a blank name or definition, or a name or definition over its limit."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "Forbidden: the caller is not the CSM portal backend."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /users/me/dashboards/{id}:
     parameters:
       - name: id
@@ -31275,6 +31379,48 @@ components:
         updatedOn:
           type: string
           format: date-time
+    SystemDashboard:
+      type: object
+      required: [id, systemKey, isSystem, name, definition, createdOn, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        systemKey:
+          type: string
+        isSystem:
+          type: boolean
+          description: "Always true."
+        name:
+          type: string
+        definition:
+          type: string
+          description: "The dashboard JSON as text. Validated by the CSM portal backend; not parsed here."
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    SystemDashboardList:
+      type: object
+      required: [dashboards]
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/SystemDashboard'
+    SaveSystemDashboardRequest:
+      type: object
+      required: [name, definition]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          description: "Trimmed; must not be blank."
+        definition:
+          type: string
+          description: "The dashboard JSON as text, at most 1048576 bytes; must not be blank."
     CustomDashboardSummary:
       type: object
       required: [id, name, createdOn, updatedOn]
