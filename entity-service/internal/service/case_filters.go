@@ -46,6 +46,7 @@ var caseFilterFieldSet = map[string]bool{
 	"resolutionNotes": true, "parentId": true, "taskSLABusinessElapsedPercent": true,
 	"escalationLevel": true, "escalation": true, "number": true, "internalId": true,
 	"accountId": true, "slaBreached": true, "accountEscalationActive": true,
+	"stateEntered": true, "stateEnteredOn": true,
 }
 
 // caseFilterOpSet is the exact set of CaseFieldFilter.Op values accepted by
@@ -557,6 +558,38 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 			}
 			p.ProductNames = append(p.ProductNames, f.Values...)
 
+		case "stateEntered":
+			if f.Op != "in" {
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			for _, v := range f.Values {
+				label, ok := caseStateDisplayLabel[domain.CaseState(v)]
+				if !ok {
+					return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: fmt.Sprintf("filters: stateEntered value %q is not a case state", v)}
+				}
+				p.EnteredStateLabels = append(p.EnteredStateLabels, strings.ToLower(label))
+			}
+
+		case "stateEnteredOn":
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			t, err := parseCaseFilterDate(f, f.Values[0], now)
+			if err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			switch f.Op {
+			case "gte":
+				p.EnteredStartDate = t
+			case "lte":
+				p.EnteredEndDate = t
+			default:
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+
 		case "projectOnboardingStatus":
 			if err := requireCaseFilterValues(f); err != nil {
 				return domain.ParsedCaseFilters{}, err
@@ -712,6 +745,15 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 		}
 	}
 
+	// stateEnteredOn bounds when a stateEntered change was logged, so it
+	// means nothing on its own.
+	if (p.EnteredStartDate != nil || p.EnteredEndDate != nil) && len(p.EnteredStateLabels) == 0 {
+		return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: stateEnteredOn needs a stateEntered filter (the states the case entered)"}
+	}
+	if p.EnteredStartDate != nil && p.EnteredEndDate != nil && p.EnteredEndDate.Before(*p.EnteredStartDate) {
+		return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "stateEnteredOn: lte value must not be before gte value"}
+	}
+
 	return p, nil
 }
 
@@ -825,6 +867,8 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"createdOn\" is not supported inside an OR group"}
 	case parsed.StartUpdatedDate != nil || parsed.EndUpdatedDate != nil:
 		return &apierror.ValidationError{Msg: "anyOf: field \"updatedOn\" is not supported inside an OR group"}
+	case len(parsed.EnteredStateLabels) > 0 || parsed.EnteredStartDate != nil || parsed.EnteredEndDate != nil:
+		return &apierror.ValidationError{Msg: "anyOf: fields \"stateEntered\" and \"stateEnteredOn\" are not supported inside an OR group"}
 	case len(parsed.ProductNames) > 0:
 		return &apierror.ValidationError{Msg: "anyOf: field \"product\" is not supported inside an OR group"}
 	case len(parsed.ProjectOnboardingStatuses) > 0 || len(parsed.ExcludeProjectOnboardingStatuses) > 0:

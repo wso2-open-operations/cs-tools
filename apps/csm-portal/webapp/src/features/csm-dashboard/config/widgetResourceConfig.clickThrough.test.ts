@@ -408,8 +408,27 @@ describe("translateCaseDashboardFiltersChecked — `lossless`", () => {
     ["entries that are not an array", { filters: "state=open" }],
     ["a state the list's URL reader does not know", { filters: [entry("state", "in", "no-such-state")] }],
     ["a work state without the single in-progress state", { filters: [entry("workState", "in", "paused")] }],
+    ["the states a case entered and when", {
+      filters: [entry("stateEntered", "in", "waiting_on_wso2"), entry("stateEnteredOn", "gte", "__today__")],
+    }],
   ])("is false for %s", (_label, filters) => {
     expect(lossless(filters as Record<string, unknown>)).toBe(false);
+  });
+});
+
+describe("a case widget on the states cases entered", () => {
+  it("opens the preview page with every filter, since the case list has none for them", () => {
+    const filters = {
+      filters: [
+        entry("stateEntered", "in", "waiting_on_wso2"),
+        entry("stateEnteredOn", "gte", "__today__"),
+        entry("state", "in", "waiting_on_wso2"),
+      ],
+    };
+    const href = WIDGET_RESOURCE_CONFIG.case.buildHref(filters, ctx);
+
+    expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
+    expect(parseWidgetPreviewFilters(hrefParams(href)).filters).toEqual(filters);
   });
 });
 

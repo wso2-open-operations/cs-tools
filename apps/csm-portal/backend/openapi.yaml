@@ -20588,6 +20588,8 @@ components:
             - accountEscalationActive
             - number
             - internalId
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -20647,6 +20649,20 @@ components:
           RFC3339 timestamp or YYYY-MM-DD date bounding the case's created,
           last-updated, or closed timestamp respectively. gte is inclusive
           "on or after"; lte is inclusive "on or before".
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change to any of them ("moved to
+          Waiting on WSO2"), whatever their state now; a case that moved there
+          several times matches once. Only logged changes are seen: the
+          history starts on 2026-10-11 and a case's creation state is not
+          logged. Not supported inside an anyOf branch.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged:
+          a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
+          placeholder such as `__today__` or `__startOfMonth:-1__`; gte is
+          inclusive, a date-only lte covers the whole day. The dashboards
+          resolve a placeholder to the viewer's local day before the request,
+          as for createdOn. Needs a stateEntered filter in the same request;
+          without a stateEnteredOn, stateEntered means at any time. Not
+          supported inside an anyOf branch.
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
           product. Only applied by the ServiceNow data source.

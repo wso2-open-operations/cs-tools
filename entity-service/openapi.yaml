@@ -24455,6 +24455,8 @@ components:
             - internalId
             - slaBreached
             - accountEscalationActive
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -24536,6 +24538,26 @@ components:
           service requests, security report analyses and announcements do not
           match it. Cases that never reached a resolved or closed state never
           match.
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change into any of them, whatever
+          the case's state is now; a case that entered one several times
+          matches once. Only logged changes are seen: the history starts when
+          the portal began logging (2026-10-11), a case's creation state is
+          not logged (so "entered open" matches only cases moved back to
+          open), and a change made in the legacy data source without being
+          logged is not seen.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged:
+          a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
+          placeholder (`__today__`, `__daysAgo:7__`, `__startOfMonth:-1__`, ...;
+          resolved against UTC, as for createdOn; a caller wanting another
+          time zone's day sends the resolved date instead, as the CSM portal
+          does with the viewer's local day). gte is inclusive "on or
+          after"; a date-only lte covers the whole day. Needs a stateEntered
+          filter; a lte bound earlier than its gte bound is rejected. E.g.
+          "moved to Waiting on WSO2 today": stateEntered in [waiting_on_wso2]
+          with stateEnteredOn gte `__today__`.
+          Neither is supported inside an anyOf branch, or by the legacy data
+          source (400).
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
           product. Only applied by the ServiceNow data source.
