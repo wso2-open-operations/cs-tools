@@ -673,6 +673,14 @@ The fix is not to change the container but to clean the body before it is render
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
 
+## Generate chat: what can I ask about
+
+Under the greeting, `GenerateChatPanel`'s "What can I ask about?" opens a short list of what the chat can
+build (`ASK_ABOUT`: the data types and, in plain words, what each can be filtered or grouped by), for a new
+dashboard and for "Edit with AI". It is in the chat rather than a link to the Help page, which is not
+enabled on every server. The list is written by hand from the AI integration service's `catalogue.md`:
+a data type or filter added to the catalogue is added to the list in the same change.
+
 ## Generate chat: a failed message
 
 A failed `POST /dashboards/generate` turn keeps the draft and answers in the chat with

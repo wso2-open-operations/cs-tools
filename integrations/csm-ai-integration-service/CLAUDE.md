@@ -128,6 +128,10 @@ out), so the catalogue and the rules that judge the model's output cannot drift 
 `go test ./internal/dashboard`, then the three steps above. In the local stack, an edit to the built-in catalogue needs this service's
 image rebuilt (`docker compose up -d --build csm-ai-integration-service`), not the backend's.
 
+**The chat tells users what they can ask about.** The webapp's `GenerateChatPanel` (`ASK_ABOUT`) lists, in
+plain words, the data types and filters this catalogue supports. It is not generated from this file: a data
+type or filter added here (or taken out) is changed in that list in the same change.
+
 **The model writes names as the user wrote them.** Products, versions, projects (key or name),
 customers (name or account number) and regions (the customer's sales region) are written as the request gives them, never ids; the backend
 resolves them after the reply and tells the user when one names nothing or several, so the catalogue
