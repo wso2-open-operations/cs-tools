@@ -59,6 +59,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgvalidation"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -285,11 +286,13 @@ func main() {
 	// PLG signups from Moesif: the Moesif reader and the PLG ingest client.
 	// Off by default; MOESIF_API_KEY is required once it is on.
 	plgMoesifSyncEnabled := envBool("PLG_MOESIF_SYNC_ENABLED", false)
+	plgValidationEnabled := envBool("PLG_REGISTRATION_VALIDATION_ENABLED", false)
 	var (
-		moesifClient     *moesif.Client
-		plgSignupsClient *plgsignups.Client
+		moesifClient        *moesif.Client
+		plgSignupsClient    *plgsignups.Client
+		plgValidationClient *plgvalidation.Client
 	)
-	if plgMoesifSyncEnabled {
+	if plgMoesifSyncEnabled || plgValidationEnabled {
 		moesifClient, err = moesif.NewClient(moesif.Config{
 			BaseURL: envString("MOESIF_BASE_URL", moesif.DefaultBaseURL),
 			APIKey:  mustEnv("MOESIF_API_KEY"),
@@ -309,6 +312,27 @@ func main() {
 		if err != nil {
 			slog.Error("failed to construct entity-service PLG ingest client", "err", err)
 			os.Exit(1)
+		}
+		plgValidationClient, err = plgvalidation.NewClient(plgvalidation.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG validation client", "err", err)
+			os.Exit(1)
+		}
+	}
+	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM"))
+	if plgValidationEnabled {
+		for i, p := range plgValidationProducts {
+			plgValidationProducts[i] = strings.ToUpper(p)
+			if _, ok := plgvalidation.Platforms[plgValidationProducts[i]]; !ok {
+				slog.Error("PLG_REGISTRATION_VALIDATION_PRODUCTS names a product with no Moesif platform", "product", p)
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -543,6 +567,8 @@ func main() {
 	usageRollupMonthlyTo, usageRollupMonthlyCc := recipientsFor(recipientOverrides, usageRollupMonthlyTaskName)
 	const plgMoesifSyncTaskName = "plg_moesif_sync"
 	plgMoesifSyncTo, plgMoesifSyncCc := recipientsFor(recipientOverrides, plgMoesifSyncTaskName)
+	const plgValidationTaskName = "plg_registration_validation"
+	plgValidationTo, plgValidationCc := recipientsFor(recipientOverrides, plgValidationTaskName)
 	const unresolvedProductsTaskName = "unresolved_products_digest"
 	unresolvedProductsTo, unresolvedProductsCc := recipientsFor(recipientOverrides, unresolvedProductsTaskName)
 	unresolvedProductsEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, unresolvedProductsTaskName))
@@ -1078,6 +1104,28 @@ func main() {
 			}, time.Now),
 			To: plgMoesifSyncTo,
 			Cc: plgMoesifSyncCc,
+		})
+	}
+
+	// Registration playbooks filled from Moesif activity, hourly, after the
+	// signups sync. A dry run (the default) derives and logs, writes nothing.
+	if plgValidationEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     plgValidationTaskName,
+			Schedule: scheduleFor(scheduleOverrides, plgValidationTaskName, "20 * * * *"),
+			Handler: plgvalidation.Run(moesifClient, plgValidationClient, plgvalidation.Options{
+				Products: plgValidationProducts,
+				Window:   time.Duration(envInt("PLG_REGISTRATION_VALIDATION_WINDOW_HOURS", 12)) * time.Hour,
+				Thresholds: plgvalidation.Thresholds{
+					Eligible: envInt("PLG_REGISTRATION_VALIDATION_ELIGIBLE_ACTIONS", 10),
+					Moderate: envInt("PLG_REGISTRATION_VALIDATION_MODERATE_ACTIONS", 5),
+				},
+				Grace:    time.Duration(envInt("PLG_REGISTRATION_VALIDATION_GRACE_HOURS", 24)) * time.Hour,
+				DryRun:   envBool("PLG_REGISTRATION_VALIDATION_DRY_RUN", true),
+				MaxPages: envInt("PLG_REGISTRATION_VALIDATION_MAX_PAGES", 100),
+			}, time.Now),
+			To: plgValidationTo,
+			Cc: plgValidationCc,
 		})
 	}
 

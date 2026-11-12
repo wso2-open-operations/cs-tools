@@ -855,6 +855,31 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
   Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
   sub-crons run one after another.
 
+## PLG registration validation
+
+**`plg_registration_validation`** (default `20 * * * *`) fills each product's registration playbook from
+its Moesif activity. **Off unless `PLG_REGISTRATION_VALIDATION_ENABLED=true`**, and a dry run (derive and
+log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. Only `AGENT_PLATFORM` (Moesif
+platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the others when they do.
+
+- **Each run**: `POST /plg/registrations/validation-queue` lists the product's REGISTRATION pairings signed
+  up within `WINDOW_HOURS` (12) plus `GRACE_HOURS` (24); Moesif is read for 50 companies per query
+  (company id, time and action only); `internal/plgactivity` counts the user's actions in the first
+  `WINDOW_HOURS` after signup; one `PUT /plg/pairings/{id}/registration-validation` per pairing writes the
+  summary and values. entity-service attaches the playbook, never overwrites an engineer's value, and
+  closes and abandons the pairing when the outcome is EXCLUDED. This client's id must be in
+  entity-service's `M2M_CLIENT_IDS`.
+- **Rules**: Agent Manager has no onboarding wizard, so the onboarding tasks are left to the engineer.
+  An action is any Agent Manager action, deletions included; `registered-gateway` and
+  `rotated-gateway-token` are not (the platform emits them minutes after signup), nor are account events
+  such as `Select Subscription Plan`. `ELIGIBLE_ACTIONS` (10) or more is ELIGIBLE and HIGH;
+  `MODERATE_ACTIONS` (5) or more is MODERATE, fewer LOW, none NONE, all MONITOR. A CORPORATE email is
+  ELIGIBLE; INTERNAL or DISPOSABLE is EXCLUDED.
+- **Email classification** is not set by this task yet; it uses a value an engineer set.
+- **Failures**: Moesif or the queue failing fails the run. A failed write is logged and the others go
+  on; the run then fails naming at most 10 pairing ids. A product without an active registration
+  playbook is skipped with a warning.
+
 ## Unresolved products digest
 
 `internal/unresolvedproducts.SendDigest`, registered as **`unresolved_products_digest`** (default
@@ -972,6 +997,7 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
+| `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `AGENT_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
 
