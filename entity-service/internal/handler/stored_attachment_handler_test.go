@@ -76,7 +76,7 @@ func (f *fakeStoredAttachmentSvc) ConfirmUpload(_ context.Context, req domain.Co
 }
 
 func (f *fakeStoredAttachmentSvc) Limits() domain.AttachmentLimits {
-	return domain.AttachmentLimits{MaxFileBytes: 1 << 30, MaxInlineImagesTotalBytes: 1 << 20}
+	return domain.AttachmentLimits{MaxFileBytes: 1 << 30, MaxInlineImagesTotalBytes: 1 << 20, DirectTransferAboveBytes: 16 << 20}
 }
 
 func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, body string) *httptest.ResponseRecorder {
@@ -484,7 +484,7 @@ func TestStoredAttachmentHandler_Limits(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"maxFileBytes":1073741824`) || !strings.Contains(rec.Body.String(), `"maxInlineImagesTotalBytes":1048576`) {
+	if !strings.Contains(rec.Body.String(), `"maxFileBytes":1073741824`) || !strings.Contains(rec.Body.String(), `"maxInlineImagesTotalBytes":1048576`) || !strings.Contains(rec.Body.String(), `"directTransferAboveBytes":16777216`) {
 		t.Errorf("body = %s", rec.Body.String())
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
