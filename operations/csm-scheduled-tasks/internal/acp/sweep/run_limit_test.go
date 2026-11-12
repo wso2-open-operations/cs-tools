@@ -34,7 +34,7 @@ func listedForLimit(now time.Time, acting []bool) *mockEntityReader {
 		if a {
 			end = now.AddDate(0, 0, 89)
 		}
-		parts = append(parts, fmt.Sprintf(`{"suspensionProcessOverridden": false, "id":"p%d","endDate":"%s","closureState":"Open"}`, i+1, end.Format(time.RFC3339)))
+		parts = append(parts, fmt.Sprintf(`{"subscriptionType":"subscription","suspensionProcessOverridden":false, "id":"p%d","endDate":"%s","closureState":"Open"}`, i+1, end.Format(time.RFC3339)))
 	}
 	body := `{"projects":[` + strings.Join(parts, ",") + `],"total":` + fmt.Sprint(len(acting)) + `,"hasMore":false}`
 	return &mockEntityReader{searchProjectsFn: func(context.Context, []byte) ([]byte, error) { return []byte(body), nil }}

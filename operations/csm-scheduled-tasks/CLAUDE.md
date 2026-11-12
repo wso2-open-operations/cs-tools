@@ -681,6 +681,15 @@ both places.
   - its `subscriptionType` is `evaluation_subscription`, `cloud_support`, `cloud_evaluation_support` or
     `internal` (`skipIneligible`, `Result.ProjectsFiltered`; decided from the project read, before the
     Salesforce read);
+  - its `subscriptionType` is missing, null, empty or not one ACP recognises (`knownSubscriptionTypes`,
+    entity-service's enum: `Result.ProjectsFilteredUnknownType`). **Fail closed**, since a project with
+    an unmapped type could be an evaluation, cloud support or internal one, and a notice or suspension
+    cannot be taken back. A WARN carries the count (never project names), `byUnknownProjectType` is on
+    the selection-filter line and `projectsSkippedUnknownType` on `acp: finished`. It does not consume
+    `ACP_DAILY_LIMIT`. Applies to a single-project run (`ACP_TEST_PROJECT_ID`) the same way; screening
+    only chooses who to re-read, so the type is checked from the re-read either way. A value added to
+    the enum is skipped until it is added to `knownSubscriptionTypes` (and, if ineligible, to
+    `ineligibleSubscriptionTypes`);
   - its account's status is not `Customer`, trimmed and case-insensitive (`Result.ProjectsFilteredStatus`).
     The status is the sales-entity `/customer-search` row's `status` (`salesentity.Customer.Status`; the
     live `isRealTime` query ACP uses selects the account status field), which is what CSM's account life
