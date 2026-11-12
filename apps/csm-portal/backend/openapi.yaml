@@ -11221,6 +11221,12 @@ paths:
       description: >-
         Read from sre-alert-core-service. Distinct values of the field among the alerts it still keeps that contain q,
         most recently seen first. The alert mute rule form suggests them, since a rule matches these strings.
+
+        Data exposure: the values are raw alert metadata from incidents seen in the last 30 days, and
+        unique_identifier in particular can carry hostnames, instance ids or customer references. They are
+        internal operational data, shown to the same audience that already reads those alerts' incidents in the
+        Operations area: PermViewOperations (CS engineers, admins and the security team), never a customer. A
+        unique_identifier search needs at least 3 characters, so the list cannot be enumerated from an empty query.
       operationId: getAlertFieldValues
       parameters:
         - name: field
