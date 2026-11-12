@@ -107,7 +107,7 @@ export default function OrganizationsPage() {
             <TextField
               fullWidth
               size="small"
-              label="Search by company id, organisation or email"
+              label="Search by Cloud organisation id, Cloud user id, organisation or email"
               value={query}
               onChange={(e) => resetTo(setQuery)(e.target.value)}
             />
@@ -209,7 +209,7 @@ export default function OrganizationsPage() {
                     key={org.id}
                     hover
                     sx={{ cursor: "pointer" }}
-                    onClick={() => navigate(`/plg/organizations/${org.id}`)}
+                    onClick={() => navigate(`/plg/organizations/${encodeURIComponent(org.moesifCompanyId ?? org.id)}`)}
                   >
                     <TableCell>
                       <CompanyName organizationId={org.id} companyId={org.moesifCompanyId} fontWeight={600} />

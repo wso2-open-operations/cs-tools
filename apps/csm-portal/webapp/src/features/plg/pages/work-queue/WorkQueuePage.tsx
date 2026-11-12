@@ -244,7 +244,7 @@ export default function WorkQueuePage() {
                       hover
                       sx={{ cursor: "pointer" }}
                       onClick={() =>
-                        navigate(`/plg/organizations/${item.organizationId}/${item.product.code}`)
+                        navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}/${item.product.code}`)
                       }
                     >
                       <TableCell>

@@ -148,7 +148,7 @@ export default function NewRegistrationsPage() {
                   <TableRow key={item.orgPlatformId} hover>
                     <TableCell
                       sx={{ cursor: "pointer" }}
-                      onClick={() => navigate(`/plg/organizations/${item.organizationId}/${item.product.code}`)}
+                      onClick={() => navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}/${item.product.code}`)}
                     >
                       <Stack>
                         <CompanyName
@@ -184,7 +184,7 @@ export default function NewRegistrationsPage() {
                         <Button
                           size="small"
                           onClick={() =>
-                            navigate(`/plg/organizations/${item.organizationId}/${item.product.code}`)
+                            navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}/${item.product.code}`)
                           }
                         >
                           Open

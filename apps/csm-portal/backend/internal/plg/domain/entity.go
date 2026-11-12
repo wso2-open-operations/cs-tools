@@ -477,9 +477,14 @@ type OrganizationDetail struct {
 	CompanyNameFromDomain *string   `json:"companyNameFromDomain"`
 	// MoesifCompanyID is the source's stable id for the company. Kept for
 	// troubleshooting and for whatever later wants to join on it.
-	MoesifCompanyID *string        `json:"moesifCompanyId"`
-	FieldsInherited bool           `json:"fieldsInherited"`
-	PlatformCards   []PlatformCard `json:"platformCards"`
+	MoesifCompanyID *string `json:"moesifCompanyId"`
+	// CloudUserID is the Cloud user id of the organisation's owner.
+	CloudUserID *string `json:"cloudUserId"`
+	// EmailClassification is the owner's email classification from a
+	// registration playbook; nil when unanswered.
+	EmailClassification *string        `json:"emailClassification"`
+	FieldsInherited     bool           `json:"fieldsInherited"`
+	PlatformCards       []PlatformCard `json:"platformCards"`
 }
 
 // ---------------------------------------------------------------------------

@@ -276,6 +276,10 @@ export interface OrganizationDetail {
   companyNameFromDomain: string | null;
   /** The source's stable id for the company. */
   moesifCompanyId: string | null;
+  /** The Cloud user id of the organisation's owner. */
+  cloudUserId?: string | null;
+  /** The owner's email classification from a registration playbook (CORPORATE, PERSONAL, ...). */
+  emailClassification?: string | null;
   /** True when the Lead fields were resolved from the registrant's other organisations. */
   fieldsInherited: boolean;
   platformCards: PlatformCard[];

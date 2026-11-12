@@ -12,12 +12,12 @@ import {
 import {
   ArrowLeft as ArrowBackIcon,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
 
 import { useOrganization, useSetOrganizationOwner } from "@features/plg/api/hooks";
-import type { UserRef } from "@features/plg/api/types";
+import type { OrganizationDetail, UserRef } from "@features/plg/api/types";
 import {
   EmptyState,
   ErrorBlock,
@@ -108,10 +108,29 @@ function OwnerEditor({
   );
 }
 
+/** The URL id of an organisation: its Cloud organisation id, else the record id. */
+function organizationPathId(org: Pick<OrganizationDetail, "id" | "moesifCompanyId">): string {
+  return org.moesifCompanyId ?? org.id;
+}
+
+/** Title-cases a playbook option code: PERSONAL reads "Personal". */
+function optionLabel(code: string): string {
+  return code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
+}
+
 export default function OrganizationDetailPage() {
   const { organizationId, productCode } = useParams();
   const navigate = useNavigate();
   const { data: org, isPending, error } = useOrganization(organizationId);
+
+  // A link by record id settles on the Cloud organisation id, the id people use.
+  const pathId = org ? organizationPathId(org) : undefined;
+  useEffect(() => {
+    if (pathId && organizationId !== pathId) {
+      const tab = productCode ? `/${productCode}` : "";
+      navigate(`/plg/organizations/${encodeURIComponent(pathId)}${tab}`, { replace: true });
+    }
+  }, [pathId, organizationId, productCode, navigate]);
 
   if (error) return <ErrorBlock error={error} />;
   if (isPending || !org) return <LoadingSpinner />;
@@ -141,7 +160,11 @@ export default function OrganizationDetailPage() {
         <Tabs
           value={selected}
           onChange={(_, value: string) =>
-            navigate(value === "overview" ? `/plg/organizations/${org.id}` : `/plg/organizations/${org.id}/${value}`)
+            navigate(
+              value === "overview"
+                ? `/plg/organizations/${encodeURIComponent(organizationPathId(org))}`
+                : `/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${value}`,
+            )
           }
           variant="scrollable"
           scrollButtons="auto"
@@ -206,6 +229,12 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
             }
           />
           <Field label="Registered email" value={<MaskedEmail organizationId={org.id} />} />
+          <Field
+            label="Email classification"
+            value={org.emailClassification ? optionLabel(org.emailClassification) : "—"}
+          />
+          <Field label="Cloud organisation id" value={org.moesifCompanyId ?? "—"} />
+          <Field label="Cloud user id" value={org.cloudUserId ?? "—"} />
           <Field label="Registered on" value={formatDate(org.createdOn)} />
           <Field label="Country" value={org.countryName ?? "—"} />
 
@@ -250,7 +279,9 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
                 {org.platformCards.map((card) => (
                   <Box
                     key={card.orgPlatformId}
-                    onClick={() => navigate(`/plg/organizations/${org.id}/${card.product.code}`)}
+                    onClick={() =>
+                      navigate(`/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${card.product.code}`)
+                    }
                     sx={{
                       p: 1.5,
                       border: "1px solid",

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/domain"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/repository"
 )
 
 // These tests exercise the BFF's validation, which is the layer that turns a
@@ -221,4 +222,29 @@ func derefOr(s *string, fallback string) string {
 		return fallback
 	}
 	return *s
+}
+
+type fakeOrgRepo struct {
+	repository.OrganizationRepository
+	got string
+}
+
+func (r *fakeOrgRepo) Get(_ context.Context, id string) (*domain.OrganizationDetail, error) {
+	r.got = id
+	return &domain.OrganizationDetail{ID: id}, nil
+}
+
+func TestOrganizationGetTakesTheRecordOrCloudID(t *testing.T) {
+	for _, id := range []string{"11111111-1111-1111-1111-111111111111", "01a1ba70-b841-718f-86f2-56d0de00d195", "demo-cloud-1"} {
+		repo := &fakeOrgRepo{}
+		if _, err := NewOrganizationService(repo).Get(context.Background(), id); err != nil || repo.got != id {
+			t.Errorf("%q: err = %v, repo got %q", id, err, repo.got)
+		}
+	}
+	for _, id := range []string{"", "has space", "../x"} {
+		repo := &fakeOrgRepo{}
+		if _, err := NewOrganizationService(repo).Get(context.Background(), id); err == nil || repo.got != "" {
+			t.Errorf("%q: err = %v, repo got %q; want refused before the repository", id, err, repo.got)
+		}
+	}
 }

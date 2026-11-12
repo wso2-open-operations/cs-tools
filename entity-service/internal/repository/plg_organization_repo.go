@@ -39,10 +39,13 @@ func buildConditions(f *domain.OrganizationSearchFilters, b *argBuilder) []strin
 
 	if q := strings.TrimSpace(f.Query); q != "" {
 		p := b.add("%" + strings.ToLower(q) + "%")
-		// The company id too: a cloud organisation has no name to search by.
+		// The Cloud organisation and user ids too: a Cloud organisation has no
+		// stored name to search by.
 		conds = append(conds, `(LOWER(v.organization_name) LIKE `+p+
 			` OR LOWER(v.registered_email) LIKE `+p+
-			` OR LOWER(v.moesif_company_id) LIKE `+p+`)`)
+			` OR LOWER(v.moesif_company_id) LIKE `+p+
+			` OR EXISTS (SELECT 1 FROM plg_organization o WHERE o.id = v.organization_id
+			             AND o.owner_user_id::TEXT LIKE `+p+`))`)
 	}
 	if v := strings.TrimSpace(f.OrganizationName); v != "" {
 		conds = append(conds, `LOWER(v.organization_name) LIKE `+b.add("%"+strings.ToLower(v)+"%"))
@@ -195,15 +198,31 @@ func (r *organizationRepository) attachPlatformStages(ctx context.Context, out [
 // Reading through plg_organization_v means a sparse second registration shows
 // its registrant's country and region rather than blanks, with FieldsInherited
 // marking that it happened.
+//
+// id is the record id or the Cloud organisation id; the record id wins.
 func (r *organizationRepository) Get(ctx context.Context, id string) (*domain.OrganizationDetail, error) {
 	const q = `
 		SELECT v.organization_id, v.organization_name, v.created_on,
 		       v.registered_email, v.registered_name,
 		       v.plg_cs_owner::TEXT, v.plg_cs_owner_email, v.plg_cs_owner_name,
 		       v.country_name, v.company_name_from_domain,
-		       v.moesif_company_id, v.fields_inherited
+		       v.moesif_company_id, o.owner_user_id::TEXT,
+		       (SELECT t.value_text
+		        FROM   plg_org_platform op
+		        JOIN   plg_playbook_run run ON run.org_platform_id = op.id
+		        JOIN   plg_playbook pb      ON pb.id = run.playbook_id
+		        JOIN   plg_playbook_run_task t ON t.playbook_run_id = run.id
+		        WHERE  op.organization_id = v.organization_id
+		          AND  pb.lifecycle_stage = 'REGISTRATION'
+		          AND  t.code = 'REGISTERED_EMAIL_CLASSIFICATION' AND t.value_text IS NOT NULL
+		        ORDER  BY t.updated_at DESC
+		        LIMIT  1),
+		       v.fields_inherited
 		FROM   plg_organization_v v
-		WHERE  v.organization_id::TEXT = $1`
+		JOIN   plg_organization o ON o.id = v.organization_id
+		WHERE  v.organization_id::TEXT = $1 OR v.moesif_company_id = $1
+		ORDER  BY (v.organization_id::TEXT = $1) DESC
+		LIMIT  1`
 
 	var (
 		d                              domain.OrganizationDetail
@@ -212,7 +231,7 @@ func (r *organizationRepository) Get(ctx context.Context, id string) (*domain.Or
 	err := r.db.QueryRow(ctx, q, id).Scan(&d.ID, &d.OrganizationName, &d.CreatedOn,
 		&d.RegisteredEmail, &d.RegisteredName, &ownerID, &ownerEmail, &ownerName,
 		&d.CountryName, &d.CompanyNameFromDomain,
-		&d.MoesifCompanyID, &d.FieldsInherited)
+		&d.MoesifCompanyID, &d.CloudUserID, &d.EmailClassification, &d.FieldsInherited)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, &apierror.NotFoundError{Msg: "organization not found"}
 	}
@@ -221,7 +240,7 @@ func (r *organizationRepository) Get(ctx context.Context, id string) (*domain.Or
 	}
 	d.Owner = userRef(ownerID, ownerEmail, ownerName)
 
-	if d.PlatformCards, err = r.loadPlatformCards(ctx, id); err != nil {
+	if d.PlatformCards, err = r.loadPlatformCards(ctx, d.ID); err != nil {
 		return nil, err
 	}
 	return &d, nil

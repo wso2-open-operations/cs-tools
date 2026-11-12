@@ -11106,10 +11106,9 @@ paths:
         - name: organizationId
           in: path
           required: true
-          description: "The organisation's id."
+          description: "The organisation's record id or its Cloud organisation id (moesifCompanyId)."
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: The organisation.
@@ -30541,6 +30540,15 @@ components:
           type: string
         moesifCompanyId:
           type: string
+          description: The Cloud organisation id.
+        cloudUserId:
+          type: string
+          nullable: true
+          description: The Cloud user id of the organisation's owner.
+        emailClassification:
+          type: string
+          nullable: true
+          description: The owner's email classification from a registration playbook.
         fieldsInherited:
           type: boolean
         platformCards:
