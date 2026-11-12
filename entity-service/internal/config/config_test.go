@@ -1612,6 +1612,19 @@ func TestLoad_AttachmentDirectTransfers(t *testing.T) {
 	}
 }
 
+// TestLoad_AttachmentDirectAboveFollowsLowerPortalCap: unset, the direct-transfer
+// size is the lower of 16 MiB and the portal cap; an explicit value is kept.
+func TestLoad_AttachmentDirectAboveFollowsLowerPortalCap(t *testing.T) {
+	t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "8")
+	if got := Load().AttachmentDirectMinBytes; got != 8<<20 {
+		t.Errorf("default with an 8 MiB portal cap = %d, want 8 MiB", got)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "12")
+	if got := Load().AttachmentDirectMinBytes; got != 12<<20 {
+		t.Errorf("explicit = %d, want 12 MiB", got)
+	}
+}
+
 // TestLoad_AttachmentDirectMax: a file sent straight to Azure may be up to 1 GiB
 // by default, which is also the ceiling.
 func TestLoad_AttachmentDirectMax(t *testing.T) {

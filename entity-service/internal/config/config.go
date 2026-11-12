@@ -1155,6 +1155,10 @@ func Load() *Config {
 	cfg.AttachmentMaxConcurrentTransfers = envPositiveInt("ATTACHMENT_MAX_CONCURRENT_TRANSFERS", 32)
 	cfg.AttachmentDirectTransfers = strings.EqualFold(strings.TrimSpace(envRenamed("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "ATTACHMENT_DIRECT_TRANSFERS_ENABLED")), "true")
 	cfg.AttachmentDirectMinBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES", 16, 100)
+	// Unset, the size above which files go direct is 16 MiB, or the portal cap when that is lower.
+	if cfg.AttachmentMaxBytes < cfg.AttachmentDirectMinBytes && !anyEnvSet("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MIN_BYTES") {
+		cfg.AttachmentDirectMinBytes = cfg.AttachmentMaxBytes
+	}
 	cfg.AttachmentDirectMaxBytes = envMegabytesRenamed("ATTACHMENT_DIRECT_UPLOAD_MAX_MB", "ATTACHMENT_DIRECT_MAX_MB", "ATTACHMENT_DIRECT_MAX_BYTES", maxAttachmentDirectMB, maxAttachmentDirectMB)
 	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()
@@ -1848,6 +1852,15 @@ func envRenamed(newKey, oldKey string) string {
 
 // envMegabytesRenamed is envMegabytes for a setting that has a new name: newKey
 // wins; when it is unset the older oldKey (and its bytes form oldBytesKey) is read.
+func anyEnvSet(keys ...string) bool {
+	for _, k := range keys {
+		if strings.TrimSpace(os.Getenv(k)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func envMegabytesRenamed(newKey, oldKey, oldBytesKey string, defMB, maxMB int64) int64 {
 	if strings.TrimSpace(os.Getenv(newKey)) != "" {
 		return envMegabytes(newKey, "", defMB, maxMB)
