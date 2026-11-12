@@ -190,7 +190,8 @@ export default function AlertMuteRuleFormPage(): JSX.Element {
       const detail = `${LIST_PATH}/${rule.id}`;
       navigate(detail, {
         replace: true,
-        state: backTarget === detail ? backState : { from: backTarget, parentState: backState ?? null },
+        // Editing from the rule's own page (whose URL may carry ?tab=): keep that page's Back, not a Back to itself.
+        state: backTarget.split("?")[0] === detail ? backState : { from: backTarget, parentState: backState ?? null },
       });
     };
     if (isEdit && id) update.mutate({ id, input }, { onSuccess });
