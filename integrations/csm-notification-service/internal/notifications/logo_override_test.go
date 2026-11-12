@@ -52,3 +52,31 @@ func TestSetLogoURLs_EmptyKeepsDefaults(t *testing.T) {
 		t.Errorf("empty values must keep the default logos")
 	}
 }
+
+func TestSetFooterIconURL_ReplacesEveryBakedIcon(t *testing.T) {
+	tmpls := footerIconTemplates()
+	orig := make([]string, len(tmpls))
+	for i, p := range tmpls {
+		orig[i] = *p
+	}
+	t.Cleanup(func() {
+		for i, p := range tmpls {
+			*p = orig[i]
+		}
+	})
+
+	SetFooterIconURL("https://example.test/icon.png")
+
+	if !strings.Contains(projectContactRegisteredTemplate, "https://example.test/icon.png") ||
+		strings.Contains(projectContactRegisteredTemplate, wso2FooterIconURL) {
+		t.Errorf("footer icon not replaced")
+	}
+}
+
+func TestSetFooterIconURL_EmptyKeepsDefault(t *testing.T) {
+	before := projectContactRegisteredTemplate
+	SetFooterIconURL("  ")
+	if projectContactRegisteredTemplate != before {
+		t.Errorf("empty value must keep the default footer icon")
+	}
+}

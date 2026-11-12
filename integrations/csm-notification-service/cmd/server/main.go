@@ -55,6 +55,8 @@ func main() {
 
 	// Optional logo overrides for every email; unset keeps the built-in URLs.
 	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_WHITE_URL"))
+	// Optional footer-icon override for the onboarding emails; unset keeps the built-in icon.
+	notifications.SetFooterIconURL(os.Getenv("EMAIL_FOOTER_ICON_URL"))
 
 	// Email is not yet configured for every deployment, so its config is read
 	// with os.Getenv (never mustEnv) — a missing or invalid configuration only

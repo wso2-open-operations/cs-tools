@@ -89,6 +89,11 @@ const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/lo
 // onboarding emails, written straight into those templates' HTML.
 const wso2LogoWhiteURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
 
+// wso2FooterIconURL is the small decorative icon next to the copyright line
+// in the onboarding emails' footer, written straight into those templates'
+// HTML the same way wso2LogoWhiteURL is.
+const wso2FooterIconURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/WSO2-Pulse-Orange.png"
+
 // bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder.
 // Done once per template at package init rather than on every Render* call,
 // since the logo never varies between emails.
@@ -141,6 +146,29 @@ func SetLogoURLs(logo, logoWhite string) {
 		if logoWhite != "" {
 			*t = strings.ReplaceAll(*t, wso2LogoWhiteURL, html.EscapeString(logoWhite))
 		}
+	}
+}
+
+// footerIconTemplates lists every template that carries the onboarding
+// emails' footer icon.
+func footerIconTemplates() []*string {
+	return []*string{
+		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
+		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
+	}
+}
+
+// SetFooterIconURL replaces the small decorative icon next to the copyright
+// line in the onboarding emails' footer. An empty value keeps the default.
+// It rewrites the already-baked templates, so call it once at startup,
+// before any email is rendered.
+func SetFooterIconURL(icon string) {
+	icon = strings.TrimSpace(icon)
+	if icon == "" {
+		return
+	}
+	for _, t := range footerIconTemplates() {
+		*t = strings.ReplaceAll(*t, wso2FooterIconURL, html.EscapeString(icon))
 	}
 }
 
