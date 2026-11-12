@@ -2014,7 +2014,7 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
 
 **Attachment limits for the portals.** `GET /attachments/limits` (any authenticated caller, `Cache-Control: private, max-age=300`)
-answers `{maxFileBytes, maxInlineImagesTotalBytes, directTransferAboveBytes}`: the largest attachment (the direct-upload maximum while direct uploads are on and above
+answers `{maxFileBytes, maxInlineImagesTotalBytes, directTransferThresholdBytes}`: the largest attachment (the direct-upload maximum while direct uploads are on and above
 `ATTACHMENT_VIA_PORTAL_MAX_MB`, else that limit), the inline-image total, and the size above which a file goes direct (`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`, 0 while direct transfers are off; the webapps use it to pick the download path). The portal webapps read it through their backends instead of
 keeping a copy in their own `window.config`; the checks at upload start and confirm stay the authority.
 

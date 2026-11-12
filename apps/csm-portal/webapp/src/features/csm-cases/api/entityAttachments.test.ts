@@ -1057,7 +1057,7 @@ describe("direct transfers of large files", () => {
         id: ID,
         name: "big.bin",
         size: DIRECT_TRANSFER_MIN_BYTES + 1,
-        directAboveBytes: DIRECT_TRANSFER_MIN_BYTES,
+        directTransferThresholdBytes: DIRECT_TRANSFER_MIN_BYTES,
         onSaved,
       });
       expect(done).toBe(true);
@@ -1083,7 +1083,7 @@ describe("direct transfers of large files", () => {
         const save = vi.fn();
         const done = await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size: 10, directAboveBytes: 5 },
+          { type: "work_item", id: ID, size: 10, directTransferThresholdBytes: 5 },
           save,
         );
         expect(done).toBe(true);
@@ -1106,7 +1106,7 @@ describe("direct transfers of large files", () => {
         const getResponse = vi.fn().mockResolvedValue(body());
         const done = await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size: 10, directAboveBytes: 5 },
+          { type: "work_item", id: ID, size: 10, directTransferThresholdBytes: 5 },
           vi.fn(),
         );
         expect(done).toBe(true);
@@ -1118,18 +1118,18 @@ describe("direct transfers of large files", () => {
     it("goes direct only above the server's size, never when it is 0 or the size is unknown", async () => {
       click();
       const cases = [
-        { size: 5, directAboveBytes: 5 },
-        { size: 10, directAboveBytes: 0 },
-        { size: undefined, directAboveBytes: 5 },
+        { size: 5, directTransferThresholdBytes: 5 },
+        { size: 10, directTransferThresholdBytes: 0 },
+        { size: undefined, directTransferThresholdBytes: 5 },
       ];
-      for (const { size, directAboveBytes } of cases) {
+      for (const { size, directTransferThresholdBytes } of cases) {
         const postEmpty = vi.fn();
         const getResponse = vi.fn().mockResolvedValue(
           new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } }),
         );
         await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size, directAboveBytes },
+          { type: "work_item", id: ID, size, directTransferThresholdBytes },
           vi.fn(),
         );
         expect(postEmpty).not.toHaveBeenCalled();
@@ -1146,7 +1146,7 @@ describe("direct transfers of large files", () => {
         id: ID,
         name: "big.bin",
         size: SIZE,
-        directAboveBytes: DIRECT_TRANSFER_MIN_BYTES,
+        directTransferThresholdBytes: DIRECT_TRANSFER_MIN_BYTES,
         ...over,
       });
       /** The backend answering any range of the SIZE-byte file. */

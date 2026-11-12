@@ -261,7 +261,7 @@ async function readRange(
  * `signal` cancels it: the requests in flight are aborted, a half-written picked
  * file is removed, and an AbortError ({@link isAbortError}) is thrown.
  *
- * A file above `directAboveBytes` (the server's value, 0 when direct transfers
+ * A file above `directTransferThresholdBytes` (the server's value, 0 when direct transfers
  * are off) is read from Azure through a signed link instead, so its bytes do not
  * pass through the backend: the same ranges into the picked file, or, with no
  * file to write to, the link handed to the browser. If that does not work for
@@ -275,7 +275,7 @@ async function readRange(
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; directAboveBytes?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; directTransferThresholdBytes?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
 ): Promise<void> {
   if (input.signal?.aborted) throw downloadCancelledError();
   // The save dialog must open inside the person's click, before any request.
@@ -285,10 +285,10 @@ export async function downloadStoredAttachment(
   const outcome = sink ? "saved" : "started";
   try {
     const direct =
-      input.directAboveBytes !== undefined &&
-      input.directAboveBytes > 0 &&
+      input.directTransferThresholdBytes !== undefined &&
+      input.directTransferThresholdBytes > 0 &&
       input.size !== undefined &&
-      input.size > input.directAboveBytes;
+      input.size > input.directTransferThresholdBytes;
     if (direct && (await downloadDirect(authFetch, input, sink))) {
       input.onSaved?.(outcome);
       return;
@@ -731,7 +731,7 @@ export async function sendFileInChunks(
  * Files above this size are uploaded to Azure through signed links (when the
  * backend says they may), so their bytes do not pass through the portal backend.
  * It is one chunk: smaller files, and every inline image, keep the backend path.
- * Downloads use the server's `directTransferAboveBytes` instead.
+ * Downloads use the server's `directTransferThresholdBytes` instead.
  */
 export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
 

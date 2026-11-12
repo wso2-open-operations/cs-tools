@@ -553,8 +553,8 @@ type DownloadArgs = {
 
 /**
  * Downloads an attachment under its own name. The save dialog (if the browser has
- * one) opens first, inside the person's click. A file above `directAboveBytes`
- * (the server's `directTransferAboveBytes`; 0 or none means never) is then read straight
+ * one) opens first, inside the person's click. A file above `directTransferThresholdBytes`
+ * (the server's `directTransferThresholdBytes`; 0 or none means never) is then read straight
  * from Azure through signed links: ranged into the picked file, or, with no file
  * to write to, handed to the browser as a download (outcome `started`, no in-page
  * progress). If that fails for any reason but a cancel, the file is streamed
@@ -563,15 +563,15 @@ type DownloadArgs = {
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
-  args: DownloadArgs & { directAboveBytes?: number },
+  args: DownloadArgs & { directTransferThresholdBytes?: number },
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
   if (args.signal?.aborted) throw downloadCancelledError();
   const target = await openDiskTarget(args.name || "attachment", args.size);
   if (target.kind === "cancelled") return true;
   const sink = target.kind === "sink" ? target.sink : undefined;
-  const { directAboveBytes = 0 } = args;
-  const direct = directAboveBytes > 0 && args.size !== undefined && args.size > directAboveBytes;
+  const { directTransferThresholdBytes = 0 } = args;
+  const direct = directTransferThresholdBytes > 0 && args.size !== undefined && args.size > directTransferThresholdBytes;
   if (direct && sink) {
     try {
       await downloadFromLink(api, args, sink, save);
@@ -776,7 +776,7 @@ export async function sendFileInChunks(
 /**
  * A directly uploaded file (the server said `directUpload`) is sent to Azure
  * through signed links only above this size, one chunk. Downloads take their
- * threshold from the server instead (`directTransferAboveBytes`).
+ * threshold from the server instead (`directTransferThresholdBytes`).
  */
 export const DIRECT_TRANSFER_MIN_BYTES = UPLOAD_CHUNK_BYTES;
 

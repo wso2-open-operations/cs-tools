@@ -875,7 +875,7 @@ func (s *storedAttachmentService) Limits() domain.AttachmentLimits {
 		MaxInlineImagesTotalBytes: s.limits.inlineTotalMax(),
 	}
 	if s.limits.DirectTransfers {
-		limits.DirectTransferAboveBytes = s.limits.DirectMinBytes
+		limits.DirectTransferThresholdBytes = s.limits.DirectMinBytes
 	}
 	return limits
 }

@@ -255,7 +255,7 @@ export function useDownloadCsmCaseAttachment(): (
   attachment: CaseAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
-  const { directTransferAboveBytes } = useAttachmentLimits();
+  const { directTransferThresholdBytes } = useAttachmentLimits();
   const { showSuccess } = useSuccessBanner();
   const notify = useCallback(
     (name: string, outcome: DownloadSaveOutcome) =>
@@ -270,10 +270,10 @@ export function useDownloadCsmCaseAttachment(): (
         id: attachment.id,
         name: attachment.filename,
         size: attachment.size,
-        directAboveBytes: directTransferAboveBytes,
+        directTransferThresholdBytes: directTransferThresholdBytes,
         onSaved: (outcome) => notify(attachment.filename, outcome),
       }),
-    [api, directTransferAboveBytes, notify],
+    [api, directTransferThresholdBytes, notify],
   );
 }
 

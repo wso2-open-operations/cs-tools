@@ -37,7 +37,7 @@ window.config = window.config ?? {
 // built-in defaults here. A test that needs other limits mocks this module
 // itself; the hook's own test calls `vi.unmock` to use the real one.
 vi.mock("@api/useAttachmentLimits", () => ({
-  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024, directTransferAboveBytes: 0 }),
+  default: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesTotalBytes: 1024 * 1024, directTransferThresholdBytes: 0 }),
 }));
 
 vi.mock("dompurify", async (importOriginal) => {

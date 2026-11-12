@@ -98,7 +98,7 @@ func directTransferOptions(cfg *config.Config, store service.FileStore) []servic
 		return nil
 	}
 	warnAttachmentSizeSettings(cfg)
-	slog.Info("direct attachment transfers are on", "aboveBytes", cfg.AttachmentDirectMinBytes)
+	slog.Info("direct attachment transfers are on", "thresholdBytes", cfg.AttachmentDirectMinBytes)
 	return []service.FileServiceOption{service.WithDirectTransfers(links)}
 }
 
@@ -107,7 +107,7 @@ func directTransferOptions(cfg *config.Config, store service.FileStore) []servic
 func warnAttachmentSizeSettings(cfg *config.Config) {
 	if cfg.AttachmentMaxBytes < cfg.AttachmentDirectMinBytes {
 		slog.Warn("a file between ATTACHMENT_VIA_PORTAL_MAX_MB and ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB is refused: it is too big for the portal and too small to go direct; keep ATTACHMENT_VIA_PORTAL_MAX_MB at least ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB",
-			"portalMaxBytes", cfg.AttachmentMaxBytes, "directAboveBytes", cfg.AttachmentDirectMinBytes)
+			"portalMaxBytes", cfg.AttachmentMaxBytes, "directTransferThresholdBytes", cfg.AttachmentDirectMinBytes)
 	}
 	if cfg.AttachmentDirectMaxBytes <= cfg.AttachmentMaxBytes {
 		slog.Warn("ATTACHMENT_DIRECT_UPLOAD_MAX_MB is not above ATTACHMENT_VIA_PORTAL_MAX_MB, so it does not raise the limit for large files; the portal limit applies",
