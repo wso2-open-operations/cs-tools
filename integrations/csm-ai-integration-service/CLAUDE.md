@@ -73,7 +73,11 @@ of `REGISTERED_EMAIL_CLASSIFICATION`, decided in this order (`source`):
   `internal/emaildomains/disposable_domains.txt`, built into the binary: no outbound call. A DISPOSABLE
   answer abandons the signup, so the list changes only by PR, where the diff is reviewed. Refresh it with
   `make disposable-list` (monthly is plenty: a domain not on it yet goes to the model) and never edit it by
-  hand. `TestTheCommittedListIsSafe` fails if it names a free provider or a WSO2 domain.
+  hand. `TestTheCommittedListIsSafe` fails if it names a free provider or a WSO2 domain. A real provider
+  the upstream list wrongly carries (`21cn.com`) goes in `notDisposable`, which is dropped on load, and in
+  `freeProviders`, so every regenerated list stays corrected.
+- **Logs never hold a gateway reply**: the SDK's error text includes the gateway's response body, which
+  could echo the domain, so a failed call is logged as its status only (`modelErrorForLog`).
 - **DNS never blocks a classification**: only a definite "not found" for both the mail server and the
   address makes a domain DISPOSABLE. Any other DNS failure (a timeout, a refused or blocked query) is logged
   as a warning, without the domain, and the model decides. Names are looked up with a trailing dot, so the

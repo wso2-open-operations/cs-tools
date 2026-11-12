@@ -37,7 +37,12 @@ var freeProviders = setOf(
 	"gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com",
 	"hotmail.com", "live.com", "msn.com", "icloud.com", "me.com", "aol.com",
 	"proton.me", "protonmail.com", "gmx.com", "zoho.com", "yandex.com", "mail.com",
+	"21cn.com",
 )
+
+// notDisposable are on the upstream list but are real mail providers. They are
+// dropped when the list is loaded, so a regenerated list stays corrected.
+var notDisposable = setOf("21cn.com")
 
 func setOf(domains ...string) map[string]struct{} {
 	m := make(map[string]struct{}, len(domains))
@@ -52,9 +57,13 @@ type Lists struct {
 	disposable map[string]struct{}
 }
 
-// NewLists loads the committed disposable list.
+// NewLists loads the committed disposable list, less notDisposable.
 func NewLists() *Lists {
-	return &Lists{disposable: parseDomains(disposableList)}
+	set := parseDomains(disposableList)
+	for d := range notDisposable {
+		delete(set, d)
+	}
+	return &Lists{disposable: set}
 }
 
 // Disposable reports whether domain is on the disposable list.

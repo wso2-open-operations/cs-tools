@@ -122,6 +122,7 @@ func TestClassifyRules(t *testing.T) {
 		"Mail.WSO2.com.": Internal,
 		"mailinator.com": Disposable,
 		"gmail.com":      Personal,
+		"21cn.com":       Personal, // on the upstream list, but a real provider
 		"gone.example":   Disposable, // no mail server and no address
 	} {
 		res, err := c.Classify(context.Background(), domain)

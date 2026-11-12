@@ -19,8 +19,11 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+
+	"github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/emaildomains"
 )
@@ -95,15 +98,28 @@ func writeClassifyError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.WarnContext(ctx, "email domain classify: unusable reply", "err", err)
 		writeError(w, http.StatusBadGateway, CodeUnusable, "the model's reply could not be used")
 	case errors.Is(err, emaildomains.ErrUsageLimit):
-		slog.WarnContext(ctx, "email domain classify: model usage limit reached", "err", err)
+		slog.WarnContext(ctx, "email domain classify: model usage limit reached", "err", modelErrorForLog(err))
 		writeError(w, http.StatusTooManyRequests, CodeUsageLimit, "the model's usage limit was reached")
 	case errors.Is(err, emaildomains.ErrCall) && isTimeout(err):
 		writeError(w, http.StatusGatewayTimeout, CodeTimeout, "the model call timed out")
 	case errors.Is(err, emaildomains.ErrCall):
-		slog.ErrorContext(ctx, "email domain classify: model call failed", "err", err)
+		slog.ErrorContext(ctx, "email domain classify: model call failed", "err", modelErrorForLog(err))
 		writeError(w, http.StatusBadGateway, CodeModelCallFailed, "the model could not be reached")
 	default:
-		slog.ErrorContext(ctx, "email domain classify: failed", "err", err)
+		slog.ErrorContext(ctx, "email domain classify: failed", "err", modelErrorForLog(err))
 		writeError(w, http.StatusInternalServerError, CodeInternal, "internal error")
 	}
+}
+
+// modelErrorForLog names a failed call without the gateway's reply, which
+// could echo the domain: a gateway error is reduced to its status.
+func modelErrorForLog(err error) string {
+	var apiErr *anthropic.Error
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("gateway status %d", apiErr.StatusCode)
+	}
+	if isTimeout(err) {
+		return "timeout"
+	}
+	return "call failed"
 }
