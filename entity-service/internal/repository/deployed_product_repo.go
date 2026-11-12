@@ -843,9 +843,17 @@ const createDeployedProductFromServiceNowQuery = `
 		$4, $5, TRUE,
 		$6, $7,
 		$8::uuid, $9::uuid, $10::uuid, $11::uuid,
-		$12::text::deployed_product_category_enum
+		COALESCE($12::text::deployed_product_category_enum, (` + projectTypeDefaultCategorySQL + `$8::uuid))
 	)
 	RETURNING id, created_on, created_by`
+
+// projectTypeDefaultCategorySQL, followed by the project id and a closing
+// parenthesis, is the default category of a project's type (migration 0291),
+// or NULL when the type has none or the project has no type. Both creates use
+// it as the category when the request names none.
+const projectTypeDefaultCategorySQL = `SELECT pt.default_deployed_product_category
+		FROM project p JOIN project_type pt ON pt.id = p.project_type_id
+		WHERE p.id = `
 
 // CreateDeployedProductFromServiceNow implements DeployedProductRepository.
 // name/life_cycle_stage/life_cycle_stage_status/update_level_info are left
@@ -855,7 +863,8 @@ const createDeployedProductFromServiceNowQuery = `
 // sources rather than inventing values ServiceNow itself doesn't set on
 // create. product_category is the one exception: see
 // domain.CreateDeployedProductRequest.Category's own doc comment for why
-// it's written here despite having no SN-side equivalent.
+// it's written here despite having no SN-side equivalent. Without a category
+// in the request it is the project type's default.
 func (r *deployedProductRepo) CreateDeployedProductFromServiceNow(ctx context.Context, req domain.CreateDeployedProductRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployedProduct, error) {
 	var category *string
 	if req.Category != nil {
@@ -927,14 +936,15 @@ const createDeployedProductQuery = `
 		next_series_number('IBITM'), $2, TRUE,
 		$3, $4,
 		$5::uuid, $6::uuid, $7::uuid, $8::uuid,
-		$9::text::deployed_product_category_enum
+		COALESCE($9::text::deployed_product_category_enum, (` + projectTypeDefaultCategorySQL + `$5::uuid))
 	)
 	RETURNING id, created_on, created_by`
 
 // CreateDeployedProduct implements DeployedProductRepository for the plain
 // PostgreSQL data source. The deployment must belong to the request's project
 // and the version to its product (an internal caller skips row-level security,
-// so these are checked here, not left to the insert policy). A number another
+// so these are checked here, not left to the insert policy). Without a
+// category in the request it is the project type's default. A number another
 // writer took between the sequence advance and the insert (a ServiceNow sync
 // still running) fails on deployed_product's unique number; that one case is
 // retried once, after advancing the sequence again.
