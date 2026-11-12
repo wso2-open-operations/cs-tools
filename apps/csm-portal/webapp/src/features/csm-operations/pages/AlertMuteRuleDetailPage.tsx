@@ -37,7 +37,8 @@ import AlertMuteRuleActions from "@features/csm-operations/components/AlertMuteR
 
 const LIST_PATH = "/operations/alert-mute-rules";
 
-const RULE_TAB_IDS = ["overview", "muted-alerts"] as const;
+// Sections below the overview card; add an id here (and a <Tab>) when the rule page gets another section.
+const RULE_TAB_IDS = ["muted-alerts"] as const;
 type RuleTabId = (typeof RULE_TAB_IDS)[number];
 
 /** Condition fields as the overview labels them; every condition must match for an alert to be muted. */
@@ -145,8 +146,8 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
   const now = useNow();
   const { data: rule, isLoading, isError, error } = useGetAlertMuteRule(id);
   const ruleState = rule ? alertMuteRuleState(rule, now) : undefined;
-  // Kept in the URL (`?tab=`) so a link to a rule's muted alerts opens on that tab.
-  const { activeTab, setActiveTab } = useQueryParamTabs<RuleTabId>(RULE_TAB_IDS, "overview");
+  // Kept in the URL (`?tab=`) so a link can open a specific section once there is more than one.
+  const { activeTab, setActiveTab } = useQueryParamTabs<RuleTabId>(RULE_TAB_IDS, "muted-alerts");
   const paging = useMutedAlertsPaging();
   const muted = useAlertMuteRuleMutedAlerts(
     rule && ruleState !== "scheduled" ? id : undefined,
@@ -202,28 +203,16 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
         </Box>
         <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
           <AlertMuteRuleActions
-          rule={rule}
-          state={state}
-          variant="buttons"
-          returnTo={`${location.pathname}${location.search}`}
-          parentState={location.state ?? null}
-          onDeleted={() => navigate(backTarget, { replace: true, state: backState })}
-        />
+            rule={rule}
+            state={state}
+            variant="buttons"
+            returnTo={`${location.pathname}${location.search}`}
+            parentState={location.state ?? null}
+            onDeleted={() => navigate(backTarget, { replace: true, state: backState })}
+          />
         </Box>
       </Box>
 
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as RuleTabId)} variant="scrollable" scrollButtons="auto">
-          <Tab value="overview" label="Overview" sx={{ minHeight: 44, textTransform: "none" }} />
-          <Tab
-            value="muted-alerts"
-            label={`Muted alerts${muted.data ? ` (${muted.data.total})` : ""}`}
-            sx={{ minHeight: 44, textTransform: "none" }}
-          />
-        </Tabs>
-      </Box>
-
-      {activeTab === "overview" && (
       <OverviewCard
         summary={[
           ...rule.conditions.map((c) => c.value),
@@ -244,7 +233,17 @@ export default function AlertMuteRuleDetailPage(): JSX.Element {
           ["Description", rule.description || "—"],
         ]}
       />
-      )}
+
+      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as RuleTabId)} variant="scrollable" scrollButtons="auto">
+          <Tab
+            value="muted-alerts"
+            label={`Muted alerts${muted.data ? ` (${muted.data.total})` : ""}`}
+            sx={{ minHeight: 44, textTransform: "none" }}
+          />
+        </Tabs>
+      </Box>
+
       {activeTab === "muted-alerts" && (
         <AlertMuteRuleMutedAlerts
           scheduled={state === "scheduled"}
