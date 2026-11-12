@@ -3000,6 +3000,28 @@ func TestDispatcher_Handle_SubjectLine_StandardFormat(t *testing.T) {
 	}
 }
 
+// TestDispatcher_Handle_SubjectLine_UsesConfiguredCompanyName: subjectLine
+// builds "[<company> Support] ..." from notifications.CompanyName(), not a
+// hardcoded "WSO2" — a deployment that configures EMAIL_TEMPLATE_COMPANY_NAME
+// must see its own name in the subject, not WSO2's.
+func TestDispatcher_Handle_SubjectLine_UsesConfiguredCompanyName(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	mock := &mockEmailSender{}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["test-recipient@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 email sent, got %d", len(mock.calls))
+	}
+	if want := "[Acme Support] (WSO2-1000/CS0001001) Something broke"; mock.calls[0].subject != want {
+		t.Errorf("subject = %q, want %q", mock.calls[0].subject, want)
+	}
+}
+
 // crRecord builds a change_request.approval_requested record. audience picks
 // which portal the link should point at.
 func crRecord(audience, projectID string) eventbus.Record {

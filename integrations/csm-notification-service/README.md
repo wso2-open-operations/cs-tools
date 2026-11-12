@@ -311,6 +311,7 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `EMAIL_LOGO_DARK_URL` | No | built-in logo if unset | Dark-coloured logo, shown on the light header of most emails. Must be a publicly fetchable `https` URL (mail clients do not load `data:` images). | `https://example.com/logo.png` |
 | `EMAIL_LOGO_WHITE_URL` | No | built-in white logo if unset | White-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-white.png` |
 | `EMAIL_FOOTER_ICON_URL` | No | built-in icon if unset | Small decorative icon next to the footer copyright line in the onboarding emails. | `https://example.com/footer-icon.png` |
+| `EMAIL_TEMPLATE_COMPANY_NAME` | No | `WSO2` | Company name in the footer disclaimer, the signoff, and the `[... Support]` email subject prefix. Does not touch logo alt text, copyright lines, or `... Support`/`... Support Portal` titles. | `Acme` |
 | `EMAIL_SENDING_ENABLED` | No | `true` | Killswitch for case.* email. `false` logs instead of sending, regardless of debug mode. Does not affect Chat or calls. | `false` |
 | `EMAIL_DEBUG_MODE` | No | off (exact `true` to enable) | Redirect case.* email to `EMAIL_DEBUG_RECIPIENTS`. Links are still resolved from the real recipients. | `true` |
 | `EMAIL_DEBUG_RECIPIENTS` | No | none | Comma-separated test addresses. With debug on and this empty, the email is skipped. | `qa@example.com` |

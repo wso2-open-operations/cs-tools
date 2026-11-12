@@ -172,6 +172,91 @@ func SetFooterIconURL(icon string) {
 	}
 }
 
+// defaultCompanyName is the name baked into every template by default.
+const defaultCompanyName = "WSO2"
+
+// companyName is the name every Render* subject/body currently carries,
+// read by CompanyName (e.g. for the dispatch package's email subjects).
+// companyNameHTML is the same name HTML-escaped, the baseline the next
+// SetTemplateCompanyName call rewrites from — tracking it (rather than
+// always diffing from defaultCompanyName) is what makes repeated calls
+// correctly reversible, instead of only ever matching the original bake.
+// Both are written only by SetTemplateCompanyName, so call it once at
+// startup, before any email is rendered, and never concurrently with one.
+var (
+	companyName     = defaultCompanyName
+	companyNameHTML = defaultCompanyName
+)
+
+// CompanyName returns the name configured by SetTemplateCompanyName (or
+// defaultCompanyName if it was never called, or called with an empty value).
+func CompanyName() string {
+	return companyName
+}
+
+// companyNamePhrases lists every fixed phrase (not a bare "WSO2") that
+// carries the company name in a template body — never a bare "WSO2", since
+// that also appears in places this config must not touch: the logo alt
+// text, "WSO2 LLC" copyright lines, and "WSO2 Support"/"WSO2 Support
+// Portal" titles and headings.
+func companyNamePhrases(from, to string) [4][2]string {
+	return [4][2]string{
+		{
+			fmt.Sprintf("This message was sent by %s's support system.", from),
+			fmt.Sprintf("This message was sent by %s's support system.", to),
+		},
+		{
+			fmt.Sprintf("This automated message was sent by %s's support system. Please do not reply to this email.", from),
+			fmt.Sprintf("This automated message was sent by %s's support system. Please do not reply to this email.", to),
+		},
+		{
+			fmt.Sprintf("Cheers!<br>The %s Team", from),
+			fmt.Sprintf("Cheers!<br>The %s Team", to),
+		},
+		{
+			fmt.Sprintf("Best Regards,<br>%s Team", from),
+			fmt.Sprintf("Best Regards,<br>%s Team", to),
+		},
+	}
+}
+
+// companyNameTemplates lists every template that carries one of
+// companyNamePhrases' fixed phrases.
+func companyNameTemplates() []*string {
+	return []*string{
+		&caseCreatedTemplate, &caseEscalatedTemplate, &internalNoteTemplate, &caseAssignedTemplate,
+		&crApprovalRequestedTemplate, &crPlanDateNoticeTemplate, &commentAddedTemplate,
+		&severityChangedTemplate, &projectReactivatedTemplate, &slaBreachTeamTemplate,
+		&slaBreachAssigneeTemplate, &statusChangedTemplate,
+		&projectContactInvitedNewTemplate, &projectContactInvitedExistingTemplate,
+		&projectContactInvitedReminderTemplate, &projectContactRegisteredTemplate,
+	}
+}
+
+// SetTemplateCompanyName replaces the company name in the handful of fixed
+// phrases every template body carries (the "sent by ... support system"
+// footer disclaimer and the "... Team" signoff) — not the bare word "WSO2"
+// wherever it appears, which would also corrupt the logo alt text, "WSO2
+// LLC" copyright lines, and "WSO2 Support"/"WSO2 Support Portal" titles.
+// An empty value keeps the current name. It rewrites the already-baked
+// templates and updates CompanyName's return value, so call it once at
+// startup, before any email is rendered.
+func SetTemplateCompanyName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	escaped := html.EscapeString(name)
+	phrases := companyNamePhrases(companyNameHTML, escaped)
+	for _, t := range companyNameTemplates() {
+		for _, phrase := range phrases {
+			*t = strings.ReplaceAll(*t, phrase[0], phrase[1])
+		}
+	}
+	companyName = name
+	companyNameHTML = escaped
+}
+
 // safeLinkSchemes is the allow-list of URL schemes sanitizeRichText permits
 // on an <a href>. Everything else (javascript:, data:, vbscript:, a bare
 // relative path with no scheme, ...) drops the tag — the link's own text

@@ -80,3 +80,56 @@ func TestSetFooterIconURL_EmptyKeepsDefault(t *testing.T) {
 		t.Errorf("empty value must keep the default footer icon")
 	}
 }
+
+func TestSetTemplateCompanyName_ReplacesEveryBakedPhrase(t *testing.T) {
+	tmpls := companyNameTemplates()
+	orig := make([]string, len(tmpls))
+	for i, p := range tmpls {
+		orig[i] = *p
+	}
+	t.Cleanup(func() {
+		for i, p := range tmpls {
+			*p = orig[i]
+		}
+		companyName = defaultCompanyName
+		companyNameHTML = defaultCompanyName
+	})
+
+	SetTemplateCompanyName("Acme")
+
+	if CompanyName() != "Acme" {
+		t.Errorf("CompanyName() = %q, want %q", CompanyName(), "Acme")
+	}
+	if !strings.Contains(caseCreatedTemplate, "This message was sent by Acme's support system.") ||
+		strings.Contains(caseCreatedTemplate, "WSO2's support system") {
+		t.Errorf("footer disclaimer not replaced in caseCreatedTemplate")
+	}
+	if !strings.Contains(projectReactivatedTemplate, "This automated message was sent by Acme's support system.") {
+		t.Errorf("reactivated-email disclaimer not replaced")
+	}
+	if !strings.Contains(projectReactivatedTemplate, "Best Regards,<br>Acme Team") {
+		t.Errorf("Best Regards signoff not replaced")
+	}
+	if !strings.Contains(projectContactRegisteredTemplate, "Cheers!<br>The Acme Team") {
+		t.Errorf("Cheers signoff not replaced")
+	}
+	// Must not touch the logo alt text, copyright line, or "... Support" titles —
+	// only the disclaimer/signoff phrases above.
+	if !strings.Contains(projectContactRegisteredTemplate, `alt="WSO2"`) {
+		t.Errorf("unrelated bare \"WSO2\" occurrence (logo alt text) must be left untouched")
+	}
+	if !strings.Contains(projectContactRegisteredTemplate, "WSO2 LLC. All rights reserved.") {
+		t.Errorf("unrelated bare \"WSO2\" occurrence (copyright line) must be left untouched")
+	}
+}
+
+func TestSetTemplateCompanyName_EmptyKeepsDefault(t *testing.T) {
+	before := caseCreatedTemplate
+	SetTemplateCompanyName("  ")
+	if caseCreatedTemplate != before {
+		t.Errorf("empty value must keep the default company name")
+	}
+	if CompanyName() != defaultCompanyName {
+		t.Errorf("CompanyName() = %q, want default %q", CompanyName(), defaultCompanyName)
+	}
+}
