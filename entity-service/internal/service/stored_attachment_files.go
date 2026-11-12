@@ -686,11 +686,9 @@ func (s *storedAttachmentFileService) DeleteAttachment(ctx context.Context, req 
 	return nil
 }
 
-// archive keeps a deleted attachment's file under csm/archive/<number>_<name>
-// instead of removing it, so it can be recovered until a retention rule (an Azure
-// lifecycle rule on that prefix, or a scheduled job) removes it for good. It is
-// best effort: when the file cannot be copied (the copy needs an account key) it
-// stays where it is, and the row is already marked DELETED so nobody can read it.
+// archive moves a deleted attachment's file to csm/archive/ so it can be recovered
+// until a retention rule removes it. Best effort: if the copy fails (it needs an
+// account key) the file stays where it is; the row is already DELETED.
 func (s *storedAttachmentFileService) archive(ctx context.Context, deleted domain.DeletedStoredAttachment) {
 	if s.store == nil || deleted.StorageKey == "" {
 		return

@@ -191,8 +191,8 @@ type InlineImageRelocatedRequest struct {
 	StorageKey string `json:"storageKey"`
 }
 
-// DeletedStoredAttachment is what a delete leaves to do: where the file is and
-// what it is called, so it can be set aside. Empty when nothing was deleted now.
+// DeletedStoredAttachment is the file a delete leaves to be set aside.
+// Empty when nothing was deleted by this call.
 type DeletedStoredAttachment struct {
 	Number     string
 	Name       string

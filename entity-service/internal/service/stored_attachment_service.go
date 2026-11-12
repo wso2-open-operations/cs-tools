@@ -789,7 +789,7 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		return domain.DeletedStoredAttachment{}, &apierror.ConflictError{Msg: "this attachment is not stored, so it cannot be deleted"}
 	}
 
-	// The same parent lookup the upload uses, so a draft (hung from its project) is found too.
+	// Same lookup as an upload, so a draft (hung from its project) is found too.
 	parent, err := s.parentOf(ctx, req.Kind, row)
 	if err != nil {
 		return domain.DeletedStoredAttachment{}, err
@@ -798,7 +798,7 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		return domain.DeletedStoredAttachment{}, &apierror.ConflictError{Msg: closedParentDeleteMessage}
 	}
 
-	// The row is only marked: the file is set aside by the caller (the file service).
+	// Only the row is marked here; the file service sets the file aside.
 	ok, err := s.repo.MarkDeleted(repository.WithSystemIdentity(ctx), req.Kind, row.ID, email)
 	if err != nil {
 		return domain.DeletedStoredAttachment{}, err
