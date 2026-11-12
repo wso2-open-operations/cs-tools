@@ -1414,6 +1414,12 @@ revisited.
   returns empty (no error) — same "can't resolve, skip" posture as every
   other Postgres-only gap in this file.
 
+  `case.created` also carries the creator's email as optional
+  `ReporterEmail` (nil-safe from `cv.CreatedBy`); csm-notification-service
+  uses it, and `case.comment_added`'s `AuthorEmail`/`CaseType`, to drop an
+  announcement's author from `Recipients`. Filtering happens there, not
+  here, so entity-service still publishes the full audience.
+
   `csm-notification-service`'s own `handleCaseCreated` mirrors this split
   on the Chat side: its Google Chat alert is skipped entirely for these
   same four non-`"case"` types (an exclude-list keyed on

@@ -1352,8 +1352,17 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	fullDescription := d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID)
 	description := d.lazyInlineImages(ctx, fullDescription, inlineimages.Scope{WorkItemID: p.CaseID})
 
-	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
-	if err != nil {
+	var (
+		groups       map[string][]string
+		groupUserIDs map[string][]string
+		err          error
+	)
+	p.Recipients = withoutAnnouncementAuthor(p.Recipients, p.CaseType, p.ReporterEmail)
+	if len(p.Recipients) == 0 {
+		// The announcement's author was its only recipient: nothing to email,
+		// and not an error (Validate already guaranteed a non-empty list).
+		slog.InfoContext(ctx, "dispatch: case.created has no recipients left after excluding the announcement author, email skipped", "caseId", p.CaseID)
+	} else if groups, groupUserIDs, err = d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID); err != nil {
 		errs = append(errs, err)
 	} else {
 		caseRef := displayCaseRef(p.CaseNumber, p.CaseID)
@@ -1499,6 +1508,14 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 		d.slaEngine.CompleteResponseClock(ctx, p.CaseID)
 	}
 
+	p.Recipients = withoutAnnouncementAuthor(p.Recipients, p.CaseType, p.AuthorEmail)
+	if len(p.Recipients) == 0 {
+		// The comment's author was the announcement's only recipient: nothing
+		// to email, and not an error (Validate already guaranteed a non-empty
+		// list).
+		slog.InfoContext(ctx, "dispatch: case.comment_added has no recipients left after excluding the announcement comment author, email skipped", "caseId", p.CaseID)
+		return nil
+	}
 	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
 	if err != nil {
 		return err
@@ -2126,6 +2143,27 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	}
 
 	return errors.Join(errs...)
+}
+
+// withoutAnnouncementAuthor drops authorEmail (the announcement's creator on
+// case.created, the comment's author on case.comment_added) from recipients
+// when caseType is ANNOUNCEMENT: the author already knows what they wrote, and
+// the audience list (every project contact in a role) would otherwise email
+// them their own message. Matching is case-insensitive and trimmed. Any other
+// case type, or an empty authorEmail (an older publisher), returns recipients
+// unchanged. The result may be empty; the caller decides what that means.
+func withoutAnnouncementAuthor(recipients []string, caseType, authorEmail string) []string {
+	author := strings.TrimSpace(authorEmail)
+	if author == "" || !strings.EqualFold(strings.TrimSpace(caseType), "ANNOUNCEMENT") {
+		return recipients
+	}
+	kept := make([]string, 0, len(recipients))
+	for _, r := range recipients {
+		if !strings.EqualFold(strings.TrimSpace(r), author) {
+			kept = append(kept, r)
+		}
+	}
+	return kept
 }
 
 // groupByLink resolves each recipient's own case link (see

@@ -232,9 +232,14 @@ func (t Type) IsKnown() bool {
 // construction.
 type CaseCreatedPayload struct {
 	ReporterName string `json:"reporterName"`
-	ProjectName  string `json:"projectName"`
-	ProjectID    string `json:"projectId"`
-	CaseID       string `json:"caseId"`
+	// ReporterEmail is the case creator's email. Optional: dispatch uses it
+	// only to keep an announcement's creator off its own recipient list;
+	// absent means no filtering. Entity-service must be deployed after this
+	// service, since the strict decode rejects an unknown field.
+	ReporterEmail string `json:"reporterEmail,omitempty"`
+	ProjectName   string `json:"projectName"`
+	ProjectID     string `json:"projectId"`
+	CaseID        string `json:"caseId"`
 	// CaseNumber is the case's human-readable reference (e.g. "CS0023001")
 	// — purely for display in the email body/subject; CaseID (the UUID)
 	// remains what's used for link construction and the caseId/entityId
@@ -381,9 +386,11 @@ type CommentAddedPayload struct {
 	// frustration-detection Chat alert to the Migration audience instead of
 	// the usual team/Incident Monitor routing, when the comment landed on a
 	// migration engagement. CaseType is entity-service's uppercase
-	// strings.ToUpper(cv.Type) (e.g. "ENGAGEMENT"); EngagementType is
-	// entity-service's own lowercase value (e.g. "migration"). Both empty
-	// for every non-engagement case-like type.
+	// strings.ToUpper(cv.Type) (e.g. "ENGAGEMENT", "ANNOUNCEMENT");
+	// EngagementType is entity-service's own lowercase value (e.g.
+	// "migration"), empty for every non-engagement type. CaseType is also
+	// what lets dispatch keep an announcement's comment author off its
+	// recipient list.
 	CaseType       string `json:"caseType,omitempty"`
 	EngagementType string `json:"engagementType,omitempty"`
 }

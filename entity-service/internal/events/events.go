@@ -433,10 +433,15 @@ type CaseTypeChangedPayload struct {
 // equivalent on the wire (see the notification service's decodeStrict).
 type CaseCreatedPayload struct {
 	ReporterName string `json:"reporterName"`
-	ProjectName  string `json:"projectName"`
-	ProjectID    string `json:"projectId"`
-	CaseID       string `json:"caseId"`
-	CaseNumber   string `json:"caseNumber,omitempty"`
+	// ReporterEmail is the case creator's email, so csm-notification-service
+	// can keep an announcement's creator off its own recipient list. Deploy
+	// csm-notification-service first: its strict decode rejects an unknown
+	// field.
+	ReporterEmail string `json:"reporterEmail,omitempty"`
+	ProjectName   string `json:"projectName"`
+	ProjectID     string `json:"projectId"`
+	CaseID        string `json:"caseId"`
+	CaseNumber    string `json:"caseNumber,omitempty"`
 	// WSO2CaseID — see CommentAddedPayload's own doc comment.
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`

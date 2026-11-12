@@ -1332,9 +1332,10 @@ func publishCaseCreatedEvent(
 		return
 	}
 
-	reporterName := ""
+	reporterName, reporterEmail := "", ""
 	if cv.CreatedBy != nil {
 		reporterName = cv.CreatedBy.Name
+		reporterEmail = cv.CreatedBy.Email
 	}
 	product := caseProductName(cv)
 
@@ -1343,6 +1344,7 @@ func publishCaseCreatedEvent(
 
 	payload, err := json.Marshal(events.CaseCreatedPayload{
 		ReporterName:         reporterName,
+		ReporterEmail:        reporterEmail,
 		ProjectName:          cv.ProjectDetails.Name,
 		ProjectID:            cv.ProjectDetails.ID,
 		CaseID:               caseID,
