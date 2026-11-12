@@ -96,8 +96,8 @@ declare global {
       CSM_PORTAL_MAINTENANCE_BANNER_ACTION_URL?: string;
       CSM_PORTAL_CHATBOT_WEBSOCKET_URL?: string;
       /**
-       * Destination for the header's "Report an issue" control
-       * (ReportIssueButton.tsx). Optional; unset hides the control entirely
+       * Destination for the avatar menu's "Report an issue" control
+       * (UserProfile.tsx). Optional; unset hides the control entirely
        * rather than offering a link with nowhere to go.
        */
       CSM_PORTAL_REPORT_ISSUE_URL?: string;

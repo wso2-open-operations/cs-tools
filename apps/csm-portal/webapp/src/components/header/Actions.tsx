@@ -23,7 +23,6 @@ import {
 import type { JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import UserProfile from "@components/header/UserProfile";
-import ReportIssueButton from "@components/header/ReportIssueButton";
 import RecentViewsButton from "@features/csm-recent/components/RecentViewsButton";
 import PinThisPageButton from "@features/csm-recent/components/PinThisPageButton";
 
@@ -40,7 +39,6 @@ export default function Actions({ hideProjectControls = false }: ActionsProps): 
 
   return (
     <HeaderUI.Actions>
-      <ReportIssueButton />
       <ColorSchemeToggle />
       {showProjectControls && <PinThisPageButton />}
       {showProjectControls && <RecentViewsButton />}

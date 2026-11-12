@@ -15,10 +15,10 @@
 // under the License.
 
 /**
- * Destination for the header's "Report an issue" control
+ * Destination for the avatar menu's "Report an issue" control
  * (CSM_PORTAL_REPORT_ISSUE_URL). Read at call time (not module load) so a
  * test can set `window.config` per case. Unset (or not a string) returns
- * "", which `ReportIssueButton` treats as "hide the control".
+ * "", which `UserProfile` treats as "hide the control".
  */
 export function getReportIssueUrl(): string {
   const raw = window.config?.CSM_PORTAL_REPORT_ISSUE_URL;
