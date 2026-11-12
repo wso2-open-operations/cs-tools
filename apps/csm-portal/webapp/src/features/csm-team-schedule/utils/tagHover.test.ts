@@ -25,7 +25,7 @@ describe("tagHoverText", () => {
   it("adds the description and says when the tag takes people off the timesheet", () => {
     expect(
       tagHoverText({ label: "SRE rotation", description: " On the SRE rota ", excludesFromTimesheet: true }),
-    ).toBe("SRE rotation — On the SRE rota — Not on the timesheet");
+    ).toBe("SRE rotation — On the SRE rota — Exclude from timesheet");
   });
 
   it("leaves out a blank description", () => {

@@ -32,6 +32,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/holidays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
@@ -361,6 +362,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// only in Postgres, so its routes are registered only when a pool is
 	// configured.
 	var scheduleHandler *handler.ScheduleHandler
+	// The Team Schedule's public holidays (migration 0283): the roster reads
+	// the stored copy; a daily refresh fills it from the calendar-events and
+	// employee services when those connections are configured.
+	var publicHolidayHandler *handler.PublicHolidayHandler
+	// Working on a public holiday (CRE, migration 0283): the Public holiday
+	// tags, the teams' confirmations and the reminders.
+	var holidayAvailabilityHandler *handler.HolidayAvailabilityHandler
 	// Customer engagement allocations for the CSM Allocations page: Postgres-only,
 	// internal staff only.
 	var engagementAllocationViewHandler *handler.EngagementAllocationViewHandler
@@ -1296,9 +1304,52 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		announcementRequestHandler = handler.NewAnnouncementRequestHandler(
 			service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db), activeCaseSvc, accessSvc),
 		)
-		scheduleHandler = handler.NewScheduleHandler(
-			service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles),
-		)
+		scheduleSvc := service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles)
+		scheduleHandler = handler.NewScheduleHandler(scheduleSvc)
+		// Keep both nil interfaces when unconfigured: a nil *Client stored in
+		// the interface would make the service think it has a source.
+		var holidayCalendar service.HolidayCalendar
+		if cfg.HolidayCalendarConfigured() {
+			holidayCalendar = holidays.NewCalendarClient(cfg.HolidayCalendarBaseURL, holidays.Credentials{
+				TokenURL: cfg.HolidayCalendarTokenURL, ClientID: cfg.HolidayCalendarClientID, ClientSecret: cfg.HolidayCalendarClientSecret,
+			})
+		}
+		var employeeLocations service.EmployeeLocations
+		if cfg.HREntityConfigured() {
+			employeeLocations = holidays.NewEmployeeClient(cfg.HREntityBaseURL, holidays.Credentials{
+				TokenURL: cfg.HREntityTokenURL, ClientID: cfg.HREntityClientID, ClientSecret: cfg.HREntityClientSecret,
+			})
+		}
+		publicHolidayRepo := repository.NewPublicHolidayRepository(db)
+		// Working on a public holiday (CRE): every refresh places the coming
+		// weeks' Public holiday tags; the leads mark who works by removing
+		// them and confirm the team. Whoever may change a team's rota may
+		// confirm it (the schedule service's own check).
+		rotaZone, zoneErr := time.LoadLocation("Asia/Colombo")
+		if zoneErr != nil {
+			rotaZone = time.UTC
+		}
+		holidayAvailabilitySvc := service.NewHolidayAvailabilityService(
+			repository.NewHolidayAvailabilityRepository(db), publicHolidayRepo, accessSvc,
+			service.RotaWriterCheck(scheduleSvc), rotaZone)
+		holidayAvailabilityHandler = handler.NewHolidayAvailabilityHandler(holidayAvailabilitySvc)
+		publicHolidaySvc := service.WithHolidayTagPlacer(
+			service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
+			holidayAvailabilitySvc)
+		publicHolidayHandler = handler.NewPublicHolidayHandler(publicHolidaySvc)
+		if holidayCalendar != nil || employeeLocations != nil {
+			// First run shortly after start, then daily. Stopped with the
+			// other background workers by closePublishers.
+			ingestRetryWG.Add(1)
+			go func() {
+				defer ingestRetryWG.Done()
+				service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
+			}()
+			slog.Info("team schedule public holidays: daily refresh enabled",
+				"calendar", holidayCalendar != nil, "employeeLocations", employeeLocations != nil)
+		} else {
+			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; no refresh runs, the roster shows only stored holidays")
+		}
 		engagementAllocationViewHandler = handler.NewEngagementAllocationViewHandler(
 			service.NewEngagementAllocationViewService(repository.NewEngagementAllocationViewRepository(db), accessSvc),
 		)
@@ -2149,6 +2200,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /team-schedule/absences/search", scheduleHandler.SearchScheduleAbsences)
 		mux.HandleFunc("POST /team-schedule/engagement-allocations/search", scheduleHandler.SearchScheduleEngagementAllocations)
 		mux.HandleFunc("GET /team-schedule/on-duty", scheduleHandler.GetScheduleOnDuty)
+	}
+	if publicHolidayHandler != nil {
+		mux.HandleFunc("POST /team-schedule/public-holidays/search", publicHolidayHandler.SearchPublicHolidays)
+		mux.HandleFunc("POST /team-schedule/public-holidays/refresh", serviceOnly(accessSvc, publicHolidayHandler.RefreshPublicHolidays))
+	}
+	if holidayAvailabilityHandler != nil {
+		mux.HandleFunc("POST /team-schedule/holiday-availability/search", holidayAvailabilityHandler.SearchHolidayAvailability)
+		mux.HandleFunc("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", holidayAvailabilityHandler.ConfirmHolidayAvailability)
+		mux.HandleFunc("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", holidayAvailabilityHandler.WithdrawHolidayAvailability)
+		mux.HandleFunc("POST /team-schedule/holiday-availability/reminders/due", serviceOnly(accessSvc, holidayAvailabilityHandler.DueHolidayReminders))
+		mux.HandleFunc("PUT /team-schedule/holiday-availability/reminders/{teamKey}/{date}/{stage}", serviceOnly(accessSvc, holidayAvailabilityHandler.RecordHolidayReminder))
 	}
 	if teamMemberHandler != nil {
 		// Who holds which rank. The call-escalation ladder resolves four of its

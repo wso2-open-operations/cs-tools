@@ -381,6 +381,32 @@ schedules assume `TZ=UTC` like every other here.
   split), and cancelling a weekday invitation (weekday sends are not recorded). Unlike the report
   tasks, these own no template file.
 
+## Holiday availability reminders
+
+`internal/holidayreminder`, registered as **`holiday_availability_reminder`** (default
+`30 3 * * 1-5`, 09:00 Colombo on weekdays), emails each CRE team's leads and rota managers
+ahead of a public holiday so they mark who works that day. Registered with the rota reminders
+(whenever `EMAIL_BASE_URL` is set); `ALERTS_ENABLED=false` silences it.
+
+- **The rule is entity-service's** (its CLAUDE.md, "Working on a public holiday"): a CRE member
+  is tagged "Public holiday" for a holiday of their country, off the timesheet and the rota; a
+  lead removes the tag from whoever works and confirms the team. This task asks
+  `POST /team-schedule/holiday-availability/reminders/due {today}` (today in
+  `ROTA_REMINDER_TIME_ZONE`, from the run's period key) which reminders are due -- 14 days
+  before (always), then 7 days, 2 and 1 working days before while the team is not fully marked
+  -- sends each, and records it (`PUT .../reminders/{teamKey}/{date}/{stage}`), so each goes once.
+  Every reminder day is a weekday (a weekend holiday gets no tag), hence Monday to Friday.
+- **To** the team's leads and rota managers; a team with neither goes to the CRE rota admins.
+  `ROTA_REMINDER_REDIRECT_TO` and `ROTA_REMINDER_SCHEDULE_URL` apply as for the rota reminders.
+  No new setting.
+- **A plain message**: the holiday, its date, the members with "Off (Public holiday)" /
+  "Working" / "Away", the rota turns with nobody, and what to do (remove the tag, then
+  "Confirm team availability").
+- **Failures.** A send that fails is not recorded and fails the run (retried next tick, which
+  sends only what is still unrecorded). A send whose record fails also fails the run and goes
+  once more. Deploy entity-service (migration 0283) first: against an older one the run fails
+  with a 404 and alerts.
+
 ## Availability recalculation
 
 Recomputes every committed service offering's uptime and rewrites

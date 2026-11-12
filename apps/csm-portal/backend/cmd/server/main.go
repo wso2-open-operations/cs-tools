@@ -741,6 +741,12 @@ func main() {
 	route("POST /team-schedule/assignments/search", handler.PermView, scheduleHandler.SearchScheduleAssignments)
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
 	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
+	route("POST /team-schedule/public-holidays/search", handler.PermView, scheduleHandler.SearchSchedulePublicHolidays)
+	route("POST /team-schedule/holiday-availability/search", handler.PermView, scheduleHandler.SearchHolidayAvailability)
+	// Confirming a team's holiday availability (CRE): entity-service allows
+	// the team's lead, its rota manager, a CRE rota admin or an admin.
+	route("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.ConfirmHolidayAvailability)
+	route("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.WithdrawHolidayAvailability)
 	route("GET /team-schedule/on-duty", handler.PermView, scheduleHandler.GetScheduleOnDuty)
 
 	// Lead edit. PermWrite keeps the control away from a caller who could not

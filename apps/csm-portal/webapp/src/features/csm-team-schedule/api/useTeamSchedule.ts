@@ -318,6 +318,8 @@ function invalidateRota(qc: ReturnType<typeof useQueryClient>): void {
   // answer for a minute, so a lead who has just changed a cell and left edit
   // mode sees a grid saying nobody has touched it.
   void qc.invalidateQueries({ queryKey: ["team-schedule", "edit-markers"] });
+  // Who is off on a coming public holiday follows the tags and the turns.
+  void qc.invalidateQueries({ queryKey: ["team-schedule", "holiday-availability"] });
 }
 
 export interface CreateAssignmentPayload {

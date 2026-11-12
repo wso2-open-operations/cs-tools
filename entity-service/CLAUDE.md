@@ -100,6 +100,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `HOLIDAY_CALENDAR_BASE_URL` / `HOLIDAY_CALENDAR_TOKEN_URL` / `HOLIDAY_CALENDAR_CLIENT_ID` / `HOLIDAY_CALENDAR_CLIENT_SECRET` | no* | — | Choreo connection to the calendar-events service the leave app reads holidays from (`GET /holidays`). All four or none (`Validate`). Unset: no holidays are fetched; the roster shows what is stored. See "Team Schedule public holidays" |
+| `HR_ENTITY_BASE_URL` / `HR_ENTITY_TOKEN_URL` / `HR_ENTITY_CLIENT_ID` / `HR_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection to the HR entity GraphQL service (the GraphQL endpoint URL), for each member's location. All four or none. Unset: every member falls back to their team's country |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -116,6 +118,66 @@ A failed Event Hub publish is logged instead of recorded — see
 and the assignable-role allow-list are organisation vocabulary and live in the CSM
 portal backend (`apps/csm-portal/backend`), resolved once at startup. This service
 holds no organisation vocabulary at all — do not reintroduce it.
+
+## Team Schedule public holidays
+
+Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`,
+`repository/public_holiday_repo.go`, `handler/public_holiday_handler.go`; tables
+`team_schedule_public_holiday` and `team_schedule_person_location` (migration 0283).
+
+- **Source** is the leave app's: `GET /holidays?countries=<country>&startTimeMin&startTimeMax`
+  on the calendar-events service (people-ops-suite `calendar_events:fetchHolidaysForCountry`).
+  An all-day event's end date is exclusive, so it becomes one row per day (`expandEvents`,
+  as `getHolidaysFromEvents`); timed events are skipped. Two holidays on one day are one row,
+  titles joined with " / ".
+- **Whose holiday:** the employee-service location (`employee(email){location}`, as
+  `employee:getEmployeeLocation`), stored per member. Unknown: India for a member of the
+  India team (the team absence kind `ALLO_IND` moves people to), else Sri Lanka. The country
+  string is the leave app's (`Sri Lanka`, `India`), passed to the calendar service as is.
+- **Refresh:** daily (first run two minutes after start) in every replica, and on demand
+  with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
+  One run at a time per process. It upserts the current and next year for every country in
+  use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
+  transient answer never wipes a year. Re-running is safe.
+- **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
+  roster works while the services are down. A holiday is not leave and moves no shift.
+- **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
+  `repository/holiday_availability_repo.go`, `handler/holiday_availability_handler.go`, same
+  migration (0283):
+  - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
+    places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
+    colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
+    on every member of a rostered CRE team (management left out) for each weekday holiday of
+    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
+    Alerts does not call them. A lead or rota manager makes somebody available by removing the
+    tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
+    changed.
+  - **Placed once.** `team_schedule_holiday_tag_placed` (unique on user and day) records each
+    placement and is kept after the tag is removed, so a removed tag is never placed again. A
+    day the person already has any tag on (leave wins) is skipped and tried again the next day.
+    A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
+    touched (still one day, created and updated by the actor) and forgets the placements.
+  - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
+    its person available (no tag that day) **and** the team is confirmed
+    (`team_schedule_holiday_confirmation`, one row per team and day). Confirm
+    (`PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation`) and withdraw
+    (`DELETE`) need a user token of whoever may change the team's rota (`RotaWriterCheck`: its
+    lead, its rota manager, a CRE rota admin or the CRE/CS head, a portal or CSM admin); a
+    confirm is refused with 409 `holiday_turns_uncovered`, naming the turns, while a turn has
+    nobody. A turn that loses its person after the confirm reads `NEEDS_ATTENTION` and the
+    reminders resume. Statuses: `NEEDS_MARKING`, `AWAITING_CONFIRMATION`, `CONFIRMED`,
+    `NEEDS_ATTENTION`.
+  - **Reads.** `POST /team-schedule/holiday-availability/search` (internal staff, at most 70
+    days): one entry per team and day with each member's status (TAGGED / AVAILABLE / AWAY),
+    the uncovered turns, the confirmation and `canConfirm` for the caller.
+  - **Reminders** (service credential only, for csm-scheduled-tasks'
+    `holiday_availability_reminder`): `POST .../reminders/due {today}` lists, per team and
+    holiday in the next 14 days, the latest stage whose day has come -- `notice` (14 days
+    before, always), `week` (7 days), `two_days` / `one_day` (working days; a Monday holiday:
+    Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
+    leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
+    (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
 
 ## Health probes
 

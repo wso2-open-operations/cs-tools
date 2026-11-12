@@ -17,8 +17,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +36,9 @@ type mockEntityScheduleClient struct {
 	catalogueFn   func(ctx context.Context) ([]byte, error)
 	assignmentsFn func(ctx context.Context, body []byte) ([]byte, error)
 	allocationsFn func(ctx context.Context, body []byte) ([]byte, error)
+	holidaysFn    func(ctx context.Context, body []byte) ([]byte, error)
+	availFn       func(ctx context.Context, body []byte) ([]byte, error)
+	confirmFn     func(ctx context.Context, teamKey, date string, confirm bool) ([]byte, error)
 	dismissFn     func(ctx context.Context, body []byte) ([]byte, error)
 	absencesFn    func(ctx context.Context, body []byte) ([]byte, error)
 	onDutyFn      func(ctx context.Context, at string) ([]byte, error)
@@ -199,6 +205,38 @@ func (m *mockEntityScheduleClient) SearchScheduleEngagementAllocations(ctx conte
 		return m.allocationsFn(ctx, body)
 	}
 	return []byte(`{"allocations":[],"count":0}`), nil
+}
+
+// SearchSchedulePublicHolidays returns holidaysFn's answer, or an empty holiday list when none is set.
+func (m *mockEntityScheduleClient) SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
+	if m.holidaysFn != nil {
+		return m.holidaysFn(ctx, body)
+	}
+	return []byte(`{"holidays":[],"count":0}`), nil
+}
+
+// SearchHolidayAvailability returns availFn's answer, or an empty holiday list when none is set.
+func (m *mockEntityScheduleClient) SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error) {
+	if m.availFn != nil {
+		return m.availFn(ctx, body)
+	}
+	return []byte(`{"holidays":[],"count":0}`), nil
+}
+
+// ConfirmHolidayAvailability calls confirmFn with confirm=true, or returns an empty object when none is set.
+func (m *mockEntityScheduleClient) ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
+	if m.confirmFn != nil {
+		return m.confirmFn(ctx, teamKey, date, true)
+	}
+	return []byte(`{}`), nil
+}
+
+// WithdrawHolidayAvailability calls confirmFn with confirm=false, or returns an empty object when none is set.
+func (m *mockEntityScheduleClient) WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
+	if m.confirmFn != nil {
+		return m.confirmFn(ctx, teamKey, date, false)
+	}
+	return []byte(`{}`), nil
 }
 
 func (m *mockEntityScheduleClient) GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error) {
@@ -877,5 +915,160 @@ func TestDismissScheduleEngagementAllocation(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
 		assertStatus(t, w, http.StatusForbidden)
+	})
+}
+
+// TestSearchSchedulePublicHolidays pins that the public holiday search needs a signed-in
+// user, forwards the body and the answer unchanged, and maps an upstream failure to a 5xx.
+func TestSearchSchedulePublicHolidays(t *testing.T) {
+	const path = "/team-schedule/public-holidays/search"
+	const payload = `{"userIds":["00000000-0000-0000-0000-000000000000"],"from":"2026-11-01","to":"2026-11-30"}`
+
+	t.Run("requires an authenticated user", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		NewScheduleHandler(&mockEntityScheduleClient{}).SearchSchedulePublicHolidays(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload)))
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("forwards the search unchanged", func(t *testing.T) {
+		const upstream = `{"holidays":[{"userId":"00000000-0000-0000-0000-000000000000","date":"2026-11-24","title":"Poya","country":"Sri Lanka","countrySource":"TEAM"}],"count":1}`
+		var captured []byte
+		h := NewScheduleHandler(&mockEntityScheduleClient{
+			holidaysFn: func(_ context.Context, body []byte) ([]byte, error) {
+				captured = body
+				return []byte(upstream), nil
+			},
+		})
+		w := httptest.NewRecorder()
+		h.SearchSchedulePublicHolidays(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
+		assertStatus(t, w, http.StatusOK)
+		if string(captured) != payload || w.Body.String() != upstream {
+			t.Fatalf("altered in transit: sent %s, got %s", captured, w.Body.String())
+		}
+	})
+
+	t.Run("maps an upstream failure", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{
+			holidaysFn: func(context.Context, []byte) ([]byte, error) { return nil, errors.New("down") },
+		})
+		w := httptest.NewRecorder()
+		h.SearchSchedulePublicHolidays(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
+		if w.Code < 500 {
+			t.Fatalf("status %d, want 5xx", w.Code)
+		}
+	})
+}
+
+// TestHolidayAvailability pins the holiday availability handlers: search forwards unchanged,
+// confirm and withdraw pass the team and day, and a refusal keeps entity-service's words out of the log.
+func TestHolidayAvailability(t *testing.T) {
+	t.Run("search forwards unchanged", func(t *testing.T) {
+		const payload = `{"from":"2026-11-01","to":"2026-11-30"}`
+		const upstream = `{"holidays":[],"count":0}`
+		var captured []byte
+		h := NewScheduleHandler(&mockEntityScheduleClient{availFn: func(_ context.Context, body []byte) ([]byte, error) {
+			captured = body
+			return []byte(upstream), nil
+		}})
+		w := httptest.NewRecorder()
+		h.SearchHolidayAvailability(w, withUser(httptest.NewRequest(http.MethodPost, "/team-schedule/holiday-availability/search", strings.NewReader(payload))))
+		assertStatus(t, w, http.StatusOK)
+		if string(captured) != payload || w.Body.String() != upstream {
+			t.Fatalf("altered in transit: sent %s, got %s", captured, w.Body.String())
+		}
+	})
+
+	confirmReq := func(method string) *http.Request {
+		r := httptest.NewRequest(method, "/team-schedule/holiday-availability/atlas/2026-11-16/confirmation", nil)
+		r.SetPathValue("teamKey", "atlas")
+		r.SetPathValue("date", "2026-11-16")
+		return r
+	}
+
+	t.Run("confirm and withdraw pass the team and day", func(t *testing.T) {
+		var calls []string
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(_ context.Context, team, date string, confirm bool) ([]byte, error) {
+			calls = append(calls, fmt.Sprintf("%s %s %v", team, date, confirm))
+			return []byte(`{"status":"CONFIRMED"}`), nil
+		}})
+		w := httptest.NewRecorder()
+		h.ConfirmHolidayAvailability(w, withUser(confirmReq(http.MethodPut)))
+		assertStatus(t, w, http.StatusOK)
+		w = httptest.NewRecorder()
+		h.WithdrawHolidayAvailability(w, withUser(confirmReq(http.MethodDelete)))
+		assertStatus(t, w, http.StatusOK)
+		if strings.Join(calls, ";") != "atlas 2026-11-16 true;atlas 2026-11-16 false" {
+			t.Fatalf("calls %v", calls)
+		}
+	})
+
+	t.Run("a refused confirm keeps entity-service's words", func(t *testing.T) {
+		const words = "1 rota turn(s) on 2026-11-16 have nobody available: Morning (Ann)."
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: `{"message":"` + words + `"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.ConfirmHolidayAvailability(w, withUser(confirmReq(http.MethodPut)))
+		assertStatus(t, w, http.StatusConflict)
+		if !strings.Contains(w.Body.String(), "Morning (Ann)") {
+			t.Fatalf("body %s", w.Body.String())
+		}
+	})
+
+	t.Run("a refusal's words, which name people, never reach the log", func(t *testing.T) {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: `{"message":"Morning (Ann) has nobody"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.ConfirmHolidayAvailability(w, withUser(confirmReq(http.MethodPut)))
+		assertStatus(t, w, http.StatusConflict)
+		if strings.Contains(buf.String(), "Ann") || !strings.Contains(buf.String(), "status=409") {
+			t.Fatalf("log %q", buf.String())
+		}
+	})
+
+	t.Run("a confirm refused with a 400 keeps entity-service's words", func(t *testing.T) {
+		const words = "the holiday on 2026-11-16 has passed"
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"message":"` + words + `"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.ConfirmHolidayAvailability(w, withUser(confirmReq(http.MethodPut)))
+		assertStatus(t, w, http.StatusBadRequest)
+		if !strings.Contains(w.Body.String(), words) {
+			t.Fatalf("body %s", w.Body.String())
+		}
+	})
+
+	t.Run("refuses a blank team or a malformed day before calling upstream", func(t *testing.T) {
+		called := false
+		h := NewScheduleHandler(&mockEntityScheduleClient{confirmFn: func(context.Context, string, string, bool) ([]byte, error) {
+			called = true
+			return nil, nil
+		}})
+		for _, tc := range []struct{ team, date string }{{"", "2026-11-16"}, {"  ", "2026-11-16"}, {"atlas", "16-11-2026"}, {"atlas", ""}} {
+			r := confirmReq(http.MethodPut)
+			r.SetPathValue("teamKey", tc.team)
+			r.SetPathValue("date", tc.date)
+			w := httptest.NewRecorder()
+			h.ConfirmHolidayAvailability(w, withUser(r))
+			assertStatus(t, w, http.StatusBadRequest)
+			w = httptest.NewRecorder()
+			h.WithdrawHolidayAvailability(w, withUser(r))
+			assertStatus(t, w, http.StatusBadRequest)
+		}
+		if called {
+			t.Fatal("a bad path value reached entity-service")
+		}
+	})
+
+	t.Run("requires an authenticated user", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		NewScheduleHandler(&mockEntityScheduleClient{}).ConfirmHolidayAvailability(w, confirmReq(http.MethodPut))
+		assertStatus(t, w, http.StatusUnauthorized)
 	})
 }

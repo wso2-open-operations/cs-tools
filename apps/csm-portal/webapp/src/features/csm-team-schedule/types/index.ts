@@ -288,6 +288,30 @@ export interface EngagementAllocationsResponse {
   count: number;
 }
 
+/** One person's public holiday on one day (POST /team-schedule/public-holidays/search).
+ *  Not leave and moves no shift: the roster only shades the day. */
+export interface SchedulePublicHoliday {
+  userId: string;
+  /** YYYY-MM-DD. */
+  date: string;
+  title: string;
+  /** As the calendar spells it, e.g. "Sri Lanka", "India". */
+  country: string;
+  /** EMPLOYEE: the person's own location; TEAM: their team's country. */
+  countrySource: "EMPLOYEE" | "TEAM";
+}
+
+export interface SchedulePublicHolidaysResponse {
+  holidays: SchedulePublicHoliday[];
+  count: number;
+}
+
+export interface SearchSchedulePublicHolidaysPayload {
+  userIds: string[];
+  from: string;
+  to: string;
+}
+
 /** One recorded change to a team's rota or leave, as the history keeps it. */
 export interface ScheduleActivity {
   id: string;
@@ -795,3 +819,54 @@ export type RotaReminderRequest = {
  * recorded as a real reminder.
  */
 export type SendRotaReminder = { kind: RotaReminderKind; test: boolean };
+
+/** A CRE member a Public holiday tag was placed for, on that day. */
+export interface HolidayAvailabilityMember {
+  userId: string;
+  name: string;
+  email?: string;
+  /** TAGGED: off for the holiday. AVAILABLE: the tag was removed; works.
+   *  AWAY: another tag (leave) that day. */
+  status: "TAGGED" | "AVAILABLE" | "AWAY";
+  /** The Public holiday tag, while TAGGED. */
+  absenceId?: string;
+  awayKind?: string;
+}
+
+/** A rota turn that day with nobody available on it. */
+export interface HolidayAvailabilityTurn {
+  shiftCode: string;
+  shiftLabel: string;
+  userId: string;
+  name: string;
+}
+
+export type HolidayAvailabilityStatus =
+  | "NEEDS_MARKING"
+  | "AWAITING_CONFIRMATION"
+  | "CONFIRMED"
+  | "NEEDS_ATTENTION";
+
+/** One CRE team's availability on one public holiday. */
+export interface HolidayAvailability {
+  teamKey: string;
+  teamName: string;
+  date: string;
+  titles: string[];
+  countries: string[];
+  status: HolidayAvailabilityStatus;
+  /** Every turn covered and confirmed: the reminders stop. */
+  fullyMarked: boolean;
+  members: HolidayAvailabilityMember[];
+  turns: number;
+  uncovered: HolidayAvailabilityTurn[];
+  confirmedBy?: string;
+  confirmedOn?: string;
+  /** Whether the reader may confirm or withdraw (and make members available). */
+  canConfirm: boolean;
+}
+
+export interface HolidayAvailabilityResponse {
+  holidays: HolidayAvailability[];
+  count: number;
+}

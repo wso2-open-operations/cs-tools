@@ -3662,6 +3662,134 @@
   color: var(--muted);
 }
 
+/* Public holidays: a day that is a holiday for that person only. A stripe over
+   the cell's own background (weekend, today, selection still show through);
+   not leave, so no chip and no colour of its own. */
+.csm-ts .roster td.ph,
+.csm-ts .tw .nm.ph {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--muted) 16%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.csm-ts .tw .nm.ph {
+  border-radius: 4px;
+  padding-inline: 3px;
+}
+
+/* Public holidays coming up (CRE): who is tagged off, who works, the turns
+   with nobody, and Confirm. Under the freeze notice, above the tabs. */
+.csm-ts .holbar {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+}
+.csm-ts .holbar .hol-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.csm-ts .holbar .hol-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.csm-ts .holbar .hol-head .btn {
+  margin-left: auto;
+}
+.csm-ts .holbar .hol-list,
+.csm-ts .holbar .hol-members {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.csm-ts .holbar .hol-row + .hol-row {
+  border-top: 1px solid var(--line);
+}
+.csm-ts .holbar .hol-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 0;
+}
+.csm-ts .holbar .hol-toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: var(--ink);
+}
+.csm-ts .holbar .hol-c,
+.csm-ts .holbar .hol-n {
+  color: var(--muted);
+  font-size: 12px;
+}
+.csm-ts .holbar .hol-st {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+}
+.csm-ts .holbar .hol-st.needs_marking,
+.csm-ts .holbar .hol-st.needs_attention {
+  color: var(--warn);
+}
+.csm-ts .holbar .hol-st.awaiting_confirmation {
+  color: var(--accent-ink);
+}
+.csm-ts .holbar .hol-st.confirmed {
+  color: var(--ok);
+}
+.csm-ts .holbar .hol-body {
+  padding: 0 0 8px 12px;
+}
+.csm-ts .holbar .hol-next,
+.csm-ts .holbar .hol-unc,
+.csm-ts .holbar .hol-err {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+}
+.csm-ts .holbar .hol-unc,
+.csm-ts .holbar .hol-err {
+  color: var(--warn);
+}
+.csm-ts .holbar .hol-members li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+.csm-ts .holbar .hol-name {
+  min-width: 180px;
+}
+.csm-ts .holbar .hol-ms {
+  color: var(--muted);
+  min-width: 90px;
+}
+.csm-ts .holbar .hol-ms.available {
+  color: var(--ok);
+  font-weight: 600;
+}
+.csm-ts .holbar .hol-actions {
+  margin-top: 6px;
+}
+.csm-ts .holbar .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.csm-ts .holbar .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Rota reminder Cc picker: chips for the people copied, and a search box that
    suggests the family's members. */
 .csm-ts .rcc { display: grid; gap: 6px; min-width: 0; }

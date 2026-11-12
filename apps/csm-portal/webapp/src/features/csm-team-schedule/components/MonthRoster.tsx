@@ -30,6 +30,7 @@ import type {
   ScheduleTeamMember,
   ScheduleTier,
   RotaFamily,
+  SchedulePublicHoliday,
 } from "../types";
 import { addDays, initialsOf, isRotationShift, kindsOfferedOn, mondayOf, movesOfferedOn, toIsoDate, zoneColumnOf, zoneLabelOn, type RosterSpan } from "../utils/rota";
 import {
@@ -43,6 +44,7 @@ import {
   dayMarkerTitle,
 } from "../utils/engagementAllocations";
 import { ordinaryDayCode, REGULAR_HOURS_CODE } from "../utils/standingDay";
+import { holidaysByPersonAndDay, PUBLIC_HOLIDAY_KIND, withHolidayNote } from "../utils/publicHolidays";
 import { useTeamColour, useTeamName } from "../utils/teamColourContext";
 import { OFF_TIMESHEET_NOTE, tagHoverText, tagSideText } from "../utils/tagHover";
 
@@ -51,8 +53,7 @@ import { OFF_TIMESHEET_NOTE, tagHoverText, tagSideText } from "../utils/tagHover
 const legendTagLabel = (kind: ScheduleAbsenceKind): string => {
   const side = tagSideText(kind);
   if (!kind.excludesFromTimesheet) return side;
-  const note = OFF_TIMESHEET_NOTE.toLowerCase();
-  return side ? `${side} (${note})` : note.charAt(0).toUpperCase() + note.slice(1);
+  return side ? `${side} (${OFF_TIMESHEET_NOTE})` : OFF_TIMESHEET_NOTE;
 };
 
 export type { RosterSpan };
@@ -81,6 +82,9 @@ interface MonthRosterProps {
   /** The allocations could not be read: the roster is drawn without them,
    *  with a quiet note saying so. */
   engagementsFailed?: boolean;
+  /** Public holidays of the people on screen: the day is shaded and named on
+   *  hover, for those it applies to only. Not leave; changes no shift. */
+  publicHolidays?: SchedulePublicHoliday[];
   /** The first day drawn with the time-zone chips (ZONE_CHIPS_FROM unless
    *  given); a day before it keeps LK, IND or NLK. */
   zoneChipsFrom?: string;
@@ -294,6 +298,7 @@ export default function MonthRoster({
   onSpanChange,
   engagementAllocations,
   engagementsFailed = false,
+  publicHolidays,
   zoneChipsFrom = ZONE_CHIPS_FROM,
   assignments,
   absences,
@@ -365,6 +370,8 @@ export default function MonthRoster({
     () => allocationsByPersonAndDay(engagementAllocations ?? [], days.map(toIsoDate)),
     [engagementAllocations, days],
   );
+  /** Public holidays, `${userId}|${day}`. */
+  const holidayByPerson = useMemo(() => holidaysByPersonAndDay(publicHolidays ?? []), [publicHolidays]);
   /** The 1st of each month after the first: where the grid draws a month rule
    *  and names the month, so ninety columns still read as three months. */
   const opensMonth = (d: Date): boolean => d.getDate() === 1 && d.getTime() !== days[0].getTime();
@@ -734,9 +741,13 @@ export default function MonthRoster({
           // turn that day shows on its own. Moves to another team are not
           // allocations here and keep their own rule above.
           if (kind?.bucket === "ALLOCATION" && !kind.movesToTeamKey && weekendDay) continue;
+          // Leave, and the Public holiday tag, take the person off the rota:
+          // the tag is the cell and a turn under it is uncovered. Any other
+          // allocation is drawn beside the turn, which the person still works.
+          const offRota = kind?.bucket === "LEAVE" || ab.kindCode === PUBLIC_HOLIDAY_KIND;
           const target =
-            kind?.bucket === "ALLOCATION" && holdsTurn(row, iso) ? row.allocs : row.days;
-          if (kind?.bucket === "LEAVE" && iso >= ab.startsOn && !row.clash.has(iso)) {
+            kind?.bucket === "ALLOCATION" && !offRota && holdsTurn(row, iso) ? row.allocs : row.days;
+          if (offRota && iso >= ab.startsOn && !row.clash.has(iso)) {
             const turns = turnsOn(row, iso);
             if (turns.length > 0) row.clash.set(iso, turns);
           }
@@ -1371,7 +1382,8 @@ export default function MonthRoster({
             iso === selectedIso ? "sel" : ""
           } ${d.getDay() === 1 ? "wkstart" : ""}${opensMonth(d) ? " mstart" : ""}${weekMarks(iso)}${
             changedCells?.has(`${row.userId}|${iso}`) ? " changed" : ""
-          }`;
+          }${holidayByPerson.has(`${row.userId}|${iso}`) ? " ph" : ""}`;
+          const holiday = holidayByPerson.get(`${row.userId}|${iso}`);
           const faded = (c: Cell | undefined) =>
             rotationsOnly && c && !c.isRotation ? "muted" : "";
 
@@ -1402,15 +1414,16 @@ export default function MonthRoster({
                 className={`${marks} ${faded(shown)}${editable ? " c editable" : ""}${
                   touched.mark ? " touched" : ""
                 }${clash ? " clash" : ""}`}
-                title={
+                title={withHolidayNote(
                   editable
                     ? `${row.name} · ${shown ? (withAlloc(cell)?.title ?? shown.title) : "nothing rostered"}${clashNote(clash)}${touched.note} — click to change`
                     : shown || touched.mark || clash
                       ? `${row.name} · ${shown ? shown.title : "nothing rostered"}${clashNote(clash)}${touched.note}${notYours(row)}`
                       : notYours(row)
                         ? `${row.name}${notYours(row)}`
-                        : undefined
-                }
+                        : undefined,
+                  holiday,
+                )}
                 onClick={editable ? (e) => openCell(e, row, iso, withAlloc(cell)) : undefined}
                 {...(editable ? keyable(key, firstStop()) : {})}
               >
@@ -1454,11 +1467,12 @@ export default function MonthRoster({
                 className={`c zwhole ${marks} ${faded(whole)}${
                   editable ? " editable" : ""
                 }${clash ? " clash" : ""}`}
-                title={
+                title={withHolidayNote(
                   editable
                     ? `${row.name} · ${whole.title}${clashNote(clash)} — click to change`
-                    : `${row.name} · ${whole.title}${clashNote(clash)}${notYours(row)}`
-                }
+                    : `${row.name} · ${whole.title}${clashNote(clash)}${notYours(row)}`,
+                  holiday,
+                )}
                 onClick={editable ? (e) => openCell(e, row, iso, cell) : undefined}
                 {...(editable ? keyable(`${row.userId}|${row.teamKey}|${iso}`, firstStop()) : {})}
               >
@@ -1489,15 +1503,16 @@ export default function MonthRoster({
                 className={`c z ${i === 0 ? "zfirst" : ""}${i === zones.length - 1 ? " zlast" : ""} ${
                   zoneMarks(marks, i, zones.length)
                 } ${faded(zc)}${editable ? " editable" : ""}`}
-                title={
+                title={withHolidayNote(
                   editable
                     ? `${row.name} · ${z} · ${zc ? (withAlloc(row.zoned.get(`${iso}|${z}`))?.title ?? zc.title) : "nothing rostered"} — click to change`
                     : zc
                       ? `${row.name} · ${z} · ${zc.title}${notYours(row)}`
                       : notYours(row)
                         ? `${row.name}${notYours(row)}`
-                        : undefined
-                }
+                        : undefined,
+                  holiday,
+                )}
                 onClick={editable ? (e) => openCell(e, row, iso, withAlloc(row.zoned.get(`${iso}|${z}`)), zoneCodeFor?.(row.teamKey, z) ?? z) : undefined}
                 {...(editable ? keyable(`${row.userId}|${row.teamKey}|${iso}|${z}`, firstStop()) : {})}
               >
