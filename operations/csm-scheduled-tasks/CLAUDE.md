@@ -875,7 +875,12 @@ platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the o
   such as `Select Subscription Plan`. `ELIGIBLE_ACTIONS` (10) or more is ELIGIBLE and HIGH;
   `MODERATE_ACTIONS` (5) or more is MODERATE, fewer LOW, none NONE, all MONITOR. A CORPORATE email is
   ELIGIBLE; INTERNAL or DISPOSABLE is EXCLUDED.
-- **Email classification** is not set by this task yet; it uses a value an engineer set.
+- **Email classification**, when the pairing has none or UNKNOWN: the owner's email is read from the
+  Cloud Directory API (`CLOUD_API_*`), kept in memory only, and reduced to its domain and a role-mailbox
+  flag (`admin@`, `test+1@`). Only the domain goes to the CSM AI service's
+  `POST /ai/email-domains/classify`; a PERSONAL domain with a role mailbox becomes DISPOSABLE. A Directory
+  or AI failure leaves it unset for the next run. Off, with a warning at start, unless
+  `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain.
 - **Failures**: Moesif or the queue failing fails the run. A failed write is logged and the others go
   on; the run then fails naming at most 10 pairing ids. A product without an active registration
   playbook is skipped with a warning.
@@ -998,6 +1003,8 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
 | `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `AGENT_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
+| `CSM_AI_SERVICE_BASE_URL` / `CSM_AI_SERVICE_SCOPES` | No | The CSM AI service, called with the shared `OAUTH2_*` credentials, for the registration validation's email classification |
+| `CLOUD_API_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` / `_USER_EMAIL_PATH` | With `CLOUD_API_BASE_URL` (path default `/users/{userId}/email`) | The Cloud Directory API (the CSM portal's Directory client) for the owner's email. The secret is a Choreo secret: never commit it |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
 

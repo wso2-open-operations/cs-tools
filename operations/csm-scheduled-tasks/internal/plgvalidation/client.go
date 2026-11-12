@@ -56,6 +56,15 @@ type Client struct {
 
 // NewClient constructs a Client authenticated via the client credentials grant.
 func NewClient(cfg Config) (*Client, error) {
+	httpClient, err := oauthClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
+}
+
+// oauthClient checks cfg's URLs and returns a client-credentials HTTP client.
+func oauthClient(cfg Config) (*http.Client, error) {
 	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
 		return nil, fmt.Errorf("plgvalidation: token URL: %w", err)
 	}
@@ -73,13 +82,14 @@ func NewClient(cfg Config) (*Client, error) {
 	httpClient := cc.Client(context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTP))
 	httpClient.Timeout = callTimeout
 	httpsec.RejectInsecureRedirects(httpClient)
-	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
+	return httpClient, nil
 }
 
 // QueueItem is one pairing to validate. Ids only.
 type QueueItem struct {
 	OrgPlatformID       string     `json:"orgPlatformId"`
 	CompanyID           string     `json:"companyId"`
+	OwnerUserID         *string    `json:"ownerUserId"`
 	RegisteredOn        time.Time  `json:"registeredOn"`
 	EmailClassification *string    `json:"emailClassification"`
 	LastValidatedOn     *time.Time `json:"lastValidatedOn"`

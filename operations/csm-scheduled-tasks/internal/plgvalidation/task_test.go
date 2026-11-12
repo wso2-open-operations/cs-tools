@@ -181,3 +181,93 @@ func value(req ApplyRequest, code string) string {
 	}
 	return ""
 }
+
+type fakeDirectory map[string]string
+
+func (f fakeDirectory) UserEmail(_ context.Context, userID string) (string, error) {
+	if email, ok := f[userID]; ok {
+		return email, nil
+	}
+	return "", errors.New("status 404")
+}
+
+type fakeClassifier struct {
+	answers map[string]string
+	asked   []string
+}
+
+func (f *fakeClassifier) Classify(_ context.Context, domain string) (string, error) {
+	f.asked = append(f.asked, domain)
+	if c, ok := f.answers[domain]; ok {
+		return c, nil
+	}
+	return "", errors.New("status 502")
+}
+
+func TestRunClassifiesTheOwnersDomain(t *testing.T) {
+	user := func(id string) *string { return &id }
+	personal, unknown := "PERSONAL", "UNKNOWN"
+	ent := &fakeEntity{
+		items: []QueueItem{
+			{OrgPlatformID: "p-corp", CompanyID: "c1", OwnerUserID: user("u-corp"), RegisteredOn: now},
+			{OrgPlatformID: "p-role", CompanyID: "c2", OwnerUserID: user("u-role"), RegisteredOn: now},
+			{OrgPlatformID: "p-known", CompanyID: "c3", OwnerUserID: user("u-corp"), RegisteredOn: now, EmailClassification: &personal},
+			{OrgPlatformID: "p-retry", CompanyID: "c4", OwnerUserID: user("u-corp"), RegisteredOn: now, EmailClassification: &unknown},
+			{OrgPlatformID: "p-lost", CompanyID: "c5", OwnerUserID: user("u-missing"), RegisteredOn: now},
+		},
+		applied: map[string]ApplyRequest{},
+	}
+	cls := &fakeClassifier{answers: map[string]string{"acme.example": "CORPORATE", "gmail.com": "PERSONAL"}}
+	opts := Options{
+		Products: []string{"AGENT_PLATFORM"}, Window: 12 * time.Hour,
+		Directory:  fakeDirectory{"u-corp": "Jane@Acme.example", "u-role": "test+1@gmail.com"},
+		Classifier: cls,
+	}
+	if err := Run(&fakeMoesif{}, ent, opts, func() time.Time { return now })(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	for id, want := range map[string]struct{ class, outcome string }{
+		"p-corp":  {"CORPORATE", OutcomeEligible},
+		"p-role":  {"DISPOSABLE", OutcomeExcluded},
+		"p-known": {"", OutcomeMonitor}, // already classified: not asked, not rewritten
+		"p-retry": {"CORPORATE", OutcomeEligible},
+		"p-lost":  {"", OutcomeMonitor}, // lookup failed: left for the next run
+	} {
+		req := ent.applied[id]
+		if got := value(req, codeClass); got != want.class || value(req, codeOutcome) != want.outcome {
+			t.Errorf("%s: class %q outcome %q, want %q %q", id, got, value(req, codeOutcome), want.class, want.outcome)
+		}
+	}
+	if !ent.applied["p-role"].Abandon {
+		t.Error("p-role: a role mailbox on a free provider should be excluded and abandoned")
+	}
+	for _, d := range cls.asked {
+		if d != "acme.example" && d != "gmail.com" {
+			t.Errorf("classifier asked %q: only the lower-cased domain may be sent", d)
+		}
+	}
+	if len(cls.asked) != 3 {
+		t.Errorf("classifier asked %d times, want 3", len(cls.asked))
+	}
+}
+
+func TestSplitEmail(t *testing.T) {
+	for email, want := range map[string]struct {
+		domain   string
+		role, ok bool
+	}{
+		"Jane@Acme.example":  {"acme.example", false, true},
+		"admin@acme.example": {"acme.example", true, true},
+		"test+42@gmail.com":  {"gmail.com", true, true},
+		"qa2@gmail.com":      {"gmail.com", true, true},
+		"testa@gmail.com":    {"gmail.com", false, true},
+		"no-at-sign":         {"", false, false},
+		"trailing@":          {"", false, false},
+	} {
+		d, role, ok := splitEmail(email)
+		if d != want.domain || role != want.role || ok != want.ok {
+			t.Errorf("%s: %q %v %v, want %+v", email, d, role, ok, want)
+		}
+	}
+}

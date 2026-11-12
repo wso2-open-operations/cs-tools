@@ -325,6 +325,41 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// Email domain classification: the owner's email from the Cloud Directory
+	// API, the domain to the CSM AI service. Off unless both are configured.
+	var (
+		plgDirectory  *plgvalidation.DirectoryClient
+		plgClassifier *plgvalidation.AIClient
+	)
+	if plgValidationEnabled && os.Getenv("CSM_AI_SERVICE_BASE_URL") != "" && os.Getenv("CLOUD_API_BASE_URL") != "" {
+		plgClassifier, err = plgvalidation.NewAIClient(plgvalidation.Config{
+			BaseURL:      os.Getenv("CSM_AI_SERVICE_BASE_URL"),
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       splitComma(os.Getenv("CSM_AI_SERVICE_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("failed to construct CSM AI service client", "err", err)
+			os.Exit(1)
+		}
+		plgDirectory, err = plgvalidation.NewDirectoryClient(plgvalidation.DirectoryConfig{
+			Config: plgvalidation.Config{
+				BaseURL:      os.Getenv("CLOUD_API_BASE_URL"),
+				TokenURL:     mustEnv("CLOUD_API_TOKEN_URL"),
+				ClientID:     mustEnv("CLOUD_API_CLIENT_ID"),
+				ClientSecret: mustEnv("CLOUD_API_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CLOUD_API_SCOPES")),
+			},
+			UserEmailPath: envString("CLOUD_API_USER_EMAIL_PATH", "/users/{userId}/email"),
+		})
+		if err != nil {
+			slog.Error("failed to construct Cloud Directory client", "err", err)
+			os.Exit(1)
+		}
+	} else if plgValidationEnabled {
+		slog.Warn("plg registration validation: email classification is off; set CSM_AI_SERVICE_BASE_URL and CLOUD_API_BASE_URL")
+	}
 	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM"))
 	if plgValidationEnabled {
 		for i, p := range plgValidationProducts {
@@ -1123,6 +1158,9 @@ func main() {
 				Grace:    time.Duration(envInt("PLG_REGISTRATION_VALIDATION_GRACE_HOURS", 24)) * time.Hour,
 				DryRun:   envBool("PLG_REGISTRATION_VALIDATION_DRY_RUN", true),
 				MaxPages: envInt("PLG_REGISTRATION_VALIDATION_MAX_PAGES", 100),
+				// Typed nils would make the interfaces non-nil.
+				Directory:  directoryOrNil(plgDirectory),
+				Classifier: classifierOrNil(plgClassifier),
 			}, time.Now),
 			To: plgValidationTo,
 			Cc: plgValidationCc,
@@ -1992,4 +2030,18 @@ func loadDotEnv(path string) {
 	if err := scanner.Err(); err != nil {
 		slog.Warn("loadDotEnv: error reading .env file", "err", err)
 	}
+}
+
+func directoryOrNil(c *plgvalidation.DirectoryClient) plgvalidation.Directory {
+	if c == nil {
+		return nil
+	}
+	return c
+}
+
+func classifierOrNil(c *plgvalidation.AIClient) plgvalidation.DomainClassifier {
+	if c == nil {
+		return nil
+	}
+	return c
 }

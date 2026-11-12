@@ -16,8 +16,9 @@
 
 // Package plgvalidation fills a product's registration playbook from its Moesif
 // activity. Each run lists the pairings whose activity window is open (or
-// closed within the grace period), reads their events, and writes the values
-// through entity-service, which never overwrites an engineer's value.
+// closed within the grace period), reads their events, classifies the owner's
+// email domain, and writes the values through entity-service, which never
+// overwrites an engineer's value.
 package plgvalidation
 
 import (
@@ -41,6 +42,7 @@ var Platforms = map[string]string{"AGENT_PLATFORM": "Agent Manager"}
 // Task codes and option codes of the registration playbook.
 const (
 	codeInitiate = "INITIATE_PLAYBOOK"
+	codeClass    = "REGISTERED_EMAIL_CLASSIFICATION"
 	codeSession  = "INITIAL_SESSION_DURATION_MINUTES"
 	codeLevel    = "INITIAL_ACTIVITY_LEVEL"
 	codeOutcome  = "ELIGIBILITY_ASSESSMENT_OUTCOME"
@@ -79,6 +81,10 @@ type Options struct {
 	BatchSize  int           // company ids per Moesif query
 	QueueLimit int
 	MaxPages   int
+	// Directory and Classifier classify the owner's email domain; either nil
+	// leaves the classification to engineers.
+	Directory  Directory
+	Classifier DomainClassifier
 }
 
 // Run returns a registry.Task.Handler. Moesif or the queue failing fails the
@@ -128,12 +134,23 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 	for _, it := range items {
 		end := minTime(it.RegisteredOn.Add(opts.Window), now)
 		act := plgactivity.Derive(events[it.CompanyID], it.RegisteredOn, end)
-		values, outcome, abandon := Decide(act, it.EmailClassification, opts.Thresholds)
+		class := it.EmailClassification
+		var newClass *string
+		if deref(class) == "" || deref(class) == classUnknown {
+			if c, ok := classify(ctx, opts, it); ok {
+				class, newClass = &c, &c
+				counts["classified"]++
+			}
+		}
+		values, outcome, abandon := Decide(act, class, opts.Thresholds)
+		if newClass != nil {
+			values = append(values, Value{Code: codeClass, TextValue: newClass})
+		}
 		counts[outcome]++
 		if opts.DryRun {
 			slog.InfoContext(ctx, "plg registration validation: dry run", "product", product,
 				"orgPlatformId", it.OrgPlatformID, "events", act.EventCount, "actions", act.Actions,
-				"outcome", outcome, "abandon", abandon)
+				"classification", deref(class), "outcome", outcome, "abandon", abandon)
 			continue
 		}
 		res, err := ent.Apply(ctx, it.OrgPlatformID, ApplyRequest{Summary: summary(act, it.RegisteredOn, end), Values: values, Abandon: abandon})
@@ -155,9 +172,41 @@ func runProduct(ctx context.Context, src Searcher, ent Entity, opts Options, pro
 	}
 	slog.InfoContext(ctx, "plg registration validation: done", "product", product, "dryRun", opts.DryRun,
 		"pairings", len(items), "eligible", counts[OutcomeEligible], "monitor", counts[OutcomeMonitor],
-		"excluded", counts[OutcomeExcluded], "abandoned", counts["abandoned"], "valuesWritten", counts["written"],
+		"excluded", counts[OutcomeExcluded], "abandoned", counts["abandoned"], "classified", counts["classified"],
+		"valuesWritten", counts["written"],
 		"valuesSkipped", counts["skipped"], "failed", len(failed))
 	return failed, nil
+}
+
+const classUnknown = "UNKNOWN"
+
+// classify reads the owner's email, keeps only its domain and whether it is a
+// role mailbox, and asks the AI service about the domain. A personal domain
+// with a role or test mailbox is DISPOSABLE. Any failure leaves the pairing
+// unclassified until the next run; logs carry the pairing id only.
+func classify(ctx context.Context, opts Options, it QueueItem) (string, bool) {
+	if opts.Directory == nil || opts.Classifier == nil || it.OwnerUserID == nil {
+		return "", false
+	}
+	email, err := opts.Directory.UserEmail(ctx, *it.OwnerUserID)
+	if err != nil {
+		slog.WarnContext(ctx, "plg registration validation: owner email lookup failed", "orgPlatformId", it.OrgPlatformID, "err", err)
+		return "", false
+	}
+	domain, role, ok := splitEmail(email)
+	if !ok {
+		slog.WarnContext(ctx, "plg registration validation: owner email is malformed", "orgPlatformId", it.OrgPlatformID)
+		return "", false
+	}
+	class, err := opts.Classifier.Classify(ctx, domain)
+	if err != nil {
+		slog.WarnContext(ctx, "plg registration validation: domain classification failed", "orgPlatformId", it.OrgPlatformID, "err", err)
+		return "", false
+	}
+	if class == "PERSONAL" && role {
+		class = "DISPOSABLE"
+	}
+	return class, true
 }
 
 // readEvents reads the platform's events for the queued companies, grouped by company id.
@@ -213,8 +262,8 @@ type Thresholds struct {
 	Moderate int // this many or more: MODERATE; fewer: LOW, or NONE at zero
 }
 
-// Decide turns the activity and a known classification into task values. The
-// classification and onboarding tasks are left alone. INTERNAL or DISPOSABLE
+// Decide turns the activity and the classification into task values. The
+// onboarding tasks are left alone. INTERNAL or DISPOSABLE
 // excludes and abandons the pairing; CORPORATE or enough actions is ELIGIBLE.
 func Decide(act plgactivity.Activity, classification *string, th Thresholds) (values []Value, outcome string, abandon bool) {
 	level := LevelNone
