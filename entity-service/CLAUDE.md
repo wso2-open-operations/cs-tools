@@ -460,7 +460,8 @@ the list.
   stored phone), `sales_region`, `sub_region`, `life_cycle` (`status`),
   `naics_industry`, `sub_industry`, `classification`, `technical_owner_id`, the
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
-  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`.
+  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
+  `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
 - `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
@@ -494,6 +495,35 @@ later CREATED/UPDATED/RESTORED clears `deleted_on`. Never `DELETE FROM account`
 `deleted_on IS NOT NULL`; `GetAccountByID`, `LookupAccountIDBySfID` (so
 `EnsureAccount`), the partner lookup and the joins from projects/cases/global search
 still see the row.
+
+**Primary partner and life cycle on the account reads.** `hasPrimaryPartner` on
+`GET /accounts/{id}` and `POST /accounts/search` is `primary_partner_sf_id IS NOT NULL`;
+it used to be "any partner link in `account_relationship`", which has no primary
+marker and overstated it for an account with a non-primary partner. The column fills
+only when the Account ingest writes the account, and until then `hasPrimaryPartner`
+reads false. Its only reader is ACP's CSM-only mode (`ACP_SALES_ENTITY_READS=off` in
+csm-scheduled-tasks), where it moves an invoice suspend date. Both reads also return
+`lifeCycle` (`account.life_cycle`), and the opportunity and project-opportunity link
+reads return `sfId` (`sf_opportunity.sf_id`, `sf_opportunity_link.link_sf_id`), all
+`null` on the ServiceNow data source.
+
+**Backfill after 0291: `POST /salesforce/accounts/{sfId}/refresh`, not replayed events.**
+A replayed `UPDATED` event for an account the ledger already holds at that version is
+skipped by the duplicate guard, so it never writes the new column. `RefreshAccount`
+(`salesforce_account_refresh.go`) writes the account from its current Salesforce record
+with the guard off; incoming events keep it. Internal callers only, registered only
+with the Account ingest on; it does not refresh partner links. Call it once per account
+(`SELECT sf_id FROM account WHERE sf_id IS NOT NULL AND deleted_on IS NULL`). Every
+refresh stamps the account's ledger row (`updated_on`, and `status` FAILED when the
+write failed), so before turning on ACP's CSM-only mode this must return 0, or only
+accounts that are known to be broken (`<start>` = when the backfill began):
+
+```sql
+SELECT COUNT(*) FROM account a
+LEFT JOIN salesforce_ingest_state s ON s.entity = 'account' AND s.sf_id = a.sf_id
+WHERE a.sf_id IS NOT NULL AND a.deleted_on IS NULL
+  AND (s.updated_on IS NULL OR s.updated_on < '<start>' OR s.status <> 'SUCCEEDED');
+```
 
 ### One row per sf_id
 

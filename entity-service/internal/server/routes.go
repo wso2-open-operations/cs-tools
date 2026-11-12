@@ -438,6 +438,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var salesforceEventHandler *handler.SalesforceEventHandler
 	// salesforcePartnerHandler is set when the partner refresh is on.
 	var salesforcePartnerHandler *handler.SalesforcePartnerHandler
+	// salesforceAccountRefreshHandler is set when the Account ingest is on.
+	var salesforceAccountRefreshHandler *handler.SalesforceAccountRefreshHandler
 	// membershipRegistrationHandler and projectContactSyncHandler both need
 	// the very same membership-ingest-enabled SalesforceEventService this
 	// block builds, so all three are wired together rather than side by side.
@@ -508,6 +510,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			States:   repository.NewSalesforceIngestStateRepository(db),
 			Projects: projectIngestRepo,
 			Owners:   owners,
+		}
+		// The Account refresh (the primary partner backfill) writes accounts
+		// with the duplicate guard off, so it exists only while the Account
+		// ingest is on; it needs none of the other families.
+		if accountIngestRepo != nil {
+			base := service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport)
+			if refresher, ok := base.(service.AccountRefresher); ok {
+				salesforceAccountRefreshHandler = handler.NewSalesforceAccountRefreshHandler(service.NewAccountRefreshService(refresher, accessSvc))
+			}
 		}
 		// The Project branch is update-only unless its insert switch is on
 		// too (csm-sync-service still inserts project rows until cutover).
@@ -2039,6 +2050,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if salesforcePartnerHandler != nil {
 		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh-partners", salesforcePartnerHandler.RefreshPartners)
+	}
+	if salesforceAccountRefreshHandler != nil {
+		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh", salesforceAccountRefreshHandler.Refresh)
 	}
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)

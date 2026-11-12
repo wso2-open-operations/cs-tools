@@ -164,6 +164,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /salesforce/accounts/{sfId}/refresh:
+    post:
+      summary: >-
+        Re-read one account from Salesforce (REST sales-entity-service POST /customer-search)
+        and write it, even when the ingest ledger already records that version (an Account
+        event for it would be skipped as a duplicate). Used to backfill columns added after
+        an account was last written, such as the primary partner. Partner links are not
+        refreshed (see refresh-partners). Internal (M2M) callers only. Registered only when
+        CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED=true, DATA_SOURCE=postgres and REST
+        sales-entity-service config is present; 404 otherwise.
+      operationId: refreshSalesforceAccount
+      parameters:
+        - name: sfId
+          in: path
+          required: true
+          description: Salesforce Account Id (15 or 18 characters).
+          schema:
+            type: string
+      responses:
+        "204":
+          description: The account was written from its current Salesforce record.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Salesforce is temporarily unavailable, or sales-entity-service did not return the account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /customer-engagements/allocation-events:
     post:
       summary: >-
@@ -22165,8 +22211,15 @@ components:
           type: boolean
           nullable: true
           description: >-
-            Whether this account has a primary partner account set. Postgres approximates
-            this as having any partner in account_relationship.
+            Whether this account has a primary partner account set. On Postgres, whether
+            the Salesforce primary partner (Account.Primary_Partner_Name2__c) was stored
+            by the Salesforce Account ingest.
+        lifeCycle:
+          type: string
+          nullable: true
+          description: >-
+            The account's life cycle (Salesforce account status), e.g. Customer, Prospect,
+            Partner, Lost Customer, Lost Prospect. Always null on the ServiceNow data source.
         healthSummary:
           description: Present only when the search set filters.includeHealthSummary.
           allOf:
@@ -22248,8 +22301,15 @@ components:
           type: boolean
           nullable: true
           description: >-
-            Whether this account has a primary partner account set. Postgres approximates
-            this as having any partner in account_relationship.
+            Whether this account has a primary partner account set. On Postgres, whether
+            the Salesforce primary partner (Account.Primary_Partner_Name2__c) was stored
+            by the Salesforce Account ingest.
+        lifeCycle:
+          type: string
+          nullable: true
+          description: >-
+            The account's life cycle (Salesforce account status), e.g. Customer, Prospect,
+            Partner, Lost Customer, Lost Prospect. Always null on the ServiceNow data source.
 
     SearchAccountsResponse:
       type: object
@@ -25134,8 +25194,8 @@ components:
     Opportunity:
       type: object
       description: >
-        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
-        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        Sourced from Salesforce-sync data on the ServiceNow data source or the Postgres
+        sf_opportunity table. Every field but id is nullable — ServiceNow can omit
         any of them entirely for a sparsely-populated row.
       required: [id]
       properties:
@@ -25158,6 +25218,10 @@ components:
         stage:
           type: string
           nullable: true
+        sfId:
+          type: string
+          nullable: true
+          description: The Salesforce Opportunity Id. Always null on the ServiceNow data source.
 
     SearchOpportunitiesResponse:
       type: object
@@ -25188,8 +25252,8 @@ components:
     Invoice:
       type: object
       description: >
-        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
-        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        Sourced from Salesforce-sync data on the ServiceNow data source or the Postgres
+        sf_invoice table. Every field but id is nullable — ServiceNow can omit
         any of them entirely for a sparsely-populated row.
       required: [id]
       properties:
@@ -25266,8 +25330,8 @@ components:
     ProjectOpportunityLink:
       type: object
       description: >
-        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
-        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        Sourced from Salesforce-sync data on the ServiceNow data source or the Postgres
+        sf_opportunity_link table. Every field but id is nullable — ServiceNow can omit
         either reference entirely for a sparsely-populated row.
       required: [id]
       properties:
@@ -25282,6 +25346,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/EntityRef'
+        sfId:
+          type: string
+          nullable: true
+          description: The Salesforce Linked_Opportunity__c Id. Always null on the ServiceNow data source.
 
     SearchProjectOpportunityLinksResponse:
       type: object
