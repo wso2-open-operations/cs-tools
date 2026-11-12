@@ -43,6 +43,8 @@ type fakeAlertMuteRuleRepo struct {
 	extendTo time.Time
 	updated  domain.AlertMuteRuleWrite
 	calls    int
+	// expectedUpdatedOn is the version the last Update was guarded by.
+	expectedUpdatedOn time.Time
 }
 
 func (f *fakeAlertMuteRuleRepo) Get(context.Context, string) (*domain.AlertMuteRule, error) {
@@ -53,9 +55,10 @@ func (f *fakeAlertMuteRuleRepo) Create(_ context.Context, _ string, w domain.Ale
 	f.calls++
 	return domain.AlertMuteRule{}, nil
 }
-func (f *fakeAlertMuteRuleRepo) Update(_ context.Context, _, _ string, w domain.AlertMuteRuleWrite, _ time.Time) (*domain.AlertMuteRule, error) {
+func (f *fakeAlertMuteRuleRepo) Update(_ context.Context, _, _ string, w domain.AlertMuteRuleWrite, expectedUpdatedOn, _ time.Time) (*domain.AlertMuteRule, error) {
 	f.calls++
 	f.updated = w
+	f.expectedUpdatedOn = expectedUpdatedOn
 	return f.written, nil
 }
 func (f *fakeAlertMuteRuleRepo) Extend(_ context.Context, _, _ string, endOn, _ time.Time) (*domain.AlertMuteRule, error) {
@@ -269,7 +272,10 @@ func TestSNAlertMuteRuleService_RefusesWith400(t *testing.T) {
 func TestAlertMuteRuleUpdate_MergesAPartialPatchOntoTheStoredRule(t *testing.T) {
 	stored := &domain.AlertMuteRule{
 		ID: alertMuteRuleTestID, Name: "Gateway upgrade", Description: "CR-1", TimeZone: "Asia/Colombo",
-		StartOn: alertMuteRuleTestNow.Add(time.Hour), EndOn: alertMuteRuleTestNow.Add(2 * time.Hour),
+		// Fractional bounds: the merge must write them back exactly, not truncated to the second.
+		StartOn:    alertMuteRuleTestNow.Add(time.Hour + 250*time.Millisecond),
+		EndOn:      alertMuteRuleTestNow.Add(2*time.Hour + 750*time.Millisecond),
+		UpdatedOn:  alertMuteRuleTestNow.Add(-time.Minute),
 		Conditions: []domain.AlertMuteRuleCondition{{Field: "service", Value: "gw"}, {Field: "environment", Value: "prod"}},
 	}
 	repo := &fakeAlertMuteRuleRepo{stored: stored, written: stored}
@@ -281,6 +287,22 @@ func TestAlertMuteRuleUpdate_MergesAPartialPatchOntoTheStoredRule(t *testing.T) 
 	if w.Name != name || w.Description != "CR-1" || w.TimeZone != "Asia/Colombo" || !w.StartOn.Equal(stored.StartOn) ||
 		!w.EndOn.Equal(stored.EndOn) || len(w.Conditions) != 2 {
 		t.Fatalf("merged write = %+v, want only the name changed", w)
+	}
+	if !repo.expectedUpdatedOn.Equal(stored.UpdatedOn) {
+		t.Fatalf("update guarded by %v, want the version read (%v)", repo.expectedUpdatedOn, stored.UpdatedOn)
+	}
+}
+
+func TestAlertMuteRuleUpdate_LostRaceOnAStillEditableRule(t *testing.T) {
+	scheduled := &domain.AlertMuteRule{ID: alertMuteRuleTestID, Name: "x", TimeZone: "UTC",
+		StartOn: alertMuteRuleTestNow.Add(time.Hour), EndOn: alertMuteRuleTestNow.Add(2 * time.Hour),
+		Conditions: []domain.AlertMuteRuleCondition{{Field: "service", Value: "gw"}, {Field: "environment", Value: "prod"}}}
+	repo := &fakeAlertMuteRuleRepo{stored: scheduled} // written nil: another write changed updated_on first
+	name := "renamed"
+	_, err := newTestAlertMuteRuleService(repo).Update(context.Background(), alertMuteRuleTestID, domain.PatchAlertMuteRuleRequest{Name: &name})
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) || ce.Msg != "the alert mute rule changed while it was being edited; reload it and try again" {
+		t.Fatalf("got %v, want the changed-while-editing conflict", err)
 	}
 }
 

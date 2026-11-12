@@ -43,8 +43,9 @@ type AlertMuteRuleRepository interface {
 	Active(ctx context.Context, now time.Time) ([]domain.AlertMuteRule, error)
 	// Create stores a new rule with the next number.
 	Create(ctx context.Context, actor string, w domain.AlertMuteRuleWrite) (domain.AlertMuteRule, error)
-	// Update replaces every field of a rule that is still scheduled at now.
-	Update(ctx context.Context, actor, id string, w domain.AlertMuteRuleWrite, now time.Time) (*domain.AlertMuteRule, error)
+	// Update writes w over a scheduled rule whose updated_on is still expectedUpdatedOn: an edit is merged onto the rule
+	// as it was read, so a write that landed in between (an extension, another edit) makes it match nothing (nil).
+	Update(ctx context.Context, actor, id string, w domain.AlertMuteRuleWrite, expectedUpdatedOn, now time.Time) (*domain.AlertMuteRule, error)
 	// Extend moves the end of a rule that is scheduled or active at now to endOn, which must be later than its end.
 	Extend(ctx context.Context, actor, id string, endOn, now time.Time) (*domain.AlertMuteRule, error)
 	// End ends a rule that is active at now, at now.
@@ -208,7 +209,7 @@ func (r *alertMuteRuleRepo) Create(ctx context.Context, actor string, w domain.A
 	return b, nil
 }
 
-func (r *alertMuteRuleRepo) Update(ctx context.Context, actor, id string, w domain.AlertMuteRuleWrite, now time.Time) (*domain.AlertMuteRule, error) {
+func (r *alertMuteRuleRepo) Update(ctx context.Context, actor, id string, w domain.AlertMuteRuleWrite, expectedUpdatedOn, now time.Time) (*domain.AlertMuteRule, error) {
 	conditions, err := conditionsJSON(w.Conditions)
 	if err != nil {
 		return nil, fmt.Errorf("update alert mute rule: %w", err)
@@ -216,8 +217,8 @@ func (r *alertMuteRuleRepo) Update(ctx context.Context, actor, id string, w doma
 	return oneAlertMuteRule(r.db.QueryRow(ctx, `UPDATE alert_mute_rule
 		SET name = $3, description = $4, time_zone = $5, start_on = $6, end_on = $7, conditions = $8::jsonb,
 		    updated_by = $9, updated_on = $1
-		WHERE id = $2::uuid AND `+alertMuteRuleStateSQL[domain.AlertMuteRuleStateScheduled]+` RETURNING `+alertMuteRuleColumns,
-		now, id, w.Name, w.Description, w.TimeZone, w.StartOn, w.EndOn, conditions, actor), "update alert mute rule")
+		WHERE id = $2::uuid AND updated_on = $10 AND `+alertMuteRuleStateSQL[domain.AlertMuteRuleStateScheduled]+` RETURNING `+alertMuteRuleColumns,
+		now, id, w.Name, w.Description, w.TimeZone, w.StartOn, w.EndOn, conditions, actor, expectedUpdatedOn), "update alert mute rule")
 }
 
 func (r *alertMuteRuleRepo) Extend(ctx context.Context, actor, id string, endOn, now time.Time) (*domain.AlertMuteRule, error) {

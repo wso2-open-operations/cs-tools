@@ -138,7 +138,7 @@ func TestAlertMuteRuleIntegration_LifecycleAndGuards(t *testing.T) {
 	}
 
 	// Guards: an active rule cannot be edited or deleted, a scheduled one cannot be ended.
-	if b, err := repo.Update(ctx, "c@wso2.com", active.ID, alertMuteRuleWrite("x", now.Add(time.Hour), now.Add(2*time.Hour), "x"), now); err != nil || b != nil {
+	if b, err := repo.Update(ctx, "c@wso2.com", active.ID, alertMuteRuleWrite("x", now.Add(time.Hour), now.Add(2*time.Hour), "x"), active.UpdatedOn, now); err != nil || b != nil {
 		t.Fatalf("update of an active rule: %+v, %v", b, err)
 	}
 	if ok, err := repo.Delete(ctx, active.ID, now); err != nil || ok {
@@ -148,7 +148,12 @@ func TestAlertMuteRuleIntegration_LifecycleAndGuards(t *testing.T) {
 		t.Fatalf("end of a scheduled rule: %+v, %v", b, err)
 	}
 
-	edited, err := repo.Update(ctx, "c@wso2.com", scheduled.ID, alertMuteRuleWrite("Later, renamed", now.Add(2*time.Hour), now.Add(3*time.Hour), "svc-x"), now)
+	// A stale version (another write changed the rule after it was read) matches nothing.
+	if b, err := repo.Update(ctx, "c@wso2.com", scheduled.ID, alertMuteRuleWrite("Stale", now.Add(2*time.Hour), now.Add(3*time.Hour), "svc-x"),
+		scheduled.UpdatedOn.Add(-time.Second), now); err != nil || b != nil {
+		t.Fatalf("update with a stale version: %+v, %v", b, err)
+	}
+	edited, err := repo.Update(ctx, "c@wso2.com", scheduled.ID, alertMuteRuleWrite("Later, renamed", now.Add(2*time.Hour), now.Add(3*time.Hour), "svc-x"), scheduled.UpdatedOn, now)
 	if err != nil || edited == nil || edited.Name != "Later, renamed" || edited.UpdatedBy != "c@wso2.com" || edited.CreatedBy != "a@wso2.com" {
 		t.Fatalf("update: %+v, %v", edited, err)
 	}

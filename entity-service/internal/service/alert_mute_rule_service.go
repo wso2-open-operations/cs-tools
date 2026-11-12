@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -119,8 +120,14 @@ func (s *alertMuteRuleService) Update(ctx context.Context, id string, req domain
 	if err != nil {
 		return domain.AlertMuteRule{}, err
 	}
-	b, err := s.repo.Update(ctx, actorOf(ctx), id, w, now)
-	return s.guarded(ctx, id, b, err, "only a scheduled alert mute rule can be edited")
+	const wrongState = "only a scheduled alert mute rule can be edited"
+	b, err := s.repo.Update(ctx, actorOf(ctx), id, w, current.UpdatedOn, now)
+	if err != nil || b != nil {
+		return s.guarded(ctx, id, b, err, wrongState)
+	}
+	// Nothing matched: the rule changed after it was read. Writing the merge anyway would put back fields another
+	// write had just changed (an extension's end, say), so the caller reloads and edits again.
+	return domain.AlertMuteRule{}, s.lostRace(ctx, id, "edited", wrongState, domain.AlertMuteRuleStateScheduled)
 }
 
 // mergeAlertMuteRulePatch lays the fields present in req over the stored rule.
@@ -129,9 +136,10 @@ func mergeAlertMuteRulePatch(current domain.AlertMuteRule, req domain.PatchAlert
 		Name:        current.Name,
 		Description: current.Description,
 		TimeZone:    current.TimeZone,
-		StartOn:     current.StartOn.UTC().Format(time.RFC3339),
-		EndOn:       current.EndOn.UTC().Format(time.RFC3339),
-		Conditions:  current.Conditions,
+		// RFC3339Nano keeps fractional seconds, so a patch that leaves the window alone writes it back unchanged.
+		StartOn:    current.StartOn.UTC().Format(time.RFC3339Nano),
+		EndOn:      current.EndOn.UTC().Format(time.RFC3339Nano),
+		Conditions: current.Conditions,
 	}
 	if req.Name != nil {
 		merged.Name = *req.Name
@@ -178,19 +186,25 @@ func (s *alertMuteRuleService) Extend(ctx context.Context, id string, req domain
 	if err != nil || b != nil {
 		return s.guarded(ctx, id, b, err, wrongState)
 	}
-	// The guarded UPDATE matched nothing: the rule changed after it was read. Say which way, so a rule that can still
-	// be extended (another extension moved its end) isn't reported as being in the wrong state.
+	// The guarded UPDATE matched nothing: the rule changed after it was read.
+	return domain.AlertMuteRule{}, s.lostRace(ctx, id, "extended", wrongState, domain.AlertMuteRuleStateScheduled, domain.AlertMuteRuleStateActive)
+}
+
+// lostRace explains a guarded write that matched nothing because the rule changed after it was read: a 404 if it is
+// gone, a 409 asking for a reload if it is still in one of the states the write allows (another write got there
+// first), and the wrong-state 409 otherwise.
+func (s *alertMuteRuleService) lostRace(ctx context.Context, id, verb, wrongState string, allowed ...domain.AlertMuteRuleState) error {
 	latest, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return domain.AlertMuteRule{}, err
+		return err
 	}
 	if latest == nil {
-		return domain.AlertMuteRule{}, alertMuteRuleNotFound()
+		return alertMuteRuleNotFound()
 	}
-	if st := latest.StateAt(s.now()); st == domain.AlertMuteRuleStateScheduled || st == domain.AlertMuteRuleStateActive {
-		return domain.AlertMuteRule{}, &apierror.ConflictError{Msg: "the alert mute rule changed while it was being extended; reload it and try again"}
+	if slices.Contains(allowed, latest.StateAt(s.now())) {
+		return &apierror.ConflictError{Msg: "the alert mute rule changed while it was being " + verb + "; reload it and try again"}
 	}
-	return domain.AlertMuteRule{}, &apierror.ConflictError{Msg: wrongState}
+	return &apierror.ConflictError{Msg: wrongState}
 }
 
 func (s *alertMuteRuleService) End(ctx context.Context, id string) (domain.AlertMuteRule, error) {
