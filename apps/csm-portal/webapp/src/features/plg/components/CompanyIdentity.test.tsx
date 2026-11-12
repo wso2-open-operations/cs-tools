@@ -12,9 +12,9 @@ vi.mock("@features/plg/api/client", () => ({
 
 const ORG = "11111111-1111-1111-1111-111111111111";
 
-function Row({ companyId = "cloud-1" }: { companyId?: string | null }) {
+function Row({ companyId = "cloud-1", onRowClick }: { companyId?: string | null; onRowClick?: () => void }) {
   return (
-    <div>
+    <div onClick={onRowClick}>
       <CompanyName organizationId={ORG} companyId={companyId} />
       <MaskedEmail organizationId={ORG} />
       <RevealButton organizationId={ORG} />
@@ -22,11 +22,11 @@ function Row({ companyId = "cloud-1" }: { companyId?: string | null }) {
   );
 }
 
-function renderRow(companyId?: string | null) {
+function renderRow(companyId?: string | null, onRowClick?: () => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <Row companyId={companyId} />
+      <Row companyId={companyId} onRowClick={onRowClick} />
     </QueryClientProvider>,
   );
 }
@@ -86,6 +86,18 @@ describe("the reveal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reveal name and email" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Reveal name and email" })).toBeDisabled());
     expect(screen.getByText(MASKED_EMAIL)).toBeInTheDocument();
+  });
+
+  it("never opens the row, even when the eye is disabled", async () => {
+    answer(null);
+    const onRowClick = vi.fn();
+    renderRow(undefined, onRowClick);
+    fireEvent.click(screen.getByRole("button", { name: "Reveal name and email" }));
+    const eye = screen.getByRole("button", { name: "Reveal name and email" });
+    await waitFor(() => expect(eye).toBeDisabled());
+    // A disabled button lets the click land on its wrapper.
+    fireEvent.click(eye.parentElement as HTMLElement);
+    expect(onRowClick).not.toHaveBeenCalled();
   });
 
   it("says so when there is no company id", () => {

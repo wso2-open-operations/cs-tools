@@ -266,7 +266,9 @@ func applyDefaults(c *Config) {
 	if c.Reveal.PerMinute <= 0 {
 		c.Reveal.PerMinute = 20
 	}
-	if c.Reveal.PerDay < c.Reveal.PerMinute {
+	// Only an unset limit is defaulted: a daily limit below the per-minute one is
+	// a deliberate choice, and simply binds first.
+	if c.Reveal.PerDay <= 0 {
 		c.Reveal.PerDay = max(300, c.Reveal.PerMinute)
 	}
 	if c.Server.Port == 0 {
@@ -351,8 +353,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("entity.baseUrl %q must be an absolute http(s) URL", c.Entity.BaseURL)
 	}
 	if c.Cloud.Enabled() {
-		if !strings.HasPrefix(c.Cloud.BaseURL, "http://") && !strings.HasPrefix(c.Cloud.BaseURL, "https://") {
-			return fmt.Errorf("cloud.baseUrl %q must be an absolute http(s) URL", c.Cloud.BaseURL)
+		// The client sends a bearer token there and reads names and emails back,
+		// so plaintext is allowed against loopback only. The URL is never quoted:
+		// it can carry credentials.
+		u, err := url.Parse(c.Cloud.BaseURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("cloud.baseUrl must be an absolute http(s) URL")
+		}
+		if u.Scheme == "http" && !isLoopback(u.Hostname()) {
+			return errors.New("cloud.baseUrl is plaintext http to a remote host; use https")
 		}
 		if !strings.Contains(c.Cloud.OrgPath, "{orgId}") {
 			return fmt.Errorf("cloud.orgPath %q must contain {orgId}", c.Cloud.OrgPath)

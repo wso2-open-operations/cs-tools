@@ -32804,6 +32804,7 @@ components:
         companyNameFromDomain:
           type: string
         moesifCompanyId:
+          nullable: true
           type: string
           description: The Cloud organisation id.
         cloudUserId:

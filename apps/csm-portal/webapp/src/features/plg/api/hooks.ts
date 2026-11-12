@@ -158,7 +158,11 @@ export function useSetOrganizationOwner(
     mutationFn: (ownerId: string | null) =>
       api.patch<OrganizationDetail>(`/organizations/${organizationId}`, { ownerId }),
     onSuccess: (detail) => {
+      // The page is cached under the Cloud id it was opened by, not the record id.
       client.setQueryData(queryKeys.organization(organizationId), detail);
+      if (detail.moesifCompanyId) {
+        client.setQueryData(queryKeys.organization(detail.moesifCompanyId), detail);
+      }
       void client.invalidateQueries({ queryKey: ["organizations"] });
       void client.invalidateQueries({ queryKey: ["work-queue"] });
     },
@@ -200,7 +204,8 @@ function useProductMutation<TVariables>(
     mutationFn,
     onSuccess: (detail) => {
       client.setQueryData(queryKeys.product(organizationId, productCode), detail);
-      void client.invalidateQueries({ queryKey: queryKeys.organization(organizationId) });
+      // Every cached detail of the organisation: it is keyed by the Cloud id or the record id.
+      void client.invalidateQueries({ queryKey: ["organization"] });
       void client.invalidateQueries({ queryKey: ["organizations"] });
       void client.invalidateQueries({ queryKey: ["registrations"] });
       void client.invalidateQueries({ queryKey: ["work-queue"] });
@@ -293,7 +298,7 @@ export function useAcknowledge(): UseMutationResult<
       client.setQueryData(queryKeys.product(detail.organizationId, detail.product.code), detail);
       void client.invalidateQueries({ queryKey: ["registrations"] });
       void client.invalidateQueries({ queryKey: ["organizations"] });
-      void client.invalidateQueries({ queryKey: queryKeys.organization(detail.organizationId) });
+      void client.invalidateQueries({ queryKey: ["organization"] });
       void client.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });

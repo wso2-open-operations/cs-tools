@@ -165,3 +165,41 @@ func TestCloudGrantIsNotInherited(t *testing.T) {
 		t.Errorf("cloud grant = %+v", cfg.Redacted().Cloud.OAuth)
 	}
 }
+
+// A daily reveal limit below the per-minute one is kept; only an unset one is defaulted.
+func TestRevealDailyLimitIsDefaultedOnlyWhenUnset(t *testing.T) {
+	clearPLGEnv(t)
+	for perDay, want := range map[string]int{"": 300, "0": 300, "5": 5, "500": 500} {
+		t.Setenv("PLG_REVEAL_LIMIT_PER_MINUTE", "20")
+		t.Setenv("PLG_REVEAL_LIMIT_PER_DAY", perDay)
+		cfg, err := LoadWith("does-not-exist.json", EntityDefaults{BaseURL: "https://entity.example"})
+		if err != nil || cfg.Reveal.PerDay != want {
+			t.Errorf("PLG_REVEAL_LIMIT_PER_DAY=%q: perDay %d, %v; want %d", perDay, cfg.Reveal.PerDay, err, want)
+		}
+	}
+}
+
+// The Cloud client sends a bearer token and reads personal data: plaintext only to loopback.
+func TestCloudBaseURLMustBeHTTPSUnlessLoopback(t *testing.T) {
+	clearPLGEnv(t)
+	for _, k := range []string{"CLOUD_API_TOKEN_URL", "CLOUD_API_CLIENT_ID", "CLOUD_API_CLIENT_SECRET", "CLOUD_API_SCOPES"} {
+		t.Setenv(k, "")
+	}
+	for base, ok := range map[string]bool{
+		"https://cloud.example/directory":       true,
+		"http://localhost:9300":                 true,
+		"http://127.0.0.1:9300":                 true,
+		"http://cloud.example/directory":        false,
+		"http://user:pass@cloud.example/secret": false,
+		"cloud.example":                         false,
+	} {
+		t.Setenv("CLOUD_API_BASE_URL", base)
+		_, err := LoadWith("does-not-exist.json", EntityDefaults{BaseURL: "https://entity.example"})
+		if (err == nil) != ok {
+			t.Errorf("%s: err = %v, want ok=%v", base, err, ok)
+		}
+		if err != nil && strings.Contains(err.Error(), "pass") {
+			t.Errorf("%s: the error quotes the URL: %v", base, err)
+		}
+	}
+}

@@ -98,7 +98,8 @@ export function RevealButton({ organizationId }: { organizationId: string }) {
 
   return (
     <Tooltip title={label}>
-      <span>
+      {/* A disabled button lets the click through to this wrapper, so it stops here too. */}
+      <span onClick={(e) => e.stopPropagation()}>
         <IconButton
           size="small"
           onClick={onClick}
