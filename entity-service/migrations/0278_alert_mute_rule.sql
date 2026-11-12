@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS alert_mute_rule (
     time_zone   TEXT          NOT NULL CHECK (btrim(time_zone) <> ''),
     start_on    TIMESTAMPTZ   NOT NULL,
     end_on      TIMESTAMPTZ   NOT NULL,
-    -- [{"field": "service", "value": "..."}, ...]; the allowed fields are checked by entity-service.
+    -- A JSON array of {field, value} objects. entity-service checks which fields are allowed.
     conditions  JSONB         NOT NULL CHECK (jsonb_typeof(conditions) = 'array' AND jsonb_array_length(conditions) > 0),
     created_by  TEXT          NOT NULL,
     created_on  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
