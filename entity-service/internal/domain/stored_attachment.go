@@ -191,6 +191,14 @@ type InlineImageRelocatedRequest struct {
 	StorageKey string `json:"storageKey"`
 }
 
+// DeletedStoredAttachment is the file a delete leaves to be set aside.
+// Empty when nothing was deleted by this call.
+type DeletedStoredAttachment struct {
+	Number     string
+	Name       string
+	StorageKey string
+}
+
 // DeleteStoredAttachmentRequest is the body of POST /attachments/delete.
 type DeleteStoredAttachmentRequest struct {
 	// Kind is work_item or deployment; an inline comment image is not deleted

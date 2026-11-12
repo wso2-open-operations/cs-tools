@@ -28,6 +28,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/filestore"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
@@ -143,8 +144,8 @@ type StoredAttachmentFileService interface {
 	// caller who may see it, as a download of the file's own name.
 	DirectDownloadLink(ctx context.Context, kind domain.StoredAttachmentKind, id string) (domain.DirectDownloadLink, error)
 	// DeleteAttachment deletes an attachment (the row first, as StoredAttachmentService
-	// does, then the file, best effort: a file that cannot be removed now is left to
-	// the orphan cleanup).
+	// does, then its file is moved to the archive folder, best effort: a file that
+	// cannot be moved now stays where it is).
 	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
 }
 
@@ -349,7 +350,7 @@ func (s *storedAttachmentFileService) DirectDownloadLink(ctx context.Context, ki
 }
 
 // discard removes a file that must not stay, best effort: one that cannot be
-// removed now is left to the orphan cleanup.
+// removed now stays where it is.
 func (s *storedAttachmentFileService) discard(ctx context.Context, id, key string) {
 	if err := s.store.Delete(ctx, key); err != nil {
 		slog.WarnContext(ctx, "could not remove a refused upload", "attachmentId", id,
@@ -677,21 +678,29 @@ func (s *storedAttachmentFileService) relocateInlineImage(ctx context.Context, i
 
 // DeleteAttachment implements StoredAttachmentFileService.
 func (s *storedAttachmentFileService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
-	// Where the file is has to be read before the row is deleted.
-	var key string
-	if s.store != nil {
-		if loc, err := s.attachments.LocateAttachment(ctx, domain.LocateAttachmentRequest{Kind: req.Kind, ID: req.ID}); err == nil {
-			key = loc.StorageKey
-		}
-	}
-	if err := s.attachments.DeleteAttachment(ctx, req); err != nil {
+	deleted, err := s.attachments.DeleteAttachment(ctx, req)
+	if err != nil {
 		return err
 	}
-	if key != "" {
-		if err := s.store.Delete(ctx, key); err != nil {
-			slog.WarnContext(ctx, "could not remove a deleted attachment's file",
-				"correlationId", middleware.CorrelationIDFromContext(ctx), "error", err)
-		}
-	}
+	s.archive(ctx, deleted)
 	return nil
+}
+
+// archive moves a deleted attachment's file to csm/archive/ so it can be recovered
+// until a retention rule removes it. Best effort: if the copy fails (it needs an
+// account key) the file stays where it is; the row is already DELETED.
+func (s *storedAttachmentFileService) archive(ctx context.Context, deleted domain.DeletedStoredAttachment) {
+	if s.store == nil || deleted.StorageKey == "" {
+		return
+	}
+	archiveKey := filestore.ArchiveKey(deleted.Number, deleted.Name)
+	if err := s.store.Copy(ctx, deleted.StorageKey, archiveKey, ""); err != nil {
+		slog.WarnContext(ctx, "could not archive a deleted attachment's file; it stays where it is",
+			"correlationId", middleware.CorrelationIDFromContext(ctx), "attachmentNumber", deleted.Number, "error", err)
+		return
+	}
+	if err := s.store.Delete(ctx, deleted.StorageKey); err != nil {
+		slog.WarnContext(ctx, "could not remove a deleted attachment's file after archiving it",
+			"correlationId", middleware.CorrelationIDFromContext(ctx), "attachmentNumber", deleted.Number, "error", err)
+	}
 }

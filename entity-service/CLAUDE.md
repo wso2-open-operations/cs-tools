@@ -1961,8 +1961,11 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    against a second `AUTH_ADMIN_ROLES` list here; from any other caller the flag is ignored and the 403 stands;
    the audit line carries `adminOverride`). Never once the work item
    is closed (409), even for an admin, an image embedded in a comment is not deleted on its own (400), and a repeated
-   delete answers 204. It removes the row first, then **the file, best effort** (a file that cannot be removed
-   now is left to the upload cleanup). A `DELETED` attachment has no file to download, and the case
+   delete answers 204. It marks the row first, then **moves the file to `csm/archive/<number>_<name>`**
+   (`filestore.ArchiveKey`, best effort: the copy needs an account key, and a file that cannot be copied stays
+   where it is). **Nothing removes the archive yet**: add an Azure lifecycle rule on that prefix (delete 30 days
+   after last modification, which is the delete time) or a scheduled job. A draft attachment can be deleted too
+   (the parent is found with `parentOf`, like an upload). A `DELETED` attachment has no file to download, and the case
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
 

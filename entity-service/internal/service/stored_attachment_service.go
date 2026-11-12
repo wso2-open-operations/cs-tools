@@ -746,36 +746,35 @@ func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID
 // tables is internal-only, so the soft delete runs as the system after the checks
 // below. Only the person who uploaded an attachment may delete it, or a portal
 // admin through the CSM portal backend (req.AsAdmin), and never once the work
-// item is closed. Only the row is marked here; the portal
-// backend removes the file afterwards.
-func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
+// item is closed. Only the row is marked here; the file service archives the file.
+func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) (domain.DeletedStoredAttachment, error) {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if req.Kind == domain.StoredAttachmentComment {
-		return &apierror.ValidationError{Msg: "an image in a comment cannot be deleted on its own"}
+		return domain.DeletedStoredAttachment{}, &apierror.ValidationError{Msg: "an image in a comment cannot be deleted on its own"}
 	}
 	if !validate.IsUUID(req.ID) {
-		return &apierror.ValidationError{Msg: "id must be a valid UUID"}
+		return domain.DeletedStoredAttachment{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
 	}
 	email, err := s.resolveActorEmail(ctx)
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 
 	// As the caller: an attachment they cannot see is not found.
 	rows, err := s.repo.GetByIDs(ctx, req.Kind, []string{req.ID})
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if len(rows) != 1 {
-		return &apierror.NotFoundError{Msg: "attachment not found"}
+		return domain.DeletedStoredAttachment{}, &apierror.NotFoundError{Msg: "attachment not found"}
 	}
 	row := rows[0]
 	adminOverride := false
 	if !strings.EqualFold(row.CreatedBy, email) {
 		if !s.mayDeleteAsAdmin(ctx, req) {
-			return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+			return domain.DeletedStoredAttachment{}, &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
 		}
 		adminOverride = true
 	}
@@ -783,29 +782,29 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 	switch row.Status {
 	case "DELETED":
 		// A delete that is repeated (a retry after a timeout) answers the same.
-		return nil
+		return domain.DeletedStoredAttachment{}, nil
 	case "COMPLETE":
 	default:
-		return &apierror.ConflictError{Msg: "this attachment is not stored, so it cannot be deleted"}
+		return domain.DeletedStoredAttachment{}, &apierror.ConflictError{Msg: "this attachment is not stored, so it cannot be deleted"}
 	}
 
-	parent, err := s.repo.GetParent(ctx, req.Kind, row.ParentID)
+	// Same lookup as an upload, so a draft (hung from its project) is found too.
+	parent, err := s.parentOf(ctx, req.Kind, row)
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if parent.Closed {
-		return &apierror.ConflictError{Msg: closedParentDeleteMessage}
+		return domain.DeletedStoredAttachment{}, &apierror.ConflictError{Msg: closedParentDeleteMessage}
 	}
 
-	// The file is not here to remove: the portal backend removes it from storage
-	// after this succeeds.
+	// Only the row is marked here; the file service sets the file aside.
 	ok, err := s.repo.MarkDeleted(repository.WithSystemIdentity(ctx), req.Kind, row.ID, email)
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if !ok {
 		// Another request deleted it first: the outcome the caller wanted.
-		return nil
+		return domain.DeletedStoredAttachment{}, nil
 	}
 	path := ""
 	if row.StorageKey != nil {
@@ -815,7 +814,7 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		"audit", true, "action", "delete", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
 		"attachmentId", row.ID, "path", path, "adminOverride", adminOverride)
-	return nil
+	return domain.DeletedStoredAttachment{Number: row.Number, Name: row.Name, StorageKey: path}, nil
 }
 
 // mayDeleteAsAdmin is whether this delete may skip the "only the uploader" rule:
