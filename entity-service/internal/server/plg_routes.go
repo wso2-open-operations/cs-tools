@@ -15,7 +15,7 @@ import (
 // EVERYTHING PLG NEEDS FROM routes.go IS ONE CALL. That is the point of this
 // file: the merge adds PLG to entity-service without editing a single line of
 // the implementations csm-portal depends on. Repositories, services, handlers
-// and all 28 route registrations live here; `NewRouter` gains one line.
+// and all route registrations live here; `NewRouter` gains one line.
 //
 // Go offers no way to self-register without an init() hack and a package-level
 // mux, which would be worse than the one line — it would hide the dependency
@@ -31,7 +31,7 @@ import (
 // `GET /plg/health` is deliberately absent. entity-service has its own
 // `/health`, and a second liveness endpoint answering for one application
 // inside a shared service is a probe that lies.
-func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
+func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool, access service.AccessService) {
 	// Reference data — the platform catalogue and the lifecycle stages.
 	referenceRepo := repository.NewReferenceRepository(db)
 	referenceHandler := handler.NewPlgReferenceHandler(service.NewReferenceService(referenceRepo))
@@ -119,6 +119,13 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
 	// lands a registration stays on this side of the wire.
 	mux.HandleFunc("POST /plg/registrations/ingest", ingestHandler.Register) // I1
 	mux.HandleFunc("POST /plg/ingest-failures", ingestHandler.RecordFailure) // I2
+
+	// --- registration validation ---------------------------------------------
+	// The plg_registration_validation job only: a user token gets 403.
+	validationHandler := handler.NewPlgValidationHandler(
+		service.NewValidationService(repository.NewValidationRepository(db)))
+	mux.HandleFunc("POST /plg/registrations/validation-queue", serviceOnly(access, validationHandler.Queue))
+	mux.HandleFunc("PUT /plg/pairings/{orgPlatformId}/registration-validation", serviceOnly(access, validationHandler.Apply))
 
 	// --- analytics -----------------------------------------------------------
 	// The work queue is a POST search because it takes eight repeatable filter

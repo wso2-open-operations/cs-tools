@@ -667,6 +667,8 @@ type RunTask struct {
 	CompletedOn  *time.Time        `json:"completedOn"`
 	CompletedBy  *UserRef          `json:"completedBy"`
 	IsBookend    bool              `json:"isBookend"`
+	// MANUAL or VALIDATION (set by the registration job); nil when never written.
+	ValueSource *string `json:"valueSource"`
 }
 
 // PlaybookRun is one playbook running on one pairing.

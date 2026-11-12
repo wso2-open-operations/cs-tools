@@ -248,7 +248,8 @@ func (r *orgPlatformRepository) loadRunTasks(ctx context.Context, runIDs []strin
 		       t.code, t.name, t.description, t.sequence_no, t.value_type::TEXT,
 		       t.value_bool, t.value_number, t.value_text,
 		       t.options, COALESCE(t.value_checked, '{}'), t.is_completed,
-		       t.completed_on, t.completed_by::TEXT, cu.email, cu.display_name
+		       t.completed_on, t.completed_by::TEXT, cu.email, cu.display_name,
+		       t.value_source::TEXT
 		FROM   plg_playbook_run_task t
 		LEFT   JOIN plg_user_v cu ON cu.id = t.completed_by
 		WHERE  t.playbook_run_id::TEXT = ANY($1::TEXT[])
@@ -271,7 +272,7 @@ func (r *orgPlatformRepository) loadRunTasks(ctx context.Context, runIDs []strin
 		if err := rows.Scan(&runID, &t.ID, &t.PlaybookTaskID, &t.Code, &t.Name, &t.Description,
 			&t.SequenceNo, &t.ValueType, &t.BoolValue, &t.NumberValue, &t.TextValue,
 			&rawOpts, &t.CheckedCodes, &t.IsCompleted, &t.CompletedOn,
-			&doneID, &doneEmail, &doneName); err != nil {
+			&doneID, &doneEmail, &doneName, &t.ValueSource); err != nil {
 			return nil, fmt.Errorf("scan run task: %w", err)
 		}
 		opts, err := scanOptions(rawOpts)
@@ -865,7 +866,9 @@ func (r *orgPlatformRepository) PatchRunTask(ctx context.Context, req domain.Pat
 		       value_text    = CASE WHEN $2 THEN NULL ELSE COALESCE($5, value_text)   END,
 		       value_checked = CASE WHEN $2 THEN NULL
 		                            WHEN $6::TEXT[] IS NOT NULL THEN NULLIF($6::TEXT[], '{}')
-		                            ELSE value_checked END
+		                            ELSE value_checked END,
+		       -- An engineer's write, clears included; the registration job never overwrites it.
+		       value_source  = 'MANUAL'
 		WHERE  id::TEXT = $1
 		  -- The attached check travels INSIDE the statement, not only in the
 		  -- lookup above: between that read and this write a concurrent detach

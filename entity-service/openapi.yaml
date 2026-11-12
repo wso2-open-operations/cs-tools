@@ -20717,6 +20717,103 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /plg/registrations/validation-queue:
+    post:
+      summary: Pairings for the registration validation job.
+      description: >
+        Pairings of one product in REGISTRATION, registered at or after
+        `registeredAfter`, oldest first. Ids only. Service credentials only: a
+        user token gets 403.
+      operationId: plgValidationQueue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgValidationQueueRequest"
+      responses:
+        "200":
+          description: The pairings to validate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgValidationQueueResult"
+        "400":
+          description: Missing productCode or registeredAfter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/pairings/{orgPlatformId}/registration-validation:
+    put:
+      summary: Write the registration job's results for one pairing.
+      description: >
+        One transaction: attaches the product's active registration playbook
+        when none is attached (added_by NULL), replaces the activity summary,
+        and writes each value marked VALIDATION. A value an engineer set
+        (MANUAL), a code the run lacks, and every value of a closed run are
+        skipped and reported. INITIATE_PLAYBOOK takes true only;
+        CLOSE_PLAYBOOK is refused as a value. With `abandon`, an EXCLUDED
+        outcome the job wrote also closes the run and moves the pairing to
+        ABANDONED, with a history row. Service credentials only: a user token
+        gets 403.
+      operationId: plgApplyRegistrationValidation
+      parameters:
+        - name: orgPlatformId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgApplyValidationRequest"
+      responses:
+        "200":
+          description: Written; read `skipped` for what was left alone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgApplyValidationResult"
+        "400":
+          description: An invalid summary, CLOSE_PLAYBOOK as a value, abandon without EXCLUDED, or a value the task cannot hold. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such pairing, or no active registration playbook for its product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The pairing has left REGISTRATION.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /plg/analytics/dashboard:
     get:
       summary: Dashboard aggregates.
@@ -41823,6 +41920,126 @@ components:
         plg_ingest_failure directly (WHERE resolved_on IS NULL, which the table
         carries a partial index for).
       properties: {}
+    PlgValidationQueueRequest:
+      type: object
+      required: [productCode, registeredAfter]
+      properties:
+        productCode:
+          type: string
+          example: AGENT_PLATFORM
+        registeredAfter:
+          type: string
+          format: date-time
+        limit:
+          type: integer
+          description: Default 200, at most 1000.
+    PlgValidationQueueResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              orgPlatformId:
+                type: string
+                format: uuid
+              companyId:
+                type: string
+              ownerUserId:
+                type: string
+                nullable: true
+              registeredOn:
+                type: string
+                format: date-time
+              emailClassification:
+                type: string
+                nullable: true
+                description: The stored REGISTERED_EMAIL_CLASSIFICATION code, whoever set it.
+              lastValidatedOn:
+                type: string
+                format: date-time
+                nullable: true
+    PlgApplyValidationRequest:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: object
+          required: [windowStart, windowEnd]
+          properties:
+            windowStart:
+              type: string
+              format: date-time
+            windowEnd:
+              type: string
+              format: date-time
+            firstEventOn:
+              type: string
+              format: date-time
+              nullable: true
+            lastEventOn:
+              type: string
+              format: date-time
+              nullable: true
+            eventCount:
+              type: integer
+            actionCounts:
+              type: object
+              additionalProperties:
+                type: integer
+            furthestStep:
+              type: string
+              nullable: true
+        values:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [code]
+            description: The one value field the task's type takes, or none to clear it.
+            properties:
+              code:
+                type: string
+              boolValue:
+                type: boolean
+              numberValue:
+                type: number
+              textValue:
+                type: string
+              checkedCodes:
+                type: array
+                items:
+                  type: string
+        abandon:
+          type: boolean
+          description: Close the run and move the pairing to ABANDONED. Needs ELIGIBILITY_ASSESSMENT_OUTCOME = EXCLUDED among the values.
+    PlgApplyValidationResult:
+      type: object
+      properties:
+        playbookRunId:
+          type: string
+          format: uuid
+        attached:
+          type: boolean
+          description: True when this call attached the registration playbook.
+        written:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              reason:
+                type: string
+                enum: [MANUAL, MISSING, CLOSED]
+        abandoned:
+          type: boolean
+          description: True when this call closed the run and moved the pairing to ABANDONED.
     PlgRunTaskShape:
       type: object
       properties:

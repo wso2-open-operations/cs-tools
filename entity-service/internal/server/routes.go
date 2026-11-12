@@ -2872,7 +2872,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// query of every PLG request. Not registering means those paths 404, which
 	// is the truthful answer where PLG has no data to serve.
 	if db != nil {
-		registerPLGRoutes(mux, db)
+		registerPLGRoutes(mux, db, accessSvc)
 	}
 
 	return middleware.CorrelationID(
