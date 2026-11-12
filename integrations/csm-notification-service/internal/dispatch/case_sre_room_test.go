@@ -424,7 +424,7 @@ type holdingSLA struct {
 	once             sync.Once
 }
 
-func (h *holdingSLA) RegisterClocks(context.Context, string, string, time.Time, string, string, string, string, string, string) {
+func (h *holdingSLA) RegisterClocks(context.Context, string, string, time.Time, string, string, string, string, string, string, string) {
 	first := false
 	h.once.Do(func() { first = true })
 	if first {
@@ -436,7 +436,7 @@ func (h *holdingSLA) ApplyStateEffects(context.Context, string, string)  {}
 func (h *holdingSLA) CompleteResponseClock(context.Context, string)      {}
 func (h *holdingSLA) PauseWorkaroundClock(context.Context, string) error { return nil }
 func (h *holdingSLA) RecalculateFromEntity(context.Context) error        { return nil }
-func (h *holdingSLA) ReviseClocks(context.Context, string, string, string, string, string, string, string, string) {
+func (h *holdingSLA) ReviseClocks(context.Context, string, string, string, string, string, string, string, string, string) {
 }
 
 // A redelivery of the same record while the first call is still in flight

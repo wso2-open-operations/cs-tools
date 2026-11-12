@@ -45,13 +45,13 @@ func NewRotaReminderSettingsRepository(db *pgxpool.Pool) RotaReminderSettingsRep
 	return &rotaReminderSettingsRepository{db: db}
 }
 
-const rotaReminderSettingsColumns = `family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, invite_rotations, copy_to, weekend_copy_to, updated_by, updated_on`
+const rotaReminderSettingsColumns = `family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, invite_rotations, copy_to, weekend_copy_to, invite_copy_to, updated_by, updated_on`
 
 func scanRotaReminderSettings(row pgx.Row) (domain.RotaReminderSettings, error) {
 	var out domain.RotaReminderSettings
 	var required, windows, inviteRotations []byte
 	if err := row.Scan(&out.Family, &out.WeekdayEnabled, &out.WeekendEnabled, &out.InvitesEnabled, &required, &windows,
-		&inviteRotations, &out.CopyTo, &out.WeekendCopyTo, &out.UpdatedBy, &out.UpdatedOn); err != nil {
+		&inviteRotations, &out.CopyTo, &out.WeekendCopyTo, &out.InviteCopyTo, &out.UpdatedBy, &out.UpdatedOn); err != nil {
 		return domain.RotaReminderSettings{}, err
 	}
 	out.WeekendRequired = map[string]int{}
@@ -71,6 +71,9 @@ func scanRotaReminderSettings(row pgx.Row) (domain.RotaReminderSettings, error) 
 	}
 	if out.WeekendCopyTo == nil {
 		out.WeekendCopyTo = []string{}
+	}
+	if out.InviteCopyTo == nil {
+		out.InviteCopyTo = []string{}
 	}
 	return out, nil
 }
@@ -119,6 +122,10 @@ func (r *rotaReminderSettingsRepository) Save(ctx context.Context, actor string,
 	if weekendCopyTo == nil {
 		weekendCopyTo = []string{}
 	}
+	inviteCopyTo := s.InviteCopyTo
+	if inviteCopyTo == nil {
+		inviteCopyTo = []string{}
+	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return domain.RotaReminderSettings{}, fmt.Errorf("save rota reminder settings: %w", err)
@@ -129,8 +136,8 @@ func (r *rotaReminderSettingsRepository) Save(ctx context.Context, actor string,
 	}
 	out, err := scanRotaReminderSettings(tx.QueryRow(ctx, `
 		INSERT INTO team_schedule_reminder_setting
-		       (family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, invite_rotations, copy_to, weekend_copy_to, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $10)
+		       (family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, invite_rotations, copy_to, weekend_copy_to, invite_copy_to, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $11)
 		ON CONFLICT (family) DO UPDATE
 		   SET weekday_enabled  = EXCLUDED.weekday_enabled,
 		       weekend_enabled  = EXCLUDED.weekend_enabled,
@@ -140,10 +147,11 @@ func (r *rotaReminderSettingsRepository) Save(ctx context.Context, actor string,
 		       invite_rotations = EXCLUDED.invite_rotations,
 		       copy_to          = EXCLUDED.copy_to,
 		       weekend_copy_to  = EXCLUDED.weekend_copy_to,
+		       invite_copy_to   = EXCLUDED.invite_copy_to,
 		       updated_by       = EXCLUDED.updated_by,
 		       updated_on       = now()
 		RETURNING `+rotaReminderSettingsColumns,
-		s.Family, s.WeekdayEnabled, s.WeekendEnabled, s.InvitesEnabled, string(required), string(windows), string(inviteRotations), copyTo, weekendCopyTo, actor))
+		s.Family, s.WeekdayEnabled, s.WeekendEnabled, s.InvitesEnabled, string(required), string(windows), string(inviteRotations), copyTo, weekendCopyTo, inviteCopyTo, actor))
 	if err != nil {
 		return domain.RotaReminderSettings{}, fmt.Errorf("save rota reminder settings: %w", err)
 	}

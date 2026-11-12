@@ -41,11 +41,15 @@ func TestClosureEnumLabel(t *testing.T) {
 
 func TestProjectSearchOrderBy(t *testing.T) {
 	cases := map[[2]string]string{
-		{"", ""}:            "p.created_on DESC, p.id",
-		{"", "asc"}:         "p.created_on ASC, p.id",
-		{"endDate", ""}:     "p.end_date ASC NULLS LAST, p.id",
-		{"endDate", "desc"}: "p.end_date DESC NULLS LAST, p.id",
-		{"x; DROP", "desc"}: "p.created_on DESC, p.id",
+		{"", ""}:                     "p.created_on DESC, p.id",
+		{"", "asc"}:                  "p.created_on ASC, p.id",
+		{"endDate", ""}:              "p.end_date ASC NULLS LAST, p.id",
+		{"endDate", "desc"}:          "p.end_date DESC NULLS LAST, p.id",
+		{"goLivePlanDate", "asc"}:    "p.onboarding_go_live_plan_date ASC NULLS LAST, p.id",
+		{"goLiveDate", "desc"}:       "p.onboarding_go_live_date DESC NULLS LAST, p.id",
+		{"onboardingExpiryDate", ""}: "p.onboarding_expiry_date ASC NULLS LAST, p.id",
+		{"productionReadinessCompletionDate", "desc"}: "p.onboarding_production_readiness_completion_date DESC NULLS LAST, p.id",
+		{"x; DROP", "desc"}:                           "p.created_on DESC, p.id",
 	}
 	for in, want := range cases {
 		if got := projectSearchOrderBy(in[0], in[1]); got != want {

@@ -17,7 +17,7 @@ info:
     | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
     | `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
-    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
+    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the five onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
     | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
@@ -3111,8 +3111,9 @@ paths:
         the integration service validates this and rejects an empty update.
         Reachable by cs_engineer, onboarding_lead and admin; which fields a
         caller may set is then decided per field. onboardingStatus and
-        onboardingOwner and the four onboarding dates (onboardingStartDate,
-        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
+        onboardingOwner and the five onboarding dates (onboardingStartDate,
+        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate,
+        onboardingProductionReadinessCompletionDate)
         need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
         alone gets 403); closureState and suspensionProcessOverridden need admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
@@ -4718,6 +4719,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "The stored dashboards could not be read. Retry later."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /dashboards/filter-presets:
     get:
@@ -4888,6 +4895,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "The stored dashboards could not be read. Retry later."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /dashboards/generate:
     post:
@@ -4905,12 +4918,19 @@ paths:
         backend: the draft's id when it is a UUID, else a new one); without
         it, a sample dashboard is returned for every valid request. A team named in a
         creTeam / sreTeam filter (its team registry key) is turned into that
-        team's group id before the reply. 422 when the model declines (the
-        message says why), refuses, or names a team that cannot be filtered
-        (unknown, in the wrong field, or with no group configured; the message
-        says which); 502 when its answer is not
-        a usable dashboard, was cut off (its own message), or the model cannot
-        be reached; 504 when it takes too long; 503 when generation is
+        team's group id before the reply; a product filter's names become the
+        products' catalog names and a productVersion filter's versions that
+        product's recorded versions; a project or account filter (a key, name
+        or account number) becomes a projectId / accountId filter on the
+        record's id, with the same op. 422 when the model declines (the
+        message says why, at most 300 characters), refuses, or names a team
+        that cannot be filtered (unknown, in the wrong field, or with no group
+        configured), or a product, version, project or account that names
+        nothing or several (generate_product, generate_project,
+        generate_account; the message names the candidates); 502 when its
+        answer is not a usable dashboard, was cut off (its own message), the
+        model cannot be reached, or a product, project or account search
+        fails; 504 when it takes too long; 503 when generation is
         unavailable (no sample loaded, or the AI integration service has no
         model key), or when the AI side's usage limit is reached (the model
         gateway's 429; its own message, unlike the caller's limit below). 413 when the dashboard being edited is over
@@ -11008,6 +11028,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+  /plg/organizations/aggregate:
+    post:
+      summary: Count organisations per owner or per country.
+      description: >-
+        Passed through to entity-service's POST /plg/organizations/aggregate
+        after the filters are checked as the organisation search checks
+        them. groupBy "owner": one group per PLG CS owner (key the owner's
+        user id) and "unowned" ("Unowned"); "country": one group per country
+        (key and label the country as written) and "unknown" ("Unknown").
+        Backs the dashboard's PLG pie and bar widgets grouped on the server.
+      operationId: plgAggregateOrganizations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateOrganizationsRequest"
+      responses:
+        "200":
+          description: Organisations per group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country filter) with its message."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
   /plg/organizations/{organizationId}:
     get:
       summary: One organisation, with its platform cards.
@@ -11542,6 +11610,103 @@ paths:
                 $ref: "#/components/schemas/PlgRegistrationSearchResponse"
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+  /plg/registrations/volume-trend:
+    post:
+      summary: Registrations per day, week or month, for a dashboard chart.
+      description: >-
+        Passed through to entity-service's POST /plg/registrations/volume-trend
+        after the filters are checked as the registration search checks them.
+        The window is taken as POST /cases/volume-trend takes it; one series,
+        "Registered", counted on the registration date. An empty body is every
+        registration over the trailing 30 days. Backs the dashboard's PLG
+        registration line widget.
+      operationId: plgRegistrationVolumeTrend
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgRegistrationVolumeTrendRequest"
+      responses:
+        "200":
+          description: Registrations per point of the window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgRegistrationVolumeTrendResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (the window, a date, or an owner email, country or playbook answer filter) with its message."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+  /plg/registrations/aggregate:
+    post:
+      summary: Count registrations per country or per playbook answer.
+      description: >-
+        Passed through to entity-service's POST /plg/registrations/aggregate
+        after the filters are checked as the registration search checks them:
+        the registrations counted per their organisation's country ("unknown",
+        "Unknown", for none) or, with groupBy "playbookAnswer", per their
+        answer to filters.playbookTask (the option code and label;
+        "unanswered", "Not answered", for none). Backs the dashboard's PLG
+        registration pie and bar widgets grouped by country or by answer.
+      operationId: plgAggregateRegistrations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateRegistrationsRequest"
+      responses:
+        "200":
+          description: Registrations per country or per answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country or playbook answer filter) with its message."
           content:
             application/json:
               schema:
@@ -14632,8 +14797,9 @@ paths:
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
         by shift code), inviteRotations (whether each rotation's reminders carry a calendar
-        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
-        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        invitation, by shift code), copyTo (copied on the reminder emails, never with the
+        invitation), weekendCopyTo (copied on the weekend summary only), inviteCopyTo (copied on
+        the emails that carry an invitation or a cancellation only), updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -14722,6 +14888,9 @@ paths:
                   example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  description: >-
+                    Copied (Cc) on the reminder emails (weekday reminders and the weekend summary),
+                    never with the calendar invitation attached.
                   maxItems: 20
                   items: { type: string, format: email }
                 weekendCopyTo:
@@ -14729,6 +14898,13 @@ paths:
                   description: >-
                     Copied (Cc) on the weekend summary email only. Optional: when absent the stored
                     value is kept.
+                  maxItems: 20
+                  items: { type: string, format: email }
+                inviteCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the emails that carry a calendar invitation or its cancellation,
+                    and on no other; never a guest. Optional: when absent the stored value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:
@@ -20112,6 +20288,19 @@ components:
             type: string
             format: uuid
           description: Match cards submitted by any of these users.
+        teamIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only time cards of the people on any of these teams today (the
+            Team Schedule's team ids: a CRE team's CRE group id, an SRE team's
+            SRE group id; a person counts
+            once however many of the teams list them). Membership is the
+            current roster, whenever the card was logged. Not supported on
+            the legacy data source (400).
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -20131,11 +20320,13 @@ components:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
         groupBy:
           type: string
-          enum: [state, user, project, day]
+          enum: [state, user, project, day, team]
           description: >-
             "day" groups by work date and needs filters.startDate and
             filters.endDate (at most 31 days, both inclusive). A card with no
-            project has no "project" bucket.
+            project has no "project" bucket. "team" needs filters.teamIds:
+            one bucket per one of those teams (a team with no cards at 0), a
+            card counted in every one of them its engineer is on.
         measure:
           type: string
           enum: [count, minutes]
@@ -20833,6 +21024,8 @@ components:
             - accountEscalationActive
             - number
             - internalId
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -20892,6 +21085,20 @@ components:
           RFC3339 timestamp or YYYY-MM-DD date bounding the case's created,
           last-updated, or closed timestamp respectively. gte is inclusive
           "on or after"; lte is inclusive "on or before".
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change to any of them ("moved to
+          Waiting on WSO2"), whatever their state now; a case that moved there
+          several times matches once. Only logged changes are seen: the
+          history starts on 2026-10-11 and a case's creation state is not
+          logged. Not supported inside an anyOf branch.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged:
+          a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
+          placeholder such as `__today__` or `__startOfMonth:-1__`; gte is
+          inclusive, a date-only lte covers the whole day. The dashboards
+          resolve a placeholder to the viewer's local day before the request,
+          as for createdOn. Needs a stateEntered filter in the same request;
+          without a stateEnteredOn, stateEntered means at any time. Not
+          supported inside an anyOf branch.
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
           product. Only applied by the ServiceNow data source.
@@ -20970,6 +21177,16 @@ components:
             hits). Defaults to false, which returns the exact total as before.
             Ignored on the ServiceNow data source, which always reports one,
             and for a search that sets groupBy (its totals are the bucket counts).
+        excludeFields:
+          type: array
+          items:
+            type: string
+            enum: [description]
+          description: >-
+            Response fields to leave out of every returned case, for a list
+            that never shows them. Only `description` is supported (it can be
+            megabytes of rich text); an excluded field comes back null. Omitted
+            or empty returns every field as before. Forwarded as is.
         filters:
           $ref: '#/components/schemas/CaseSearchFilters'
         sortBy:
@@ -21146,7 +21363,7 @@ components:
       description: >-
         The shared result shape for every resource's dedicated aggregate
         endpoint (cases, incidents, problems, change requests, incident
-        tasks). groups holds the top buckets by count, capped at the
+        tasks, time cards, PLG organisations and registrations). groups holds the top buckets by count, capped at the
         request's maxGroups when set; othersCount folds every bucket beyond
         that cap into a single count. totalRecords is the total number of
         records matching the request's filters, and always equals the sum
@@ -21393,6 +21610,8 @@ components:
             - announcement
             - engagement
             - case_feedback
+            - plg_organization
+            - plg_registration
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
@@ -21405,7 +21624,11 @@ components:
             by the caller against POST /cases/feedback/aggregate instead;
             there is no server-side resourceType-to-endpoint mapping, the
             caller picks the endpoint from resourceType on its own, same as
-            every other value here.
+            every other value here. plg_organization is PLG organisations,
+            searched with POST /plg/organizations/search, which only PLG
+            users may call. plg_registration is PLG registrations (one per
+            organisation and product), searched with POST
+            /plg/registrations/search, PLG users only as well.
         shape:
           type: string
           enum:
@@ -22272,6 +22495,7 @@ components:
           type: string
         description:
           type: string
+          nullable: true
         severity:
           type: string
           enum:
@@ -23447,6 +23671,97 @@ components:
               - cloud_support
               - professional_services
           description: Excludes projects whose subscriptionType matches any of these values.
+        onboardingStartDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding start date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        onboardingStartDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding start date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        goLivePlanDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a planned go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        goLivePlanDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a planned go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        goLiveDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a actual go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        goLiveDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a actual go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        onboardingExpiryDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding expiry date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        onboardingExpiryDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding expiry date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        productionReadinessCompletionDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a production-readiness completion date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        productionReadinessCompletionDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a production-readiness completion date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        closureStates:
+          type: array
+          items:
+            type: string
+            enum:
+              - Open
+              - Suspended
+              - Restricted
+          description: >
+            Only projects whose overall closure state is any of these values (the
+            include-side counterpart of excludeClosureStates; a project with no
+            recorded closure state matches none). Postgres data sources only.
+        sortBy:
+          type: string
+          enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
+          description: >
+            Sort field. Projects with no value for it are last. Only endDate is
+            supported on every data source; the others are Postgres only.
+        sortOrder:
+          type: string
+          enum: [asc, desc]
 
     ProjectSearchResponse:
       type: object
@@ -23708,6 +24023,31 @@ components:
               format: date-time
               nullable: true
               description: End of the project's current renewed period.
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC). Postgres data sources only; null elsewhere.
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
             createdOn:
               type: string
               format: date-time
@@ -23829,6 +24169,11 @@ components:
               format: date-time
               nullable: true
               description: The project's onboarding expiry date (midnight UTC).
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC).
 
     ProjectAccountRef:
       type: object
@@ -23862,7 +24207,7 @@ components:
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
         suspensionProcessOverridden requires the admin role;
-        onboardingStatus, onboardingOwner and the four onboarding dates
+        onboardingStatus, onboardingOwner and the five onboarding dates
         require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
       properties:
@@ -23914,6 +24259,15 @@ components:
             onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
             applicable to projects sourced from the database; cannot be
             cleared; an invalid date, or dates out of order, is a 400.
+        onboardingProductionReadinessCompletionDate:
+          type: string
+          format: date
+          description: >
+            Sets the date the project's onboarding production-readiness work was
+            completed (YYYY-MM-DD). Requires onboarding_lead or admin -- a 403
+            for a cs_engineer alone. Only applicable to projects sourced from the
+            database; read back as productionReadinessCompletionDate; cannot be
+            cleared; an invalid date, or one earlier than the start date, is a 400.
         hasAgent:
           type: boolean
         hasKbReferences:
@@ -24014,6 +24368,11 @@ components:
               format: date-time
               nullable: true
               description: The project's onboarding expiry date (midnight UTC). Present on Postgres data sources only.
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC). Present on Postgres data sources only.
 
     DeploymentCreatePayload:
       type: object
@@ -29615,6 +29974,181 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationSearchFilters:
+      type: object
+      description: >-
+        The filters the PLG organisation and registration searches, the
+        registration trend and both PLG aggregates share, passed to
+        entity-service as they are. Every key is optional; lists match any
+        of their values; keys are ANDed.
+      properties:
+        query:
+          type: string
+          description: Matches the organisation name or registered email, ignoring case.
+        organizationName:
+          type: string
+        registeredEmail:
+          type: string
+        productCodes:
+          type: array
+          items:
+            type: string
+        lifecycleStages:
+          type: array
+          items:
+            type: string
+        subscriptionTiers:
+          type: array
+          items:
+            type: string
+        ownerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        unowned:
+          type: boolean
+          nullable: true
+          description: true matches the organisations with no CS owner.
+        ownerEmails:
+          type: array
+          items:
+            type: string
+            maxLength: 254
+          description: >-
+            Matches the organisation's CS owner by email address, any of
+            these, ignoring case; a registration matches by its organisation's
+            owner. entity-service checks each entry (an email address of at
+            most 254 characters). Not with unowned.
+        registeredFrom:
+          type: string
+          format: date-time
+        registeredTo:
+          type: string
+          format: date-time
+        countryNames:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+          description: >-
+            Matches the organisation's country, any of these, ignoring case;
+            a registration matches by its organisation's country.
+            entity-service checks each entry (1 to 100 characters).
+        countryUnknown:
+          type: boolean
+          nullable: true
+          description: true matches the organisations (registrations) with no country. Not with countryNames.
+        playbookTask:
+          type: string
+          description: >-
+            A playbook task's code, the task playbookAnswers and
+            playbookUnanswered match on (and the registration aggregate's
+            playbookAnswer grouping groups by).
+        playbookAnswers:
+          type: array
+          items:
+            type: string
+          description: >-
+            Matches the registrations that answered playbookTask with any of
+            these option codes; an organisation matches when any of its
+            registrations does. Needs playbookTask; not with
+            playbookUnanswered. entity-service checks the codes (1 to 100
+            characters).
+        playbookUnanswered:
+          type: boolean
+          nullable: true
+          description: true matches the registrations with no answer to playbookTask. Needs playbookTask; not with playbookAnswers.
+    PlgAggregateOrganizationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [owner, country]
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: The groups after the first maxGroups are folded into othersCount; 0 or omitted keeps every group.
+    PlgAggregateRegistrationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [country, playbookAnswer]
+          description: playbookAnswer needs filters.playbookTask.
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: As PlgAggregateOrganizationsRequest's maxGroups.
+    PlgRegistrationVolumeTrendRequest:
+      type: object
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        days:
+          type: integer
+          description: The trailing days, ending today (UTC), 1 to 90; 30 when no window is given. Not with startDate/endDate.
+        startDate:
+          type: string
+          description: First day of a fixed window, a YYYY-MM-DD date or a relative date placeholder. Needs endDate.
+        endDate:
+          type: string
+          description: Last day of a fixed window, in startDate's forms. Needs startDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: How a fixed window's days are grouped (day at most 90 days, week 54 weeks, month 24 months).
+    PlgRegistrationVolumeTrendResponse:
+      type: object
+      description: >-
+        Registrations per day, week or month: the case trend's window fields
+        and always exactly one series, "Registered" (by registration date).
+      properties:
+        days:
+          type: integer
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlgRegistrationVolumeTrendSeries"
+    PlgRegistrationVolumeTrendSeries:
+      type: object
+      properties:
+        label:
+          type: string
+          description: '"Registered".'
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseVolumeTrendPoint"
+          description: >-
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no registrations is still present,
+            with count 0.
     PlgPatchOrganizationRequest:
       type: object
       required:

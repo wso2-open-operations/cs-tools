@@ -27,20 +27,33 @@ import (
 func TestParseOnboardingDates(t *testing.T) {
 	str := func(s string) *string { return &s }
 	d, err := ParseOnboardingDates(domain.ProjectUpdateRequest{OnboardingStartDate: str("2026-03-01"), OnboardingGoLiveDate: str("2026-03-01")})
-	if err != nil || d.Start == nil || d.GoLive == nil || d.GoLivePlan != nil || d.Expiry != nil {
+	if err != nil || d.Start == nil || d.GoLive == nil || d.GoLivePlan != nil || d.Expiry != nil || d.ProductionReadiness != nil {
 		t.Fatalf("same-day pair: %+v, %v", d, err)
 	}
 	if d, err = ParseOnboardingDates(domain.ProjectUpdateRequest{}); err != nil || d != (OnboardingDates{}) {
 		t.Fatalf("empty: %+v, %v", d, err)
 	}
 	for name, req := range map[string]domain.ProjectUpdateRequest{
-		"malformed":    {OnboardingStartDate: str("2026-3-1x")},
-		"empty string": {OnboardingExpiryDate: str("")},
-		"order":        {OnboardingStartDate: str("2026-03-02"), OnboardingGoLiveDate: str("2026-03-01")},
+		"malformed":           {OnboardingStartDate: str("2026-3-1x")},
+		"empty string":        {OnboardingExpiryDate: str("")},
+		"order":               {OnboardingStartDate: str("2026-03-02"), OnboardingGoLiveDate: str("2026-03-01")},
+		"readiness malformed": {OnboardingProductionReadinessCompletionDate: str("01/03/2026")},
+		"readiness order":     {OnboardingStartDate: str("2026-03-02"), OnboardingProductionReadinessCompletionDate: str("2026-03-01")},
 	} {
 		var ve *apierror.ValidationError
 		if _, err := ParseOnboardingDates(req); !errors.As(err, &ve) {
 			t.Errorf("%s: err = %v, want ValidationError", name, err)
 		}
+	}
+}
+
+func TestParseOnboardingDates_ProductionReadiness(t *testing.T) {
+	str := func(s string) *string { return &s }
+	d, err := ParseOnboardingDates(domain.ProjectUpdateRequest{OnboardingStartDate: str("2026-03-01"), OnboardingProductionReadinessCompletionDate: str("2026-03-01")})
+	if err != nil || d.ProductionReadiness == nil || d.ProductionReadiness.Format("2006-01-02") != "2026-03-01" {
+		t.Fatalf("same-day: %+v, %v", d, err)
+	}
+	if d, err = ParseOnboardingDates(domain.ProjectUpdateRequest{OnboardingProductionReadinessCompletionDate: str("2026-03-01")}); err != nil || d.Start != nil || d.ProductionReadiness == nil {
+		t.Fatalf("alone: %+v, %v", d, err)
 	}
 }

@@ -19,6 +19,8 @@ import { useId, useState, type FormEvent, type JSX } from "react";
 import { useRotaReminderSettings, useSaveRotaReminderSettings } from "../api/useRotaReminderSettings";
 import type { ReminderWindow, RotaFamily, RotaReminderSettings, SaveRotaReminderSettings } from "../types";
 import { observesDaylightSaving, zoneNameAllYear } from "../utils/rota";
+import { useFamilyCcPeople } from "../api/useFamilyCcPeople";
+import RotaCcPicker from "./RotaCcPicker";
 import RotaReminderSendNow from "./RotaReminderSendNow";
 
 const FAMILY: RotaFamily = "CRE";
@@ -89,6 +91,7 @@ interface Form extends Record<InviteKey, boolean> {
   timeZone: string;
   copyTo: string;
   weekendCopyTo: string;
+  inviteCopyTo: string;
 }
 
 function toForm(s: SaveRotaReminderSettings): Form {
@@ -112,6 +115,7 @@ function toForm(s: SaveRotaReminderSettings): Form {
     timeZone: w.timeZone,
     copyTo: (s.copyTo ?? []).join("\n"),
     weekendCopyTo: (s.weekendCopyTo ?? []).join("\n"),
+    inviteCopyTo: (s.inviteCopyTo ?? []).join("\n"),
   };
 }
 
@@ -177,6 +181,8 @@ function buildBody(
   if (typeof copyTo === "string") return { error: copyTo };
   const weekendCopyTo = addresses(form.weekendCopyTo);
   if (typeof weekendCopyTo === "string") return { error: weekendCopyTo };
+  const inviteCopyTo = addresses(form.inviteCopyTo);
+  if (typeof inviteCopyTo === "string") return { error: inviteCopyTo };
 
   const savedRequired = saved?.weekendRequired ?? {};
   const savedWindows = saved?.windows ?? {};
@@ -205,6 +211,7 @@ function buildBody(
       inviteRotations,
       copyTo,
       weekendCopyTo,
+      inviteCopyTo,
     },
   };
 }
@@ -213,7 +220,8 @@ function buildBody(
  * The CRE rota reminders card on the Rota Access tab: whether the weekday and
  * weekend reminder emails and the calendar invitations go out, how many people
  * a weekend rotation needs before it is announced, the hours of the Americas
- * Weekend and Americas On-call rotations, and who is copied on every reminder.
+ * Weekend and Americas On-call rotations, and who is copied on the reminder
+ * emails, on the calendar invitations and on the weekend summary.
  *
  * Until something is saved the reminders run on their built-in settings, which
  * the form shows. The server decides who may save (a CSM admin or the CRE rota
@@ -225,6 +233,7 @@ export default function RotaReminderSettings(): JSX.Element {
   const headingId = id("h");
 
   const query = useRotaReminderSettings(FAMILY);
+  const ccPeople = useFamilyCcPeople(FAMILY);
   const save = useSaveRotaReminderSettings(FAMILY);
   const [draft, setDraft] = useState<Form | null>(null);
   const [savedNow, setSavedNow] = useState<RotaReminderSettings | null>(null);
@@ -499,27 +508,44 @@ export default function RotaReminderSettings(): JSX.Element {
             <fieldset className="rrs-group">
               <legend>Cc</legend>
               <div className="rrs-field">
-                <label htmlFor={id("copy")}>Cc on every reminder</label>
-                <textarea
+                <label htmlFor={id("copy")}>Cc on reminder emails</label>
+                <RotaCcPicker
                   id={id("copy")}
-                  rows={3}
+                  family={FAMILY}
+                  people={ccPeople}
                   value={form.copyTo}
-                  aria-describedby={id("copy-help")}
-                  onChange={(e) => edit({ copyTo: e.target.value })}
+                  describedBy={id("copy-help")}
+                  onChange={(copyTo) => edit({ copyTo })}
                 />
                 <p className="cp-help" id={id("copy-help")}>
-                  Email addresses, separated by commas or new lines. Optional. Added to the Cc line, so everybody the
-                  reminder goes to sees them.
+                  Cc on the weekday reminders and the weekend summary, without the calendar invitation, so nothing is
+                  added to their calendar. Optional.
+                </p>
+              </div>
+              <div className="rrs-field">
+                <label htmlFor={id("invite-copy")}>Cc on calendar invitations</label>
+                <RotaCcPicker
+                  id={id("invite-copy")}
+                  family={FAMILY}
+                  people={ccPeople}
+                  value={form.inviteCopyTo}
+                  describedBy={id("invite-copy-help")}
+                  onChange={(inviteCopyTo) => edit({ inviteCopyTo })}
+                />
+                <p className="cp-help" id={id("invite-copy-help")}>
+                  Cc on the emails that carry a calendar invitation or a cancellation, and no others. They are not added
+                  as guests. Optional.
                 </p>
               </div>
               <div className="rrs-field">
                 <label htmlFor={id("weekend-copy")}>Cc on weekend reminders only</label>
-                <textarea
+                <RotaCcPicker
                   id={id("weekend-copy")}
-                  rows={2}
+                  family={FAMILY}
+                  people={ccPeople}
                   value={form.weekendCopyTo}
-                  aria-describedby={id("weekend-copy-help")}
-                  onChange={(e) => edit({ weekendCopyTo: e.target.value })}
+                  describedBy={id("weekend-copy-help")}
+                  onChange={(weekendCopyTo) => edit({ weekendCopyTo })}
                 />
                 <p className="cp-help" id={id("weekend-copy-help")}>
                   Cc on the weekend summary email (the Saturday and Sunday teams) only: not the weekday reminders or the

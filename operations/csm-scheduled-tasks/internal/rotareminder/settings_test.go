@@ -208,6 +208,7 @@ func TestSettings_InviteRotations(t *testing.T) {
 	saved := savedSettings()
 	saved.InviteRotations = map[string]bool{"CRE_MORNING": false, "CRE_EVENING": true}
 	saved.WeekendCopyTo = []string{"head@example.com"}
+	saved.InviteCopyTo = []string{"admin@example.com"}
 	cfg.Settings = fakeSettings{s: saved}
 	got, on, err := withSettings(context.Background(), cfg, false)
 	if err != nil || !on {
@@ -215,6 +216,9 @@ func TestSettings_InviteRotations(t *testing.T) {
 	}
 	if strings.Join(got.WeekendCopy, ",") != "head@example.com" {
 		t.Errorf("weekend copy %v, want the saved one", got.WeekendCopy)
+	}
+	if strings.Join(got.InviteCopy, ",") != "admin@example.com" {
+		t.Errorf("invitation copy %v, want the saved one", got.InviteCopy)
 	}
 	if got.invitesFor("CRE_MORNING") || !got.invitesFor("CRE_EVENING") || !got.invitesFor("CRE_WEEKEND") {
 		t.Errorf("invitations: Morning %v, Evening %v, LK Weekend %v; want off, on, on",

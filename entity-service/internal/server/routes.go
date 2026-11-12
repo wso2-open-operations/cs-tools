@@ -134,6 +134,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
 	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
+	var systemDashboardHandler *handler.SystemDashboardHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -147,6 +148,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
 			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
+		)
+		systemDashboardHandler = handler.NewSystemDashboardHandler(
+			service.NewSystemDashboardService(repository.NewSystemDashboardRepository(db), cfg.CSMPortalBackendClientID),
 		)
 	}
 
@@ -446,6 +450,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var salesforceEventHandler *handler.SalesforceEventHandler
 	// salesforcePartnerHandler is set when the partner refresh is on.
 	var salesforcePartnerHandler *handler.SalesforcePartnerHandler
+	// salesforceAccountRefreshHandler is set when the Account ingest is on.
+	var salesforceAccountRefreshHandler *handler.SalesforceAccountRefreshHandler
 	// membershipRegistrationHandler and projectContactSyncHandler both need
 	// the very same membership-ingest-enabled SalesforceEventService this
 	// block builds, so all three are wired together rather than side by side.
@@ -516,6 +522,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			States:   repository.NewSalesforceIngestStateRepository(db),
 			Projects: projectIngestRepo,
 			Owners:   owners,
+		}
+		// The Account refresh (the primary partner backfill) writes accounts
+		// with the duplicate guard off, so it exists only while the Account
+		// ingest is on; it needs none of the other families.
+		if accountIngestRepo != nil {
+			base := service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport)
+			if refresher, ok := base.(service.AccountRefresher); ok {
+				salesforceAccountRefreshHandler = handler.NewSalesforceAccountRefreshHandler(service.NewAccountRefreshService(refresher, accessSvc))
+			}
 		}
 		// The Project branch is update-only unless its insert switch is on
 		// too (csm-sync-service still inserts project rows until cutover).
@@ -845,7 +860,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.WithServiceNowGithubCases(githubSync, service.NewSNGithubCases(serviceNowIntegrationServiceClient))
 			slog.Info("github: service requests from issues are created in ServiceNow first (dual-write)")
 		} else if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
-			slog.Info("github: service requests from issues are written to Postgres only and numbered SR-GH-<n> (GITHUB_SR_SERVICENOW_FIRST is off)")
+			slog.Info("github: service requests from issues are written to Postgres only and numbered natively, SR-GH-<n> only when the repository has no project (GITHUB_SR_SERVICENOW_FIRST is off)")
 		}
 	}
 
@@ -2091,6 +2106,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if salesforcePartnerHandler != nil {
 		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh-partners", salesforcePartnerHandler.RefreshPartners)
 	}
+	if salesforceAccountRefreshHandler != nil {
+		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh", salesforceAccountRefreshHandler.Refresh)
+	}
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)
 	}
@@ -2395,6 +2413,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/me/dashboards/{id}", customDashboardHandler.Get)
 		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
+	}
+	if systemDashboardHandler != nil {
+		// System dashboards (no owner): the CSM portal backend upserts them
+		// on startup, reads them back and removes the ones whose file is gone;
+		// no other caller is admitted.
+		mux.HandleFunc("GET /system-dashboards", systemDashboardHandler.List)
+		mux.HandleFunc("GET /system-dashboards/{key}", systemDashboardHandler.Get)
+		mux.HandleFunc("PUT /system-dashboards/{key}", systemDashboardHandler.Save)
+		mux.HandleFunc("DELETE /system-dashboards/{key}", systemDashboardHandler.Delete)
 	}
 	if customDashboardShareHandler != nil {
 		// Sharing the caller's saved dashboards (owner) and the ones shared

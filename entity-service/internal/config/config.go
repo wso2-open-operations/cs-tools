@@ -390,7 +390,7 @@ type Config struct {
 	// and WSO2 Case ID as a portal-created one does. Off by default: turn it on
 	// once the integration service serving /github-cases is deployed, or every
 	// new issue fails to create. Off, an issue's SR is written to Postgres only
-	// and numbered SR-GH-<n>. See GithubServiceNowFirst.
+	// and numbered as a portal SR is (CS number, <KEY>-<n> id) when its repository maps to a project, SR-GH-<n> when not. See GithubServiceNowFirst.
 	GithubSRServiceNowFirst bool
 	// GithubOutboundInterval is how often to drain the outbound queue when the
 	// last pass came back short. A backlog drains at full speed regardless.

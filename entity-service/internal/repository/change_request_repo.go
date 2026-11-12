@@ -2322,7 +2322,7 @@ func insertApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail,
 // createChangeRequestPortalQuery is CreateChangeRequest's (the plain-Postgres,
 // caller-initiated path) query -- structurally identical to
 // createChangeRequestFromServiceNowQuery except id/number are generated here
-// (gen_random_uuid()/next_portal_work_item_number(), migration 0140) instead
+// (gen_random_uuid()/next_work_item_number('CHANGE_REQUEST'), migration 0180) instead
 // of supplied by a prior ServiceNow response, and there is no wso2_id column
 // at all either way (change_request is excluded from
 // work_item_wso2_id_required_by_type, per this file's own package doc
@@ -2340,7 +2340,7 @@ const createChangeRequestPortalQuery = `
 		)
 		VALUES (
 			gen_random_uuid(), NOW(), NOW(), $1, $1,
-			next_portal_work_item_number(), $2, $3, 'CHANGE_REQUEST'::work_item_type_enum, $4::uuid, $24::uuid,
+			next_work_item_number('CHANGE_REQUEST'::work_item_type_enum), $2, $3, 'CHANGE_REQUEST'::work_item_type_enum, $4::uuid, $24::uuid,
 			$27::uuid, $28::uuid, $29::uuid
 		)
 		RETURNING id, number, subject, created_on, updated_on, created_by

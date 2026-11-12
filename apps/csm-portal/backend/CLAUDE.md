@@ -26,8 +26,8 @@ Go HTTP server (`net/http`, Go 1.26+) that acts as a backend-for-frontend (BFF) 
 - **`PermCreateAnnouncement` narrows `PermWrite`, it does not replace it.** Creating and sending a customer announcement needs the `announcement_creator` role (`AUTH_ANNOUNCEMENT_CREATOR_ROLES`) or `admin`, **in addition to** the caller's own `PermWrite`: a `cs_engineer` without the role keeps every other write and loses this one, and a holder of the role who cannot write still cannot send anything. The role implies nothing else, not even view (same shape as `worknote_creator`). Two mechanisms, because the feature is not backed by routes of its own: (1) every write on `/announcement-requests` (create, edit, dry run, submit, schedule, publish, add an update, record deliveries) is registered with `routeAll(pattern, handler, handler.PermWrite, handler.PermCreateAnnouncement)`, which goes through `AccessGuard.RequireAll` (every permission must be held, an empty list denies); the request LIST (`POST /announcement-requests/search`, the webapp's Requests tab: drafts and requests awaiting approval) is the creators' workspace and is registered the same way, while reading ONE request and its updates and deliveries stays `PermView` because a published announcement in the main list opens the same request dialog; (2) `POST /cases` is the one generic create route and makes an announcement (the dry-run case and every per-project case of a publish) as readily as a support case, so `CaseHandler.CreateCase` additionally requires `PermCreateAnnouncement` when the body asks for `type: announcement` (`caseCreateTargetsAnnouncement`, a token scan of the top-level keys so every spelling and every repeat of `type` is judged; a nil guard fails closed, like the Security Center check). **Approving a request ("Mark as approved") is deliberately not gated**: it only records a decision taken over email and may be recorded by someone other than the creator. An unset `AUTH_ANNOUNCEMENT_CREATOR_ROLES` means only `admin` can create announcements, so startup warns about it and it must be set (to the Asgardeo role the announcement creators hold) before this ships to an environment. `cmd/server/announcement_routes_test.go` pins how each `/announcement-requests` route is registered, and `openapi_routes_test.go` reads `routeAll` registrations too. Not covered here: posting an update as ordinary case comments (`POST /cases/{id}/comments`) is the normal comment route and unchanged.
 - **`PermUpdateDeleteComment` widens the `PATCH`/`DELETE /comments/{id}` route floor, it does not narrow it.** Unlike `PermCreateAnnouncement`, which removes an ability from `cs_engineer` by requiring a second permission alongside `PermWrite`, this is the same shape as `PermCreateWorkNote`: `comment_updater` (`AUTH_COMMENT_UPDATER_ROLES`) is a new, additional way to reach the handler, on top of `cs_engineer`/`admin`'s existing access — a `cs_engineer` keeps editing/deleting comments exactly as before. This permission only decides who may reach the handler at all; it says nothing about which specific comment they may act on — that finer-grained decision is `PermUpdateDeleteAnyComment`, below. An unset `AUTH_COMMENT_UPDATER_ROLES` is a normal, supported state (same as `AUTH_WORKNOTE_CREATOR_ROLES`): `cs_engineer`/`admin` already hold this permission regardless, so leaving it empty just means the role isn't provisioned yet, never a lockout.
 - **`PermUpdateDeleteAnyComment` is the in-handler check that decides whether THIS caller may act on a comment they did not author — entirely inside this backend, nothing forwarded to or re-checked by entity-service.** Held by `admin` and `comment_updater` ONLY — deliberately NOT `cs_engineer`, unlike `PermUpdateDeleteComment` above. `CommentHandler.authorizeCommentActor` (called from both `UpdateComment` and `DeleteComment`) calls `entityCommentClient.GetComment` first, purely to learn the comment's author, then allows the request through when either the caller's own email matches that author (case-insensitively) or `h.access.Permits(PermUpdateDeleteAnyComment, user.Roles)` is true — otherwise it writes a 403 itself and never calls entity-service's `UpdateComment`/`DeleteComment` at all. entity-service's `comment_service.go` performs **no author or role check of its own** on `GetComment`/`UpdateComment`/`DeleteComment`/`GetCommentEditHistory` any more — not even its own former Postgres `admin`-role lookup, dropped as redundant with (and a source of confusion against) this backend's own Asgardeo roles, which is the only caller of this path. Net effect: a `cs_engineer` can still only successfully edit/delete a comment they themselves authored; `comment_updater`/`admin` can act on any comment, decided once, here.
-- **`PermManageOnboarding` is checked in-handler on `PATCH /projects/{id}`, behind a wider route floor, `PermUpdateProject`.** Held by `onboarding_lead` (`AUTH_ONBOARDING_LEAD_ROLES`) and `admin` ONLY, not `cs_engineer`. `PermUpdateProject` (`cs_engineer` ∪ `admin` ∪ `onboarding_lead`) only lets an `onboarding_lead` reach the handler; `ProjectHandler.UpdateProject` then reads the body's keys (case-insensitively, like the `closureState` check) and requires `PermManageOnboarding` for `onboardingStatus`, `onboardingOwner` and the four onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`; the `projectOnboardingKeys` set) and `PermWrite` for any other field, so an `onboarding_lead` alone can never edit anything else and a `cs_engineer` alone can never set the onboarding fields or dates. `closureState` and `suspensionProcessOverridden` stay `PermAdmin`-only. The role is config-only and grants no read permission. A nil guard fails closed. An unset variable is a normal state (admin still holds the permission), so startup does not warn.
-- **PLG's routes go through this guard too, and through a second one of their own.** `internal/plg/plg.go` registers all 24 as `accessGuard.Require(perm, identity(fn))` — the guard OUTSIDE PLG's `identity` middleware, deliberately, because the guard is a set lookup while `identity` is an entity-service round trip, so a denied caller costs nothing upstream. Two permissions: `PermUsePlg` (CS engineer and admin) for 20 routes, and `PermManagePlaybooks` (admin only) for the four that author a playbook template. `PermUsePlg` is narrower than `PermView` on purpose — every portal role holds `PermView`, but PLG is a worklist staff act on, and a view-only role that could open it would meet a 403 on every control. Reading a playbook (`GET /plg/playbooks`, `GET /plg/playbooks/{id}`) and assigning one to a pairing (`POST .../playbook-runs`) are `PermUsePlg`, NOT `PermManagePlaybooks`: running a template and writing one are different jobs, so gating on the `/plg/playbooks` path prefix would be wrong. `PermManagePlaybooks` is kept separate from `PermAdmin`, which it currently matches exactly, so granting playbook authoring to a future PLG-admin role does not also hand out platform-user creation. `identity` still runs and is not redundant: it resolves the `"user".id` every PLG write records as `actorId`, and refuses anyone who is not ACTIVE INTERNAL staff — a roles claim cannot tell you somebody was offboarded this morning. `internal/plg/routes_access_test.go` pins every route's permission and the middleware ordering.
+- **`PermManageOnboarding` is checked in-handler on `PATCH /projects/{id}`, behind a wider route floor, `PermUpdateProject`.** Held by `onboarding_lead` (`AUTH_ONBOARDING_LEAD_ROLES`) and `admin` ONLY, not `cs_engineer`. `PermUpdateProject` (`cs_engineer` ∪ `admin` ∪ `onboarding_lead`) only lets an `onboarding_lead` reach the handler; `ProjectHandler.UpdateProject` then reads the body's keys (case-insensitively, like the `closureState` check) and requires `PermManageOnboarding` for `onboardingStatus`, `onboardingOwner` and the five onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`, `onboardingProductionReadinessCompletionDate`; the `projectOnboardingKeys` set) and `PermWrite` for any other field, so an `onboarding_lead` alone can never edit anything else and a `cs_engineer` alone can never set the onboarding fields or dates. `closureState` and `suspensionProcessOverridden` stay `PermAdmin`-only. The role is config-only and grants no read permission. A nil guard fails closed. An unset variable is a normal state (admin still holds the permission), so startup does not warn.
+- **PLG's routes go through this guard too, and through a second one of their own.** `internal/plg/plg.go` registers all 27 as `accessGuard.Require(perm, identity(fn))` — the guard OUTSIDE PLG's `identity` middleware, deliberately, because the guard is a set lookup while `identity` is an entity-service round trip, so a denied caller costs nothing upstream. Two permissions: `PermUsePlg` (CS engineer and admin) for 23 routes, and `PermManagePlaybooks` (admin only) for the four that author a playbook template. `PermUsePlg` is narrower than `PermView` on purpose — every portal role holds `PermView`, but PLG is a worklist staff act on, and a view-only role that could open it would meet a 403 on every control. Reading a playbook (`GET /plg/playbooks`, `GET /plg/playbooks/{id}`) and assigning one to a pairing (`POST .../playbook-runs`) are `PermUsePlg`, NOT `PermManagePlaybooks`: running a template and writing one are different jobs, so gating on the `/plg/playbooks` path prefix would be wrong. `PermManagePlaybooks` is kept separate from `PermAdmin`, which it currently matches exactly, so granting playbook authoring to a future PLG-admin role does not also hand out platform-user creation. `identity` still runs and is not redundant: it resolves the `"user".id` every PLG write records as `actorId`, and refuses anyone who is not ACTIVE INTERNAL staff — a roles claim cannot tell you somebody was offboarded this morning. `internal/plg/routes_access_test.go` pins every route's permission and the middleware ordering.
 - **`GET /users/me` reports `roles`** (from `AccessGuard.RolesFor`): the stable keys of the portal roles the token roles grant — several possible, fixed order — and is **not** the entity service's role data, which the response no longer carries. The frontend decides what to show or hide from these roles (there is deliberately no derived `permissions` list); the backend's `403` is the real gate. Dashboard-designer access is only the `AUTH_DASHBOARD_DESIGNER_ROLES` role (the old `DASHBOARD_DESIGNER_EMAILS` email allow-list is gone).
 - **`GET /users/{id}` reports a target's CSM portal-role vocabulary alongside entity-service's own, via SCIM instead of a JWT -- and matches by role ID, not by display name.** `GetUser`'s own `withPortalRoles` (`internal/handler/user_portal_roles.go`) reaches the same vocabulary for the profile being *viewed* in two SCIM calls: `scim.SearchUser` by the target's email to resolve their own Asgardeo user ID (there is no other lookup key available here -- entity-service stores no SCIM id), then `scim.GetUserByID` by that ID for the target's full, canonical role assignment list. The result lands in a separate `csmPlatformRoles` field -- this used to overwrite the response's own `roles` outright for an internal target, but that read as though the Customer Portal's own role vocabulary (`admin`/`commenter`/`customer`/`customer_admin`/`partner`/`partner_admin`/`external`/`internal`/`timecard_approver`/`agent`, the `CSM_USER_ROLES` set -- a genuinely different, unrelated vocabulary from the CSM-portal-access one, not something SCIM has any equivalent for) had disappeared for that person, and left the whole section looking empty for a target holding no configured Asgardeo role at all. Both vocabularies describe real, different things about the same person, so neither hides the other. Things worth knowing:
   - **Why `GetUserByID`, not `SearchUser`'s own `roles` field (which a search response does carry too).** A `/Users/.search` result only returns whichever attributes the caller requested, where a direct `GET /Users/{id}` is the canonical resource read and always returns the complete representation. The decisive reason to pay for the second round trip: matching a held role correctly needs each role's own Asgardeo ID, not just its display name, and two distinct roles can share a display name -- a name-based match can silently credit (or deny) the wrong one. `scim.scimUserByID`/`scimRoleAssignments` (`internal/scim/types.go`) decode the GET-by-id response keeping both `value` (ID) and `display` (name) per role, unlike the plain-search decoder `scimRoles`, which only ever kept `display`.
@@ -209,7 +209,7 @@ bridges read the identical config; they just project it onto two different, non-
 ## Time card totals (POST /time-cards/aggregate)
 
 `TimeCardHandler.AggregateTimeCards` forwards the body to entity-service's `POST /time-cards/aggregate`
-(counts and summed minutes per `state`, `user`, `project` or `day`; the rules are in entity-service's
+(counts and summed minutes per `state`, `user`, `project`, `day` or `team`; the rules are in entity-service's
 `CLAUDE.md`) and passes the response through unchanged. It needs `PermViewTimeCardTotals`, held by the CS engineer
 and admin only. That is narrower on purpose than `PermTimeCardsAndUpdates`, which every other time card
 route uses and which the time card approver also holds. Who may see totals per user is still to be
@@ -761,7 +761,7 @@ Each upstream service has its own client package under `internal/`:
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
 | `csmnotification` | `integrations/csm-notification-service` | Health check only today (`Health(ctx)`, backing `GET /health/dependencies` — see "Health endpoints" below). Optional: unconfigured (`CSM_NOTIFICATION_SERVICE_BASE_URL` unset) means this dependency reports `not_configured` |
 | `csmintegration` | `integrations/csm-integration-service` | Same shape and same one purpose as `csmnotification` above, for `integrations/csm-integration-service` |
-| `csmai` | `integrations/csm-ai-integration-service` | The dashboard generator's model calls (`POST /ai/dashboards/generate`) plus `Health(ctx)`. Each request carries the correlation id and the signed-in user's id as `X-CSM-User-ID` (never the email), which the service logs with the call's token usage. Optional (`CSM_AI_INTEGRATION_SERVICE_BASE_URL`, `_SCOPES`, `_TIMEOUT` default 55s; https, or http for a local host only). When set, `handler.NewServiceDashboardGenerator` (`dashboard_generator_service.go`) is the generator: the service builds the prompt and calls the model; this backend still converts the draft (`draftToDefinition`), sends the registry teams that have a group, keeps the last candidate `dashboard.ParseGenerated` accepts, swaps team keys for group ids (`WithDashboardTeams`) and maps the service's error `code` to the same statuses and messages (`serviceGenerateError`): `usage_limit` (the model gateway's 429) becomes 503 with "The AI assistant has reached its usage limit", never 429, which stays this backend's own per-user limit; `truncated` has its own message ("too large to create in one go"), apart from `unusable`. Unset: the sample. **This backend holds no model client or model SDK** (`cmd/server/no_model_sdk_test.go` fails if `go.mod` requires, or any file imports, one); the catalogue lives in the service, and `internal/dashboard`'s `TestParseGenerated_TheCatalogueExampleIsValid` reads the service's `catalogue.md` so its example keeps passing this backend's check |
+| `csmai` | `integrations/csm-ai-integration-service` | The dashboard generator's model calls (`POST /ai/dashboards/generate`) plus `Health(ctx)`. Each request carries the correlation id and the signed-in user's id as `X-CSM-User-ID` (never the email), which the service logs with the call's token usage. Optional (`CSM_AI_INTEGRATION_SERVICE_BASE_URL`, `_SCOPES`, `_TIMEOUT` default 55s; https, or http for a local host only). When set, `handler.NewServiceDashboardGenerator` (`dashboard_generator_service.go`) is the generator: the service builds the prompt and calls the model; this backend still converts the draft (`draftToDefinition`), sends the registry teams that have a group, keeps the last candidate `dashboard.ParseGenerated` accepts, sends the PLG playbook answers and checks their codes (`WithPlaybooks`, "PLG widgets"), swaps team keys for group ids (`WithDashboardTeams`) and maps the service's error `code` to the same statuses and messages (`serviceGenerateError`): `usage_limit` (the model gateway's 429) becomes 503 with "The AI assistant has reached its usage limit", never 429, which stays this backend's own per-user limit; `truncated` has its own message ("too large to create in one go"), apart from `unusable`. Unset: the sample. **This backend holds no model client or model SDK** (`cmd/server/no_model_sdk_test.go` fails if `go.mod` requires, or any file imports, one); the catalogue lives in the service, and `internal/dashboard`'s `TestParseGenerated_TheCatalogueExampleIsValid` reads the service's `catalogue.md` so its example keeps passing this backend's check |
 
 New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern. `entity` is the exception: because it hosts multiple, separately-deployed/differently-authenticated services, it uses a `<Name>Config`/`<Name>Client` pair per service/file instead of one shared `Client` for the whole package — `CustomerEntityClient`/`EngineeringEntityClient`.
 
@@ -884,6 +884,21 @@ draft, a save and a share never carry one, and `ParseGenerated` stays strict: a 
 `note` is refused like any unknown field. A note that is not a string or is over
 `generatedNoteMaxChars` (500) makes that candidate invalid.
 
+**Cases that moved to a state.** A case-family widget may filter on `stateEntered` (`in`, case states)
+and `stateEnteredOn` (`gte` / `lte`, one date): the cases whose logged state history has a change to one of
+those states in that window ("moved to Waiting on WSO2 today"), whatever their state now (entity-service's
+`CLAUDE.md` has the search side). Case queries are otherwise passed through unchecked, so
+`checkGeneratedStateEntered` (`internal/dashboard/generated_state_entered.go`) checks just these two at
+generation, where the model can retry, rather than leaving a tile to fail on load: `in` with case states,
+`gte` / `lte` with one date, a window only with a `stateEntered` in the widget (a slice's window may lean on
+the widget's own `stateEntered`, as the webapp merges slices by field), a window of two plain dates or
+instants that does not end before it starts (read as entity-service reads it: the last bound wins, a
+date-only `lte` covers its day; a relative date is not compared), and neither in an `anyOf` branch. A
+widget without them is not touched, so no saved dashboard changes. The catalogue (sections 5, 8 and 9)
+teaches the model these widgets, and `TestParseGenerated_TheCatalogueStateEnteredExamplesAreValid` runs
+every section 5 example that uses them through `ParseGenerated`. Deploy entity-service (which must accept
+the fields) before the catalogue that teaches them.
+
 **Time card totals widgets.** A time card widget may group on the server (`groupBy.field` `state`,
 `user`, `project` or `day`, through `POST /time-cards/aggregate`, see "Time card totals" above), and only
 a time card widget grouped by a field may set `groupBy.measure`: `count` (the default) or `hours`. The
@@ -902,6 +917,16 @@ could not group before this, so no saved dashboard changes. The AI integration s
 (section 5a) teaches the model these widgets, and
 `TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` runs every grouped time card example
 there through `ParseGenerated`, so the catalogue cannot teach a widget the save would refuse.
+
+**Time cards by team.** A generated time card widget may hold `query.teamIds`: 1 to 20 team keys or names
+(`valuesTeamNames`), or `["__current_team__"]`, the cards of those teams' current members. `groupBy.field`
+`team` (one bar per team) needs the widget's own `query.teamIds`. Right after generation `WithDashboardTeams`
+(`resolveTimeCardTeams` in `internal/handler/dashboard_teams.go`) swaps each key or name for the team's
+group id (a CRE team's CRE group id, an SRE team's SRE group id), which is the Team Schedule's team id
+that entity-service's `teamIds` matches; a group id already there is kept and `__current_team__` is left
+for the webapp. An unknown team, or a team with no group configured, is an `errDashboardTeam` (422 with
+the reason), as for a case's team filter. Only the generator checks these keys, so no saved dashboard
+changes.
 
 **Line widgets: `series`.** A `line` widget may set `series` to `["opened"]` or `["closed"]` to draw only
 that line ("new cases per day", "cases closed per day", or an Edit with AI request such as "remove the closed
@@ -942,6 +967,55 @@ widget saved before the field changes. The registry refuses an unknown value and
 The view and the draft carry it (`widgetViews` / `widgetTemplates`): `TestDraftToDefinition_KeepsLineWindow`.
 Deploy this backend before the catalogue that teaches it, as for `series`.
 
+**PLG widgets.** A widget's `resourceType` may be `plg_organization` (`POST /plg/organizations/search`)
+or `plg_registration` (`POST /plg/registrations/search`, one row per organisation and product). Both
+take the PLG searches' flat filters, and a generated one only those a prompt can name
+(`generatedResourceRules` in `internal/dashboard/generated_resources.go`): `productCodes`,
+`lifecycleStages`, `subscriptionTiers` (exact-case values from `plg/domain` and the products seeded in
+`plg_product`), `registeredFrom` / `registeredTo` (a date or a relative date token), `unowned` (a JSON
+boolean), `ownerIds` **only** as `["__current_user__"]` ("my PLG organisations": the webapp resolves it to
+the viewer's user id, which is what an owner is), `ownerEmails` (another person's organisations: 1 to 20
+email addresses, each with text on both sides of an `@` and at most 254 characters, never with `unowned`,
+in one query or a widget's and a slice's together; the catalogue uses only addresses the request gives
+and declines a name without one, as for a case's `createdBy`), `countryNames` (1 to 20 names as written, each 1 to 100
+characters) and `countryUnknown` (a JSON boolean, never with `countryNames`, in one query or a widget's
+and a slice's together), the playbook answer filter `playbookTask` (one task code) with `playbookAnswers`
+(1 to 20 option codes) or `playbookUnanswered` (a JSON boolean; each needs `playbookTask` in the query or
+the slice's, and the two never come together) and, on registrations only, `unacknowledgedOnly`. Never
+another owner id or free text. Shapes: `count`; `list` (an organisation list sorts by `name` or `registeredOn`, a registration
+list has one order and takes no `sortBy`); `pie` / `bar` with `slices` (each slice's query held to the
+same filters) or `groupBy` on the server, organisations by `owner` or `country`
+(`POST /plg/organizations/aggregate`) and registrations by `country` or `playbookAnswer` (with
+`playbookTask` in the widget's query; `POST /plg/registrations/aggregate`; a registration is counted in
+each answer it holds, a checklist's every ticked option and every answer its runs of several playbooks
+asking the same task gave, so the groups can add up to more than the registrations, while each group
+still matches its own click-through), on a pie or bar only; and, on registrations only, `line` (`POST /plg/registrations/volume-trend`: one
+line, "Registered", with the case line's `days` or fixed window and `chart`, never `series`; the
+registry allows a line on `case` or `plg_registration`). The three routes are `PermUsePlg` passthroughs in
+`internal/plg` that check the filters as the searches do and leave the grouping, `maxGroups` and the
+window to entity-service, whose 400 message comes back as it is (`trend_aggregate_wiring_test.go`).
+`generated_plg_test.go` pins the generator's rules. The playbook codes are checked against the live
+playbooks, not by `ParseGenerated`: `handler.WithPlaybooks` (`dashboard_playbook_answers.go`) makes the
+service generator read every PLG playbook on each message (`plg.NewPlaybookLister`, PLG's own
+entity-service configuration, which `cmd/server/main.go` shares with `plg.Mount`), send the AI service
+`playbookAnswers` (`playbookAnswerFields`: the active playbooks' active, non-bookend single choice and
+checklist tasks with options, one per code, sorted, table characters cleaned, a name or label cut at 100
+characters and a code over 100 left out, so an admin's wording cannot grow the prompt, at most the AI service's
+200 codes of 100 answers each; left out when none), and
+refuse a dashboard naming a task or an answer they do not have (`errDashboardPlaybook`: 422,
+`generate_playbook`, the reason and the known codes). A slice is checked as the webapp runs it, merged
+over its widget key by key: a slice that names its own `playbookTask` but no answers runs with the
+widget's `playbookAnswers`, so those are checked against the slice's task (an answer of another task
+would count nothing). When the playbooks cannot be read, none are sent
+and any playbook answer filter is refused. **Deploy the AI integration service first**: it refuses a
+request field it does not know. The AI integration service's catalogue (section 5e)
+teaches the model these widgets, and `TestParseGenerated_TheCataloguePlgExamplesAreValid` runs its
+examples through `ParseGenerated`. **Access:** the PLG routes need `PermUsePlg` (CS engineer and admin),
+narrower than `PermView`. Every role that can generate or save a dashboard (`PermWrite`) also holds it
+(`TestAccessGuard_DashboardWritersCanReadPlg`), so the author can always see what they built; a
+recipient of a shared dashboard without PLG access gets a 403 on those widgets alone, and the webapp's
+tile says so. PLG widgets are new resource types, so no saved dashboard changes.
+
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
 the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same
@@ -953,6 +1027,47 @@ entity-service does not tell them apart) gets its own readable message (`errMsgD
 everything else goes through `mapUpstreamErrorGeneric`. `sharedViaLink` on both Shared responses says
 the caller has the dashboard only through its link. The routes are in
 `cmd/server/custom_dashboard_routes_test.go`'s must-exist list.
+
+**Why a dashboard cannot be generated.** A 422 carries a reason the webapp shows under its lead line.
+The model's own sentence (`{"error": ...}`, catalogue section 1: why, and what to ask instead) goes through
+`declineMessage` (`dashboard_generate_errors.go`): control characters dropped, whitespace collapsed, cut at
+`maxDeclineRunes` (300) on a word with "…", and `errMsgGenerateRefused` when nothing is left. The name
+resolvers below give their own reasons.
+
+**Names in a generated case filter become what the case search matches.** The model only knows what the
+user wrote, so wrappers around the generator (`cmd/server/main.go`, in this order) resolve it once, right
+after generation; from then on the dashboard holds what the search matches, so the reply, Save, a share
+and every read need nothing more:
+
+- `WithDashboardTeams`: a `creTeam` / `sreTeam` key or name becomes the team's group id.
+- `WithDashboardProducts` (`dashboard_products.go`): each `product` value (`in` or `notIn`) becomes the
+  product's catalog name ("API Manager" -> "WSO2 API Manager": the search matches it exactly), and a
+  `productVersion` value becomes that product's recorded versions ("4.3" every 4.3.x, "4.x" every 4.*).
+- `WithDashboardProjects` / `WithDashboardAccounts` (`dashboard_projects.go`, `dashboard_accounts.go`,
+  one shared `namedResolver` in `dashboard_named_filters.go`): a `project` (key or name) or `account`
+  (name or account number) filter becomes `projectId` / `accountId` with the same op, on the record's
+  id, so a renamed project still matches. An exact key / number wins, then one exact name, then the only
+  match of the caller's own search (`/projects/search`, `/accounts/search`, scoped to what they may see).
+  The search is read page by page, up to `namedSearchPages` (10 pages of 50): a key is taken as soon as
+  it is seen, but one exact name only once every page has been read, since another record of that name
+  (or the key) may be on a later page; a name matching more than those pages hold is "matches several".
+
+A value that names nothing, or several, is a 422 (`generate_product`, `generate_project`,
+`generate_account`) naming the candidates, e.g. `"quartz labs" matches several projects (Quartz Labs
+(QRTZ-PROJ1), Quartz Labs (QRTZ-PROJ2)); name the one you mean.`; a search that fails is a 502 (`_lookup`).
+The 422 is logged as which filter it was only, never its reason: that names what the user typed and the
+records it matched, such as a customer's name. Never
+dropped: a `notIn` that left out nothing would count every product or project under a title that says
+otherwise. `ParseGenerated` checks the shapes first (`generated_product_version.go`,
+`generated_project.go`): `product`, `project` and `account` are `in` or `notIn` with names, the last two
+never in an `anyOf` branch; `productVersion` is `in`, never in an `anyOf` branch, and needs exactly one
+product kept (`in`) in the same search (a slice's product filter of any op replaces its widget's, as the
+webapp merges a slice by field); a grouping by `productVersion` needs it in the widget's own query.
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project}ExamplesAreValid` run the catalogue's
+section 7 examples through the same check. An edit sends the resolved ids back to the model; the
+catalogue tells it to keep `projectId` / `accountId` filters as they are. Nothing saved before these
+filters had them, so no saved dashboard changes. Deploy entity-service first (product `notIn`,
+`productVersion`, grouping by `project` and `productVersion`), then this backend, then the AI service.
 
 **What one user can spend on model calls.** Every `POST /dashboards/generate` that passes the prompt
 checks counts against the caller's `handler.GenerateRateLimiter` (keyed by the token's user id):
@@ -972,7 +1087,7 @@ go run ./cmd/server/main.go
 
 The server auto-loads `.env` from the working directory at startup (silently ignored if absent). No need to `source .env` manually.
 
-`cp .env.example .env` is enough to start: `DASHBOARDS_DIR` points at the committed `dashboards.example/` (a missing directory is fatal). For a real dashboard set, `cp -r dashboards.example dashboards` and repoint it — `./dashboards` is gitignored.
+`cp .env.example .env` is enough to start: `DASHBOARDS_DIR` points at the committed `dashboards.example/` (a missing directory is fatal). The dashboards API serves the **database** (entity service `/system-dashboards`, reached with this backend's own `OAUTH2_*` credentials, which the entity service must list as `CSM_PORTAL_BACKEND_CLIENT_ID`); `DASHBOARDS_DIR` is only a migration source: at startup each file is expanded and upserted under the key `dashboard.SystemKey(id)` (the id itself when it already satisfies the key rule, else slugged), overwriting the stored copy; afterwards stored dashboards whose key is not among the migrated ones are deleted (a removed or renamed file removes its dashboard), but only when every upsert succeeded, the stored list was read and the directory held at least one dashboard, and never with no source mounted. Hot reload reconciles only when the directory's key set changed. The startup log line carries `removed=N`. A failed upsert is retried 3 times (30s total cap), logged per dashboard and does not stop startup; a failed read at request time is an upstream error, never an empty list. With `DASHBOARDS_DIR` and `DASHBOARDS_CONFIG` unset the backend serves whatever the database holds. Dashboard lists are cached 15s and dropped after an upsert. Presets/sections catalogues are file-only. For a real dashboard set, `cp -r dashboards.example dashboards` and repoint it — `./dashboards` is gitignored.
 
 `CSM_TEAM_REGISTRY` (team vocabulary: `teamKey|Display Name|FAMILY|groupId` rows, comma separated) and `CSM_USER_ROLES` (assignable-role allow-list) are read **here**, not in `entity-service` — they moved. Both are resolved once at startup into `internal/directory`, so `POST /roles/search` makes no upstream call. `POST /teams/search` lists the entity service's `team` table (`ReferenceHandler.WithEntityClient`) and swaps each team whose name matches a registry row for that row's entry (registry key as `id`, family, group ids) — consumers resolve a team id by key, so a matched team must keep it; an unmatched team is listed by its `team` id and name alone. A request with a `family` filter, or a handler with no entity client, is answered from the registry alone, because family lives only there. A malformed row, an unknown family, or a duplicate team key/display name is fatal at startup, naming the row. Both are flat single-line strings on purpose: the deployment platform's configuration UI is one-dimensional and stringifies nested collections, so a structured registry cannot be deployed at all. Do not introduce nested-collection configuration.
 

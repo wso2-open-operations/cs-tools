@@ -128,6 +128,10 @@ window.config = {
   // CSM_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL: "Learn more",
   // CSM_PORTAL_MAINTENANCE_BANNER_ACTION_URL: "https://example.com",
 
+  // Destination for the avatar menu's "Report an issue" control. Optional; unset
+  // hides the control entirely rather than offering a link with nowhere to go.
+  // CSM_PORTAL_REPORT_ISSUE_URL: "https://github.com/your-org/your-repo/issues/new",
+
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
   // CSM_PORTAL_TOP_BANNERS  (optional, default: [])

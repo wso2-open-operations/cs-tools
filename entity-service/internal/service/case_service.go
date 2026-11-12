@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -468,6 +470,10 @@ var validCaseAggregateField = map[string]bool{
 	"state":    true,
 	"severity": true,
 	"type":     true,
+	"product":  true,
+	// productVersion: only with a product filter naming one product.
+	"productVersion": true,
+	"project":        true,
 }
 
 var validCaseIssueType = map[domain.CaseIssueType]bool{
@@ -817,6 +823,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		return domain.CreateCaseResponse{}, err
 	}
 	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
+	s.addDescriptionAsFirstComment(ctx, c, req)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered
@@ -1051,6 +1058,63 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 			State:      responseState,
 		},
 	}, nil
+}
+
+// addDescriptionAsFirstComment gives a case created on the plain PostgreSQL
+// data source the first comment ServiceNow's case-creation rules write: the
+// description itself, as a COMMENT by the creator at the case's creation time.
+// Under dual-write that comment comes from ServiceNow (mirrorInitialSNComments);
+// with no ServiceNow behind the create nothing wrote it, so the case's activity
+// started without its description.
+//
+// Written straight to the repository, like the mirror: it is the case's own
+// history, not a new reply, so it publishes no case.comment_added, counts as
+// no support engineer response, subscribes no watcher and, carrying the
+// case's own created_on, leaves updated_on alone. An announcement is skipped
+// (its description is already shown, and the mirror drops ServiceNow's
+// repeat of it), as is a blank description. Best effort: the case already
+// exists, so a failure is logged and the create still succeeds. The write
+// gets its own deadline (descriptionCommentTimeout) so a slow insert cannot
+// use up the request's and leave the steps after it (SLA clocks, case.created)
+// without time to run.
+func (s *caseService) addDescriptionAsFirstComment(ctx context.Context, c domain.Case, req domain.CreateCaseRequest) {
+	if req.Type == "announcement" || strings.TrimSpace(req.Description) == "" {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, descriptionCommentTimeout)
+	defer cancel()
+	createdOn := c.CreatedOn
+	if _, err := s.repo.CreateCaseCommentAsSystem(writeCtx, domain.CreateCaseCommentRequest{
+		CaseID:    c.ID,
+		Type:      domain.CommentTypeComment,
+		Content:   req.Description,
+		CreatedBy: c.CreatedBy,
+	}, &createdOn); err != nil {
+		slog.ErrorContext(ctx, "create case: writing the description as the first comment failed", "caseId", c.ID, "reason", dbFailureReason(err))
+	}
+}
+
+// descriptionCommentTimeout bounds addDescriptionAsFirstComment's insert, the
+// same 5s the other best-effort steps after a create get
+// (publishCaseCreatedTimeout and its siblings).
+const descriptionCommentTimeout = 5 * time.Second
+
+// dbFailureReason summarises a repository error for a log line without
+// repeating its text: a pgx connection error names the database host, user
+// and database. A PostgreSQL error is reported by its SQLSTATE, a deadline or
+// cancellation by name, anything else only as a database error.
+func dbFailureReason(err error) string {
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.As(err, &pgErr):
+		return "database error, SQLSTATE " + pgErr.Code
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "database error"
+	}
 }
 
 // mirrorInitialSNComments copies the comments ServiceNow's own case-creation
@@ -3572,10 +3636,24 @@ func prepareCaseSearchFilters(ctx context.Context, req domain.SearchCasesRequest
 	return req, nil
 }
 
+// validateSearchExcludeFields rejects any excludeFields value other than the
+// supported ones, so a typo is a 400 rather than a silently full response.
+func validateSearchExcludeFields(fields []string) error {
+	for _, f := range fields {
+		if f != domain.SearchExcludeFieldDescription {
+			return &apierror.ValidationError{Msg: "excludeFields contains invalid value: " + f + " (supported: description)"}
+		}
+	}
+	return nil
+}
+
 // SearchCases implements CaseService.
 func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if req.CountOnly && req.SkipTotal {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "countOnly and skipTotal cannot both be set: countOnly already skips the page query, and skipTotal would leave nothing to compute"}
+	}
+	if err := validateSearchExcludeFields(req.ExcludeFields); err != nil {
+		return domain.SearchCasesResponse{}, err
 	}
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCasesResponse{}, err
@@ -3688,6 +3766,11 @@ func (s *caseService) AggregateCases(ctx context.Context, req domain.AggregateCa
 	search, err := s.prepareCaseSearch(ctx, domain.SearchCasesRequest{Filters: req.Filters})
 	if err != nil {
 		return domain.AggregateResponse{}, err
+	}
+	// A version is shared by several products, so versions are grouped
+	// within one product only.
+	if req.GroupBy == "productVersion" && !oneProductName(search.Parsed.ProductNames) {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: `groupBy "productVersion" needs a product filter naming exactly one product`}
 	}
 	scope, err := s.access.ResolveScope(ctx)
 	if err != nil {
@@ -3868,31 +3951,11 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 		}
 	}
 
-	// A day point per day; a week or month point sums its days, from the
-	// bucket's first day in the window (Date) to its last (EndDate).
-	grouped := window.bucket == caseVolumeTrendBucketWeek || window.bucket == caseVolumeTrendBucketMonth
-	var opened, closed []domain.CaseVolumeTrendPoint
-	for _, d := range allDays {
-		dc := counts[d]
-		if n := len(opened); grouped && n > 0 && caseVolumeTrendSameBucket(opened[n-1].Date, d, window.bucket) {
-			opened[n-1].Count += dc.Opened
-			opened[n-1].EndDate = d
-			closed[n-1].Count += dc.Closed
-			closed[n-1].EndDate = d
-			continue
-		}
-		var endDate string
-		if grouped {
-			endDate = d
-		}
-		opened = append(opened, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: dc.Opened})
-		closed = append(closed, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: dc.Closed})
-	}
 	resp := domain.CaseVolumeTrendResponse{
 		Days: days,
 		Series: []domain.CaseVolumeTrendSeries{
-			{Label: "Opened", Points: opened},
-			{Label: "Closed", Points: closed},
+			{Label: "Opened", Points: volumeTrendPoints(allDays, window.bucket, func(d string) int { return counts[d].Opened })},
+			{Label: "Closed", Points: volumeTrendPoints(allDays, window.bucket, func(d string) int { return counts[d].Closed })},
 		},
 	}
 	if window.fixed {
@@ -3901,6 +3964,29 @@ func (s *caseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolume
 		resp.Bucket = window.bucket
 	}
 	return resp, nil
+}
+
+// volumeTrendPoints turns days (a window's UTC days, YYYY-MM-DD, in order),
+// each counted by count, into a trend's points: a point per day, or for a
+// "week" or "month" bucket a point per bucket summing its days, from the
+// bucket's first day in the window (Date) to its last (EndDate). Shared by
+// the case trend and the PLG registration trend.
+func volumeTrendPoints(days []string, bucket string, count func(day string) int) []domain.CaseVolumeTrendPoint {
+	grouped := bucket == caseVolumeTrendBucketWeek || bucket == caseVolumeTrendBucketMonth
+	points := []domain.CaseVolumeTrendPoint{}
+	for _, d := range days {
+		if n := len(points); grouped && n > 0 && caseVolumeTrendSameBucket(points[n-1].Date, d, bucket) {
+			points[n-1].Count += count(d)
+			points[n-1].EndDate = d
+			continue
+		}
+		var endDate string
+		if grouped {
+			endDate = d
+		}
+		points = append(points, domain.CaseVolumeTrendPoint{Date: d, EndDate: endDate, Count: count(d)})
+	}
+	return points
 }
 
 // caseVolumeTrendWindow is the inclusive span of UTC days a

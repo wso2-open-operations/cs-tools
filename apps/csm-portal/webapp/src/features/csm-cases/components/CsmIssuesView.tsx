@@ -61,6 +61,7 @@ import {
   resolveCaseFilterDates,
 } from "@features/csm-cases/utils/caseSearchPayload";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { visibleCaseTypes } from "@features/csm-cases/utils/caseType";
 import {
@@ -282,38 +283,34 @@ export default function CsmIssuesView({
   columnsViewId,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = useMemo<CasesFilters>(
-    () => readCasesFiltersFromUrl(searchParams),
-    [searchParams],
-  );
-
-  // Writes `defaultCaseTypes` into the URL at most once per mount, the first
-  // time it finds no `types` param at all. Done as a real URL write (in an
-  // effect, gated by a ref) rather than an in-memory override inside the
-  // `filters` memo above: a memo can't tell "fresh visit" apart from "the
-  // user cleared the type filter back to every type" -- both just look like
-  // "no `types` param" -- so an in-memory default would keep reasserting
-  // itself every time the user broadened back, making that choice
-  // impossible to keep. Writing it into the URL once, right after mount,
-  // means every later render (including a later clear) is driven purely by
-  // `searchParams` like every other filter, with no special-casing.
-  const defaultCaseTypesAppliedRef = useRef(false);
+  // `defaultCaseTypes` seeds the type selection only while the URL carries no
+  // `types` param at all, and is applied to the very FIRST render's `filters`
+  // (below) so the first search is already the default-typed one rather than
+  // an unfiltered one that a post-mount URL write then replaces. `armed`
+  // distinguishes "fresh visit" from "the user cleared the type filter back to
+  // every type" -- both just look like "no `types` param": it disarms for good
+  // the first time a render sees a `types` param (an explicit link, or the URL
+  // write below landing), so a later clear is never re-seeded. The URL write
+  // is kept so the address bar / back button carry the selection like every
+  // other filter. Disarming is the guarded set-during-render pattern, not an
+  // effect, so no render in between sees a stale "armed" flag.
+  const [defaultTypesArmed, setDefaultTypesArmed] = useState(true);
+  const urlHasTypes = searchParams.has("types");
+  if (defaultTypesArmed && urlHasTypes) setDefaultTypesArmed(false);
+  const seedTypes =
+    defaultTypesArmed && !urlHasTypes && !hideTypeFilter && !!defaultCaseTypes?.length;
+  const seedTypesKey = seedTypes ? (defaultCaseTypes ?? []).join(",") : "";
+  const filters = useMemo<CasesFilters>(() => {
+    const fromUrl = readCasesFiltersFromUrl(searchParams);
+    if (!seedTypesKey) return fromUrl;
+    return { ...fromUrl, caseTypes: seedTypesKey.split(",") as CasesFilters["caseTypes"] };
+  }, [searchParams, seedTypesKey]);
   useEffect(() => {
-    if (defaultCaseTypesAppliedRef.current || !defaultCaseTypes?.length || hideTypeFilter) {
-      return;
-    }
-    // Marks the default "consumed" on the very first render regardless of
-    // whether it actually got written -- an initial URL that already names
-    // an explicit `types` (e.g. a direct link to `?types=service_request`)
-    // must permanently disarm the default too, or clearing that explicit
-    // type back to "every type" later would look identical to "no types
-    // param yet" and wrongly reassert `defaultCaseTypes` at that point.
-    defaultCaseTypesAppliedRef.current = true;
-    if (searchParams.has("types")) return;
+    if (!seedTypesKey) return;
     const next = new URLSearchParams(searchParams);
-    next.set("types", defaultCaseTypes.join(","));
+    next.set("types", seedTypesKey);
     setSearchParams(next, { replace: true });
-  }, [searchParams, defaultCaseTypes, hideTypeFilter, setSearchParams]);
+  }, [searchParams, seedTypesKey, setSearchParams]);
 
   const location = useLocation();
   const navigate = useNavTransition();
@@ -547,7 +544,13 @@ export default function CsmIssuesView({
     writePaginationToUrl(0, rowsPerPage);
   };
 
-  const { data: directoryUsers } = useDirectoryUsers();
+  // Only seeds chip labels for assignees already selected (e.g. from a shared
+  // URL); the picker searches the directory itself once opened. So hold the
+  // directory fetch until there is a selected email to label (`@me` has its
+  // own "Me" label).
+  const { data: directoryUsers } = useDirectoryUsers({
+    enabled: filters.assignees.some((a) => a !== ASSIGNEE_ME_TOKEN),
+  });
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
 

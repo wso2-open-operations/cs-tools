@@ -55,6 +55,9 @@ func TestUnavailableFeedbackService(t *testing.T) {
 			if sue.Msg != feedbackUnavailableMsg {
 				t.Errorf("Msg = %q, want %q", sue.Msg, feedbackUnavailableMsg)
 			}
+			if sue.Msg != "case feedback is not available for this data source" {
+				t.Errorf("Msg = %q, want the neutral unavailable message", sue.Msg)
+			}
 		})
 	}
 }

@@ -61,7 +61,7 @@ export interface CaseVolumeTrendWindow {
  * day (so "this week" starts on the same Monday for every viewer, and
  * "today" is never a day the service has not reached yet); a plain date is
  * sent as it is. */
-function windowDate(value: string): string {
+export function windowDate(value: string): string {
   return resolveRelativeDatePlaceholderToUtcDate(value, new Date()) ?? value;
 }
 
@@ -69,6 +69,9 @@ export interface CaseVolumeTrendData {
   points: CaseVolumeTrendChartPoint[];
   isLoading: boolean;
   isError: boolean;
+  /** The backend refused the user's role (403). Set only by
+   * `usePlgRegistrationTrendData`; the case trend leaves it unset. */
+  isForbidden?: boolean;
 }
 
 /**

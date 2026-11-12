@@ -177,6 +177,114 @@ describe("useWidgetGroupByData", () => {
     ]);
   });
 
+  it("groups cases by product, each bar opening that product's cases by its name as it is", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "WSO2 API Manager", label: "WSO2 API Manager", count: 4 },
+        { key: "WSO2 Identity Server", label: "WSO2 Identity Server", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "case", { filters: [] }, { field: "product", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      { filters: { filters: [] }, groupBy: "product", maxGroups: 10 },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices).toEqual([
+      {
+        label: "WSO2 API Manager",
+        query: { filters: [{ field: "product", op: "in", values: ["WSO2 API Manager"] }] },
+        value: 4,
+        linkId: "WSO2 API Manager",
+      },
+      {
+        label: "WSO2 Identity Server",
+        query: { filters: [{ field: "product", op: "in", values: ["WSO2 Identity Server"] }] },
+        value: 2,
+        linkId: "WSO2 Identity Server",
+      },
+    ]);
+  });
+
+  it("groups one product's cases by version, each bar opening that version under the widget's product", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "4.3.0", label: "4.3.0", count: 5 },
+        { key: "4.2.0", label: "4.2.0", count: 1 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+    const widgetFilters = { filters: [{ field: "product", op: "in", values: ["WSO2 API Manager"] }] };
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "case", widgetFilters, { field: "productVersion", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      { filters: widgetFilters, groupBy: "productVersion", maxGroups: 10 },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query])).toEqual([
+      ["4.3.0", 5, { filters: [{ field: "productVersion", op: "in", values: ["4.3.0"] }] }],
+      ["4.2.0", 1, { filters: [{ field: "productVersion", op: "in", values: ["4.2.0"] }] }],
+    ]);
+  });
+
+  it("groups cases by project, each bar opening that project's cases by its id", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "6a0e1b52-0000-4000-8000-000000000001", label: "Example Corp Production", count: 5 },
+        { key: "6a0e1b52-0000-4000-8000-000000000002", label: "EXCORP-PROJ-2", count: 1 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "case", {}, { field: "project", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      { filters: {}, groupBy: "project", maxGroups: 10 },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query])).toEqual([
+      ["Example Corp Production", 5, { filters: [{ field: "projectId", op: "in", values: ["6a0e1b52-0000-4000-8000-000000000001"] }] }],
+      ["EXCORP-PROJ-2", 1, { filters: [{ field: "projectId", op: "in", values: ["6a0e1b52-0000-4000-8000-000000000002"] }] }],
+    ]);
+  });
+
+  it("keeps the groupBy field as the filter field outside the case family", async () => {
+    postMock.mockResolvedValue({ groups: [{ key: "acme", label: "Acme", count: 2 }], othersCount: 0, totalRecords: 2 });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "incident", {}, { field: "account", maxGroups: 10 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.slices[0].query).toEqual({ filters: [{ field: "account", op: "in", values: ["acme"] }] });
+  });
+
   it("marks the synthetic Others bucket non-navigable rather than giving it an unscoped query", async () => {
     postMock.mockResolvedValue({
       groups: [{ key: "critical", label: "Critical", count: 3 }],
@@ -247,7 +355,7 @@ describe("useWidgetGroupByData", () => {
     expect(result.current.slices).toEqual([
       {
         label: "Acme Corp",
-        query: { filters: [{ field: "account", op: "in", values: ["acme"] }] },
+        query: { filters: [{ field: "accountId", op: "in", values: ["acme"] }] },
         value: 10,
         linkId: "acme",
       },
@@ -363,6 +471,199 @@ describe("useWidgetGroupByData", () => {
     );
 
     await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+
+  describe("PLG organisations by owner", () => {
+    const BY_OWNER = {
+      groups: [
+        { key: "unowned", label: "Unowned", count: 4 },
+        { key: "5e636a12-0000-4000-8000-000000000001", label: "Alice Perera", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 6,
+    };
+
+    it("asks the PLG aggregate with the PLG search's filters", async () => {
+      postMock.mockResolvedValue(BY_OWNER);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-owner",
+            "plg_organization",
+            { productCodes: ["IAM"], registeredFrom: "2026-01-01", searchQuery: " acme " },
+            { field: "owner", maxGroups: 10 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        {
+          filters: { productCodes: ["IAM"], registeredFrom: "2026-01-01T00:00:00Z", query: "acme" },
+          groupBy: "owner",
+          maxGroups: 10,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.total).toBe(6);
+    });
+
+    it("opens an owner's organisations from their bar, and the unowned ones from Unowned", async () => {
+      postMock.mockResolvedValue(BY_OWNER);
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("by-owner", "plg_organization", {}, { field: "owner" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.slices).toEqual([
+        { label: "Unowned", query: { unowned: true }, value: 4, linkId: "unowned" },
+        {
+          label: "Alice Perera",
+          query: { ownerIds: ["5e636a12-0000-4000-8000-000000000001"] },
+          value: 2,
+          linkId: "5e636a12-0000-4000-8000-000000000001",
+        },
+      ]);
+    });
+
+    it("says no access on a 403", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+      const { result } = renderHook(
+        () => useWidgetGroupByData("by-owner", "plg_organization", {}, { field: "owner" }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5000 });
+      expect(result.current.isForbidden).toBe(true);
+    });
+  });
+
+  describe("PLG by country", () => {
+    const BY_COUNTRY = {
+      groups: [
+        { key: "Sri Lanka", label: "Sri Lanka", count: 5 },
+        { key: "unknown", label: "Unknown", count: 2 },
+      ],
+      othersCount: 0,
+      totalRecords: 7,
+    };
+
+    it("asks the organisation aggregate with the PLG search's filters", async () => {
+      postMock.mockResolvedValue(BY_COUNTRY);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "orgs-by-country",
+            "plg_organization",
+            { productCodes: ["IAM"], countryUnknown: ["false"] },
+            { field: "country", maxGroups: 8 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        { filters: { productCodes: ["IAM"], countryUnknown: false }, groupBy: "country", maxGroups: 8 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it("asks the registration aggregate with unacknowledgedOnly beside the filters", async () => {
+      postMock.mockResolvedValue(BY_COUNTRY);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "new-by-country",
+            "plg_registration",
+            { productCodes: ["IAM"], unacknowledgedOnly: true, registeredTo: "2026-11-01" },
+            { field: "country", maxGroups: 10 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        {
+          filters: { productCodes: ["IAM"], registeredTo: "2026-11-01T23:59:59.999999Z" },
+          unacknowledgedOnly: true,
+          groupBy: "country",
+          maxGroups: 10,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.total).toBe(7);
+    });
+
+    it.each(["plg_organization", "plg_registration"] as const)(
+      "opens a country's %s from its bar, and the ones with no country from Unknown",
+      async (resourceType) => {
+        postMock.mockResolvedValue(BY_COUNTRY);
+
+        const { result } = renderHook(
+          () => useWidgetGroupByData("by-country", resourceType, {}, { field: "country" }),
+          { wrapper },
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+        expect(result.current.slices).toEqual([
+          { label: "Sri Lanka", query: { countryNames: ["Sri Lanka"] }, value: 5, linkId: "Sri Lanka" },
+          { label: "Unknown", query: { countryUnknown: true }, value: 2, linkId: "unknown" },
+        ]);
+      },
+    );
+  });
+
+  describe("PLG registrations by playbook answer", () => {
+    const BY_ANSWER = {
+      groups: [
+        { key: "unanswered", label: "Not answered", count: 2 },
+        { key: "MONITOR", label: "Monitor", count: 1 },
+      ],
+      othersCount: 0,
+      totalRecords: 3,
+    };
+
+    it("asks the registration aggregate with the widget's task, and opens an answer or Not answered", async () => {
+      postMock.mockResolvedValue(BY_ANSWER);
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-outcome",
+            "plg_registration",
+            { playbookTask: ["ELIGIBILITY_ASSESSMENT_OUTCOME"], lifecycleStages: ["REGISTRATION"] },
+            { field: "playbookAnswer", maxGroups: 10 },
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        {
+          filters: { playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME", lifecycleStages: ["REGISTRATION"] },
+          groupBy: "playbookAnswer",
+          maxGroups: 10,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(result.current.slices).toEqual([
+        { label: "Not answered", query: { playbookUnanswered: true }, value: 2, linkId: "unanswered" },
+        { label: "Monitor", query: { playbookAnswers: ["MONITOR"] }, value: 1, linkId: "MONITOR" },
+      ]);
+      expect(result.current.total).toBe(3);
+    });
   });
 
   describe("time card totals", () => {
@@ -508,6 +809,47 @@ describe("useWidgetGroupByData", () => {
       expect(filters.userIds).toEqual(["user-123"]);
       expect(filters.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(filters.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it("groups by team over the selected team's or every ABT's group ids, each team's bar opening that team", async () => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "rigel-group", label: "Rigel", count: 6, totalMinutes: 810 },
+          { key: "atlas-group", label: "Atlas", count: 4, totalMinutes: 660 },
+          { key: "vega-group", label: "Vega", count: 0, totalMinutes: 0 },
+        ],
+        othersCount: 0,
+        totalRecords: 10,
+        othersMinutes: 0,
+        totalMinutes: 1470,
+      });
+
+      const { result } = renderHook(
+        () =>
+          useWidgetGroupByData(
+            "by-abt",
+            "time_card",
+            { teamIds: ["__current_team__"], states: ["approved"] },
+            { field: "team", measure: "hours" },
+            ["rigel-group", "atlas-group", "vega-group"],
+            undefined,
+          ),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(postMock.mock.calls[0][1]).toEqual({
+        filters: { teamIds: ["rigel-group", "atlas-group", "vega-group"], states: ["approved"] },
+        groupBy: "team",
+        maxGroups: undefined,
+        measure: "minutes",
+      });
+      expect(result.current.slices.map((s) => [s.label, s.value])).toEqual([
+        ["Rigel", 13.5],
+        ["Atlas", 11],
+        ["Vega", 0],
+      ]);
+      expect(result.current.slices[1].query).toEqual({ teamIds: ["atlas-group"] });
     });
   });
 });

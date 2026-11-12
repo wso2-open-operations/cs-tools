@@ -353,7 +353,7 @@ func TestRegisterClocks_RegistersEveryClockThePolicyHasForThisSeverity(t *testin
 	createdAt := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC) // a Monday
 
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "WSO2-1", "Title", "CASE", "API Manager", "Team Nova")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "WSO2-1", "Title", "CASE", "", "API Manager", "Team Nova")
 
 	for _, ct := range []string{ClockResponse, ClockWorkaround, ClockResolution} {
 		meta, found, _ := st.GetClock(context.Background(), "case-1", ct)
@@ -384,7 +384,7 @@ func TestRegisterClocks_SkipsClockTypesThePolicyHasNoEntryFor(t *testing.T) {
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"case-1|" + ClockResponse: {Found: true, DurationSeconds: int64((24 * time.Hour).Seconds())},
 	}}
-	e.RegisterClocks(context.Background(), "case-1", "LOW", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "LOW", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	if _, found, _ := st.GetClock(context.Background(), "case-1", ClockResponse); !found {
 		t.Error("response clock not registered for LOW")
@@ -405,7 +405,7 @@ func TestRegisterClocks_SkipsClockTypesThePolicyHasNoEntryFor(t *testing.T) {
 func TestRegisterClocks_NoEntityClient_RegistersNothing(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
-	e.RegisterClocks(context.Background(), "case-1", "UNKNOWN", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "UNKNOWN", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	if len(st.clocks) != 0 {
 		t.Errorf("clocks registered with no entity-service client configured: %+v", st.clocks)
@@ -420,7 +420,7 @@ func TestRegisterClocks_EntityReportsNoPolicy_RegistersNothing(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = &fakeEntityClockStatus{} // no states configured -- every lookup reports Found: false
-	e.RegisterClocks(context.Background(), "case-1", "ANNOUNCEMENT", time.Now(), "CS0001", "", "", "ANNOUNCEMENT", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "ANNOUNCEMENT", time.Now(), "CS0001", "", "", "ANNOUNCEMENT", "", "", "")
 
 	if len(st.clocks) != 0 {
 		t.Errorf("clocks registered when entity-service has no applicable policy: %+v", st.clocks)
@@ -441,7 +441,7 @@ func TestRegisterClocks_Replay_DoesNotResetPausedOrAlertedTier(t *testing.T) {
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	createdAt := time.Now()
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "", "")
 
 	// A later event completes the response clock and pauses workaround --
 	// simulating CompleteResponseClock/ApplyStateEffects having already run
@@ -459,7 +459,7 @@ func TestRegisterClocks_Replay_DoesNotResetPausedOrAlertedTier(t *testing.T) {
 	// case.created is redelivered (retry or DLQ replay) with the identical
 	// payload.
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "", "")
 
 	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockResponse); meta.AlertedTier != 100 {
 		t.Errorf("response AlertedTier = %d after replay, want 100 (must not reset)", meta.AlertedTier)
@@ -487,7 +487,7 @@ func TestRegisterClocks_MediumResolution_AvoidsWeekendDueDate(t *testing.T) {
 		"case-1|" + ClockWorkaround: {Found: true, DurationSeconds: int64((72 * time.Hour).Seconds())},
 		"case-1|" + ClockResolution: {Found: true, DurationSeconds: int64((7 * 24 * time.Hour).Seconds())},
 	}}
-	e.RegisterClocks(context.Background(), "case-1", "MEDIUM", createdAt, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "MEDIUM", createdAt, "CS0001", "", "", "CASE", "", "", "")
 
 	due100 := st.wake[wakeMember("case-1", ClockResolution, 100)]
 	if due100.Weekday() == time.Saturday || due100.Weekday() == time.Sunday {
@@ -518,7 +518,7 @@ func TestRegisterClocks_BusinessDaySchedule_WakesAtTheBusinessDayAdjustedInstant
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"case-1|" + ClockResolution: {Found: true, DurationSeconds: int64(duration.Seconds()), Schedule: "WSO2 Business days"},
 	}}
-	e.RegisterClocks(context.Background(), "case-1", "LOW", createdAt, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "LOW", createdAt, "CS0001", "", "", "CASE", "", "", "")
 
 	due100, ok := st.wake[wakeMember("case-1", ClockResolution, 100)]
 	if !ok {
@@ -591,7 +591,7 @@ func TestApplyStateEffects_AwaitingInfo_PausesWorkaroundAndResolution(t *testing
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	// entity-service's own pause_condition already evaluated this case's new
 	// status to "paused" for both clocks by the time this event is
@@ -618,7 +618,7 @@ func TestApplyStateEffects_Closed_CompletesResolutionAndResponseAndPausesWorkaro
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	e.ApplyStateEffects(context.Background(), "case-1", "Closed")
 
@@ -653,7 +653,7 @@ func TestApplyStateEffects_Closed_WithoutAQualifyingReply_NeverAlertsOnResponse(
 	e := newTestEngine(st, chat, &fakePublisher{})
 	start := time.Now().Add(-2 * time.Hour)
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", start, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", start, "CS0001", "", "", "CASE", "", "", "")
 
 	// The case closes with no qualifying support-engineer reply ever having
 	// completed the response clock -- matching the issue's own repro (a
@@ -688,7 +688,7 @@ func TestApplyStateEffects_Closed_NoClockTypeAlertsAfterClose(t *testing.T) {
 	e := newTestEngine(st, chat, &fakePublisher{})
 	start := time.Now().Add(-2 * time.Hour)
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", start, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", start, "CS0001", "", "", "CASE", "", "", "")
 
 	e.ApplyStateEffects(context.Background(), "case-1", "Closed")
 
@@ -705,7 +705,7 @@ func TestApplyStateEffects_ResumesOnAnyOtherStatus(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"case-1|" + ClockWorkaround: {Found: true, IsPaused: true},
 		"case-1|" + ClockResolution: {Found: true, IsPaused: true},
@@ -740,7 +740,7 @@ func TestApplyStateEffects_Resume_ShiftsWakeEntriesByTheNewPauseSegment(t *testi
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	createdAt := time.Now()
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "", "")
 
 	before := map[string]time.Time{
 		ClockWorkaround: st.wake[wakeMember("case-1", ClockWorkaround, 50)],
@@ -799,7 +799,7 @@ func TestApplyStateEffects_Resume_BusinessDayClock_RecomputesWakeTimesRatherThan
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"case-1|" + ClockResolution: {Found: true, DurationSeconds: int64(duration.Seconds()), Schedule: slaScheduleWSO2BusinessDays},
 	}}
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", startedAt, "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", startedAt, "CS0001", "", "", "CASE", "", "", "")
 
 	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
 	// entity-service's own CSM-native engine has, by the time this Kafka
@@ -847,7 +847,7 @@ func TestApplyStateEffects_Resume_NoEntityClient_SkipsShiftWithoutPanicking(t *t
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 	// Pause the clock directly (bypassing ApplyStateEffects' own
 	// entity-based pause detection, which is not what this test is about)
 	// to set up the "currently paused" precondition a resume needs.
@@ -869,7 +869,7 @@ func TestCompleteResponseClock_AdvancesToTier100(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	e.CompleteResponseClock(context.Background(), "case-1")
 
@@ -893,7 +893,7 @@ func TestPauseWorkaroundClock_SetsPaused(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	if err := e.PauseWorkaroundClock(context.Background(), "case-1"); err != nil {
 		t.Fatalf("PauseWorkaroundClock() error = %v", err)
@@ -917,7 +917,7 @@ func TestPauseWorkaroundClock_StoreFailure_ReturnsError(t *testing.T) {
 	st.failSetPaused = true
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	if err := e.PauseWorkaroundClock(context.Background(), "case-1"); err == nil {
 		t.Fatal("expected PauseWorkaroundClock() to return an error on a store failure, got nil")
@@ -1008,6 +1008,42 @@ func TestTick_BreachAlert_RealTeamAudienceIsNotRetargeted(t *testing.T) {
 	}
 }
 
+// TestTick_BreachAlert_OnboardingProjectRoutesToBothTeamAndOnboarding is the
+// regression test for a real, reported gap: sendBreachAlert used to call
+// chataudience.Resolve with isEvaluationAccount/onboardingStatus hardcoded
+// to false/"", so an onboarding-stage case's SLA breach Chat alert never
+// reached the Onboarding space at all, regardless of the project's real
+// onboarding_status. Those two facts now come from the same GetClockState
+// call already made for the stale-alert check (state.IsEvaluationAccount/
+// state.ProjectOnboardingStatus) -- and chataudience.Resolve now adds the
+// Onboarding space on top of the case's own team space (both the team
+// actually working the case and whoever is running the onboarding should
+// see the alert -- see that function's own doc comment).
+func TestTick_BreachAlert_OnboardingProjectRoutesToBothTeamAndOnboarding(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{spaces: map[string]bool{"Team Nova": true, "Onboarding": true}}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {Found: true, Stage: "IN_PROGRESS", StartedOn: &past, ProjectOnboardingStatus: "IN_PROGRESS"},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 2 {
+		t.Fatalf("chat calls = %+v, want exactly two (the team's own space and Onboarding)", chat.calls)
+	}
+	gotAudiences := map[string]bool{chat.calls[0].audience: true, chat.calls[1].audience: true}
+	if !gotAudiences["Team Nova"] || !gotAudiences["Onboarding"] {
+		t.Errorf("audiences = %v, want both %q and %q", gotAudiences, "Team Nova", "Onboarding")
+	}
+}
+
 // TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor
 // guards the product decision that a service request's SLA breach stays
 // UI-only: the account's default CRE team (ClockMeta.Team) is often not the
@@ -1042,6 +1078,53 @@ func TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor(t *
 	}
 	if len(email.calls) != 0 {
 		t.Errorf("email calls = %+v, want none for a service request", email.calls)
+	}
+	if pub.calls != 1 {
+		t.Errorf("publish calls = %d, want 1 -- sla.tier_reached still publishes, the UI still reflects the breach", pub.calls)
+	}
+	if _, stillWaiting := st.wake[wakeMember("case-1", "response", 50)]; stillWaiting {
+		t.Error("wake entry not removed")
+	}
+	meta, _, _ := st.GetClock(context.Background(), "case-1", "response")
+	if meta.AlertedTier != 50 {
+		t.Errorf("AlertedTier = %d, want 50 -- bookkeeping is unaffected by the chat/email suppression", meta.AlertedTier)
+	}
+}
+
+// TestTick_MigrationEngagementBreach_SkipsChatAndEmailButKeepsPublishAndCursor
+// guards the product decision that a migration engagement's SLA breach is
+// frustration-detection-only: a clock can get attached to an engagement via
+// entity-service's own clock re-evaluation (no case_type gate there, unlike
+// clock registration at creation), and once that happens its breach must
+// not also page the case's team Chat space/inbox the normal way. Same
+// bookkeeping-unaffected shape as the SERVICE_REQUEST skip.
+func TestTick_MigrationEngagementBreach_SkipsChatAndEmailButKeepsPublishAndCursor(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.email = email
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", CaseType: "ENGAGEMENT", EngagementType: "migration", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %+v, want none for a migration engagement", chat.calls)
+	}
+	if len(email.calls) != 0 {
+		t.Errorf("email calls = %+v, want none for a migration engagement", email.calls)
 	}
 	if pub.calls != 1 {
 		t.Errorf("publish calls = %d, want 1 -- sla.tier_reached still publishes, the UI still reflects the breach", pub.calls)
@@ -1204,7 +1287,7 @@ func TestRegisterClocks_ClockNotYetRegistered_RetriesAndThenRegistersIt(t *testi
 		found:         clockState{Found: true, DurationSeconds: int64((15 * time.Minute).Seconds())},
 	}
 
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS001", "WSO2-1", "Title", "case", "API Manager", "Team Nova")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS001", "WSO2-1", "Title", "case", "", "API Manager", "Team Nova")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -1430,6 +1513,51 @@ func TestTick_BreachEmail_SendsToAssigneeAndTeam(t *testing.T) {
 	}
 	if got := email.calls[1].to; len(got) != 1 || got[0] != "team-nova@example.com" {
 		t.Errorf("second email to = %v, want [team-nova@example.com]", got)
+	}
+}
+
+// TestTick_BreachEmail_OnboardingSendsToBothCRETeamAndOnboardingTeam is the
+// regression test for a CodeRabbit-caught gap in an earlier version of the
+// onboarding fix: that version swapped TeamEmail/TeamLeadName to the
+// Customer Onboarding team entirely for an onboarding-stage case, which
+// paired the ONBOARDING team's lead with the CRE team's own displayed name
+// (meta.Team/the Chat card) -- a real, confirmed mismatch. TeamEmail/
+// TeamLeadName must always stay the case's real CRE team; OnboardingTeamEmail
+// is a genuinely additional "to" address, present only for an onboarding
+// project, with no lead-name swap of its own.
+func TestTick_BreachEmail_OnboardingSendsToBothCRETeamAndOnboardingTeam(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.email = email
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", TeamLeadName: "CRE Lead",
+			OnboardingTeamEmail: "onboarding@example.com", ProjectOnboardingStatus: "IN_PROGRESS",
+			BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(email.calls) != 2 {
+		t.Fatalf("email calls = %+v, want exactly 2 (assignee + team)", email.calls)
+	}
+	gotTeamTo := map[string]bool{}
+	for _, addr := range email.calls[1].to {
+		gotTeamTo[addr] = true
+	}
+	if len(email.calls[1].to) != 2 || !gotTeamTo["team-nova@example.com"] || !gotTeamTo["onboarding@example.com"] {
+		t.Errorf("team email to = %v, want exactly [team-nova@example.com onboarding@example.com]", email.calls[1].to)
 	}
 }
 
@@ -2584,7 +2712,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForATerminalClock(t *testing
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockResponse, 50)]; stillThere {
 		t.Error("stale wake entry survived ReviseClocks for a clock that had already reached a terminal stage")
@@ -2624,7 +2752,7 @@ func TestEngine_ReviseClocks_RebuildsFromNewSeverity(t *testing.T) {
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2659,7 +2787,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForAClockTypeNoLongerCovered
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockWorkaround, 50)]; stillThere {
 		t.Error("stale workaround wake entry survived ReviseClocks despite the new severity having no policy for it")
@@ -2682,7 +2810,7 @@ func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *test
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2718,7 +2846,7 @@ func TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata(t *testing
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Need an upgrade", "api-manager", "Phoenix", "service_request")
+	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Need an upgrade", "api-manager", "Phoenix", "service_request", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2729,6 +2857,68 @@ func TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata(t *testing
 	}
 	if meta.CaseType != "SERVICE_REQUEST" {
 		t.Errorf("meta.CaseType = %q, want %q -- the transfer's own new type must override the stale pre-transfer value", meta.CaseType, "SERVICE_REQUEST")
+	}
+}
+
+// TestEngine_ReviseClocks_EngagementTypeTransfer_UpdatesEngagementTypeMetadata
+// is the regression test for the CodeRabbit-caught follow-up gap: a case
+// transferring INTO a migration engagement must have its Redis-held
+// EngagementType updated the same way CaseType already is just above --
+// otherwise sendBreachAlert's CaseType=="ENGAGEMENT" &&
+// EngagementType=="migration" suppression check keeps reading the stale
+// pre-transfer value ("") forever, and never actually suppresses anything
+// for the exact case this feature exists for.
+func TestEngine_ReviseClocks_EngagementTypeTransfer_UpdatesEngagementTypeMetadata(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "CASE", EngagementType: "", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Migrate us", "api-manager", "Phoenix", "engagement", "migration")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "ENGAGEMENT" || meta.EngagementType != "migration" {
+		t.Errorf("meta = {CaseType: %q, EngagementType: %q}, want {ENGAGEMENT, migration} -- the transfer's own new engagement type must override the stale pre-transfer value", meta.CaseType, meta.EngagementType)
+	}
+}
+
+// TestEngine_ReviseClocks_SeverityChangeOnly_PreservesEngagementType confirms
+// a plain severity change (newType/newEngagementType both "") never resets
+// an already-set EngagementType back to "" -- the same preservation
+// CaseType already gets via TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta.
+func TestEngine_ReviseClocks_SeverityChangeOnly_PreservesEngagementType(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "ENGAGEMENT", EngagementType: "migration", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Migrate us", "api-manager", "Phoenix", "", "")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "ENGAGEMENT" || meta.EngagementType != "migration" {
+		t.Errorf("meta = {CaseType: %q, EngagementType: %q}, want {ENGAGEMENT, migration} -- a plain severity change must not reset the engagement type", meta.CaseType, meta.EngagementType)
 	}
 }
 
@@ -2945,7 +3135,7 @@ func TestApplyStateEffects_PauseStatus_DrivenByEntityService_NotByStatusString(t
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
-	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "", "")
 
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
 		"case-1|" + ClockWorkaround: {Found: true, IsPaused: true},

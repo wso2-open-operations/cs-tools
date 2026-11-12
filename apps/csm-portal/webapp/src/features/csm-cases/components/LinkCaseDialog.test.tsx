@@ -123,6 +123,46 @@ describe("LinkCaseDialog — search-and-select", () => {
     expect(onLink).toHaveBeenCalledWith("case-2002", "related");
   });
 
+  it("disables the related option with the reason when the ticket can't have a related case", () => {
+    mockHits();
+    const onLink = vi.fn();
+    render(
+      <LinkCaseDialog
+        currentCaseId="case-1001"
+        isLinking={false}
+        onClose={() => {}}
+        onLink={onLink}
+        relatedUnavailableReason="Only a case can have a related case. Link this one as a parent instead."
+      />,
+    );
+    const related = screen.getByRole("radio", { name: /as related case/i });
+    expect(related).toBeDisabled();
+    expect(related).toHaveAccessibleDescription(
+      "Only a case can have a related case. Link this one as a parent instead.",
+    );
+    expect(screen.getByRole("radio", { name: /as parent/i })).toBeChecked();
+
+    // Linking still works, as a parent.
+    typeAndDebounce("CS-2002");
+    fireEvent.click(screen.getByText(/CS-2002 — Related latency issue/i));
+    fireEvent.click(screen.getByRole("button", { name: /^link$/i }));
+    expect(onLink).toHaveBeenCalledWith("case-2002", "parent");
+  });
+
+  it("offers the related option with no reason when none is given", () => {
+    mockHits();
+    render(
+      <LinkCaseDialog
+        currentCaseId="case-1001"
+        isLinking={false}
+        onClose={() => {}}
+        onLink={() => {}}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: /as related case/i })).toBeEnabled();
+    expect(screen.queryByText(/only a case can have a related case/i)).not.toBeInTheDocument();
+  });
+
   it("calls onClose on Cancel without calling onLink", () => {
     mockHits();
     const onLink = vi.fn();
