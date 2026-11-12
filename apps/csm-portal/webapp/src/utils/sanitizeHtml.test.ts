@@ -21,6 +21,7 @@ import {
   isBlankHtml,
   looksLikeHtml,
   sanitizeAnnouncementHtml,
+  sanitizeBannerHtml,
   sanitizeDescriptionHtml,
   sanitizeRichTextHtml,
   sanitizeStructuredHtml,
@@ -330,5 +331,25 @@ describe("sanitizeAnnouncementHtml", () => {
     ]) {
       expect(sanitizeAnnouncementHtml(html)).toBe(DOMPurify.sanitize(html));
     }
+  });
+});
+
+describe("sanitizeBannerHtml", () => {
+  it("removes popover attributes, which would draw over the portal in the top layer", () => {
+    const out = sanitizeBannerHtml(
+      '<button popovertarget="p1" popovertargetaction="show">Open</button><div id="p1" popover="manual">Panel</div>',
+    );
+    expect(out).not.toMatch(/popover/i);
+    expect(out).toContain("Open");
+    expect(out).toContain("Panel");
+  });
+
+  it("still removes style elements and forms, and keeps a new-tab link safe", () => {
+    const out = sanitizeBannerHtml(
+      '<style>body{display:none}</style><form action="/x"><input name="a"></form><a href="https://example.com" target="_blank">go</a>',
+    );
+    expect(out).not.toMatch(/<style|<form|<input/i);
+    expect(out).toContain('target="_blank"');
+    expect(out).toContain('rel="noopener noreferrer"');
   });
 });
