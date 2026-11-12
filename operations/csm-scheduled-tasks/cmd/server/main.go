@@ -518,6 +518,9 @@ func main() {
 	const housekeepingTaskName = "housekeeping_cleanup"
 	housekeepingTo, housekeepingCc := recipientsFor(recipientOverrides, housekeepingTaskName)
 
+	const attachmentCleanupTaskName = "attachment_upload_cleanup"
+	attachmentCleanupTo, attachmentCleanupCc := recipientsFor(recipientOverrides, attachmentCleanupTaskName)
+
 	const availabilityTaskName = "availability_recalculation"
 	availabilityTo, availabilityCc := recipientsFor(recipientOverrides, availabilityTaskName)
 
@@ -744,6 +747,16 @@ func main() {
 			Handler:  housekeeping.CleanupResolvedRuns(ledgerClient, envDays("HOUSEKEEPING_RETENTION_DAYS", 30)),
 			To:       housekeepingTo,
 			Cc:       housekeepingCc,
+		},
+		// Asks entity-service to clean up abandoned attachment uploads and unlinked
+		// comment images and report drafts (see internal/housekeeping).
+		// Daily at 03:30, after housekeeping_cleanup.
+		{
+			Name:     attachmentCleanupTaskName,
+			Schedule: scheduleFor(scheduleOverrides, attachmentCleanupTaskName, "30 3 * * *"),
+			Handler:  housekeeping.CleanupAttachmentUploads(ledgerClient),
+			To:       attachmentCleanupTo,
+			Cc:       attachmentCleanupCc,
 		},
 		// Emails staleCasesTo/Cc the long-open cases report (cases open more
 		// than staleCaseOlderThanDays, in two tables) fetched from

@@ -73,6 +73,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | Task name (ledger key) | Default schedule | Enabled | What it does |
 |---|---|---|---|
 | `housekeeping_cleanup` | `0 3 * * *` | Always | Deletes resolved (succeeded or superseded) ledger rows older than `HOUSEKEEPING_RETENTION_DAYS`. Open or failed rows are never deleted. |
+| `attachment_upload_cleanup` | `30 3 * * *` | Always | Asks entity-service to clean up attachment uploads that were never confirmed and comment images and report drafts that were never linked. Entity-service removes the files itself. |
 | `stale_cases_report` | `0 7 * * *` | Always | Emails the long-open cases report from entity-service (`GET /reports/long-open-cases`, deploy entity-service first): cases open for more than 30 days (fixed window), in two tables, "Ongoing cases" and "Ongoing cases on onboarding projects". Sends nothing and still succeeds when both tables are empty or the task has no `to` recipients. |
 | `open_cases_report` | `0 8 * * *` | Always | Emails a report of cases still in the `open` state that were created before the start of yesterday (UTC calendar-day boundary). Does nothing and still succeeds if the task has no `to` recipients. |
 | `migration_case_report` | `30 22 * * 0` | Always | Emails the weekly migration case scan: migration engagements still open after `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS`, in three tables (customer asked to hold, waiting on the accounts team, neither). Sent to the mail groups of the teams entity-service is configured with (`MIGRATION_CASE_REPORT_TEAM_KEYS` there) plus this task's own `to`/`cc`; fails the run when that audience is empty. Always sent, even with empty tables. |
@@ -207,7 +208,7 @@ csm-scheduled-tasks/
 │   ├── announcementpublish/      # Client + handler for publish_scheduled_announcements
 │   ├── cloudstatus/              # Client, outbound webhook poster and handler for cloud_status_webhooks
 │   ├── availability/             # Client + handler for availability_recalculation
-│   ├── housekeeping/             # Handler for housekeeping_cleanup
+│   ├── housekeeping/             # Handlers for housekeeping_cleanup and attachment_upload_cleanup
 │   ├── stalecases/               # Handler for stale_cases_report
 │   ├── longopenreport/           # Client + types for entity-service's long-open cases report
 │   ├── opencases/                # Handler for open_cases_report
