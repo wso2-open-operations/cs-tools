@@ -1083,7 +1083,7 @@ describe("direct transfers of large files", () => {
         const save = vi.fn();
         const done = await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
+          { type: "work_item", id: ID, size: 10, directAboveBytes: 5 },
           save,
         );
         expect(done).toBe(true);
@@ -1106,7 +1106,7 @@ describe("direct transfers of large files", () => {
         const getResponse = vi.fn().mockResolvedValue(body());
         const done = await downloadEntityAttachment(
           apiFor({ postEmpty, getResponse }),
-          { type: "work_item", id: ID, size: DIRECT_TRANSFER_MIN_BYTES + 1, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
+          { type: "work_item", id: ID, size: 10, directAboveBytes: 5 },
           vi.fn(),
         );
         expect(done).toBe(true);
@@ -1118,9 +1118,9 @@ describe("direct transfers of large files", () => {
     it("goes direct only above the server's size, never when it is 0 or the size is unknown", async () => {
       click();
       const cases = [
-        { size: DIRECT_TRANSFER_MIN_BYTES, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
-        { size: DIRECT_TRANSFER_MIN_BYTES + 1, directAboveBytes: 0 },
-        { size: undefined, directAboveBytes: DIRECT_TRANSFER_MIN_BYTES },
+        { size: 5, directAboveBytes: 5 },
+        { size: 10, directAboveBytes: 0 },
+        { size: undefined, directAboveBytes: 5 },
       ];
       for (const { size, directAboveBytes } of cases) {
         const postEmpty = vi.fn();
@@ -1149,8 +1149,15 @@ describe("direct transfers of large files", () => {
         directAboveBytes: DIRECT_TRANSFER_MIN_BYTES,
         ...over,
       });
-      const backendBody = () =>
-        new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } });
+      /** The backend answering any range of the SIZE-byte file. */
+      const backendRange = async (_path: string, init?: { headers?: Record<string, string> }) => {
+        const [, a, b] = /bytes=(\d+)-(\d+)/.exec(init!.headers!.Range)!;
+        const end = Math.min(Number(b), SIZE - 1);
+        return new Response(new Uint8Array(end - Number(a) + 1), {
+          status: 206,
+          headers: { "Content-Range": `bytes ${a}-${end}/${SIZE}` },
+        });
+      };
       /** Serves ranges of a SIZE-byte file; `refuse` decides a response status per call. */
       const linkFetch = (refuse: (url: string, call: number) => number = () => 0) => {
         let call = 0;
@@ -1234,9 +1241,9 @@ describe("direct transfers of large files", () => {
         ];
         for (const { fetch: fetchMock, postEmpty } of refusals) {
           vi.stubGlobal("fetch", fetchMock);
-          const getResponse = vi.fn().mockResolvedValue(backendBody());
+          const getResponse = vi.fn(backendRange);
           await downloadEntityAttachment(apiFor({ postEmpty, getResponse }), dlArgs({ onSaved }), vi.fn());
-          expect(getResponse).toHaveBeenCalledTimes(1);
+          expect(getResponse).toHaveBeenCalledTimes(3); // every range, through the backend
           expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
         }
         expect(picker).toHaveBeenCalledTimes(3);

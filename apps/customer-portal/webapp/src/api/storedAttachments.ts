@@ -308,8 +308,6 @@ async function readAndStore(
   request: RangeRequest,
   input: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   sink: DiskSink | undefined,
-  /** True for a signed link: Azure honours any range, so no first read is needed to learn the size. */
-  parallelFromStart = false,
 ): Promise<void> {
   // Bytes received so far, counted as each piece arrives; the size of the file
   // is known from the first answer's headers on.
@@ -371,7 +369,8 @@ async function readAndStore(
     else saveBlobAs(new Blob(ranges.flat() as BlobPart[]), fileName || "attachment");
   };
 
-  if (parallelFromStart && input.size !== undefined && input.size > DOWNLOAD_RANGE_BYTES) {
+  // Azure and the backend both honour a range, so with the size known no first read is needed.
+  if (input.size !== undefined && input.size > DOWNLOAD_RANGE_BYTES) {
     knownTotal = input.size;
     await readRangesFrom(0, input.size);
     await finish(input.name);
@@ -494,7 +493,7 @@ async function downloadDirect(
   try {
     const link = await requestDownloadLink(authFetch, input);
     if (sink) {
-      await readAndStore(directRangeRequest(authFetch, input, link), input, sink, true);
+      await readAndStore(directRangeRequest(authFetch, input, link), input, sink);
     } else {
       if (!(await linkWorks(link.url, input.signal))) return false;
       startBrowserDownload(link.url, input.name || link.name || "attachment");

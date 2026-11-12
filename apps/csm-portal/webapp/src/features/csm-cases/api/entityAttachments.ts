@@ -340,7 +340,7 @@ async function readUntilEnd(
  */
 async function readAndStore(
   fetchRange: RangeFetcher,
-  args: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal; parallelFromStart?: boolean },
+  args: { name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
@@ -383,9 +383,9 @@ async function readAndStore(
     else save(new Blob(ranges.flat() as BlobPart[]), fileName);
   };
 
-  // Azure always honours a range, so when the size is known every range, the first
-  // included, is read at once instead of waiting for the first one to finish.
-  if (args.parallelFromStart && knownSize !== undefined && knownSize > DOWNLOAD_RANGE_BYTES) {
+  // Both Azure and the backend honour a range, so when the size is known every range,
+  // the first included, is read at once instead of waiting for the first one to finish.
+  if (knownSize !== undefined && knownSize > DOWNLOAD_RANGE_BYTES) {
     await readRangesFrom(0, knownSize);
     await finish(args.name || "attachment");
     return true;
@@ -521,7 +521,7 @@ async function downloadFromLink(
       throw new BackendApiError(response.status, `Download link refused (${response.status}).`);
     }
   };
-  if (!(await readAndStore(fetchRange, { ...args, parallelFromStart: true }, save, sink))) throw new Error("Attachment not found.");
+  if (!(await readAndStore(fetchRange, args, save, sink))) throw new Error("Attachment not found.");
 }
 
 /**
