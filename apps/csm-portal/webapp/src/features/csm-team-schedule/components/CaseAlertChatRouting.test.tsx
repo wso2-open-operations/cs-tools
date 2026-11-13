@@ -62,6 +62,8 @@ const HOOK =
 const NOT_DB =
   "The alert service only compares it with its file (shadow mode); it uses it once PAGING_CONFIG_SOURCE is db or unset.";
 const DB = "The alert service uses it after its next restart.";
+/** In db mode the alert service restarts itself once the change settles. */
+const DB_MODE = "The alert service restarts itself to use it, usually within a few minutes.";
 
 function room(over: Partial<CaseAlertChatRoom>): CaseAlertChatRoom {
   return {
@@ -504,7 +506,7 @@ describe("Chat space for each team: changes wait for Submit", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Turn off" }));
     fireEvent.click(within(chatRow("Apollo")).getByRole("button", { name: "Turn off" }));
     await submit();
-    expect(screen.getByText(/^✓ Saved/)).toHaveTextContent(`✓ Saved 1 change. ${DB}`);
+    expect(screen.getByText(/^✓ Saved/)).toHaveTextContent(`✓ Saved 1 change. ${DB_MODE}`);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText(/^✓ Saved/)).not.toBeInTheDocument();
   });

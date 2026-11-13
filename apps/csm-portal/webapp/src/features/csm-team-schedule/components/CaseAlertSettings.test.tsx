@@ -197,13 +197,13 @@ describe("CaseAlertSettings", () => {
     }
   });
 
-  it("says when saved changes wait for a restart, and when they are in use", () => {
+  it("says when saved changes are picked up by the alert service's own restart, and when they are in use", () => {
     settings.data = make({
       revision: { saved: 5, applied: 4, appliedMode: "db" },
     });
     const { unmount } = render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
-    expect(screen.getByText("Saved · applies after a restart")).toHaveAccessibleName(
-      /^Status: Saved\. Changes apply the next time the alert service restarts/,
+    expect(screen.getByText("Saved · applies within a few minutes")).toHaveAccessibleName(
+      /^Status: Saved\. The alert service restarts itself to use the change, usually within a few minutes/,
     );
     unmount();
     settings.data = make({
