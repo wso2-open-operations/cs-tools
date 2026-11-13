@@ -18,7 +18,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import type { JSX } from "react";
 import type { BeStandardChangeProposal } from "@api/backend/types";
+import { BackendApiError } from "@api/backend/client";
 
 vi.hoisted(() => {
   window.config = { ...window.config, CSM_PORTAL_BACKEND_BASE_URL: "http://localhost:9090" };
@@ -37,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   remove: vi.fn(),
   recordView: vi.fn(),
+  refetch: vi.fn(),
   calls: [] as string[],
 }));
 
@@ -44,7 +47,7 @@ vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () =>
 vi.mock("@hooks/useNavTransition", () => ({ useNavTransition: () => mocks.navigate }));
 vi.mock("@features/csm-recent/hooks/useRecentViews", () => ({ useRecordRecentView: () => mocks.recordView }));
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
-  useGetStandardChangeProposal: () => ({ data: mocks.proposal, isLoading: false, isError: false, refetch: vi.fn() }),
+  useGetStandardChangeProposal: () => ({ data: mocks.proposal, isLoading: false, isError: false, refetch: mocks.refetch }),
   useUpdateStandardChangeProposal: () => ({ mutate: mocks.update, mutateAsync: mocks.updateAsync, isPending: false }),
   useSubmitStandardChangeProposal: () => ({ mutateAsync: mocks.submitAsync, isPending: false }),
   useWithdrawStandardChangeProposal: () => ({ mutate: mocks.withdraw, isPending: false }),
@@ -147,14 +150,17 @@ const DRAFT: BeStandardChangeProposal = {
   canCancel: false,
 };
 
-function renderPage(state?: { from: string }): void {
-  render(
+/** Renders the page; the returned function renders it again, as a refetch would, with whatever `mocks.proposal` now holds. */
+function renderPage(state?: { from: string }): () => void {
+  const tree = (): JSX.Element => (
     <MemoryRouter initialEntries={[{ pathname: "/operations/standard-change-proposals/scp-1", state }]}>
       <Routes>
         <Route path="/operations/standard-change-proposals/:id" element={<StandardChangeProposalPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const { rerender } = render(tree());
+  return () => rerender(tree());
 }
 
 const richField = (name: RegExp): HTMLElement => within(screen.getByRole("group", { name })).getByRole("textbox");
@@ -179,6 +185,7 @@ beforeEach(() => {
   });
   mocks.withdraw.mockReset();
   mocks.decide.mockReset();
+  mocks.refetch.mockReset();
   mocks.create.mockReset();
 });
 
@@ -589,6 +596,78 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
     expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved", stageId: "st-1" }, expect.anything());
+  });
+
+  describe("a proposal that moves on while the decision dialog is open", () => {
+    /** The same proposal returned to draft and submitted again: a new CAB stage, where the caller can decide again. */
+    const RESUBMITTED: BeStandardChangeProposal = {
+      ...IN_REVIEW,
+      stages: [{ id: "st-9", label: "CAB Approval", requiredApprovals: 2, approvals: 0, decision: null }],
+      approvers: IN_REVIEW.approvers!.map((a) => ({ ...a, id: `${a.id}-9`, stageId: "st-9" })),
+    };
+
+    it("sends the stage the dialog was opened on, never the one a refetch shows, and says the proposal changed", () => {
+      mocks.proposal = IN_REVIEW;
+      const refetched = renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+      const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
+      expect(within(dialog).queryByRole("alert", { name: "Proposal changed" })).not.toBeInTheDocument();
+      mocks.proposal = RESUBMITTED;
+      refetched();
+      expect(within(dialog).getByRole("alert", { name: "Proposal changed" })).toHaveTextContent(/review it again/i);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
+      expect(mocks.decide).toHaveBeenCalledTimes(1);
+      expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved", stageId: "st-1" }, expect.anything());
+    });
+
+    it("still names the stage when the refetched proposal leaves the caller nothing to decide", () => {
+      mocks.proposal = IN_REVIEW;
+      const refetched = renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+      const dialog = screen.getByRole("dialog", { name: /reject the proposal/i });
+      mocks.proposal = { ...IN_REVIEW, approvers: IN_REVIEW.approvers!.map((a) => ({ ...a, canDecide: false })) };
+      refetched();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: "Too broad." } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Reject" }));
+      expect(mocks.decide).toHaveBeenCalledWith(
+        { id: "scp-1", decision: "rejected", comment: "Too broad.", stageId: "st-1" },
+        expect.anything(),
+      );
+    });
+
+    it("closes the dialog on a stale-stage refusal (409), says why and reads the proposal again, without retrying", async () => {
+      mocks.proposal = IN_REVIEW;
+      mocks.decide.mockImplementation((_vars: unknown, opts: { onError?: (err: unknown) => void }) =>
+        opts.onError?.(
+          new BackendApiError(
+            409,
+            "the stage you decided on is not the one this proposal now waits on, so nothing was recorded: reload it to see what you are asked to decide",
+          ),
+        ),
+      );
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+      fireEvent.click(within(screen.getByRole("dialog", { name: /authorise the proposal/i })).getByRole("button", { name: "Authorise" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const notice = screen.getByRole("alert");
+      expect(notice).toHaveTextContent("The proposal changed after you opened it, so your decision was not recorded.");
+      expect(notice).toHaveFocus();
+      expect(mocks.refetch).toHaveBeenCalledTimes(1);
+      expect(mocks.decide).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the dialog open on any other refusal", () => {
+      mocks.proposal = IN_REVIEW;
+      mocks.decide.mockImplementation((_vars: unknown, opts: { onError?: (err: unknown) => void }) =>
+        opts.onError?.(new BackendApiError(403, "only active internal (WSO2) users can decide a standard change proposal")),
+      );
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+      const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
+      expect(screen.getByRole("dialog", { name: /authorise the proposal/i })).toBeInTheDocument();
+      expect(mocks.refetch).not.toHaveBeenCalled();
+    });
   });
 
   it("offers no decision to a viewer without a pending row of their own", () => {

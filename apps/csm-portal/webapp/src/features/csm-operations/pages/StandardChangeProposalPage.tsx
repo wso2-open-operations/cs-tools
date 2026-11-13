@@ -1088,27 +1088,57 @@ function ReasonDialog({
   );
 }
 
+/**
+ * What the decision dialog was opened on, kept as it was when it opened: the
+ * decision sends this `stageId` and nothing else, so a refetch behind the open
+ * dialog (another member's decision, or the proposal returned to draft and
+ * submitted again with a new stage) never turns a click into a decision on a
+ * stage the approver was not shown. The server refuses (409) a stage that is no
+ * longer the one the proposal waits on.
+ */
+interface DecisionSnapshot {
+  verdict: "approved" | "rejected";
+  stageId: string;
+  stage: BeStandardChangeProposalStage | null;
+  cabHistory: BeStandardChangeCabHistory | null | undefined;
+}
+
+/** Said on the page when a decision was refused because the proposal moved on while the dialog was open. */
+const STANDARD_CHANGE_DECISION_STALE_NOTICE =
+  "The proposal changed after you opened it, so your decision was not recorded. Review it again: the page now shows where it stands.";
+
+/**
+ * Whether a refused decision was refused because the proposal is no longer what
+ * the dialog was opened on. The decision endpoint answers 409 for exactly that,
+ * whether the stage named was settled or replaced, or the proposal left review,
+ * and the same request would be refused again. It names no `errorCode` for it,
+ * so the status is what tells it apart; any other refusal stays in the dialog.
+ */
+function isStaleDecisionError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { status?: unknown }).status === 409;
+}
+
 /** An approver's Approve / Reject on the stage the proposal waits on; a rejection needs a comment. */
 function DecisionDialog({
   decision,
-  stage,
-  cabHistory,
+  moved,
   pending,
   error,
   onClose,
   onDecide,
 }: {
-  decision: "approved" | "rejected" | null;
-  /** The stage the caller decides on. */
-  stage: BeStandardChangeProposalStage | null;
-  /** The proposal's CAB history, summed up in front of the approver as they decide (absent: not shown). */
-  cabHistory?: BeStandardChangeCabHistory | null;
+  /** What the dialog was opened on (null: closed). */
+  decision: DecisionSnapshot | null;
+  /** The page, refetched, no longer offers the caller the stage the dialog was opened on. */
+  moved: boolean;
   pending: boolean;
   error: string | null;
   onClose: () => void;
   onDecide: (comment: string) => void;
 }): JSX.Element {
-  const reject = decision === "rejected";
+  const reject = decision?.verdict === "rejected";
+  const stage = decision?.stage ?? null;
+  const cabHistory = decision?.cabHistory;
   // From the page as loaded: another member may have authorised since, so it
   // never promises that nothing will be applied.
   const required = stage?.requiredApprovals ?? STANDARD_CHANGE_CAB_APPROVALS;
@@ -1131,10 +1161,20 @@ function DecisionDialog({
       required={reject}
       helperText={reject ? "Say why, so the proposer can act on it." : undefined}
       notice={
-        cabHistory ? (
-          <Alert severity={cabHistoryOf(cabHistory).rejectionCount > 0 ? "warning" : "info"} role="note" aria-label="CAB history summary">
-            {cabHistorySummary(cabHistory)}
-          </Alert>
+        moved || cabHistory ? (
+          <>
+            {moved && (
+              <Alert severity="warning" role="alert" aria-label="Proposal changed">
+                The proposal has changed since you opened this. Your decision is only recorded on the stage you were
+                shown, and is refused if that stage is no longer open: go back and review it again.
+              </Alert>
+            )}
+            {cabHistory && (
+              <Alert severity={cabHistoryOf(cabHistory).rejectionCount > 0 ? "warning" : "info"} role="note" aria-label="CAB history summary">
+                {cabHistorySummary(cabHistory)}
+              </Alert>
+            )}
+          </>
         ) : undefined
       }
       confirmLabel={reject ? "Reject" : "Authorise"}
@@ -1445,8 +1485,16 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
+  const [decision, setDecision] = useState<DecisionSnapshot | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  // Why the decision dialog was closed for the approver (the proposal moved on
+  // while it was open). It takes focus once the dialog is gone: the button that
+  // opened the dialog may not be there any more.
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  const staleNoticeRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (staleNotice) staleNoticeRef.current?.focus();
+  }, [staleNotice]);
 
   const openChangeRequest = (crId: string): void =>
     navigate(`/operations/change-requests/${encodeURIComponent(crId)}`, { state: { from: here } });
@@ -1495,7 +1543,8 @@ export default function StandardChangeProposalPage(): JSX.Element {
 
   const editing = proposal.canEdit && proposal.state === "draft";
   const approvers = proposal.approvers ?? [];
-  const myRow = approvers.find((a) => a.canDecide);
+  // A decision names its stage, so a row without one is not offered.
+  const myRow = approvers.find((a) => a.canDecide && !!a.stageId);
   const stages = proposal.stages ?? [];
   const myStage = stages.find((st) => st.id === myRow?.stageId) ?? stages[stages.length - 1] ?? null;
   // One table per stage, oldest first (an older decided proposal may hold a
@@ -1508,6 +1557,13 @@ export default function StandardChangeProposalPage(): JSX.Element {
     canWrite &&
     proposal.kind === "new" &&
     (proposal.state === "rejected" || proposal.state === "withdrawn" || proposal.state === "cancelled");
+
+  const openDecision = (verdict: DecisionSnapshot["verdict"]): void => {
+    if (!myRow?.stageId) return;
+    setStaleNotice(null);
+    setDecision({ verdict, stageId: myRow.stageId, stage: myStage, cabHistory: proposal.cabHistory });
+  };
+  const decisionMoved = decision !== null && myRow?.stageId !== decision.stageId;
 
   const runWithdraw = (): void => {
     setConfirmWithdraw(false);
@@ -1626,6 +1682,12 @@ export default function StandardChangeProposalPage(): JSX.Element {
         </Alert>
       )}
 
+      {staleNotice && (
+        <Alert ref={staleNoticeRef} severity="warning" role="alert" tabIndex={-1} onClose={() => setStaleNotice(null)}>
+          {staleNotice}
+        </Alert>
+      )}
+
       {proposal.kind === "retire" && retirementChangeRequestsInNewText(proposal.changeRequestsInNewTotal) && (
         <Alert severity="warning" role="region" aria-label="Change requests still New">
           <Typography variant="body2">{retirementChangeRequestsInNewText(proposal.changeRequestsInNewTotal)}</Typography>
@@ -1716,10 +1778,10 @@ export default function StandardChangeProposalPage(): JSX.Element {
           action={
             myRow ? (
               <Box sx={{ display: "flex", gap: 1 }}>
-                <Button size="small" variant="contained" color="success" startIcon={<Check size={16} />} onClick={() => setDecision("approved")}>
+                <Button size="small" variant="contained" color="success" startIcon={<Check size={16} />} onClick={() => openDecision("approved")}>
                   Authorise
                 </Button>
-                <Button size="small" variant="outlined" color="error" startIcon={<X size={16} />} onClick={() => setDecision("rejected")}>
+                <Button size="small" variant="outlined" color="error" startIcon={<X size={16} />} onClick={() => openDecision("rejected")}>
                   Reject
                 </Button>
               </Box>
@@ -1747,27 +1809,40 @@ export default function StandardChangeProposalPage(): JSX.Element {
 
       <DecisionDialog
         decision={decision}
-        stage={myStage}
-        cabHistory={proposal.cabHistory}
+        moved={decisionMoved}
         pending={decide.isPending}
         error={decide.isError ? errorText(decide.error, "Could not record the decision.") : null}
         onClose={() => {
           setDecision(null);
           decide.reset();
         }}
-        onDecide={(comment) =>
+        onDecide={(comment) => {
+          if (!decision) return;
           decide.mutate(
             {
               id: proposal.id,
-              decision: decision!,
+              decision: decision.verdict,
               ...(comment ? { comment } : {}),
-              // The stage this page shows: the decision is refused, not recorded
-              // elsewhere, if that stage was settled or closed meanwhile.
-              ...(myRow?.stageId ? { stageId: myRow.stageId } : {}),
+              // The stage the dialog was opened on, never the page's current one:
+              // the decision is refused, not recorded elsewhere, if that stage was
+              // settled or replaced meanwhile.
+              stageId: decision.stageId,
             },
-            { onSuccess: () => setDecision(null) },
-          )
-        }
+            {
+              onSuccess: () => setDecision(null),
+              onError: (err) => {
+                // Sending it again would be refused the same way, and retrying on
+                // whatever the page shows now would decide a stage nobody reviewed:
+                // close, say why, and show the proposal as it is.
+                if (!isStaleDecisionError(err)) return;
+                setDecision(null);
+                decide.reset();
+                setStaleNotice(STANDARD_CHANGE_DECISION_STALE_NOTICE);
+                void refetch({ cancelRefetch: false });
+              },
+            },
+          );
+        }}
       />
 
       <CancelDialog
