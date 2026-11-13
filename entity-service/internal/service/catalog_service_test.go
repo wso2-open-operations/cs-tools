@@ -28,16 +28,23 @@ type stubCatalogRepo struct {
 	getCatalogItemVariablesCalled    bool
 	getCatalogItemVariablesErr       error
 	getCatalogItemVariablesVariables []domain.CatalogItemVariable
+	includeCSMOnly                   bool
 }
 
-func (s *stubCatalogRepo) SearchCatalogs(ctx context.Context, deployedProductID string, pagination domain.Pagination) ([]domain.Catalog, int, error) {
+func (s *stubCatalogRepo) SearchCatalogs(ctx context.Context, deployedProductID string, includeCSMOnly bool, pagination domain.Pagination) ([]domain.Catalog, int, error) {
 	s.searchCatalogsCalled = true
+	s.includeCSMOnly = includeCSMOnly
 	return nil, 0, nil
 }
 
-func (s *stubCatalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) ([]domain.CatalogItemVariable, error) {
+func (s *stubCatalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string, includeCSMOnly bool) ([]domain.CatalogItemVariable, error) {
 	s.getCatalogItemVariablesCalled = true
+	s.includeCSMOnly = includeCSMOnly
 	return s.getCatalogItemVariablesVariables, s.getCatalogItemVariablesErr
+}
+
+func (s *stubCatalogRepo) IsCatalogItemCSMOnly(ctx context.Context, catalogItemID string) (bool, error) {
+	return false, nil
 }
 
 type stubCatalogMirror struct {
@@ -111,7 +118,7 @@ func TestCatalogService_GetCatalogItemVariables_UsesRepoWhenNoMirror(t *testing.
 	repo := &stubCatalogRepo{
 		getCatalogItemVariablesVariables: []domain.CatalogItemVariable{{ID: "v1", Name: &fieldName}},
 	}
-	svc := NewCatalogService(repo)
+	svc := NewCatalogService(repo, nil)
 
 	resp, err := svc.GetCatalogItemVariables(context.Background(), testUUID, testDeploymentUUID)
 	if err != nil {

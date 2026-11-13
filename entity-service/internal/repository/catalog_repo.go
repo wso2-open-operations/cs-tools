@@ -41,11 +41,20 @@ type CatalogRepository interface {
 	// one catalog item available for the given deployed product, each with its
 	// available items, plus the total catalog count before pagination. Returns
 	// a NotFoundError if the deployed product does not exist.
-	SearchCatalogs(ctx context.Context, deployedProductID string, pagination domain.Pagination) ([]domain.Catalog, int, error)
+	//
+	// includeCSMOnly is whether the caller is WSO2 staff in the CSM portal:
+	// when false, catalog items marked csm_only (migration 0291) are left out,
+	// and so is a catalog left with no items.
+	SearchCatalogs(ctx context.Context, deployedProductID string, includeCSMOnly bool, pagination domain.Pagination) ([]domain.Catalog, int, error)
 	// GetCatalogItemVariables returns the variables (form fields) of the
 	// catalog item, ordered by their "order" column. Returns a NotFoundError
-	// if the item does not belong to the catalog.
-	GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) ([]domain.CatalogItemVariable, error)
+	// if the item does not belong to the catalog, or is csm_only and
+	// includeCSMOnly is false (the same answer, so a customer can't tell a
+	// staff-only item exists).
+	GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string, includeCSMOnly bool) ([]domain.CatalogItemVariable, error)
+	// IsCatalogItemCSMOnly reports whether the catalog item is marked
+	// csm_only. An unknown id answers false: it can't be raised anyway.
+	IsCatalogItemCSMOnly(ctx context.Context, catalogItemID string) (bool, error)
 }
 
 type catalogRepo struct {
@@ -78,6 +87,9 @@ func NewCatalogRepository(db *Scoped) CatalogRepository {
 // only matches rules that don't require a specific classification, rather
 // than being shown every classification's items. TODO: once product.unit is
 // populated, make unit strict again.
+//
+// $2 is includeCSMOnly: an item marked catalog_item.csm_only (migration 0291)
+// is available only when it is true, i.e. to WSO2 staff in the CSM portal.
 const availableCatalogItemsCTE = `
 	WITH dp AS (
 		SELECT p.unit::TEXT AS unit, d.product_category::TEXT AS classification
@@ -88,10 +100,11 @@ const availableCatalogItemsCTE = `
 	available AS (
 		SELECT DISTINCT r.catalog_item_id
 		FROM sr_category_routing_rule r
+		JOIN catalog_item ci ON ci.id = r.catalog_item_id
 		CROSS JOIN dp
-		WHERE r.catalog_item_id IS NOT NULL
-		  AND (r.product_unit IS NULL OR dp.unit IS NULL OR r.product_unit::TEXT = dp.unit)
+		WHERE (r.product_unit IS NULL OR dp.unit IS NULL OR r.product_unit::TEXT = dp.unit)
 		  AND (r.classification IS NULL OR r.classification::TEXT = dp.classification)
+		  AND (NOT ci.csm_only OR $2::BOOLEAN)
 	)`
 
 // catalogsWithAvailableItems is the shared FROM/WHERE for the count and page
@@ -106,7 +119,7 @@ const catalogsWithAvailableItems = `
 	  )`
 
 // SearchCatalogs implements CatalogRepository.
-func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID string, pagination domain.Pagination) ([]domain.Catalog, int, error) {
+func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID string, includeCSMOnly bool, pagination domain.Pagination) ([]domain.Catalog, int, error) {
 	var exists bool
 	if err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM deployed_product WHERE id = $1)`, deployedProductID).Scan(&exists); err != nil {
 		return nil, 0, fmt.Errorf("check deployed product: %w", err)
@@ -121,7 +134,7 @@ func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID stri
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
-		if err := r.db.QueryRow(egCtx, availableCatalogItemsCTE+` SELECT COUNT(*) `+catalogsWithAvailableItems, deployedProductID).Scan(&total); err != nil {
+		if err := r.db.QueryRow(egCtx, availableCatalogItemsCTE+` SELECT COUNT(*) `+catalogsWithAvailableItems, deployedProductID, includeCSMOnly).Scan(&total); err != nil {
 			return fmt.Errorf("count catalogs: %w", err)
 		}
 		return nil
@@ -130,8 +143,8 @@ func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID stri
 	eg.Go(func() error {
 		rows, err := r.db.Query(egCtx,
 			availableCatalogItemsCTE+` SELECT c.id, c.name `+catalogsWithAvailableItems+`
-			 ORDER BY c.name, c.id LIMIT $2 OFFSET $3`,
-			deployedProductID, pagination.Limit, pagination.Offset)
+			 ORDER BY c.name, c.id LIMIT $3 OFFSET $4`,
+			deployedProductID, includeCSMOnly, pagination.Limit, pagination.Offset)
 		if err != nil {
 			return fmt.Errorf("query catalogs: %w", err)
 		}
@@ -166,9 +179,9 @@ func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID stri
 		 FROM catalog_item_category cic
 		 JOIN catalog_item ci ON ci.id = cic.catalog_item_id
 		 JOIN available a ON a.catalog_item_id = ci.id
-		 WHERE cic.sr_category_id = ANY($2::text[]::uuid[])
+		 WHERE cic.sr_category_id = ANY($3::text[]::uuid[])
 		 ORDER BY ci.name, ci.id`,
-		deployedProductID, ids)
+		deployedProductID, includeCSMOnly, ids)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query catalog items: %w", err)
 	}
@@ -199,11 +212,15 @@ func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID stri
 // avoid N+1 (same ANY($...::uuid[]) pattern SearchCatalogs already uses above
 // for catalog items). This data is kept in sync from the backing data source
 // by a separate service, not written here.
-func (r *catalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) ([]domain.CatalogItemVariable, error) {
+func (r *catalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string, includeCSMOnly bool) ([]domain.CatalogItemVariable, error) {
 	var belongs bool
 	if err := r.db.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM catalog_item_category WHERE sr_category_id = $1 AND catalog_item_id = $2)`,
-		catalogID, catalogItemID).Scan(&belongs); err != nil {
+		`SELECT EXISTS (
+			SELECT 1 FROM catalog_item_category cic
+			JOIN catalog_item ci ON ci.id = cic.catalog_item_id
+			WHERE cic.sr_category_id = $1 AND cic.catalog_item_id = $2
+			  AND (NOT ci.csm_only OR $3::BOOLEAN))`,
+		catalogID, catalogItemID, includeCSMOnly).Scan(&belongs); err != nil {
 		return nil, fmt.Errorf("check catalog item: %w", err)
 	}
 	if !belongs {
@@ -305,4 +322,15 @@ func (r *catalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, ca
 		}
 	}
 	return out, nil
+}
+
+// IsCatalogItemCSMOnly implements CatalogRepository.
+func (r *catalogRepo) IsCatalogItemCSMOnly(ctx context.Context, catalogItemID string) (bool, error) {
+	var csmOnly bool
+	if err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM catalog_item WHERE id = $1 AND csm_only)`,
+		catalogItemID).Scan(&csmOnly); err != nil {
+		return false, fmt.Errorf("check catalog item csm_only: %w", err)
+	}
+	return csmOnly, nil
 }

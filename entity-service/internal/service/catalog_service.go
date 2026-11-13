@@ -54,13 +54,35 @@ type catalogService struct {
 	// is the source of truth for the same catalog item. Now both follow the
 	// same source under dual-write.
 	snMirror CatalogService
+	// access tells WSO2 staff in the CSM portal from everyone else, for
+	// catalog items marked csm_only (migration 0291). Nil, or a caller it
+	// can't resolve, counts as not staff: those items stay hidden.
+	access AccessService
+}
+
+// isCSMPortalStaff reports whether the caller is WSO2 staff acting outside
+// the customer portal: an Unrestricted scope (the CSM portal backend for a
+// staff email, an M2M client) that did not come through the customer portal.
+// Staff signed in to the customer portal get the customer's view. A nil
+// resolver or an unresolvable caller answers false.
+func isCSMPortalStaff(ctx context.Context, access AccessService) bool {
+	if access == nil {
+		return false
+	}
+	scope, err := access.ResolveScope(ctx)
+	if err != nil {
+		return false
+	}
+	return scope.Unrestricted && !scope.ViaCustomerPortal
 }
 
 // NewCatalogService constructs a CatalogService backed by Postgres
 // (sr_category, catalog_item, catalog_item_category, catalog_variable,
 // sr_category_routing_rule -- migrations 000067-000071).
-func NewCatalogService(repo repository.CatalogRepository) CatalogService {
-	return &catalogService{repo: repo}
+//
+// access resolves the caller for csm_only items; see the access field.
+func NewCatalogService(repo repository.CatalogRepository, access AccessService) CatalogService {
+	return &catalogService{repo: repo, access: access}
 }
 
 // NewCatalogServiceWithSNFallback constructs a CatalogService for
@@ -87,7 +109,7 @@ func (s *catalogService) SearchCatalogs(ctx context.Context, req domain.SearchCa
 		return domain.SearchCatalogsResponse{}, err
 	}
 
-	catalogs, total, err := s.repo.SearchCatalogs(ctx, req.DeployedProductID, req.Pagination)
+	catalogs, total, err := s.repo.SearchCatalogs(ctx, req.DeployedProductID, isCSMPortalStaff(ctx, s.access), req.Pagination)
 	if err != nil {
 		return domain.SearchCatalogsResponse{}, err
 	}
@@ -131,7 +153,7 @@ func (s *catalogService) GetCatalogItemVariables(ctx context.Context, catalogID,
 		return domain.GetCatalogItemVariablesResponse{}, err
 	}
 
-	variables, err := s.repo.GetCatalogItemVariables(ctx, catalogID, catalogItemID)
+	variables, err := s.repo.GetCatalogItemVariables(ctx, catalogID, catalogItemID, isCSMPortalStaff(ctx, s.access))
 	if err != nil {
 		return domain.GetCatalogItemVariablesResponse{}, err
 	}
