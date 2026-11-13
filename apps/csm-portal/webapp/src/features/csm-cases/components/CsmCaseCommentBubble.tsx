@@ -34,8 +34,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { Bot, Lock, MoreVertical, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
-import RelativeTime from "@components/RelativeTime";
+import RelativeTime, { CopyPermalinkButton } from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
+import CommentCardHeader from "@features/csm-cases/components/CommentCardHeader";
 import UserRefLink from "@components/UserRefLink";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -392,9 +393,27 @@ export default function CsmCaseCommentBubble({
             dangerouslySetInnerHTML={{ __html: renderHtml }}
           />
         )}
-        <Typography variant="caption" color="text.secondary">
-          <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
-        </Typography>
+        {/* Top-aligned, so a message that wraps onto several lines keeps the
+            time and the copy-link button in the row's top-right corner (the
+            row itself centres its other items). */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            alignSelf: "flex-start",
+            flexShrink: 0,
+            gap: 1,
+          }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            <RelativeTime
+              iso={comment.createdAt}
+              href={`#${comment.id}`}
+              hideCopyButton
+            />
+          </Typography>
+          <CopyPermalinkButton href={`#${comment.id}`} />
+        </Box>
       </Box>
     );
   }
@@ -410,6 +429,56 @@ export default function CsmCaseCommentBubble({
       ? theme.palette.primary.main
       : theme.palette.grey[700];
   const avatarFg = pickAccessibleText(avatarBg);
+
+  // Top-right corner of the card. The copy-link button is always there: it
+  // used to follow the timestamp as a faint 13px icon that went unnoticed.
+  // The comment-actions menu joins it only for a caller who may edit or
+  // delete this comment, and not while editing.
+  const headerActions = (
+    <>
+      <CopyPermalinkButton href={`#${comment.id}`} />
+      {showMenu && !isEditing && (
+        <>
+          <Tooltip title="Comment actions">
+            <IconButton
+              size="small"
+              aria-label="Comment actions"
+              aria-haspopup="menu"
+              onClick={(e) => setMenuAnchor(e.currentTarget)}
+            >
+              <MoreVertical size={16} />
+            </IconButton>
+          </Tooltip>
+          <Menu
+            anchorEl={menuAnchor}
+            open={!!menuAnchor}
+            onClose={() => setMenuAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+            transformOrigin={{ vertical: "top", horizontal: "right" }}
+          >
+            {showEditAffordance && (
+              <MenuItem onClick={openEdit}>
+                <Pencil size={14} style={{ marginRight: 8 }} />
+                Edit
+              </MenuItem>
+            )}
+            {showDeleteAffordance && (
+              <MenuItem
+                onClick={() => {
+                  setMenuAnchor(null);
+                  setDeleteError(null);
+                  setDeleteConfirmOpen(true);
+                }}
+              >
+                <Trash2 size={14} style={{ marginRight: 8 }} />
+                Delete
+              </MenuItem>
+            )}
+          </Menu>
+        </>
+      )}
+    </>
+  );
 
   return (
     <Box
@@ -459,7 +528,7 @@ export default function CsmCaseCommentBubble({
           }),
         }}
       >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+        <CommentCardHeader actions={headerActions}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
             {compact && "Commented by "}
             <UserRefLink
@@ -492,7 +561,11 @@ export default function CsmCaseCommentBubble({
             />
           )}
           <Typography variant="caption" color="text.secondary">
-            <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
+            <RelativeTime
+              iso={comment.createdAt}
+              href={`#${comment.id}`}
+              hideCopyButton
+            />
           </Typography>
           {comment.isEdited && !comment.isDeleted && (
             <Typography
@@ -511,48 +584,7 @@ export default function CsmCaseCommentBubble({
           {comment.isDeleted && (
             <Chip size="small" variant="outlined" label="Deleted" />
           )}
-          {showMenu && !isEditing && (
-            <>
-              <Box sx={{ flexGrow: 1 }} />
-              <Tooltip title="Comment actions">
-                <IconButton
-                  size="small"
-                  aria-label="Comment actions"
-                  aria-haspopup="menu"
-                  onClick={(e) => setMenuAnchor(e.currentTarget)}
-                >
-                  <MoreVertical size={16} />
-                </IconButton>
-              </Tooltip>
-              <Menu
-                anchorEl={menuAnchor}
-                open={!!menuAnchor}
-                onClose={() => setMenuAnchor(null)}
-                anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-                transformOrigin={{ vertical: "top", horizontal: "right" }}
-              >
-                {showEditAffordance && (
-                  <MenuItem onClick={openEdit}>
-                    <Pencil size={14} style={{ marginRight: 8 }} />
-                    Edit
-                  </MenuItem>
-                )}
-                {showDeleteAffordance && (
-                  <MenuItem
-                    onClick={() => {
-                      setMenuAnchor(null);
-                      setDeleteError(null);
-                      setDeleteConfirmOpen(true);
-                    }}
-                  >
-                    <Trash2 size={14} style={{ marginRight: 8 }} />
-                    Delete
-                  </MenuItem>
-                )}
-              </Menu>
-            </>
-          )}
-        </Box>
+        </CommentCardHeader>
         {isEditing ? (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <EditorWithSourceToggle

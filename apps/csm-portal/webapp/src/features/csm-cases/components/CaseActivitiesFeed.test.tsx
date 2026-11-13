@@ -562,6 +562,87 @@ describe("CaseActivitiesFeed — alert/smart-alert link in a comment", () => {
   });
 });
 
+describe("CaseActivitiesFeed — copy-link button", () => {
+  // Every non-comment entry gets the button in its card header, after the
+  // timestamp's permalink rather than glued to it (comments are covered by
+  // CsmCaseCommentBubble's own tests).
+  function expectCopyButtonAfterTimestamp(entryId: string): void {
+    const permalink = document.querySelector<HTMLElement>(
+      `a[href="#${entryId}"]`,
+    );
+    expect(permalink).not.toBeNull();
+    const copy = screen.getByRole("button", {
+      name: /copy link to this entry/i,
+    });
+    expect(permalink!.parentElement).not.toContainElement(copy);
+    expect(
+      permalink!.compareDocumentPosition(copy) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  }
+
+  it("shows it on a lifecycle entry", () => {
+    const entry: CaseAuditEntry = {
+      id: "fc-9",
+      kind: "field_change",
+      actor: "Jane Doe",
+      createdAt: "2026-07-01T10:15:00Z",
+      changes: [
+        {
+          field: "state",
+          fieldLabel: "State",
+          previousValue: "In Progress",
+          newValue: "Resolved",
+        },
+      ],
+    };
+    renderWithRouter(
+      <CaseActivitiesFeed comments={[]} audit={[entry]} attachments={[]} />,
+    );
+    expectCopyButtonAfterTimestamp(entry.id);
+  });
+
+  it("shows it on a feedback entry", () => {
+    const feedback: CaseFeedbackEntry = {
+      id: "fb-9",
+      rating: 4,
+      ratingLabel: "Satisfied",
+      comment: "Thanks.",
+      submittedAt: "2026-08-17T06:17:56Z",
+      submitterName: "Jane Customer",
+      submitterEmail: "jane.customer@example.com",
+    };
+    renderWithRouter(
+      <CaseActivitiesFeed
+        comments={[]}
+        audit={[]}
+        attachments={[]}
+        feedback={[feedback]}
+      />,
+    );
+    expectCopyButtonAfterTimestamp(feedback.id);
+  });
+
+  it("shows it on an attachment entry", () => {
+    const attachment: CaseAttachment = {
+      id: "att-9",
+      filename: "notes.txt",
+      size: 128,
+      contentType: "text/plain",
+      uploadedBy: "Jane Doe",
+      uploadedAt: "2026-01-01T00:00:00Z",
+    };
+    renderWithRouter(
+      <CaseActivitiesFeed
+        comments={[]}
+        audit={[]}
+        attachments={[attachment]}
+      />,
+    );
+    expectCopyButtonAfterTimestamp(attachment.id);
+  });
+});
+
 describe("CaseActivitiesFeed — attachment preview affordance", () => {
   const IMAGE_ATTACHMENT: CaseAttachment = {
     id: "att-1",
