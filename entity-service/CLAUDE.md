@@ -8789,10 +8789,10 @@ History, kept short: until 2026-11-10 a separate Standard Change Authority group
 heads of SaaS SRE, each SaaS ABT and SRE) held this stage; before 0295 (2026-11-06) a proposal also
 went through a one-approval CAB stage first. The proposal shares the label "CAB Approval" with a change
 request's CAB stage, which mixes nothing up: a proposal's stages are only read by its own id (every
-change request read joins or filters on the change request's id). It does affect migration 0295,
-whose DELETE keeps only "Standard Change Authority" stages on an open proposal: 0295 never runs
-again on a server (`make migrate` records it), and its integration test labels its fixtures the old
-way and parks other open proposals' "CAB Approval" stages while it re-runs the file.
+change request read joins or filters on the change request's id). Migration 0295 therefore tells the
+old flow's CAB stage by the "Standard Change Authority" stage after it, never by the label alone: it
+runs again on any database that recorded it under an earlier number, and must leave today's stage
+(and its approvals) alone.
 
 `DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
 the stage it was meant for (`stageId`, which the webapp always sends): when that is not the stage the
@@ -8832,12 +8832,17 @@ rollback or deviation of a change raised from a retired template no longer flags
 (`flagStandardTemplateReview` skips `RETIRED`). Final: there is no un-retire.
 
 **0295** returned every proposal still in `CAB_REVIEW` to `DRAFT` (`submitted_on` cleared,
-`customer_locked` kept), then deleted every stage other than the authority's (its approver rows go
-with it) from every open proposal, `DRAFT` or `AUTHORITY_REVIEW`: a returned draft is a clean draft
-again (it can be deleted), and a proposal the CAB approved under the old flow carries on in
-`AUTHORITY_REVIEW` with only the authority's stage. Decided proposals keep their stages, the record of
-who approved the template in force. Then it recreated `standard_change_proposal_state_check` without
-`CAB_REVIEW`.
+`customer_locked` kept), then deleted the old flow's CAB stage (any stage not labelled "Standard
+Change Authority"; its approver rows go with it) from a `DRAFT` proposal and from an
+`AUTHORITY_REVIEW` one whose CAB stage is older than an authority stage on it (the old flow opened the
+authority's stage when the CAB approved): a returned draft is a clean draft again (it can be
+deleted), and a proposal the CAB approved under the old flow carries on in `AUTHORITY_REVIEW` with only
+the authority's stage. Today's "CAB Approval" stage has no authority stage after it and is never
+touched. Decided proposals keep their stages, the record of who approved the template in force. Then
+it recreated `standard_change_proposal_state_check` without `CAB_REVIEW`. Each proposal it changes is
+a `RAISE WARNING` in the migration's output (number, id, and every decision on the deleted stage:
+who, what, when, the comment), with the query that finds them afterwards (`work_item.updated_by =
+'migration:0295_standard_change_no_cab_stage'`).
 **Run 0295 immediately before rolling out the entity-service build without the CAB stage**: a new pod
 before 0295 does not know `CAB_REVIEW`, so the proposals still in it are stranded until 0295 runs; an
 old pod after 0295 fails only on submit (its `CAB_REVIEW` write breaks the new check, nothing
@@ -8850,13 +8855,32 @@ proposal write waits instead of deadlocking. `SearchProposals` still accepts `st
 **0297** (2026-11-10) returned every proposal still in `AUTHORITY_REVIEW` with no "CAB Approval"
 stage (so still waiting on the authority) to `DRAFT` (`submitted_on` cleared, `customer_locked`
 kept) and deleted its stage, approver rows and any approval already given with it, as 0295 did for
-`CAB_REVIEW`: the proposer submits it again, to the CAB. Decided proposals keep their "Standard Change
+`CAB_REVIEW`: the proposer submits it again, to the CAB. Each one is a `RAISE WARNING` in the output
+(number, id, every decision on the deleted stage), with the query that finds them afterwards
+(`updated_by = 'migration:0297_standard_change_cab_authorises'`). It cannot match where 0287 to 0297
+run together before the new build (nothing writes `AUTHORITY_REVIEW` before 0297's code), only on a
+database that ran an earlier build of this work. The stages are deleted rather than kept on the
+draft because the code reads every stage of a proposal: the page lists them, `DeleteProposal` refuses
+a draft that has one, and a decision goes to the latest. Decided proposals keep their "Standard Change
 Authority" stages; the group row stays (they point at it) and its description says it is no longer
 used (reworded only while it reads as 0295 left it, or as 0287 wrote it). One transaction,
 `lock_timeout` 5s, the `app.is_internal` bracket and `lockProposal`'s lock order; safe to re-run (a
 proposal submitted to the CAB is never selected). **Run 0297 immediately before rolling out the build
 that asks the CAB**; a proposal an old pod submits after it asks the authority's members and still
-works (decisions go by the latest stage's rows), it is just not returned.
+works (decisions go by the latest stage's rows), it is just not returned (a re-run of 0297 would
+return it, and report it).
+
+**Every migration of this work is safe to re-run after the new code has written data**
+(`0287`–`0297`, `100029`–`100031`). They were renumbered twice to stay above dev's (`0277`…,
+`0282`…, now `0287`…; `100028` became `100031`), and `make migrate` keys a file by its name, so a
+database that ran them under an earlier name runs every one again, in order, over proposals submitted
+and decided under the CAB, suggestions, dismissals, clones and retirements. Additions are `IF NOT
+EXISTS` / `WHERE NOT EXISTS`, backfills only fill what is empty, and 0295 and 0297 select only the old
+flows' proposals. `0287` is one transaction (`BEGIN` / `SET LOCAL lock_timeout` / `COMMIT`, passing
+under `psql -1` like its siblings): it drops and recreates the state check and the
+one-open-per-template index, which in autocommit a lock timeout could leave missing.
+`TestStandardChangeIntegration_MigrationsReplay` pins this: it applies every file, writes that data
+through the service, replays every file and compares the rows and definitions.
 
 **Drafts, withdrawal, cancellation.** A draft that was never submitted is deleted by its proposer
 (`DELETE /standard-change-proposals/{id}`, 204; the work item's delete cascades to the proposal and
@@ -8959,7 +8983,11 @@ suspend body),
 without BYPASSRLS so the internal-only policies apply; run with `-p 1`). The tests seat their own
 authorisers on the CAB and take everyone else off it while they run (`isolateStdCAB`, put back on
 cleanup, as the change request flow tests' `isolateApprovalGroup` does), since a local or synced
-database has real CAB members; `TestStandardChangeIntegration_CABAuthorisesMigration` re-runs 0297.
+database has real CAB members. `standard_change_migrations_integration_test.go` runs the migrations:
+`TestStandardChangeIntegration_NoCABStageMigration` (0295),
+`TestStandardChangeIntegration_CABAuthorisesMigration` (0297) and
+`TestStandardChangeIntegration_MigrationsReplay` (every file of this work replayed over the new
+code's data). They run migration files, DB-wide, as `make migrate` would: use a test database.
 
 ## Standard change suggestions (`GET /standard-change-suggestions`)
 

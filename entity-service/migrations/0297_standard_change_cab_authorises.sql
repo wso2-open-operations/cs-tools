@@ -31,6 +31,22 @@
 -- draft is a clean draft again (it can be deleted). The stored state keeps its
 -- name: AUTHORITY_REVIEW now means "awaiting CAB approval".
 --
+-- Which databases this can touch: only one that ran an earlier build of this
+-- change, whose code submitted proposals to the authority. 0287 adds
+-- AUTHORITY_REVIEW and the code before it writes CAB_REVIEW (which 0295 returns
+-- to draft), so where 0287 to 0297 run together, before the new build, no
+-- proposal is in AUTHORITY_REVIEW and this returns none. Where it does return
+-- one, every proposal is reported as a WARNING in the migration's output: its
+-- number and id, and each decision recorded on the deleted stage (who, what,
+-- when, the comment), so its proposer can be told and an approval given there
+-- can be recovered from the output. The stages are not kept on the draft
+-- instead: the code reads every stage of a proposal (its page lists them, a
+-- draft with one cannot be deleted, and a decision goes to the latest), so the
+-- authority's stage would show, still asking its members, on a draft. Afterwards,
+-- while nobody has edited them since, the returned drafts are found with
+--   SELECT w.number, p.id FROM standard_change_proposal p JOIN work_item w ON w.id = p.id
+--    WHERE w.updated_by = 'migration:0297_standard_change_cab_authorises';
+--
 -- Decided proposals (APPROVED, REJECTED, WITHDRAWN, CANCELLED) keep their
 -- "Standard Change Authority" stages: that is the record of who approved the
 -- template in force. So the group row is kept (those stages point at it); only
@@ -57,9 +73,14 @@
 -- application's own writes are, and cleared afterwards, as 0295 does
 -- (session-level: a LOCAL setting would not outlive a statement in autocommit).
 --
--- Safe to re-run: a proposal submitted to the CAB has a "CAB Approval" stage and
--- is never selected, so a second run finds nothing to return and leaves the
--- reworded description alone.
+-- Safe to re-run, also once the new build has submitted and decided proposals
+-- (a database that recorded this file under an earlier number runs it again): a
+-- proposal submitted to the CAB has a "CAB Approval" stage and is never
+-- selected, nor is a draft or a decided one, so a second run finds nothing to
+-- return and leaves the reworded description alone. (The one thing a re-run
+-- can find is a proposal an old pod sent to the authority after the first run,
+-- during the rollout; it is returned to draft as the first run would have, and
+-- reported.)
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -82,6 +103,37 @@ SELECT p.id
                     WHERE s.work_item_id = p.id AND s.checkpoint_label = 'CAB Approval')
  ORDER BY p.id
    FOR UPDATE OF p;
+
+DO $$
+DECLARE
+    r record;
+    n integer := 0;
+BEGIN
+    FOR r IN
+        SELECT w.number, p.id,
+               (SELECT string_agg(format('%s %s on %s%s', COALESCE(u.email, ap.approver_user_id::text), ap.state, ap.updated_on,
+                                         COALESCE(': ' || ap.comments, '')),
+                                  '; ' ORDER BY ap.updated_on)
+                  FROM approval_stage s
+                  JOIN approval_stage_approver ap ON ap.stage_id = s.id
+                  LEFT JOIN "user" u ON u.id = ap.approver_user_id
+                 WHERE s.work_item_id = p.id
+                   AND ap.state IN ('APPROVED', 'REJECTED')) AS decisions
+          FROM standard_change_proposal p
+          JOIN work_item w ON w.id = p.id
+         WHERE p.state = 'AUTHORITY_REVIEW'
+           AND NOT EXISTS (SELECT 1 FROM approval_stage s
+                            WHERE s.work_item_id = p.id AND s.checkpoint_label = 'CAB Approval')
+         ORDER BY w.number
+    LOOP
+        n := n + 1;
+        RAISE WARNING '0297: standard change proposal % (%): returned from the authority to draft; decisions on its deleted stages: %',
+            r.number, r.id, COALESCE(r.decisions, 'none');
+    END LOOP;
+    IF n > 0 THEN
+        RAISE WARNING '0297 returned % standard change proposal(s) to draft, listed above; tell their proposers. Find them (until edited again) with: SELECT w.number, p.id FROM standard_change_proposal p JOIN work_item w ON w.id = p.id WHERE w.updated_by = ''migration:0297_standard_change_cab_authorises'';', n;
+    END IF;
+END $$;
 
 WITH returned AS (
     UPDATE standard_change_proposal p
