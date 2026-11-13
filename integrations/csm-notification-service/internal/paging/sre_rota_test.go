@@ -190,6 +190,26 @@ func TestEngine_NamesTheSREChain(t *testing.T) {
 	}
 }
 
+// U2 and B-Central's chains are named after their assignment groups, so a
+// reader can tell where the incident came from; their rota codes keep the
+// SME_ prefix 0217 gave them.
+func TestSREChain_U2AndBCentral(t *testing.T) {
+	for rota, want := range map[string]string{
+		RotaSREU2:        "U2-SRE",
+		RotaSREBCentral:  "B-Central-SRE",
+		"sme_b_central ": "B-Central-SRE",
+		RotaSRESaaS:      "SaaS SRE",
+		RotaSREIaaS:      "IaaS SRE",
+	} {
+		if got := (RoutingContext{Rota: rota}).SREChain(); got != want {
+			t.Errorf("SREChain(%q) = %q, want %q", rota, got, want)
+		}
+	}
+	if got := rungRole(Level0, RoutingContext{Ladder: LadderSRE, Rota: RotaSREU2}); got != "U2-SRE L1 Support" {
+		t.Errorf("rung role = %q, want U2-SRE L1 Support", got)
+	}
+}
+
 // Without rotas nothing changes in what people read.
 func TestEngine_UnknownRotaKeepsTheOldWording(t *testing.T) {
 	tr := Trigger{Routing: RoutingContext{Ladder: LadderSRE}}

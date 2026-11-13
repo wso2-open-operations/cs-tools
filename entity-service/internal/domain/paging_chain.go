@@ -192,7 +192,8 @@ type PagingReadinessResponse struct {
 	Chains      []PagingReadinessChain `json:"chains"`
 }
 
-// PagingReadinessChain is one chain: CRE, SRE_SAAS, SRE_IAAS or SME. Ready is
+// PagingReadinessChain is one chain: CRE, SRE_SAAS, SRE_IAAS, SRE_U2,
+// SRE_B_CENTRAL (the last two only once their rotas are SRE rotas) or SME. Ready is
 // true when it has no gap of severity error; a warning does not stop a page.
 type PagingReadinessChain struct {
 	Chain  string                  `json:"chain"`

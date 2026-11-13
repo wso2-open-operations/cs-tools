@@ -30,6 +30,8 @@ export const CHAIN_LADDER: Partial<Record<PagingChainCode, CaseAlertLadder>> = {
   CRE: "CRE",
   SRE_SAAS: "SRE",
   SRE_IAAS: "SRE",
+  SRE_U2: "SRE",
+  SRE_B_CENTRAL: "SRE",
 };
 
 /**
