@@ -65,7 +65,13 @@ export type FeatureState = "enabled" | "wip" | "hidden";
  * them; `wip` and `hidden` both hide.
  */
 export const SLA_TIMELINE_FEATURE_ID = "support.case-sla-timeline";
-const EMBEDDED_FEATURE_IDS: readonly string[] = [SLA_TIMELINE_FEATURE_ID];
+const EMBEDDED_FEATURES: readonly PreviewableFeature[] = [
+  { id: SLA_TIMELINE_FEATURE_ID, label: "SLA impact timeline (case SLA tab)" },
+];
+const EMBEDDED_FEATURE_IDS: readonly string[] = EMBEDDED_FEATURES.map((f) => f.id);
+
+/** A feature the Feature Preview dialog can offer a toggle for. */
+export type PreviewableFeature = Pick<CsmNavNode, "id" | "label">;
 
 const FEATURE_STATES: readonly string[] = ["enabled", "wip", "hidden"];
 
@@ -578,13 +584,19 @@ export function firstEnabledDestination(
  * previewing the owner is the toggle that matters (`featureState` ignores a
  * shortcut's own preview value).
  */
-export function listPreviewableFeatures(access?: PortalAccess): CsmNavNode[] {
+export function listPreviewableFeatures(access?: PortalAccess): PreviewableFeature[] {
   const overrides = parseOverrides();
-  return flattenNavNodes(CSM_NAV_ITEMS).filter((node) => {
-    if (isNavShortcut(node) || !(node.id in overrides)) return false;
-    const state = featureState(node.id, access);
+  const restricted = (id: string): boolean => {
+    const state = featureState(id, access);
     return state === "hidden" || state === "wip";
-  });
+  };
+  const navNodes = flattenNavNodes(CSM_NAV_ITEMS).filter(
+    (node) => !isNavShortcut(node) && node.id in overrides && restricted(node.id),
+  );
+  // Embedded features are offered under the same rule: only when the
+  // deployment itself restricts them.
+  const embedded = EMBEDDED_FEATURES.filter((f) => f.id in overrides && restricted(f.id));
+  return [...navNodes, ...embedded];
 }
 
 /**

@@ -16,7 +16,12 @@
 
 import { describe, expect, it } from "vitest";
 import { buildSlaImpactTimeline } from "./slaImpactTimeline";
-import { layoutSlaTrack, MARKER_MIN_GAP_PX } from "./slaTrackLayout";
+import {
+  formatCalendarDuration,
+  layoutSlaTrack,
+  MARKER_MIN_GAP_PX,
+  summarizeSlaSides,
+} from "./slaTrackLayout";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
 
 function entry(id: string, createdAt: string, field: string, from: string, to: string): CaseAuditEntry {
@@ -106,5 +111,91 @@ describe("layoutSlaTrack", () => {
     expect(one.markers).toHaveLength(1);
     expect(Number.isFinite(one.markers[0].leftPct)).toBe(true);
     expect(layout([entry("a", "not a date", "severity", "S3", "S2")]).markers).toEqual([]);
+  });
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+
+describe("summarizeSlaSides", () => {
+  const OPENED = "2026-07-01T00:00:00Z";
+
+  it("splits the open period by side, summing to exactly the open period", () => {
+    const l = layout(
+      [
+        entry("a", "2026-07-02T00:00:00Z", "state", "Open", "Awaiting Info"),
+        entry("b", "2026-07-06T00:00:00Z", "state", "Awaiting Info", "Work In Progress"),
+      ],
+      { openedAt: OPENED },
+    );
+    const s = summarizeSlaSides(l.segments);
+    expect(s.wso2Ms).toBe(1 * DAY + 4 * DAY); // 1 day before, 4 days after (now is 07-10)
+    expect(s.customerMs).toBe(4 * DAY);
+    expect(s.openMs).toBe(NOW - Date.parse(OPENED));
+    expect(s.wso2Pct + s.customerPct).toBeCloseTo(100);
+    expect(s.closedMs).toBe(0);
+  });
+
+  it("marks only the last segment of an open case as ongoing", () => {
+    const l = layout([entry("a", "2026-07-02T00:00:00Z", "state", "Open", "Awaiting Info")], {
+      openedAt: OPENED,
+    });
+    expect(l.segments.map((s) => s.ongoing)).toEqual([false, true]);
+    expect(l.segments[1].toMs).toBe(NOW);
+  });
+
+  it("excludes closed time, including the tail drawn after a closure", () => {
+    const l = layout([entry("a", "2026-07-03T00:00:00Z", "state", "Open", "Closed")], {
+      openedAt: OPENED,
+    });
+    const s = summarizeSlaSides(l.segments);
+    expect(s.openMs).toBe(2 * DAY);
+    expect(s.closedMs).toBe(0);
+    expect(l.segments.every((seg) => !seg.ongoing)).toBe(true);
+    expect(s.wso2Pct).toBeCloseTo(100);
+  });
+
+  it("counts a closed stretch before a reopening as closed, not open", () => {
+    const l = layout(
+      [
+        entry("a", "2026-07-02T00:00:00Z", "state", "Open", "Closed"),
+        entry("b", "2026-07-05T00:00:00Z", "state", "Closed", "Open"),
+      ],
+      { openedAt: OPENED },
+    );
+    const s = summarizeSlaSides(l.segments);
+    expect(s.closedMs).toBe(3 * DAY);
+    expect(s.openMs).toBe(1 * DAY + 5 * DAY);
+  });
+
+  it("handles a single segment", () => {
+    const l = layout([], { openedAt: OPENED, currentState: "awaiting_info" });
+    const s = summarizeSlaSides(l.segments);
+    expect(s.customerMs).toBe(NOW - Date.parse(OPENED));
+    expect(s.customerPct).toBe(100);
+    expect(s.wso2Pct).toBe(0);
+  });
+
+  it("gives zero time and no NaN for a zero-length period", () => {
+    const l = layout([], { openedAt: new Date(NOW).toISOString() });
+    const s = summarizeSlaSides(l.segments);
+    expect(s.openMs).toBe(0);
+    expect(s.wso2Pct).toBe(0);
+    expect(s.customerPct).toBe(0);
+  });
+
+  it("knows whether the sides can be determined", () => {
+    expect(layout([]).sidesKnown).toBe(false);
+    expect(layout([], { currentState: "open" }).sidesKnown).toBe(true);
+    expect(layout([entry("a", "2026-07-02T00:00:00Z", "state", "Open", "Awaiting Info")]).sidesKnown).toBe(true);
+    expect(layout([entry("a", "2026-07-02T00:00:00Z", "severity", "S3", "S2")]).sidesKnown).toBe(false);
+  });
+});
+
+describe("formatCalendarDuration", () => {
+  it("shows the two most significant units", () => {
+    expect(formatCalendarDuration(3 * DAY + 4 * 3600000 + 59 * 60000)).toBe("3d 4h");
+    expect(formatCalendarDuration(5 * 3600000 + 12 * 60000)).toBe("5h 12m");
+    expect(formatCalendarDuration(12 * 60000)).toBe("12m");
+    expect(formatCalendarDuration(0)).toBe("under 1m");
   });
 });

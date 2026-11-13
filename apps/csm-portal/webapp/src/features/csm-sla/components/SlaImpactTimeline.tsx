@@ -29,14 +29,24 @@ import {
   User,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
-import { isFeatureEnabled, SLA_TIMELINE_FEATURE_ID } from "@config/featureFlags";
+import {
+  isFeatureEnabled,
+  isPreviewedOnly,
+  SLA_TIMELINE_FEATURE_ID,
+} from "@config/featureFlags";
+import { useFeaturePreviewOverrides } from "@config/featurePreview";
+import { usePortalAccess, useSafeCurrentUserId } from "@context/current-user/usePortalAccess";
 import {
   formatAbsoluteForUser,
   formatBackendTimestampForDisplay,
 } from "@utils/dateTime";
 import {
+  formatCalendarDuration,
   layoutSlaTrack,
+  summarizeSlaSides,
+  type SlaTrackLayout,
   type SlaTrackMarker,
+  type SlaTrackSegment,
   type SlaTrackSide,
 } from "@features/csm-sla/utils/slaTrackLayout";
 import {
@@ -215,24 +225,65 @@ function Marker({ marker, trackY }: { marker: SlaTrackMarker; trackY: number }):
   );
 }
 
-function TimelineTrack({
-  entries,
-  openedAt,
-  currentState,
-}: {
-  entries: SlaTimelineEvent[];
-  openedAt?: string;
-  currentState?: string;
-}): JSX.Element {
-  // Fixed per mount: the track's right edge is "now" as of when the tab opened.
-  const [nowMs] = useState(() => Date.now());
-  const layout = layoutSlaTrack({
-    events: entries,
-    openedAt,
-    currentState,
-    nowMs,
-    formatTick: tickLabel,
-  });
+function segmentTitle(seg: SlaTrackSegment): string {
+  const side = seg.side === "closed" ? "Closed" : SIDE_LABEL[seg.side];
+  const duration = seg.side === "closed" && seg.durationMs === 0 ? "" : `: ${formatCalendarDuration(seg.durationMs)}`;
+  return `${side}${duration}${seg.ongoing ? " (ongoing)" : ""}`;
+}
+
+const CALENDAR_TIME_NOTE = "Calendar time; the SLA table above uses business time.";
+
+function SideSummary({ layout }: { layout: SlaTrackLayout }): JSX.Element {
+  if (!layout.sidesKnown) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Not enough history to split this case's time by side.
+      </Typography>
+    );
+  }
+  const sum = summarizeSlaSides(layout.segments);
+  const rows: { side: SlaTimelineSide; ms: number; pct: number }[] = [
+    { side: "wso2", ms: sum.wso2Ms, pct: sum.wso2Pct },
+    { side: "customer", ms: sum.customerMs, pct: sum.customerPct },
+  ];
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap", alignItems: "baseline" }}>
+        {rows.map((r) => (
+          <Box key={r.side} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Box
+              aria-hidden
+              sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: TRACK_COLOR[r.side] }}
+            />
+            <Typography variant="body2">
+              {`${SIDE_LABEL[r.side]}: `}
+              <strong>{formatCalendarDuration(r.ms)}</strong>
+              {` (${Math.round(r.pct)}%)`}
+            </Typography>
+          </Box>
+        ))}
+        <Typography variant="body2" color="text.secondary">
+          {`Open period: ${formatCalendarDuration(sum.openMs)}`}
+        </Typography>
+      </Box>
+      <Box
+        role="img"
+        aria-label={`Share of the open period: WSO2 side ${Math.round(sum.wso2Pct)}%, customer side ${Math.round(sum.customerPct)}%`}
+        sx={{ display: "flex", height: 8, borderRadius: 8, overflow: "hidden", bgcolor: "divider" }}
+      >
+        <Box sx={{ width: `${sum.wso2Pct}%`, bgcolor: TRACK_COLOR.wso2 }} />
+        <Box sx={{ width: `${sum.customerPct}%`, bgcolor: TRACK_COLOR.customer }} />
+      </Box>
+      <Typography variant="caption" color="text.secondary">
+        {sum.closedMs > 0
+          ? `${CALENDAR_TIME_NOTE} Time spent closed (${formatCalendarDuration(sum.closedMs)}) is not counted.`
+          : CALENDAR_TIME_NOTE}
+      </Typography>
+    </Box>
+  );
+}
+
+function TimelineTrack({ layout }: { layout: SlaTrackLayout }): JSX.Element {
   const aboveLevels = Math.ceil(layout.maxLane / 2);
   const belowLevels = Math.floor(layout.maxLane / 2);
   const trackY = aboveLevels * LANE_STEP_PX + MARKER_PX / 2 + 4;
@@ -260,17 +311,18 @@ function TimelineTrack({
             }}
           >
             {layout.segments.map((seg, i) => (
-              <Box
-                key={i}
-                sx={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: `${seg.leftPct}%`,
-                  width: `${seg.widthPct}%`,
-                  bgcolor: TRACK_COLOR[seg.side],
-                }}
-              />
+              <Tooltip key={i} title={segmentTitle(seg)} arrow followCursor>
+                <Box
+                  sx={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: `${seg.leftPct}%`,
+                    width: `${seg.widthPct}%`,
+                    bgcolor: TRACK_COLOR[seg.side],
+                  }}
+                />
+              </Tooltip>
             ))}
           </Box>
           {layout.ticks.map((t) => (
@@ -333,9 +385,15 @@ export function SlaImpactTimeline({
   openedAt,
   currentState,
 }: SlaImpactTimelineProps): JSX.Element | null {
-  if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)) return null;
+  const access = usePortalAccess();
+  const { overrides: previewOverrides } = useFeaturePreviewOverrides(useSafeCurrentUserId());
+  // Fixed per mount: the track's right edge is "now" as of when the tab opened.
+  const [nowMs] = useState(() => Date.now());
+  if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID, access, previewOverrides)) return null;
+  const previewed = isPreviewedOnly(SLA_TIMELINE_FEATURE_ID, access, previewOverrides);
 
   const events = buildSlaImpactTimeline(entries ?? []);
+  const layout = layoutSlaTrack({ events, openedAt, currentState, nowMs, formatTick: tickLabel });
 
   return (
     <Card
@@ -349,6 +407,7 @@ export function SlaImpactTimeline({
         {!isLoading && !isError ? (
           <Chip size="small" variant="outlined" label={`${events.length} events`} />
         ) : null}
+        {previewed ? <Chip size="small" color="info" label="Preview" /> : null}
       </Box>
 
       {isLoading ? (
@@ -378,6 +437,7 @@ export function SlaImpactTimeline({
         </Typography>
       ) : (
         <>
+          <SideSummary layout={layout} />
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             {LEGEND.map((l) => (
               <Box key={l.side} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
@@ -389,7 +449,7 @@ export function SlaImpactTimeline({
               </Box>
             ))}
           </Box>
-          <TimelineTrack entries={events} openedAt={openedAt} currentState={currentState} />
+          <TimelineTrack layout={layout} />
         </>
       )}
     </Card>
