@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { companyName } from "@config/brandingConfig";
 import {
-  COMPANY_NAME,
+  COMPANY_LEGAL_SUFFIX,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
 } from "@features/project-hub/constants/appLayoutConstants";
@@ -39,7 +40,8 @@ export default function Footer(): JSX.Element {
       }}
     >
       <FooterUI.Copyright>
-        © {new Date().getFullYear()} {COMPANY_NAME}. All rights reserved.
+        © {new Date().getFullYear()} {companyName()} {COMPANY_LEGAL_SUFFIX}. All
+        rights reserved.
       </FooterUI.Copyright>
       <FooterUI.Link href={TERMS_OF_SERVICE_URL}>
         Terms & Conditions
