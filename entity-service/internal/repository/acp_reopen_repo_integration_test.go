@@ -172,7 +172,7 @@ func TestACPReopenRepoIntegration_GetProjectBySfID(t *testing.T) {
 	}
 	if got.ID != acpReopenTestProjectID || got.Key != "ACPREOPENTEST" || got.Name != "[S] ACP Reopen Test" ||
 		acpDeref(got.EndDateClosureState) != "CLOSED" || acpDeref(got.InvoiceDueDateClosureState) != "OPEN" ||
-		got.ComplianceViolationClosureState != nil || acpDeref(got.ClosureState) != "SUSPENDED" {
+		acpDeref(got.ComplianceViolationClosureState) != "OPEN" || acpDeref(got.ClosureState) != "SUSPENDED" {
 		t.Errorf("project = %+v", got)
 	}
 	var section map[string]map[string]string
