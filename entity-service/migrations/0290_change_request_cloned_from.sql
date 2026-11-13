@@ -25,7 +25,7 @@
 -- One transaction with a short lock timeout: adding the column (with its foreign
 -- key) takes an exclusive lock on change_request, which is written all day, so
 -- rather than queue every write behind it this gives up after 5s; re-run it when
--- the table is quiet. Its index is built without blocking writes, in 0287.
+-- the table is quiet. Its index is built without blocking writes, in 0292.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 

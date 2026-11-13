@@ -36892,7 +36892,7 @@ components:
         states:
           type: array
           description: >
-            cab_review (a state until migration 0290 removed the CAB stage) is still accepted for one
+            cab_review (a state until migration 0295 removed the CAB stage) is still accepted for one
             release, for a client deployed before it, and matches no proposal.
           items: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled, cab_review]}
         kinds:

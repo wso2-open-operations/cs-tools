@@ -803,7 +803,7 @@ describe("StandardChangeProposalPage — the CAB", () => {
     expect(screen.getByRole("region", { name: "Approval" })).not.toHaveTextContent("two different CAB members");
   });
 
-  /** The one-approval CAB stage of a proposal returned to draft when the CAB stage was removed (0290): never decided, its rows cancelled. */
+  /** The one-approval CAB stage of a proposal returned to draft when the CAB stage was removed (0295): never decided, its rows cancelled. */
   const RETURNED_STAGE = { id: "st-0", label: "CAB Approval", requiredApprovals: 1, approvals: 0, decision: null };
   const RETURNED_ROW = { id: "a-0", stageId: "st-0", approver: { id: "u-2", name: "Carol Silva", email: "carol@example.com" }, state: "CANCELLED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false };
 

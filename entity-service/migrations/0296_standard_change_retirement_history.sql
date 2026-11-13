@@ -17,7 +17,7 @@
 -- A standard change template's retirement is recorded in its history, and a
 -- retired template carries no review flag.
 --
--- standard_change_template_event (0282) gains the action RETIRED and a
+-- standard_change_template_event (0287) gains the action RETIRED and a
 -- proposal_id: the retirement proposal whose approval retired the template
 -- (the history links to it; its note is that proposal's rationale). A proposal
 -- is deleted only as a never-submitted draft, which retires nothing, so ON
@@ -35,7 +35,7 @@
 -- (100031) are row-level-secured with FORCE: a migrating role without
 -- BYPASSRLS that is not flagged internal sees no row, and the INSERT and the
 -- UPDATE would write nothing without an error. So the session is flagged
--- internal and cleared afterwards, as 0283 and 0290 do.
+-- internal and cleared afterwards, as 0288 and 0295 do.
 --
 -- Safe to re-run: the constraint is dropped and recreated, the column is added
 -- IF NOT EXISTS, a template that already has a RETIRED entry gets no second

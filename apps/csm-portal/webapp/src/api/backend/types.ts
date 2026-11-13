@@ -5712,7 +5712,7 @@ export interface BeStandardChangeCabHistory {
 /**
  * One approval stage of a proposal: the CAB's ("CAB Approval", two approvals),
  * the only one now. A proposal decided before 2026-11-10 holds a "Standard Change
- * Authority" stage instead, and one decided before migration 0290 also an
+ * Authority" stage instead, and one decided before migration 0295 also an
  * earlier one-approval "CAB Approval" stage.
  */
 export interface BeStandardChangeProposalStage {

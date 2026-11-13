@@ -454,7 +454,7 @@ The change request create page and edit dialog share `useChangeRequestScope` (`f
 - **Refusals of the create are worded by the entity service and shown as written.** A person with no ServiceNow account (a user created in this database, which nothing in the web can tell apart in the picker) or an assignment group ServiceNow does not have is refused by the create itself with a 400 that says who or what cannot be used, why, and which field to change. The create form shows every 4xx message of the entity service as written in its error banner (`CreateChangeRequestPage` `onError`), so keep that wording on the entity-service side and do not replace it with a generic message here.
 - Sent only when non-empty. The create page sends `projectId`, `deploymentIds`, `deploymentProductIds` (plus `category`, `comment`, `workNote`); the edit dialog sends the three scope fields **together** when any of them changed (the backend validates them as a unit), and not at all once the CR has been approved -- from Customer Approval / Scheduled on, i.e. editable only in New, Assess and Authorize (the dialog locks the deployments with the reason; the backend refuses from there on). The **Customer Project itself is editable only in New** (see the next section): after New the dialog shows it read-only and, when only the deployments changed, sends the stored project beside them, which the backend accepts as a no-op. A saved project can be swapped (in New) but not cleared (the patch cannot express "no project").
 - Clone sends the source's id as `clonedFromChangeRequestId` on create (`CloneChangeRequestNavState.sourceId`),
-  so the new change request records what it was cloned from (entity-service migration 0285; the detail reads
+  so the new change request records what it was cloned from (entity-service migration 0290; the detail reads
   it back as `clonedFrom`, and the standard change suggestions use it).
 - Clone carries the project and category, but deliberately **not** deployments / products: they name the deployment the change targets, and a clone exists to promote the change to another one. A draft or clone from before this change may still hold `customerGroupId` / `environmentIds`; they are ignored (not read, not re-saved).
 - The draft keeps display names next to the ids (`*Labels`), because the pickers only know ids; without them a restored form shows raw UUIDs.
@@ -952,7 +952,7 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   stage by its own `label` and count ("1 of 2 approvals"), numbered only when there is more than one, with no
   CAB-specific code. A proposal has one stage, the CAB's (`STANDARD_CHANGE_CAB_STAGE`, "CAB Approval", 2 approvals);
   one decided before 2026-11-10 has a "Standard Change Authority" stage (`STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE`)
-  instead, and one decided before migration 0290 an earlier one-approval "CAB Approval" stage too, shown as "1. CAB
+  instead, and one decided before migration 0295 an earlier one-approval "CAB Approval" stage too, shown as "1. CAB
   Approval" above "2. Standard Change Authority". **Authorise** / Reject on the
   viewer's own `canDecide` row (there is no Approve); the dialog says whether a second member must still approve or
   this one applies it (`STANDARD_CHANGE_CAB_APPROVALS` when the answer has no stage); the decision sends the

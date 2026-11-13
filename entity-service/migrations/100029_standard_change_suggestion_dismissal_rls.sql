@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- A dismissed standard change suggestion (migration 0284) is internal, like the
+-- A dismissed standard change suggestion (migration 0289) is internal, like the
 -- suggestions and the catalogue (100026): only WSO2 staff read or write it.
 --
 -- DROP POLICY IF EXISTS before CREATE POLICY: safe to re-run.

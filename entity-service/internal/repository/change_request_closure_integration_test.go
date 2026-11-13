@@ -28,7 +28,7 @@ import (
 
 // change_request.closed_on / closed_by_user_id: stamped by every writer that moves
 // a change request into Closed or Rollback, never by Canceled, never moved by a
-// resend; and migration 0283's backfill from event_outbox. Same harness as the
+// resend; and migration 0288's backfill from event_outbox. Same harness as the
 // other crFlow tests (CHANGE_REQUEST_TEST_DSN, run as a superuser and as csm_app).
 //
 //	CHANGE_REQUEST_TEST_DSN=postgres://... go test ./internal/repository/ -run ChangeRequestClosureIntegration -p 1
@@ -126,13 +126,13 @@ func TestChangeRequestClosureIntegration_Writers(t *testing.T) {
 	})
 }
 
-// 0283 fills closed_on from the first outbox transition into Closed / Rollback,
+// 0288 fills closed_on from the first outbox transition into Closed / Rollback,
 // and the closer from the work item when it still carries that instant; a row
 // with no transition, or one that already has closed_on, is left alone; running
 // it twice changes nothing more.
 func TestChangeRequestClosureIntegration_Backfill(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	sql, err := os.ReadFile("../../migrations/0283_change_request_closed_on_backfill.sql")
+	sql, err := os.ReadFile("../../migrations/0288_change_request_closed_on_backfill.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
@@ -173,12 +173,12 @@ func TestChangeRequestClosureIntegration_Backfill(t *testing.T) {
 		}
 		if _, err := conn.Exec(context.Background(), string(sql)); err != nil {
 			conn.Release()
-			t.Fatalf("run %d of 0283: %v", run, err)
+			t.Fatalf("run %d of 0288: %v", run, err)
 		}
 		var flag string
 		if err := conn.QueryRow(context.Background(), `SELECT COALESCE(current_setting('app.is_internal', true), '')`).Scan(&flag); err != nil || flag != "" {
 			conn.Release()
-			t.Fatalf("run %d: app.is_internal = %q after 0283 (%v), want it cleared", run, flag, err)
+			t.Fatalf("run %d: app.is_internal = %q after 0288 (%v), want it cleared", run, flag, err)
 		}
 		conn.Release()
 		if on, by := f.closure(closed); on == nil || !on.Equal(*wantOn) || by == nil || *by != crFlowCreatorID {

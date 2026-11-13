@@ -14,7 +14,7 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- The standard change suggestion snapshot (migration 0286) is internal, like the
+-- The standard change suggestion snapshot (migration 0291) is internal, like the
 -- dismissals (100029) and the catalogue (100026): only WSO2 staff and internal
 -- services read or write it.
 --

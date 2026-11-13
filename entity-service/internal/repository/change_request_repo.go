@@ -2405,7 +2405,7 @@ func provisionApprovalStage(ctx context.Context, tx pgx.Tx, workItemID string, a
 // checkpoint_label (migration 0179) records which checkpoint this is
 // explicitly; GetChangeRequestApprovals prefers it over the ordinal heuristic.
 // required is how many different people must approve the stage
-// (required_approvals, migration 0282): 1 for every change request stage.
+// (required_approvals, migration 0287): 1 for every change request stage.
 func insertApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail, label string, required int, pool approvalPool, creatorIDs map[string]bool) error {
 	var stageID string
 	if err := tx.QueryRow(ctx,
