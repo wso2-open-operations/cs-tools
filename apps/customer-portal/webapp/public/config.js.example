@@ -63,11 +63,12 @@ window.config = {
   //
   // CUSTOMER_PORTAL_APP_NAME  (default: "Customer Portal")
   //   Product name shown beside the logo in the header and in the browser tab.
-  // CUSTOMER_PORTAL_COMPANY_NAME  (default: "WSO2 LLC")
-  //   Company name in the footer copyright line. Also used in the PDF report
-  //   footers ("<name> Support 24x7") and in the labels "<name> Products",
-  //   "Add <name> Product" (project deployments) and "<name> Resolution"
-  //   (vulnerability details); those default to "WSO2".
+  // CUSTOMER_PORTAL_COMPANY_NAME  (default: "WSO2")
+  //   Company name, without "LLC": the footer copyright line adds it, so
+  //   "WSO2" reads "© <year> WSO2 LLC". Also used, without "LLC", in the PDF
+  //   report footers ("<name> Support 24x7") and in the labels
+  //   "<name> Products", "Add <name> Product" (project deployments) and
+  //   "<name> Resolution" (vulnerability details).
   // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL  (default: "/logo-dark.svg")
   //   Logo for the light colour scheme and the light-mode tab icon. A path
   //   under public/ or an absolute https URL. When no dark-mode logo is set,
