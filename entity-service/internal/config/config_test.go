@@ -1624,3 +1624,63 @@ func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
 		})
 	}
 }
+
+func alertConsumerConfig() Config {
+	c := baseValidConfig()
+	c.DBPoolMaxConns = 20
+	c.AlertConsumerEnabled = true
+	c.AlertServiceBusNamespace = "sbns-example"
+	c.AlertServiceBusTenantID = "tenant"
+	c.AlertServiceBusClientID = "client"
+	c.AlertServiceBusClientSecret = "secret"
+	c.AlertPriorityQueue = "priority-queue"
+	c.AlertStandardQueue = "standard-queue"
+	c.AlertConsumerConcurrency = 8
+	c.AlertConsumerPriorityWeight = 4
+	return c
+}
+
+func TestConfig_Validate_AlertConsumer(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(c *Config)
+		wantErr bool
+	}{
+		{name: "complete", change: func(*Config) {}},
+		{name: "disabled ignores everything else", change: func(c *Config) { *c = baseValidConfig() }},
+		{name: "no database", change: func(c *Config) { c.DBUser, c.DBPassword, c.DBName = "", "", ""; c.DataSource = DataSourceServiceNow }, wantErr: true},
+		{name: "no namespace", change: func(c *Config) { c.AlertServiceBusNamespace = "" }, wantErr: true},
+		{name: "no tenant", change: func(c *Config) { c.AlertServiceBusTenantID = "" }, wantErr: true},
+		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
+		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
+		{name: "same queue twice", change: func(c *Config) { c.AlertStandardQueue = c.AlertPriorityQueue }, wantErr: true},
+		{name: "concurrency takes the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 20 }, wantErr: true},
+		{name: "concurrency above the cap", change: func(c *Config) { c.DBPoolMaxConns = 200; c.AlertConsumerConcurrency = 65 }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := alertConsumerConfig()
+			tt.change(&c)
+			err := c.validateAlertConsumer()
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("validateAlertConsumer() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_AlertConsumerDefaults(t *testing.T) {
+	for _, key := range []string{"ALERT_CONSUMER_ENABLED", "ALERT_SERVICEBUS_PRIORITY_QUEUE", "ALERT_SERVICEBUS_STANDARD_QUEUE", "ALERT_CONSUMER_CONCURRENCY", "ALERT_CONSUMER_PRIORITY_WEIGHT"} {
+		t.Setenv(key, "")
+	}
+	c := Load()
+	if c.AlertConsumerEnabled {
+		t.Error("the alert consumer is on by default, want off")
+	}
+	if c.AlertPriorityQueue != "priority-queue" || c.AlertStandardQueue != "standard-queue" {
+		t.Errorf("queues = %q and %q, want the gateway's priority-queue and standard-queue", c.AlertPriorityQueue, c.AlertStandardQueue)
+	}
+	if c.AlertConsumerConcurrency != 8 || c.AlertConsumerPriorityWeight != 4 {
+		t.Errorf("concurrency %d and weight %d, want 8 and 4", c.AlertConsumerConcurrency, c.AlertConsumerPriorityWeight)
+	}
+}

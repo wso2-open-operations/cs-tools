@@ -10733,3 +10733,24 @@ type ACPReopenCheckResponse struct {
 	NextCursor       string   `json:"nextCursor"`
 	More             bool     `json:"more"`
 }
+
+// AlertTier is the Service Bus queue an SRE alert arrived on, which decides how soon it is processed.
+type AlertTier string
+
+// Alert tiers, matching the tier the alerting gateway stamps on every message.
+const (
+	AlertTierHigh    AlertTier = "high"
+	AlertTierDefault AlertTier = "default"
+)
+
+// NewAlert is one normalised SRE alert the Service Bus consumer stores in the alert table.
+type NewAlert struct {
+	ID           string
+	Source       string
+	Alert        json.RawMessage
+	Fingerprint  string
+	Tier         AlertTier
+	MessageID    string
+	MessageIndex int
+	ReceivedOn   time.Time
+}
