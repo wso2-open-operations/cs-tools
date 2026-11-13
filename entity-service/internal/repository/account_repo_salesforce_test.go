@@ -68,9 +68,10 @@ func insertColumns(t *testing.T) map[string]bool {
 
 // TestUpdateAccountFromSalesforceQuery_ColumnSet pins which account columns
 // a Salesforce event may write. The CSM-only columns must be absent so an
-// event can never blank them; the SE-1 columns must be COALESCEd with the
-// stored value while Sales Entity does not send them; deactivation_date is
-// no longer nulled; deleted_on is cleared.
+// event can never blank them; the six columns Sales Entity sends late
+// (CSM, secondary owner, renewal manager, vertical, lost reason category,
+// deactivation date) are plain assignments so a cleared value clears here;
+// deleted_on is cleared.
 func TestUpdateAccountFromSalesforceQuery_ColumnSet(t *testing.T) {
 	set := setClauses(t)
 	cases := []struct {
@@ -105,13 +106,14 @@ func TestUpdateAccountFromSalesforceQuery_ColumnSet(t *testing.T) {
 		{"activation_date", `^\$22$`},
 		{"lost_date", `^\$23$`},
 		{"lost_reason", `^\$24$`},
-		// SE-1 columns: keep the stored value when Sales Entity sends none.
-		{"customer_success_manager_id", `^COALESCE\(\$25, account\.customer_success_manager_id\)$`},
-		{"secondary_technical_owner_id", `^COALESCE\(\$26, account\.secondary_technical_owner_id\)$`},
-		{"renewal_account_manager_id", `^COALESCE\(\$27, account\.renewal_account_manager_id\)$`},
-		{"account_vertical", `^COALESCE\(\$28, account\.account_vertical\)$`},
-		{"lost_reason_category", `^COALESCE\(\$29, account\.lost_reason_category\)$`},
-		{"deactivation_date", `^COALESCE\(\$30, account\.deactivation_date\)$`},
+		// A value cleared in Salesforce (NULL) clears the column, unless the
+		// keep flag says the email was sent but resolved to no user.
+		{"customer_success_manager_id", `^CASE WHEN \$33::boolean THEN account\.customer_success_manager_id ELSE \$25 END$`},
+		{"secondary_technical_owner_id", `^CASE WHEN \$34::boolean THEN account\.secondary_technical_owner_id ELSE \$26 END$`},
+		{"renewal_account_manager_id", `^CASE WHEN \$35::boolean THEN account\.renewal_account_manager_id ELSE \$27 END$`},
+		{"account_vertical", `^\$28$`},
+		{"lost_reason_category", `^\$29$`},
+		{"deactivation_date", `^\$30$`},
 		// Plain assignment: a primary partner removed in Salesforce clears here.
 		{"primary_partner_sf_id", `^\$31$`},
 		// A CREATED/UPDATED/RESTORED event brings a soft-deleted account back.
@@ -290,9 +292,9 @@ func TestUpsertAccountFromSalesforce_ResolutionAndLedger(t *testing.T) {
 	}
 }
 
-// TestUpsertAccountFromSalesforce_AbsentSE1FieldsAreNull: when Sales Entity
-// sends no SE-1 fields the COALESCE parameters are NULL, which is what keeps
-// the stored values (see the column-set test for the COALESCE itself).
+// TestUpsertAccountFromSalesforce_AbsentSE1FieldsAreNull: an absent field
+// reaches the UPDATE as NULL, which the plain assignment (pinned in the
+// column-set test) writes, clearing the stored value.
 func TestUpsertAccountFromSalesforce_AbsentSE1FieldsAreNull(t *testing.T) {
 	q := &accountTxQuerier{updateResults: []int64{1}}
 	owner := "user-1"
@@ -301,8 +303,13 @@ func TestUpsertAccountFromSalesforce_AbsentSE1FieldsAreNull(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 	args := q.statements("UPDATE account")[0].args
-	if len(args) != 32 {
-		t.Fatalf("update args = %d, want 32", len(args))
+	if len(args) != 35 {
+		t.Fatalf("update args = %d, want 35", len(args))
+	}
+	for i := 31; i <= 34; i++ {
+		if b, ok := args[i].(bool); !ok || b {
+			t.Errorf("$%d = %v, want false (keep flags default to writing the value)", i+1, args[i])
+		}
 	}
 	if p, ok := args[20].(*string); !ok || p == nil || *p != "user-1" {
 		t.Errorf("$21 account_manager_id = %v, want user-1", args[20])

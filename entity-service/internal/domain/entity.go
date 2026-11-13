@@ -858,15 +858,22 @@ type SalesforceAccountUpsert struct {
 	// (primaryPartnerAccountId), nil when there is none.
 	PrimaryPartnerSfID *string
 
-	// The fields below come from the Sales Entity SE-1 change. Until it is
-	// deployed they are always nil, so the upsert writes them as
-	// COALESCE(new, stored): a nil keeps the value the ServiceNow sync loaded.
+	// The fields below are plain assignments in the upsert: nil clears the
+	// column. For the three person references, nil is written only when
+	// Salesforce sent no email; when an email was sent but no user could be
+	// resolved, the matching Keep flag is set and the stored value stays.
 	CustomerSuccessManagerID  *string
 	SecondaryTechnicalOwnerID *string
 	RenewalAccountManagerID   *string
-	AccountVertical           *string
-	LostReasonCategory        *string
-	DeactivationDate          *time.Time
+	// KeepCustomerSuccessManager, KeepSecondaryTechnicalOwner and
+	// KeepRenewalAccountManager keep the stored column instead of writing the
+	// (nil) id above.
+	KeepCustomerSuccessManager  bool
+	KeepSecondaryTechnicalOwner bool
+	KeepRenewalAccountManager   bool
+	AccountVertical             *string
+	LostReasonCategory          *string
+	DeactivationDate            *time.Time
 }
 
 // Salesforce Project_Contact__c states, as stored in Salesforce State__c and

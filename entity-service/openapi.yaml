@@ -22554,6 +22554,11 @@ components:
           description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          description: The account's customer success manager. null when not set.
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         activationDate:
           type: string
           nullable: true
@@ -22642,6 +22647,11 @@ components:
         renewalAccountManager:
           nullable: true
           description: ServiceNow data source only.
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          description: The account's customer success manager. null when not set.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         activationDate:

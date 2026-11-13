@@ -460,7 +460,7 @@ func (s *stubSalesforceAccountRepo) LookupAccountIDBySfID(_ context.Context, sfI
 }
 
 // fullCustomer is sampleCustomer plus every field the Account ingest maps,
-// including the SE-1 ones Sales Entity does not send yet.
+// including the customer success manager, vertical and deactivation fields.
 func fullCustomer() salesentity.Customer {
 	c := sampleCustomer()
 	c.Address = &salesentity.CustomerAddress{
@@ -554,9 +554,9 @@ func TestHandleEvent_MapsFullColumnSet(t *testing.T) {
 	}
 }
 
-// TestHandleEvent_AbsentSE1FieldsStayNil: until Sales Entity sends the SE-1
-// fields they reach the repository as nil, which its COALESCE turns into
-// "keep the stored value" (pinned in account_repo_salesforce_test.go).
+// TestHandleEvent_AbsentSE1FieldsStayNil: fields Sales Entity omits or clears
+// reach the repository as nil, which its plain assignment writes as NULL
+// (pinned in account_repo_salesforce_test.go).
 func TestHandleEvent_AbsentSE1FieldsStayNil(t *testing.T) {
 	se := &stubSalesEntityClient{customer: sampleCustomer()}
 	repo := &stubSalesforceAccountRepo{lookup: fullCustomerLookup()}
@@ -824,5 +824,97 @@ func TestProvisionOwner_TrimsNamesAndCreatesUser(t *testing.T) {
 	}
 	if gotReq.LastName != "Doe"+ownerAutoProvisionSuffix {
 		t.Errorf("LastName = %q, want trimmed %q", gotReq.LastName, "Doe"+ownerAutoProvisionSuffix)
+	}
+}
+
+// A person email Salesforce sent but CSM cannot resolve to a user keeps the
+// stored CSM, secondary technical owner and renewal manager (keep flags set,
+// ids nil); the event still succeeds. The owner and technical owner are not
+// covered by a keep flag and still write NULL.
+func TestHandleEvent_UnresolvedPersonEmailSetsKeepFlags(t *testing.T) {
+	lookup := fullCustomerLookup()
+	delete(lookup, "csm@example.com")
+	delete(lookup, "tech2@example.com")
+	delete(lookup, "renewal@example.com")
+	se := &stubSalesEntityClient{customer: fullCustomer()}
+	repo := &stubSalesforceAccountRepo{lookup: lookup}
+	svc := NewSalesforceEventService(repo, se, SalesforceIngestSupport{})
+
+	if err := svc.HandleEvent(context.Background(), accountEvent(domain.SalesforceEventUpdated)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	got := repo.lastUpsert
+	if got.CustomerSuccessManagerID != nil || got.SecondaryTechnicalOwnerID != nil || got.RenewalAccountManagerID != nil {
+		t.Errorf("ids = %v / %v / %v, want nil", got.CustomerSuccessManagerID, got.SecondaryTechnicalOwnerID, got.RenewalAccountManagerID)
+	}
+	if !got.KeepCustomerSuccessManager || !got.KeepSecondaryTechnicalOwner || !got.KeepRenewalAccountManager {
+		t.Errorf("keep flags = %v/%v/%v, want all true", got.KeepCustomerSuccessManager, got.KeepSecondaryTechnicalOwner, got.KeepRenewalAccountManager)
+	}
+}
+
+// Resolved people and absent (empty) emails leave the keep flags false: a
+// resolved id is written, an empty email clears the column.
+func TestHandleEvent_ResolvedOrEmptyPersonLeavesKeepFlagsFalse(t *testing.T) {
+	repo := &stubSalesforceAccountRepo{lookup: fullCustomerLookup()}
+	svc := NewSalesforceEventService(repo, &stubSalesEntityClient{customer: fullCustomer()}, SalesforceIngestSupport{})
+	if err := svc.HandleEvent(context.Background(), accountEvent(domain.SalesforceEventUpdated)); err != nil {
+		t.Fatalf("HandleEvent (resolved): %v", err)
+	}
+	got := repo.lastUpsert
+	if got.KeepCustomerSuccessManager || got.KeepSecondaryTechnicalOwner || got.KeepRenewalAccountManager {
+		t.Errorf("resolved: keep flags set: %+v", got)
+	}
+	if !eqStr(got.CustomerSuccessManagerID, "user-csm") {
+		t.Errorf("resolved csm = %v, want user-csm", got.CustomerSuccessManagerID)
+	}
+
+	for name, blank := range map[string]*string{"absent": nil, "empty": sampleStr(""), "whitespace": sampleStr("   ")} {
+		t.Run(name, func(t *testing.T) {
+			cust := fullCustomer()
+			cust.CsmEmail, cust.SecondaryTechnicalOwner = blank, blank
+			cust.RenewalManager = &salesentity.CustomerUser{Email: blank}
+			repo := &stubSalesforceAccountRepo{lookup: fullCustomerLookup()}
+			svc := NewSalesforceEventService(repo, &stubSalesEntityClient{customer: cust}, SalesforceIngestSupport{})
+			if err := svc.HandleEvent(context.Background(), accountEvent(domain.SalesforceEventUpdated)); err != nil {
+				t.Fatalf("HandleEvent: %v", err)
+			}
+			got := repo.lastUpsert
+			if got.KeepCustomerSuccessManager || got.KeepSecondaryTechnicalOwner || got.KeepRenewalAccountManager {
+				t.Errorf("keep flags set for a blank email: %+v", got)
+			}
+			if got.CustomerSuccessManagerID != nil || got.SecondaryTechnicalOwnerID != nil || got.RenewalAccountManagerID != nil {
+				t.Errorf("ids = %v / %v / %v, want nil (cleared)", got.CustomerSuccessManagerID, got.SecondaryTechnicalOwnerID, got.RenewalAccountManagerID)
+			}
+		})
+	}
+}
+
+// A provisioning failure (SCIM error) is swallowed so the event still
+// succeeds, and the stored person is kept rather than nulled.
+func TestHandleEvent_ProvisioningErrorKeepsStoredPerson(t *testing.T) {
+	cust := fullCustomer()
+	cust.CsmEmail = sampleStr("jane.doe@wso2.com")
+	lookup := fullCustomerLookup()
+	repo := &stubSalesforceAccountRepo{lookup: lookup}
+	support := SalesforceIngestSupport{Owners: OwnerProvisioning{
+		SCIM: fakePersonFinder{err: errors.New("directory unavailable")},
+		Users: stubUserRepo{
+			createUser: func(context.Context, domain.CreateUserRequest, string) (domain.User, error) {
+				t.Fatal("CreateUser must not be called when the directory search failed")
+				return domain.User{}, nil
+			},
+		},
+	}}
+	svc := NewSalesforceEventService(repo, &stubSalesEntityClient{customer: cust}, support)
+
+	if err := svc.HandleEvent(context.Background(), accountEvent(domain.SalesforceEventUpdated)); err != nil {
+		t.Fatalf("HandleEvent must not fail on a provisioning error: %v", err)
+	}
+	got := repo.lastUpsert
+	if got.CustomerSuccessManagerID != nil || !got.KeepCustomerSuccessManager {
+		t.Errorf("csm = %v keep = %v, want nil / true", got.CustomerSuccessManagerID, got.KeepCustomerSuccessManager)
+	}
+	if got.KeepSecondaryTechnicalOwner || got.KeepRenewalAccountManager {
+		t.Errorf("resolved people must not be kept: %+v", got)
 	}
 }

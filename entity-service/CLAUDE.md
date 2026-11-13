@@ -69,7 +69,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
-| `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
+| `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; a value Salesforce sends empty clears its column; see "Salesforce Account ingest" for the full column set |
 | `CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Opportunity` envelopes (`sf_opportunity` plus its `sf_opportunity_product` line items, see "Salesforce Opportunity ingest" below) and `Linked_Opportunity__c`, `Invoice__c` and standalone `OpportunityLineItem` envelopes (`sf_opportunity_link`, `sf_invoice`, `sf_opportunity_product`); off, they are acknowledged and ignored. Keep it off while csm-sync-service still copies these tables from ServiceNow: the two writers use different row ids and `sf_id` is not unique, so both on means duplicate rows |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project__c` envelopes (see "Salesforce Project ingest" below); off, they are acknowledged and ignored. Update-only unless the insert switch is on too |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` | no | `false` | With the project flag on, lets the Project ingest and `EnsureProject` insert projects CSM does not have. Keep it off while csm-sync-service still inserts `project` rows (different id schemes and a UNIQUE `key`: its insert would fail forever); turn it on at cutover |
@@ -524,17 +524,20 @@ the list.
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
   `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
   `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
-- `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
+  Also plain assignment: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
-  `deactivation_date`. Sales Entity sends these only after its "customer fields"
-  change (SE-1 in `docs/customer-onboarding/SALESFORCE_SYNC_PLAN.md`); until then they
-  keep the ServiceNow sync's value. Switch them to plain assignment once SE-1 ships.
+  `deactivation_date`. A NULL cleared in Salesforce clears the column. For the
+  three person columns only, an empty email clears but an email CSM cannot resolve
+  to a user (no match, provisioning off or failed) keeps the stored value
+  (`Keep*` flags on `SalesforceAccountUpsert`, `$33`-`$35`); the event still succeeds.
 - Never written: `number` on an existing row (a new row gets the Salesforce Id,
   decision D9), `cre_team_id`, `sre_team_id`, `support_tier`, `support_timezone`,
   `suspension_process_state`, the two AI flags, `drive_location`.
 - Person references resolve by email against `"user"` (`LookupUserIDByEmail`); an
-  email with no user writes NULL and logs a WARN with the role and email.
+  email with no user logs a WARN with the role and email, and writes NULL
+  (`account_manager_id`, `technical_owner_id`) or keeps the stored value (the three
+  person columns above).
 - A value longer than its VARCHAR column (`accountColumnLimits`) or a date that does
   not parse (`2006-01-02`) is written as NULL with a WARN, so one bad field cannot
   fail the event.
