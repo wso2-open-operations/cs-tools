@@ -777,8 +777,12 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     entity-service finds and judges **once a day** (its CLAUDE.md, "Standard change suggestions"); the page
     reads the last snapshot and nothing is computed or decided here, so opening it costs one cheap read. A
     Customer filter (`accountId`), "Show near misses" (`includeIneligible`) and "Show dismissed"
-    (`includeDismissed`), not kept in the URL, are the only parameters (the thresholds are entity-service
-    configuration). A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
+    (`includeDismissed`), not kept in the URL, are the only filters (the thresholds are entity-service
+    configuration). The list is **paged by entity-service** (`limit` / `offset`, `TablePagination` with
+    10 / 20 / 50 a page, 20 by default; one suggestion can be 50 KB and more, so "All customers" is never
+    fetched whole): it is sorted across customers on the server, so a page is a slice of the one order; a
+    filter goes back to the first page, and a page left empty by a dismissal steps back to the new last
+    page. The count in the status line is `total`, every page's. A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
     `suggestionUpdatedText`, the viewer's time zone) and the thresholds it used; before the first snapshot it,
     and the empty table, say suggestions are computed once a day and none have been yet
     (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is

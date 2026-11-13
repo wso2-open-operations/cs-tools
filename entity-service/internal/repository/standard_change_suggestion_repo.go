@@ -50,9 +50,6 @@ type StandardChangeSuggestionRepository interface {
 	// OpenProposalsOf maps a change request id to the open proposals (draft or
 	// under review) that started from it or cite it as evidence.
 	OpenProposalsOf(ctx context.Context, changeRequestIDs []string) (map[string][]domain.EntityRef, error)
-	// Dismissals of the customers given (all customers when nil), by account
-	// id then key.
-	Dismissals(ctx context.Context, accountIDs []string) (map[string]map[string]domain.StandardChangeSuggestionDismissal, error)
 	// Dismiss records a dismissal (409 when the key is already dismissed for
 	// that customer, 400 when the account does not exist).
 	Dismiss(ctx context.Context, accountID, key, reason, actor string) (domain.StandardChangeSuggestionDismissal, error)
@@ -90,9 +87,10 @@ type StandardChangeSuggestionRepository interface {
 	// CustomerCounts are one customer's counts in a run (all zero when the run
 	// did not compute it: it had no candidates).
 	CustomerCounts(ctx context.Context, runID, accountID string) (domain.StandardChangeSuggestionScan, error)
-	// SnapshotRows reads a run's rows: of one customer when accountID is set, and
-	// only the eligible ones unless includeIneligible.
-	SnapshotRows(ctx context.Context, runID, accountID string, includeIneligible bool) ([]SuggestionSnapshotRow, error)
+	// SuggestionPage reads one page of a run's rows, each with its dismissal,
+	// in the order GET /standard-change-suggestions lists them (see
+	// SuggestionPageQuery), and counts the rows the query matches.
+	SuggestionPage(ctx context.Context, runID string, q SuggestionPageQuery) (SuggestionPage, error)
 	// SnapshotKeys is one customer's rows of a run with only their keys and
 	// member ids (no suggestion decoded), and the keys a skip carried into the
 	// run: what the next refresh carries the clusters' keys over from.
@@ -116,6 +114,33 @@ type SuggestionSnapshotRow struct {
 	Eligible   bool
 	MemberIDs  []string
 	Suggestion domain.StandardChangeSuggestion
+	// Dismissal is the customer's dismissal of this key, read live; set only by
+	// SuggestionPage (nil when it is not dismissed).
+	Dismissal *domain.StandardChangeSuggestionDismissal
+}
+
+// SuggestionPageQuery is what SuggestionPage reads: the rows of one customer
+// (every customer when AccountID is empty), only the eligible ones unless
+// IncludeIneligible, and only those not dismissed unless IncludeDismissed;
+// Limit of them after skipping Offset. The order is the one sort, across
+// customers: eligible first, then the most often closed (closedCount), then the
+// most recently completed (lastCompletedOn), then the customer's name and the
+// key (byte order), then the row's id. It is applied in the query, so a page is
+// the same slice of the whole list whatever the page size.
+type SuggestionPageQuery struct {
+	AccountID         string
+	IncludeIneligible bool
+	IncludeDismissed  bool
+	Limit, Offset     int
+}
+
+// SuggestionPage is one page of a run's suggestions. Total counts every row the
+// query matches (not only this page's); Dismissed counts the matching rows that
+// are dismissed, whether or not IncludeDismissed returns them.
+type SuggestionPage struct {
+	Rows      []SuggestionSnapshotRow
+	Total     int
+	Dismissed int
 }
 
 // SuggestionCandidate is one completed change request as the clustering reads it.
@@ -280,36 +305,6 @@ func scanSuggestionDismissal(row pgx.Row) (accountID, key string, d domain.Stand
 		d.DismissedBy = &domain.EntityRef{Name: byName}
 	}
 	return
-}
-
-// Dismissals implements StandardChangeSuggestionRepository.
-func (r *standardChangeSuggestionRepo) Dismissals(ctx context.Context, accountIDs []string) (map[string]map[string]domain.StandardChangeSuggestionDismissal, error) {
-	out := map[string]map[string]domain.StandardChangeSuggestionDismissal{}
-	if accountIDs != nil && len(accountIDs) == 0 {
-		return out, nil
-	}
-	rows, err := r.db.Query(ctx, `SELECT `+suggestionDismissalColumns+`
-		  FROM standard_change_suggestion_dismissal d
-		  LEFT JOIN "user" du ON du.id = d.dismissed_by_user_id
-		 WHERE $1::uuid[] IS NULL OR d.account_id = ANY($1::uuid[])`, accountIDs)
-	if err != nil {
-		return nil, fmt.Errorf("standard change suggestions: dismissals: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		account, key, d, err := scanSuggestionDismissal(rows)
-		if err != nil {
-			return nil, fmt.Errorf("standard change suggestions: dismissals: %w", err)
-		}
-		if out[account] == nil {
-			out[account] = map[string]domain.StandardChangeSuggestionDismissal{}
-		}
-		out[account][key] = d
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("standard change suggestions: dismissals: %w", err)
-	}
-	return out, nil
 }
 
 // Dismiss implements StandardChangeSuggestionRepository.
@@ -569,33 +564,97 @@ func (r *standardChangeSuggestionRepo) PublishRun(ctx context.Context, id string
 	})
 }
 
-// SnapshotRows implements StandardChangeSuggestionRepository.
-func (r *standardChangeSuggestionRepo) SnapshotRows(ctx context.Context, runID, accountID string, includeIneligible bool) ([]SuggestionSnapshotRow, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT account_id::text, suggestion_key, eligible, member_ids::text[], suggestion
-		  FROM standard_change_suggestion_snapshot
-		 WHERE run_id = $1::uuid
-		   AND ($2 = '' OR account_id = $2::uuid)
-		   AND ($3 OR eligible)
-		 ORDER BY id`, runID, accountID, includeIneligible)
+// suggestionPageSQL reads one page of a run's suggestions (see
+// SuggestionPageQuery) with their dismissals and the counts, in one statement so
+// the counts and the page see the same dismissals. $1 run, $2 account (empty for
+// every customer), $3 includeIneligible, $4 includeDismissed, $5 limit, $6 offset.
+// The sort keys are read from the stored suggestion: closedCount and
+// lastCompletedOn are always written, and the name and key compare in byte
+// order (COLLATE "C"). The dismissal's columns are suggestionDismissalColumns'
+// (all NULL when the row is not dismissed). The counts row is joined to the
+// page with LEFT JOIN, so a page past the end still answers the counts.
+const suggestionPageSQL = `
+	WITH matched AS (
+		SELECT s.id, s.account_id, s.suggestion_key, s.eligible, s.member_ids, s.suggestion,
+		       d.id AS dismissal_id,
+		       (s.suggestion ->> 'closedCount')::int AS closed_count,
+		       (s.suggestion ->> 'lastCompletedOn')::timestamptz AS last_completed_on,
+		       COALESCE(s.suggestion -> 'customer' ->> 'name', '') AS customer_name
+		  FROM standard_change_suggestion_snapshot s
+		  LEFT JOIN standard_change_suggestion_dismissal d
+		    ON d.account_id = s.account_id AND d.suggestion_key = s.suggestion_key
+		 WHERE s.run_id = $1::uuid
+		   AND ($2 = '' OR s.account_id = $2::uuid)
+		   AND ($3 OR s.eligible)
+	), counts AS (
+		SELECT COUNT(*) FILTER (WHERE $4 OR dismissal_id IS NULL) AS total,
+		       COUNT(*) FILTER (WHERE dismissal_id IS NOT NULL) AS dismissed
+		  FROM matched
+	), page AS (
+		SELECT * FROM matched
+		 WHERE $4 OR dismissal_id IS NULL
+		 ORDER BY eligible DESC, closed_count DESC, last_completed_on DESC NULLS LAST,
+		          customer_name COLLATE "C", suggestion_key COLLATE "C", id
+		 LIMIT $5 OFFSET $6
+	)
+	SELECT c.total, c.dismissed,
+	       p.account_id::text, p.suggestion_key, p.eligible, p.member_ids::text[], p.suggestion,
+	       ` + suggestionDismissalColumns + `
+	  FROM counts c
+	  LEFT JOIN page p ON TRUE
+	  LEFT JOIN standard_change_suggestion_dismissal d ON d.id = p.dismissal_id
+	  LEFT JOIN "user" du ON du.id = d.dismissed_by_user_id
+	 ORDER BY p.eligible DESC, p.closed_count DESC, p.last_completed_on DESC NULLS LAST,
+	          p.customer_name COLLATE "C", p.suggestion_key COLLATE "C", p.id`
+
+// SuggestionPage implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) SuggestionPage(ctx context.Context, runID string, q SuggestionPageQuery) (SuggestionPage, error) {
+	out := SuggestionPage{Rows: []SuggestionSnapshotRow{}}
+	rows, err := r.db.Query(ctx, suggestionPageSQL, runID, q.AccountID, q.IncludeIneligible, q.IncludeDismissed, q.Limit, q.Offset)
 	if err != nil {
-		return nil, fmt.Errorf("read suggestions: %w", err)
+		return out, fmt.Errorf("read suggestions: %w", err)
 	}
 	defer rows.Close()
-	var out []SuggestionSnapshotRow
 	for rows.Next() {
-		var row SuggestionSnapshotRow
-		var raw []byte
-		if err := rows.Scan(&row.AccountID, &row.Key, &row.Eligible, &row.MemberIDs, &raw); err != nil {
-			return nil, fmt.Errorf("read suggestions: %w", err)
+		var (
+			accountID, key, dismissalID, reason, byID, byName *string
+			dismissalAccount, dismissalKey                    *string
+			eligible                                          *bool
+			memberIDs                                         []string
+			raw                                               []byte
+			dismissedOn                                       *time.Time
+		)
+		if err := rows.Scan(&out.Total, &out.Dismissed, &accountID, &key, &eligible, &memberIDs, &raw,
+			&dismissalID, &dismissalAccount, &dismissalKey, &reason, &dismissedOn, &byID, &byName); err != nil {
+			return out, fmt.Errorf("read suggestions: %w", err)
 		}
+		if accountID == nil {
+			continue // the counts alone: no row on this page
+		}
+		row := SuggestionSnapshotRow{AccountID: *accountID, Key: *key, Eligible: *eligible, MemberIDs: memberIDs}
 		if err := json.Unmarshal(raw, &row.Suggestion); err != nil {
-			return nil, fmt.Errorf("read suggestions: decode: %w", err)
+			return out, fmt.Errorf("read suggestions: decode: %w", err)
 		}
-		out = append(out, row)
+		if dismissalID != nil {
+			d := domain.StandardChangeSuggestionDismissal{ID: *dismissalID, DismissedBy: &domain.EntityRef{}}
+			if reason != nil {
+				d.Reason = *reason
+			}
+			if dismissedOn != nil {
+				d.DismissedOn = *dismissedOn
+			}
+			if byID != nil {
+				d.DismissedBy.ID = *byID
+			}
+			if byName != nil {
+				d.DismissedBy.Name = *byName
+			}
+			row.Dismissal = &d
+		}
+		out.Rows = append(out.Rows, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read suggestions: %w", err)
+		return out, fmt.Errorf("read suggestions: %w", err)
 	}
 	return out, nil
 }

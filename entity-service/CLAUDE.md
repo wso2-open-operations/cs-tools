@@ -9075,6 +9075,18 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
 - **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
   dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
   are as they were at the refresh.
+- **One page per read, sorted in the query.** One suggestion carries up to 100 members, up to 99 evidence
+  refs and up to 20 CAB rejections and 20 comments (measured: about 3 KB at 5 members, 44 KB at 100, 50 KB
+  with a few CAB entries, 137 KB at every cap), so a read across every customer is never sent whole. GET
+  takes `limit` (default 20, at most 50, `normalizePagination`) and `offset` and answers `total`, `limit`
+  and `offset` beside the page. `SuggestionPage` sorts and pages in one statement, across customers when
+  no `accountId` is given: eligible first, then `closedCount` descending, then `lastCompletedOn`
+  descending, then the customer's name and the key in byte order (`COLLATE "C"`), then the row id. The
+  sort keys are read from the stored JSON (no column for them, no migration); the dismissals are joined in
+  the same statement, so `total` (the rows the filters match) and `scanned.dismissed` (the matching rows
+  that are dismissed, shown or not) agree with the page. The open proposals are read for the page's members
+  only. `TestStandardChangeSuggestionPageIntegration` checks the query's order against the reference sort
+  (`sgListOrder`, the fake repository's) at every page size, on a database whose collation is not C.
 - **Logged**: each page (`refresh page`: customers, skipped, change requests, suggestions, `more`,
   `pageMs`), each customer skipped as too large (WARN) or for an error (ERROR, with the cause), a page
   with no time for a customer (WARN), a run refused for its errors (ERROR) and the publish (`refresh published`: customers, skipped, change

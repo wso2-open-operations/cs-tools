@@ -18,8 +18,10 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -37,19 +39,41 @@ func NewStandardChangeSuggestionHandler(svc service.StandardChangeSuggestionServ
 
 // parseSuggestionsQuery reads GET /standard-change-suggestions' query. A flag
 // is true only for "true" (any case). The criteria are configuration, applied
-// when the snapshot is computed, not parameters of a read.
-func parseSuggestionsQuery(r *http.Request) domain.StandardChangeSuggestionsRequest {
+// when the snapshot is computed, not parameters of a read. limit and offset must
+// be integers when given (a ValidationError otherwise); their default and
+// bounds are the service's.
+func parseSuggestionsQuery(r *http.Request) (domain.StandardChangeSuggestionsRequest, error) {
 	q := r.URL.Query()
-	return domain.StandardChangeSuggestionsRequest{
+	req := domain.StandardChangeSuggestionsRequest{
 		AccountID:         q.Get("accountId"),
 		IncludeIneligible: strings.EqualFold(strings.TrimSpace(q.Get("includeIneligible")), "true"),
 		IncludeDismissed:  strings.EqualFold(strings.TrimSpace(q.Get("includeDismissed")), "true"),
 	}
+	for _, p := range []struct {
+		name string
+		to   *int
+	}{{"limit", &req.Pagination.Limit}, {"offset", &req.Pagination.Offset}} {
+		raw := strings.TrimSpace(q.Get(p.name))
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return req, &apierror.ValidationError{Msg: p.name + " must be a non-negative integer"}
+		}
+		*p.to = n
+	}
+	return req, nil
 }
 
 // GetSuggestions handles GET /standard-change-suggestions.
 func (h *StandardChangeSuggestionHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.GetSuggestions(r.Context(), parseSuggestionsQuery(r))
+	req, err := parseSuggestionsQuery(r)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	resp, err := h.svc.GetSuggestions(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

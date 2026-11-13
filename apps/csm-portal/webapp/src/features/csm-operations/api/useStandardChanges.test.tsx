@@ -235,6 +235,20 @@ describe("standard change reads", () => {
     await act(() => client.invalidateQueries({ queryKey: STANDARD_CHANGES_KEY }));
     await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
   });
+
+  it("asks for one page of the suggestions, each page its own cache entry", async () => {
+    getMock.mockResolvedValue({ suggestions: [], total: 0, limit: 20, offset: 0, criteria: {}, scanned: {} });
+    const client = newClient();
+    const { result } = renderHook(
+      () => ({ first: useStandardChangeSuggestions({ limit: 20 }), second: useStandardChangeSuggestions({ limit: 20, offset: 20 }) }),
+      { wrapper: wrapper(client) },
+    );
+    await waitFor(() => expect(result.current.second.isSuccess).toBe(true));
+    expect(getMock.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "/standard-change-suggestions?limit=20",
+      "/standard-change-suggestions?limit=20&offset=20",
+    ]);
+  });
 });
 
 describe("standard change writes", () => {

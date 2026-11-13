@@ -84,8 +84,9 @@ export function suggestionProposalEvidence(s: Pick<BeStandardChangeSuggestion, "
 }
 
 /** The line above the list: how many, from what, judged by which thresholds. */
-export function suggestionCriteriaText(r: BeStandardChangeSuggestionsResponse): string {
-  const n = r.suggestions.length;
+export function suggestionCriteriaText(r: Pick<BeStandardChangeSuggestionsResponse, "total" | "criteria" | "scanned">): string {
+  // Every page's, not this page's.
+  const n = r.total;
   const c = r.criteria;
   return (
     `${n} ${n === 1 ? "suggestion" : "suggestions"} from ${r.scanned.changeRequests} change requests completed in the last ${c.windowMonths} months` +

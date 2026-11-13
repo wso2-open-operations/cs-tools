@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -121,10 +120,13 @@ func NewStandardChangeSuggestionService(repo repository.StandardChangeSuggestion
 
 const standardChangeSuggestionForbidden = "standard change suggestions are available to WSO2 staff only"
 
-// GetSuggestions implements StandardChangeSuggestionService: the last published
-// snapshot, filtered as asked. It never computes. The open proposals and the
-// dismissals are read live, so a suggestion proposed or dismissed since the
-// snapshot says so at once.
+// GetSuggestions implements StandardChangeSuggestionService: one page of the
+// last published snapshot, filtered as asked. It never computes. The open
+// proposals and the dismissals are read live, so a suggestion proposed or
+// dismissed since the snapshot says so at once. The list is sorted and paged in
+// the query (repository.SuggestionPageQuery), across customers when none is
+// asked for: one suggestion can hold 100 members and 40 CAB entries (about
+// 45 KB, up to about 140 KB), so a snapshot of every customer is never sent whole.
 func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, error) {
 	if err := RequireInternalCaller(ctx, s.access, standardChangeSuggestionForbidden); err != nil {
 		return domain.StandardChangeSuggestionsResponse{}, err
@@ -132,6 +134,9 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 	account := strings.ToLower(strings.TrimSpace(req.AccountID))
 	if account != "" && !validate.IsUUID(account) {
 		return domain.StandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "accountId must be a UUID"}
+	}
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.StandardChangeSuggestionsResponse{}, err
 	}
 	// The run, its counts and its rows are separate reads: a refresh publishing
 	// between them (which deletes the run read first) would answer one run's
@@ -158,7 +163,10 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 
 // readSuggestions is one read of GetSuggestions (see there), with the run it read.
 func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, account string, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, string, error) {
-	resp := domain.StandardChangeSuggestionsResponse{Suggestions: []domain.StandardChangeSuggestion{}, Criteria: s.criteria, SkippedCustomers: []domain.StandardChangeSuggestionSkipped{}}
+	resp := domain.StandardChangeSuggestionsResponse{
+		Suggestions: []domain.StandardChangeSuggestion{}, Criteria: s.criteria, SkippedCustomers: []domain.StandardChangeSuggestionSkipped{},
+		Limit: req.Pagination.Limit, Offset: req.Pagination.Offset,
+	}
 	run, err := s.repo.LatestRun(ctx)
 	if err != nil || run == nil {
 		return resp, "", err // nothing computed yet: an empty list, no computedOn
@@ -175,20 +183,19 @@ func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, a
 		return resp, "", err
 	}
 
-	rows, err := s.repo.SnapshotRows(ctx, run.ID, account, req.IncludeIneligible)
+	page, err := s.repo.SuggestionPage(ctx, run.ID, repository.SuggestionPageQuery{
+		AccountID:         account,
+		IncludeIneligible: req.IncludeIneligible,
+		IncludeDismissed:  req.IncludeDismissed,
+		Limit:             req.Pagination.Limit,
+		Offset:            req.Pagination.Offset,
+	})
 	if err != nil {
 		return resp, "", err
 	}
-	var accounts []string // nil: every customer's dismissals
-	if account != "" {
-		accounts = []string{account}
-	}
-	dismissals, err := s.repo.Dismissals(ctx, accounts)
-	if err != nil {
-		return resp, "", err
-	}
+	resp.Total, resp.Scanned.Dismissed = page.Total, page.Dismissed
 	var memberIDs []string
-	for _, row := range rows {
+	for _, row := range page.Rows {
 		memberIDs = append(memberIDs, row.MemberIDs...)
 	}
 	proposals, err := s.repo.OpenProposalsOf(ctx, memberIDs)
@@ -196,9 +203,9 @@ func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, a
 		return resp, "", err
 	}
 
-	for _, row := range rows {
+	for _, row := range page.Rows {
 		sg := row.Suggestion
-		sg.Dismissal, sg.OpenProposals = nil, []domain.EntityRef{}
+		sg.Dismissal, sg.OpenProposals = row.Dismissal, []domain.EntityRef{}
 		// A snapshot computed before the CAB's pushback was recorded has none.
 		if sg.CABRejections == nil {
 			sg.CABRejections = []domain.StandardChangeCABRejection{}
@@ -222,21 +229,11 @@ func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, a
 				}
 			}
 		}
-		if d, ok := dismissals[row.AccountID][row.Key]; ok {
-			resp.Scanned.Dismissed++
-			if !req.IncludeDismissed {
-				continue
-			}
-			dd := d
-			sg.Dismissal = &dd
-		}
 		resp.Suggestions = append(resp.Suggestions, sg)
 	}
-	sortSuggestions(resp.Suggestions)
 	return resp, run.ID, nil
 }
 
-// sortSuggestions: eligible first, then the most often closed, then the most recent.
 // listedDeviations counts the listed members that deviated from their plan.
 func listedDeviations(members []domain.StandardChangeSuggestionMember) int {
 	n := 0
@@ -246,25 +243,6 @@ func listedDeviations(members []domain.StandardChangeSuggestionMember) int {
 		}
 	}
 	return n
-}
-
-func sortSuggestions(list []domain.StandardChangeSuggestion) {
-	sort.SliceStable(list, func(a, b int) bool {
-		x, y := list[a], list[b]
-		if x.Eligible != y.Eligible {
-			return x.Eligible
-		}
-		if x.ClosedCount != y.ClosedCount {
-			return x.ClosedCount > y.ClosedCount
-		}
-		if !x.LastCompletedOn.Equal(y.LastCompletedOn) {
-			return x.LastCompletedOn.After(y.LastCompletedOn)
-		}
-		if x.Customer.Name != y.Customer.Name {
-			return x.Customer.Name < y.Customer.Name
-		}
-		return x.Key < y.Key
-	})
 }
 
 // Refresh implements StandardChangeSuggestionService: one page of a refresh run

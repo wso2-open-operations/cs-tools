@@ -462,7 +462,8 @@ export function useProjectCustomer(projectId: string | undefined): UseQueryResul
  * `GET /standard-change-suggestions`: clusters of a customer's completed change
  * requests that look like the same change done again (every customer when no
  * accountId), from the snapshot entity-service's scheduled refresh last
- * published (`computedOn`; none before the first). A read never computes.
+ * published (`computedOn`; none before the first). A read never computes. It
+ * answers one page (`limit`, default 20, at most 50; `offset`) with `total`.
  */
 export function useStandardChangeSuggestions(
   query: BeStandardChangeSuggestionsQuery,
@@ -472,6 +473,8 @@ export function useStandardChangeSuggestions(
   if (query.accountId) params.set("accountId", query.accountId);
   if (query.includeIneligible) params.set("includeIneligible", "true");
   if (query.includeDismissed) params.set("includeDismissed", "true");
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.offset) params.set("offset", String(query.offset));
   const qs = params.toString();
   return useQuery({
     queryKey: [...SUGGESTIONS_KEY, qs],

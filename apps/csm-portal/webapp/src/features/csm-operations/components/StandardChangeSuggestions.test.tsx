@@ -15,6 +15,7 @@
 // under the License.
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { JSX } from "react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -90,6 +91,9 @@ function serve(
   mocks.suggestions.mockReturnValue({
     data: {
       suggestions: list,
+      total: list.length,
+      limit: 20,
+      offset: 0,
       criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
       computedOn,
       scanned: { customers: 2, changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
@@ -130,7 +134,7 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.queryByText(/Covered by|Close to|^New$/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^(Revise|Open) / })).not.toBeInTheDocument();
     expect(within(row("Rotate keys")).getByRole("button", { name: "Propose" })).toBeEnabled();
-    expect(mocks.suggestions).toHaveBeenLastCalledWith({ accountId: undefined, includeIneligible: false, includeDismissed: false });
+    expect(mocks.suggestions).toHaveBeenLastCalledWith({ accountId: undefined, includeIneligible: false, includeDismissed: false, limit: 20, offset: 0 });
   });
 
   it("says when the snapshot was computed", () => {
@@ -227,7 +231,7 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.getByText(/No change is done often enough/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Show near misses" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show dismissed" }));
-    expect(mocks.suggestions).toHaveBeenLastCalledWith({ accountId: undefined, includeIneligible: true, includeDismissed: true });
+    expect(mocks.suggestions).toHaveBeenLastCalledWith({ accountId: undefined, includeIneligible: true, includeDismissed: true, limit: 20, offset: 0 });
   });
 
   it("Propose starts a new proposal from the newest clean change request, cites the others, and opens it", () => {
@@ -380,6 +384,71 @@ describe("StandardChangeSuggestions", () => {
       fireEvent.click(screen.getByRole("button", { name: "Show the details of Deploy CApps to Pekin prod" }));
       expect(screen.queryByText("CAB pushback")).not.toBeInTheDocument();
       expect(screen.queryByText(/rejected by the CAB/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("paging", () => {
+    // Serves the page the hook is asked for, out of `total` suggestions.
+    function servePages(total: number): void {
+      mocks.suggestions.mockImplementation((q: { limit: number; offset: number }) => ({
+        data: {
+          suggestions: Array.from({ length: Math.max(0, Math.min(q.limit, total - q.offset)) }, (_, i) =>
+            suggestion({ key: `k${q.offset + i}`, subject: `Change ${q.offset + i}` }),
+          ),
+          total,
+          limit: q.limit,
+          offset: q.offset,
+          criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
+          computedOn: "2026-11-06T14:00:00Z",
+          scanned: { customers: 9, changeRequests: 400, clusters: 60, eligible: total, dismissed: 0 },
+          skippedCustomers: [],
+        },
+        isLoading: false,
+        isError: false,
+        isFetching: false,
+        refetch: vi.fn(),
+      }));
+    }
+    const lastQuery = (): unknown => mocks.suggestions.mock.calls[mocks.suggestions.mock.calls.length - 1][0];
+
+    it("asks for one page at a time and counts every page's suggestions", () => {
+      servePages(45);
+      renderIt();
+      expect(screen.getByRole("status")).toHaveTextContent("45 suggestions from 400 change requests");
+      expect(screen.getByText("Change 0")).toBeInTheDocument();
+      expect(screen.getByText("1–20 of 45")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+      expect(lastQuery()).toEqual({ accountId: undefined, includeIneligible: false, includeDismissed: false, limit: 20, offset: 20 });
+      expect(screen.getByText("Change 20")).toBeInTheDocument();
+      expect(screen.queryByText("Change 0")).not.toBeInTheDocument();
+    });
+
+    it("goes back to the first page when a filter changes", () => {
+      servePages(45);
+      renderIt();
+      fireEvent.click(screen.getByRole("button", { name: "Go to last page" }));
+      expect(lastQuery()).toMatchObject({ offset: 40 });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Show near misses" }));
+      expect(lastQuery()).toEqual({ accountId: undefined, includeIneligible: true, includeDismissed: false, limit: 20, offset: 0 });
+    });
+
+    it("steps back when the last page empties (its last suggestion was dismissed)", () => {
+      servePages(41);
+      // A new element each time, so a rerender renders the list again.
+      const tree = (): JSX.Element => (
+        <MemoryRouter>
+          <StandardChangeSuggestions leading={null} trailing={null} />
+        </MemoryRouter>
+      );
+      const { rerender } = render(tree());
+      fireEvent.click(screen.getByRole("button", { name: "Go to last page" }));
+      expect(screen.getByText("Change 40")).toBeInTheDocument();
+      // The dismissal's refetch of the same page: 40 left, so page 3 is empty.
+      servePages(40);
+      rerender(tree());
+      expect(lastQuery()).toMatchObject({ offset: 20 });
+      expect(screen.getByText("Change 20")).toBeInTheDocument();
+      expect(screen.getByText("21–40 of 40")).toBeInTheDocument();
     });
   });
 });

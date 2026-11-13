@@ -44,15 +44,24 @@ type StandardChangeSuggestionsRequest struct {
 	IncludeIneligible bool
 	// IncludeDismissed also returns dismissed suggestions, with their dismissal.
 	IncludeDismissed bool
+	// Pagination: limit (default 20, at most 50) and offset over the whole
+	// sorted list, which spans every customer when AccountID is empty.
+	Pagination Pagination
 }
 
 // StandardChangeSuggestionsResponse is GET /standard-change-suggestions' answer:
-// the last published snapshot. ComputedOn is when it was published; nil (with no
-// suggestions) when none has been computed yet.
+// one page of the last published snapshot. ComputedOn is when it was published;
+// nil (with no suggestions) when none has been computed yet.
 type StandardChangeSuggestionsResponse struct {
-	Suggestions []StandardChangeSuggestion       `json:"suggestions"`
-	Criteria    StandardChangeSuggestionCriteria `json:"criteria"`
-	ComputedOn  *time.Time                       `json:"computedOn"`
+	// Suggestions: this page, eligible first, then the most often closed, then
+	// the most recently completed (across customers when none is asked for).
+	Suggestions []StandardChangeSuggestion `json:"suggestions"`
+	// Total: the suggestions the query matches, on every page.
+	Total      int                              `json:"total"`
+	Limit      int                              `json:"limit"`
+	Offset     int                              `json:"offset"`
+	Criteria   StandardChangeSuggestionCriteria `json:"criteria"`
+	ComputedOn *time.Time                       `json:"computedOn"`
 	// Scanned: completed change requests the snapshot considered (not raised from
 	// a template, of a customer, completed in the window) and the clusters they
 	// formed (two or more members); Dismissed is counted when read.

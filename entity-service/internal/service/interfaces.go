@@ -271,7 +271,7 @@ type StandardChangeService interface {
 // completed change requests suggest (standard_change_suggestion.go) and keeps
 // the dismissals. Internal callers only; a dismissal also needs a person.
 type StandardChangeSuggestionService interface {
-	// GetSuggestions reads the last published snapshot; it never computes.
+	// GetSuggestions reads one page of the last published snapshot; it never computes.
 	GetSuggestions(ctx context.Context, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, error)
 	// Refresh computes one page of a snapshot run (service credentials only).
 	Refresh(ctx context.Context, req domain.RefreshStandardChangeSuggestionsRequest) (domain.RefreshStandardChangeSuggestionsResponse, error)

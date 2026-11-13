@@ -14592,21 +14592,28 @@ paths:
         computedOn is when the snapshot was published; with none yet the answer is an empty list
         and no computedOn. skippedCustomers names the customers (the one asked for, or all) the
         refresh could not compute (too large for their deadline, or an error), each with the reason:
-        the snapshot holds nothing for them, which is not the same as having no suggestions. Internal
-        callers only.
+        the snapshot holds nothing for them, which is not the same as having no suggestions.
+        The answer is one page (limit, default 20, at most 50; offset), sorted and paged across
+        customers, with total: one suggestion carries up to 100 members and its CAB rejections and
+        comments (about 45 KB, up to about 140 KB), so the whole snapshot is never sent at once.
+        Internal callers only.
       parameters:
         - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}, description: "One customer; every customer when absent."}
         - {name: includeIneligible, in: query, required: false, schema: {type: boolean}, description: "Also the clusters that miss a criterion (each names what it misses)."}
         - {name: includeDismissed, in: query, required: false, schema: {type: boolean}, description: "Also the dismissed suggestions, with their dismissal."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 50, default: 20}, description: "Page size; 0 or absent is 20."}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}, description: "Suggestions to skip, counted in the sorted list."}
       responses:
         "200":
-          description: The suggestions, eligible first, then the most often closed, then the most recent.
+          description: >-
+            One page of the suggestions, eligible first, then the most often closed, then the most
+            recent (across customers when no accountId), with total.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StandardChangeSuggestionsResponse'
         "400":
-          description: "Bad request: accountId is not a UUID."
+          description: "Bad request: accountId is not a UUID, limit or offset is not a non-negative integer, or limit exceeds 50."
           content:
             application/json:
               schema:
@@ -36463,11 +36470,23 @@ components:
           description: Why the template may be used again. Required (blank is a 400), at most 1000 characters.
     StandardChangeSuggestionsResponse:
       type: object
-      required: [suggestions, criteria, scanned]
+      required: [suggestions, total, limit, offset, criteria, scanned]
       properties:
         suggestions:
           type: array
+          description: >-
+            This page: eligible first, then the most often closed (closedCount), then the most
+            recently completed (lastCompletedOn), then the customer's name and the key; across
+            customers when no accountId is given. The order is the same whatever the page size.
           items: {$ref: '#/components/schemas/StandardChangeSuggestion'}
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            The suggestions the query matches (accountId, includeIneligible, includeDismissed), on
+            every page; 0 when nothing has been computed yet.
+        limit: {type: integer, minimum: 1, maximum: 50, description: "The page size applied (20 when none was given)."}
+        offset: {type: integer, minimum: 0}
         criteria:
           $ref: '#/components/schemas/StandardChangeSuggestionCriteria'
         computedOn:

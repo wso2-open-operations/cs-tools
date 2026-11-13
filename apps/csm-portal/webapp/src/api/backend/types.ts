@@ -6062,10 +6062,21 @@ export interface BeStandardChangeSuggestionsQuery {
   accountId?: string;
   includeIneligible?: boolean;
   includeDismissed?: boolean;
+  /** Page size: 20 when absent, at most 50. */
+  limit?: number;
+  offset?: number;
 }
 
 export interface BeStandardChangeSuggestionsResponse {
+  /**
+   * One page: eligible first, then the most often closed, then the most
+   * recent, across customers when no accountId is given.
+   */
   suggestions: BeStandardChangeSuggestion[];
+  /** The suggestions the query matches, on every page. */
+  total: number;
+  limit: number;
+  offset: number;
   /** The thresholds the snapshot was computed by (configuration, not a request parameter). */
   criteria: BeStandardChangeSuggestionCriteria;
   /** When the snapshot was published (a scheduled refresh, once a day); null before the first. */

@@ -280,7 +280,7 @@ type fakeSuggestionRepo struct {
 	listed      map[string][]string                                      // run id -> the customers listed at its start
 	skipped     map[string]map[string]string                             // run id -> account -> reason
 	carried     map[string]map[string][]repository.SuggestionSnapshotRow // run id -> account -> keys a skip carried
-	beforeRows  func()                                                   // called before SnapshotRows reads (once set)
+	beforeRows  func()                                                   // called before SuggestionPage reads (once set)
 	nextRun     int
 	loaded      []string         // accounts whose candidates were read, in order
 	slow        map[string]bool  // accounts whose read waits until its context ends
@@ -344,9 +344,6 @@ func (f *fakeSuggestionRepo) IncidentsOf(context.Context, []string) (map[string]
 }
 func (f *fakeSuggestionRepo) OpenProposalsOf(context.Context, []string) (map[string][]domain.EntityRef, error) {
 	return f.proposals, nil
-}
-func (f *fakeSuggestionRepo) Dismissals(context.Context, []string) (map[string]map[string]domain.StandardChangeSuggestionDismissal, error) {
-	return f.dismissals, nil
 }
 func (f *fakeSuggestionRepo) Dismiss(_ context.Context, account, key, reason, actor string) (domain.StandardChangeSuggestionDismissal, error) {
 	f.dismissed = append(f.dismissed, account+"|"+key+"|"+reason+"|"+actor)
@@ -507,17 +504,62 @@ func (f *fakeSuggestionRepo) SnapshotKeys(_ context.Context, runID, account stri
 	}
 	return append(out, f.carried[runID][account]...), nil
 }
-func (f *fakeSuggestionRepo) SnapshotRows(_ context.Context, runID, account string, includeIneligible bool) ([]repository.SuggestionSnapshotRow, error) {
+
+// SuggestionPage serves the rows as the query does: filtered, each with its
+// dismissal, sorted by sgListOrder, then paged.
+func (f *fakeSuggestionRepo) SuggestionPage(_ context.Context, runID string, q repository.SuggestionPageQuery) (repository.SuggestionPage, error) {
 	if f.beforeRows != nil {
 		f.beforeRows()
 	}
-	var out []repository.SuggestionSnapshotRow
+	out := repository.SuggestionPage{Rows: []repository.SuggestionSnapshotRow{}}
+	var matched []repository.SuggestionSnapshotRow
 	for _, r := range f.rows[runID] {
-		if (account == "" || r.AccountID == account) && (includeIneligible || r.Eligible) {
-			out = append(out, r)
+		if (q.AccountID != "" && r.AccountID != q.AccountID) || (!q.IncludeIneligible && !r.Eligible) {
+			continue
 		}
+		r.Dismissal = nil
+		if d, ok := f.dismissals[r.AccountID][r.Key]; ok {
+			out.Dismissed++
+			if !q.IncludeDismissed {
+				continue
+			}
+			r.Dismissal = &d
+		}
+		matched = append(matched, r)
+	}
+	sgListOrder(matched)
+	out.Total = len(matched)
+	if q.Offset < len(matched) {
+		matched = matched[q.Offset:]
+		if q.Limit < len(matched) {
+			matched = matched[:q.Limit]
+		}
+		out.Rows = matched
 	}
 	return out, nil
+}
+
+// sgListOrder is the order GET /standard-change-suggestions lists in (the
+// query's ORDER BY, repository.SuggestionPageQuery): eligible first, then the
+// most often closed, then the most recent, then the customer's name and the
+// key; a stable sort keeps the rows' stored order last.
+func sgListOrder(list []repository.SuggestionSnapshotRow) {
+	sort.SliceStable(list, func(a, b int) bool {
+		x, y := list[a].Suggestion, list[b].Suggestion
+		if x.Eligible != y.Eligible {
+			return x.Eligible
+		}
+		if x.ClosedCount != y.ClosedCount {
+			return x.ClosedCount > y.ClosedCount
+		}
+		if !x.LastCompletedOn.Equal(y.LastCompletedOn) {
+			return x.LastCompletedOn.After(y.LastCompletedOn)
+		}
+		if x.Customer.Name != y.Customer.Name {
+			return x.Customer.Name < y.Customer.Name
+		}
+		return x.Key < y.Key
+	})
 }
 
 func sgService(repo *fakeSuggestionRepo, internal bool) *standardChangeSuggestionService {
@@ -771,5 +813,58 @@ func TestNewStandardChangeSuggestionService_Criteria(t *testing.T) {
 	want.MinClosed, want.MinSuccessPercent = 7, 100
 	if svc.criteria != want {
 		t.Errorf("criteria = %+v, want %+v (defaults for zero, capped at 100)", svc.criteria, want)
+	}
+}
+
+// A read is one page: 20 by default, at most 50, with total over every page,
+// so every customer's snapshot is never sent in one response.
+func TestStandardChangeSuggestionService_GetSuggestions_Pages(t *testing.T) {
+	completed := sgNow.Add(-24 * time.Hour)
+	repo := &fakeSuggestionRepo{
+		runs: map[string]*repository.SuggestionRun{"r1": {ID: "r1", CompletedOn: &sgNow}},
+		rows: map[string][]repository.SuggestionSnapshotRow{},
+	}
+	for i := 0; i < 45; i++ {
+		account := sgAccountA
+		if i%2 == 1 {
+			account = sgAccountB
+		}
+		key := fmt.Sprintf("change %02d", i)
+		repo.rows["r1"] = append(repo.rows["r1"], repository.SuggestionSnapshotRow{AccountID: account, Key: key, Eligible: true,
+			Suggestion: domain.StandardChangeSuggestion{Key: key, Customer: domain.EntityRef{ID: account}, Eligible: true, ClosedCount: 5 + i, LastCompletedOn: completed}})
+	}
+	repo.dismissals = map[string]map[string]domain.StandardChangeSuggestionDismissal{sgAccountB: {"change 01": {ID: "d1"}}}
+	svc := sgService(repo, true)
+	keys := func(resp domain.StandardChangeSuggestionsResponse) []string {
+		var out []string
+		for _, s := range resp.Suggestions {
+			out = append(out, s.Key)
+		}
+		return out
+	}
+
+	first, err := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+	if err != nil || len(first.Suggestions) != 20 || first.Total != 44 || first.Limit != 20 || first.Offset != 0 || first.Scanned.Dismissed != 1 {
+		t.Fatalf("default page: %d suggestions, total %d, limit %d, offset %d, dismissed %d, %v",
+			len(first.Suggestions), first.Total, first.Limit, first.Offset, first.Scanned.Dismissed, err)
+	}
+	if first.Suggestions[0].Key != "change 44" {
+		t.Errorf("first = %s, want the most often closed across customers", first.Suggestions[0].Key)
+	}
+	last, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{Pagination: domain.Pagination{Limit: 20, Offset: 40}})
+	if got := keys(last); len(got) != 4 || got[3] != "change 00" {
+		t.Errorf("last page = %v, want the 4 least often closed", got)
+	}
+	whole, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{Pagination: domain.Pagination{Limit: 50}})
+	if len(whole.Suggestions) != 44 {
+		t.Errorf("limit 50: %d suggestions", len(whole.Suggestions))
+	}
+	var ve *apierror.ValidationError
+	if _, err := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{Pagination: domain.Pagination{Limit: 51}}); !errors.As(err, &ve) {
+		t.Errorf("limit 51: err = %v, want a 400", err)
+	}
+	empty, err := sgService(&fakeSuggestionRepo{}, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{Pagination: domain.Pagination{Offset: 40}})
+	if err != nil || empty.Limit != 20 || empty.Offset != 40 || empty.Total != 0 {
+		t.Errorf("nothing computed: limit %d, offset %d, total %d, %v", empty.Limit, empty.Offset, empty.Total, err)
 	}
 }

@@ -96,7 +96,7 @@ describe("suggestionCriteriaText", () => {
   it("says how many, from what, by which thresholds", () => {
     expect(
       suggestionCriteriaText({
-        suggestions: [suggestion()],
+        total: 1,
         criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
         scanned: { changeRequests: 41, clusters: 5, eligible: 1, dismissed: 0 },
       }),
@@ -104,6 +104,16 @@ describe("suggestionCriteriaText", () => {
       "1 suggestion from 41 change requests completed in the last 12 months that were not raised from a template. " +
         "A suggestion is the same change closed at least 5 times, at least 90% of them without a rollback, with no incident linked and no high risk or impact.",
     );
+  });
+
+  it("counts every page's suggestions, not this page's", () => {
+    expect(
+      suggestionCriteriaText({
+        total: 45,
+        criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
+        scanned: { changeRequests: 900, clusters: 60, eligible: 45, dismissed: 0 },
+      }),
+    ).toMatch(/^45 suggestions from 900 change requests/);
   });
 });
 

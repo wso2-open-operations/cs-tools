@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -150,7 +151,9 @@ func (h *StandardChangeHandler) DeleteProposal(w http.ResponseWriter, r *http.Re
 // GetSuggestions handles GET /standard-change-suggestions: the snapshot of
 // standard changes suggested by completed change requests, which entity-service
 // computes on a schedule (a read never computes). Only the known parameters are
-// forwarded, each checked for shape (accountId a UUID, the flags true or false).
+// forwarded, each checked for shape (accountId a UUID, the flags true or false,
+// limit and offset non-negative integers; the page size's bounds are the entity
+// service's).
 func (h *StandardChangeHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -173,6 +176,15 @@ func (h *StandardChangeHandler) GetSuggestions(w http.ResponseWriter, r *http.Re
 				return
 			}
 			out.Set(flag, v)
+		}
+	}
+	for _, name := range []string{"limit", "offset"} {
+		if v := strings.TrimSpace(in.Get(name)); v != "" {
+			if n, err := strconv.Atoi(v); err != nil || n < 0 {
+				writeError(w, http.StatusBadRequest, name+" must be a non-negative integer")
+				return
+			}
+			out.Set(name, v)
 		}
 	}
 	path := "/standard-change-suggestions"

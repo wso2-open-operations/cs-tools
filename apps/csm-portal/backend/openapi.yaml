@@ -16790,12 +16790,16 @@ paths:
         is absent with an empty list before the first): a read never computes. See
         its openapi.yaml for the response, which includes each suggestion's CAB
         pushback (cabRejectionCount, cabRejections, cabCommentCount, cabComments) and
-        deviationCount, shown only and never a criterion. Only these parameters are forwarded,
-        each checked for shape here (400 with no upstream call otherwise).
+        deviationCount, shown only and never a criterion. The answer is one page (limit, default
+        20, at most 50; offset) of the list sorted across customers, with total, limit and offset.
+        Only these parameters are forwarded, each checked for shape here (400 with no upstream call
+        otherwise); a limit over 50 is the entity service's 400.
       parameters:
         - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}}
         - {name: includeIneligible, in: query, required: false, schema: {type: boolean}}
         - {name: includeDismissed, in: query, required: false, schema: {type: boolean}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 50, default: 20}, description: "Page size; 0 or absent is 20."}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
       responses:
         "200":
           description: Ok.
@@ -16803,9 +16807,15 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [suggestions, total, limit, offset]
                 additionalProperties: true
+                properties:
+                  suggestions: {type: array, items: {type: object, additionalProperties: true}}
+                  total: {type: integer, minimum: 0, description: "The suggestions the query matches, on every page."}
+                  limit: {type: integer, minimum: 1, maximum: 50}
+                  offset: {type: integer, minimum: 0}
         "400":
-          description: Bad request.
+          description: "Bad request: accountId is not a UUID, a flag is not true or false, limit or offset is not a non-negative integer, or limit exceeds 50."
           content:
             application/json:
               schema:

@@ -266,12 +266,12 @@ func TestStandardChangeHandler_SuggestionsQuery(t *testing.T) {
 		NewStandardChangeHandler(fake).GetSuggestions(w, withUser(httptest.NewRequest(http.MethodGet, "/standard-change-suggestions?"+query, nil)))
 		return fake, w
 	}
-	fake, w := call("accountId=" + stdID + "&includeIneligible=true&includeDismissed=false&minClosed=2&windowMonths=6&other=x")
-	want := "/standard-change-suggestions?accountId=" + stdID + "&includeDismissed=false&includeIneligible=true"
+	fake, w := call("accountId=" + stdID + "&includeIneligible=true&includeDismissed=false&minClosed=2&windowMonths=6&other=x&limit=20&offset=40")
+	want := "/standard-change-suggestions?accountId=" + stdID + "&includeDismissed=false&includeIneligible=true&limit=20&offset=40"
 	if w.Code != http.StatusOK || fake.path != want {
 		t.Fatalf("status %d, path %s; want 200, %s", w.Code, fake.path, want)
 	}
-	for _, bad := range []string{"accountId=acme", "includeIneligible=yes"} {
+	for _, bad := range []string{"accountId=acme", "includeIneligible=yes", "limit=ten", "offset=-1"} {
 		fake, w := call(bad)
 		if w.Code != http.StatusBadRequest || fake.calls != 0 {
 			t.Errorf("%s: status %d, %d upstream calls; want 400 and none", bad, w.Code, fake.calls)

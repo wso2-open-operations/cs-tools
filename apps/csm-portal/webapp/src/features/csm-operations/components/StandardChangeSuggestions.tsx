@@ -34,6 +34,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -80,6 +81,9 @@ import StandardChangeCabPushback from "@features/csm-operations/components/Stand
 import type { BeEntityRef, BeStandardChangeSuggestion } from "@api/backend/types";
 
 const COLUMNS = 6;
+// The page sizes offered: entity-service answers at most 50 a page.
+const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
+const DEFAULT_ROWS_PER_PAGE = 20;
 
 function formatDate(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium" }) ?? "—";
@@ -252,7 +256,8 @@ function DismissDialog({
  * pushback (its rejections and comments) and the deviations from plan are shown
  * as chips and in the details, like the incidents; they decide nothing. It is not
  * related to the customer's existing templates, on purpose (see
- * suggestionActions).
+ * suggestionActions). The list is paged by entity-service, sorted across
+ * customers; a filter goes back to the first page.
  */
 export default function StandardChangeSuggestions({ leading, trailing }: { leading: ReactNode; trailing: ReactNode }): JSX.Element {
   const { canWrite } = usePortalAccess();
@@ -266,12 +271,20 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
   const [dismissing, setDismissing] = useState<BeStandardChangeSuggestion | null>(null);
   const [dismissError, setDismissError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useStandardChangeSuggestions({
     accountId: customer.id || undefined,
     includeIneligible,
     includeDismissed,
+    limit: rowsPerPage,
+    offset: page * rowsPerPage,
   });
+  // A dismissal can empty the last page: go back to the page that is now last.
+  if (data && !isFetching && page > 0 && data.offset === page * rowsPerPage && data.suggestions.length === 0) {
+    setPage(Math.max(0, Math.ceil(data.total / rowsPerPage) - 1));
+  }
   const createProposal = useCreateStandardChangeProposal();
   const citeEvidence = useUpdateStandardChangeProposal();
   const dismiss = useDismissStandardChangeSuggestion();
@@ -339,18 +352,39 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
             shrinkLabel
             value={customer.id}
             knownLabel={customer.label}
-            onChange={(next, item) => setCustomer({ id: next, label: item?.name })}
+            onChange={(next, item) => {
+              setCustomer({ id: next, label: item?.name });
+              setPage(0);
+            }}
             useSearch={useSearchStandardChangeCustomersForSelect}
             getId={(a) => a.id}
             getLabel={(a) => a.name}
           />
         </Box>
         <FormControlLabel
-          control={<Checkbox size="small" checked={includeIneligible} onChange={(e) => setIncludeIneligible(e.target.checked)} />}
+          control={
+            <Checkbox
+              size="small"
+              checked={includeIneligible}
+              onChange={(e) => {
+                setIncludeIneligible(e.target.checked);
+                setPage(0);
+              }}
+            />
+          }
           label="Show near misses"
         />
         <FormControlLabel
-          control={<Checkbox size="small" checked={includeDismissed} onChange={(e) => setIncludeDismissed(e.target.checked)} />}
+          control={
+            <Checkbox
+              size="small"
+              checked={includeDismissed}
+              onChange={(e) => {
+                setIncludeDismissed(e.target.checked);
+                setPage(0);
+              }}
+            />
+          }
           label="Show dismissed"
         />
         {trailing}
@@ -523,6 +557,20 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={data?.total ?? 0}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(e) => {
+            setRowsPerPage(Number(e.target.value));
+            setPage(0);
+          }}
+          rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+          showFirstButton
+          showLastButton
+        />
       </Box>
 
       {dismissing && (
