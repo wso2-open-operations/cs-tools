@@ -46,7 +46,7 @@ var caseFilterFieldSet = map[string]bool{
 	"resolutionNotes": true, "parentId": true, "taskSLABusinessElapsedPercent": true,
 	"escalationLevel": true, "escalation": true, "number": true, "internalId": true,
 	"accountId": true, "slaBreached": true, "accountEscalationActive": true,
-	"stateEntered": true, "stateEnteredOn": true,
+	"stateEntered": true, "stateEnteredOn": true, "region": true,
 }
 
 // caseFilterOpSet is the exact set of CaseFieldFilter.Op values accepted by
@@ -607,6 +607,24 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
 
+		case "region":
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			for _, v := range f.Values {
+				if strings.TrimSpace(v) == "" {
+					return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: region values must not be blank"}
+				}
+			}
+			switch f.Op {
+			case "in":
+				p.Regions = append(p.Regions, f.Values...)
+			case "notIn":
+				p.ExcludeRegions = append(p.ExcludeRegions, f.Values...)
+			default:
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+
 		case "stateEntered":
 			if f.Op != "in" {
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
@@ -936,6 +954,8 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"accountId\" (notIn) is not supported inside an OR group"}
 	case len(parsed.ExcludeProductNames) > 0:
 		return &apierror.ValidationError{Msg: "anyOf: field \"product\" (notIn) is not supported inside an OR group"}
+	case len(parsed.Regions) > 0 || len(parsed.ExcludeRegions) > 0:
+		return &apierror.ValidationError{Msg: "anyOf: field \"region\" is not supported inside an OR group"}
 	case len(parsed.ExcludeStates) > 0:
 		// state+in is supported inside a branch (CaseFilterGroup.States);
 		// state+notIn is not modeled there.

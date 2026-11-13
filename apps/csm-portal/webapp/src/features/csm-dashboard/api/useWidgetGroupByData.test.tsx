@@ -244,6 +244,35 @@ describe("useWidgetGroupByData", () => {
     ]);
   });
 
+  it("groups cases by their account's region, labelled as the account writes it, each bar opening that region", async () => {
+    postMock.mockResolvedValue({
+      groups: [
+        { key: "apac", label: "APAC", count: 4 },
+        { key: "emea", label: "EMEA", count: 1 },
+      ],
+      othersCount: 2,
+      totalRecords: 7,
+    });
+
+    const { result } = renderHook(
+      () => useWidgetGroupByData("widget-1", "security_report_analysis", {}, { field: "region", maxGroups: 2 }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/aggregate",
+      expect.objectContaining({ groupBy: "region", maxGroups: 2 }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.slices.map((s) => [s.label, s.value, s.query, s.navigable])).toEqual([
+      ["APAC", 4, { filters: [{ field: "region", op: "in", values: ["apac"] }] }, undefined],
+      ["EMEA", 1, { filters: [{ field: "region", op: "in", values: ["emea"] }] }, undefined],
+      ["Others", 2, {}, false],
+    ]);
+  });
+
   it("groups cases by project, each bar opening that project's cases by its id", async () => {
     postMock.mockResolvedValue({
       groups: [

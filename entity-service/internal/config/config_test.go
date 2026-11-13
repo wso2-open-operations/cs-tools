@@ -1664,3 +1664,44 @@ func TestLoad_AttachmentSettingNames(t *testing.T) {
 		}
 	})
 }
+
+// TestConfig_Validate_PublicHolidaySourcesAllOrNothing checks that the holiday
+// calendar and HR entity connections each validate only when all four settings
+// are given or none are.
+func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
+	type set struct{ base, token, id, secret string }
+	cases := []struct {
+		name     string
+		calendar set
+		hr       set
+		wantErr  bool
+	}{
+		{name: "none set"},
+		{name: "calendar only, complete", calendar: set{"b", "t", "c", "s"}},
+		{name: "hr only, complete", hr: set{"b", "t", "c", "s"}},
+		{name: "both complete", calendar: set{"b", "t", "c", "s"}, hr: set{"b", "t", "c", "s"}},
+		{name: "calendar missing secret", calendar: set{"b", "t", "c", ""}, wantErr: true},
+		{name: "hr only base URL", hr: set{base: "b"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.HolidayCalendarBaseURL, c.HolidayCalendarTokenURL = tc.calendar.base, tc.calendar.token
+			c.HolidayCalendarClientID, c.HolidayCalendarClientSecret = tc.calendar.id, tc.calendar.secret
+			c.HREntityBaseURL, c.HREntityTokenURL = tc.hr.base, tc.hr.token
+			c.HREntityClientID, c.HREntityClientSecret = tc.hr.id, tc.hr.secret
+			err := c.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() = %v, wantErr %v", err, tc.wantErr)
+			}
+			if !tc.wantErr {
+				if got := c.HolidayCalendarConfigured(); got != (tc.calendar.secret != "") {
+					t.Errorf("HolidayCalendarConfigured() = %v", got)
+				}
+				if got := c.HREntityConfigured(); got != (tc.hr.secret != "") {
+					t.Errorf("HREntityConfigured() = %v", got)
+				}
+			}
+		})
+	}
+}

@@ -594,6 +594,58 @@ func TestWeekdayReminder_InvitesTurnedOffForOneRotation(t *testing.T) {
 	}
 }
 
+// A weekday reminder that carries its invitation is copied to the invitation
+// copies only. The reminder copies get a separate copy without the invitation
+// (and without the line saying it is attached); an address on both lists, or
+// on the window, gets no second email.
+func TestWeekdayReminder_InvitationAndReminderCopiesAreSeparate(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites, cfg.OrganizerEmail = true, "rota@example.com"
+	cfg.Copy = []string{"lead@example.com", "Both@example.com", "ann@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com", "both@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 2 {
+		t.Fatalf("sent %d emails, want the reminder and one copy: %+v", len(mail.sent), mail.sent)
+	}
+	reminder, copied := mail.sent[0], mail.sent[1]
+	if strings.Join(reminder.to, ",") != "ann@example.com" || strings.Join(reminder.cc, ",") != "admin@example.com,both@example.com" ||
+		len(reminder.attachments) != 1 {
+		t.Errorf("reminder to %v cc %v with %d attachments, want Ann, the invitation copies and the invitation",
+			reminder.to, reminder.cc, len(reminder.attachments))
+	}
+	if strings.Join(copied.to, ",") != "lead@example.com" || len(copied.cc) != 0 || len(copied.attachments) != 0 ||
+		strings.Contains(copied.body, "calendar invitation is attached") || copied.subject != reminder.subject {
+		t.Errorf("copy to %v cc %v with %d attachments (subject %q), want the lead only, no invitation\n%s",
+			copied.to, copied.cc, len(copied.attachments), copied.subject, copied.body)
+	}
+}
+
+// A weekday reminder whose rotation sends no invitation is one email, copied
+// to the reminder copies; the invitation copies are not on it.
+func TestWeekdayReminder_NoInvitationMeansReminderCopiesOnly(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites, cfg.OrganizerEmail = true, "rota@example.com"
+	cfg.InvitesOff = map[string]bool{"CRE_MORNING": true}
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Join(mail.sent[0].cc, ",") != "lead@example.com" || len(mail.sent[0].attachments) != 0 {
+		t.Fatalf("sent %+v, want one reminder copied to the lead", mail.sent)
+	}
+}
+
 // A weekend-only copy is never on a weekday reminder.
 func TestWeekdayReminder_WeekendCopyIsNotCopied(t *testing.T) {
 	rota := &fakeRota{assignments: []teamschedule.Assignment{

@@ -220,7 +220,16 @@ func TestRenderCaseCreatedEmail_UnstyledAnnouncementIsUnchanged(t *testing.T) {
 	data.CaseType = "Case"
 	plain, _ := RenderCaseCreatedEmail(data)
 
-	if strings.ReplaceAll(announcement, ">Announcement<", ">Case<") != plain {
-		t.Errorf("an unstyled announcement's email changed:\n announcement: %s\n plain: %s", announcement, plain)
+	// The only intended differences are the type label and the author-free
+	// headline and missing Reported row (see RenderCaseCreatedEmail); compare
+	// the rest with whitespace collapsed.
+	reportedRow := `<tr> <td style="color:#71717a; width:110px; padding:2px 0; vertical-align:top;">Reported</td> <td style="padding:2px 0;">Reporter</td> </tr>`
+	norm := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	want := norm(plain)
+	want = strings.ReplaceAll(want, reportedRow+" ", "")
+	want = strings.ReplaceAll(want, "Reporter <b>created</b> a case", "A new <b>announcement</b> was published")
+	want = strings.ReplaceAll(want, ">Case<", ">Announcement<")
+	if norm(announcement) != want {
+		t.Errorf("an unstyled announcement's email changed beyond the author-free headline:\n announcement: %s\n plain: %s", announcement, plain)
 	}
 }

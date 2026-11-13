@@ -698,3 +698,29 @@ describe("a case widget on one product's versions", () => {
     ]);
   });
 });
+
+describe("a case widget on account regions", () => {
+  const filters = [
+    { field: "region", op: "in", values: ["APAC", "EMEA"] },
+    { field: "region", op: "notIn", values: ["EMEA"] },
+  ];
+
+  it("round-trips the regions, kept and left out, through the preview URL", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "security-reports",
+      widgetId: "w1",
+      displayName: "W",
+      filters: { filters },
+      resourceType: "security_report_analysis",
+    });
+
+    expect(parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters).toEqual({ filters });
+  });
+
+  it("shows the regions as chips", () => {
+    expect(describeWidgetFilters({ filters }).map(widgetFilterChipLabel)).toEqual([
+      "region: APAC, EMEA",
+      "region not in EMEA",
+    ]);
+  });
+});

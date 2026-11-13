@@ -305,6 +305,18 @@ func (s *scheduleService) requireRotaWriter(ctx context.Context, teamKey string)
 	return nil
 }
 
+// RotaWriterCheck is svc's own "may the caller change teamKey's rota" check
+// (its lead, its rota manager, a rota admin of its family, or an admin), for
+// another service that must allow exactly the same people. nil for a
+// ScheduleService it does not recognise.
+func RotaWriterCheck(svc ScheduleService) RotaWriterAuthorizer {
+	s, ok := svc.(*scheduleService)
+	if !ok {
+		return nil
+	}
+	return s.requireRotaWriter
+}
+
 // containsFold is a case-insensitive membership test over team keys.
 //
 // team.key is stored lowercase and both repository reads return it as stored,

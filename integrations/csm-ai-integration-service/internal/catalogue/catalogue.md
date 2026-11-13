@@ -170,6 +170,7 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `account` | `in`, `notIn` | customer (account) names or account numbers as the request writes them (`"Example Corp"`, `"ACC-0001"`), **only if the request names a customer**; `notIn` leaves those customers' cases out; never in an `anyOf` branch (section 8) |
 | `projectOnboardingStatus` | `in` | the case's project's onboarding status: `In-Progress`, `Not-Started`, `Completed`, `Not-Applicable` (exact case); never `notIn` (section 8) |
 | `project` | `in`, `notIn` | project keys or names as the request writes them (`"EXCORP-PROJ-1"`, `"Example Corp Production"`), **only if the request names a project**; `notIn` leaves those projects' cases out; never in an `anyOf` branch (section 8) |
+| `region` | `in`, `notIn` | the region of the case's customer (account), as the request writes it (`"APAC"`, `"EMEA"`), **only if the request names a region**; `notIn` leaves those regions' cases out (a customer with no region stays); never in an `anyOf` branch (section 8) |
 | `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date (below) |
 | `stateEntered` | `in` | states a case **moved to**, values as for `state` (see "Moved to a state" below) |
 | `stateEnteredOn` | `gte`, `lte` | one date (below): when it moved there; only with a `stateEntered` |
@@ -244,7 +245,7 @@ are not counted." A case's first state is not in the history, so "moved to Open"
 beside `filters`. Each branch is ANDed inside; branches are ORed; the result is ANDed with
 `filters`. **Inside an `anyOf` branch only these fields are allowed:** `state`, `severity`,
 `issueType`, `workState`, `engagementType`, `assignedUserId`, `escalation`, `escalationLevel`,
-`slaBreached`, `taskSLABusinessElapsedPercent`, `tag`. Dates, `createdBy`, `product`, `creTeam`,
+`slaBreached`, `taskSLABusinessElapsedPercent`, `tag`. Dates, `createdBy`, `product`, `region`, `creTeam`,
 `sreTeam`, `stateEntered` and `stateEnteredOn` must go in the top-level `filters`, never in a branch.
 
 Never use: ids of projects, accounts, deployments or users; `number`; `internalId`; `parentId`;
@@ -708,6 +709,26 @@ Projects left out are a `notIn` ("Sirius cases opened this month, excluding the 
                           { "field": "project", "op": "notIn", "values": ["ACMESUB", "EXCORP-PROJ-1"] } ] } }
 ```
 
+A case-family widget may group by `region` too ("cases by region", "security reports per region"):
+one bar per region of the cases' customers, named as the customer record writes it; cases of a customer
+with no region are in none of them.
+
+```json
+{ "id": "open-cases-by-region", "displayName": "Open Cases by Region", "resourceType": "case",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "filters": [ { "field": "state", "op": "in", "values": ["open"] } ] },
+  "groupBy": { "field": "region", "maxGroups": 10 } }
+```
+
+A named region's cases are a `region` filter ("open APAC service requests"):
+
+```json
+{ "id": "open-apac-service-requests", "displayName": "Open APAC Service Requests", "resourceType": "service_request",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "region", "op": "in", "values": ["APAC"] },
+                          { "field": "state", "op": "in", "values": ["open"] } ] } }
+```
+
 `maxGroups` 5 to 12.
 
 Never set both `slices` and `groupBy`.
@@ -848,7 +869,12 @@ Never set both `slices` and `groupBy`.
 | cases of customers "still onboarding", "in onboarding" / "whose onboarding has not started" / "onboarded", "fully onboarded" | `projectOnboardingStatus in ["In-Progress"]` / `["Not-Started"]` / `["Completed"]` |
 | cases of customers "not onboarded yet", "excluding onboarded customers" | `projectOnboardingStatus in ["In-Progress", "Not-Started"]`, never `notIn`; the widget's `description` says which statuses it counts |
 | projects left out: "excluding EXCORP-PROJ-1", "except the Summit project", "without the ACMESUB and EXCORP-PROJ-1 cases", "remove the ACMESUB cases" | `project notIn` with every key or name as written (one `notIn` with all of them), in **every** widget the request is about; never a `project in` listing the other projects |
-| a code-like word in capitals ("ACMESUB", "EXCORP-PROJ-1") the request uses for cases to include or leave out | a project key, unless this file gives the word a meaning ("ABT", "CSAT", "SLA") or the request calls it something else (a tag, a team) |
+| a code-like word in capitals ("ACMESUB", "EXCORP-PROJ-1") the request uses for cases to include or leave out | a project key, unless this file gives the word a meaning ("ABT", "CSAT", "SLA") or the request calls it something else (a tag, a team, a region) |
+| "by region", "per region", "top regions by ..." (cases, service requests, security reports, engagements, announcements) | `bar` (or `pie` for a share) with `groupBy: {"field": "region", "maxGroups": 10}` (section 7) |
+| a region by name: "APAC cases", "cases of EMEA customers", "security reports from the NA region", "sales region APAC" | `region in` the region as the request writes it, in **every** case-family widget the request is about; several regions: one `in` with all of them. "Region", "sales region" and "geo" all mean the customer's region. The portal matches it to the customers' regions, ignoring case, and tells the user the regions there are if none has it, so never refuse a region as unknown |
+| regions left out: "excluding APAC", "outside EMEA", "every region but NA" | `region notIn` with every region as written (one `notIn` with all of them), in **every** case-family widget the request is about; never a `region in` listing the other regions |
+| a country or city ("cases from Sri Lanka", "US customers"), unless the request calls it a region | not expressible: reply with `{"error": ...}` saying cases can be filtered by the customer's region (e.g. APAC), not by country |
+| a region on time cards, accounts, projects, customer satisfaction, operations or PLG widgets | not expressible: only case-family widgets take `region`; reply with `{"error": ...}` |
 | "patch cases", "patch tag cases", "cases with a patch" (a Patch Git issue was filed from them) | `tag in ["patch"]` |
 | "internal discussion cases", "discussion cases" (a discussion Git issue was filed from them) | `tag in ["s_dip"]` |
 | "cases with a Git issue", "GitHub issue cases" | `tag in ["patch", "s_dip"]`; "without a Git issue": `tag notIn ["patch", "s_dip"]` |

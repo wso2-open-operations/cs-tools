@@ -1545,6 +1545,10 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// own case number.
 			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
+		if isAnnouncementCaseType(p.CaseType) {
+			// An announcement's author is not shown to its project contacts.
+			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		}
 		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
@@ -2128,6 +2132,12 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	return errors.Join(errs...)
 }
 
+// isAnnouncementCaseType reports whether caseType is an announcement
+// (case-insensitive, trimmed). An empty or unknown value is not.
+func isAnnouncementCaseType(caseType string) bool {
+	return strings.EqualFold(strings.TrimSpace(caseType), "ANNOUNCEMENT")
+}
+
 // groupByLink resolves each recipient's own case link (see
 // recipientlinks.Resolver.ResolveLinks) and buckets recipients by the link
 // they resolved to — at most two buckets today, customer portal vs CSM
@@ -2358,7 +2368,7 @@ func displayInternalRef(wso2CaseID, caseID string) string {
 // carry one) — still a valid, if less descriptive, subject rather than a
 // missing one.
 func subjectLine(wso2CaseID, caseNumber, caseID, title string) string {
-	return fmt.Sprintf("[WSO2 Support] (%s/%s) %s", displayInternalRef(wso2CaseID, caseID), displayCaseRef(caseNumber, caseID), title)
+	return fmt.Sprintf("[%s Support] (%s/%s) %s", notifications.CompanyName(), displayInternalRef(wso2CaseID, caseID), displayCaseRef(caseNumber, caseID), title)
 }
 
 // maskPhone redacts all but the last 4 characters of an E.164 phone number
@@ -3036,7 +3046,7 @@ func (d *Dispatcher) handleProjectContactInvited(ctx context.Context, record eve
 
 // invitationSubject is the subject of the new and existing-account invitations.
 func invitationSubject(projectName string) string {
-	return "Invitation To Use WSO2 Support for " + projectName
+	return "Invitation To Use " + notifications.CompanyName() + " Support for " + projectName
 }
 
 // handleProjectContactRegistered sends the Welcome email after a contact's
@@ -3125,7 +3135,7 @@ func (d *Dispatcher) handleProjectContactRegistered(ctx context.Context, record 
 		PortalURL:   d.onboarding.PortalURL,
 		IntendedFor: intendedFor,
 	})
-	subject := "Welcome to WSO2 Support for " + projectName
+	subject := "Welcome to " + notifications.CompanyName() + " Support for " + projectName
 	if err := d.onboarding.Email.SendEmailFrom(ctx, d.onboarding.EmailFrom, to, nil, nil, d.onboarding.ReplyTo, subject, body, nil); err != nil {
 		return fail(fmt.Errorf("dispatch: send welcome email for membership %s: %w", p.MembershipSfID, err))
 	}

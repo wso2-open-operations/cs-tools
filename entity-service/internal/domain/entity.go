@@ -671,8 +671,13 @@ type AccountView struct {
 	// customer_account.partner, or account.classification = 'Partner' on Postgres.
 	IsPartner *bool `json:"isPartner"`
 	// HasPrimaryPartner is whether this account has a primary partner account set. On
-	// Postgres it approximates this as "has any partner in account_relationship".
+	// Postgres it is whether account.primary_partner_sf_id is set (Salesforce
+	// Account.Primary_Partner_Name2__c, written by the Salesforce Account ingest).
 	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
+	// LifeCycle is the account's life cycle (account.life_cycle, Salesforce's
+	// account status: "Customer", "Prospect", ...). Nil when unknown, and
+	// always nil on the ServiceNow data source.
+	LifeCycle *string `json:"lifeCycle"`
 	// HealthSummary is set only when the search asked for it
 	// (filters.includeHealthSummary); omitted otherwise.
 	HealthSummary *AccountSearchHealthSummary `json:"healthSummary,omitempty"`
@@ -733,8 +738,10 @@ type AccountDetail struct {
 	// AccountView.IsPartner.
 	IsPartner *bool `json:"isPartner"`
 	// HasPrimaryPartner is whether this account has a primary partner account set.
-	// Mirrors AccountView.HasPrimaryPartner, including its Postgres approximation.
+	// Mirrors AccountView.HasPrimaryPartner.
 	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
+	// LifeCycle mirrors AccountView.LifeCycle.
+	LifeCycle *string `json:"lifeCycle"`
 }
 
 // UpdateAccountTeamsRequest is the input for PATCH /accounts/{id} (Postgres
@@ -847,6 +854,9 @@ type SalesforceAccountUpsert struct {
 	ActivationDate    *time.Time
 	LostDate          *time.Time
 	LostReason        *string
+	// PrimaryPartnerSfID is the Salesforce Account Id of the primary partner
+	// (primaryPartnerAccountId), nil when there is none.
+	PrimaryPartnerSfID *string
 
 	// The fields below come from the Sales Entity SE-1 change. Until it is
 	// deployed they are always nil, so the upsert writes them as
@@ -1482,7 +1492,7 @@ type ProjectAccountRef struct {
 	IsPartner *bool `json:"isPartner"`
 }
 
-// ProjectClosureFields groups the ServiceNow-only closure-tracking fields
+// ProjectClosureFields groups the closure-tracking fields
 // shared by ProjectDetailsView and ProjectView, so the two don't drift when a
 // closure field is added or renamed. Embedded anonymously; encoding/json
 // promotes its fields to the parent's JSON object, so the wire shape is
@@ -1502,16 +1512,17 @@ type ProjectClosureFields struct {
 	// SuspensionProcessState is a free-form JSON object tracking per-dimension
 	// Account Closure Process (ACP) suspension-process state (event type + action
 	// results, e.g. per the "based_on_subscription_end_date"/"based_on_due_invoices"/
-	// "based_on_compliance" keys an existing SN suspension flow writes). This layer
-	// does not interpret, validate, or impose any schema on its contents — it is
-	// passed through opaquely as written by that SN flow (ServiceNow data source only).
+	// "based_on_compliance" keys). This layer does not interpret, validate, or
+	// impose any schema on its contents: it is passed through opaquely as
+	// written. Stored in project.suspension_process_state on Postgres data
+	// sources and written by PATCH /projects/{id}.
 	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
 	// SuspensionProcessOverridden is the CSM-owned "suspension process
 	// overridden" flag (project.suspension_process_overridden, migration 0281).
 	// When true the automatic Account Closure Process must not evaluate the
-	// project. Always present, false by default. Read-only: there is no write
-	// path yet, it is set directly in the database or by the data sync. The
-	// legacy data source carries no such field, so it is always false there.
+	// project. Always present, false by default. Writable on Postgres data
+	// sources via PATCH /projects/{id} (ProjectUpdateRequest); always false on
+	// data sources that carry no such field.
 	SuspensionProcessOverridden bool `json:"suspensionProcessOverridden"`
 }
 
@@ -1906,6 +1917,9 @@ type Opportunity struct {
 	EulaVersionDecimal *string    `json:"eulaVersionDecimal"`
 	// Stage is the opportunity's sales stage (e.g. "50 - Closed Won"), nil when absent.
 	Stage *string `json:"stage"`
+	// SfID is the Salesforce Opportunity Id (sf_opportunity.sf_id), nil when not
+	// linked and always nil on the ServiceNow data source.
+	SfID *string `json:"sfId"`
 }
 
 // SearchOpportunitiesRequest is the input for searching opportunities.
@@ -1972,6 +1986,9 @@ type ProjectOpportunityLink struct {
 	ID          string     `json:"id"`
 	Project     *EntityRef `json:"project"`
 	Opportunity *EntityRef `json:"opportunity"`
+	// SfID is the Salesforce Linked_Opportunity__c Id (sf_opportunity_link.link_sf_id),
+	// nil when not linked and always nil on the ServiceNow data source.
+	SfID *string `json:"sfId"`
 }
 
 // SearchProjectOpportunityLinksRequest is the input for searching project-opportunity links.
@@ -3340,6 +3357,14 @@ type ParsedCaseFilters struct {
 	// product's name is none of these, including cases without a deployed
 	// product. Inverse of ProductNames.
 	ExcludeProductNames []string
+	// Regions (region in) keeps the cases whose account's region
+	// (account.region, as the account page shows it) is one of these,
+	// ignoring case and surrounding spaces.
+	Regions []string
+	// ExcludeRegions (region notIn) keeps the cases whose account's region is
+	// none of these, including cases without an account or a region. Inverse
+	// of Regions.
+	ExcludeRegions []string
 	// ExcludeStates filters to cases whose state is NOT one of these values
 	// (optional). Inverse of States, and the two are independent: a request may
 	// carry either, both, or neither. Only the backing data source that models

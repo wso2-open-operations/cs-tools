@@ -48,6 +48,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/holidayreminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
@@ -694,6 +695,8 @@ func main() {
 	rotaWeekendReminderTo, rotaWeekendReminderCc := recipientsFor(recipientOverrides, rotaWeekendReminderTaskName)
 	const rotaManualTaskName = "rota_manual_reminder"
 	rotaManualTo, rotaManualCc := recipientsFor(recipientOverrides, rotaManualTaskName)
+	const holidayReminderTaskName = "holiday_availability_reminder"
+	holidayReminderTo, holidayReminderCc := recipientsFor(recipientOverrides, holidayReminderTaskName)
 
 	// Attachment retention: removes the files of work items that have been closed for
 	// ATTACHMENT_RETENTION_DAYS. It deletes customers' files, so it is OFF unless
@@ -1209,6 +1212,28 @@ func main() {
 				Cc: rotaManualCc,
 			},
 		)
+
+		// Working on a public holiday (CRE): 09:00 Colombo on weekdays, each
+		// CRE team's leads and rota managers are reminded to mark who works
+		// on a coming public holiday -- 14 days before, then 7 days, 2 and 1
+		// working days before while the team is not fully marked. Which
+		// reminders are due is entity-service's decision; each is recorded
+		// there, so it goes once. Every reminder day is a weekday (a weekend
+		// holiday gets no tag), so the task runs Monday to Friday.
+		holidayReminderSchedule := scheduleFor(scheduleOverrides, holidayReminderTaskName, "30 3 * * 1-5")
+		tasks = append(tasks, registry.Task{
+			Name:     holidayReminderTaskName,
+			Schedule: holidayReminderSchedule,
+			Handler: holidayreminder.Run(teamScheduleClient, emailClient, holidayreminder.Config{
+				ScheduleURL:   scheduleURL,
+				RedirectTo:    splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
+				EmailsEnabled: alertsEnabled,
+				Zone:          rotaZone,
+				Anchor:        periodStart(holidayReminderSchedule),
+			}),
+			To: holidayReminderTo,
+			Cc: holidayReminderCc,
+		})
 	}
 
 	// Daily at 02:30 UTC (08:00 IST), every day including weekends, the slot the

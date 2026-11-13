@@ -99,6 +99,8 @@ const (
 	errCodeGenerateProjectLookup = "generate_project_lookup"
 	errCodeGenerateAccount       = "generate_account"
 	errCodeGenerateAccountLookup = "generate_account_lookup"
+	errCodeGenerateRegion        = "generate_region"
+	errCodeGenerateRegionLookup  = "generate_region_lookup"
 	errCodeGenerateTruncated     = "generate_truncated"
 	errCodeGenerateUsageLimit    = "generate_usage_limit"
 	errCodeGenerateTimeout       = "generate_timeout"
@@ -128,6 +130,9 @@ const (
 //   - errDashboardAccount (an account filter naming 422, the reason (no account,
 //     no account or several: namedResolver)             or the candidates)
 //   - errDashboardAccountLookup                      502
+//   - errDashboardRegion (a region filter naming a  422, the reason (the
+//     region no case's account has: regionResolver)     regions there are)
+//   - errDashboardRegionLookup                       502
 //   - errGenerateTruncated (the reply was cut off)   502, its own message
 //   - errGenerateUsageLimit (the AI side's limit,    503 (429 stays this
 //     not the per-user one)                              backend's own limit)
@@ -180,6 +185,12 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, errDashboardAccountLookup):
 		slog.WarnContext(ctx, "dashboard generate: account lookup failed", "err", err)
 		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateAccountLookup, errCodeGenerateAccountLookup)
+	case errors.Is(err, errDashboardRegion):
+		slog.InfoContext(ctx, "dashboard generate: unusable region filter")
+		writeErrorCode(w, http.StatusUnprocessableEntity, dashboardTeamMessage(err), errCodeGenerateRegion)
+	case errors.Is(err, errDashboardRegionLookup):
+		slog.WarnContext(ctx, "dashboard generate: region lookup failed", "err", err)
+		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateRegionLookup, errCodeGenerateRegionLookup)
 	case errors.Is(err, errGenerateTruncated):
 		slog.WarnContext(ctx, "dashboard generate: model reply cut off", "err", err)
 		writeErrorCode(w, http.StatusBadGateway, errMsgGenerateTruncated, errCodeGenerateTruncated)

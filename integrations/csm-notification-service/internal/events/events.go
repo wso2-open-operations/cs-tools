@@ -381,9 +381,10 @@ type CommentAddedPayload struct {
 	// frustration-detection Chat alert to the Migration audience instead of
 	// the usual team/Incident Monitor routing, when the comment landed on a
 	// migration engagement. CaseType is entity-service's uppercase
-	// strings.ToUpper(cv.Type) (e.g. "ENGAGEMENT"); EngagementType is
-	// entity-service's own lowercase value (e.g. "migration"). Both empty
-	// for every non-engagement case-like type.
+	// strings.ToUpper(cv.Type) (e.g. "ENGAGEMENT", "ANNOUNCEMENT");
+	// EngagementType is entity-service's own lowercase value (e.g.
+	// "migration"), empty for every non-engagement type. CaseType is also
+	// what makes the comment email omit an announcement's commenter name.
 	CaseType       string `json:"caseType,omitempty"`
 	EngagementType string `json:"engagementType,omitempty"`
 }
