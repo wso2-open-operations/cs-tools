@@ -238,8 +238,8 @@ func WithDueInvoicesState(raw json.RawMessage, window closure.NoticeWindow, acti
 
 // WithSubscriptionEndDateOpen returns a copy of raw with
 // based_on_subscription_end_date set back to {"event_type":"open"}: no
-// notice sent for the current term. Legacy saved this on every run where the
-// end date was more than 90 days away, so a renewal started the reminders
+// notice sent for the current term. Legacy saved the recomputed event on every run,
+// so a date that moved out past the recorded window started the reminders
 // over. Other keys are preserved byte-for-byte, as in
 // WithSubscriptionEndDateState.
 func WithSubscriptionEndDateOpen(raw json.RawMessage) (json.RawMessage, error) {

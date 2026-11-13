@@ -179,10 +179,18 @@ func processProject(ctx context.Context, reader entityReader, updater projectUpd
 	return acted, invoiceErr
 }
 
-// newTerm reports whether a track's date is more than 90 days away: legacy's
-// "open" event, outside every notice window.
-func newTerm(daysRemaining int) bool {
-	return daysRemaining > int(closure.NoticeWindow90)
+// movedOut reports whether a track's date has moved out past the notice window
+// recorded for it: more days remain than the recorded window's day count (90,
+// 60, 30, 15 or 7; the terminal day-0 window counts 0). A recorded window is
+// always one the date had reached (days <= window), and days only fall as time
+// passes, so more days than the window can only mean the date moved later: a
+// renewal, an extended due date, or a hand-reopened project whose date is in
+// the future again. Legacy recomputed the event from the date on every run, so
+// any such move changed the event and the next term's reminders started over;
+// this is that test. It is false at exactly the window's day count and below,
+// so an untouched project is never rewritten.
+func movedOut(daysRemaining int, recorded closure.NoticeWindow) bool {
+	return daysRemaining > int(recorded)
 }
 
 // dimensionOpen reports whether a per-dimension closure state is Open; unset
@@ -193,7 +201,7 @@ func dimensionOpen(state *string) bool {
 
 // subscriptionRenewed reports whether the end-date track's saved state should
 // go back to "open" (see resetToOpen): a notice is recorded, the dimension is
-// Open, and the end date is more than 90 days away again.
+// Open, and the end date has moved out past the recorded window (movedOut).
 func subscriptionRenewed(proj project, now time.Time) (bool, error) {
 	if proj.EndDate == nil || !dimensionOpen(proj.EndDateClosureState) {
 		return false, nil
@@ -202,7 +210,7 @@ func subscriptionRenewed(proj project, now time.Time) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("sweep: parse suspensionProcessState for project %s: %w", proj.ID, err)
 	}
-	return lastWindow != nil && newTerm(closure.Decide(now, *proj.EndDate, nil).DaysRemaining), nil
+	return lastWindow != nil && movedOut(closure.Decide(now, *proj.EndDate, nil).DaysRemaining, *lastWindow), nil
 }
 
 // resetToOpen saves one track's suspensionProcessState section as "open",
@@ -210,7 +218,7 @@ func subscriptionRenewed(proj project, now time.Time) (bool, error) {
 // from the date on every run and saved it, so once a customer renewed (or
 // paid) the track went back to "open" and the next term's reminders started
 // over. Without this, a renewed project keeps its old "30_days_notice" and its
-// next 90, 60 and 30-day reminders are skipped. Only a track whose own closure
+// next 60, 30, 15 and 7-day reminders are skipped. Only a track whose own closure
 // state is still Open is reset, even if the other track suspended the project,
 // as in legacy. No closure state changes: reopening a suspended project is a
 // separate, manual step.
