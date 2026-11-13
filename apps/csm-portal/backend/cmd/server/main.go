@@ -589,7 +589,14 @@ func main() {
 	route("PATCH /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.SaveSavedFilterView)
 	route("DELETE /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.DeleteSavedFilterView)
 	route("POST /users/me/saved-filter-views/reorder", handler.PermAuthenticated, usersHandler.ReorderSavedFilterView)
+	// Internal users only, for every caller: the handler overrides
+	// filters.userType, so pickers cannot list external users by omitting it.
 	route("POST /users/search", handler.PermView, usersHandler.SearchUsers)
+	// The only user search that may list external users (user-management users
+	// page, role/group/team member lists). Same shape as /users/search, no
+	// userType restriction. PermWrite is cs_engineer + admin, the audience of
+	// the portal's settings area.
+	route("POST /admin/users/search", handler.PermWrite, usersHandler.SearchUsersAdmin)
 	// Batch id-to-name lookup for the KB article lists (author and
 	// reviewer columns). Not /users/search with an id filter: that filter
 	// is ServiceNow-only and 400s against Postgres.

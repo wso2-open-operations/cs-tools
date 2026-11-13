@@ -149,6 +149,18 @@ Two routes on `TeamHandler`, all backed by entity-service's own `team.chat_webho
   prompt to set the new lead's phone number in the same flow (`PATCH /users/{id}` above) if none is
   on file.
 
+## User search scope (POST /users/search vs POST /admin/users/search)
+
+External (customer) users may be listed only by the user-management screens. `POST /users/search`
+(`PermView`, every role) therefore overrides `filters.userType` to `internal` for every caller before
+forwarding (`forceInternalUserType` in `internal/handler/users.go`): a request that omits the field or
+sets another value still gets internal users, and every other filter is preserved. `POST
+/admin/users/search` (`PermWrite`, `cs_engineer` and `admin`) has the same request and response and
+forwards the body as sent, so it is the only user search that can list external users. A new user
+picker must use `/users/search`; only a user-management or directory-membership screen may use the
+admin route. Do not move the restriction into the webapp: it is enforced here so a caller cannot
+widen it. The internal value is the entity service's own `internal` user type.
+
 ## Listing time card approvers via SCIM (GET /users/time-card-approvers)
 
 Who may approve a time card is granted by real Asgardeo role membership (see `AUTH_TIMECARD_APPROVER_ROLES`
