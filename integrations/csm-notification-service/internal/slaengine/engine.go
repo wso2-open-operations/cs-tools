@@ -296,13 +296,6 @@ type Engine struct {
 	// arriving while one is still running -- see that method's own doc
 	// comment.
 	recalculating atomic.Bool
-	// americasTeamKey is the team.key (entity-service's "team" table, not
-	// the chataudience.Americas *Chat* audience name, a separate concept --
-	// see sendBreachEmails' own doc comment) whose group_email also gets the
-	// team breach email during the Americas overnight coverage window, on
-	// top of the case's own team. Empty disables this entirely (no such
-	// team configured for this deployment).
-	americasTeamKey string
 	// teamGroupEmailsMu guards teamGroupEmails -- refreshed periodically by
 	// cmd/server/main.go from a background goroutine (the same ticker that
 	// refreshes GoogleChatClient's own team-sourced Chat spaces) while
@@ -326,20 +319,24 @@ func (e *Engine) clock() time.Time {
 // all SLA-triggered messages (Chat card and email) — see that field's own
 // doc comment. email/emailDebugMode/emailDebugRecipients back
 // sendBreachEmails — see each field's own doc comment; email may be nil
-// (no SLA breach email reaction configured). americasTeamKey is this
-// deployment's team.key for the Americas overnight-coverage team email (see
-// Engine.americasTeamKey's own doc comment); empty disables that one extra
-// recipient entirely.
-func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *recipientlinks.Resolver, entity entityClockStatusClient, slaEmailSendingEnabled bool, email emailSender, emailDebugMode bool, emailDebugRecipients []string, americasTeamKey string) *Engine {
+// (no SLA breach email reaction configured).
+func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *recipientlinks.Resolver, entity entityClockStatusClient, slaEmailSendingEnabled bool, email emailSender, emailDebugMode bool, emailDebugRecipients []string) *Engine {
 	return &Engine{
 		store: store, pub: pub, chat: chat, links: links, entity: entity,
 		slaEmailSendingEnabled: slaEmailSendingEnabled,
 		email:                  email,
 		emailDebugMode:         emailDebugMode,
 		emailDebugRecipients:   emailDebugRecipients,
-		americasTeamKey:        americasTeamKey,
 	}
 }
+
+// slaBreachAmericasTeamKey is entity-service's team.key for the Americas
+// overnight-coverage team email (see sendBreachEmails' own doc comment) — a
+// fixed value, not a per-deployment config, by explicit request: unlike
+// chataudience.Americas (the separate, configurable Chat-audience name this
+// engine's Chat card can route to), there's exactly one real team this
+// email goes to, so there's nothing for an env var to usefully vary.
+const slaBreachAmericasTeamKey = "americas_cre_team"
 
 // SetTeamGroupEmails atomically replaces the team.key -> group_email lookup
 // table sendBreachEmails reads for the Americas overnight-coverage email
@@ -1363,23 +1360,23 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 // sendBreachEmails sends the same tier crossing sendBreachAlert just posted
 // to Chat as two or three separate emails — one to the case's assigned
 // engineer, one to the case's team email group(s), and, when isAmericas is
-// true, one more to this deployment's americasTeamKey team (see that
-// field's own doc comment) — on top of (not instead of) the Chat alert. A
+// true, one more to the fixed slaBreachAmericasTeamKey team (see that
+// constant's own doc comment) — on top of (not instead of) the Chat alert. A
 // no-op when e.email is nil (no SLA breach email reaction configured for
 // this deployment). Any recipient is skipped silently (logged at INFO, not
 // WARN/ERROR) when there's no address to send to for it (state.AssigneeEmail/
-// TeamEmail+OnboardingTeamEmail all empty, or americasTeamKey unset/not yet
-// resolved in teamGroupEmails) — a case with no assignee, a team with no
-// configured group_email, or a deployment with no Americas team configured,
-// is a normal state, not a misconfiguration this engine can fix; production
-// has no real address to send to in that case regardless. The "team"
-// email's own "to" list can carry two addresses, not one — see its call
-// site's own doc comment just below for why. isAmericas is the SAME
-// Resolve-computed decision sendBreachAlert's own Chat card used to decide
-// whether this breach posts to the chataudience.Americas Chat audience
-// (team.key's "Americas" Chat-audience *name* and americasTeamKey's team.key
-// *value* are two independent configuration points — a deployment is free
-// to point them at the same or different teams).
+// TeamEmail+OnboardingTeamEmail all empty, or slaBreachAmericasTeamKey not
+// yet resolved in teamGroupEmails) — a case with no assignee, or a team with
+// no configured group_email, is a normal state, not a misconfiguration this
+// engine can fix; production has no real address to send to in that case
+// regardless. The "team" email's own "to" list can carry two addresses, not
+// one — see its call site's own doc comment just below for why. isAmericas
+// is the SAME Resolve-computed decision sendBreachAlert's own Chat card used
+// to decide whether this breach posts to the chataudience.Americas Chat
+// audience (team.key's "Americas" Chat-audience *name* and
+// slaBreachAmericasTeamKey's team.key *value* are two independent
+// configuration points, happening to share a real-world team today but not
+// tied to each other).
 //
 // Unlike sendBreachAlert's own per-audience Chat sends, there is no
 // separate Redis claim guarding this against a duplicate send: the one
@@ -1493,19 +1490,19 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
 	})
 
-	// A separate, third email to the configured Americas team — only during
-	// the overnight coverage window (isAmericas). A case whose own team IS
-	// the configured Americas team is deliberately left out of reals (not
-	// just skipped) rather than sent an identical second copy; americasTeamKey
-	// unresolved in teamGroupEmails still goes through send so, under
-	// EMAIL_DEBUG_MODE, a missing configuration is as visible as the
-	// assignee/team recipients' own unresolved cases are.
-	if isAmericas && e.americasTeamKey != "" {
+	// A separate, third email to the fixed Americas team — only during the
+	// overnight coverage window (isAmericas). A case whose own team IS the
+	// Americas team is deliberately left out of reals (not just skipped)
+	// rather than sent an identical second copy; unresolved in
+	// teamGroupEmails still goes through send so, under EMAIL_DEBUG_MODE, a
+	// missing configuration is as visible as the assignee/team recipients'
+	// own unresolved cases are.
+	if isAmericas {
 		var americasEmails []string
-		if americasEmail, ok := e.teamGroupEmail(e.americasTeamKey); ok && !slices.Contains(teamEmails, americasEmail) {
+		if americasEmail, ok := e.teamGroupEmail(slaBreachAmericasTeamKey); ok && !slices.Contains(teamEmails, americasEmail) {
 			americasEmails = []string{americasEmail}
 		}
-		send("americas", americasEmails, e.americasTeamKey, func(intendedFor string) string {
+		send("americas", americasEmails, slaBreachAmericasTeamKey, func(intendedFor string) string {
 			d := data
 			d.IntendedFor = intendedFor
 			return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)

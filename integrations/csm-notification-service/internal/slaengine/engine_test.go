@@ -1523,8 +1523,9 @@ var americasWindowInstant = time.Date(2026, time.October, 14, 17, 0, 0, 0, time.
 
 // TestTick_BreachEmail_AmericasWindowAlsoEmailsTheConfiguredAmericasTeam
 // confirms sendBreachEmails sends a third, separate email to
-// americasTeamKey's resolved group_email during the Americas overnight
-// coverage window, alongside (not instead of) the assignee/team emails.
+// slaBreachAmericasTeamKey's resolved group_email during the Americas
+// overnight coverage window, alongside (not instead of) the assignee/team
+// emails.
 func TestTick_BreachEmail_AmericasWindowAlsoEmailsTheConfiguredAmericasTeam(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
@@ -1533,7 +1534,6 @@ func TestTick_BreachEmail_AmericasWindowAlsoEmailsTheConfiguredAmericasTeam(t *t
 	e := newTestEngine(st, chat, pub)
 	e.now = func() time.Time { return americasWindowInstant }
 	e.email = email
-	e.americasTeamKey = "americas_cre_team"
 	e.SetTeamGroupEmails(map[string]string{"americas_cre_team": "americas-cre@example.test"})
 	past := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
@@ -1568,7 +1568,6 @@ func TestTick_BreachEmail_OutsideAmericasWindow_NoThirdEmail(t *testing.T) {
 	email := &fakeEmail{}
 	e := newTestEngine(st, chat, pub) // now defaults to weekdayDaytime, outside the window
 	e.email = email
-	e.americasTeamKey = "americas_cre_team"
 	e.SetTeamGroupEmails(map[string]string{"americas_cre_team": "americas-cre@example.test"})
 	past := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
@@ -1602,7 +1601,6 @@ func TestTick_BreachEmail_AmericasWindow_CasesOwnTeamIsTheAmericasTeam_NoDuplica
 	e := newTestEngine(st, chat, pub)
 	e.now = func() time.Time { return americasWindowInstant }
 	e.email = email
-	e.americasTeamKey = "americas_cre_team"
 	e.SetTeamGroupEmails(map[string]string{"americas_cre_team": "team-nova@example.com"})
 	past := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
