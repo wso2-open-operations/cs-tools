@@ -184,7 +184,10 @@ window.config = {
   // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL: "<your-dark-mode-logo-url>",
   //
   // CUSTOMER_PORTAL_COMPANY_NAME  (optional — default: "WSO2")
-  //   Company name in the PDF report footers, printed as "<name> Support 24x7".
+  //   Company name in the PDF report footers, printed as "<name> Support 24x7",
+  //   and in the portal labels that name the company: "<name> Products" and
+  //   "Add <name> Product" (project deployments), "<name> Resolution"
+  //   (vulnerability details).
   // CUSTOMER_PORTAL_COMPANY_NAME: "<your-company-name>",
 
   // ── Top banners ─────────────────────────────────────────────────────────────
