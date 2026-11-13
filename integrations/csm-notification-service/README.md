@@ -328,7 +328,7 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `GOOGLE_CHAT_SPACES` | unset (Chat alerts unavailable) | JSON array of `{"audience","webhookUrl"}`, one per space. Audience matching ignores whitespace but is case-sensitive. Meant now only for the standing, non-team audiences: `Incident Monitor`, `Onboarding`, `Americas`, `Evaluation` — a real team's own space should come from entity-service's `team.chat_webhook_url` instead (see `TEAM_CHAT_SPACES_REFRESH_INTERVAL` below); a team still listed here during migration still works, and wins over a same-named entity-service entry. A malformed value (or unknown JSON keys, such as the legacy product-keyed shape) logs an error and disables Chat. An audience with no entry is skipped. | `[{"audience":"Incident Monitor","webhookUrl":"<webhook-url>"}]` |
 | `INCIDENT_CHAT_SPACES` | unset (no incident cards) | JSON object, assignment group (matched case-insensitively) to webhook URL. | `{"Example SRE Group":"<webhook-url>"}` |
 | `INCIDENT_CHAT_FANOUT` | unset | JSON object, assignment group to the list of groups whose `INCIDENT_CHAT_SPACES` spaces get its cards. Names only. The call is placed once; a card that fails in one space is not retried. | `{"Default Group":["Group A","Group B"]}` |
-| `TEAM_CHAT_SPACES_REFRESH_INTERVAL` | `5m` | How often a team's own Chat webhook URL (entity-service's `GET /teams/chat-webhooks`) is re-fetched and merged into the routing table. Only read when `CUSTOMER_ENTITY_BASE_URL` is set; a failed refresh logs and keeps the previous set. | `1m` |
+| `TEAM_CHAT_SPACES_REFRESH_INTERVAL` | `5m` | How often a team's own Chat webhook URL (entity-service's `GET /teams/chat-webhooks`) is re-fetched and merged into the routing table — the same tick also refreshes the SLA engine's team group-email lookup (`GET /teams/group-emails`, see `SLA_BREACH_AMERICAS_TEAM_KEY` below) when Redis is configured. Only read when `CUSTOMER_ENTITY_BASE_URL` is set; a failed refresh logs and keeps the previous set. | `1m` |
 | `GOOGLE_CHAT_AUDIENCE_SPACES` | n/a | Removed; if set, a warning is logged and it is ignored. Use `GOOGLE_CHAT_SPACES`. | |
 
 ### Voice calls and SMS (Twilio)
@@ -411,6 +411,7 @@ the steps until the code or documentation is reconciled.
 | `REDIS_PASSWORD` | none | Password for `REDIS_ADDR`; ignored with `REDIS_URL`. | |
 | `SLA_TICK_INTERVAL` | `5m` | How often the wake-index is scanned. | `1m` |
 | `SLA_EMAIL_SENDING_ENABLED` | `true` | Killswitch for all SLA messages (breach Chat card). Events still publish and tiers still advance. | `false` |
+| `SLA_BREACH_AMERICAS_TEAM_KEY` | `americas_cre_team` | entity-service `team.key` whose `group_email` also gets a breach email during the Americas overnight coverage window (9 PM-6 AM IST), alongside the case's own team. Resolved via the same `GET /teams/group-emails` lookup refreshed on `TEAM_CHAT_SPACES_REFRESH_INTERVAL`'s ticker. Empty disables this extra recipient. | `other_team_key` |
 
 ### Call-escalation ladder
 

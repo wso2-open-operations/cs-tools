@@ -581,6 +581,12 @@ func main() {
 	// Case Alerts rung email's "response SLA remaining time"; nil when the
 	// fetch failed (the email then uses the published defaults).
 	var slaDurations map[string]map[string]time.Duration
+	// slaEngine is constructed below (only when Redis is configured) and read
+	// again further down to refresh its team-group-email lookup table on the
+	// same ticker as the Chat team-webhook one -- hoisted to this scope
+	// (rather than a block-local :=) so it's reachable from there; nil when
+	// Redis isn't configured, same as slaProducer above.
+	var slaEngine *slaengine.Engine
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -669,7 +675,12 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		//
+		// SLA_BREACH_AMERICAS_TEAM_KEY (default "americas_cre_team") is this
+		// deployment's entity-service team.key for the overnight
+		// Americas-coverage team email -- see Engine.americasTeamKey's own
+		// doc comment. Empty disables that one extra recipient entirely.
+		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients, envOrDefault("SLA_BREACH_AMERICAS_TEAM_KEY", "americas_cre_team"))
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -735,6 +746,21 @@ func main() {
 				return err
 			}
 			googleChatClient.SetTeamAudienceSpaces(webhooks)
+
+			// Piggybacks on this same ticker (rather than a second one) to
+			// also refresh slaEngine's team.key -> group_email lookup table
+			// (see Engine.SetTeamGroupEmails's own doc comment) -- an
+			// independent fetch, so a failure here doesn't touch the Chat
+			// webhooks just set above, and vice versa. Only when Redis (and
+			// so the SLA engine) is configured at all.
+			if slaEngine != nil {
+				groupEmails, err := customerEntityClient.GetTeamGroupEmails(fetchCtx)
+				if err != nil {
+					slog.Error("slaengine: failed to refresh team group emails from entity-service; keeping the previous set", "err", err)
+				} else {
+					slaEngine.SetTeamGroupEmails(groupEmails)
+				}
+			}
 			return nil
 		}
 		// Retry the initial fetch, with backoff, before consumers start --

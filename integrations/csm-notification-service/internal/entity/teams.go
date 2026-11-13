@@ -71,3 +71,46 @@ func (c *CustomerEntityClient) GetTeamChatWebhooks(ctx context.Context) (map[str
 	}
 	return webhooks, nil
 }
+
+// GetTeamGroupEmails calls entity-service's internal-caller-only
+// GET /teams/group-emails and returns a map of team.key -> group_email, for
+// every team that has one configured (see that repo's own CLAUDE.md). Keyed
+// by key, not name, unlike GetTeamChatWebhooks above — this backs
+// slaengine.Engine's lookup of one specific, stable team (e.g.
+// "americas_cre_team" for its SLA-breach overnight-coverage email), not a
+// case's own, possibly-renamed display team.
+//
+// A team with a blank or duplicate key is skipped the same defensive way
+// GetTeamChatWebhooks handles a blank/duplicate name.
+func (c *CustomerEntityClient) GetTeamGroupEmails(ctx context.Context) (map[string]string, error) {
+	respBody, err := c.do(ctx, http.MethodGet, "/teams/group-emails", nil)
+	if err != nil {
+		return nil, err
+	}
+	var parsed struct {
+		Teams []struct {
+			Key        string `json:"key"`
+			GroupEmail string `json:"groupEmail"`
+		} `json:"teams"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("entity: decode GetTeamGroupEmails response: %w", err)
+	}
+
+	emails := make(map[string]string, len(parsed.Teams))
+	seen := make(map[string]bool, len(parsed.Teams))
+	for _, t := range parsed.Teams {
+		key := strings.TrimSpace(t.Key)
+		email := strings.TrimSpace(t.GroupEmail)
+		if key == "" || email == "" {
+			continue
+		}
+		if seen[key] {
+			emails[key] = ""
+			continue
+		}
+		seen[key] = true
+		emails[key] = email
+	}
+	return emails, nil
+}
