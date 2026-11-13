@@ -49,6 +49,7 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
 }));
 
 import StandardChangeSuggestions from "@features/csm-operations/components/StandardChangeSuggestions";
+import { SUGGESTION_SKIPPED_ERROR, SUGGESTION_SKIPPED_TOO_LARGE } from "@features/csm-operations/utils/standardChangeSuggestions";
 
 function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardChangeSuggestion {
   return {
@@ -146,11 +147,15 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.queryByText(/No change is done often enough/)).not.toBeInTheDocument();
   });
 
-  it("says which customers the latest refresh could not compute", () => {
-    serve([suggestion()], "2026-11-06T14:00:00Z", [{ customer: { id: "acct-9", name: "BigCo" }, reason: "too large" }]);
+  it("says which customers the latest refresh could not compute, and why", () => {
+    serve([suggestion()], "2026-11-06T14:00:00Z", [
+      { customer: { id: "acct-9", name: "BigCo" }, reason: SUGGESTION_SKIPPED_TOO_LARGE },
+      { customer: { id: "acct-8", name: "OddCo" }, reason: SUGGESTION_SKIPPED_ERROR },
+    ]);
     renderIt();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "BigCo's suggestions were not computed in the latest refresh: it has too many change requests to compute in time.",
+      "BigCo's suggestions were not computed in the latest refresh: it has too many change requests to compute in time. " +
+        "OddCo's suggestions were not computed in the latest refresh: an error stopped it, and the next refresh tries again.",
     );
   });
 

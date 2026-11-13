@@ -23,6 +23,8 @@ import {
   suggestionSampleLabel,
   suggestionSampleText,
   suggestionSkippedText,
+  SUGGESTION_SKIPPED_ERROR,
+  SUGGESTION_SKIPPED_TOO_LARGE,
   suggestionUpdatedText,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import {
@@ -135,8 +137,8 @@ describe("a suggestion built from part of its subject", () => {
 });
 
 describe("suggestionSkippedText", () => {
-  const skipped = (n: number) =>
-    Array.from({ length: n }, (_, i) => ({ customer: { id: `a${i}`, name: `Customer ${i + 1}` }, reason: "too large" }));
+  const skipped = (n: number, reason = SUGGESTION_SKIPPED_TOO_LARGE, from = 0) =>
+    Array.from({ length: n }, (_, i) => ({ customer: { id: `a${from + i}`, name: `Customer ${from + i + 1}` }, reason }));
   it("says the customer's suggestions were not computed, not that it has none", () => {
     expect(suggestionSkippedText(skipped(1))).toBe(
       "Customer 1's suggestions were not computed in the latest refresh: it has too many change requests to compute in time.",
@@ -147,6 +149,25 @@ describe("suggestionSkippedText", () => {
       "The suggestions of 2 customers were not computed in the latest refresh (Customer 1, Customer 2): each has too many change requests to compute in time.",
     );
     expect(suggestionSkippedText(skipped(7))).toContain("(Customer 1, Customer 2, Customer 3, Customer 4, Customer 5 and 2 more)");
+  });
+  it("says an error stopped a customer, not that it is too large", () => {
+    expect(suggestionSkippedText(skipped(1, SUGGESTION_SKIPPED_ERROR))).toBe(
+      "Customer 1's suggestions were not computed in the latest refresh: an error stopped it, and the next refresh tries again.",
+    );
+    expect(suggestionSkippedText(skipped(2, SUGGESTION_SKIPPED_ERROR))).toBe(
+      "The suggestions of 2 customers were not computed in the latest refresh (Customer 1, Customer 2): an error stopped each, and the next refresh tries again.",
+    );
+  });
+  it("gives each reason its own sentence, too large first", () => {
+    expect(suggestionSkippedText([...skipped(1, SUGGESTION_SKIPPED_ERROR), ...skipped(2, SUGGESTION_SKIPPED_TOO_LARGE, 1)])).toBe(
+      "The suggestions of 2 customers were not computed in the latest refresh (Customer 2, Customer 3): each has too many change requests to compute in time. " +
+        "Customer 1's suggestions were not computed in the latest refresh: an error stopped it, and the next refresh tries again.",
+    );
+  });
+  it("shows a reason it does not know as written", () => {
+    expect(suggestionSkippedText(skipped(1, "paused by an operator"))).toBe(
+      "Customer 1's suggestions were not computed in the latest refresh: paused by an operator.",
+    );
   });
   it("is nothing when none was skipped", () => {
     expect(suggestionSkippedText([])).toBeNull();

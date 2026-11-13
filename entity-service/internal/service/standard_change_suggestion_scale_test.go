@@ -168,15 +168,18 @@ func TestStandardChangeSuggestionService_Refresh_SkipsACustomerThatOverruns(t *t
 		t.Errorf("customer B: skipped = %+v, want an empty list", other.SkippedCustomers)
 	}
 
-	t.Run("the call's own deadline is an error, not a skip", func(t *testing.T) {
-		suggestionCustomerTimeout = time.Minute
+	t.Run("the call ending is an error, not a skip", func(t *testing.T) {
+		suggestionCustomerTimeout = old
 		repo := sgFixture()
 		repo.slow = map[string]bool{sgAccountA: true}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		// Cancelled while A is computing (a request deadline too short for a
+		// customer starts none: TestStandardChangeSuggestionService_Refresh_PageTiming).
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		time.AfterFunc(20*time.Millisecond, cancel)
 		_, err := sgService(repo, true).Refresh(ctx, domain.RefreshStandardChangeSuggestionsRequest{})
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("err = %v, want the call's deadline", err)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want the call's cancellation", err)
 		}
 		if len(repo.skipped) != 1 || len(repo.skipped[firstRunID(repo)]) != 0 {
 			t.Errorf("skipped = %v, want none recorded", repo.skipped)

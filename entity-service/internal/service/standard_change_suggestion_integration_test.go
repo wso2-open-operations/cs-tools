@@ -382,6 +382,9 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			if after, _ := repo.NextCustomers(ctx, run.ID, e.accounts["A"], 100000); slices.Contains(after, e.accounts["A"]) {
 				t.Error("the cursor did not move past A")
 			}
+			if n, err := repo.RunCustomerCount(ctx, run.ID); err != nil || n != len(listed) {
+				t.Errorf("run customer count = %d, %v; want the %d listed", n, err, len(listed))
+			}
 			if err := repo.SkipCustomer(ctx, run.ID, e.accounts["A"], "too large"); err != nil {
 				t.Fatalf("skip A: %v", err)
 			}

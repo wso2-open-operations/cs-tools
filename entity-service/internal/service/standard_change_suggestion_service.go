@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -46,25 +47,51 @@ var DefaultStandardChangeSuggestionCriteria = domain.StandardChangeSuggestionCri
 const maxSuggestionDismissalReason = 1000
 
 // Refresh paging: how many customers one call computes unless it asks for
-// fewer, the most it may ask for, how long a call keeps starting customers
-// before it hands back, and how long one customer may take. A call computes at
-// least one customer and finishes the one it is on, so a call takes at most the
-// budget plus one customer's deadline (20s + 30s), inside the 60s
-// REQUEST_TIMEOUT. A customer that overruns its deadline is recorded as skipped
-// and the run carries on: one customer can never fail the whole run.
+// fewer, and the most it may ask for.
 const (
 	defaultSuggestionRefreshLimit = 50
 	maxSuggestionRefreshLimit     = 500
 )
 
+// Refresh timing. Everything one call does runs under suggestionPageTimeout
+// (45s), so a call answers 15s inside both the 60s REQUEST_TIMEOUT and the
+// scheduled task's 60s per-call timeout, whatever its customers and writes do.
+// Inside it, each customer's compute has suggestionCustomerTimeout (20s) and
+// each write (its save, or its skip) suggestionWriteTimeout (5s); a customer is
+// started only while the page has time for its compute and two writes (a save
+// that fails, then the skip that records it: 30s), so a customer that starts
+// always gets its whole deadline and the page's own deadline is never what
+// stops it. The publish (with the error check before it) gets
+// suggestionPublishTimeout (10s); a page that finishes its customers with less
+// than that left hands the publish to the next call. Worst case: the last
+// customer starts at 15s, its compute ends by 35s, its save by 40s, its skip
+// by 45s.
 var (
-	suggestionRefreshBudget   = 20 * time.Second
-	suggestionCustomerTimeout = 30 * time.Second
+	suggestionPageTimeout     = 45 * time.Second
+	suggestionCustomerTimeout = 20 * time.Second
+	suggestionWriteTimeout    = 5 * time.Second
+	suggestionPublishTimeout  = 10 * time.Second
 )
 
-// suggestionSkippedTooLarge is the reason a customer that overran its deadline
-// is recorded under.
-const suggestionSkippedTooLarge = "too large to compute within the refresh's per-customer deadline"
+// The reasons a skipped customer is recorded under (skipped_reason, returned as
+// skippedCustomers[].reason; the webapp matches these exact strings, so change
+// them together).
+const (
+	// A customer that overran its own deadline.
+	suggestionSkippedTooLarge = "too large to compute within the refresh's per-customer deadline"
+	// A customer whose compute or save failed for any other reason (a bad row,
+	// a decode failure, a failed write, a panic); the cause is logged at ERROR.
+	suggestionSkippedError = "an error stopped its computation (the refresh logged the cause)"
+)
+
+// suggestionMaxErrorShare: a run in which more than this share of its customers
+// were skipped for an error is not published. One customer's error is that
+// customer's problem and is skipped like an overrun; most customers failing is
+// a fault of the system (a query, the schema, the database) and publishing
+// would replace every customer's suggestions with "not computed", so the run
+// fails instead and readers keep the previous snapshot. Overruns do not count:
+// they are bounded by each customer's own size.
+const suggestionMaxErrorShare = 0.5
 
 type standardChangeSuggestionService struct {
 	repo     repository.StandardChangeSuggestionRepository
@@ -243,7 +270,11 @@ func sortSuggestions(list []domain.StandardChangeSuggestion) {
 // Refresh implements StandardChangeSuggestionService: one page of a refresh run
 // (see RefreshStandardChangeSuggestionsRequest). Customers are computed one at
 // a time, so a page never holds more than one customer's change requests and
-// plans; the last page publishes the run.
+// plans; the last page publishes the run. A customer that overruns its deadline
+// or fails is recorded as skipped and the page carries on, so one customer
+// cannot keep every other one's snapshot from being published; see
+// suggestionPageTimeout for the timing and suggestionMaxErrorShare for when
+// errors fail the run instead.
 func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domain.RefreshStandardChangeSuggestionsRequest) (domain.RefreshStandardChangeSuggestionsResponse, error) {
 	if err := RequireInternalCaller(ctx, s.access, standardChangeSuggestionForbidden); err != nil {
 		return domain.RefreshStandardChangeSuggestionsResponse{}, err
@@ -260,10 +291,26 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 	if cursor != "" && (runID == "" || !validate.IsUUID(cursor)) {
 		return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "cursor continues a run: send it with that run's runId, as the previous call returned it"}
 	}
+	if runID != "" && !validate.IsUUID(runID) {
+		return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "runId must be a UUID"}
+	}
+
+	// Everything from here, the run's start included, runs under the page's
+	// own deadline (or the request's, when that is sooner).
+	pageStart := s.now()
+	pageCtx, cancelPage := context.WithTimeout(ctx, suggestionPageTimeout)
+	defer cancelPage()
+	pageTime := suggestionPageTimeout
+	if d, ok := ctx.Deadline(); ok && time.Until(d) < pageTime {
+		pageTime = time.Until(d)
+	}
+	pageDeadline := pageStart.Add(pageTime)
+	remaining := func() time.Duration { return pageDeadline.Sub(s.now()) }
+
 	var run repository.SuggestionRun
 	if runID == "" {
 		crit := s.criteria
-		started, err := s.repo.StartRun(ctx, crit, func(startedOn time.Time) time.Time {
+		started, err := s.repo.StartRun(pageCtx, crit, func(startedOn time.Time) time.Time {
 			return suggestionWindowStart(startedOn, crit.WindowMonths)
 		})
 		if err != nil {
@@ -272,10 +319,7 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 		run = started
 		slog.InfoContext(ctx, "standard change suggestions: refresh started", "runId", run.ID, "criteria", run.Criteria)
 	} else {
-		if !validate.IsUUID(runID) {
-			return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "runId must be a UUID"}
-		}
-		got, err := s.repo.GetRun(ctx, runID)
+		got, err := s.repo.GetRun(pageCtx, runID)
 		if err != nil {
 			return domain.RefreshStandardChangeSuggestionsResponse{}, err
 		}
@@ -289,55 +333,47 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 	// judges alike.
 	crit := run.Criteria
 	since := suggestionWindowStart(run.StartedOn, crit.WindowMonths)
-	pageStart := s.now()
 	// The customers were listed once, when the run started.
-	accounts, err := s.repo.NextCustomers(ctx, run.ID, cursor, limit+1)
+	accounts, err := s.repo.NextCustomers(pageCtx, run.ID, cursor, limit+1)
 	if err != nil {
 		return domain.RefreshStandardChangeSuggestionsResponse{}, err
 	}
-	resp := domain.RefreshStandardChangeSuggestionsResponse{RunID: run.ID}
+	resp := domain.RefreshStandardChangeSuggestionsResponse{RunID: run.ID, NextCursor: cursor}
 	// The previous snapshot, which each customer's clusters take their keys from.
-	previous, err := s.repo.LatestRun(ctx)
+	previous, err := s.repo.LatestRun(pageCtx)
 	if err != nil {
 		return resp, err
 	}
 	todo := accounts[:min(limit, len(accounts))]
-	for i, account := range todo {
-		if i > 0 && s.now().Sub(pageStart) > suggestionRefreshBudget {
+	perCustomer := suggestionCustomerTimeout + 2*suggestionWriteTimeout
+	done := 0
+	for _, account := range todo {
+		if remaining() < perCustomer {
 			break
 		}
-		if err := ctx.Err(); err != nil {
+		if err := pageCtx.Err(); err != nil {
 			return resp, err
 		}
-		customerStart := s.now()
-		customerCtx, cancel := context.WithTimeout(ctx, suggestionCustomerTimeout)
-		rows, candidates, err := s.computeCustomer(customerCtx, account, since, crit, previous)
-		// Its own deadline, not the call's (a query cut short reports it in its own words).
-		overran := errors.Is(customerCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
-		cancel()
-		switch {
-		case err != nil && overran:
-			// Record it and go on.
-			slog.WarnContext(ctx, "standard change suggestions: customer skipped, too large to compute in time",
-				"runId", run.ID, "accountId", account, "candidates", candidates,
-				"deadlineMs", suggestionCustomerTimeout.Milliseconds(), "elapsedMs", s.now().Sub(customerStart).Milliseconds())
-			if err := s.repo.SkipCustomer(ctx, run.ID, account, suggestionSkippedTooLarge); err != nil {
-				return resp, err
-			}
-			resp.Skipped++
-		case err != nil:
-			return resp, fmt.Errorf("standard change suggestions: customer %s: %w", account, err)
-		default:
-			if err := s.repo.SaveCustomer(ctx, run.ID, account, candidates, rows); err != nil {
-				return resp, err
-			}
-			resp.Customers++
-			resp.ChangeRequests += candidates
-			resp.Suggestions += len(rows)
+		if err := s.refreshCustomer(pageCtx, run.ID, account, since, crit, previous, &resp); err != nil {
+			return resp, err
 		}
+		done++
 		resp.NextCursor = account
 	}
-	resp.More = resp.Customers+resp.Skipped < len(accounts)
+	resp.More = done < len(accounts)
+	if done == 0 && resp.More {
+		// Not even one customer fits (a slow start of the run, or a request
+		// deadline shorter than one customer needs). The next call starts
+		// afresh from the same cursor; on a continuation page the caller sees
+		// no progress and fails the run.
+		slog.WarnContext(ctx, "standard change suggestions: no time left on this page for a customer",
+			"runId", run.ID, "cursor", cursor, "remainingMs", remaining().Milliseconds(), "neededMs", perCustomer.Milliseconds())
+	}
+	if !resp.More && done > 0 && remaining() < suggestionPublishTimeout {
+		// Every customer is done but the publish might not fit: the next call
+		// finds no customer left and publishes with a page of its own.
+		resp.More = true
+	}
 	if !resp.More {
 		resp.NextCursor = ""
 	}
@@ -348,7 +384,12 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 		return resp, nil
 	}
 
-	published, err := s.repo.PublishRun(ctx, run.ID)
+	publishCtx, cancelPublish := context.WithTimeout(pageCtx, suggestionPublishTimeout)
+	defer cancelPublish()
+	if err := s.checkRunErrors(publishCtx, run.ID); err != nil {
+		return resp, err
+	}
+	published, err := s.repo.PublishRun(publishCtx, run.ID)
 	if err != nil {
 		return resp, err
 	}
@@ -359,6 +400,100 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 		"customers", totals.Customers, "skipped", totals.Skipped, "changeRequests", totals.ChangeRequests, "clusters", totals.Clusters,
 		"eligible", totals.Eligible, "durationMs", published.CompletedOn.Sub(published.StartedOn).Milliseconds())
 	return resp, nil
+}
+
+// refreshCustomer computes one customer and saves it, or records it as skipped:
+// too large when it overran its own deadline, an error when its compute or its
+// save failed otherwise (the cause logged at ERROR). It returns an error only
+// for what is not that customer's: the page's own deadline or cancellation, a
+// run no longer open (409), or a skip that cannot be recorded (the database).
+func (s *standardChangeSuggestionService) refreshCustomer(pageCtx context.Context, runID, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria, previous *repository.SuggestionRun, resp *domain.RefreshStandardChangeSuggestionsResponse) error {
+	customerStart := s.now()
+	customerCtx, cancel := context.WithTimeout(pageCtx, suggestionCustomerTimeout)
+	rows, candidates, err := s.computeCustomerRecovering(customerCtx, account, since, crit, previous)
+	// Its own deadline, not the page's (a query cut short reports it in its own words).
+	overran := errors.Is(customerCtx.Err(), context.DeadlineExceeded) && pageCtx.Err() == nil
+	cancel()
+	if err != nil && pageCtx.Err() != nil {
+		return fmt.Errorf("standard change suggestions: customer %s: %w", account, err)
+	}
+	reason := ""
+	switch {
+	case err != nil && overran:
+		slog.WarnContext(pageCtx, "standard change suggestions: customer skipped, too large to compute in time",
+			"runId", runID, "accountId", account, "candidates", candidates,
+			"deadlineMs", suggestionCustomerTimeout.Milliseconds(), "elapsedMs", s.now().Sub(customerStart).Milliseconds())
+		reason = suggestionSkippedTooLarge
+	case err != nil:
+		slog.ErrorContext(pageCtx, "standard change suggestions: customer skipped, its computation failed",
+			"runId", runID, "accountId", account, "candidates", candidates, "error", err)
+		reason = suggestionSkippedError
+	default:
+		writeCtx, cancelWrite := context.WithTimeout(pageCtx, suggestionWriteTimeout)
+		err := s.repo.SaveCustomer(writeCtx, runID, account, candidates, rows)
+		cancelWrite()
+		var conflict *apierror.ConflictError
+		switch {
+		case err == nil:
+			resp.Customers++
+			resp.ChangeRequests += candidates
+			resp.Suggestions += len(rows)
+			return nil
+		case errors.As(err, &conflict) || pageCtx.Err() != nil:
+			return err
+		}
+		slog.ErrorContext(pageCtx, "standard change suggestions: customer skipped, saving its suggestions failed",
+			"runId", runID, "accountId", account, "candidates", candidates, "suggestions", len(rows), "error", err)
+		reason = suggestionSkippedError
+	}
+	writeCtx, cancelWrite := context.WithTimeout(pageCtx, suggestionWriteTimeout)
+	defer cancelWrite()
+	if err := s.repo.SkipCustomer(writeCtx, runID, account, reason); err != nil {
+		return err
+	}
+	resp.Skipped++
+	return nil
+}
+
+// computeCustomerRecovering is computeCustomer with a panic turned into that
+// customer's error, so a row that trips a bug skips the customer rather than
+// failing the page (and every page after it, at the same customer).
+func (s *standardChangeSuggestionService) computeCustomerRecovering(ctx context.Context, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria, previous *repository.SuggestionRun) (rows []repository.SuggestionSnapshotRow, candidates int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "standard change suggestions: computing a customer panicked", "accountId", account, "panic", r, "stack", string(debug.Stack()))
+			rows, err = nil, fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return s.computeCustomer(ctx, account, since, crit, previous)
+}
+
+// checkRunErrors refuses to publish a run in which more than
+// suggestionMaxErrorShare of its customers were skipped for an error.
+func (s *standardChangeSuggestionService) checkRunErrors(ctx context.Context, runID string) error {
+	skipped, err := s.repo.SkippedCustomers(ctx, runID, "")
+	if err != nil {
+		return err
+	}
+	errored := 0
+	for _, sk := range skipped {
+		if sk.Reason == suggestionSkippedError {
+			errored++
+		}
+	}
+	if errored == 0 {
+		return nil
+	}
+	listed, err := s.repo.RunCustomerCount(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if float64(errored) <= suggestionMaxErrorShare*float64(listed) {
+		return nil
+	}
+	slog.ErrorContext(ctx, "standard change suggestions: most customers failed; the run is not published and readers keep the previous snapshot",
+		"runId", runID, "errored", errored, "customers", listed)
+	return fmt.Errorf("standard change suggestions: %d of the run's %d customers failed to compute (each logged with its cause), which points at a fault of the system rather than of one customer: the run is not published", errored, listed)
 }
 
 // computeCustomer computes one customer's suggestions: its candidates and their

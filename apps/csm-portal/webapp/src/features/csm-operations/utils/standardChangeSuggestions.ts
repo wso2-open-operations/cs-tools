@@ -116,18 +116,54 @@ export function suggestionSampleText(s: Pick<BeStandardChangeSuggestion, "sample
 const SKIPPED_NAMED = 5;
 
 /**
- * The notice for customers the latest refresh could not compute in time (too
- * many change requests): their suggestions are missing from the snapshot, which
- * is not the same as having none. null when there are none.
+ * The reasons entity-service records a skipped customer under
+ * (standard_change_suggestion_service.go, suggestionSkippedTooLarge /
+ * suggestionSkippedError): matched exactly, so change them together.
+ */
+export const SUGGESTION_SKIPPED_TOO_LARGE = "too large to compute within the refresh's per-customer deadline";
+export const SUGGESTION_SKIPPED_ERROR = "an error stopped its computation (the refresh logged the cause)";
+
+/** Why, after "were not computed in the latest refresh:", for one customer and for several. */
+function skippedWhy(reason: string): { one: string; many: string } {
+  if (reason === SUGGESTION_SKIPPED_TOO_LARGE) {
+    return { one: "it has too many change requests to compute in time", many: "each has too many change requests to compute in time" };
+  }
+  if (reason === SUGGESTION_SKIPPED_ERROR) {
+    return { one: "an error stopped it, and the next refresh tries again", many: "an error stopped each, and the next refresh tries again" };
+  }
+  // A reason this page does not know (an older or newer backend): as written.
+  return { one: reason, many: reason };
+}
+
+/**
+ * The notice for customers the latest refresh could not compute (too many
+ * change requests, or an error): their suggestions are missing from the
+ * snapshot, which is not the same as having none. One sentence per reason;
+ * null when there are none.
  */
 export function suggestionSkippedText(skipped?: BeStandardChangeSuggestionSkipped[] | null): string | null {
   if (!skipped?.length) return null;
-  const names = skipped.map((s) => s.customer.name || s.customer.id);
-  const why = "it has too many change requests to compute in time";
-  if (names.length === 1) return `${names[0]}'s suggestions were not computed in the latest refresh: ${why}.`;
-  const shown = names.slice(0, SKIPPED_NAMED).join(", ");
-  const more = names.length > SKIPPED_NAMED ? ` and ${names.length - SKIPPED_NAMED} more` : "";
-  return `The suggestions of ${names.length} customers were not computed in the latest refresh (${shown}${more}): each has too many change requests to compute in time.`;
+  const byReason = new Map<string, string[]>();
+  for (const s of skipped) {
+    const names = byReason.get(s.reason) ?? [];
+    names.push(s.customer.name || s.customer.id);
+    byReason.set(s.reason, names);
+  }
+  const order = [SUGGESTION_SKIPPED_TOO_LARGE, SUGGESTION_SKIPPED_ERROR];
+  const reasons = [...byReason.keys()].sort((a, b) => {
+    const rank = (r: string) => (order.includes(r) ? order.indexOf(r) : order.length);
+    return rank(a) - rank(b);
+  });
+  return reasons
+    .map((reason) => {
+      const names = byReason.get(reason) ?? [];
+      const why = skippedWhy(reason);
+      if (names.length === 1) return `${names[0]}'s suggestions were not computed in the latest refresh: ${why.one}.`;
+      const shown = names.slice(0, SKIPPED_NAMED).join(", ");
+      const more = names.length > SKIPPED_NAMED ? ` and ${names.length - SKIPPED_NAMED} more` : "";
+      return `The suggestions of ${names.length} customers were not computed in the latest refresh (${shown}${more}): ${why.many}.`;
+    })
+    .join(" ");
 }
 
 /** What the page says before the first snapshot has been computed. */

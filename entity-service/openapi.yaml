@@ -14591,8 +14591,9 @@ paths:
         live.
         computedOn is when the snapshot was published; with none yet the answer is an empty list
         and no computedOn. skippedCustomers names the customers (the one asked for, or all) the
-        refresh could not compute within their deadline: the snapshot holds nothing for them, which
-        is not the same as having no suggestions. Internal callers only.
+        refresh could not compute (too large for their deadline, or an error), each with the reason:
+        the snapshot holds nothing for them, which is not the same as having no suggestions. Internal
+        callers only.
       parameters:
         - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}, description: "One customer; every customer when absent."}
         - {name: includeIneligible, in: query, required: false, schema: {type: boolean}, description: "Also the clusters that miss a criterion (each names what it misses)."}
@@ -14629,14 +14630,19 @@ paths:
       description: >-
         Driven once a day by operations/csm-scheduled-tasks' standard_change_suggestions_refresh.
         The first call (no runId) starts a run; each call computes the next customers in id order
-        after the cursor, one at a time, at most limit of them and fewer when the call runs short
-        of time (after at least one), and stores their suggestions in the run. The customers are
-        listed once, when the run starts; one whose change requests completed after that waits for
-        the next run. A customer that takes longer than its own deadline (30 s) is recorded as
-        skipped, not computed, and the call carries on (skipped, and totals.skipped). While more is true,
-        call again with runId and nextCursor. The call that answers more = false publishes the
-        run: in one transaction it becomes what GET /standard-change-suggestions reads and every
-        older run is deleted, so a reader never sees a half-written snapshot. Sending a page again
+        after the cursor, one at a time, at most limit of them, and stores their suggestions in the
+        run. A call answers within 45 s: it starts a customer only while it has the time for that
+        customer's 20 s deadline and its writes, so it may compute fewer than limit, and a first call
+        whose start of the run left no time for one only starts the run (runId, more = true, no
+        nextCursor). The customers are listed once, when the run starts; one whose change requests
+        completed after that waits for the next run. A customer that takes longer than its own
+        deadline, or whose computation or save fails, is recorded as skipped, not computed, and the
+        call carries on (skipped, and totals.skipped; GET names it with the reason). While more is
+        true, call again with runId and nextCursor (empty after a first call that only started the
+        run). The call that answers more = false publishes the run: in one transaction it becomes
+        what GET /standard-change-suggestions reads and every older run is deleted, so a reader
+        never sees a half-written snapshot; a run in which more than half of the customers failed
+        with an error is not published (500) and readers keep the previous snapshot. Sending a page again
         replaces that customer's rows (never counted twice). Service credentials only (an internal
         client in M2M_CLIENT_IDS, no user token).
       requestBody:
@@ -14671,7 +14677,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
-          description: Internal error.
+          description: Internal error, including a run not published because more than half of its customers failed with an error (logged with their causes); readers keep the previous snapshot.
           content:
             application/json:
               schema:
@@ -36480,17 +36486,24 @@ components:
             clusters: {type: integer}
             eligible: {type: integer}
             dismissed: {type: integer}
-            skipped: {type: integer, description: "Customers the refresh could not compute in time."}
+            skipped: {type: integer, description: "Customers the refresh could not compute (too large for their deadline, or an error)."}
         skippedCustomers:
           type: array
           description: >-
-            Customers whose suggestions were not computed in the latest refresh (too large to
-            compute within its per-customer deadline), the one asked for or all; empty when none.
+            Customers whose suggestions were not computed in the latest refresh, the one asked for
+            or all; empty when none.
           items:
             type: object
             properties:
               customer: {$ref: '#/components/schemas/EntityRef'}
-              reason: {type: string}
+              reason:
+                type: string
+                description: >-
+                  Why. The refresh writes one of two: "too large to compute within the refresh's
+                  per-customer deadline" (it overran its deadline) or "an error stopped its
+                  computation (the refresh logged the cause)" (its computation or save failed; the
+                  cause is in entity-service's log). Matched exactly by the portal: treat any other
+                  value as free text.
     RefreshStandardChangeSuggestionsRequest:
       type: object
       properties:
@@ -36504,7 +36517,7 @@ components:
         customers: {type: integer, description: "Customers this call computed."}
         changeRequests: {type: integer}
         suggestions: {type: integer}
-        skipped: {type: integer, description: "Customers this call could not compute within their deadline (recorded as skipped)."}
+        skipped: {type: integer, description: "Customers this call could not compute, too large for their deadline or failed (recorded as skipped)."}
         more: {type: boolean}
         nextCursor: {type: string, format: uuid}
         computedOn: {type: string, format: date-time, description: "Set on the call that published the run."}

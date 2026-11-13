@@ -71,7 +71,7 @@ type StandardChangeSuggestionRepository interface {
 	// published), so a call sent again never counts a customer twice.
 	SaveCustomer(ctx context.Context, runID, accountID string, changeRequests int, rows []SuggestionSnapshotRow) error
 	// SkipCustomer records that a customer could not be computed in this run
-	// (reason, e.g. too large for its deadline): no suggestions, and it is
+	// (reason: too large for its deadline, or an error): no suggestions, and it is
 	// reported as skipped. The customer's cluster keys are carried over from the
 	// latest published run (carried_keys, migration 0294), so the next run keeps
 	// them (SnapshotKeys). 409 when the run is gone or published.
@@ -79,6 +79,8 @@ type StandardChangeSuggestionRepository interface {
 	// SkippedCustomers are the customers a run skipped (of one customer when
 	// accountID is set), with their reasons.
 	SkippedCustomers(ctx context.Context, runID, accountID string) ([]domain.StandardChangeSuggestionSkipped, error)
+	// RunCustomerCount is how many customers a run listed when it started.
+	RunCustomerCount(ctx context.Context, runID string) (int, error)
 	// PublishRun sums the run's totals, makes it the one readers see and deletes
 	// every other run with its rows, in one transaction (409 when it is gone or
 	// already published).
@@ -504,6 +506,15 @@ func (r *standardChangeSuggestionRepo) SkipCustomer(ctx context.Context, runID, 
 		}
 		return nil
 	})
+}
+
+// RunCustomerCount implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) RunCustomerCount(ctx context.Context, runID string) (int, error) {
+	var n int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid`, runID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count the run's customers: %w", err)
+	}
+	return n, nil
 }
 
 // SkippedCustomers implements StandardChangeSuggestionRepository.

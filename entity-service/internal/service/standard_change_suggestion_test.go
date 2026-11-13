@@ -282,8 +282,16 @@ type fakeSuggestionRepo struct {
 	carried     map[string]map[string][]repository.SuggestionSnapshotRow // run id -> account -> keys a skip carried
 	beforeRows  func()                                                   // called before SnapshotRows reads (once set)
 	nextRun     int
-	loaded      []string        // accounts whose candidates were read, in order
-	slow        map[string]bool // accounts whose read waits until its context ends
+	loaded      []string         // accounts whose candidates were read, in order
+	slow        map[string]bool  // accounts whose read waits until its context ends
+	fail        map[string]error // accounts whose candidates cannot be read
+	panics      map[string]bool  // accounts whose read panics (a row that trips a bug)
+	saveFail    map[string]error // accounts whose save fails
+	skipFail    error            // every skip fails (the database is gone)
+	onStart     func()           // called when a run starts (its customers listed)
+	onRead      func(account string)
+	onSave      func(account string)
+	onSkip      func(account string)
 }
 
 func (f *fakeSuggestionRepo) NextCustomers(_ context.Context, runID, after string, limit int) ([]string, error) {
@@ -297,6 +305,16 @@ func (f *fakeSuggestionRepo) NextCustomers(_ context.Context, runID, after strin
 }
 func (f *fakeSuggestionRepo) Candidates(ctx context.Context, account string, since time.Time) ([]repository.SuggestionCandidate, error) {
 	f.loaded = append(f.loaded, account)
+	if f.onRead != nil {
+		f.onRead(account)
+	}
+	if f.panics[account] {
+		var none []repository.SuggestionCandidate
+		_ = none[1] // an index out of range, as a bad row might cause
+	}
+	if err := f.fail[account]; err != nil {
+		return nil, err
+	}
 	if f.slow[account] {
 		<-ctx.Done()
 		return nil, fmt.Errorf("read candidates: %w", ctx.Err())
@@ -340,6 +358,9 @@ func (f *fakeSuggestionRepo) StartRun(_ context.Context, crit domain.StandardCha
 		f.runs, f.rows, f.runCustomer = map[string]*repository.SuggestionRun{}, map[string][]repository.SuggestionSnapshotRow{}, map[string]map[string]int{}
 		f.listed, f.skipped, f.carried = map[string][]string{}, map[string]map[string]string{}, map[string]map[string][]repository.SuggestionSnapshotRow{}
 	}
+	if f.onStart != nil {
+		f.onStart()
+	}
 	f.nextRun++
 	run := repository.SuggestionRun{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextRun), StartedOn: sgNow, Criteria: crit}
 	f.runs[run.ID] = &run
@@ -372,7 +393,13 @@ func (f *fakeSuggestionRepo) open(id string) error {
 	return nil
 }
 func (f *fakeSuggestionRepo) SaveCustomer(_ context.Context, runID, account string, crs int, rows []repository.SuggestionSnapshotRow) error {
+	if f.onSave != nil {
+		f.onSave(account)
+	}
 	if err := f.open(runID); err != nil {
+		return err
+	}
+	if err := f.saveFail[account]; err != nil {
 		return err
 	}
 	kept := f.rows[runID][:0:0]
@@ -390,6 +417,12 @@ func (f *fakeSuggestionRepo) SaveCustomer(_ context.Context, runID, account stri
 func (f *fakeSuggestionRepo) SkipCustomer(_ context.Context, runID, account, reason string) error {
 	if err := f.open(runID); err != nil {
 		return err
+	}
+	if f.onSkip != nil {
+		f.onSkip(account)
+	}
+	if f.skipFail != nil {
+		return f.skipFail
 	}
 	delete(f.runCustomer[runID], account)
 	f.skipped[runID][account] = reason
@@ -409,6 +442,9 @@ func (f *fakeSuggestionRepo) SkippedCustomers(_ context.Context, runID, account 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Customer.ID < out[j].Customer.ID })
 	return out, nil
+}
+func (f *fakeSuggestionRepo) RunCustomerCount(_ context.Context, runID string) (int, error) {
+	return len(f.listed[runID]), nil
 }
 func (f *fakeSuggestionRepo) PublishRun(_ context.Context, id string) (repository.SuggestionRun, error) {
 	if err := f.open(id); err != nil {
@@ -545,11 +581,16 @@ func TestStandardChangeSuggestionService_Refresh(t *testing.T) {
 			t.Errorf("window from %v, want 12 months before the run started", repo.sinces[0])
 		}
 	})
-	t.Run("a page stops once its time is spent, after one customer", func(t *testing.T) {
+	t.Run("a page starts no customer it has not the time for", func(t *testing.T) {
 		repo := sgFixture()
 		svc := sgService(repo, true)
 		clock := sgNow
-		svc.now = func() time.Time { clock = clock.Add(suggestionRefreshBudget + time.Second); return clock }
+		svc.now = func() time.Time { return clock }
+		// A takes a second longer than leaves B the time for its compute and
+		// two writes, so B is not started.
+		repo.onRead = func(string) {
+			clock = clock.Add(suggestionPageTimeout - suggestionCustomerTimeout - 2*suggestionWriteTimeout + time.Second)
+		}
 		resp, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{})
 		if err != nil || resp.Customers != 1 || !resp.More || resp.NextCursor != sgAccountA {
 			t.Fatalf("resp = %+v, %v; want one customer and more after A", resp, err)

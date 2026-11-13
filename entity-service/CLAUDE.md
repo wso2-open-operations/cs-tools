@@ -9024,19 +9024,42 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
   (`StartRun`: every customer with a candidate in the window, one `standard_change_suggestion_run_customer`
   row each; a customer whose first candidate completes later waits for the next run). Each call then walks
   that list (`NextCustomers`) in id order after `cursor`, **one customer at a time** (only that customer's
-  change requests and plans are held), at most `limit` (default 50, at most 500), and starts no new one
-  after 20 seconds (`suggestionRefreshBudget`; it always computes at least one).
-- **One customer can never fail the run.** Each customer gets its own 30-second deadline
-  (`suggestionCustomerTimeout`), so a call ends within about 50 seconds, inside the 60s `REQUEST_TIMEOUT`.
-  A customer that overruns it (its own deadline, not the call's: a cancelled call is still an error) is
-  logged at WARN with its account id and candidate count, recorded as skipped (`SkipCustomer`:
-  `run_customer.skipped_reason`, its `change_requests` NULL, no rows), counted in the page's `skipped`
-  and the run's `totals.skipped` (column `standard_change_suggestion_run.skipped`), and the page carries on
-  with the next customer. `GET` returns `skippedCustomers` (`[{customer, reason}]`, of the one customer
-  asked for or all) and `scanned.skipped`, so the page can say that customer's suggestions were not
-  computed rather than that it has none. A later page that computes it after all (a page sent again)
+  change requests and plans are held), at most `limit` (default 50, at most 500).
+- **A page answers within 45 seconds, 15 inside both 60s timeouts.** Everything a call does, the run's
+  start included, runs under `suggestionPageTimeout` (45s; the request's own deadline when that is
+  sooner), so it ends well inside `REQUEST_TIMEOUT` (60s) and the scheduled task's per-call timeout (60s)
+  whatever its customers and writes do. Inside it each customer's compute has
+  `suggestionCustomerTimeout` (20s) and each write (its save, or the skip that records it)
+  `suggestionWriteTimeout` (5s). A customer is **started only while the page has the time for its
+  compute and two writes** (30s: a save that fails and then its skip), so a customer that starts always
+  gets its whole deadline and the page's deadline is never what stops it; the last one starts by 15s.
+  The publish (with the error check below) gets `suggestionPublishTimeout` (10s): a page that finishes
+  its customers with less left answers `more` and the next call, which finds no customer left,
+  publishes. A page with no time for even one customer (a slow start of the run, or a request deadline
+  under 30s) computes none and logs a WARN: on the first page that only starts the run (`runId`, empty
+  `nextCursor`, `more`), which the scheduled task counts as progress; on a later page the task sees no
+  progress and fails the run.
+- **One customer can never fail the run.** A customer that overruns its own deadline (not the page's:
+  a cancelled call is still an error) is logged at WARN with its account id and candidate count and
+  recorded as skipped with the reason `suggestionSkippedTooLarge`. A customer whose compute fails for any
+  other reason (a bad row, a decode failure, a panic, which is recovered) or whose save fails is logged at
+  ERROR with the cause and recorded as skipped with the reason `suggestionSkippedError`, and the page
+  carries on with the next customer. Only what is not that customer's stops the page: the call ending,
+  a run no longer open (409, from the save), or a skip that cannot be recorded (the database). A skip is
+  `SkipCustomer`: `run_customer.skipped_reason`, its `change_requests` NULL, no rows, its previous keys
+  carried; it is counted in the page's `skipped` and the run's `totals.skipped` (column
+  `standard_change_suggestion_run.skipped`). `GET` returns `skippedCustomers` (`[{customer, reason}]`, of
+  the one customer asked for or all) and `scanned.skipped`, so the page can say that customer's
+  suggestions were not computed, and why, rather than that it has none (the webapp matches the two reason
+  strings exactly: change them together). A later page that computes it after all (a page sent again)
   clears the skip.
-  While `more` is true the caller sends `{runId, cursor: nextCursor}`. The call that answers
+- **Most customers failing fails the run.** Before publishing, a run in which more than half of its
+  listed customers (`suggestionMaxErrorShare`, `RunCustomerCount`) were skipped for an error is not
+  published: the last page answers 500, logs `most customers failed` at ERROR, and readers keep the
+  previous snapshot. One customer's error is that customer's; most of them failing is a fault of the
+  system (a query, the schema, the database), and publishing would replace every customer's suggestions
+  with "not computed". Overruns do not count: they are bounded by each customer's own size.
+- **Continued, then published.** While `more` is true the caller sends `{runId, cursor: nextCursor}`. The call that answers
   `more: false` **publishes**: in one transaction the run gets `completed_on` and its totals (summed from
   `standard_change_suggestion_run_customer` and the rows), and every other run is deleted with its rows
   (`ON DELETE CASCADE`). Readers read the newest published run, so they see the old snapshot until that
@@ -9053,7 +9076,8 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
   dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
   are as they were at the refresh.
 - **Logged**: each page (`refresh page`: customers, skipped, change requests, suggestions, `more`,
-  `pageMs`), each skipped customer (WARN) and the publish (`refresh published`: customers, skipped, change
+  `pageMs`), each customer skipped as too large (WARN) or for an error (ERROR, with the cause), a page
+  with no time for a customer (WARN), a run refused for its errors (ERROR) and the publish (`refresh published`: customers, skipped, change
   requests, clusters, eligible, `durationMs` of the run).
 - **Cost.** The customer list once per run (it used to be re-read on every page: 8.5 s a page on the
   200,000-change-request benchmark), then per customer one read of its window's completed change
@@ -9238,8 +9262,14 @@ for a machine caller).
 Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging; the refresh's
 paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
 `standard_change_suggestion_scale_test.go` (the cap and its sample, `similarAtLeast` against `jaccard`,
-the context checks, a customer that overruns its deadline skipped while the call's own deadline is an
-error, the customer list read once per run), `standard_change_suggestion_identity_test.go` (two clusters of
+the context checks, a customer that overruns its deadline skipped while the call ending is an
+error, the customer list read once per run), `standard_change_suggestion_refresh_test.go` (a customer
+whose read, computation or save fails skipped with the error reason and the cause logged; a 409 or a
+failed skip still failing the page; most customers failing refused and the previous snapshot kept, half
+of them published, overruns not counted; the page timing: the numbers against the 60s timeouts, the worst
+case on a fake clock, customers started only while one fits, the hard stop in real time, a slow start, a
+publish left to the next call, a request deadline too short for any customer),
+`standard_change_suggestion_identity_test.go` (two clusters of
 one subject get keys of their own and are dismissed apart; keys kept across a refresh whose oldest members
 left, and across a skipped refresh; a key kept when the subject changes; a split, minting, one key per
 cluster; key validation; GET reading again when a refresh publishes during it), `standard_change_suggestion_words_test.go` (the tokenizer
