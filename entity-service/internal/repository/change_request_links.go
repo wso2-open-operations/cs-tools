@@ -328,7 +328,7 @@ func resolveChangeRequestLinks(ctx context.Context, q crQueryer, sel domain.Chan
 
 	// Deployments: exist, active, in the project.
 	rows, err := q.Query(ctx, `
-		SELECT d.id::text, d.name, d.project_id::text, COALESCE(d.is_active, false), lower(d.type::text)
+		SELECT d.id::text, d.name, d.project_id::text, COALESCE(d.is_active, false), COALESCE(lower(d.type::text), '')
 		FROM deployment d
 		WHERE d.id = ANY($1::text[]::uuid[])`, depIDs)
 	if err != nil {
@@ -676,6 +676,26 @@ func (r *changeRequestRepo) ValidateChangeRequestLinks(ctx context.Context, sel 
 	res, err := resolveChangeRequestLinks(ctx, r.db, sel, resolveLinkOpts{})
 	if err != nil {
 		return domain.ChangeRequestLinkSet{}, err
+	}
+	// The clone source, checked again in the create transaction
+	// (createChangeRequestWithScope).
+	if _, err := checkCloneSource(ctx, r.db, sel.CloneSourceID); err != nil {
+		return domain.ChangeRequestLinkSet{}, err
+	}
+	if sel.StandardChangeTemplateVersionID != nil {
+		// The create transaction checks this again (checkStandardChangeDeployments);
+		// here it is checked before the previous system is called on dual-write.
+		name, types, err := standardChangeTemplateDeploymentTypes(ctx, r.db, *sel.StandardChangeTemplateVersionID)
+		if err != nil {
+			return domain.ChangeRequestLinkSet{}, fmt.Errorf("validate change request links: template deployment types: %w", err)
+		}
+		deps := make([]templateDeployment, 0, len(res.deployments))
+		for _, d := range res.deployments {
+			deps = append(deps, templateDeployment{name: d.ref.Name, typ: d.typ})
+		}
+		if refusal := templateDeploymentsRefusal(name, types, deps); refusal != nil {
+			return domain.ChangeRequestLinkSet{}, refusal
+		}
 	}
 	return res.linkSet(), nil
 }

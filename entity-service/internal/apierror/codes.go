@@ -142,7 +142,7 @@ const (
 	// CodeChangeRequestStandardTemplateField is the 400 for a create or PATCH of a
 	// change request raised from a standard change template that sets or changes a
 	// field the template specifies (the plans, the impact and risk, the customer
-	// gates, the type): those come from the CAB-approved template and cannot
+	// gates, the type): those come from the authorised template and cannot
 	// deviate from it. Only the template's parameters and the fields it does not
 	// specify are the caller's. Nothing was written.
 	CodeChangeRequestStandardTemplateField = "change_request_standard_template_field"
@@ -162,6 +162,25 @@ const (
 	// customer's (the Salesforce project sync re-parented it): a template is
 	// pre-authorised for one customer's deployments only. Nothing was written.
 	CodeStandardChangeTemplateOtherCustomer = "standard_change_template_other_customer"
+)
+
+// The two refusals of a decision on a standard change proposal (POST
+// /standard-change-proposals/{id}/decision) that mean the proposal moved on
+// behind the caller's page: the same request would be refused again, so a
+// client reads the proposal again rather than offering a retry. Every other
+// 409 of that route (a template that took the name, the template moved on, a
+// piece of evidence no longer a closed change request of the customer) is
+// about the approval itself, carries no code, and its message says what to do.
+const (
+	// CodeStandardChangeProposalNotInReview is the 409 for a decision on a
+	// proposal that is no longer waiting for one: still a draft, or already
+	// approved, rejected, withdrawn or cancelled. Nothing was recorded.
+	CodeStandardChangeProposalNotInReview = "standard_change_proposal_not_in_review"
+
+	// CodeStandardChangeDecisionStageStale is the 409 for a decision that names
+	// a stage the proposal no longer waits on (settled, or replaced when the
+	// proposal returned to draft and was submitted again). Nothing was recorded.
+	CodeStandardChangeDecisionStageStale = "standard_change_decision_stage_stale"
 )
 
 // The refusals of a portal membership write (PATCH / DELETE /

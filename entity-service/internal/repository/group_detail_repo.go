@@ -54,7 +54,8 @@ func NewGroupDetailRepository(db *pgxpool.Pool) GroupDetailRepository {
 }
 
 // namedPoolGroups are the groups the approval pools resolve BY NAME rather than
-// by id: the CAB stage's own group and the Devops Approval peer fallback
+// by id: the CAB stage's own group (which also authorises standard change
+// templates) and the Devops Approval peer fallback
 // (resolveApprovalPool / resolvePeerPool -> namedGroup). Every other
 // group an approval stage points at is a change's assigned group, whose pools
 // read team_member.group_id = <the group's id> only (groupMemberIDs).

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -34,7 +35,7 @@ import (
 //
 //   - the fields the template specifies are frozen from creation on, in every
 //     state: what is implemented, tested and backed out cannot deviate from the
-//     CAB-approved template (checkStandardChangeTemplateFields);
+//     authorised template (checkStandardChangeTemplateFields);
 //   - its type stays standard, and no other change request becomes a standard
 //     change by a PATCH (checkStandardChangeTypeEdit);
 //   - Request Approval needs the template still active and still at the version
@@ -81,9 +82,16 @@ func checkStandardChangeTemplateFields(ctx context.Context, tx pgx.Tx, id string
 	if snap.templateVersionID == nil {
 		return nil
 	}
+	// The priority is the template's only when its version fixes one.
+	fixesPriority := false
+	if req.Priority != nil {
+		if err := tx.QueryRow(ctx, `SELECT priority IS NOT NULL FROM standard_change_template_version WHERE id = $1::uuid`, *snap.templateVersionID).Scan(&fixesPriority); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("patch change request: read template priority: %w", err)
+		}
+	}
 	var fields []approvedLockField
 	for _, f := range approvedLockFields(req, true) {
-		if standardTemplateFields[f.name] {
+		if standardTemplateFields[f.name] || (f.name == "priority" && fixesPriority) {
 			fields = append(fields, f)
 		}
 	}
@@ -103,6 +111,111 @@ func checkStandardChangeTemplateFields(ctx context.Context, tx pgx.Tx, id string
 		return nil
 	}
 	return &apierror.ValidationError{Msg: standardTemplateFieldsMsg(changed), Code: apierror.CodeChangeRequestStandardTemplateField}
+}
+
+// DeploymentTypesText names a template's deployment types for a message
+// ("primary_production or staging").
+func DeploymentTypesText(types []string) string {
+	if len(types) <= 1 {
+		return strings.Join(types, "")
+	}
+	return strings.Join(types[:len(types)-1], ", ") + " or " + types[len(types)-1]
+}
+
+// checkStandardChangeDeployments refuses (400, CodeChangeRequestStandardTemplateField)
+// a change request raised from template version templateVersionID, when that
+// version names deployment types (migration 0287), if it has no deployment, or a
+// deployment of another type (an untyped one included). The deployments are the
+// link rows and the single work_item.deployment_id an older client still writes.
+// Run in the writing transaction, after its deployments are written, by create
+// and by any PATCH that writes them, of a templated change request only.
+//
+// crvis: reads one change request's own deployments by id inside a transaction that has just written them
+func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeRequestID, templateVersionID string) error {
+	name, types, err := standardChangeTemplateDeploymentTypes(ctx, tx, templateVersionID)
+	if err != nil {
+		return fmt.Errorf("check standard change deployments: %w", err)
+	}
+	if len(types) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		WITH chosen AS (
+		    SELECT l.deployment_id AS id FROM change_request_deployment l WHERE l.change_request_id = $1::uuid
+		    UNION
+		    SELECT wi.deployment_id FROM work_item wi WHERE wi.id = $1::uuid AND wi.deployment_id IS NOT NULL)
+		SELECT d.name, COALESCE(LOWER(d.type::text), '')
+		  FROM chosen c JOIN deployment d ON d.id = c.id`, changeRequestID)
+	if err != nil {
+		return fmt.Errorf("check standard change deployments: %w", err)
+	}
+	deps, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (templateDeployment, error) {
+		var d templateDeployment
+		err := row.Scan(&d.name, &d.typ)
+		return d, err
+	})
+	if err != nil {
+		return fmt.Errorf("check standard change deployments: %w", err)
+	}
+	return templateDeploymentsRefusal(name, types, deps)
+}
+
+// standardChangeTemplateDeploymentTypes reads the deployment types template
+// version versionID names, and its template's name. No types when the version
+// names none, or does not exist.
+func standardChangeTemplateDeploymentTypes(ctx context.Context, q rowQuerier, versionID string) (name string, types []string, err error) {
+	err = q.QueryRow(ctx, `SELECT t.name, v.deployment_types FROM standard_change_template_version v
+		JOIN standard_change_template t ON t.id = v.template_id WHERE v.id = $1::uuid`, versionID).Scan(&name, &types)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, nil
+	}
+	return name, types, err
+}
+
+// templateDeployment is a deployment chosen for a templated change request, as
+// the deployment-type rule judges it: its name and its lower-cased type ("" when
+// it has none).
+type templateDeployment struct{ name, typ string }
+
+// templateDeploymentsRefusal is the deployment-type rule, for the create's
+// pre-flight (ValidateChangeRequestLinks) and the writing transactions
+// (checkStandardChangeDeployments) alike: deps, chosen for a change of template
+// name, which is for deployments of types, are refused when there are none or
+// one is of another type (named "name (type)", "no type" when untyped, in name
+// order). nil when types is empty.
+func templateDeploymentsRefusal(name string, types []string, deps []templateDeployment) error {
+	if len(types) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(deps)
+	slices.SortStableFunc(sorted, func(a, b templateDeployment) int { return strings.Compare(a.name, b.name) })
+	var other []string
+	for _, d := range sorted {
+		if slices.Contains(types, d.typ) {
+			continue
+		}
+		t := d.typ
+		if t == "" {
+			t = "no type"
+		}
+		other = append(other, d.name+" ("+t+")")
+	}
+	return standardChangeDeploymentsRefusal(name, types, len(deps), other)
+}
+
+// standardChangeDeploymentsRefusal is the 400 for a change of template name,
+// which is for deployments of types, with total deployments of which other
+// (named "name (type)") are of another type; nil when they are acceptable.
+func standardChangeDeploymentsRefusal(name string, types []string, total int, other []string) error {
+	switch {
+	case total == 0:
+		return &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,
+			Msg: fmt.Sprintf("the standard change template %q is for %s deployments: choose at least one of the project's deployments of that type", name, DeploymentTypesText(types))}
+	case len(other) > 0:
+		return &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,
+			Msg: fmt.Sprintf("the standard change template %q is for %s deployments only: %s cannot be chosen", name, DeploymentTypesText(types), strings.Join(other, ", "))}
+	}
+	return nil
 }
 
 // checkStandardChangeTypeEdit keeps a templated change request standard.
@@ -143,7 +256,7 @@ func checkStandardChangeTemplateUsable(ctx context.Context, tx pgx.Tx, snap chan
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("patch change request: read standard change template: %w", err)
 	}
-	return templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), *snap.templateVersionID, stringOrEmpty(name), "approval cannot be requested")
+	return templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), *snap.templateVersionID, stringOrEmpty(name), "approval cannot be requested", true)
 }
 
 // checkStandardChangeCustomerAtApproval refuses (400,
@@ -184,20 +297,30 @@ func checkStandardChangeCustomerAtApproval(ctx context.Context, tx pgx.Tx, snap 
 
 // templateUsableRefusal is the 409 for a template that cannot be used (state is
 // the stored upper-case state, "" when the template could not be read), nil when
-// it can.
-func templateUsableRefusal(state, currentVersionID, versionID, name, what string) error {
+// it can. existing is true for a change request already raised from it (Request
+// Approval), which is told what is left to do with it; false on create, where
+// there is no change request yet. A retirement is final, so it is named first; a
+// revision next, since it still refuses the change request once a suspension is
+// lifted; a suspension last.
+func templateUsableRefusal(state, currentVersionID, versionID, name, what string, existing bool) error {
+	refuse := func(msg string) error {
+		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable, Msg: what + ": " + msg}
+	}
 	switch {
 	case state == "":
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable, Msg: what + ": the standard change template could not be found"}
-	case state == "SUSPENDED":
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
-			Msg: fmt.Sprintf("%s: the standard change template %q is suspended", what, name)}
-	case state != "ACTIVE":
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
-			Msg: fmt.Sprintf("%s: the standard change template %q has been retired", what, name)}
+		return refuse("the standard change template could not be found")
+	case state != "ACTIVE" && state != "SUSPENDED":
+		if existing {
+			return refuse(fmt.Sprintf("the standard change template %q has been retired, and a retired template is never used again; cancel this change request, and raise a Normal change if the work is still needed", name))
+		}
+		return refuse(fmt.Sprintf("the standard change template %q has been retired; raise a Normal change instead", name))
 	case !strings.EqualFold(currentVersionID, versionID):
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
-			Msg: fmt.Sprintf("%s: the standard change template %q has been revised since; cancel this change request and raise a new one from the current version", what, name)}
+		if existing {
+			return refuse(fmt.Sprintf("the standard change template %q has been revised since; cancel this change request and raise a new one from the current version", name))
+		}
+		return refuse(fmt.Sprintf("the standard change template %q has been revised since it was loaded; reload it and raise the change request from the current version", name))
+	case state == "SUSPENDED":
+		return refuse(fmt.Sprintf("the standard change template %q is suspended", name))
 	}
 	return nil
 }
@@ -218,7 +341,7 @@ func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("create change request: read standard change template: %w", err)
 	}
-	if err := templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), versionID, stringOrEmpty(name), "the change request cannot be raised"); err != nil {
+	if err := templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), versionID, stringOrEmpty(name), "the change request cannot be raised", false); err != nil {
 		return err
 	}
 	if err := checkProjectOfTemplateCustomer(ctx, tx, stringOrEmpty(name), accountRef(accountID, accountName), projectID); err != nil {
@@ -342,9 +465,12 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 	var accountID, accountName *string
 	var raw []byte
 	var paramsRaw []byte
+	var priority *string
+	var templateState string
 	err := q.QueryRow(ctx, `
 		SELECT t.id::text, t.name, t.number, a.id::text, a.name, v.id::text, v.version, COALESCE(v.parameters, '[]'::jsonb), cr.standard_change_parameter_values,
-		       t.account_id IS DISTINCT FROM p.account_id
+		       t.account_id IS DISTINCT FROM p.account_id, LOWER(t.state), t.current_version_id IS DISTINCT FROM v.id,
+		       v.priority, v.deployment_types
 		  FROM change_request cr
 		  JOIN work_item wi ON wi.id = cr.id
 		  LEFT JOIN project p ON p.id = wi.project_id
@@ -353,7 +479,7 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		  LEFT JOIN account a ON a.id = t.account_id
 		 WHERE cr.id = $1::uuid`, id).
 		Scan(&out.Template.ID, &out.Template.Name, &out.TemplateNumber, &accountID, &accountName, &out.VersionID, &out.Version, &paramsRaw, &raw,
-			&out.CustomerMismatch)
+			&out.CustomerMismatch, &templateState, &out.Superseded, &priority, &out.DeploymentTypes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -361,6 +487,11 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		return nil, fmt.Errorf("read change request standard change: %w", err)
 	}
 	out.Customer = accountRef(accountID, accountName)
+	out.TemplateState = domain.StandardChangeTemplateState(templateState)
+	if priority != nil {
+		v := domain.ChangeRequestPriority(*priority)
+		out.Priority = &v
+	}
 	var params []domain.StandardChangeParameter
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		return nil, fmt.Errorf("read change request standard change: parameters: %w", err)
@@ -384,8 +515,8 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 }
 
 // refuseOtherWorkItemType answers 404 for a work item the caller can see that is
-// not a change request (a standard change proposal, whose CAB stage lives in the
-// same approval tables). A work item the caller cannot see is left to the caller's
+// not a change request (a standard change proposal, whose approval stages live in
+// the same approval tables). A work item the caller cannot see is left to the caller's
 // own visibility handling.
 func refuseOtherWorkItemType(ctx context.Context, q crQuerier, id string) error {
 	var typ string

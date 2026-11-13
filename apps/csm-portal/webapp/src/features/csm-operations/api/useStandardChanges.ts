@@ -28,8 +28,10 @@ import type {
   BeChangeRequestSearchPayload,
   BeChangeRequestSearchResponse,
   BeChangeRequestSearchView,
+  BeCancelStandardChangeProposalPayload,
   BeCreateStandardChangeProposalPayload,
   BeDecideStandardChangeProposalPayload,
+  BeDismissStandardChangeSuggestionPayload,
   BeEntityRef,
   BeProjectSearchPayload,
   BeProjectSearchResponse,
@@ -38,32 +40,41 @@ import type {
   BeSearchStandardChangeTemplatesPayload,
   BeSearchStandardChangeTemplatesResponse,
   BeStandardChangeProposal,
+  BeStandardChangeSuggestionDismissal,
+  BeStandardChangeSuggestionsQuery,
+  BeStandardChangeSuggestionsResponse,
   BeStandardChangeTemplate,
+  BeStandardChangeTemplateNotePayload,
   BeStandardChangeTemplateVersion,
   BeSuspendStandardChangeTemplatePayload,
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
-// Operations > Change requests > Standard changes: the CAB-approved template
+// Operations > Change requests > Standard changes: the approved template
 // catalogue and the proposals that create, revise or retire its templates.
 // Every route is a thin BFF proxy of entity-service, which decides who may act
-// (the proposer edits and submits, a CAB member decides, the owner or a CAB
-// member suspends): a refusal keeps its message and `errorCode`, so callers
-// show `err.message`.
+// (the proposer edits, submits and deletes a draft; two CAB members decide; the
+// owner or the CAB suspends; only the CAB resumes, clears a review flag or
+// cancels someone else's proposal): a refusal keeps its message and `errorCode`, so callers show
+// `err.message`.
 
 /** Every standard change query lives under this key, so one write refreshes them all. */
 export const STANDARD_CHANGES_KEY = ["operations", "standard-changes"] as const;
 const TEMPLATES_KEY = [...STANDARD_CHANGES_KEY, "templates"] as const;
 const PROPOSALS_KEY = [...STANDARD_CHANGES_KEY, "proposals"] as const;
+const SUGGESTIONS_KEY = [...STANDARD_CHANGES_KEY, "suggestions"] as const;
+export const SUGGESTIONS_STALE_TIME_MS = 5 * 60_000;
 
 const TEMPLATES = "/standard-change-templates";
 const PROPOSALS = "/standard-change-proposals";
+const SUGGESTIONS = "/standard-change-suggestions";
 
 const enc = encodeURIComponent;
 
 /** One page of the catalogue (`POST /standard-change-templates/search`). */
 export function useSearchStandardChangeTemplates(
   payload: BeSearchStandardChangeTemplatesPayload,
+  options?: { enabled?: boolean },
 ): UseQueryResult<BeSearchStandardChangeTemplatesResponse, Error> {
   const api = useBackendApi();
   return useQuery<BeSearchStandardChangeTemplatesResponse, Error>({
@@ -74,6 +85,7 @@ export function useSearchStandardChangeTemplates(
         payload,
       ),
     placeholderData: keepPreviousData,
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -124,7 +136,7 @@ export function useGetStandardChangeTemplate(
   });
 }
 
-/** One version as the CAB approved it (immutable, so cached for good). */
+/** One version as it was approved (immutable, so cached for good). */
 export function useGetStandardChangeTemplateVersion(
   templateId: string | undefined,
   versionId: string | undefined,
@@ -178,7 +190,7 @@ export function useCountStandardChangeProposals(
   });
 }
 
-/** A proposal with its content, evidence and CAB approvers; `null` when not found. */
+/** A proposal with its content, evidence, stages and approvers; `null` when not found. */
 export function useGetStandardChangeProposal(
   id: string | undefined,
 ): UseQueryResult<BeStandardChangeProposal | null, Error> {
@@ -229,19 +241,31 @@ export function useSuspendStandardChangeTemplate(): UseMutationResult<
   });
 }
 
-/** `POST /standard-change-templates/{id}/resume` (the owner or a CAB member). */
-export function useResumeStandardChangeTemplate(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+/** `POST /standard-change-templates/{id}/resume` (a CAB member, with a note). */
+export function useResumeStandardChangeTemplate(): UseMutationResult<
+  BeStandardChangeTemplate,
+  Error,
+  { id: string; note: string }
+> {
   const api = useBackendApi();
-  return useStandardChangeMutation((id: string) =>
-    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/resume`),
+  return useStandardChangeMutation(({ id, note }: { id: string; note: string }) =>
+    api.post<BeStandardChangeTemplateNotePayload, BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/resume`, {
+      note: note.trim(),
+    }),
   );
 }
 
-/** `POST /standard-change-templates/{id}/clear-review` (the owner or a CAB member). */
-export function useClearStandardChangeTemplateReview(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+/** `POST /standard-change-templates/{id}/clear-review` (a CAB member, with a note). */
+export function useClearStandardChangeTemplateReview(): UseMutationResult<
+  BeStandardChangeTemplate,
+  Error,
+  { id: string; note: string }
+> {
   const api = useBackendApi();
-  return useStandardChangeMutation((id: string) =>
-    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/clear-review`),
+  return useStandardChangeMutation(({ id, note }: { id: string; note: string }) =>
+    api.post<BeStandardChangeTemplateNotePayload, BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/clear-review`, {
+      note: note.trim(),
+    }),
   );
 }
 
@@ -277,12 +301,32 @@ export function useSubmitStandardChangeProposal(): UseMutationResult<BeStandardC
   );
 }
 
-/** `POST /standard-change-proposals/{id}/withdraw`: the proposer, while a draft or in CAB review. */
+/** `POST /standard-change-proposals/{id}/withdraw`: the proposer, while it is open. */
 export function useWithdrawStandardChangeProposal(): UseMutationResult<BeStandardChangeProposal, Error, string> {
   const api = useBackendApi();
   return useStandardChangeMutation((id: string) =>
     api.postEmpty<BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}/withdraw`),
   );
+}
+
+/** `POST /standard-change-proposals/{id}/cancel`: a CAB member, on someone else's open proposal. */
+export function useCancelStandardChangeProposal(): UseMutationResult<
+  BeStandardChangeProposal,
+  Error,
+  { id: string; reason: string }
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation(({ id, reason }: { id: string; reason: string }) =>
+    api.post<BeCancelStandardChangeProposalPayload, BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}/cancel`, {
+      reason: reason.trim(),
+    }),
+  );
+}
+
+/** `DELETE /standard-change-proposals/{id}`: the proposer, on a draft never submitted. */
+export function useDeleteStandardChangeProposal(): UseMutationResult<null, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) => api.del<null>(`${PROPOSALS}/${enc(id)}`));
 }
 
 /** `POST /standard-change-proposals/{id}/decision`: a CAB member on their own row. */
@@ -412,4 +456,56 @@ export function useProjectCustomer(projectId: string | undefined): UseQueryResul
     enabled: !!projectId,
     staleTime: 60_000,
   });
+}
+
+/**
+ * `GET /standard-change-suggestions`: clusters of a customer's completed change
+ * requests that look like the same change done again (every customer when no
+ * accountId), from the snapshot entity-service's scheduled refresh last
+ * published (`computedOn`; none before the first). A read never computes. It
+ * answers one page (`limit`, default 20, at most 50; `offset`) with `total`.
+ */
+export function useStandardChangeSuggestions(
+  query: BeStandardChangeSuggestionsQuery,
+): UseQueryResult<BeStandardChangeSuggestionsResponse, Error> {
+  const api = useBackendApi();
+  const params = new URLSearchParams();
+  if (query.accountId) params.set("accountId", query.accountId);
+  if (query.includeIneligible) params.set("includeIneligible", "true");
+  if (query.includeDismissed) params.set("includeDismissed", "true");
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.offset) params.set("offset", String(query.offset));
+  const qs = params.toString();
+  return useQuery({
+    queryKey: [...SUGGESTIONS_KEY, qs],
+    queryFn: async () => {
+      const resp = await api.get<BeStandardChangeSuggestionsResponse>(qs ? `${SUGGESTIONS}?${qs}` : SUGGESTIONS);
+      if (!resp) throw new Error("Empty response from the standard change suggestions.");
+      return resp;
+    },
+    placeholderData: keepPreviousData,
+    retry: false,
+    // The snapshot changes once a day: switching back to Suggested, or between
+    // its filters, reads the cache. A dismissal or restore still refreshes it
+    // (they invalidate STANDARD_CHANGES_KEY).
+    staleTime: SUGGESTIONS_STALE_TIME_MS,
+  });
+}
+
+/** `POST /standard-change-suggestions/dismissals`: hide a suggestion for its customer, with a reason. */
+export function useDismissStandardChangeSuggestion(): UseMutationResult<
+  BeStandardChangeSuggestionDismissal,
+  Error,
+  BeDismissStandardChangeSuggestionPayload
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((body: BeDismissStandardChangeSuggestionPayload) =>
+    api.post<BeDismissStandardChangeSuggestionPayload, BeStandardChangeSuggestionDismissal>(`${SUGGESTIONS}/dismissals`, body),
+  );
+}
+
+/** `DELETE /standard-change-suggestions/dismissals/{id}`: show a dismissed suggestion again. */
+export function useRestoreStandardChangeSuggestion(): UseMutationResult<null, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) => api.del<null>(`${SUGGESTIONS}/dismissals/${enc(id)}`));
 }

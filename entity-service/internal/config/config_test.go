@@ -1583,3 +1583,29 @@ func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
 		t.Errorf("\" s2 \" normalizes to %q, want S2", got)
 	}
 }
+
+// The standard change suggestion thresholds: their defaults, a value in range,
+// and every invalid value (zero, negative, a percent over 100, not a number)
+// falling back to the default.
+func TestStandardChangeSuggestionThresholds(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		for _, k := range []string{"STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS", "STANDARD_CHANGE_SUGGESTION_MIN_CLOSED",
+			"STANDARD_CHANGE_SUGGESTION_MIN_SUCCESS_PERCENT", "STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT"} {
+			t.Setenv(k, "")
+		}
+		cfg := Load()
+		if cfg.StandardChangeSuggestionWindowMonths != 12 || cfg.StandardChangeSuggestionMinClosed != 5 ||
+			cfg.StandardChangeSuggestionMinSuccessPercent != 90 || cfg.StandardChangeSuggestionPlanSimilarityPercent != 50 {
+			t.Errorf("defaults = %d / %d / %d / %d, want 12 / 5 / 90 / 50", cfg.StandardChangeSuggestionWindowMonths,
+				cfg.StandardChangeSuggestionMinClosed, cfg.StandardChangeSuggestionMinSuccessPercent, cfg.StandardChangeSuggestionPlanSimilarityPercent)
+		}
+	})
+	for value, want := range map[string]int{"7": 7, " 100 ": 100, "0": 50, "-3": 50, "101": 50, "half": 50, "1.5": 50} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT", value)
+			if got := Load().StandardChangeSuggestionPlanSimilarityPercent; got != want {
+				t.Errorf("%q -> %d, want %d", value, got, want)
+			}
+		})
+	}
+}

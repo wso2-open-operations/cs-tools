@@ -572,6 +572,16 @@ type Config struct {
 	// excluded tags would list cases the team has set aside.
 	LongOpenCasesReportProjectTypes []string
 	LongOpenCasesReportExcludedTags []string
+	// StandardChangeSuggestion* are the thresholds the scheduled refresh of the
+	// standard change suggestions computes by: STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS
+	// (default 12, 1-60), _MIN_CLOSED (5, 1-1000), _MIN_SUCCESS_PERCENT (90,
+	// 1-100) and _PLAN_SIMILARITY_PERCENT (50, 1-100). A value that is not a
+	// whole number in its range falls back to the default with a warning
+	// (envIntInRange).
+	StandardChangeSuggestionWindowMonths          int
+	StandardChangeSuggestionMinClosed             int
+	StandardChangeSuggestionMinSuccessPercent     int
+	StandardChangeSuggestionPlanSimilarityPercent int
 	// OpenBeforeYesterdayReportProjectTypes are the project type names that
 	// put a case in the open-before-yesterday variant of that report whatever
 	// its product; OpenBeforeYesterdayReportProductProjectTypes put it there
@@ -1038,6 +1048,10 @@ func Load() *Config {
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
 		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
 		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
+		StandardChangeSuggestionWindowMonths:          envIntInRange("STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS", 12, 1, 60),
+		StandardChangeSuggestionMinClosed:             envIntInRange("STANDARD_CHANGE_SUGGESTION_MIN_CLOSED", 5, 1, 1000),
+		StandardChangeSuggestionMinSuccessPercent:     envIntInRange("STANDARD_CHANGE_SUGGESTION_MIN_SUCCESS_PERCENT", 90, 1, 100),
+		StandardChangeSuggestionPlanSimilarityPercent: envIntInRange("STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT", 50, 1, 100),
 		OpenBeforeYesterdayReportProjectTypes:         splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProjectTypes),
 		OpenBeforeYesterdayReportProductProjectTypes:  splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProductProjectTypes),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
@@ -1744,6 +1758,24 @@ func envPositiveInt(key string, def int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// envIntInRange reads a whole number from lo to hi. Unset is def; anything else
+// that is not a whole number in the range (zero, negative, a percent over 100,
+// a typo) is def too, with a warning naming the key, so a mistake costs the
+// override and says so rather than stopping the service.
+func envIntInRange(key string, def, lo, hi int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < lo || n > hi {
+		slog.Warn("ignoring an out-of-range configuration value", "key", key, "value", v,
+			"range", fmt.Sprintf("%d-%d", lo, hi), "using", def)
 		return def
 	}
 	return n

@@ -19,7 +19,7 @@
 //   1. Operations > Change requests has a two-entry strip, "Change requests"
 //      (the list, no `view`) | "Standard changes" (`?view=standard`). Standard
 //      changes opens on the catalogue; the proposals are its secondary view
-//      (the "Templates or proposals" toggle, `&show=proposals`, with `scope` and
+//      (the "Templates, proposals or suggestions" toggle, `&show=proposals`, with `scope` and
 //      `state` in the URL; the scope select is named "Show", a name the toggle
 //      does not share). The proposals open on all proposals (no `scope`). Both
 //      are headed "Standard changes" with the same line, which says nothing
@@ -40,7 +40,7 @@
 //      templates, each with its customer -- and its Customer filter narrows it
 //      to one customer's (server-side, `accountId`); the suspended one's page
 //      shows its customer and the seed's reason, the proposals list the seed's
-//      rejected, in-CAB-review and draft proposals and its revision with their
+//      rejected and draft proposals and its revision with their
 //      customer, the breadcrumbs read "Change requests › Standard
 //      changes › [Proposals ›] <number>" (the "Proposals" crumb opens all the
 //      proposals), Back returns to the view a record was opened from, "Pin
@@ -49,10 +49,12 @@
 //      number) and the sidebar's "Change requests" is the one active entry
 //      throughout.
 //   2. The "needs your attention" strip above the catalogue: hidden for jane,
-//      who has nothing pending; for carol (a CAB member asked about the seed's
-//      proposal in CAB review) and bob (who has the seed's draft) it reads the
-//      counts Postgres holds, in words, each part a link to the proposals
-//      filtered to it, which lists that seeded proposal. Hidden on the
+//      who has nothing pending (she is not on the CAB, so no proposal asks
+//      her), and for carol, a CAB member, while no proposal awaits the CAB (the
+//      seed leaves none); for bob (who
+//      has the seed's drafts) it reads the counts Postgres holds, in words,
+//      each part a link to the proposals filtered to it, which lists that
+//      seeded proposal. Hidden on the
 //      proposals view, which for jane, who proposed nothing, opens on all the
 //      proposals: bob's seeded ones.
 //   3. bob proposes a standard change from a CLOSED change request of Example
@@ -66,12 +68,16 @@
 //      ({{host}} / {{env}}) before sample values are typed, open and filled
 //      side by side (styled differently: the filled one with a dotted
 //      underline) once only the host is typed, and filled with them all
-//      after. He saves and submits it to the CAB; carol finds it through her
-//      attention strip and approves it; the template's page shows the current
+//      after. He saves and submits it: it awaits the CAB, one "CAB Approval"
+//      stage needing two approvals (alice and carol are asked; bob, on the CAB
+//      too, is listed cancelled: nobody decides their own proposal; jane, not on
+//      the CAB, is not asked); alice finds it through her attention strip and
+//      authorises it, and carol's authorisation, the second, applies it; the template's page shows the current
 //      version with its placeholders highlighted and its customer (Example
 //      Corp), and it is in the catalogue as active version 1 of Example Corp;
 //      alice raises a change request from it on the create form (type
-//      Standard: the template picker waits for a Customer Project; with Other
+//      Standard: the Customer Project is asked for first, alone, above the
+//      template, and the template picker waits for it; with Other
 //      Corp's project it offers Other Corp's templates and none of Example
 //      Corp's -- not this one --, switching the project to Example Corp's
 //      clears the Other Corp template picked, and then the template, the
@@ -110,9 +116,13 @@
 //
 // The seed must have been run first (scripts/csm-compose/seed-standard-changes.sh).
 // The personas sign in through the local mock identity provider (no password):
-// bob proposes, carol decides as a member of the "CAB Approval" group (the
-// proposer cannot decide his own), alice raises and moves the change request,
-// jane (in no approval group, with no proposals) has nothing pending.
+// bob proposes, then alice and carol authorise it as members of the CAB, the
+// "CAB Approval" group (scripts/csm-compose/seed-entity-service.sql seats alice,
+// bob and carol there, and this spec's beforeAll makes sure alice and carol are
+// members, idempotently, so it does not depend on how the stack was seeded; the
+// proposer cannot decide his own), and alice raises and moves the change
+// request. jane is not on the CAB: she has no say over a proposal, and nothing
+// pending.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -130,6 +140,7 @@ const RUN = Date.now().toString(36);
 const SOURCE_SUBJECT = `${TAG} Restart the cache service on cache-01 (${RUN})`;
 const TEMPLATE_NAME = `${TAG} Restart the cache service on a node (${RUN})`;
 const TEMPLATE_SUBJECT = `${TAG} Restart the cache service on {{host}} ({{env}})`;
+const TEMPLATE_SUMMARY = "Restarts the cache service on one node and puts it back in the pool. Not for a cluster-wide restart.";
 const SOURCE_BACKOUT = "Start the previous cache build again and confirm it serves reads.";
 const SOURCE_TEST = "Read a known key and compare it with the primary.";
 
@@ -177,7 +188,7 @@ const OPERATIONS_HEADING = {
 /** Standard changes' heading, the same for the catalogue and the proposals. */
 const STANDARD_CHANGES_HEADING = {
   title: "Standard changes",
-  subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
+  subtitle: "Pre-authorised change requests, raised from templates two CAB members have approved.",
 };
 /** What the user complained about: the standard change views headed with the entities they have nothing to do with. */
 const OTHER_OPERATIONS_ENTITIES = /service requests?|incidents?|problems?|runbooks?/i;
@@ -228,10 +239,13 @@ const SUSPENDED_TEMPLATE = "Restart an API Manager node";
 const SUSPENDED_REASON =
   "The owner is reworking the restart procedure for clustered deployments. Raise node restarts as normal changes until this template is resumed.";
 const REVISED_TEMPLATE = "Scale a Kubernetes deployment's replicas";
-/** bob's proposals in states other than approved, and his approved revision (all Example Corp's). */
+/**
+ * bob's proposals in states other than approved, and his approved revision (all Example Corp's). The memory limit one
+ * was the seed's proposal in CAB review; CAB review is gone, and a proposal left in it was returned to Draft.
+ */
 const SEEDED_PROPOSALS = [
   { name: "Purge API Manager analytics data older than a retention period", kind: "New template", state: "Rejected", customer: EXAMPLE_CORP_CUSTOMER },
-  { name: "Raise the memory limit of a Choreo component", kind: "New template", state: "CAB review", customer: EXAMPLE_CORP_CUSTOMER },
+  { name: "Raise the memory limit of a Choreo component", kind: "New template", state: "Draft", customer: EXAMPLE_CORP_CUSTOMER },
   { name: "Enable debug logging on a Micro Integrator node for a fixed period", kind: "New template", state: "Draft", customer: EXAMPLE_CORP_CUSTOMER },
   { name: REVISED_TEMPLATE, kind: "Revision", state: "Approved", customer: EXAMPLE_CORP_CUSTOMER },
 ] as const;
@@ -349,7 +363,8 @@ async function pick(page: Page, combobox: Locator, option: string): Promise<void
 
 /** The sidebar (not the breadcrumb trail, which is a navigation too). */
 function sidebar(page: Page): Locator {
-  return page.locator("nav").filter({ has: page.getByRole("button", { name: "Dashboard", exact: true }) });
+  // The sidebar is the nav holding the Operations entry (the first entry has been renamed before: Dashboard, Dashboards).
+  return page.locator("nav").filter({ has: page.getByRole("button", { name: "Operations", exact: true }) });
 }
 
 /** The sidebar's highlighted entry is "Change requests", and it is the only one. */
@@ -532,13 +547,13 @@ function attentionStrip(main: Locator): Locator {
 }
 
 /**
- * What Postgres holds for `email`, by the backend's own definitions (entity-service's `SearchProposals`): proposals in
- * CAB review on which they have a REQUESTED approver row, and their own drafts.
+ * What Postgres holds for `email`, by the backend's own definitions (entity-service's `SearchProposals`): proposals
+ * awaiting authorisation on which they have a REQUESTED approver row, and their own drafts.
  */
 async function pendingFor(email: string): Promise<{ awaiting: number; drafts: number }> {
   const out = await psql(`
     SELECT (SELECT count(*) FROM standard_change_proposal p
-             WHERE p.state = 'CAB_REVIEW'
+             WHERE p.state = 'AUTHORITY_REVIEW'
                AND EXISTS (SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
                             WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND lower(u.email) = lower('${email}'))),
            (SELECT count(*) FROM standard_change_proposal p JOIN work_item wi ON wi.id = p.id
@@ -557,7 +572,7 @@ async function proposalsBy(email: string): Promise<number> {
 /** The strip's parts for these counts, as the page words them ("1 proposal awaits ...", "2 drafts of yours"). */
 function attentionParts({ awaiting, drafts }: { awaiting: number; drafts: number }): string[] {
   const parts: string[] = [];
-  if (awaiting > 0) parts.push(`${awaiting} ${awaiting === 1 ? "proposal awaits" : "proposals await"} your CAB decision`);
+  if (awaiting > 0) parts.push(`${awaiting} ${awaiting === 1 ? "proposal awaits" : "proposals await"} your decision`);
   if (drafts > 0) parts.push(`${drafts} ${drafts === 1 ? "draft" : "drafts"} of yours`);
   return parts;
 }
@@ -590,6 +605,16 @@ test.describe("standard changes (real stack)", () => {
 
   test.beforeAll(async () => {
     await cleanUp();
+    // The CAB ("CAB Approval", migration 0188) authorises proposals: alice and carol are members here (the entity
+    // seed seats them with team_member rows), so a proposal bob makes has the two different authorisers it needs
+    // (submit refuses one without). A person who is a member in neither form gets a group_member row. Idempotent.
+    await psql(`
+      INSERT INTO group_member (id, created_on, updated_on, created_by, updated_by, group_id, user_id)
+      SELECT gen_random_uuid(), now(), now(), 'e2e', 'e2e', g.id, u.id
+        FROM (SELECT id FROM "group" WHERE name = 'CAB Approval' ORDER BY created_on, id LIMIT 1) g CROSS JOIN "user" u
+       WHERE lower(u.email) IN (lower('${USERS.alice}'), lower('${USERS.carol}'))
+         AND NOT EXISTS (SELECT 1 FROM group_member gm JOIN "group" gg ON gg.id = gm.group_id WHERE gg.name = 'CAB Approval' AND gm.user_id = u.id)
+         AND NOT EXISTS (SELECT 1 FROM team_member tm JOIN "group" gg ON gg.id = tm.group_id WHERE gg.name = 'CAB Approval' AND tm.user_id = u.id);`);
   });
   test.afterAll(async () => {
     if (POSTGRES_CONTAINER && realStackNamed()) await cleanUp();
@@ -652,9 +677,9 @@ test.describe("standard changes (real stack)", () => {
       await expectChangeRequestsActive(page);
       // The list's filters do not apply here: its search box is not on the page.
       await expect(listSearch).toHaveCount(0);
-      // The toolbar: the Templates | Proposals toggle on the catalogue, and Propose.
-      const toggle = main.getByRole("group", { name: "Templates or proposals", exact: true });
-      await expect(toggle.getByRole("button")).toHaveText(["Templates", "Proposals"]);
+      // The toolbar: the Templates | Proposals | Suggested toggle on the catalogue, and Propose.
+      const toggle = main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true });
+      await expect(toggle.getByRole("button")).toHaveText(["Templates", "Proposals", "Suggested"]);
       await expect(toggle.getByRole("button", { name: "Templates" })).toHaveAttribute("aria-pressed", "true");
       await expect(main.getByRole("button", { name: "Propose a standard change" })).toBeVisible();
       // The strip is a push: Back returns to the filtered list it came from.
@@ -784,9 +809,9 @@ test.describe("standard changes (real stack)", () => {
       // The toggle and the scope select have names of their own: "Show" is the select's only.
       const scopeSelect = main.getByRole("combobox", { name: "Show", exact: true });
       await expect(scopeSelect).toHaveCount(1);
-      await expect(main.getByRole("group", { name: "Templates or proposals", exact: true })).toHaveCount(1);
+      await expect(main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true })).toHaveCount(1);
       await expect(main.getByRole("group", { name: "Show", exact: true })).toHaveCount(0);
-      await expect(main.getByRole("combobox", { name: "Templates or proposals", exact: true })).toHaveCount(0);
+      await expect(main.getByRole("combobox", { name: "Templates, proposals or suggestions", exact: true })).toHaveCount(0);
       // The proposals open on all of them (no scope in the URL), and the select offers the three scopes in this order.
       await expect(scopeSelect).toHaveText("All proposals");
       await scopeSelect.click();
@@ -922,7 +947,7 @@ test.describe("standard changes (real stack)", () => {
     }
   });
 
-  test("the attention strip above the catalogue: nothing for jane, carol's CAB decision and bob's draft, each linking to them", async ({ browser }) => {
+  test("the attention strip above the catalogue: nothing for jane or for carol (nothing awaits the CAB), bob's drafts linking to them", async ({ browser }) => {
     test.setTimeout(180_000);
 
     // jane: no proposal awaits her and she has no draft, so there is no strip at all.
@@ -933,12 +958,12 @@ test.describe("standard changes (real stack)", () => {
       await openStandardChangesCounted(jane);
       await expect(main.getByRole("table", { name: "Standard change templates" }).getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE })).toHaveCount(1);
       await expect(attentionStrip(main)).toHaveCount(0);
-      await expect(main.getByText(/your CAB decision|of yours/)).toHaveCount(0);
+      await expect(main.getByText(/your decision|of yours/)).toHaveCount(0);
       await shot(jane, "04-no-attention-strip", main);
 
       // The proposals open on all of them: jane proposed nothing, yet she sees bob's seeded proposals.
       expect(await proposalsBy(USERS.jane), "jane has proposed nothing (Postgres)").toBe(0);
-      await main.getByRole("group", { name: "Templates or proposals", exact: true }).getByRole("button", { name: "Proposals" }).click();
+      await main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true }).getByRole("button", { name: "Proposals" }).click();
       await expect(jane).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
       await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText("All proposals");
       const proposals = main.getByRole("table", { name: "Standard change proposals" });
@@ -960,46 +985,51 @@ test.describe("standard changes (real stack)", () => {
       await jane.context().close();
     }
 
-    // carol (CAB) is asked about the seed's proposal in CAB review; bob has the seed's draft. Each link opens the
-    // proposals filtered to it, which lists that proposal.
-    const inCabReview = SEEDED_PROPOSALS.find((p) => p.state === "CAB review")!;
-    const draft = SEEDED_PROPOSALS.find((p) => p.state === "Draft")!;
-    const cases = [
-      { who: USERS.carol, part: "awaiting", search: "view=standard&show=proposals&scope=awaiting", scope: "Awaiting my decision", state: "Any state", lists: inCabReview },
-      { who: USERS.bob, part: "drafts", search: "view=standard&show=proposals&scope=mine&state=draft", scope: "Proposed by me", state: "Draft", lists: draft },
-    ] as const;
-    for (const c of cases) {
-      const pending = await pendingFor(c.who);
-      expect(pending[c.part], `${c.who} has a ${c.part === "awaiting" ? "proposal awaiting a decision" : "draft"} (${SEED_HINT})`).toBeGreaterThan(0);
-      const parts = attentionParts(pending);
-      const page = await signedIn(browser, c.who, "/operations");
-      try {
-        const main = page.getByRole("main");
-        await openStandardChangesCounted(page);
-        const strip = attentionStrip(main);
-        await expect(strip, `${c.who}'s strip`).toHaveText(parts.join(" · "));
-        await expect(strip.getByRole("link")).toHaveText(parts);
-        await shot(page, `05-attention-strip-${c.part}`, strip);
-        const link = strip.getByRole("link", { name: c.part === "awaiting" ? /your CAB decision$/ : /of yours$/ });
-        await link.click();
-        await expect(page).toHaveURL(exactly("/operations/change-requests", c.search));
-        await expect(main.getByRole("group", { name: "Templates or proposals", exact: true }).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
-        await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText(c.scope);
-        await expect(main.getByRole("combobox", { name: "State" })).toHaveText(c.state);
-        await expect(attentionStrip(main)).toHaveCount(0);
-        const proposals = main.getByRole("table", { name: "Standard change proposals" });
-        const row = proposals.getByRole("row").filter({ hasText: c.lists.name });
-        await expect(row).toHaveCount(1);
-        await expect(row.getByRole("cell").nth(P("State"))).toHaveText(c.lists.state);
-        // Every row the link lists is what the count counted.
-        await expect(proposals.getByRole("row")).toHaveCount(1 + pending[c.part]);
-      } finally {
-        await page.context().close();
+    // carol sits on the CAB, which decides proposals, but the seed leaves none awaiting it: nothing awaits her, so no strip.
+    expect(await pendingFor(USERS.carol), `carol (CAB) has nothing pending in Postgres (${SEED_HINT})`).toEqual({ awaiting: 0, drafts: 0 });
+    const carol = await signedIn(browser, USERS.carol, "/operations");
+    try {
+      await openStandardChangesCounted(carol);
+      await expect(carol.getByRole("main").getByRole("table", { name: "Standard change templates" })).toBeVisible();
+      await expect(attentionStrip(carol.getByRole("main"))).toHaveCount(0);
+    } finally {
+      await carol.context().close();
+    }
+
+    // bob has the seed's drafts. The link opens the proposals filtered to them, which lists them. (The "awaiting"
+    // part is followed in the flow test below, once bob's proposal awaits alice.)
+    const drafts = SEEDED_PROPOSALS.filter((p) => p.state === "Draft");
+    const pending = await pendingFor(USERS.bob);
+    expect(pending.drafts, `${USERS.bob} has drafts (${SEED_HINT})`).toBeGreaterThanOrEqual(drafts.length);
+    const parts = attentionParts(pending);
+    const page = await signedIn(browser, USERS.bob, "/operations");
+    try {
+      const main = page.getByRole("main");
+      await openStandardChangesCounted(page);
+      const strip = attentionStrip(main);
+      await expect(strip, `${USERS.bob}'s strip`).toHaveText(parts.join(" · "));
+      await expect(strip.getByRole("link")).toHaveText(parts);
+      await shot(page, "05-attention-strip-drafts", strip);
+      await strip.getByRole("link", { name: /of yours$/ }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=mine&state=draft"));
+      await expect(main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true }).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
+      await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText("Proposed by me");
+      await expect(main.getByRole("combobox", { name: "State" })).toHaveText("Draft");
+      await expect(attentionStrip(main)).toHaveCount(0);
+      const proposals = main.getByRole("table", { name: "Standard change proposals" });
+      for (const seeded of drafts) {
+        const row = proposals.getByRole("row").filter({ hasText: seeded.name });
+        await expect(row, `bob's draft "${seeded.name}"`).toHaveCount(1);
+        await expect(row.getByRole("cell").nth(P("State"))).toHaveText("Draft");
       }
+      // Every row the link lists is what the count counted.
+      await expect(proposals.getByRole("row")).toHaveCount(1 + pending.drafts);
+    } finally {
+      await page.context().close();
     }
   });
 
-  test("propose from a closed change request, the CAB approves, raise a change request from the template, roll it back: the template needs review", async ({ browser }) => {
+  test("propose from a closed change request, two CAB members authorise it, raise a change request from the template, roll it back: the template needs review", async ({ browser }) => {
     test.setTimeout(360_000);
 
     // The evidence: a closed change request of Example Corp (its project's customer), raised and walked through the
@@ -1058,6 +1088,7 @@ test.describe("standard changes (real stack)", () => {
 
       const proposalSection = main.getByRole("region", { name: "Proposal" });
       await proposalSection.getByRole("textbox", { name: /^Name/ }).fill(TEMPLATE_NAME);
+      await proposalSection.getByRole("textbox", { name: /^Summary/ }).fill(TEMPLATE_SUMMARY);
       await replaceRichText(bob, richEditor(proposalSection, "Rationale"), "Done many times without incident; the steps never change, only the node.");
 
       // Two parameters: the node (text) and its environment (a choice).
@@ -1125,60 +1156,125 @@ test.describe("standard changes (real stack)", () => {
       await expectFilledPlaceholders(rendered, { host: "cache-07", env: "Staging" });
       await shot(bob, "07-proposal-preview-with-sample-values", preview);
 
-      await expect(main.getByText("Ready to send to the CAB. Submitting saves first.")).toBeVisible();
+      await expect(
+        main.getByText("Ready to submit: two CAB members other than you must authorise it. Submitting saves first."),
+      ).toBeVisible();
       const [saved] = await Promise.all([
         bob.waitForResponse((r) => r.request().method() === "PATCH" && /\/standard-change-proposals\/[^/]+$/.test(r.url())),
         main.getByRole("button", { name: "Save", exact: true }).click(),
       ]);
       expect(saved.status(), await saved.text()).toBe(200);
 
-      await main.getByRole("button", { name: "Submit to CAB" }).click();
-      await expect(main.getByText("CAB review", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await main.getByRole("button", { name: "Submit for approval" }).click();
+      await expect(main.getByText("Awaiting CAB approval", { exact: true })).toBeVisible({ timeout: 15_000 });
       await expect(main.getByRole("heading", { name: TEMPLATE_NAME })).toBeVisible();
-      const approvers = main.getByRole("table", { name: "CAB approvers" });
+      // One stage, the CAB's: its members are asked at once, the proposer (on the CAB too) is listed cancelled, and
+      // jane, not on the CAB, is not asked.
+      const approval = main.getByRole("region", { name: "Approval" });
+      const cab = main.getByRole("region", { name: "CAB Approval approvers" });
+      await expect(cab).toContainText("0 of 2 approvals");
+      const approvers = main.getByRole("table", { name: "CAB Approval approvers" });
+      await expect(approvers.getByRole("row").filter({ hasText: "Alice Perera" })).toContainText("Requested");
       await expect(approvers.getByRole("row").filter({ hasText: "Carol Silva" })).toContainText("Requested");
-      // The proposer is not one of the deciders, and has no Approve of his own.
-      await expect(main.getByRole("region", { name: "CAB approval" }).getByRole("button", { name: "Approve" })).toHaveCount(0);
-      await shot(bob, "08-proposal-in-cab-review", main.getByRole("region", { name: "CAB approval" }));
+      await expect(approvers.getByRole("row").filter({ hasText: "Bob Fernando" })).not.toContainText("Requested");
+      await expect(approvers.getByRole("row").filter({ hasText: "Jane Doe" })).toHaveCount(0);
+      await expect(main.getByRole("region", { name: /approvers$/ })).toHaveCount(1);
+      await expect(approval).not.toContainText("Standard Change Authority");
+      // The proposer is not one of the deciders, and has no Authorise of his own.
+      await expect(approval.getByRole("button", { name: /^(Approve|Authorise)$/ })).toHaveCount(0);
+      await shot(bob, "08-proposal-awaiting-authorisation", approval);
     } finally {
       await bob.context().close();
     }
 
-    // ---- carol finds it through her attention strip and approves it for the CAB ---------------------------------
-    const carol = await signedIn(browser, USERS.carol, "/operations");
+    // The API says the same: one stage, the CAB's, needing two approvals; jane (not on the CAB) is asked nothing.
+    const proposalId = decodeURIComponent(proposalUrl.split("/").pop()!);
+    const submitted = await staff("bob").request<{ state: string; stages: Array<{ label: string; requiredApprovals: number }> }>(
+      "GET",
+      `/standard-change-proposals/${proposalId}`,
+    );
+    expect(submitted.status, JSON.stringify(submitted.body)).toBe(200);
+    expect(submitted.body.state).toBe("authority_review");
+    expect(submitted.body.stages.map((st) => [st.label, st.requiredApprovals])).toEqual([["CAB Approval", 2]]);
+    expect((await pendingFor(USERS.jane)).awaiting, "someone not on the CAB is not asked about a proposal").toBe(0);
+    expect((await pendingFor(USERS.carol)).awaiting, "the CAB is asked").toBeGreaterThan(0);
+
+    // ---- alice finds it through her attention strip and authorises it: the first of the two -------------------
+    const alicePage = await signedIn(browser, USERS.alice, "/operations");
     let templatePath = "";
     let templateId = "";
     let templateNumber = "";
     try {
-      const main = carol.getByRole("main");
-      const pending = await pendingFor(USERS.carol);
-      expect(pending.awaiting, "bob's proposal now awaits carol").toBeGreaterThan(0);
-      await openStandardChangesCounted(carol);
+      const main = alicePage.getByRole("main");
+      const pending = await pendingFor(USERS.alice);
+      expect(pending.awaiting, "bob's proposal now awaits alice").toBeGreaterThan(0);
+      await openStandardChangesCounted(alicePage);
       const strip = attentionStrip(main);
       await expect(strip).toHaveText(attentionParts(pending).join(" · "));
-      await strip.getByRole("link", { name: /your CAB decision$/ }).click();
-      await expect(carol).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=awaiting"));
+      await strip.getByRole("link", { name: /your decision$/ }).click();
+      await expect(alicePage).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=awaiting"));
+      await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText("Awaiting my decision");
+      await expect(main.getByRole("combobox", { name: "State" })).toHaveText("Any state");
+      // Every row the link lists is what the count counted.
+      await expect(main.getByRole("table", { name: "Standard change proposals" }).getByRole("row")).toHaveCount(1 + pending.awaiting);
       await main.getByRole("textbox", { name: "Search proposals by number or name" }).fill(TEMPLATE_NAME);
       const mine = main.getByRole("table", { name: "Standard change proposals" }).getByRole("row").filter({ hasText: TEMPLATE_NAME });
       await expect(mine).toHaveCount(1);
-      await expect(mine.getByRole("cell").nth(P("State"))).toHaveText("CAB review");
+      await expect(mine.getByRole("cell").nth(P("State"))).toHaveText("Awaiting CAB approval");
       await mine.click();
-      await expect(carol).toHaveURL(new RegExp(`${escapeRegExp(proposalUrl)}$`));
+      await expect(alicePage).toHaveURL(new RegExp(`${escapeRegExp(proposalUrl)}$`));
 
-      const cab = main.getByRole("region", { name: "CAB approval" });
-      await expect(cab.getByRole("button", { name: "Approve" })).toBeVisible({ timeout: 20_000 });
-      await cab.getByRole("button", { name: "Approve" }).click();
-      const dialog = carol.getByRole("dialog", { name: "Approve the proposal" });
+      const approval = main.getByRole("region", { name: "Approval" });
+      await expect(approval.getByRole("button", { name: "Authorise" })).toBeVisible({ timeout: 20_000 });
+      await expect(approval.getByRole("button", { name: "Approve" })).toHaveCount(0);
+      await approval.getByRole("button", { name: "Authorise" }).click();
+      const dialog = alicePage.getByRole("dialog", { name: "Authorise the proposal" });
+      // Hers is not enough on its own: a second member must authorise too.
+      await expect(dialog).toContainText("the template change is applied by the last of them");
       await dialog.getByRole("textbox", { name: /^Comment/ }).fill("Low risk and well rehearsed.");
-      await dialog.getByRole("button", { name: "Approve", exact: true }).click();
+      await dialog.getByRole("button", { name: "Authorise", exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(main.getByText("Awaiting CAB approval", { exact: true })).toBeVisible();
+      await expect(main.getByRole("region", { name: "Decision" })).toHaveCount(0);
+      await expect(main.getByRole("region", { name: "CAB Approval approvers" })).toContainText("1 of 2 approvals");
+      // She has decided: nothing more for her here.
+      await expect(approval.getByRole("button", { name: /^(Approve|Authorise)$/ })).toHaveCount(0);
+      await shot(alicePage, "08b-proposal-one-of-two-authorisations", approval);
+      expect((await pendingFor(USERS.alice)).awaiting).toBe(pending.awaiting - 1);
+    } finally {
+      await alicePage.context().close();
+    }
+
+    // ---- carol authorises it: the second authorisation applies it -----------------------------------------------
+    const carolPage = await signedIn(browser, USERS.carol, proposalUrl);
+    try {
+      const main = carolPage.getByRole("main");
+      const approval = main.getByRole("region", { name: "Approval" });
+      await expect(approval.getByRole("button", { name: "Authorise" })).toBeVisible({ timeout: 20_000 });
+      await approval.getByRole("button", { name: "Authorise" }).click();
+      const dialog = carolPage.getByRole("dialog", { name: "Authorise the proposal" });
+      await expect(dialog).toContainText("Yours is the last approval needed");
+      await dialog.getByRole("button", { name: "Authorise", exact: true }).click();
       await expect(dialog).toBeHidden();
       const decision = main.getByRole("region", { name: "Decision" });
       await expect(decision).toContainText("Approved by the CAB");
+      await expect(decision).not.toContainText("Standard Change Authority");
       // The template is named by its catalogue number and name.
       await expect(decision).toContainText(new RegExp(`Resulting template: STD\\d+ ${escapeRegExp(TEMPLATE_NAME)}, version 1`));
+      await expect(main.getByRole("region", { name: "CAB Approval approvers" })).toContainText("Approved");
+      await shot(carolPage, "08c-proposal-authorised", decision);
+    } finally {
+      await carolPage.context().close();
+    }
 
+    // ---- carol opens the template it wrote ----------------------------------------------------------------------
+    const carolAgain = await signedIn(browser, USERS.carol, proposalUrl);
+    try {
+      const main = carolAgain.getByRole("main");
+      const decision = main.getByRole("region", { name: "Decision" });
       await decision.getByRole("button", { name: TEMPLATE_NAME }).click();
-      await expect(carol).toHaveURL(/\/operations\/standard-changes\/[^/]+$/);
+      await expect(carolAgain).toHaveURL(/\/operations\/standard-changes\/[^/]+$/);
+      const carol = carolAgain;
       templatePath = new URL(carol.url()).pathname;
       templateId = decodeURIComponent(templatePath.split("/").pop()!);
       await expect(main.getByRole("heading", { name: TEMPLATE_NAME })).toBeVisible();
@@ -1201,10 +1297,10 @@ test.describe("standard changes (real stack)", () => {
       await expect(renderedSection(currentVersion, "Description")).toHaveText(TEMPLATE.description);
       await expectOpenPlaceholders(currentVersion);
       await shot(carol, "09-template-active-v1-placeholders", currentVersion);
-      // There is no proposal left for her to decide.
-      expect((await pendingFor(USERS.carol)).awaiting).toBe(pending.awaiting - 1);
+      // The summary the proposer wrote is the template's own description.
+      await expect(main.getByText(TEMPLATE_SUMMARY, { exact: true })).toBeVisible();
     } finally {
-      await carol.context().close();
+      await carolAgain.context().close();
     }
 
     // What the template's version holds, as the API returns it: what the change request raised from it must equal.
@@ -1253,7 +1349,15 @@ test.describe("standard changes (real stack)", () => {
       const projectPicker = alice.getByRole("combobox", { name: /^Customer Project/ });
       const options = alice.getByRole("listbox").getByRole("option");
       await expect(templatePicker).toBeDisabled();
-      await expect(alice.getByText(/^Select the Customer Project first\./)).toBeVisible();
+      await expect(alice.getByText("Choose the Customer Project above to see its customer's templates.", { exact: true })).toBeVisible();
+      await expect(alice.getByText("Select a Customer Project to continue.", { exact: true })).toBeVisible();
+      // A standard change asks for its Customer Project first, alone, above the template.
+      const projectSection = alice.getByRole("group", { name: "Customer project", exact: true });
+      await expect(projectSection.getByRole("combobox", { name: /^Customer Project/ })).toBeVisible();
+      await expect(projectSection.getByRole("combobox", { name: /^Deployments/ })).toHaveCount(0);
+      await expect(alice.getByRole("button", { name: "Create change request" })).toHaveAccessibleDescription(
+        "Before it can be created it still needs a Customer Project and a standard change template.",
+      );
       const chooseProject = async (name: string): Promise<void> => {
         await projectPicker.click();
         await projectPicker.fill(name);

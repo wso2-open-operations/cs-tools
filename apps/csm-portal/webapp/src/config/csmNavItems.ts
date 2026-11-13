@@ -259,7 +259,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
           within: {
             standard: {
               param: "show",
-              labels: { proposals: "Standard change proposals" },
+              labels: { proposals: "Standard change proposals", suggested: "Suggested standard changes" },
             },
           },
         },

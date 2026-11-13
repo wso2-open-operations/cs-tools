@@ -535,15 +535,24 @@ reached the browser; this is what stops them being sent at all to a caller who s
 
 ## Standard changes (`internal/handler/standard_changes.go`)
 
-Operations > Change requests > Standard changes: the CAB-approved standard change templates and the proposals that
-create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The thirteen routes
+Operations > Change requests > Standard changes: the approved standard change templates and the proposals that
+create, revise or retire them (entity-service CLAUDE.md, "Standard changes"), and the suggestions mined from
+completed change requests (below). The fifteen template and proposal routes
 are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
 only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
-proposal (the proposer edits and submits, a CAB member other than the proposer decides, the owner
-or a CAB member suspends) is entity-service's decision, so a 400 / 403 / 404 / 409 keeps its
-message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstreamError`'s generic
-one); a 5xx is the generic fallback. Suspend's body `{reason}` is optional (`optionalBody`: empty
-is forwarded as none, otherwise a JSON object under the 1 MiB cap). A change request raised from a template is an ordinary
+proposal (the proposer edits, submits and deletes a draft; two CAB members decide, on one
+"CAB Approval" stage (until 2026-11-10 a separate Standard Change Authority group did); the owner or the
+CAB suspends; only the CAB resumes, clears a review flag or cancels someone else's proposal) is entity-service's decision, so a 400 /
+403 / 404 / 409 keeps its message and `errorCode` (a 403 here is a reason the page shows, unlike
+`mapUpstreamError`'s generic one); a 5xx is the generic fallback. Suspend's body `{reason}` and the
+`{note}` of resume and clear-review go through `optionalBody` (empty is forwarded as none, otherwise
+a JSON object under the 1 MiB cap; entity-service requires the note). `POST
+/standard-change-proposals/{id}/cancel` forwards `{reason}`; `POST /standard-change-proposals/{id}/decision`
+forwards `{decision, comment?, stageId}` as it is: `stageId` (the stage the page showed) is required, and
+entity-service refuses a body without it (400), one for another stage (409 `standard_change_decision_stage_stale`),
+one on a proposal no longer in review (409 `standard_change_proposal_not_in_review`) and a member who has left the CAB
+since submit (403); its other 409s (the approval would clash) carry no code, and the webapp keys on the code; `DELETE /standard-change-proposals/{id}`
+answers 204 with no body (`forward` writes no body for a 204). A change request raised from a template is an ordinary
 `POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
 `standardChangeParameters`, forwarded like every other create field. A template is one customer's
 (entity-service migration 0254): templates and proposals carry `customer` {id, name}, the search
@@ -551,6 +560,23 @@ bodies' `accountId` filter and a proposal's `accountId` pass through raw, and ra
 from a template for another customer's project (or none), or a PATCH moving it there, is entity-service's
 400 `standard_change_template_other_customer`, echoed with its message and code by `mapUpstreamError`
 (`standard_change_customer_test.go`).
+
+**Suggestions** (entity-service CLAUDE.md, "Standard change suggestions"): `GET
+/standard-change-suggestions` (`PermViewOperations`) reads entity-service's snapshot, which its scheduled
+refresh computes once a day (a read never computes; the refresh route is service-only and not proxied
+here). It forwards only `accountId` (a UUID), `includeIneligible` / `includeDismissed` (`true` or
+`false`) and `limit` / `offset` (non-negative integers; the page is one page of the list sorted across
+customers, with `total`, and a limit over 50 is entity-service's 400), each shape-checked here (400 with
+no upstream call), anything else dropped (the threshold overrides it once forwarded are configuration
+now); `POST
+/standard-change-suggestions/dismissals` (201) and `DELETE /standard-change-suggestions/dismissals/{id}`
+(204) are `PermWrite`, through the same `forward`, so a refusal keeps its message and code.
+`TestStandardChangeHandler_SuggestionsQuery`.
+
+**The CAB's pushback passes through untouched**: a suggestion's `cabRejectionCount` / `cabRejections` /
+`cabCommentCount` / `cabComments` / `deviationCount` (and a member's `cabRejected` / `cabCommentCount`),
+and a proposal's `cabHistory` and its evidence rows' `hasDeviation` / `cabRejected`, are entity-service's
+(its CLAUDE.md, "The CAB's pushback"); this proxy decodes none of them.
 
 ## Change request tags go through the case tag routes
 
@@ -574,6 +600,11 @@ the previous system (see entity-service's `CLAUDE.md`, "Change requests: Tags").
 to the entity service as-is (no field allow-list), with two checks on top:
 
 * `POST` requires `type` of `standard`, `normal` or `emergency` (`validateChangeRequestCreateType`).
+* `POST`'s `clonedFromChangeRequestId` (the change request a clone is made from, sent by the webapp's
+  Clone) must be a UUID string in every spelling of the key (`validateChangeRequestCloneSource`, 400
+  `clonedFromChangeRequestId must be a UUID string`, no upstream call); whether it names an existing
+  change request is entity-service's 400, echoed. The detail's `clonedFrom` passes through.
+  `TestCreateChangeRequest_CloneSource`.
 * **An Emergency change takes no customer step** (the previous system has no Emergency CAB and acts on an Emergency
   change without the customer's consent): a `POST` with `type: emergency` and either box true, a `PATCH` that
   turns a box on of an Emergency change, and a `PATCH {type: emergency}` that leaves a box ticked are refused by

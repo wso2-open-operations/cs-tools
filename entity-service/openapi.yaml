@@ -13767,7 +13767,7 @@ paths:
       summary: Search the standard change catalogue.
       operationId: searchStandardChangeTemplates
       description: >-
-        The CAB-approved standard change templates, by name. Internal callers only;
+        The approved standard change templates, by name. Internal callers only;
         PostgreSQL data sources only. With no states the list is the active and
         suspended templates; each carries its current version's content, its usage
         counts and whether a change raised from it failed (reviewRequired).
@@ -13856,7 +13856,7 @@ paths:
     get:
       summary: Get one version of a standard change template.
       operationId: getStandardChangeTemplateVersion
-      description: A version as the CAB approved it. Versions are never changed. Internal callers only.
+      description: A version as it was approved. Versions are never changed. Internal callers only.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: versionId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -13904,7 +13904,8 @@ paths:
       description: >-
         No change request can be raised from a suspended template, and one already
         raised cannot be sent for approval. The template's owner or a member of the CAB
-        Approval group. 409 when it is not active. The body is optional: an empty body
+        (the "CAB Approval" group) (canSuspend). 409 when
+        it is not active. The body is optional: an empty body
         suspends without a reason. The reason, the time and the caller are recorded on
         the template (suspendedReason, suspendedOn, suspendedBy) until it is resumed or
         retired.
@@ -13963,9 +13964,18 @@ paths:
     post:
       summary: Resume a suspended standard change template.
       operationId: resumeStandardChangeTemplate
-      description: The template's owner or a member of the CAB Approval group. 409 when it is not suspended.
+      description: >-
+        A CAB member only (resuming puts the template back in
+        use with no review), with a note saying why; recorded in the template's history. 409 when
+        it is not suspended.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StandardChangeTemplateNoteRequest'
       responses:
         "200":
           description: The template.
@@ -14015,10 +14025,18 @@ paths:
       operationId: clearStandardChangeTemplateReview
       description: >-
         A change raised from the template was rolled back or deviated from its plan,
-        and the owner or the CAB has looked at it and decided the template stands.
-        (Approving a modification clears the flag too.) The owner or a CAB member.
+        and the CAB has looked at it and decided the template stands.
+        (Approving a modification clears the flag too.) A CAB member only, with a note;
+        recorded in the template's history. 409 when the
+        template is retired or not flagged.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StandardChangeTemplateNoteRequest'
       responses:
         "200":
           description: The template.
@@ -14046,6 +14064,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template is retired, or not flagged for review.
           content:
             application/json:
               schema:
@@ -14163,7 +14187,7 @@ paths:
       summary: Get a standard change proposal.
       operationId: getStandardChangeProposal
       description: >-
-        The proposal with its evidence, its CAB approvers and what the caller may do
+        The proposal with its evidence, its approvers and what the caller may do
         (canEdit, canSubmit, canWithdraw, and canDecide on their own pending approver
         row). Internal callers only.
       parameters:
@@ -14211,8 +14235,9 @@ paths:
       description: >-
         The proposer only, while it is a draft (409 otherwise). Omitted fields are left
         as they are; parameters and evidenceChangeRequestIds replace the whole list.
-        Evidence must be closed change requests. A retirement takes only its name and
-        rationale. Placeholders are written {{key}} in the text fields.
+        Evidence must be closed change requests. A retirement takes only its rationale and
+        evidence; its name is the template's (another is a 400, resending it is accepted).
+        Placeholders are written {{key}} in the text fields.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -14264,6 +14289,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a draft standard change proposal.
+      operationId: deleteStandardChangeProposal
+      description: >-
+        The proposer only, on a draft that was never submitted: it is deleted with its
+        evidence. A submitted proposal is the record of what was asked and is withdrawn
+        instead (409).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /standard-change-proposals/{id}/submit:
     post:
       summary: Send a standard change proposal to the CAB.
@@ -14271,15 +14344,18 @@ paths:
       description: >-
         The proposer only. The proposal must be complete (name, rationale, subject,
         implementation / backout / test plans, impact, risk other than high, every
-        placeholder declared: 400 naming what is missing). Opens a CAB Approval stage
-        whose approvers are the active internal members of the CAB Approval group; the
-        proposer is listed cancelled. A modification whose template moved on since it
+        placeholder declared: 400 naming what is missing). Opens the proposal's one
+        approval stage, "CAB Approval", whose approvers are the active internal members
+        of the CAB (the "CAB Approval" group, the one that approves normal change
+        requests); the proposer is listed cancelled, and two different members must
+        approve. 400 when the CAB has fewer than two eligible members besides the
+        proposer. A modification whose template moved on since it
         was drafted is a 409.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         "200":
-          description: The proposal, in cab_review.
+          description: The proposal, in authority_review (awaiting CAB approval).
           content:
             application/json:
               schema:
@@ -14324,7 +14400,7 @@ paths:
     post:
       summary: Withdraw a standard change proposal.
       operationId: withdrawStandardChangeProposal
-      description: The proposer only, while it is a draft or in CAB review. Pending approvers are cancelled; the proposal is kept.
+      description: The proposer only, while it is open (draft or awaiting CAB approval). Pending approvers are cancelled; the proposal is kept.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -14372,17 +14448,23 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /standard-change-proposals/{id}/decision:
     post:
-      summary: Approve or reject a standard change proposal (CAB).
+      summary: Approve or reject a standard change proposal (CAB members).
       operationId: decideStandardChangeProposal
       description: >-
-        A CAB member on their own pending approver row; the proposer never decides
-        (403). The first decision settles the proposal and cancels the other
-        approvers. Approved: a new template (version 1), a new version of the template,
-        or the template retired. Rejected: needs a comment; nothing in the catalogue
-        changes and the proposal is kept as the record. 409 when it is not in CAB
-        review, or the approval would clash (a live template of the same name for the
-        customer, the template moved on, or the source change request or a piece of
-        evidence is no longer a closed change request of the proposal's customer).
+        A decision on the caller's own pending approver row of the stage the proposal
+        waits on (the CAB's); the proposer never decides, nor does anyone without a
+        pending row there, nor someone who has left the CAB since the proposal was
+        submitted (their row stays, but only current CAB members decide) (403). The stage needs two different CAB members' approvals: the second one applies the proposal (a new
+        template (version 1), a new version of the template, or the template retired).
+        Any rejection ends the proposal; it needs a comment, nothing in the catalogue
+        changes and the proposal is kept as the record. stageId is required (400 when
+        absent, blank or not a UUID). 409 when it is not waiting for a
+        decision (errorCode standard_change_proposal_not_in_review), when stageId is not
+        the stage it waits on (errorCode standard_change_decision_stage_stale), or the
+        approval would clash (a live template of the same name for the customer, the
+        template moved on, or the source change request or a piece of evidence is no
+        longer a closed change request of the proposal's customer; no errorCode: these are
+        about the approval itself, not a page that is out of date).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -14424,6 +14506,272 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/cancel:
+    post:
+      summary: Cancel someone else's open standard change proposal (CAB members).
+      operationId: cancelStandardChangeProposal
+      description: >-
+        A CAB member ends an open proposal (draft or awaiting CAB approval) its proposer
+        abandoned, with a reason: pending approvers
+        are cancelled, the proposal is kept (state cancelled), and a modification or
+        retirement no longer holds its template. The proposer withdraws or deletes their own
+        (409).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelStandardChangeProposalRequest'
+      responses:
+        "200":
+          description: The proposal, cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions:
+    get:
+      summary: The last computed standard change suggestions.
+      operationId: getStandardChangeSuggestions
+      description: >-
+        Reads the snapshot the scheduled refresh last published (POST
+        /standard-change-suggestions/refresh, once a day); it never computes. A snapshot holds,
+        per customer, the clusters of completed change requests (Closed or Rollback, not raised
+        from a template, completed within the configured window) that look like the same change
+        done again: the same normalised subject, confirmed by the implementation plans, joined
+        directly by clone lineage, each judged by the configured criteria
+        (STANDARD_CHANGE_SUGGESTION_*, returned as criteria). A cluster is not related to the
+        customer's existing templates (by design). The open proposals and the dismissals are read
+        live.
+        computedOn is when the snapshot was published; with none yet the answer is an empty list
+        and no computedOn. skippedCustomers names the customers (the one asked for, or all) the
+        refresh could not compute (too large for their deadline, or an error), each with the reason:
+        the snapshot holds nothing for them, which is not the same as having no suggestions.
+        The answer is one page (limit, default 20, at most 50; offset), sorted and paged across
+        customers, with total: one suggestion carries up to 100 members and its CAB rejections and
+        comments (about 45 KB, up to about 140 KB), so the whole snapshot is never sent at once.
+        Internal callers only.
+      parameters:
+        - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}, description: "One customer; every customer when absent."}
+        - {name: includeIneligible, in: query, required: false, schema: {type: boolean}, description: "Also the clusters that miss a criterion (each names what it misses)."}
+        - {name: includeDismissed, in: query, required: false, schema: {type: boolean}, description: "Also the dismissed suggestions, with their dismissal."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 50, default: 20}, description: "Page size; 0 or absent is 20."}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}, description: "Suggestions to skip, counted in the sorted list."}
+      responses:
+        "200":
+          description: >-
+            One page of the suggestions, eligible first, then the most often closed, then the most
+            recent (across customers when no accountId), with total.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeSuggestionsResponse'
+        "400":
+          description: "Bad request: accountId is not a UUID, limit or offset is not a non-negative integer, or limit exceeds 50."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/refresh:
+    post:
+      summary: Compute one page of a new standard change suggestion snapshot (the scheduled refresh).
+      operationId: refreshStandardChangeSuggestions
+      description: >-
+        Driven once a day by operations/csm-scheduled-tasks' standard_change_suggestions_refresh.
+        The first call (no runId) starts a run; each call computes the next customers in id order
+        after the cursor, one at a time, at most limit of them, and stores their suggestions in the
+        run. A call answers within 45 s: it starts a customer only while it has the time for that
+        customer's 20 s deadline and its writes, so it may compute fewer than limit, and a first call
+        whose start of the run left no time for one only starts the run (runId, more = true, no
+        nextCursor). The customers are listed once, when the run starts; one whose change requests
+        completed after that waits for the next run. A customer that takes longer than its own
+        deadline, or whose computation or save fails, is recorded as skipped, not computed, and the
+        call carries on (skipped, and totals.skipped; GET names it with the reason). While more is
+        true, call again with runId and nextCursor (empty after a first call that only started the
+        run). The call that answers more = false publishes the run: in one transaction it becomes
+        what GET /standard-change-suggestions reads and every older run is deleted, so a reader
+        never sees a half-written snapshot; a run in which more than half of the customers failed
+        with an error is not published (500) and readers keep the previous snapshot. Sending a page again
+        replaces that customer's rows (never counted twice). Service credentials only (an internal
+        client in M2M_CLIENT_IDS, no user token).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshStandardChangeSuggestionsRequest'
+      responses:
+        "200":
+          description: The page computed, and whether the run was published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshStandardChangeSuggestionsResponse'
+        "400":
+          description: '"Bad request: a cursor without its runId, a malformed id, or a limit outside 1-500."'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The run is no longer open (published, or replaced by another run); start a new one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error, including a run not published because more than half of its customers failed with an error (logged with their causes); readers keep the previous snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/dismissals:
+    post:
+      summary: Dismiss a standard change suggestion for a customer.
+      operationId: dismissStandardChangeSuggestion
+      description: >-
+        Hides the suggestion with this key for this customer from then on (however many
+        members it gains), recording who dismissed it and why. The key is the one the
+        suggestion carries. Internal callers with a user identity only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissStandardChangeSuggestionRequest'
+      responses:
+        "201":
+          description: The dismissal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeSuggestionDismissal'
+        "400":
+          description: "Bad request: accountId is not a UUID or no such customer, the key is missing or not a suggestion key, or the reason is missing or longer than 1000 characters."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The suggestion is already dismissed for this customer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/dismissals/{id}:
+    delete:
+      summary: Restore a dismissed standard change suggestion.
+      operationId: restoreStandardChangeSuggestion
+      description: Deletes the dismissal, so the suggestion shows again. Internal callers with a user identity only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Restored.
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such dismissal.
           content:
             application/json:
               schema:
@@ -29594,6 +29942,12 @@ components:
                 with the values of its parameters. Staff only; omitted otherwise. While it is
                 set, what the template specifies is read-only (errorCode
                 change_request_standard_template_field).
+            clonedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              description: >-
+                The change request this one was cloned from (id, and its number as name), when
+                one was recorded on create. Staff only; omitted otherwise, and once the source is
+                deleted.
             justification:
               type: string
               nullable: true
@@ -30650,6 +31004,14 @@ components:
           type: object
           additionalProperties: {type: string}
           description: The values of the template version's parameters, by key (400 for a missing required value, an undeclared key or a value of the wrong kind).
+        clonedFromChangeRequestId:
+          type: string
+          format: uuid
+          description: >-
+            The change request this one is a clone of (the portal's Clone), recorded as its
+            clonedFrom and never changed afterwards. Must be an existing change request (400
+            otherwise, refused before the previous system is called on dual-write).
+            Recorded on the PostgreSQL data sources only: the legacy data source ignores it.
 
     ChangeRequestLinkOptionsRequest:
       type: object
@@ -35963,6 +36325,27 @@ components:
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}
         customerReviewRequired: {type: boolean}
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            What the template is for, when to use it and what it does not cover (plain text, no
+            placeholders, at most 2000 characters). The template's own description: never copied
+            onto a change request. Required to submit a new template or a revision; null on
+            versions approved before it existed.
+        priority:
+          type: string
+          nullable: true
+          enum: [critical, high, moderate, low]
+          description: When set, the priority of every change request raised from the template (sending another is a 400, and a PATCH cannot change it); null leaves it to whoever raises the change.
+        deploymentTypes:
+          type: array
+          nullable: true
+          items: {type: string, enum: [primary_production, staging, qa, stress, uat, development]}
+          description: >-
+            When set, a change request raised from the template needs at least one deployment, and
+            every one of its deployments must be of these types (create and PATCH refuse others, an
+            untyped deployment included). Null: any deployments, or none.
         parameters:
           type: array
           items: {$ref: '#/components/schemas/StandardChangeParameter'}
@@ -36056,6 +36439,291 @@ components:
           type: array
           items: {$ref: '#/components/schemas/StandardChangeTemplateVersionSummary'}
           description: On GET /standard-change-templates/{id} only, newest first.
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeTemplateEvent'}
+          description: On GET /standard-change-templates/{id} only, newest first. What happened to the template outside its proposals.
+        canSuspend: {type: boolean, description: 'The caller may suspend it: its owner or a CAB member, while it is active.'}
+        canResume: {type: boolean, description: 'The caller may resume it: a CAB member, while it is suspended.'}
+        canClearReview: {type: boolean, description: 'The caller may clear its review flag: a CAB member, while it is flagged.'}
+    StandardChangeTemplateEvent:
+      type: object
+      properties:
+        action: {type: string, enum: [suspended, resumed, review_flagged, review_cleared, retired]}
+        note: {type: string, nullable: true, description: "The suspension reason, the resume or clear note or why the template was flagged (plain text); for retired, the retirement proposal's rationale (rich-text HTML, as the proposal stores it)."}
+        changeRequest:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The change request that flagged the template for review.
+        proposal:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The retirement proposal (id and number) whose approval retired the template; null for every other action.
+        actor: {type: string, description: 'Who did it: an email, or a service name.'}
+        createdOn: {type: string, format: date-time}
+    StandardChangeTemplateNoteRequest:
+      type: object
+      required: [note]
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 1000
+          description: Why the template may be used again. Required (blank is a 400), at most 1000 characters.
+    StandardChangeSuggestionsResponse:
+      type: object
+      required: [suggestions, total, limit, offset, criteria, scanned]
+      properties:
+        suggestions:
+          type: array
+          description: >-
+            This page: eligible first, then the most often closed (closedCount), then the most
+            recently completed (lastCompletedOn), then the customer's name and the key; across
+            customers when no accountId is given. The order is the same whatever the page size.
+          items: {$ref: '#/components/schemas/StandardChangeSuggestion'}
+        total:
+          type: integer
+          minimum: 0
+          description: >-
+            The suggestions the query matches (accountId, includeIneligible, includeDismissed), on
+            every page; 0 when nothing has been computed yet.
+        limit: {type: integer, minimum: 1, maximum: 50, description: "The page size applied (20 when none was given)."}
+        offset: {type: integer, minimum: 0}
+        criteria:
+          $ref: '#/components/schemas/StandardChangeSuggestionCriteria'
+        computedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the snapshot was published; null when none has been computed yet.
+        scanned:
+          type: object
+          description: >-
+            What the snapshot looked at, for every customer or for the one asked for (dismissed
+            ones counted when read, whether shown or not).
+          properties:
+            customers: {type: integer, description: "Customers computed (not the skipped)."}
+            changeRequests: {type: integer}
+            clusters: {type: integer}
+            eligible: {type: integer}
+            dismissed: {type: integer}
+            skipped: {type: integer, description: "Customers the refresh could not compute (too large for their deadline, or an error)."}
+        skippedCustomers:
+          type: array
+          description: >-
+            Customers whose suggestions were not computed in the latest refresh, the one asked for
+            or all; empty when none.
+          items:
+            type: object
+            properties:
+              customer: {$ref: '#/components/schemas/EntityRef'}
+              reason:
+                type: string
+                description: >-
+                  Why. The refresh writes one of two: "too large to compute within the refresh's
+                  per-customer deadline" (it overran its deadline) or "an error stopped its
+                  computation (the refresh logged the cause)" (its computation or save failed; the
+                  cause is in entity-service's log). Matched exactly by the portal: treat any other
+                  value as free text.
+    RefreshStandardChangeSuggestionsRequest:
+      type: object
+      properties:
+        runId: {type: string, format: uuid, description: "The run to continue; absent starts one."}
+        cursor: {type: string, format: uuid, description: "The previous page's nextCursor (needs runId)."}
+        limit: {type: integer, minimum: 1, maximum: 500, description: "Most customers this call computes (default 50)."}
+    RefreshStandardChangeSuggestionsResponse:
+      type: object
+      properties:
+        runId: {type: string, format: uuid}
+        customers: {type: integer, description: "Customers this call computed."}
+        changeRequests: {type: integer}
+        suggestions: {type: integer}
+        skipped: {type: integer, description: "Customers this call could not compute, too large for their deadline or failed (recorded as skipped)."}
+        more: {type: boolean}
+        nextCursor: {type: string, format: uuid}
+        computedOn: {type: string, format: date-time, description: "Set on the call that published the run."}
+        totals:
+          type: object
+          description: The whole run's counts, on the call that published it.
+          properties:
+            customers: {type: integer}
+            changeRequests: {type: integer}
+            clusters: {type: integer}
+            eligible: {type: integer}
+            skipped: {type: integer}
+    StandardChangeSuggestionCriteria:
+      type: object
+      properties:
+        windowMonths: {type: integer}
+        minClosed: {type: integer}
+        minSuccessPercent: {type: integer}
+        planSimilarityPercent: {type: integer}
+    StandardChangeSuggestion:
+      type: object
+      properties:
+        key:
+          type: string
+          description: >-
+            The cluster's own key: unique within its customer, kept from one refresh to the next (a
+            cluster takes the key of the previous snapshot's cluster it shares the most change
+            requests with), and what it is dismissed by. It is subjectKey, or, when the subject
+            split into more than one cluster (plans less alike than planSimilarityPercent),
+            subjectKey, '#' and 12 hex digits.
+        subjectKey: {type: string, description: "The normalised subject the cluster's members share; several clusters can share one."}
+        customer: {$ref: '#/components/schemas/EntityRef'}
+        subject: {type: string, description: "The newest member's subject, as written."}
+        memberCount: {type: integer}
+        closedCount: {type: integer}
+        rollbackCount: {type: integer}
+        successRate: {type: number, description: "closed / (closed + rolled back), 0 to 1."}
+        incidents: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Incidents naming a member as their cause or their change request."}
+        risk: {$ref: '#/components/schemas/StandardChangeSuggestionBreakdown'}
+        impact: {$ref: '#/components/schemas/StandardChangeSuggestionBreakdown'}
+        firstCompletedOn: {type: string, format: date-time}
+        lastCompletedOn: {type: string, format: date-time}
+        eligible: {type: boolean}
+        unmet: {type: array, items: {type: string}, description: "Each criterion it misses, in words."}
+        proposeFrom:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: >-
+            What a NEW proposal starts from: the newest closed member that neither deviated from its
+            plan nor was ever rejected by the CAB, else the newest closed one with no deviation (null
+            when there is none).
+        evidence: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Every other closed member, newest first, at most 99 (a proposal cites at most 100)."}
+        openProposals: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Open proposals already started from or citing a member."}
+        members:
+          type: array
+          description: Newest completion first, at most 100 (memberCount is the true count).
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              number: {type: string}
+              subject: {type: string}
+              state: {type: string, enum: [closed, rollback]}
+              completedOn: {type: string, format: date-time}
+              risk: {type: string, nullable: true}
+              impact: {type: string, nullable: true}
+              clonedFromId: {type: string, format: uuid, nullable: true}
+              hasDeviation: {type: boolean}
+              cabRejected: {type: boolean, description: "The CAB rejected it at least once (it was then resubmitted and completed)."}
+              cabCommentCount: {type: integer, description: "Comments CAB approvers wrote on it, with any decision."}
+              joinedBy: {type: string, enum: [subject, clone]}
+        dismissal:
+          allOf: [{$ref: '#/components/schemas/StandardChangeSuggestionDismissal'}]
+          nullable: true
+        deviationCount: {type: integer, description: "Members that deviated from their implementation plan (all of them, not only those listed). For a snapshot computed before the count was kept, the listed members that deviated."}
+        cabRejectionCount: {type: integer, description: "See StandardChangeCABHistory. Shown only: the CAB's pushback is never a criterion, and changes no count, key or cluster."}
+        cabRejections: {type: array, items: {$ref: '#/components/schemas/StandardChangeCABRejection'}}
+        cabCommentCount: {type: integer}
+        cabComments: {type: array, items: {$ref: '#/components/schemas/StandardChangeCABComment'}}
+        sample:
+          type: object
+          description: >-
+            Present when the subject had more change requests than are compared (500): the cluster
+            was built from the newest compared of the total, and its counts are of those.
+          properties:
+            compared: {type: integer}
+            total: {type: integer}
+    StandardChangeCABHistory:
+      type: object
+      description: >-
+        What the CAB said about a set of change requests: a suggestion's members and the look-alikes
+        attached to it, or a proposal's source and evidence and theirs. A CAB decision is an approver's
+        row on a change request's CAB stage, the stage the change request approvals view names as the
+        CAB's (a "CAB Approval", "Authorize" or "ECAB Approval" stage, an unlabelled second stage, or an
+        unlabelled stage of the "CAB Approval" group). A look-alike is one of the same customer's change
+        requests that the CAB rejected within the suggestion window, in any state but Closed and
+        Rollback and not raised from a template, whose normalised subject is the suggestion's (or that
+        of the proposal's source or an evidence change request). For a suggestion, a look-alike whose
+        subject several clusters share joins the one whose plans are most like its own (word-set
+        Jaccard), else the largest. A suggestion computed before these fields existed has zero counts
+        and empty lists until the next refresh.
+      properties:
+        cabRejectionCount: {type: integer, description: "Change requests the CAB rejected, each once."}
+        cabRejections:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeCABRejection'}
+          description: Their latest CAB rejection each, newest first, at most 20.
+        cabCommentCount: {type: integer, description: "Comments CAB approvers wrote, with any decision (an approval that asks for more is pushback too)."}
+        cabComments:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeCABComment'}
+          description: Newest first, at most 20.
+    StandardChangeCABChangeRequest:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        state: {type: string, description: "Its state now, lower case (canceled, closed, ...)."}
+    StandardChangeCABRejection:
+      type: object
+      properties:
+        changeRequest: {$ref: '#/components/schemas/StandardChangeCABChangeRequest'}
+        member: {type: boolean, description: "A member of the suggestion (a proposal's source or evidence); false for a look-alike."}
+        rejectedOn: {type: string, format: date-time}
+        rejectedBy: {type: string, description: "The CAB member's name; empty when unknown."}
+        comment: {type: string, description: "The rejection's comment as plain text; empty when none."}
+    StandardChangeCABComment:
+      type: object
+      properties:
+        changeRequest: {$ref: '#/components/schemas/StandardChangeCABChangeRequest'}
+        member: {type: boolean}
+        approverName: {type: string}
+        state: {type: string, description: "The approver's decision: APPROVED, REJECTED, REQUESTED, CANCELLED, ..."}
+        comment: {type: string, description: "Plain text (markup removed; comments migrated from the previous system can be rich text), at most 2000 characters."}
+        decidedOn: {type: string, format: date-time}
+    StandardChangeSuggestionBreakdown:
+      type: object
+      properties:
+        low: {type: integer}
+        moderate: {type: integer, description: "Moderate risk, or medium impact."}
+        high: {type: integer}
+        unknown: {type: integer}
+    StandardChangeSuggestionDismissal:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        reason: {type: string}
+        dismissedBy: {$ref: '#/components/schemas/EntityRef'}
+        dismissedOn: {type: string, format: date-time}
+    DismissStandardChangeSuggestionRequest:
+      type: object
+      required: [accountId, key, reason]
+      properties:
+        accountId: {type: string, format: uuid}
+        key: {type: string, maxLength: 512}
+        reason: {type: string, maxLength: 1000}
+    CancelStandardChangeProposalRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason: {type: string, maxLength: 4000, description: 'Why the proposal is cancelled. Required.'}
+    StandardChangeProposalStage:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string, description: '"CAB Approval" (two CAB members approve). A proposal submitted before 2026-11-10 shows "Standard Change Authority" instead (the group that authorised templates until then); one decided before the separate CAB stage was removed also shows an older one-approval "CAB Approval" stage first.'}
+        requiredApprovals: {type: integer, description: 'How many different approvers must approve the stage (2; 1 on the older one-approval CAB stage).'}
+        approvals: {type: integer}
+        decision: {type: string, nullable: true, enum: [APPROVED, REJECTED], description: 'Null while the stage is open.'}
+        eligibleApprovers:
+          type: integer
+          nullable: true
+          description: >-
+            Set only on the stage a proposal awaiting CAB approval waits on (null on every other stage):
+            approvals so far plus the people still asked (an open row) who are still active internal CAB
+            members. The people asked are fixed at submit and a member who has left the CAB since cannot
+            decide, so this is the most approvals the stage can still reach.
+        cannotReachQuorum:
+          type: boolean
+          description: >-
+            True on that stage when eligibleApprovers is below requiredApprovals: the proposal can never be
+            approved as it stands. A CAB member should cancel it, or its proposer withdraw it and submit a
+            copy (which asks the CAB as it is then). Nothing cancels it automatically.
     SuspendStandardChangeTemplateRequest:
       type: object
       additionalProperties: false
@@ -36095,16 +36763,19 @@ components:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
           description: "The change request's customer now (its project's account); null when it has none."
+        hasDeviation: {type: boolean, description: "It deviated from its implementation plan."}
+        cabRejected: {type: boolean, description: "The CAB rejected it at least once before it was done (see the proposal's cabHistory)."}
     StandardChangeProposalApprover:
       type: object
       properties:
+        stageId: {type: string, format: uuid, description: 'The stage (stages) the row belongs to.'}
         approver:
           allOf: [{$ref: '#/components/schemas/UserReference'}]
           nullable: true
         state: {type: string, description: 'REQUESTED, APPROVED, REJECTED or CANCELLED.'}
         comments: {type: string, nullable: true}
         updatedOn: {type: string, format: date-time, nullable: true}
-        canDecide: {type: boolean}
+        canDecide: {type: boolean, description: "The caller's own pending row of the stage the proposal waits on, while the caller is still on the CAB."}
     StandardChangeProposal:
       allOf:
         - $ref: '#/components/schemas/StandardChangeContent'
@@ -36114,7 +36785,7 @@ components:
             id: {type: string, format: uuid}
             number: {type: string, description: 'SCP number.'}
             kind: {type: string, enum: [new, modify, retire]}
-            state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+            state: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled]}
             name: {type: string}
             customer:
               allOf: [{$ref: '#/components/schemas/EntityRef'}]
@@ -36146,6 +36817,10 @@ components:
             evidence:
               type: array
               items: {$ref: '#/components/schemas/StandardChangeEvidence'}
+            stages:
+              type: array
+              items: {$ref: '#/components/schemas/StandardChangeProposalStage'}
+              description: The approval stages, oldest first.
             approvers:
               type: array
               items: {$ref: '#/components/schemas/StandardChangeProposalApprover'}
@@ -36159,11 +36834,30 @@ components:
               nullable: true
             decisionComment: {type: string, nullable: true}
             resultingVersion: {type: integer, nullable: true}
+            changeRequestsInNew:
+              type: array
+              items: {$ref: '#/components/schemas/EntityRef'}
+              description: >
+                An open retirement only (empty otherwise): the change requests raised from the
+                template that are still New, newest 100 (id and number). Once the template is retired
+                they cannot request approval and can only be cancelled.
+            changeRequestsInNewTotal: {type: integer, description: 'How many change requests changeRequestsInNew stands for (it lists at most 100).'}
+            cabHistory:
+              allOf: [{$ref: '#/components/schemas/StandardChangeCABHistory'}]
+              nullable: true
+              description: >
+                What the CAB said about changes like this one, read whenever the proposal is (never
+                stored): its rejections and comments on the source and evidence change requests, and the
+                same customer's change requests the CAB rejected in the last STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS
+                whose normalised subject is that of the source or of an evidence change request. Shown to
+                the approvers; it decides nothing.
             createdOn: {type: string, format: date-time}
             updatedOn: {type: string, format: date-time}
             canEdit: {type: boolean}
             canSubmit: {type: boolean}
             canWithdraw: {type: boolean}
+            canDelete: {type: boolean, description: 'The proposer, on a draft never submitted.'}
+            canCancel: {type: boolean, description: "A CAB member, on someone else's open proposal."}
     CreateStandardChangeProposalRequest:
       type: object
       required: [kind]
@@ -36172,7 +36866,7 @@ components:
         templateId: {type: string, format: uuid, nullable: true, description: 'Required for modify and retire.'}
         sourceChangeRequestId: {type: string, format: uuid, nullable: true, description: 'A closed change request to start from (new only).'}
         copyFromProposalId: {type: string, format: uuid, nullable: true, description: 'An earlier proposal to copy (new only).'}
-        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change".'}
+        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change". A modification or retirement with none takes its template''s; a retirement named otherwise is a 400.'}
         accountId:
           type: string
           format: uuid
@@ -36187,11 +36881,13 @@ components:
     UpdateStandardChangeProposalRequest:
       type: object
       description: >
-        Omitted fields are left as they are; an empty category, impact or risk clears it; parameters
-        and evidenceChangeRequestIds replace the whole list. Evidence must be closed change requests of
+        Omitted fields are left as they are; an empty category, impact, risk or priority clears it;
+        parameters, deploymentTypes (empty: any deployment) and evidenceChangeRequestIds replace the
+        whole list. Evidence and the source change request may not be change requests raised from
+        another standard change template (a 400 points to a revision of that template). Evidence must be closed change requests of
         the proposal's customer (a 400 names those that are not); a proposal with no customer cites none.
       properties:
-        name: {type: string}
+        name: {type: string, description: "A retirement's name is its template's: another is a 400, resending it is accepted."}
         accountId:
           type: string
           format: uuid
@@ -36212,6 +36908,11 @@ components:
         impact: {type: string, enum: ['', high, medium, low]}
         risk: {type: string, enum: ['', high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
         rollbackDurationText: {type: string}
+        summary: {type: string, maxLength: 2000}
+        priority: {type: string, enum: ['', critical, high, moderate, low]}
+        deploymentTypes:
+          type: array
+          items: {type: string, enum: [primary_production, staging, qa, stress, uat, development]}
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}
         customerReviewRequired: {type: boolean}
@@ -36223,23 +36924,33 @@ components:
           items: {type: string, format: uuid}
     DecideStandardChangeProposalRequest:
       type: object
-      required: [decision]
+      required: [decision, stageId]
       properties:
         decision: {type: string, enum: [approved, rejected]}
         comment: {type: string, nullable: true, description: 'Required when rejecting.'}
+        stageId:
+          type: string
+          format: uuid
+          description: >-
+            The stage the caller decides on, as their page showed it (the proposal's stages). Required:
+            400 when absent, blank or not a UUID. When it is not the stage the proposal waits on (it was
+            submitted again while the page was open), the decision is a 409 and nothing is written.
     SearchStandardChangeProposalsRequest:
       type: object
       properties:
         states:
           type: array
-          items: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+          description: >
+            cab_review (a state until migration 0295 removed the CAB stage) is still accepted for one
+            release, for a client deployed before it, and matches no proposal.
+          items: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled, cab_review]}
         kinds:
           type: array
           items: {type: string, enum: [new, modify, retire]}
         templateId: {type: string, format: uuid, nullable: true}
         accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to the proposals for one customer.'}
         proposedByMe: {type: boolean}
-        awaitingMyDecision: {type: boolean}
+        awaitingMyDecision: {type: boolean, description: 'Proposals in authority_review (awaiting CAB approval) on which the caller holds a pending approver row, while the caller is still on the CAB (a member who has left lists none).'}
         query: {type: string, nullable: true}
         pagination: {$ref: '#/components/schemas/Pagination'}
     StandardChangeProposalSummary:
@@ -36248,7 +36959,7 @@ components:
         id: {type: string, format: uuid}
         number: {type: string}
         kind: {type: string, enum: [new, modify, retire]}
-        state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+        state: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled]}
         name: {type: string}
         customer:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
@@ -36291,8 +37002,26 @@ components:
             customer (the Salesforce project sync moved the project to another account after the
             change was raised). Request Approval is then refused with 400
             `standard_change_template_other_customer`.
+        templateState:
+          type: string
+          enum: [active, suspended, retired]
+          description: >
+            The template's state now. A change request still New can request approval only while its
+            template is active and its version current; otherwise Request Approval is refused with 409
+            `standard_change_template_unavailable`.
+        superseded: {type: boolean, description: 'True when the template has been revised since this change request was raised.'}
         versionId: {type: string, format: uuid}
         version: {type: integer}
+        priority:
+          type: string
+          nullable: true
+          enum: [critical, high, moderate, low]
+          description: The priority the version fixes (a PATCH cannot change it); null when it fixes none.
+        deploymentTypes:
+          type: array
+          nullable: true
+          items: {type: string}
+          description: The deployment types the version fixes (every deployment must be of them, and one is required); null when it fixes none.
         parameters:
           type: array
           items:
@@ -36409,7 +37138,11 @@ components:
             raised from a standard change template sets or changes a field the template specifies,
             a standard change created with no template, or a change of type to or from standard;
             nothing written), `standard_change_template_unavailable` (409: the template is
-            suspended, retired or was revised since, or has no customer recorded; nothing written), and
+            suspended, retired or was revised since, or has no customer recorded; nothing written),
+            `standard_change_proposal_not_in_review` (409: a decision on a standard change proposal
+            that is no longer waiting for one; nothing recorded), `standard_change_decision_stage_stale`
+            (409: a decision on a standard change proposal naming a stage it no longer waits on;
+            nothing recorded), and
             `standard_change_template_other_customer` (400: a change request raised from a standard change
             template for no project or for a project of another customer than the template's, or a PATCH
             that moves such a change request to another customer's project, in any state, or Request

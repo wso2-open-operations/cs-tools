@@ -147,6 +147,10 @@ describe("buildCloneChangeRequestNavState", () => {
     expect(state.sourceNumber).toBe("CHG0009988");
   });
 
+  it("carries the source's id, which the create sends as the clone's lineage", () => {
+    expect(buildCloneChangeRequestNavState(FULL_CR).sourceId).toBe("chg-1");
+  });
+
   it("carries the implementation plan, risk and impact analysis, and backout plan into the create form's own fields", () => {
     const state = buildCloneChangeRequestNavState({
       ...FULL_CR,
@@ -2026,6 +2030,7 @@ describe("standard changes: clone, draft key and the Schedule label", () => {
   it("clones a templated change as the template, its values and what the template does not specify", () => {
     expect(buildCloneChangeRequestNavState(TEMPLATED)).toEqual({
       sourceNumber: "CHG0001234",
+      sourceId: "chg-1",
       type: "standard",
       standardChangeTemplateId: "tpl-1",
       standardChangeTemplateLabel: "STD0000001 — Rotate a TLS certificate",

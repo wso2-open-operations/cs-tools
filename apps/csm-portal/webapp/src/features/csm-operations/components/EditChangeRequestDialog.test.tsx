@@ -1755,6 +1755,18 @@ describe("EditChangeRequestDialog — a change raised from a standard change tem
     expect(screen.getByLabelText("Customer Project")).toBeEnabled();
   });
 
+  it("freezes a priority the template fixes, and asks for a deployment of its types", () => {
+    renderDialog({
+      ...TEMPLATED,
+      priority: "high",
+      project: { id: "proj-a", name: "Acme Project" },
+      standardChange: { ...TEMPLATED.standardChange!, priority: "high", deploymentTypes: ["primary_production"] },
+    });
+    expect(screen.getByRole("combobox", { name: /^priority/i })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getAllByText(HINT).length).toBeGreaterThanOrEqual(11);
+    expect(screen.getByRole("combobox", { name: /^deployments/i })).toBeRequired();
+  });
+
   it("never sends a template field, so a save carries only what was edited", () => {
     const { onSave } = renderDialog(TEMPLATED);
     fireEvent.change(screen.getByRole("textbox", { name: /work note/i }), { target: { value: "Checked the host." } });

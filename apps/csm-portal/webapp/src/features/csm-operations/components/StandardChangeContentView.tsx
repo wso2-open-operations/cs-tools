@@ -30,8 +30,10 @@ import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { PLAN_RICH_TEXT_SX } from "@features/csm-operations/utils/planRichText";
 import {
   changeRequestCategoryLabel,
+  changeRequestChoiceLabel,
   changeRequestImpactLabel,
 } from "@features/csm-operations/utils/changeRequests";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 import {
   changeRequestRiskLabel,
   highlightStandardChangeHtml,
@@ -88,12 +90,33 @@ export function PlaceholderText({ text, fill }: { text: string; fill?: StandardC
   );
 }
 
-function RichSection({ title, html, fill }: { title: string; html: string | null; fill?: StandardChangeFill }): JSX.Element | null {
+function RichSection({
+  title,
+  html,
+  fill,
+  missing,
+}: {
+  title: string;
+  html: string | null;
+  fill?: StandardChangeFill;
+  /** Shown in place of an empty value; without it an empty section is left out. */
+  missing?: string;
+}): JSX.Element | null {
   const rendered = useMemo(
     () => (html && !isBlankHtml(html) ? highlightStandardChangeHtml(html, sanitizeRichTextHtml, fill) : null),
     [html, fill],
   );
-  if (!rendered) return null;
+  if (!rendered) {
+    if (!missing) return null;
+    return (
+      <Box component="section" aria-label={title} sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+        <Typography variant="subtitle2">{title}</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {missing}
+        </Typography>
+      </Box>
+    );
+  }
   return (
     <Box component="section" aria-label={title} sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
       <Typography variant="subtitle2">{title}</Typography>
@@ -106,7 +129,8 @@ function RichSection({ title, html, fill }: { title: string; html: string | null
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+/** A caption over its value, as the template's facts are shown. */
+export function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
       <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -149,6 +173,10 @@ export default function StandardChangeContentView({
         <Field label="Category">{changeRequestCategoryLabel(content.category)}</Field>
         <Field label="Impact">{content.impact ? changeRequestImpactLabel(content.impact) : "—"}</Field>
         <Field label="Risk">{changeRequestRiskLabel(content.risk)}</Field>
+        <Field label="Priority">{content.priority ? changeRequestChoiceLabel(content.priority) : "Chosen per change"}</Field>
+        <Field label="Deployments">
+          {content.deploymentTypes?.length ? `${deploymentTypesText(content.deploymentTypes)} only` : "Any, chosen per change"}
+        </Field>
         <Field label="Rollback duration">
           {content.rollbackDurationText ? <PlaceholderText text={content.rollbackDurationText} fill={fill} /> : "—"}
         </Field>
@@ -156,7 +184,7 @@ export default function StandardChangeContentView({
         <Field label="Customer approval">{yesNo(content.customerApprovalRequired)}</Field>
         <Field label="Customer review">{yesNo(content.customerReviewRequired)}</Field>
       </Box>
-      <RichSection title="Description" html={content.description} fill={fill} />
+      <RichSection title="Description" html={content.description} fill={fill} missing="No description." />
       <RichSection title="Justification" html={content.justification} fill={fill} />
       <RichSection title="Implementation plan" html={content.implementationPlan} fill={fill} />
       <RichSection title="Risk and impact analysis" html={content.riskImpactAnalysis} fill={fill} />

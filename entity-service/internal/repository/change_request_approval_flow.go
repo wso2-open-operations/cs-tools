@@ -403,23 +403,28 @@ func changeRequestCreatorUserIDsWith(ctx context.Context, q crQuerier, workItemI
 		ids[strings.ToLower(*requestedBy)] = true
 	}
 	if createdBy != nil && strings.TrimSpace(*createdBy) != "" {
-		rows, err := q.Query(ctx, `SELECT id::text FROM "user" WHERE LOWER(email) = LOWER($1)`, strings.TrimSpace(*createdBy))
-		if err != nil {
+		if err := addUserIDsForEmail(ctx, q, strings.TrimSpace(*createdBy), ids); err != nil {
 			return nil, fmt.Errorf("resolve change request creator: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return nil, fmt.Errorf("scan change request creator: %w", err)
-			}
-			ids[strings.ToLower(id)] = true
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("change request creator rows: %w", err)
 		}
 	}
 	return ids, nil
+}
+
+// addUserIDsForEmail adds to into the (lower-cased) id of every "user" row with
+// email, ignoring case: one person can have several.
+func addUserIDsForEmail(ctx context.Context, q crQuerier, email string, into map[string]bool) error {
+	rows, err := q.Query(ctx, `SELECT id::text FROM "user" WHERE LOWER(email) = LOWER($1)`, email)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		into[strings.ToLower(id)] = true
+	}
+	return nil
 }
 
 // groupMemberIDs lists the distinct user ids in the "group" identified by
@@ -1801,7 +1806,7 @@ func provisionCustomerStage(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 			"changeRequestId", workItemID, "stage", spec.label)
 		return false, nil
 	}
-	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, spec.label, approvalPool{members: members}, creatorIDs); err != nil {
+	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, spec.label, 1, approvalPool{members: members}, creatorIDs); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1813,19 +1818,21 @@ func provisionCustomerStage(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 // Closed (stamping is_customer_review_required), rejected -> Rollback. The change
 // must still be in the stage's state (a stage whose change has moved on has
 // had its approvers cancelled, so this is a defence, not a path). Returns
-// whether the state moved.
-func applyCustomerStageOutcome(ctx context.Context, tx pgx.Tx, workItemID string, spec *customerStageSpec, currentState string, approved bool) (bool, error) {
+// whether the state moved. The customer who answered (actorEmail) is who closed
+// or rolled back the change (changeRequestClosureSets).
+func applyCustomerStageOutcome(ctx context.Context, tx pgx.Tx, workItemID string, spec *customerStageSpec, currentState string, approved bool, actorEmail string) (bool, error) {
 	if !strings.EqualFold(currentState, spec.state) {
 		return false, nil
 	}
 	var ct pgconn.CommandTag
 	var err error
+	closure := changeRequestClosureSets("$2", "$3")
 	if approved {
 		ct, err = tx.Exec(ctx,
-			fmt.Sprintf(`UPDATE change_request SET state = $2::change_request_state_enum, %s = true WHERE id = $1`, spec.approvedFlagColumn),
-			workItemID, spec.approvedState)
+			fmt.Sprintf(`UPDATE change_request SET state = $2::change_request_state_enum, %s = true, %s WHERE id = $1`, spec.approvedFlagColumn, closure),
+			workItemID, spec.approvedState, actorEmail)
 	} else {
-		ct, err = tx.Exec(ctx, `UPDATE change_request SET state = $2::change_request_state_enum WHERE id = $1`, workItemID, spec.rejectedState)
+		ct, err = tx.Exec(ctx, `UPDATE change_request SET state = $2::change_request_state_enum, `+closure+` WHERE id = $1`, workItemID, spec.rejectedState, actorEmail)
 	}
 	if err != nil {
 		return false, fmt.Errorf("decide change request approval: apply customer %s outcome: %w", spec.what, err)

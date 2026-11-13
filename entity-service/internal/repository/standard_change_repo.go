@@ -30,7 +30,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// StandardChangeRepository stores standard change templates, their CAB-approved
+// StandardChangeRepository stores standard change templates, their approved
 // versions and the proposals that create, modify or retire them (migration 0252).
 // Every table it touches is internal-only (row-level security, migration 100026),
 // and its routes are internal callers only: no customer identity reaches it.
@@ -50,17 +50,20 @@ type StandardChangeRepository interface {
 	GetVersion(ctx context.Context, id string) (*domain.StandardChangeTemplateVersion, error)
 	// SetTemplateState moves a template from one of from to to (suspend /
 	// resume); a ConflictError when it is in none of them. Moving to SUSPENDED
-	// records reason (nil for none), when and by whom; any other move clears them.
-	SetTemplateState(ctx context.Context, id, actor string, from []string, to string, reason *string) (*domain.StandardChangeTemplate, error)
-	// ClearReviewRequired clears the "review required" flag.
-	ClearReviewRequired(ctx context.Context, id, actor string) (*domain.StandardChangeTemplate, error)
+	// records note (nil for none) as the reason, when and by whom; any other move
+	// clears them. Either way the move and the note go into the template's history.
+	SetTemplateState(ctx context.Context, id, actor string, from []string, to string, note *string) (*domain.StandardChangeTemplate, error)
+	// ClearReviewRequired clears the "review required" flag of a template that is
+	// not retired and has it raised (else a ConflictError), recording note in the
+	// template's history.
+	ClearReviewRequired(ctx context.Context, id, actor, note string) (*domain.StandardChangeTemplate, error)
 	// FlagReviewRequired raises the "review required" flag of the template a
 	// change request was raised from, if it was raised from one, recording the
 	// change request and why. Safe to call on any change request.
 	FlagReviewRequired(ctx context.Context, tx pgx.Tx, changeRequestID, reason, actor string) error
-	// IsCABMember reports whether the email is an active internal member of the
-	// "CAB Approval" group.
-	IsCABMember(ctx context.Context, email string) (bool, error)
+	// IsGroupMember reports whether the email is an active internal member of the
+	// named group (domain.CABApprovalGroupName), as the approval pools resolve it.
+	IsGroupMember(ctx context.Context, email, group string) (bool, error)
 	// ProjectAccount returns the customer (account) of a project: nil when there
 	// is no such project, an empty EntityRef when it has no account.
 	ProjectAccount(ctx context.Context, projectID string) (*domain.EntityRef, error)
@@ -74,13 +77,24 @@ type StandardChangeRepository interface {
 	// UpdateProposal edits a draft; only its proposer may.
 	UpdateProposal(ctx context.Context, id, actor string, req domain.UpdateStandardChangeProposalRequest) error
 	// SubmitProposal sends a draft to the CAB: check runs on the proposal read
-	// under the row lock, then a CAB Approval stage is provisioned.
+	// under the row lock, then the CAB's stage is provisioned.
 	SubmitProposal(ctx context.Context, id, actor string, check func(domain.StandardChangeProposal) error) error
-	// WithdrawProposal withdraws a draft or a proposal in CAB review.
+	// WithdrawProposal withdraws the proposer's own open proposal.
 	WithdrawProposal(ctx context.Context, id, actor string) error
-	// DecideProposal records a CAB member's decision; an approval applies the
-	// proposal (new template, new version, or retirement) in the same transaction.
-	DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string) error
+	// CancelProposal ends someone else's open proposal, with a reason; the
+	// service checks the actor is a CAB member.
+	CancelProposal(ctx context.Context, id, actor, reason string) error
+	// DeleteProposal deletes the proposer's own draft (never submitted), with
+	// everything that hangs off it.
+	DeleteProposal(ctx context.Context, id, actor string) error
+	// DecideProposal records a decision on the stage the proposal waits on (the
+	// CAB's). Its last required approval applies the
+	// proposal (new template, new version, or retirement) in the same
+	// transaction. Any rejection ends it.
+	// expectedStage is the stage the caller meant (required): another (latest)
+	// stage is a 409 with nothing written. The actor must have an open row on
+	// the stage and still be on the CAB (403 otherwise).
+	DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string, expectedStage string) error
 }
 
 // StandardChangeProposalCreate is what CreateProposal writes.
@@ -102,7 +116,7 @@ type StandardChangeProposalFilter struct {
 	TemplateID      *string
 	AccountID       *string
 	ProposedByEmail string // "" = anyone
-	AwaitingEmail   string // "" = no filter: proposals in CAB review with a REQUESTED row for this email
+	AwaitingEmail   string // "" = no filter: proposals awaiting CAB approval with a REQUESTED row for this email, while it is still on the CAB
 	Query           string
 	Limit, Offset   int
 }
@@ -116,18 +130,70 @@ func NewStandardChangeRepository(db *Scoped) StandardChangeRepository {
 	return &standardChangeRepo{db: db}
 }
 
-// standardChangeStageLabel is the label of a proposal's one approval stage.
-const standardChangeStageLabel = approvalStageLabelCAB
+// standardChangeCABStageLabel is the label of a proposal's approval stage: the
+// one a change request's CAB stage has ("CAB Approval"). Older proposals carry
+// other labels, read like any other: "Standard Change Authority" on one
+// submitted before 2026-11-10 (that group authorised templates until migration
+// 0297), and, before it, a one-approval "CAB Approval" stage on one decided
+// before migration 0295 removed the separate CAB stage. A proposal's stages are
+// only ever read by its own id, never as a change request's, so sharing the
+// label with change requests mixes nothing up.
+const standardChangeCABStageLabel = approvalStageLabelCAB
 
-// standardChangeCABCheckpoint provisions a proposal's stage: the CAB group, the
-// proposer listed cancelled (nobody approves their own proposal).
-var standardChangeCABCheckpoint = changeRequestApprovalCheckpoint{Position: 0, Label: standardChangeStageLabel, Pool: poolNamedGroup, GroupName: domain.CABApprovalGroupName}
+// standardChangeCABCheckpoint provisions a proposal's one stage, at submit: the
+// CAB (the same group a normal change request's CAB stage asks), the proposer
+// listed cancelled (nobody approves their own proposal);
+// domain.StandardChangeCABApprovals of the rest must approve.
+var standardChangeCABCheckpoint = changeRequestApprovalCheckpoint{Position: 0, Label: standardChangeCABStageLabel, Pool: poolNamedGroup, GroupName: domain.CABApprovalGroupName}
+
+// resolveProposalCABPool resolves the CAB's approvers for a proposal and refuses
+// (400) a group with fewer than the required number of eligible members once
+// excluded (the proposer).
+// Members are counted as people, by email: one person may have several "user"
+// rows (the email is not unique), and two rows of one person are one approver.
+func resolveProposalCABPool(ctx context.Context, q crQuerier, excluded map[string]bool) (approvalPool, error) {
+	pool, err := resolveApprovalPool(ctx, q, standardChangeCABCheckpoint, nil, excluded)
+	if err != nil {
+		return approvalPool{}, err
+	}
+	var open []string
+	for _, m := range pool.members {
+		if !excluded[strings.ToLower(m)] {
+			open = append(open, m)
+		}
+	}
+	var eligible int
+	if err := q.QueryRow(ctx, `SELECT COUNT(DISTINCT LOWER(email)) FROM "user" WHERE id::text = ANY($1::text[])`, open).Scan(&eligible); err != nil {
+		return approvalPool{}, fmt.Errorf("count the CAB's members: %w", err)
+	}
+	if eligible < domain.StandardChangeCABApprovals {
+		return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the CAB (the %q group) has %d member(s) who may authorise this proposal, and %d different people must: the proposer cannot; ask for members to be added to the CAB",
+			domain.CABApprovalGroupName, eligible, domain.StandardChangeCABApprovals)}
+	}
+	return pool, nil
+}
 
 // contentColumns are the template content columns, shared by the proposal and the
-// version tables, in the order scanContent reads them.
+// version tables, in the order scanContent reads them. parameters stays last: the
+// INSERTs cast it (::jsonb) by position.
 const contentColumns = `subject, description, justification, implementation_plan, risk_impact_analysis,
 	backout_plan, test_plan, category, impact, risk, rollback_duration_text,
-	is_planning_visible_to_customers, customer_approval_required, customer_review_required, parameters`
+	is_planning_visible_to_customers, customer_approval_required, customer_review_required,
+	summary, priority, deployment_types, parameters`
+
+// contentColumnCount is how many columns contentColumns names.
+var contentColumnCount = strings.Count(contentColumns, ",") + 1
+
+// placeholders is "$from, ..., $(from+n-1)", the last one cast to last (e.g.
+// "::jsonb") when it is not "".
+func placeholders(from, n int, last string) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("$%d", from+i)
+	}
+	parts[n-1] += last
+	return strings.Join(parts, ", ")
+}
 
 func prefixed(alias, cols string) string {
 	parts := strings.Split(cols, ",")
@@ -140,15 +206,20 @@ func prefixed(alias, cols string) string {
 // contentDest returns scan destinations for contentColumns and a finish func
 // that decodes them into c.
 func contentDest(c *domain.StandardChangeContent) ([]any, func() error) {
-	var category, impact, risk *string
+	var category, impact, risk, priority *string
 	// The booleans go through nullable locals: a template whose current version
 	// is missing (LEFT JOIN, templateSelect) reads all of them as NULL.
 	var planningVisible, approvalRequired, reviewRequired *bool
 	var params []byte
 	dest := []any{&c.Subject, &c.Description, &c.Justification, &c.ImplementationPlan, &c.RiskImpactAnalysis,
 		&c.BackoutPlan, &c.TestPlan, &category, &impact, &risk, &c.RollbackDurationText,
-		&planningVisible, &approvalRequired, &reviewRequired, &params}
+		&planningVisible, &approvalRequired, &reviewRequired,
+		&c.Summary, &priority, &c.DeploymentTypes, &params}
 	return dest, func() error {
+		if priority != nil {
+			v := domain.ChangeRequestPriority(*priority)
+			c.Priority = &v
+		}
 		c.IsPlanningVisibleToCustomers = planningVisible != nil && *planningVisible
 		c.CustomerApprovalRequired = approvalRequired != nil && *approvalRequired
 		c.CustomerReviewRequired = reviewRequired != nil && *reviewRequired
@@ -183,7 +254,16 @@ func contentArgs(c domain.StandardChangeContent) ([]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode standard change parameters: %w", err)
 	}
-	var category, impact, risk *string
+	var category, impact, risk, priority *string
+	if c.Priority != nil {
+		v := string(*c.Priority)
+		priority = &v
+	}
+	// An empty list is stored as NULL: "any deployment".
+	var deploymentTypes []string
+	if len(c.DeploymentTypes) > 0 {
+		deploymentTypes = c.DeploymentTypes
+	}
 	if c.Category != nil {
 		v := string(*c.Category)
 		category = &v
@@ -198,7 +278,8 @@ func contentArgs(c domain.StandardChangeContent) ([]any, error) {
 	}
 	return []any{c.Subject, c.Description, c.Justification, c.ImplementationPlan, c.RiskImpactAnalysis,
 		c.BackoutPlan, c.TestPlan, category, impact, risk, c.RollbackDurationText,
-		c.IsPlanningVisibleToCustomers, c.CustomerApprovalRequired, c.CustomerReviewRequired, string(raw)}, nil
+		c.IsPlanningVisibleToCustomers, c.CustomerApprovalRequired, c.CustomerReviewRequired,
+		c.Summary, priority, deploymentTypes, string(raw)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +306,7 @@ const templateSelect = `SELECT t.id::text, t.number, t.name, t.state, acc.id::te
 	LEFT JOIN work_item pwi ON pwi.id = v.proposal_id
 	LEFT JOIN LATERAL (
 		SELECT p.id, w.number FROM standard_change_proposal p JOIN work_item w ON w.id = p.id
-		 WHERE p.template_id = t.id AND p.kind IN ('MODIFY', 'RETIRE') AND p.state IN ('DRAFT', 'CAB_REVIEW')
+		 WHERE p.template_id = t.id AND p.kind IN ('MODIFY', 'RETIRE') AND p.state IN ('DRAFT', 'AUTHORITY_REVIEW')
 		 LIMIT 1) op ON TRUE
 	LEFT JOIN LATERAL (
 		SELECT COUNT(*) AS total,
@@ -364,6 +445,39 @@ func (r *standardChangeRepo) GetTemplate(ctx context.Context, id string) (*domai
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("get standard change template: versions: %w", err)
 	}
+	rows.Close()
+	rows, err = r.db.Query(ctx, `
+		SELECT LOWER(e.action), e.note, cr.id::text, w.number, pw.id::text, pw.number, e.actor, e.created_on
+		  FROM standard_change_template_event e
+		  LEFT JOIN change_request cr ON cr.id = e.change_request_id
+		  LEFT JOIN work_item w ON w.id = cr.id
+		  LEFT JOIN work_item pw ON pw.id = e.proposal_id
+		 WHERE e.template_id = $1::uuid
+		 ORDER BY e.created_on DESC, e.id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("get standard change template: history: %w", err)
+	}
+	defer rows.Close()
+	t.History = []domain.StandardChangeTemplateEvent{}
+	for rows.Next() {
+		var e domain.StandardChangeTemplateEvent
+		var action string
+		var crID, crNumber, propID, propNumber *string
+		if err := rows.Scan(&action, &e.Note, &crID, &crNumber, &propID, &propNumber, &e.Actor, &e.CreatedOn); err != nil {
+			return nil, fmt.Errorf("get standard change template: history: scan: %w", err)
+		}
+		e.Action = domain.StandardChangeTemplateEventAction(action)
+		if crID != nil {
+			e.ChangeRequest = &domain.EntityRef{ID: *crID, Name: stringOrEmpty(crNumber)}
+		}
+		if propID != nil {
+			e.Proposal = &domain.EntityRef{ID: *propID, Name: stringOrEmpty(propNumber)}
+		}
+		t.History = append(t.History, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get standard change template: history: %w", err)
+	}
 	return &t, nil
 }
 
@@ -395,7 +509,7 @@ func getVersion(ctx context.Context, q crQuerier, id string) (*domain.StandardCh
 	return &v, nil
 }
 
-func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor string, from []string, to string, reason *string) (*domain.StandardChangeTemplate, error) {
+func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor string, from []string, to string, note *string) (*domain.StandardChangeTemplate, error) {
 	var current *string
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `SELECT state FROM standard_change_template WHERE id = $1::uuid FOR UPDATE`, id).Scan(&current); err != nil {
@@ -414,8 +528,16 @@ func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor str
 			return &apierror.ConflictError{Msg: fmt.Sprintf("the template is %s, so it cannot be moved to %s", strings.ToLower(*current), strings.ToLower(to))}
 		}
 		suspended := to == "SUSPENDED"
+		reason := note
 		if !suspended {
 			reason = nil
+		}
+		action := "RESUMED"
+		if suspended {
+			action = "SUSPENDED"
+		}
+		if err := recordTemplateEvent(ctx, tx, id, action, note, nil, actor); err != nil {
+			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE standard_change_template
 			SET state = $2, updated_on = NOW(), updated_by = $3,
@@ -434,18 +556,46 @@ func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor str
 	return r.GetTemplate(ctx, id)
 }
 
-func (r *standardChangeRepo) ClearReviewRequired(ctx context.Context, id, actor string) (*domain.StandardChangeTemplate, error) {
-	tag, err := r.db.Exec(ctx, `UPDATE standard_change_template
-		SET review_required = false, review_required_reason = NULL, review_required_on = NULL,
-		    review_required_change_request_id = NULL, updated_on = NOW(), updated_by = $2
-		WHERE id = $1::uuid`, id, actor)
+func (r *standardChangeRepo) ClearReviewRequired(ctx context.Context, id, actor, note string) (*domain.StandardChangeTemplate, error) {
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		var state string
+		var flagged bool
+		if err := tx.QueryRow(ctx, `SELECT state, review_required FROM standard_change_template WHERE id = $1::uuid FOR UPDATE`, id).Scan(&state, &flagged); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return &apierror.NotFoundError{Msg: "standard change template not found"}
+			}
+			return fmt.Errorf("clear standard change template review: %w", err)
+		}
+		if state == "RETIRED" {
+			return &apierror.ConflictError{Msg: "the template is retired"}
+		}
+		if !flagged {
+			return &apierror.ConflictError{Msg: "the template is not flagged for review"}
+		}
+		if err := recordTemplateEvent(ctx, tx, id, "REVIEW_CLEARED", &note, nil, actor); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE standard_change_template
+			SET review_required = false, review_required_reason = NULL, review_required_on = NULL,
+			    review_required_change_request_id = NULL, updated_on = NOW(), updated_by = $2
+			WHERE id = $1::uuid`, id, actor); err != nil {
+			return templateWriteErr("clear standard change template review", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, templateWriteErr("clear standard change template review", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, &apierror.NotFoundError{Msg: "standard change template not found"}
+		return nil, err
 	}
 	return r.GetTemplate(ctx, id)
+}
+
+// recordTemplateEvent appends to a template's history (migration 0287).
+func recordTemplateEvent(ctx context.Context, tx pgx.Tx, templateID, action string, note, changeRequestID *string, actor string) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO standard_change_template_event (template_id, action, note, change_request_id, actor)
+		VALUES ($1::uuid, $2, NULLIF(btrim(COALESCE($3, '')), ''), $4::uuid, $5)`, templateID, action, note, changeRequestID, actor); err != nil {
+		return fmt.Errorf("record standard change template history: %w", err)
+	}
+	return nil
 }
 
 // FlagReviewRequired runs inside the caller's transaction, which may belong to a
@@ -472,7 +622,8 @@ func flagStandardTemplateReview(ctx context.Context, tx pgx.Tx, changeRequestID,
 	if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
 		return fmt.Errorf("flag standard change template: escalate identity: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	var templateID string
+	err := tx.QueryRow(ctx, `
 		UPDATE standard_change_template t
 		   SET review_required = true, review_required_reason = $2, review_required_on = NOW(),
 		       review_required_change_request_id = $3::uuid, updated_on = NOW(), updated_by = $4
@@ -482,11 +633,19 @@ func flagStandardTemplateReview(ctx context.Context, tx pgx.Tx, changeRequestID,
 		   -- updated (migration 0254's check) until it is given one; flagging it
 		   -- must not fail the change request's own write.
 		   AND t.account_id IS NOT NULL
-		   AND NOT (t.review_required AND t.review_required_change_request_id = $3::uuid AND t.review_required_reason = $2)`,
-		*versionID, reason, changeRequestID, actor); err != nil {
+		   -- A retired template is never used again: nothing is left to review
+		   -- (and the flag could never be cleared).
+		   AND t.state <> 'RETIRED'
+		   AND NOT (t.review_required AND t.review_required_change_request_id = $3::uuid AND t.review_required_reason = $2)
+		RETURNING t.id::text`,
+		*versionID, reason, changeRequestID, actor).Scan(&templateID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("flag standard change template: %w", err)
 	}
-	return nil
+	return recordTemplateEvent(ctx, tx, templateID, "REVIEW_FLAGGED", &reason, &changeRequestID, actor)
 }
 
 // accountRef is a customer read through a LEFT JOIN: nil when there is none.
@@ -564,22 +723,34 @@ func customerName(ref *domain.EntityRef) string {
 	return ref.ID
 }
 
-func (r *standardChangeRepo) IsCABMember(ctx context.Context, email string) (bool, error) {
+func (r *standardChangeRepo) IsGroupMember(ctx context.Context, email, group string) (bool, error) {
+	return isGroupMember(ctx, r.db, email, group)
+}
+
+// isGroupMember is IsGroupMember on q (a transaction, when the answer decides
+// what it writes).
+func isGroupMember(ctx context.Context, q crQuerier, email, group string) (bool, error) {
 	var ok bool
-	err := r.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		  SELECT 1 FROM "user" u
-		   WHERE LOWER(u.email) = LOWER($1) AND COALESCE(u.is_active, true) AND u.user_type::text = 'INTERNAL'
-		     AND (u.id IN (SELECT tm.user_id FROM team_member tm
-		                    WHERE tm.group_id IN (SELECT id FROM "group" WHERE name = $2)
-		                       OR tm.team_id IN (SELECT id FROM team WHERE name = $2))
-		       OR u.id IN (SELECT gm.user_id FROM group_member gm
-		                    WHERE gm.group_id IN (SELECT id FROM "group" WHERE name = $2))))`,
-		strings.TrimSpace(email), domain.CABApprovalGroupName).Scan(&ok)
+	err := q.QueryRow(ctx, `SELECT `+groupMemberSQL("$1", "$2"), strings.TrimSpace(email), group).Scan(&ok)
 	if err != nil {
-		return false, fmt.Errorf("check CAB membership: %w", err)
+		return false, fmt.Errorf("check %s membership: %w", group, err)
 	}
 	return ok, nil
+}
+
+// groupMemberSQL is true when the email emailExpr names is an active internal
+// member of the group groupExpr names (any "user" row of that email): every
+// group of that name (team_member.group_id, group_member) and any team of that
+// name (team_member.team_id), as namedGroup resolves the CAB's pool.
+func groupMemberSQL(emailExpr, groupExpr string) string {
+	return `EXISTS (
+		  SELECT 1 FROM "user" gu
+		   WHERE LOWER(gu.email) = LOWER(` + emailExpr + `) AND COALESCE(gu.is_active, true) AND gu.user_type::text = 'INTERNAL'
+		     AND (gu.id IN (SELECT tm.user_id FROM team_member tm
+		                     WHERE tm.group_id IN (SELECT id FROM "group" WHERE name = ` + groupExpr + `)
+		                        OR tm.team_id IN (SELECT id FROM team WHERE name = ` + groupExpr + `))
+		       OR gu.id IN (SELECT gm.user_id FROM group_member gm
+		                     WHERE gm.group_id IN (SELECT id FROM "group" WHERE name = ` + groupExpr + `))))`
 }
 
 // ---------------------------------------------------------------------------
@@ -677,6 +848,11 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			if err := fixedCustomer("the change request", cust); err != nil {
 				return "", err
 			}
+			// A change request raised from a template is that template's: a new
+			// template from it would duplicate it.
+			if err := changeRequestsFromOtherTemplate(ctx, tx, nil, []string{*in.SourceChangeRequestID}); err != nil {
+				return "", err
+			}
 			account = &cust.ID
 			if category != nil {
 				v := domain.ChangeRequestCategory(*category)
@@ -726,7 +902,11 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 				}
 			}
 			templateID, baseVersionID = in.TemplateID, current
-			if name == "" {
+			if in.Kind == domain.StandardChangeProposalKindRetire && name != "" && strings.TrimSpace(name) != strings.TrimSpace(tname) {
+				// Named after the template it retires (approving it renames nothing), as UpdateProposal keeps it.
+				return "", &apierror.ValidationError{Msg: "a retirement proposal keeps the name of the template it retires: only its rationale and evidence can be edited"}
+			}
+			if name == "" || in.Kind == domain.StandardChangeProposalKindRetire {
 				name = tname
 			}
 		}
@@ -768,15 +948,16 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 		if err != nil {
 			return "", err
 		}
+		copied := fmt.Sprintf("$%d", 8+contentColumnCount)
 		_, err = tx.Exec(ctx, `
 			INSERT INTO standard_change_proposal (id, kind, state, template_id, base_version_id, source_change_request_id, rationale, account_id, `+contentColumns+`, copied_from_proposal_id, customer_locked)
-			VALUES ($1::uuid, $2::text, 'DRAFT', $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23::uuid,
-			        $2::text <> 'NEW' OR $5::uuid IS NOT NULL OR ($23::uuid IS NOT NULL AND $7::uuid IS NOT NULL))`,
+			VALUES ($1::uuid, $2::text, 'DRAFT', $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid, `+placeholders(8, contentColumnCount, "::jsonb")+`, `+copied+`::uuid,
+			        $2::text <> 'NEW' OR $5::uuid IS NOT NULL OR (`+copied+`::uuid IS NOT NULL AND $7::uuid IS NOT NULL))`,
 			append(append([]any{id, kind, templateID, baseVersionID, sourceCR, rationale, account}, args...), copiedFrom)...)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				return "", &apierror.ConflictError{Msg: "this template already has a modification or retirement in draft or CAB review: continue that one, or withdraw it first"}
+				return "", &apierror.ConflictError{Msg: "this template already has a modification or retirement in draft or under review: continue that one, or withdraw it first (a CAB member can cancel one its proposer abandoned)"}
 			}
 			return "", fmt.Errorf("create standard change proposal: %w", err)
 		}
@@ -792,6 +973,17 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 func setEvidenceTx(ctx context.Context, tx pgx.Tx, proposalID, actor string, account *string, ids []string) error {
 	clean, err := checkEvidenceTx(ctx, tx, account, ids)
 	if err != nil {
+		return err
+	}
+	var kind string
+	var templateID *string
+	if err := tx.QueryRow(ctx, `SELECT kind, template_id::text FROM standard_change_proposal WHERE id = $1::uuid`, proposalID).Scan(&kind, &templateID); err != nil {
+		return fmt.Errorf("standard change evidence: read proposal: %w", err)
+	}
+	if kind == "NEW" {
+		templateID = nil
+	}
+	if err := changeRequestsFromOtherTemplate(ctx, tx, templateID, clean); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM standard_change_proposal_evidence WHERE proposal_id = $1::uuid`, proposalID); err != nil {
@@ -839,6 +1031,71 @@ func checkEvidenceTx(ctx context.Context, tx pgx.Tx, account *string, ids []stri
 	return clean, nil
 }
 
+// checkNotFromOtherTemplate is changeRequestsFromOtherTemplate for a proposal
+// read under its lock: its evidence (ids) and the change request it started from,
+// against the template it revises or retires (none for a new template).
+func checkNotFromOtherTemplate(ctx context.Context, tx pgx.Tx, p domain.StandardChangeProposal, evidence []string) error {
+	ids := append([]string{}, evidence...)
+	if p.SourceChangeRequest != nil {
+		ids = append(ids, p.SourceChangeRequest.ID)
+	}
+	var own *string
+	if p.Kind != domain.StandardChangeProposalKindNew && p.Template != nil {
+		own = &p.Template.ID
+	}
+	return changeRequestsFromOtherTemplate(ctx, tx, own, ids)
+}
+
+// changeRequestsFromOtherTemplate refuses (400) change requests (ids) raised from
+// a standard change template other than own (nil: any template). A change that
+// was already done from a template is that template's; proposing a new template
+// from it, or citing it for another one, makes a second template of the same
+// change. The answer names the template and points to a revision of it.
+//
+// crvis: internal callers only; reads which template change requests were raised from, by id
+func changeRequestsFromOtherTemplate(ctx context.Context, q crQuerier, own *string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT wi.number, t.number, t.name
+		  FROM unnest($1::uuid[]) AS x(id)
+		  JOIN change_request cr ON cr.id = x.id
+		  JOIN work_item wi ON wi.id = cr.id
+		  JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
+		  JOIN standard_change_template t ON t.id = v.template_id
+		 WHERE $2::uuid IS NULL OR t.id <> $2::uuid
+		 ORDER BY wi.number`, ids, own)
+	if err != nil {
+		return fmt.Errorf("check change requests raised from templates: %w", err)
+	}
+	defer rows.Close()
+	var found []string
+	var first string
+	for rows.Next() {
+		var cr, number, name string
+		if err := rows.Scan(&cr, &number, &name); err != nil {
+			return fmt.Errorf("check change requests raised from templates: scan: %w", err)
+		}
+		if first == "" {
+			first = number
+		}
+		found = append(found, fmt.Sprintf("%s (raised from %s %s)", cr, number, name))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("check change requests raised from templates: %w", err)
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	what := "a new template"
+	if own != nil {
+		what = "this template"
+	}
+	return &apierror.ValidationError{Msg: fmt.Sprintf("%s: a change request raised from a standard change template belongs to that template, so it cannot start or support %s; to change what %s does, propose a revision of it instead",
+		strings.Join(found, ", "), what, first)}
+}
+
 // checkSourceChangeRequestTx refuses (400) a proposal's source change request
 // (nil: none) that is not a closed change request of the proposal's customer
 // account, in the evidence refusal's words. Checked when a proposal is created
@@ -864,9 +1121,10 @@ func checkSourceChangeRequestTx(ctx context.Context, tx pgx.Tx, account, sourceC
 	return nil
 }
 
-// checkProposalCustomerAtDecision refuses (409) the CAB's approval of a proposal whose
-// source change request or evidence is no longer a closed change request of the
-// proposal's customer, naming them. Nothing is written by the refused approval.
+// checkProposalCustomerAtDecision refuses (409) the approval that applies a
+// proposal (the CAB's final one) whose source change request or evidence
+// is no longer a closed change request of the proposal's customer, naming them.
+// Nothing is written by the refused approval.
 //
 // crvis: internal callers only; reads a proposal's source and evidence change requests and their customers
 func checkProposalCustomerAtDecision(ctx context.Context, tx pgx.Tx, proposalID string, account *string) error {
@@ -883,12 +1141,12 @@ func checkProposalCustomerAtDecision(ctx context.Context, tx pgx.Tx, proposalID 
 		return fmt.Errorf("check standard change proposal customer: evidence: %w", err)
 	}
 	if account == nil && (sourceCR != nil || len(ids) > 0) {
-		return &apierror.ConflictError{Msg: "the CAB cannot approve this proposal now: it names no customer, so its source change request and evidence cannot be checked; reject it, or ask the proposer to withdraw it and propose again"}
+		return &apierror.ConflictError{Msg: "this proposal cannot be approved now: it names no customer, so its source change request and evidence cannot be checked; reject it, or ask the proposer to withdraw it and propose again"}
 	}
 	refuse := func(err error) error {
 		var ve *apierror.ValidationError
 		if errors.As(err, &ve) {
-			return &apierror.ConflictError{Msg: "the CAB cannot approve this proposal now: " + ve.Msg + " (a project moved to another customer since it was submitted); reject it, or ask the proposer to withdraw it and propose again"}
+			return &apierror.ConflictError{Msg: "this proposal cannot be approved now: " + ve.Msg + " (a project moved to another customer since it was submitted); reject it, or ask the proposer to withdraw it and propose again"}
 		}
 		return err
 	}
@@ -947,7 +1205,7 @@ func (r *standardChangeRepo) GetProposal(ctx context.Context, id string) (*domai
 	return getProposal(ctx, r.db, id)
 }
 
-// crvis: internal callers only; reads a proposal's own approval rows and evidence change requests
+// crvis: internal callers only; reads a proposal's own approval rows and evidence change requests, and (an open retirement) the number of each change request still New raised from its template
 func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardChangeProposal, error) {
 	var p domain.StandardChangeProposal
 	var kind, state string
@@ -992,7 +1250,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 		return nil, err
 	}
 	p.Kind = domain.StandardChangeProposalKind(strings.ToLower(kind))
-	p.State = domain.StandardChangeProposalState(strings.ToLower(state))
+	p.State = proposalState(state)
 	p.Customer = accountRef(accID, accName)
 	if tplID != nil {
 		p.Template = &domain.EntityRef{ID: *tplID, Name: stringOrEmpty(tplName)}
@@ -1010,7 +1268,8 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 
 	p.Evidence = []domain.StandardChangeEvidence{}
 	rows, err := q.Query(ctx, `
-		SELECT cr.id::text, wi.number, wi.subject, LOWER(cr.state::text), cr.closed_on, ea.id::text, ea.name
+		SELECT cr.id::text, wi.number, wi.subject, LOWER(cr.state::text), cr.closed_on, ea.id::text, ea.name,
+		       cr.implementation_deviation IS NOT NULL AND btrim(cr.implementation_deviation) <> ''
 		  FROM standard_change_proposal_evidence e
 		  JOIN change_request cr ON cr.id = e.change_request_id
 		  JOIN work_item wi ON wi.id = cr.id
@@ -1024,7 +1283,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	for rows.Next() {
 		var e domain.StandardChangeEvidence
 		var eaID, eaName *string
-		if err := rows.Scan(&e.ID, &e.Number, &e.Subject, &e.State, &e.ClosedOn, &eaID, &eaName); err != nil {
+		if err := rows.Scan(&e.ID, &e.Number, &e.Subject, &e.State, &e.ClosedOn, &eaID, &eaName, &e.HasDeviation); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("get standard change proposal: evidence: scan: %w", err)
 		}
@@ -1036,9 +1295,63 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 		return nil, fmt.Errorf("get standard change proposal: evidence: %w", err)
 	}
 
+	p.Stages = []domain.StandardChangeProposalStage{}
+	rows, err = q.Query(ctx, `
+		SELECT s.id::text, COALESCE(s.checkpoint_label, ''), s.required_approvals, `+stageApprovalsSQL("s.id")+`, s.raw_status
+		  FROM approval_stage s WHERE s.work_item_id = $1::uuid ORDER BY s.created_on, s.id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("get standard change proposal: stages: %w", err)
+	}
+	for rows.Next() {
+		var st domain.StandardChangeProposalStage
+		if err := rows.Scan(&st.ID, &st.Label, &st.RequiredApprovals, &st.Approvals, &st.Decision); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("get standard change proposal: stages: scan: %w", err)
+		}
+		p.Stages = append(p.Stages, st)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get standard change proposal: stages: %w", err)
+	}
+	if proposalState(state).IsInReview() && len(p.Stages) > 0 {
+		if err := proposalStageReach(ctx, q, &p.Stages[len(p.Stages)-1]); err != nil {
+			return nil, err
+		}
+	}
+
+	p.ChangeRequestsInNew = []domain.EntityRef{}
+	if p.Kind == domain.StandardChangeProposalKindRetire && tplID != nil && (state == "DRAFT" || state == "AUTHORITY_REVIEW") {
+		rows, err = q.Query(ctx, `
+			SELECT cr.id::text, wi.number, COUNT(*) OVER ()
+			  FROM change_request cr
+			  JOIN work_item wi ON wi.id = cr.id
+			  JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
+			 WHERE v.template_id = $1::uuid AND cr.state = 'NEW'
+			 ORDER BY wi.created_on DESC, wi.number
+			 LIMIT 100`, *tplID)
+		if err != nil {
+			return nil, fmt.Errorf("get standard change proposal: change requests in new: %w", err)
+		}
+		for rows.Next() {
+			var ref domain.EntityRef
+			var total int
+			if err := rows.Scan(&ref.ID, &ref.Name, &total); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("get standard change proposal: change requests in new: scan: %w", err)
+			}
+			p.ChangeRequestsInNew = append(p.ChangeRequestsInNew, ref)
+			p.ChangeRequestsInNewTotal = total
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("get standard change proposal: change requests in new: %w", err)
+		}
+	}
+
 	p.Approvers = []domain.StandardChangeProposalApprover{}
 	rows, err = q.Query(ctx, `
-		SELECT a.id::text, u.id::text, COALESCE(u.email, ''), COALESCE(NULLIF(u.name, ''), u.email, ''), a.state, a.comments, a.updated_on
+		SELECT a.id::text, s.id::text, u.id::text, COALESCE(u.email, ''), COALESCE(NULLIF(u.name, ''), u.email, ''), a.state, a.comments, a.updated_on
 		  FROM approval_stage_approver a
 		  JOIN approval_stage s ON s.id = a.stage_id
 		  LEFT JOIN "user" u ON u.id = a.approver_user_id
@@ -1053,7 +1366,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 		var uid *string
 		var email, name string
 		var st *string
-		if err := rows.Scan(&a.ID, &uid, &email, &name, &st, &a.Comments, &a.UpdatedOn); err != nil {
+		if err := rows.Scan(&a.ID, &a.StageID, &uid, &email, &name, &st, &a.Comments, &a.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("get standard change proposal: approvers: scan: %w", err)
 		}
 		a.Approver = domain.NewUserReference(stringOrEmpty(uid), email, name)
@@ -1064,18 +1377,19 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 }
 
 // SearchProposals lists proposals, newest first.
-// crvis: internal callers only (internalOnly routes); reads the CAB rows of standard change proposals, never a change request's
+// crvis: internal callers only (internalOnly routes); reads the approval rows of standard change proposals, never a change request's
 func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChangeProposalFilter) ([]domain.StandardChangeProposalSummary, int, error) {
 	where := `WHERE (cardinality($1::text[]) = 0 OR p.state = ANY($1::text[]))
 	   AND (cardinality($2::text[]) = 0 OR p.kind = ANY($2::text[]))
 	   AND ($3::uuid IS NULL OR p.template_id = $3::uuid)
 	   AND ($4 = '' OR LOWER(wi.created_by) = LOWER($4))
-	   AND ($5 = '' OR (p.state = 'CAB_REVIEW' AND EXISTS (
+	   AND ($5 = '' OR (p.state = 'AUTHORITY_REVIEW' AND EXISTS (
 	         SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
-	          WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($5))))
+	          WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($5))
+	         AND ` + groupMemberSQL("$5", "$8") + `))
 	   AND ($6 = '' OR wi.subject ILIKE '%' || $6 || '%' ESCAPE '\' OR wi.number ILIKE '%' || $6 || '%' ESCAPE '\')
 	   AND ($7::uuid IS NULL OR p.account_id = $7::uuid)`
-	args := []any{f.States, f.Kinds, f.TemplateID, strings.TrimSpace(f.ProposedByEmail), strings.TrimSpace(f.AwaitingEmail), escapeLikeWildcards(strings.TrimSpace(f.Query)), f.AccountID}
+	args := []any{f.States, f.Kinds, f.TemplateID, strings.TrimSpace(f.ProposedByEmail), strings.TrimSpace(f.AwaitingEmail), escapeLikeWildcards(strings.TrimSpace(f.Query)), f.AccountID, domain.CABApprovalGroupName}
 	if f.States == nil {
 		args[0] = []string{}
 	}
@@ -1094,7 +1408,7 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 		  LEFT JOIN standard_change_template t ON t.id = p.template_id
 		  LEFT JOIN account acc ON acc.id = p.account_id
 		  LEFT JOIN LATERAL (SELECT u.id, u.name FROM "user" u WHERE LOWER(u.email) = LOWER(wi.created_by) ORDER BY u.id LIMIT 1) pu ON TRUE
-		`+where+` ORDER BY wi.created_on DESC, wi.id LIMIT $8 OFFSET $9`, append(args, f.Limit, f.Offset)...)
+		`+where+` ORDER BY wi.created_on DESC, wi.id LIMIT $9 OFFSET $10`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search standard change proposals: %w", err)
 	}
@@ -1109,7 +1423,7 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 			return nil, 0, fmt.Errorf("search standard change proposals: scan: %w", err)
 		}
 		s.Kind = domain.StandardChangeProposalKind(strings.ToLower(kind))
-		s.State = domain.StandardChangeProposalState(strings.ToLower(state))
+		s.State = proposalState(state)
 		s.Customer = accountRef(accID, accName)
 		if tid != nil {
 			s.Template = &domain.EntityRef{ID: *tid, Name: stringOrEmpty(tname)}
@@ -1172,7 +1486,19 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 			return &apierror.ConflictError{Msg: "only a draft can be edited; this proposal is " + strings.ToLower(state)}
 		}
 		if kind == "RETIRE" && hasContentEdits(req) {
-			return &apierror.ValidationError{Msg: "a retirement proposal carries only its name, rationale and evidence"}
+			return &apierror.ValidationError{Msg: "a retirement proposal carries only its rationale and evidence"}
+		}
+		if kind == "RETIRE" && req.Name != nil {
+			// A retirement is named after the template it retires, and approving it
+			// renames nothing: resending that name is accepted, another is refused.
+			var stored string
+			if err := tx.QueryRow(ctx, `SELECT subject FROM work_item WHERE id = $1::uuid`, id).Scan(&stored); err != nil {
+				return fmt.Errorf("update standard change proposal: name: %w", err)
+			}
+			if strings.TrimSpace(*req.Name) != strings.TrimSpace(stored) {
+				return &apierror.ValidationError{Msg: "a retirement proposal keeps the name of the template it retires: only its rationale and evidence can be edited"}
+			}
+			req.Name = nil
 		}
 		account, accountChanged, err := updateProposalCustomer(ctx, tx, id, kind, req.AccountID)
 		if err != nil {
@@ -1190,6 +1516,7 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 			}
 		}
 		str("rationale", req.Rationale)
+		str("summary", req.Summary)
 		str("subject", req.Subject)
 		str("description", req.Description)
 		str("justification", req.Justification)
@@ -1214,6 +1541,17 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 		}
 		if req.Risk != nil {
 			enumOrClear("risk", string(*req.Risk))
+		}
+		if req.Priority != nil {
+			enumOrClear("priority", string(*req.Priority))
+		}
+		if req.DeploymentTypes != nil {
+			// An empty list clears it: any deployment.
+			if len(*req.DeploymentTypes) == 0 {
+				sets = append(sets, "deployment_types = NULL")
+			} else {
+				add("deployment_types", *req.DeploymentTypes, "::text[]")
+			}
 		}
 		if req.IsPlanningVisibleToCustomers != nil {
 			add("is_planning_visible_to_customers", *req.IsPlanningVisibleToCustomers, "")
@@ -1316,7 +1654,8 @@ func hasContentEdits(req domain.UpdateStandardChangeProposalRequest) bool {
 	return req.Subject != nil || req.Description != nil || req.Justification != nil || req.ImplementationPlan != nil ||
 		req.RiskImpactAnalysis != nil || req.BackoutPlan != nil || req.TestPlan != nil || req.Category != nil ||
 		req.Impact != nil || req.Risk != nil || req.RollbackDurationText != nil || req.IsPlanningVisibleToCustomers != nil ||
-		req.CustomerApprovalRequired != nil || req.CustomerReviewRequired != nil || req.Parameters != nil
+		req.CustomerApprovalRequired != nil || req.CustomerReviewRequired != nil || req.Parameters != nil ||
+		req.Summary != nil || req.Priority != nil || req.DeploymentTypes != nil
 }
 
 // checkTemplateStillCurrent refuses a modification or retirement whose template
@@ -1352,7 +1691,7 @@ func checkTemplateStillCurrent(ctx context.Context, tx pgx.Tx, proposalID string
 	return nil
 }
 
-// crvis: internal callers only; provisions a CAB stage on a standard change proposal, never a change request
+// crvis: internal callers only; provisions the CAB's stage on a standard change proposal, never a change request
 func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor string, check func(domain.StandardChangeProposal) error) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		_, state, proposer, err := lockProposal(ctx, tx, id)
@@ -1405,19 +1744,43 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		}
 		// The name is checked here too, while the proposer can still rename the
 		// draft; approval checks it again (a template may take the name meanwhile).
+		// Another proposal of the same customer already before the CAB under
+		// that name is the same template proposed twice.
 		if p.Kind != domain.StandardChangeProposalKindRetire {
-			var taken bool
+			// Two submits of one name for one customer queue here, so the second
+			// sees the first in review.
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('standard-change-name:' || $1 || ':' || lower(btrim($2)), 0))`,
+				p.Customer.ID, p.Name); err != nil {
+				return fmt.Errorf("submit standard change proposal: lock the name: %w", err)
+			}
+			if strings.EqualFold(strings.TrimSpace(p.Name), untitledStandardChangeName) {
+				return &apierror.ValidationError{Msg: "the proposal is not complete; it still needs: a name (it is still called \"" + untitledStandardChangeName + "\")"}
+			}
+			var takenBy, rivalNumber *string
 			if err := tx.QueryRow(ctx, `
-				SELECT EXISTS (SELECT 1 FROM standard_change_template t
-				                WHERE lower(btrim(t.name)) = lower(btrim($1)) AND t.state <> 'RETIRED'
-				                  AND t.account_id = $3::uuid
-				                  AND t.id IS DISTINCT FROM (SELECT template_id FROM standard_change_proposal WHERE id = $2::uuid))`,
-				p.Name, id, p.Customer.ID).Scan(&taken); err != nil {
+				SELECT (SELECT t.number FROM standard_change_template t
+				         WHERE lower(btrim(t.name)) = lower(btrim($1)) AND t.state <> 'RETIRED'
+				           AND t.account_id = $3::uuid
+				           AND t.id IS DISTINCT FROM (SELECT template_id FROM standard_change_proposal WHERE id = $2::uuid)
+				         LIMIT 1),
+				       (SELECT w.number FROM standard_change_proposal o JOIN work_item w ON w.id = o.id
+				         WHERE lower(btrim(w.subject)) = lower(btrim($1)) AND o.account_id = $3::uuid AND o.id <> $2::uuid
+				           AND o.kind <> 'RETIRE' AND o.state = 'AUTHORITY_REVIEW'
+				         ORDER BY w.created_on LIMIT 1)`,
+				p.Name, id, p.Customer.ID).Scan(&takenBy, &rivalNumber); err != nil {
 				return fmt.Errorf("submit standard change proposal: check name: %w", err)
 			}
-			if taken {
-				return &apierror.ConflictError{Msg: fmt.Sprintf("%s already has a standard change template named %q: rename the proposal and submit it again", customerName(p.Customer), p.Name)}
+			if takenBy != nil {
+				return &apierror.ConflictError{Msg: fmt.Sprintf("%s already has a standard change template named %q (%s): propose a revision of it instead, or rename the proposal and submit it again", customerName(p.Customer), p.Name, *takenBy)}
 			}
+			if rivalNumber != nil {
+				return &apierror.ConflictError{Msg: fmt.Sprintf("proposal %s for %s, named %q, is already waiting for approval: it is the same template proposed twice; ask its proposer, or rename this one and submit it again", *rivalNumber, customerName(p.Customer), p.Name)}
+			}
+		}
+		// Neither the evidence nor the starting change request may come from
+		// another template: that change is a revision of that template.
+		if err := checkNotFromOtherTemplate(ctx, tx, *p, ids); err != nil {
+			return err
 		}
 		if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
 			return fmt.Errorf("submit standard change proposal: escalate identity: %w", err)
@@ -1426,14 +1789,16 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		if err != nil {
 			return err
 		}
-		pool, err := resolveApprovalPool(ctx, tx, standardChangeCABCheckpoint, nil, creators)
+		// The proposer (every "user" row of their email) is listed cancelled, and a
+		// group that has too few others to authorise the proposal is refused.
+		pool, err := resolveProposalCABPool(ctx, tx, creators)
 		if err != nil {
 			return err
 		}
-		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeStageLabel, pool, creators); err != nil {
+		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeCABStageLabel, domain.StandardChangeCABApprovals, pool, creators); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'CAB_REVIEW', submitted_on = NOW(), customer_locked = true WHERE id = $1::uuid`, id)
+		_, err = tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'AUTHORITY_REVIEW', submitted_on = NOW(), customer_locked = true WHERE id = $1::uuid`, id)
 		if err == nil {
 			_, err = tx.Exec(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, id, actor)
 		}
@@ -1444,7 +1809,15 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 	})
 }
 
-// crvis: internal callers only; cancels the CAB rows of a standard change proposal, never a change request's
+// userIDByEmailSQL is a user's id by email, for decided_by_user_id.
+const userIDByEmailSQL = `(SELECT u.id FROM "user" u WHERE LOWER(u.email) = LOWER($2) ORDER BY u.id LIMIT 1)`
+
+// proposalState is a standard_change_proposal.state as the domain spells it.
+func proposalState(state string) domain.StandardChangeProposalState {
+	return domain.StandardChangeProposalState(strings.ToLower(state))
+}
+
+// crvis: internal callers only; cancels the approval rows of a standard change proposal, never a change request's
 func (r *standardChangeRepo) WithdrawProposal(ctx context.Context, id, actor string) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		_, state, proposer, err := lockProposal(ctx, tx, id)
@@ -1454,29 +1827,142 @@ func (r *standardChangeRepo) WithdrawProposal(ctx context.Context, id, actor str
 		if !sameEmail(proposer, actor) {
 			return &apierror.ForbiddenError{Msg: "only the proposer can withdraw a standard change proposal"}
 		}
-		if state != "DRAFT" && state != "CAB_REVIEW" {
+		if !proposalState(state).IsOpen() {
 			return &apierror.ConflictError{Msg: "this proposal is already " + strings.ToLower(state)}
 		}
-		if err := cancelPendingApprovers(ctx, tx, id, actor); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'WITHDRAWN', decided_on = NOW() WHERE id = $1::uuid`, id); err != nil {
-			return fmt.Errorf("withdraw standard change proposal: %w", err)
-		}
-		_, err = tx.Exec(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, id, actor)
-		return err
+		return closeProposal(ctx, tx, id, actor, "WITHDRAWN", nil)
 	})
 }
 
-// crvis: internal callers only; decides the CAB rows of a standard change proposal, never a change request's
-func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string) error {
+// crvis: internal callers only; cancels the approval rows of a standard change proposal, never a change request's
+func (r *standardChangeRepo) CancelProposal(ctx context.Context, id, actor, reason string) error {
+	return r.db.InTx(ctx, func(tx pgx.Tx) error {
+		_, state, proposer, err := lockProposal(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if sameEmail(proposer, actor) {
+			return &apierror.ConflictError{Msg: "this is your own proposal: withdraw it, or delete it while it is a draft"}
+		}
+		if !proposalState(state).IsOpen() {
+			return &apierror.ConflictError{Msg: "this proposal is already " + strings.ToLower(state)}
+		}
+		return closeProposal(ctx, tx, id, actor, "CANCELLED", &reason)
+	})
+}
+
+// closeProposal ends an open proposal (WITHDRAWN or CANCELLED) under its lock:
+// its pending approvals are cancelled, and who ended it and why are recorded.
+func closeProposal(ctx context.Context, tx pgx.Tx, id, actor, state string, reason *string) error {
+	if err := cancelPendingApprovers(ctx, tx, id, actor); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE standard_change_proposal SET state = $3, decided_on = NOW(), decided_by_user_id = `+userIDByEmailSQL+`, decision_comment = $4
+		WHERE id = $1::uuid`, id, actor, state, reason); err != nil {
+		return fmt.Errorf("close standard change proposal: %w", err)
+	}
+	_, err := tx.Exec(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, id, actor)
+	return err
+}
+
+// crvis: internal callers only; deletes the proposer's own unsubmitted standard change proposal, never a change request
+func (r *standardChangeRepo) DeleteProposal(ctx context.Context, id, actor string) error {
+	return r.db.InTx(ctx, func(tx pgx.Tx) error {
+		_, state, proposer, err := lockProposal(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if !sameEmail(proposer, actor) {
+			return &apierror.ForbiddenError{Msg: "only the proposer can delete a standard change proposal"}
+		}
+		var submitted bool
+		if err := tx.QueryRow(ctx, `SELECT submitted_on IS NOT NULL OR EXISTS (SELECT 1 FROM approval_stage WHERE work_item_id = $1::uuid)
+			FROM standard_change_proposal WHERE id = $1::uuid`, id).Scan(&submitted); err != nil {
+			return fmt.Errorf("delete standard change proposal: %w", err)
+		}
+		if state != "DRAFT" || submitted {
+			return &apierror.ConflictError{Msg: "only a draft that was never submitted can be deleted; a submitted proposal stays as the record of what was asked (withdraw it instead)"}
+		}
+		// The work item's delete cascades to the proposal, its evidence, comments
+		// and activity. The work item is internal-only (no project), so the
+		// identity is raised as Submit does.
+		if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
+			return fmt.Errorf("delete standard change proposal: escalate identity: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM work_item WHERE id = $1::uuid AND type = 'STANDARD_CHANGE_PROPOSAL'::work_item_type_enum`, id); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return &apierror.ConflictError{Msg: "this draft cannot be deleted: something else refers to it; withdraw it instead"}
+			}
+			return fmt.Errorf("delete standard change proposal: %w", err)
+		}
+		return nil
+	})
+}
+
+// proposalStage is the approval stage a proposal waits on: its latest.
+type proposalStage struct {
+	id, label string
+	required  int
+}
+
+func currentProposalStage(ctx context.Context, tx pgx.Tx, id string) (proposalStage, error) {
+	var st proposalStage
+	var label *string
+	err := tx.QueryRow(ctx, `SELECT id::text, checkpoint_label, required_approvals FROM approval_stage
+		WHERE work_item_id = $1::uuid ORDER BY created_on DESC, id DESC LIMIT 1`, id).Scan(&st.id, &label, &st.required)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return st, &apierror.ConflictError{Msg: "this proposal has no approval stage to decide"}
+		}
+		return st, fmt.Errorf("decide standard change proposal: read stage: %w", err)
+	}
+	st.label = stringOrEmpty(label)
+	return st, nil
+}
+
+// stageApprovalsSQL counts the approvals of the approval stage stageExpr names,
+// by person: two "user" rows with one email are one approval. Both what a
+// proposal shows and the quorum DecideProposal waits for count this way.
+func stageApprovalsSQL(stageExpr string) string {
+	return `(SELECT COUNT(DISTINCT LOWER(u.email)) FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		WHERE a.stage_id = ` + stageExpr + ` AND a.state = 'APPROVED')`
+}
+
+// proposalStageReach sets EligibleApprovers and CannotReachQuorum on st, the
+// stage a proposal in review waits on: its approvals so far, plus the people
+// still asked (an open row of an active internal user) who have not approved
+// and are still on the CAB, counted by email as the quorum is. It is what
+// DecideProposal would still accept, so a stage short of its required approvals
+// is flagged rather than left waiting for decisions nobody can make.
+func proposalStageReach(ctx context.Context, q crQuerier, st *domain.StandardChangeProposalStage) error {
+	var open int
+	if err := q.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT LOWER(u.email))
+		  FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED'
+		   AND COALESCE(u.is_active, true) AND u.user_type::text = 'INTERNAL'
+		   AND `+groupMemberSQL("u.email", "$2")+`
+		   AND NOT EXISTS (SELECT 1 FROM approval_stage_approver b JOIN "user" bu ON bu.id = b.approver_user_id
+		                    WHERE b.stage_id = a.stage_id AND b.state = 'APPROVED' AND LOWER(bu.email) = LOWER(u.email))`,
+		st.ID, domain.CABApprovalGroupName).Scan(&open); err != nil {
+		return fmt.Errorf("get standard change proposal: eligible approvers: %w", err)
+	}
+	reach := st.Approvals + open
+	st.EligibleApprovers = &reach
+	st.CannotReachQuorum = reach < st.RequiredApprovals
+	return nil
+}
+
+// crvis: internal callers only; decides the approval rows of a standard change proposal, never a change request's
+func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string, expectedStage string) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		kind, state, proposer, err := lockProposal(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		if state != "CAB_REVIEW" {
-			return &apierror.ConflictError{Msg: "this proposal is not waiting for the CAB: it is " + strings.ToLower(state)}
+		if !proposalState(state).IsInReview() {
+			return &apierror.ConflictError{Msg: "this proposal is not waiting for a decision: it is " + strings.ToLower(state), Code: apierror.CodeStandardChangeProposalNotInReview}
 		}
 		if sameEmail(proposer, actor) {
 			return &apierror.ForbiddenError{Msg: "the proposer of a standard change cannot decide it"}
@@ -1484,17 +1970,16 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
 			return fmt.Errorf("decide standard change proposal: escalate identity: %w", err)
 		}
-		var rowID, stageID, userID string
-		err = tx.QueryRow(ctx, `
-			SELECT a.id::text, a.stage_id::text, a.approver_user_id::text
-			  FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
-			 WHERE a.work_item_id = $1::uuid AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($2)
-			 ORDER BY a.created_on LIMIT 1 FOR UPDATE OF a`, id, actor).Scan(&rowID, &stageID, &userID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return &apierror.ForbiddenError{Msg: "only the CAB members asked to decide this standard change proposal can approve or reject it"}
-		}
+		stage, err := currentProposalStage(ctx, tx, id)
 		if err != nil {
-			return fmt.Errorf("decide standard change proposal: %w", err)
+			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(expectedStage), stage.id) {
+			return &apierror.ConflictError{Msg: "the stage you decided on is not the one this proposal now waits on, so nothing was recorded: reload it to see what you are asked to decide", Code: apierror.CodeStandardChangeDecisionStageStale}
+		}
+		rowID, userID, err := requestedProposalApprover(ctx, tx, stage, actor)
+		if err != nil {
+			return err
 		}
 		internal, err := internalApproverIDs(ctx, tx, []string{userID})
 		if err != nil {
@@ -1502,6 +1987,15 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		}
 		if !internal[strings.ToLower(userID)] {
 			return &apierror.ForbiddenError{Msg: "only active internal (WSO2) users can decide a standard change proposal"}
+		}
+		// The row was written at submit, from the CAB as it was then: someone who
+		// has left the CAB since keeps it, but no longer has a say.
+		cab, err := isGroupMember(ctx, tx, actor, domain.CABApprovalGroupName)
+		if err != nil {
+			return fmt.Errorf("decide standard change proposal: %w", err)
+		}
+		if !cab {
+			return &apierror.ForbiddenError{Msg: fmt.Sprintf("you are no longer a member of the CAB (the %q group), so you cannot decide this proposal: only current CAB members can", domain.CABApprovalGroupName)}
 		}
 		decision := "REJECTED"
 		if approve {
@@ -1511,11 +2005,34 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			rowID, decision, comment, actor); err != nil {
 			return fmt.Errorf("decide standard change proposal: %w", err)
 		}
+		touch := func() error {
+			_, err := tx.Exec(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, id, actor)
+			return err
+		}
+		if approve {
+			// The stage needs several different people: until it has them the
+			// others' rows stay open. The approver's other rows (another "user"
+			// row with the same email) are no longer asked.
+			if _, err := tx.Exec(ctx, `UPDATE approval_stage_approver a SET state = 'CANCELLED', updated_on = NOW(), updated_by = $2
+				  FROM "user" u
+				 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED' AND u.id = a.approver_user_id AND LOWER(u.email) = LOWER($2)`,
+				stage.id, actor); err != nil {
+				return fmt.Errorf("decide standard change proposal: %w", err)
+			}
+			var approvals int
+			if err := tx.QueryRow(ctx, `SELECT `+stageApprovalsSQL("$1::uuid"), stage.id).Scan(&approvals); err != nil {
+				return fmt.Errorf("decide standard change proposal: count approvals: %w", err)
+			}
+			if approvals < stage.required {
+				return touch()
+			}
+		}
+		// The stage is settled: the open rows are no longer asked.
 		if _, err := tx.Exec(ctx, `UPDATE approval_stage_approver SET state = 'CANCELLED', updated_on = NOW(), updated_by = $2 WHERE stage_id = $1::uuid AND state = 'REQUESTED'`,
-			stageID, actor); err != nil {
+			stage.id, actor); err != nil {
 			return fmt.Errorf("decide standard change proposal: cancel the others: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE approval_stage SET raw_status = $2, updated_on = NOW(), updated_by = $3 WHERE id = $1::uuid`, stageID, decision, actor); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE approval_stage SET raw_status = $2, updated_on = NOW(), updated_by = $3 WHERE id = $1::uuid`, stage.id, decision, actor); err != nil {
 			return fmt.Errorf("decide standard change proposal: stage: %w", err)
 		}
 
@@ -1534,9 +2051,37 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			WHERE id = $1::uuid`, id, newState, userID, comment, templateID, resultingVersion); err != nil {
 			return fmt.Errorf("decide standard change proposal: %w", err)
 		}
-		_, err = tx.Exec(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, id, actor)
-		return err
+		return touch()
 	})
+}
+
+// requestedProposalApprover locks the actor's open (REQUESTED) row on the stage
+// and returns it with its user id; a 403 when they have none. Someone who
+// already authorised (by any "user" row of their email) is refused first,
+// whether or not a row of theirs is still open: an approval cancels the
+// approver's other rows (DecideProposal), but a row whose email came to match
+// theirs later would otherwise let them decide again.
+func requestedProposalApprover(ctx context.Context, tx pgx.Tx, stage proposalStage, actor string) (rowID, userID string, err error) {
+	var already bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		WHERE a.stage_id = $1::uuid AND a.state = 'APPROVED' AND LOWER(u.email) = LOWER($2))`, stage.id, actor).Scan(&already); err != nil {
+		return "", "", fmt.Errorf("decide standard change proposal: %w", err)
+	}
+	if already {
+		return "", "", &apierror.ForbiddenError{Msg: "you have already authorised this proposal: another CAB member must"}
+	}
+	err = tx.QueryRow(ctx, `
+		SELECT a.id::text, a.approver_user_id::text
+		  FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($2)
+		 ORDER BY a.created_on LIMIT 1 FOR UPDATE OF a`, stage.id, actor).Scan(&rowID, &userID)
+	if err == nil {
+		return rowID, userID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", fmt.Errorf("decide standard change proposal: %w", err)
+	}
+	return "", "", &apierror.ForbiddenError{Msg: "only the CAB members asked to authorise this proposal can approve or reject it; the proposer cannot, and each member decides once"}
 }
 
 // applyApprovedProposal does what an approved proposal asks: a new template with
@@ -1558,8 +2103,8 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 	if err := finish(); err != nil {
 		return nil, nil, err
 	}
-	// The CAB pre-authorises the template for the proposal's customer on that
-	// customer's changes: the source change request and the evidence are checked
+	// The approval pre-authorises the template for the proposal's customer on
+	// that customer's changes: the source change request and the evidence are checked
 	// again now, since the Salesforce project sync may have moved one of their
 	// projects to another account after submit. A refusal changes nothing.
 	if kind != "RETIRE" {
@@ -1577,9 +2122,19 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 
 	switch kind {
 	case "RETIRE":
+		// A retired template is never used again, so its suspension and its review
+		// flag go with it (the flag could not be cleared afterwards); the history
+		// records the retirement, with the proposal and its rationale.
 		if _, err := tx.Exec(ctx, `UPDATE standard_change_template SET state = 'RETIRED', updated_on = NOW(), updated_by = $2,
-			suspended_reason = NULL, suspended_on = NULL, suspended_by = NULL WHERE id = $1::uuid`, *tplID, actor); err != nil {
+			suspended_reason = NULL, suspended_on = NULL, suspended_by = NULL,
+			review_required = false, review_required_reason = NULL, review_required_on = NULL,
+			review_required_change_request_id = NULL WHERE id = $1::uuid`, *tplID, actor); err != nil {
 			return nil, nil, templateWriteErr("apply standard change proposal: retire", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_template_event (template_id, action, note, proposal_id, actor)
+			SELECT $1::uuid, 'RETIRED', NULLIF(btrim(COALESCE(p.rationale, '')), ''), p.id, $3
+			  FROM standard_change_proposal p WHERE p.id = $2::uuid`, *tplID, id, actor); err != nil {
+			return nil, nil, fmt.Errorf("apply standard change proposal: retire: record history: %w", err)
 		}
 		return tplID, nil, nil
 	case "NEW":
@@ -1607,7 +2162,7 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO standard_change_template_version (template_id, version, proposal_id, approved_by, `+contentColumns+`)
 		VALUES ($1::uuid, COALESCE((SELECT MAX(version) FROM standard_change_template_version WHERE template_id = $1::uuid), 0) + 1,
-		        $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
+		        $2::uuid, $3, `+placeholders(4, contentColumnCount, "::jsonb")+`)
 		RETURNING id::text`, append([]any{*tplID, id, actor}, args...)...).Scan(&vid); err != nil {
 		return nil, nil, fmt.Errorf("apply standard change proposal: version: %w", err)
 	}

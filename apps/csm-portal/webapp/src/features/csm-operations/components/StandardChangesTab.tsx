@@ -48,14 +48,15 @@ import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import ProposeStandardChangeDialog from "@features/csm-operations/components/ProposeStandardChangeDialog";
+import StandardChangeSuggestions from "@features/csm-operations/components/StandardChangeSuggestions";
 import {
   useCountStandardChangeProposals,
-  useCreateStandardChangeProposal,
   useSearchStandardChangeProposals,
   useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeTemplates,
 } from "@features/csm-operations/api/useStandardChanges";
-import { changeRequestImpactLabel } from "@features/csm-operations/utils/changeRequests";
+import { changeRequestImpactLabel, errorText } from "@features/csm-operations/utils/changeRequests";
 import {
   CHANGE_REQUESTS_PATH,
   changeRequestRiskLabel,
@@ -110,10 +111,6 @@ const PROPOSAL_SCOPE_OPTIONS: ReadonlyArray<{ value: ProposalScope; label: strin
 
 function formatDate(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium" }) ?? "—";
-}
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
 }
 
 /** The search box's text, sent once typing pauses. */
@@ -309,6 +306,15 @@ function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
                             <Chip size="small" variant="outlined" color="warning" label="Review needed" />
                           )}
                         </Box>
+                        {t.currentVersion?.summary && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+                          >
+                            {t.currentVersion.summary}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell sx={{ maxWidth: 220, wordBreak: "break-word" }}>
                         <CustomerCell customer={t.customer} />
@@ -540,7 +546,7 @@ function plural(n: number, one: string, many: string): string {
 }
 
 /**
- * "2 proposals await your CAB decision · 1 draft of yours" above the
+ * "2 proposals await your decision · 1 draft of yours" above the
  * catalogue, each part a link to the proposals filtered to it. Only what
  * applies to the viewer is said, and nothing at all when nothing does. It is a
  * hint, not the list: nothing is shown until both counts are in (so it does not
@@ -562,7 +568,7 @@ function AttentionLine(): JSX.Element | null {
   if (awaitingCount > 0) {
     parts.push({
       key: "awaiting",
-      text: `${plural(awaitingCount, "proposal awaits", "proposals await")} your CAB decision`,
+      text: `${plural(awaitingCount, "proposal awaits", "proposals await")} your decision`,
       to: proposalsHref({ scope: "awaiting" }),
     });
   }
@@ -592,12 +598,14 @@ function AttentionLine(): JSX.Element | null {
 /**
  * Standard changes, the second sub-view of Operations > Change requests (see
  * `ChangeRequestsArea`, which owns the sub-navigation and the `?view=standard`
- * it is kept in). It opens on the catalogue of CAB-approved standard change
+ * it is kept in). It opens on the catalogue of approved standard change
  * templates (a standard change can only be raised from an active one), under a
  * line saying what needs the viewer's attention, if anything does. The
  * proposals that create, revise or retire templates are a secondary view of the
  * same tab (`&show=proposals`, the Templates | Proposals switch beside the
- * search), with their filters in the URL too. A row opens with `state.from` set
+ * search), with their filters in the URL too; so are the suggested standard
+ * changes mined from completed change requests (`&show=suggested`,
+ * StandardChangeSuggestions). A row opens with `state.from` set
  * to this URL, so Back from a template or proposal returns to the view it was
  * opened from.
  */
@@ -606,26 +614,15 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
   const navigate = useNavTransition();
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
-  const createProposal = useCreateStandardChangeProposal();
-
-  const propose = (): void => {
-    createProposal.mutate(
-      { kind: "new" },
-      {
-        onSuccess: (proposal) =>
-          navigate(standardChangeProposalPath(proposal.id), {
-            state: { from: `${location.pathname}${location.search}` },
-          }),
-      },
-    );
-  };
+  const [proposing, setProposing] = useState(false);
+  const from = { from: `${location.pathname}${location.search}` };
 
   const toggle = (
     <ToggleButtonGroup
       exclusive
       size="small"
       value={show}
-      aria-label="Templates or proposals"
+      aria-label="Templates, proposals or suggestions"
       onChange={(_, next: StandardChangesShow | null) => {
         if (next && next !== show) setSearchParams((prev) => standardChangesSearch(prev, next));
       }}
@@ -636,6 +633,9 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
       <ToggleButton value="proposals" sx={{ textTransform: "none", px: 1.5 }}>
         Proposals
       </ToggleButton>
+      <ToggleButton value="suggested" sx={{ textTransform: "none", px: 1.5 }}>
+        Suggested
+      </ToggleButton>
     </ToggleButtonGroup>
   );
   const proposeButton = canWrite ? (
@@ -643,8 +643,7 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
       variant="contained"
       size="small"
       startIcon={<Plus size={16} />}
-      loading={createProposal.isPending}
-      onClick={propose}
+      onClick={() => setProposing(true)}
       sx={{ ml: "auto", whiteSpace: "nowrap" }}
     >
       Propose a standard change
@@ -655,14 +654,21 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {show === "templates" && <AttentionLine />}
 
-      {createProposal.isError && (
-        <Alert severity="error" onClose={() => createProposal.reset()}>
-          {errorText(createProposal.error, "Could not start the proposal.")}
-        </Alert>
+      {/* Mounted only while open: it starts empty every time, and its template
+          lookup runs only then. */}
+      {proposing && (
+        <ProposeStandardChangeDialog
+          open
+          onClose={() => setProposing(false)}
+          onCreated={(proposal) => navigate(standardChangeProposalPath(proposal.id), { state: from })}
+          onOpenTemplate={(id) => navigate(standardChangeTemplatePath(id), { state: from })}
+        />
       )}
 
       {show === "templates" ? (
         <TemplateCatalogue leading={toggle} trailing={proposeButton} />
+      ) : show === "suggested" ? (
+        <StandardChangeSuggestions leading={toggle} trailing={proposeButton} />
       ) : (
         <ProposalList leading={toggle} trailing={proposeButton} />
       )}

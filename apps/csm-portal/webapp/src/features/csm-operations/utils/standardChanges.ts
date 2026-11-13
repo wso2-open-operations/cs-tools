@@ -18,6 +18,7 @@ import { isBlankHtml } from "@utils/sanitizeHtml";
 import { backendErrorCode } from "@features/csm-operations/utils/changeRequests";
 import type {
   BeChangeRequestRisk,
+  BeChangeRequestStandardChange,
   BeStandardChangeContent,
   BeStandardChangeParameter,
   BeStandardChangeParameterType,
@@ -134,6 +135,63 @@ export function standardChangeCustomerMismatchWarning(customerName?: string | nu
   );
 }
 
+/**
+ * Why a change request still New cannot request approval because of its
+ * template (retired, suspended, or revised since it was raised), or null: the
+ * server refuses its Request Approval (409 `standard_change_template_unavailable`),
+ * so the action bar disables it with this reason and the template banner says it
+ * with what is left to do (`standardChangeTemplateUnusableWarning`). null for a
+ * change request not raised from a template, when the template can be used, and
+ * once the change request has left New (from then on its template is not checked).
+ */
+export function requestApprovalNeedsUsableTemplateReason(cr: {
+  state?: string | null;
+  standardChange?: Pick<BeChangeRequestStandardChange, "templateState" | "superseded" | "templateNumber"> | null;
+}): string | null {
+  const sc = cr.standardChange;
+  if (!sc || cr.state !== "new") return null;
+  const tpl = sc.templateNumber || "Its standard change template";
+  // As the server judges it: a retirement is final; a revision still refuses the
+  // change request once a suspension is lifted, so it is named before one.
+  if (sc.templateState === "retired") return `${tpl} has been retired, so approval cannot be requested for this change request`;
+  if (sc.superseded) return `${tpl} has been revised since this change request was raised, so approval cannot be requested for it`;
+  if (sc.templateState === "suspended") {
+    return `${tpl} is suspended, so approval cannot be requested for this change request until it is resumed`;
+  }
+  return null;
+}
+
+/**
+ * The template banner's warning on such a change request: the reason
+ * (`requestApprovalNeedsUsableTemplateReason`) and what is left to do. null when
+ * there is none.
+ */
+export function standardChangeTemplateUnusableWarning(
+  standardChange: Pick<BeChangeRequestStandardChange, "templateState" | "superseded" | "templateNumber">,
+  changeRequestState: string | null | undefined,
+): string | null {
+  const reason = requestApprovalNeedsUsableTemplateReason({ state: changeRequestState, standardChange });
+  if (!reason) return null;
+  if (standardChange.templateState === "retired") return `${reason}. Cancel it, and raise a Normal change if the work is still needed.`;
+  if (standardChange.superseded) return `${reason}. Cancel it and raise a new one from the current version.`;
+  return `${reason} by a CAB member.`;
+}
+
+/**
+ * The warning on an open retirement whose template still has change requests in
+ * New (`changeRequestsInNewTotal`): once it is retired they cannot request
+ * approval and can only be cancelled. null when there are none.
+ */
+export function retirementChangeRequestsInNewText(total: number | null | undefined): string | null {
+  if (!total || total <= 0) return null;
+  const which = total === 1 ? "1 change request raised from this template is" : `${total} change requests raised from this template are`;
+  const them = total === 1 ? "it" : "they";
+  return (
+    `${which} still New. Once the template is retired ${them} cannot request approval and can only be cancelled ` +
+    "(a Normal change can be raised instead)."
+  );
+}
+
 /** Said where a template is picked or a project chosen for one. */
 export const STANDARD_CHANGE_ONE_CUSTOMER_RULE =
   "A standard change template belongs to one customer and is used only for that customer's projects.";
@@ -184,10 +242,11 @@ export function standardChangeTemplateStateColor(state?: string | null): ChipCol
 
 const PROPOSAL_STATE: Record<BeStandardChangeProposalState, { label: string; color: ChipColor }> = {
   draft: { label: "Draft", color: "default" },
-  cab_review: { label: "CAB review", color: "info" },
+  authority_review: { label: "Awaiting CAB approval", color: "info" },
   approved: { label: "Approved", color: "success" },
   rejected: { label: "Rejected", color: "error" },
   withdrawn: { label: "Withdrawn", color: "default" },
+  cancelled: { label: "Cancelled", color: "default" },
 };
 
 export const STANDARD_CHANGE_PROPOSAL_STATES = Object.keys(PROPOSAL_STATE) as BeStandardChangeProposalState[];
@@ -210,9 +269,53 @@ export function standardChangeProposalKindLabel(kind?: string | null): string {
   return PROPOSAL_KIND[kind as BeStandardChangeProposalKind] ?? (kind || "—");
 }
 
-/** A proposal that can no longer change (approved, rejected, withdrawn). */
+/** A proposal that can no longer change (approved, rejected, withdrawn, cancelled). */
 export function isStandardChangeProposalFinal(state?: string | null): boolean {
-  return state === "approved" || state === "rejected" || state === "withdrawn";
+  return state === "approved" || state === "rejected" || state === "withdrawn" || state === "cancelled";
+}
+
+/** A proposal waiting on the CAB's decision (stored state `authority_review`). */
+export function isStandardChangeProposalInReview(state?: string | null): boolean {
+  return state === "authority_review";
+}
+
+/**
+ * The label of a proposal's approval stage, and the name of the group asked: the
+ * CAB (the server's `CABApprovalGroupName`), the same group and label as a
+ * change request's CAB stage.
+ */
+export const STANDARD_CHANGE_CAB_STAGE = "CAB Approval";
+
+/**
+ * The label of the stage of a proposal submitted before 2026-11-10, when a
+ * separate group, the Standard Change Authority, authorised templates. Read on
+ * older proposals only.
+ */
+export const STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE = "Standard Change Authority";
+
+/**
+ * The day (UTC, `YYYY-MM-DD`) the CAB took over from the Standard Change
+ * Authority. A decision time before it (an RFC 3339 string, compared as text)
+ * was that group's: only its members could cancel someone else's proposal.
+ */
+export const STANDARD_CHANGE_CAB_AUTHORISES_SINCE = "2026-11-10";
+
+/** How many different CAB members must approve (the server's `StandardChangeCABApprovals`). */
+export const STANDARD_CHANGE_CAB_APPROVALS = 2;
+
+/** Who approves a template, for the proposal page and its dialogs. */
+export const STANDARD_CHANGE_APPROVAL_RULE =
+  "A standard change skips the CAB every time it is used, so its template is authorised by two different CAB members. The proposer cannot authorise their own proposal.";
+
+/** The longest summary the server takes. */
+export const MAX_STANDARD_CHANGE_SUMMARY = 2000;
+
+/** The longest name the server takes (`maxStandardChangeName`), which also bounds the template's subject. */
+export const MAX_STANDARD_CHANGE_NAME = 255;
+
+/** Whether a deployment of `type` may be chosen for a template that is for `types`. */
+export function deploymentFitsTypes(type: string | null | undefined, types: readonly string[]): boolean {
+  return !!type && types.includes(type);
 }
 
 /** One piece of a text split at its placeholders. */
@@ -498,7 +601,7 @@ export function raiseFromTemplatePath(templateId: string): string {
  * Operations > Change requests (`/operations/change-requests`) as ONE sub-view
  * next to the change request list, chosen by `?view=standard`: no `view` (or
  * one this page does not know) is the list, exactly as before. Inside it the
- * template catalogue is the default and the proposals to the CAB a secondary
+ * template catalogue is the default and the proposals a secondary
  * view (`&show=proposals`), whose filters are `scope` (all proposals by
  * default; mine / awaiting my decision when picked) and `state`. Everything is
  * in the URL so each place is linkable and Back from a template or a proposal
@@ -534,7 +637,7 @@ export const CHANGE_REQUEST_LIST_PARAM_PREFIX = "cr";
 const LEGACY_VIEWS = ["catalogue", "proposals"] as const;
 
 export type ChangeRequestsView = "list" | "standard";
-export type StandardChangesShow = "templates" | "proposals";
+export type StandardChangesShow = "templates" | "proposals" | "suggested";
 /** Whose proposals the proposals view lists. */
 export type ProposalScope = "all" | "mine" | "awaiting";
 export const PROPOSAL_SCOPES: readonly ProposalScope[] = ["all", "mine", "awaiting"];
@@ -545,6 +648,7 @@ export const DEFAULT_PROPOSAL_SCOPE: ProposalScope = "all";
 export const STANDARD_CHANGES_LABELS: Readonly<Record<StandardChangesShow, string>> = {
   templates: "Standard changes",
   proposals: "Standard change proposals",
+  suggested: "Suggested standard changes",
 };
 
 function isLegacyView(view: string | null): view is (typeof LEGACY_VIEWS)[number] {
@@ -557,8 +661,9 @@ export function changeRequestsView(params: URLSearchParams): ChangeRequestsView 
   return view === STANDARD_CHANGES_VIEW || isLegacyView(view) ? "standard" : "list";
 }
 
-/** Which part of Standard changes a URL's query selects: the catalogue unless it asks for the proposals. */
+/** Which part of Standard changes a URL's query selects: the catalogue unless it asks for the proposals or the suggestions. */
 export function standardChangesShow(params: URLSearchParams): StandardChangesShow {
+  if (params.get(STANDARD_CHANGES_SHOW_PARAM) === "suggested") return "suggested";
   return params.get(STANDARD_CHANGES_SHOW_PARAM) === "proposals" || params.get(CHANGE_REQUESTS_VIEW_PARAM) === "proposals"
     ? "proposals"
     : "templates";
@@ -608,6 +713,7 @@ export function standardChangesSearch(
 ): URLSearchParams {
   const next = new URLSearchParams();
   next.set(CHANGE_REQUESTS_VIEW_PARAM, STANDARD_CHANGES_VIEW);
+  if (show === "suggested") next.set(STANDARD_CHANGES_SHOW_PARAM, "suggested");
   if (show === "proposals") {
     next.set(STANDARD_CHANGES_SHOW_PARAM, "proposals");
     if (filters.scope && filters.scope !== DEFAULT_PROPOSAL_SCOPE) next.set(PROPOSAL_SCOPE_PARAM, filters.scope);
@@ -657,6 +763,8 @@ export function standardChangesPath(
 export const STANDARD_CHANGES_PATH = standardChangesPath();
 /** The proposals (all of them): `/operations/change-requests?view=standard&show=proposals`. */
 export const STANDARD_CHANGE_PROPOSALS_PATH = standardChangesPath("proposals");
+/** The suggestions mined from completed change requests: `...?view=standard&show=suggested`. */
+export const STANDARD_CHANGE_SUGGESTIONS_PATH = standardChangesPath("suggested");
 
 /**
  * Where a link to the old, separate Operations tab lands: the standard change
@@ -712,7 +820,9 @@ export function standardChangeProposalGaps(
     rationale: string;
     /** The customer (account) id the proposal is for; "" when none is named. */
     accountId: string;
+    summary: string;
     subject: string;
+    description: string;
     implementationPlan: string;
     backoutPlan: string;
     testPlan: string;
@@ -727,7 +837,9 @@ export function standardChangeProposalGaps(
   // modification or retirement has its template's.
   if (kind === "new" && !draft.accountId.trim()) gaps.push("a customer");
   if (kind === "retire") return gaps;
+  if (!draft.summary.trim()) gaps.push("a summary");
   if (!draft.subject.trim()) gaps.push("a subject");
+  if (isBlankHtml(draft.description)) gaps.push("a description");
   if (isBlankHtml(draft.implementationPlan)) gaps.push("an implementation plan");
   if (isBlankHtml(draft.backoutPlan)) gaps.push("a backout plan");
   if (isBlankHtml(draft.testPlan)) gaps.push("a test plan");

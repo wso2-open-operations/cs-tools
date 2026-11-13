@@ -18,8 +18,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -32,15 +34,82 @@ import (
 // standardChangeService serves the standard change catalogue and its proposals.
 // Every method is for internal (WSO2) callers only; a write also needs the
 // caller's own user token, because who did it decides what they may do (the
-// proposer edits, a CAB member decides, and nobody decides their own proposal).
+// proposer edits, a CAB member decides, and nobody decides
+// their own proposal).
 type standardChangeService struct {
 	repo   repository.StandardChangeRepository
 	access AccessService
+	// cab reads the CAB history a proposal shows (WithCABHistory); nil: none.
+	cab             repository.CABDecisionReader
+	cabWindowMonths int
+	now             func() time.Time
 }
 
 // NewStandardChangeService constructs a StandardChangeService.
 func NewStandardChangeService(repo repository.StandardChangeRepository, access AccessService) StandardChangeService {
-	return &standardChangeService{repo: repo, access: access}
+	return &standardChangeService{repo: repo, access: access, now: time.Now}
+}
+
+// WithCABHistory makes every proposal the service returns carry its CAB history
+// (domain.StandardChangeProposal.CABHistory), its look-alikes read from the last
+// windowMonths (the suggestion window). svc must be what NewStandardChangeService
+// returned; any other value is returned unchanged.
+func WithCABHistory(svc StandardChangeService, reader repository.CABDecisionReader, windowMonths int) StandardChangeService {
+	if s, ok := svc.(*standardChangeService); ok && reader != nil {
+		if windowMonths <= 0 {
+			windowMonths = DefaultStandardChangeSuggestionCriteria.WindowMonths
+		}
+		s.cab, s.cabWindowMonths = reader, windowMonths
+	}
+	return svc
+}
+
+// proposalCABHistory is a proposal's CAB history (see
+// domain.StandardChangeProposal.CABHistory) and the ids (lower case) of the
+// change requests the CAB rejected.
+func (s *standardChangeService) proposalCABHistory(ctx context.Context, p *domain.StandardChangeProposal) (domain.StandardChangeCABHistory, map[string]bool, error) {
+	var ids []string
+	if p.SourceChangeRequest != nil && p.SourceChangeRequest.ID != "" {
+		ids = append(ids, strings.ToLower(p.SourceChangeRequest.ID))
+	}
+	for _, e := range p.Evidence {
+		ids = append(ids, strings.ToLower(e.ID))
+	}
+	own, err := s.cab.CABDecisionsOf(ctx, ids)
+	if err != nil {
+		return domain.StandardChangeCABHistory{}, nil, err
+	}
+	rejected := map[string]bool{}
+	keys := map[string]bool{}
+	var subjects []cabSubject
+	seen := map[string]bool{}
+	for _, id := range ids {
+		c, ok := own[id]
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if k := suggestionKey(c.Subject); k != "" {
+			keys[k] = true
+		}
+		if c.Rejected() {
+			rejected[id] = true
+		}
+		subjects = append(subjects, cabSubject{cr: c, member: true})
+	}
+	if p.Customer != nil && p.Customer.ID != "" && len(keys) > 0 {
+		since := suggestionWindowStart(s.now(), s.cabWindowMonths)
+		lookalikes, err := s.cab.CABRejectedLookalikes(ctx, strings.ToLower(p.Customer.ID), since)
+		if err != nil {
+			return domain.StandardChangeCABHistory{}, nil, err
+		}
+		for _, la := range lookalikes {
+			if keys[suggestionKey(la.Subject)] {
+				subjects = append(subjects, cabSubject{cr: la})
+			}
+		}
+	}
+	return buildCABHistory(subjects), rejected, nil
 }
 
 const standardChangeForbidden = "standard change templates are available to WSO2 staff only"
@@ -51,12 +120,20 @@ var standardChangeTemplateStates = map[domain.StandardChangeTemplateState]string
 	domain.StandardChangeTemplateStateRetired:   "RETIRED",
 }
 
+// legacyCABReviewState was a proposal state until migration 0295 removed the CAB
+// stage. SearchProposals still accepts it, and it matches no proposal, because a
+// webapp deployed before this release (services deploy separately) or a
+// bookmarked URL may still send it. Remove it, and its branch in
+// SearchProposals, in the release after the one that ships 0295.
+const legacyCABReviewState domain.StandardChangeProposalState = "cab_review"
+
 var standardChangeProposalStates = map[domain.StandardChangeProposalState]string{
-	domain.StandardChangeProposalStateDraft:     "DRAFT",
-	domain.StandardChangeProposalStateCABReview: "CAB_REVIEW",
-	domain.StandardChangeProposalStateApproved:  "APPROVED",
-	domain.StandardChangeProposalStateRejected:  "REJECTED",
-	domain.StandardChangeProposalStateWithdrawn: "WITHDRAWN",
+	domain.StandardChangeProposalStateDraft:           "DRAFT",
+	domain.StandardChangeProposalStateAuthorityReview: "AUTHORITY_REVIEW",
+	domain.StandardChangeProposalStateApproved:        "APPROVED",
+	domain.StandardChangeProposalStateRejected:        "REJECTED",
+	domain.StandardChangeProposalStateWithdrawn:       "WITHDRAWN",
+	domain.StandardChangeProposalStateCancelled:       "CANCELLED",
 }
 
 var standardChangeProposalKinds = map[domain.StandardChangeProposalKind]string{
@@ -123,9 +200,58 @@ func (s *standardChangeService) SearchTemplates(ctx context.Context, req domain.
 }
 
 func (s *standardChangeService) GetTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
-	if _, err := s.internal(ctx); err != nil {
+	viewer, err := s.internal(ctx)
+	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
+	t, err := s.readTemplate(ctx, id)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	if viewer == "" {
+		return t, nil
+	}
+	roles, err := s.rolesOf(ctx, viewer, t)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return withTemplatePermissions(t, roles), nil
+}
+
+// templateRoles is who the caller is to a template: its owner, and a member of
+// the CAB (which authorises templates).
+type templateRoles struct{ owner, cab bool }
+
+// mayManage says whether the caller may act on a template: suspending it (a
+// brake) is open to its owner and the CAB; releasing it (resume, clear the
+// review flag), which puts it back in use with no review, to the CAB only.
+func (r templateRoles) mayManage(release bool) bool {
+	if release {
+		return r.cab
+	}
+	return r.owner || r.cab
+}
+
+// withTemplatePermissions sets what the caller, of roles, may do to t now.
+func withTemplatePermissions(t domain.StandardChangeTemplate, roles templateRoles) domain.StandardChangeTemplate {
+	t.CanSuspend = t.State == domain.StandardChangeTemplateStateActive && roles.mayManage(false)
+	t.CanResume = t.State == domain.StandardChangeTemplateStateSuspended && roles.mayManage(true)
+	t.CanClearReview = t.ReviewRequired && t.State != domain.StandardChangeTemplateStateRetired && roles.mayManage(true)
+	return t
+}
+
+func (s *standardChangeService) rolesOf(ctx context.Context, actor string, t domain.StandardChangeTemplate) (templateRoles, error) {
+	var r templateRoles
+	var err error
+	r.owner = t.Owner != nil && strings.EqualFold(t.Owner.Email, actor)
+	if r.cab, err = s.repo.IsGroupMember(ctx, actor, domain.CABApprovalGroupName); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+// readTemplate is GetTemplate's read, without the caller's permissions.
+func (s *standardChangeService) readTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
 	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
@@ -156,67 +282,100 @@ func (s *standardChangeService) GetTemplateVersion(ctx context.Context, template
 	return *v, nil
 }
 
-// mayManageTemplate: the template's owner or a CAB member.
-func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id string) error {
-	t, err := s.GetTemplate(ctx, id)
+// mayManageTemplate checks the caller may act on the template
+// (templateRoles.mayManage) and returns who they are to it.
+func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id string, release bool) (templateRoles, error) {
+	t, err := s.readTemplate(ctx, id)
 	if err != nil {
-		return err
+		return templateRoles{}, err
 	}
-	if t.Owner != nil && strings.EqualFold(t.Owner.Email, actor) {
-		return nil
-	}
-	cab, err := s.repo.IsCABMember(ctx, actor)
+	roles, err := s.rolesOf(ctx, actor, t)
 	if err != nil {
-		return err
+		return templateRoles{}, err
 	}
-	if !cab {
-		return &apierror.ForbiddenError{Msg: "only the template's owner or a member of the CAB can do this"}
+	if roles.mayManage(release) {
+		return roles, nil
 	}
-	return nil
+	if release {
+		return templateRoles{}, &apierror.ForbiddenError{Msg: "only a CAB member can put a template back in use (resume it, or clear its review flag)"}
+	}
+	return templateRoles{}, &apierror.ForbiddenError{Msg: "only the template's owner or a CAB member can suspend it"}
+}
+
+// managedTemplate is the template a suspend, resume or clear-review wrote, as
+// GetTemplate answers it for the caller of roles.
+func managedTemplate(t *domain.StandardChangeTemplate, roles templateRoles) (domain.StandardChangeTemplate, error) {
+	if t == nil {
+		return domain.StandardChangeTemplate{}, &apierror.NotFoundError{Msg: "standard change template not found"}
+	}
+	return withTemplatePermissions(*t, roles), nil
 }
 
 func (s *standardChangeService) SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error) {
-	return s.moveTemplate(ctx, id, []string{"ACTIVE"}, "SUSPENDED", req.Reason)
-}
-
-func (s *standardChangeService) ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
-	return s.moveTemplate(ctx, id, []string{"SUSPENDED"}, "ACTIVE", "")
-}
-
-// moveTemplate moves the template's state; reason (blank for none) is recorded
-// only on a move to SUSPENDED (the repository clears it on any other move).
-func (s *standardChangeService) moveTemplate(ctx context.Context, id string, from []string, to, reason string) (domain.StandardChangeTemplate, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	if err := s.mayManageTemplate(ctx, actor, id); err != nil {
-		return domain.StandardChangeTemplate{}, err
-	}
-	r, err := normalizeSuspendReason(reason)
+	r, err := normalizeSuspendReason(req.Reason)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	t, err := s.repo.SetTemplateState(ctx, id, actor, from, to, r)
+	roles, err := s.mayManageTemplate(ctx, actor, id, false)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	return *t, nil
+	t, err := s.repo.SetTemplateState(ctx, id, actor, []string{"ACTIVE"}, "SUSPENDED", r)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return managedTemplate(t, roles)
 }
 
-func (s *standardChangeService) ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
+func (s *standardChangeService) ResumeTemplate(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error) {
+	actor, note, roles, err := s.releaseNote(ctx, id, req)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	t, err := s.repo.SetTemplateState(ctx, id, actor, []string{"SUSPENDED"}, "ACTIVE", &note)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return managedTemplate(t, roles)
+}
+
+func (s *standardChangeService) ClearTemplateReview(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error) {
+	actor, note, roles, err := s.releaseNote(ctx, id, req)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	t, err := s.repo.ClearReviewRequired(ctx, id, actor, note)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return managedTemplate(t, roles)
+}
+
+// releaseNote checks a resume or clear-review: a CAB member, with a note saying why the template may be used again.
+func (s *standardChangeService) releaseNote(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (string, string, templateRoles, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
-		return domain.StandardChangeTemplate{}, err
+		return "", "", templateRoles{}, err
 	}
-	if err := s.mayManageTemplate(ctx, actor, id); err != nil {
-		return domain.StandardChangeTemplate{}, err
+	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
+		return "", "", templateRoles{}, err
 	}
-	t, err := s.repo.ClearReviewRequired(ctx, id, actor)
+	note, err := normalizeSuspendReason(req.Note)
 	if err != nil {
-		return domain.StandardChangeTemplate{}, err
+		return "", "", templateRoles{}, &apierror.ValidationError{Msg: fmt.Sprintf("note must be at most %d characters", maxStandardChangeSuspendReason)}
 	}
-	return *t, nil
+	if note == nil {
+		return "", "", templateRoles{}, &apierror.ValidationError{Msg: "note is required: say why the template may be used again"}
+	}
+	roles, err := s.mayManageTemplate(ctx, actor, id, true)
+	if err != nil {
+		return "", "", templateRoles{}, err
+	}
+	return actor, *note, roles, nil
 }
 
 func (s *standardChangeService) CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {
@@ -297,10 +456,33 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 	mine := viewer != "" && p.ProposedBy != nil && strings.EqualFold(p.ProposedBy.Email, viewer)
 	p.CanEdit = mine && p.State == domain.StandardChangeProposalStateDraft
 	p.CanSubmit = p.CanEdit
-	p.CanWithdraw = mine && (p.State == domain.StandardChangeProposalStateDraft || p.State == domain.StandardChangeProposalStateCABReview)
+	p.CanWithdraw = mine && p.State.IsOpen()
+	p.CanDelete = p.CanEdit && p.SubmittedOn == nil && len(p.Stages) == 0
+	// cab: the viewer is on the CAB now. Cancelling someone else's open proposal
+	// and deciding one both need it; the rows a decision is made on were written
+	// at submit, so a member who has left since still has one and must not be
+	// offered a decision the server refuses (DecideProposal).
+	var cab bool
+	if !mine && viewer != "" && p.State.IsOpen() {
+		if cab, err = s.repo.IsGroupMember(ctx, viewer, domain.CABApprovalGroupName); err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		p.CanCancel = cab
+	}
+	if s.cab != nil {
+		h, rejected, err := s.proposalCABHistory(ctx, p)
+		if err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		p.CABHistory = &h
+		for i := range p.Evidence {
+			p.Evidence[i].CABRejected = rejected[strings.ToLower(p.Evidence[i].ID)]
+		}
+	}
+	// Only the stage the proposal waits on (its latest) has REQUESTED rows.
 	for i := range p.Approvers {
 		a := &p.Approvers[i]
-		a.CanDecide = !mine && viewer != "" && p.State == domain.StandardChangeProposalStateCABReview &&
+		a.CanDecide = !mine && viewer != "" && cab && p.State.IsInReview() &&
 			a.State == "REQUESTED" && a.Approver != nil && strings.EqualFold(a.Approver.Email, viewer)
 	}
 	return *p, nil
@@ -328,8 +510,12 @@ func (s *standardChangeService) SearchProposals(ctx context.Context, req domain.
 	f := repository.StandardChangeProposalFilter{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}
 	for _, st := range req.States {
 		v, ok := standardChangeProposalStates[st]
+		if st == legacyCABReviewState {
+			// No row holds it (0295's check), so it narrows to nothing.
+			v, ok = "CAB_REVIEW", true
+		}
 		if !ok {
-			return domain.SearchStandardChangeProposalsResponse{}, &apierror.ValidationError{Msg: "states must be draft, cab_review, approved, rejected or withdrawn"}
+			return domain.SearchStandardChangeProposalsResponse{}, &apierror.ValidationError{Msg: "states must be draft, authority_review, approved, rejected, withdrawn or cancelled"}
 		}
 		f.States = append(f.States, v)
 	}
@@ -420,6 +606,23 @@ func (s *standardChangeService) UpdateProposal(ctx context.Context, id string, r
 	if req.Risk != nil && *req.Risk != "" && !validChangeRequestRisk[*req.Risk] {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "risk must be one of high, moderate or low"}
 	}
+	if req.Priority != nil && *req.Priority != "" && !validChangeRequestPriority[*req.Priority] {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "priority must be one of critical, high, moderate or low (or empty: chosen per change)"}
+	}
+	if req.Summary != nil {
+		n := strings.TrimSpace(*req.Summary)
+		if err := checkStandardChangeSummary(&n); err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		req.Summary = &n
+	}
+	if req.DeploymentTypes != nil {
+		types, err := normalizeStandardChangeDeploymentTypes(*req.DeploymentTypes)
+		if err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		req.DeploymentTypes = &types
+	}
 	if req.Parameters != nil {
 		params, err := normalizeStandardChangeParameters(*req.Parameters)
 		if err != nil {
@@ -472,6 +675,45 @@ func (s *standardChangeService) WithdrawProposal(ctx context.Context, id string)
 	return s.proposalFor(ctx, actor, id)
 }
 
+func (s *standardChangeService) CancelProposal(ctx context.Context, id string, req domain.CancelStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "reason is required: say why the proposal is cancelled, for its record and its proposer"}
+	}
+	if utf8.RuneCountInString(reason) > 4000 {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "reason must be at most 4000 characters"}
+	}
+	cab, err := s.repo.IsGroupMember(ctx, actor, domain.CABApprovalGroupName)
+	if err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	if !cab {
+		return domain.StandardChangeProposal{}, &apierror.ForbiddenError{Msg: "only a CAB member can cancel someone else's proposal"}
+	}
+	if err := s.repo.CancelProposal(ctx, id, actor, reason); err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	return s.proposalFor(ctx, actor, id)
+}
+
+func (s *standardChangeService) DeleteProposal(ctx context.Context, id string) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return err
+	}
+	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
+		return err
+	}
+	return s.repo.DeleteProposal(ctx, id, actor)
+}
+
 func (s *standardChangeService) DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
@@ -501,7 +743,16 @@ func (s *standardChangeService) DecideProposal(ctx context.Context, id string, r
 	if !approve && comment == nil {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "a rejection needs a comment saying why, for the proposal's record"}
 	}
-	if err := s.repo.DecideProposal(ctx, id, actor, approve, comment); err != nil {
+	// The stage is required: a decision is only ever made on the stage the
+	// caller's page showed, so one sent for no stage at all (an old cached page,
+	// a script) cannot land on a stage its sender never saw.
+	if req.StageID == nil || strings.TrimSpace(*req.StageID) == "" {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "stageId is required: send the id of the stage you are deciding on (the proposal's stages), as your page showed it"}
+	}
+	if err := checkUUIDFields(map[string]string{"stageId": strings.TrimSpace(*req.StageID)}); err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	if err := s.repo.DecideProposal(ctx, id, actor, approve, comment, *lowerPtr(req.StageID)); err != nil {
 		return domain.StandardChangeProposal{}, err
 	}
 	return s.proposalFor(ctx, actor, id)

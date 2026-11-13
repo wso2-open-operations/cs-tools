@@ -445,8 +445,17 @@ The change request create page and edit dialog share `useChangeRequestScope` (`f
 
 - Changing or clearing the project clears the deployments below it and re-derives the Customer Group. Deployment products are never picked — they are derived (`productsReady` is false while the lookup for the current selection is in flight, and the products are then not sent).
 - **Customer Group is read-only and derived.** It is the chosen project's registered contacts (the people asked at the customer gates, who answer in the customer portal), shown as name chips with a lock icon, helper "Derived from the customer project's registered contacts" ("Select a Customer Project first." / "—" until a project is chosen, "No registered contacts on this project…" when empty). It is not form state, not in drafts or clones, and **never sent**: the backend refuses `customerGroupId` (and `environmentIds`) with a 400. The detail page shows the same list from `customerContacts`; at a customer gate with an empty list the Approval tab explains that no customer approvers were assigned (`noCustomerContactsHelper`).
+- **What a standard change's Create is still waiting for is said beside it** (standard only; Normal and Emergency
+  show no such line, their Create area is unchanged): "Before it can be created it still needs a Customer Project and
+  a standard change template / a <types> deployment." (`stillNeeded`, the button's `aria-describedby`), so nobody has
+  to search the form for the missing field. Only what keeps Create disabled is listed; a template that can't be used
+  or an incident as the originating record is explained where it is, and the change specifics are checked on Create.
+  Every field Create needs carries the required asterisk (see "Required fields").
 - **Refusals of the create are worded by the entity service and shown as written.** A person with no ServiceNow account (a user created in this database, which nothing in the web can tell apart in the picker) or an assignment group ServiceNow does not have is refused by the create itself with a 400 that says who or what cannot be used, why, and which field to change. The create form shows every 4xx message of the entity service as written in its error banner (`CreateChangeRequestPage` `onError`), so keep that wording on the entity-service side and do not replace it with a generic message here.
 - Sent only when non-empty. The create page sends `projectId`, `deploymentIds`, `deploymentProductIds` (plus `category`, `comment`, `workNote`); the edit dialog sends the three scope fields **together** when any of them changed (the backend validates them as a unit), and not at all once the CR has been approved -- from Customer Approval / Scheduled on, i.e. editable only in New, Assess and Authorize (the dialog locks the deployments with the reason; the backend refuses from there on). The **Customer Project itself is editable only in New** (see the next section): after New the dialog shows it read-only and, when only the deployments changed, sends the stored project beside them, which the backend accepts as a no-op. A saved project can be swapped (in New) but not cleared (the patch cannot express "no project").
+- Clone sends the source's id as `clonedFromChangeRequestId` on create (`CloneChangeRequestNavState.sourceId`),
+  so the new change request records what it was cloned from (entity-service migration 0290; the detail reads
+  it back as `clonedFrom`, and the standard change suggestions use it).
 - Clone carries the project and category, but deliberately **not** deployments / products: they name the deployment the change targets, and a clone exists to promote the change to another one. A draft or clone from before this change may still hold `customerGroupId` / `environmentIds`; they are ignored (not read, not re-saved).
 - The draft keeps display names next to the ids (`*Labels`), because the pickers only know ids; without them a restored form shows raw UUIDs.
 - The detail response's `category` is the enum value (or an `{id, name|label}` ref on older responses) — always read it through `changeRequestCategoryValue` / `changeRequestCategoryLabel`.
@@ -742,7 +751,10 @@ The previous system has no Emergency CAB and acts on an Emergency change **witho
 
 ## Standard changes: templates, proposals, and a change raised from one
 
-A standard change is raised only from a CAB-approved template (entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
+A standard change is raised only from an approved template: authorised by two different CAB members, in one "CAB
+Approval" stage (until 2026-11-10 a separate Standard Change Authority group did; before 2026-11-06 a one-approval CAB
+stage came first)
+(entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
 thin proxy that keeps entity-service's 400 / 403 / 404 / 409 words and `errorCode`). Hooks: `api/useStandardChanges.ts` (every
 write invalidates `STANDARD_CHANGES_KEY`, refused or not); pure rules mirroring `standard_change_template.go` (key shape,
 declarations, values, `{{key}}` placeholders, completeness, the preview's rendering): `utils/standardChanges.ts`.
@@ -750,16 +762,77 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
 - **Inside Operations > Change requests, as one sub-view.** Standard changes are templated change requests, so the
   Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
   before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
-  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, "Propose a standard change",
-  `kind: "new"`); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
-  search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
+  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, each template's summary
+  under its name, "Propose a standard change"); the proposals and the suggestions are secondary views of the same tab, a
+  **Templates | Proposals | Suggested** toggle beside the search (`&show=proposals`, `&show=suggested`); the proposals keep their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
   absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
   fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
   me" and "Awaiting my decision" are filters the user picks from the "Show" select (options: All proposals, Proposed
-  by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
+  by me, Awaiting my decision). The toggle is a group named "Templates, proposals or suggestions", so it
   does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
-  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
-  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your CAB decision · N
+  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `STANDARD_CHANGE_SUGGESTIONS_PATH`,
+  `standardChangesPath`, `standardChangesSearch`).
+  - **Suggested** (`StandardChangeSuggestions`, `useStandardChangeSuggestions`, rules in
+    `utils/standardChangeSuggestions.ts`): the clusters of a customer's completed change requests that
+    entity-service finds and judges **once a day** (its CLAUDE.md, "Standard change suggestions"); the page
+    reads the last snapshot and nothing is computed or decided here, so opening it costs one cheap read. A
+    Customer filter (`accountId`), "Show near misses" (`includeIneligible`) and "Show dismissed"
+    (`includeDismissed`), not kept in the URL, are the only filters (the thresholds are entity-service
+    configuration). The list is **paged by entity-service** (`limit` / `offset`, `TablePagination` with
+    10 / 20 / 50 a page, 20 by default; one suggestion can be 50 KB and more, so "All customers" is never
+    fetched whole): it is sorted across customers on the server, so a page is a slice of the one order; a
+    filter goes back to the first page, and a page left empty by a dismissal steps back to the new last
+    page. The count in the status line is `total`, every page's. A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
+    `suggestionUpdatedText`, the viewer's time zone) and the thresholds it used; before the first snapshot it,
+    and the empty table, say suggestions are computed once a day and none have been yet
+    (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is
+    shown, and kept for five minutes (`SUGGESTIONS_STALE_TIME_MS`; the snapshot changes once a day), so going
+    back to Suggested or between its filters reads the cache; a dismissal or restore still refreshes it (they
+    invalidate `STANDARD_CHANGES_KEY`, under which the key sits). A customer the refresh could not compute comes
+    back in `skippedCustomers` with one of two exact `reason`s: too large for its deadline (entity-service gives
+    each 20 seconds, `SUGGESTION_SKIPPED_TOO_LARGE`) or an error stopped its computation (`SUGGESTION_SKIPPED_ERROR`;
+    entity-service logs the cause and does not publish a run in which more than half the customers failed so). A
+    warning `Alert` under the status line names them, one sentence per reason (`suggestionSkippedText`:
+    "<customer>'s suggestions were not computed in the latest refresh: …", up to five names, then "and N more";
+    an unknown reason is shown as written), and with that one customer selected the empty table
+    says the same instead of "No change is done often enough". A suggestion built from only part of a large
+    subject (entity-service compares the newest 500) carries `sample`: a "Newest 500 of 3,000" chip on the
+    row (`suggestionSampleLabel`) and a "Based on" line in the details (`suggestionSampleText`). A row is
+    identified by customer and `key`, never by the subject: one subject can split into several clusters
+    (`subjectKey` is shared, `key` is not), and keyed by subject they expanded, went busy and were dismissed
+    together, and left ghost rows behind a filter.
+    Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
+    the last completion; and the actions (`suggestionActions`): **Propose** (`kind: "new"` from `proposeFrom`,
+    then a PATCH citing `suggestionProposalEvidence`: the source and the other closed members, at most 100),
+    **Dismiss** with a required reason (at most 1000 characters) and **Restore** for a dismissed one. The
+    proposal opens whatever happens to the evidence PATCH (its refusal goes to the error banner). Propose is
+    shown disabled with the reason as the button's name for a near miss ("Not yet a candidate: …"), one already
+    being proposed ("Already being proposed in SCP…", an exact link: a member is that proposal's source or
+    evidence) and one with no clean change request to start from. Only `canWrite` gets the actions. **A
+    suggestion is not related to the customer's existing templates** (no "covered by" / "close to" label, no
+    Revise or Open template action): that relation came from word overlap, which can be wildly off, and was
+    left out on purpose with the similar-templates check (2026-11-06); whether a template already covers a
+    suggestion is for the reader to judge. The chevron opens the details: what it misses, risk and impact
+    counts (unknown included), incidents, open proposals, the dismissal, and the change requests (newest 100),
+    each marked when it joined as a clone, deviated from its plan or was rejected by the CAB (" · rejected by
+    the CAB").
+    **The CAB's pushback** (entity-service CLAUDE.md, "The CAB's pushback"; helpers in `utils/cabHistory.ts`,
+    the list in `components/StandardChangeCabPushback.tsx`) is shown like the incidents, never as a reason a
+    suggestion cannot be proposed: on the row, outlined chips "2 CAB rejections" (error), "3 CAB comments"
+    (warning) and, for consistency, "1 deviated from plan" (warning; `suggestionDeviationCount`: the
+    `deviationCount` sent, which entity-service itself counts from the listed members for a snapshot that
+    predates it, else the listed members that deviated); in the details a "CAB pushback" line lists
+    each rejected change request (latest rejection: when, by whom, the comment; a look-alike, one of the
+    customer's rejected change requests with the same subject that is not a member, says so) and the CAB's
+    comments (approver, decision, date, the comment as plain text), each change request linked to
+    `/operations/change-requests/<id>`, newest 20 of each with "The newest N are listed." A snapshot computed
+    before these fields existed has none (`cabHistoryOf` reads absent and null as none). Tests:
+    `StandardChangeSuggestions.test.tsx` ("the CAB's pushback and the deviations"), `utils/__tests__/cabHistory.test.ts`.
+  - **"Propose a standard change"** opens `ProposeStandardChangeDialog` (mounted only while open): the name and the
+    customer, both required, and only then "Start the draft" creates it (`kind: "new"`, `name`, `accountId`), so
+    leaving creates nothing: no empty "Untitled standard change" drafts. Once the customer is chosen it lists their
+    live templates (first 8, with each summary) as links: a change one of them covers is a revision of it.
+  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your decision · N
     draft(s) of yours", each part a link to the proposals filtered to it (`scope=awaiting`; `scope=mine&state=draft`),
     built from the current query so the list's `cr*` filters ride along.
     Counts come from `useCountStandardChangeProposals` (`POST /standard-change-proposals/search` with
@@ -783,7 +856,7 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     (`/operations?tab=standard_changes|standard-changes[&view=proposals]`, `/operations/standard-changes[?view=proposals]`)
     is redirected the same way (`OperationsLegacyRedirects`, `legacyStandardChangesHref`).
   - **Heading.** On Standard changes the page heading is "Standard changes" with "Pre-authorised change requests,
-    raised from templates the CAB has approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
+    raised from templates two CAB members have approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
     and the proposals alike, never the Operations-wide "Service requests, change requests, incidents, problems, and
     runbooks" line, which every other Operations tab (the change request list included) keeps.
   - **Template and proposal pages.** The Change requests nav node owns `/operations/standard-changes` and
@@ -821,8 +894,15 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     `{accountId}`, and searches with `projectIds`; no projects = no evidence, nothing searched). Submit is held back
     with "still needs ... a customer" (`standardChangeProposalGaps`, in the backend's order: after name and rationale).
   - **Create form, Standard**: the customer is the Customer Project's account (`useProjectCustomer`, `GET
-    /projects/{id}`). The template picker is disabled with the reason until a project with a customer is chosen, and
-    then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
+    /projects/{id}`), so a Standard change asks for the **Customer Project first, alone**, in a highlighted
+    "Customer project" section right under the change type and above the template (`ChangeRequestScopeFields
+    parts="project"`); its Deployments, Deployment products and Customer Group stay in the usual place below Priority
+    (`parts="deployments"`, under a "Deployments" heading), since they have no bearing on the template. Normal and
+    Emergency keep the one block (`parts="all"`) in its usual place, unchanged. The template picker is disabled with
+    the reason ("Choose the Customer Project above to see its customer's templates.") until a project with a
+    customer is chosen; until then the prompt to continue ("Select a Customer Project to continue.") is on the project
+    section, and the template's own prompt appears once its picker can be used. The one-customer rule is said once, in
+    the project section. It then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
     accountId)`, `searchExtra`; it searches nothing without a customer). The Customer Project is required for
     Standard. A template chosen before any project (`?standardChangeTemplateId=`, a clone, a draft) narrows the
     project picker to its customer (`AsyncProjectSelect accountId`, a server-side `accountId` on `/projects/search`,
@@ -836,7 +916,14 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     projects."; when the detail's `standardChange.customerMismatch` is true (the project sync moved the project to
     another account after the change was raised) the banner turns `warning` and says the project is no longer one of
     the customer's, approval cannot be requested, and to cancel and raise a new one
-    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code; in New the Edit dialog narrows the Customer Project picker to the template's customer
+    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code. While the
+    change request is still New and its template is retired, suspended or revised since (`templateState`,
+    `superseded`) the banner also turns `warning` and says approval cannot be requested and what is left: cancel and
+    raise a Normal change / wait for a CAB member to resume it / cancel and raise from the current version
+    (`standardChangeTemplateUnusableWarning`; the backend's 409 `standard_change_template_unavailable`), and the action
+    bar disables Request Approval / Schedule with the reason (`requestApprovalNeedsUsableTemplateReason`, first in
+    `TARGET_BLOCKED_REASON.assess`; null for a change not raised from a template, so nothing changes for Normal or
+    Emergency); in New the Edit dialog narrows the Customer Project picker to the template's customer
     (`projectAccountId`) and says so in its template notice. The backend refuses a move to another customer's project
     in every state with the same code; its words show in `saveError`.
   - Tests: `utils/__tests__/standardChanges.test.ts` ("a standard change is one customer's"), `useStandardChanges.test.tsx`,
@@ -844,24 +931,94 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     `StandardChangeProposalPage.test.tsx` ("its customer: ..."), `CreateChangeRequestPage.test.tsx` ("a template is one
     customer's: the Customer Project's"), `EditChangeRequestDialog.test.tsx`, `CsmChangeRequestDetailPage.test.tsx`,
     `AsyncProjectSelect.test.tsx` ("narrowed to one customer").
-- **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): current version with placeholders
-  highlighted, parameters, version history (an older version via the versions endpoint), usage, the review flag (link to the
-  change request, Clear review), Suspend / Resume (who may is the server's call: the 403 words are shown), Propose a revision /
+- **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): the summary under the name,
+  current version with placeholders highlighted (its priority and deployment types too, "Chosen per change" / "Any"
+  when it fixes none, and "No description." when it has none), parameters, version history (an older version via the
+  versions endpoint), usage, the review flag (link to the change request; never shown on a retired template, which the
+  server no longer flags), a **History** table (`template.history`: suspended / resumed / flagged / cleared / retired,
+  the note, the flagging change request or the retirement proposal, who), Propose a revision /
   retirement (disabled while one is open: `openProposal`), Raise a change request (`?standardChangeTemplateId=`).
+  Suspend, Resume and Clear review follow the server's `canSuspend` / `canResume` / `canClearReview`: Suspend for the
+  owner and the CAB (optional reason); Resume and Clear review for the CAB only,
+  each with a required note in its confirmation (the hooks take `{id, note}`); otherwise the suspended notice and the
+  review flag say "Only a CAB member can resume it" / "... a CAB member clears it once reviewed".
 - **Proposal** `/operations/standard-change-proposals/:id` (`StandardChangeProposalPage`): the proposer's editor while `canEdit`
-  (parameters editor, "Insert {{…}}" per text field, live preview with sample values, closed change requests as evidence, Save =
-  one PATCH of the whole draft, Submit saves first); read-only otherwise, with the CAB approvers and Approve / Reject on the
-  viewer's own `canDecide` row (a rejection needs a comment). "Copy into a new proposal" only for a rejected / withdrawn
-  **new** proposal: the API's `copyFromProposalId` starts new templates only.
-- **Create form**: type Standard shows a template picker (active only, of the project's customer), "Change specifics" (one input per parameter type) and a
+  (a required **Summary** under the name; parameters editor, "Insert {{…}}" per text field; **Priority** ("Chosen per
+  change" = `""`) and **Deployment types** (multi-select, none = "Any deployment") beside the classification; the
+  Description is required; live preview with sample values, closed change requests as evidence, Save = one PATCH of
+  the whole draft, "Submit for approval" saves first; "still needs" lists a summary and a description too). A draft
+  never submitted (`canDelete`) offers **Delete draft** (a confirmation; then Back) instead of
+  Withdraw. A **retirement** shows its Name disabled (named after the template; the server refuses another) and asks
+  only for the rationale and evidence; while it is open, a warning lists the template's change requests still New
+  (`changeRequestsInNew`, "and N more" past 100, `retirementChangeRequestsInNewText`): once it is retired they can only
+  be cancelled. A complete draft reads "Ready to submit: two CAB members other than you must
+  authorise it." Submit goes straight to `authority_review` ("Awaiting CAB approval"; there is no `cab_review` state
+  any more, in the type or the State filter, and an old `state=cab_review` link's filter is dropped). Read-only
+  otherwise, with an **Approval** section: the rule (`STANDARD_CHANGE_APPROVAL_RULE`: two different CAB members, never the
+  proposer) and one table per stage (`proposal.stages`, approver rows by `stageId`), **rendered generically**: each
+  stage by its own `label` and count ("1 of 2 approvals"), numbered only when there is more than one, with no
+  CAB-specific code. A proposal has one stage, the CAB's (`STANDARD_CHANGE_CAB_STAGE`, "CAB Approval", 2 approvals);
+  one decided before 2026-11-10 has a "Standard Change Authority" stage (`STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE`)
+  instead, and one decided before migration 0295 an earlier one-approval "CAB Approval" stage too, shown as "1. CAB
+  Approval" above "2. Standard Change Authority". **Authorise** / Reject on the
+  viewer's own `canDecide` row (there is no Approve); the dialog says whether a second member must still approve or
+  this one applies it (`STANDARD_CHANGE_CAB_APPROVALS` when the answer has no stage). The dialog works from a
+  `DecisionSnapshot` taken when it opens (verdict, `stageId`, the stage's counts, `cabHistory`) and always sends that
+  `stageId` (required by entity-service, 400 without it), so a refetch behind it can neither change nor drop the stage;
+  when the refetched page no longer offers that stage the dialog shows a "Proposal changed" warning. A 409 whose
+  `errorCode` is `standard_change_decision_stage_stale` or `standard_change_proposal_not_in_review`
+  (`isStaleDecisionError`; the code, never the words) closes the dialog, puts a focused page notice that nothing was
+  recorded and reads the proposal again, without retrying; any other refusal, a 409 with no code or another one included
+  (the approval itself clashes: a template took the name, the template moved on, evidence is no longer a closed change
+  request of the customer), stays in the dialog with the backend's words, since the proposal has not moved on. When
+  members have left the CAB since submit and the open stage can no longer reach its approvals (`cannotReachQuorum`, with
+  `eligibleApprovers`), a warning on that stage says how many can still approve, that it cannot be approved as it
+  stands, and that a CAB member can cancel it or its proposer withdraw it and submit a copy (`cannotReachQuorumText`);
+  nothing ends such a proposal on its own. Only the latest stage can read as open, "Withdrawn" or "Cancelled"; an earlier stage left
+  undecided reads "Not decided", never as waiting. The read-only view shows the Summary above what the template specifies. A rejection needs a comment.
+  `canCancel` (a CAB member, someone else's open proposal) offers **Cancel proposal** with a required reason.
+  **CAB history** (`CabHistorySection`, a named region placed directly above the Approval section, so it is read
+  before Authorise / Reject): the proposal's `cabHistory` (entity-service reads it live: the CAB's rejections and
+  comments on the source and evidence change requests, and the customer's CAB-rejected look-alikes). With a rejection
+  it has a warning edge and a warning `Alert` headline ("The CAB rejected 2 change requests like this one",
+  `cabHistoryHeadline`), then the same list as a suggestion's details (links through `openChangeRequest`, so Back
+  returns here); with comments only an info one; "No CAB rejections or comments" when empty; not rendered when the
+  answer carries no `cabHistory`. The decision dialog (Authorise and Reject) repeats it in one line
+  (`cabHistorySummary`, a `role="note"` named "CAB history summary", `ReasonDialog`'s `notice`), so it is in front of
+  the approver as they decide. Evidence rows carry "Rejected by the CAB" (error) and "Deviated from plan" (warning)
+  chips (`cabRejected`, `hasDeviation`). It decides nothing. Tests: `StandardChangeProposalPage.test.tsx` ("the
+  CAB's history, in front of the approvers").
+  The decision banner names who ended it (`decisionHeadline` / `settledBy`: "Approved by" / "Rejected by the CAB" for
+  the two-approval "CAB Approval" stage; "... by the Standard Change Authority" for that older stage; an older
+  proposal settled at its one-approval CAB stage, "Approved at the CAB Approval stage", told apart by
+  `requiredApprovals`; withdrawn; `cancelledBy`: "Cancelled by a CAB member" when the latest stage is the two-approval
+  CAB one, "Cancelled by the Standard Change Authority" when it is that group's, and otherwise (a draft has no stage;
+  the oldest flow's one-approval CAB stage) by `decidedOn`: before 2026-11-10
+  (`STANDARD_CHANGE_CAB_AUTHORISES_SINCE`) only the authority could cancel someone else's proposal). The dialog's
+  summary quotes the newest CAB comment of any decision as "Latest" (a rejection's comment only when none is listed).
+  "Copy into a new proposal" only for a rejected / withdrawn / cancelled **new** proposal: the API's
+  `copyFromProposalId` starts new templates only.
+- **Create form**: type Standard shows a template picker (active only, of the project's customer, each result with its
+  summary as a second line: `AsyncEntitySelect getCaption`), "Change specifics" (one input per parameter type) and a
   read-only preview of what the template specifies; the payload is `type`, `standardChangeTemplateId`,
   `standardChangeTemplateVersionId` (the version shown), `standardChangeParameters`, `projectId` (required: a project of the
   template's customer) and only the fields the template does not specify. A 409 `standard_change_template_unavailable` is shown at the template with "Reload template", not in the banner. A
   clone of a templated change carries the template and its values, never the frozen fields (`buildCloneChangeRequestNavState`).
+  A template that fixes a **priority** shows it read-only ("Fixed by the standard change template.") and the payload
+  leaves it out (sending one is a 400); one that fixes **deployment types** offers only the project's deployments of
+  those types (`ChangeRequestScopeFields deploymentTypes`, filtering on `ScopeOption.type`), marks Deployments
+  required ("Required: the template is for <types> deployments only."), drops a deployment of another type chosen
+  before the template, and holds Create with "still needs a <types> deployment". The Edit dialog does the same from
+  the detail's `standardChange.priority` / `deploymentTypes` (priority disabled with the template hint; Deployments
+  narrowed and required). The bulk edit does not know each change's template: the backend refuses there, in words.
 - **Detail / Edit / action bar**: `standardChange` shows a banner (template link, version, values); the Edit dialog disables
   every field the template specifies (400 `change_request_standard_template_field`) and keeps the type Standard; a Standard
   change with `customerApprovalRequired === false` labels Request Approval "Schedule" (`requestApprovalSchedulesDirectly`; still
-  `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`).
+  `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`); one raised
+  from a template offers "Propose a revision of STD…" instead (a `modify` proposal of that template, then a PATCH citing
+  the change as its evidence, then the proposal opens): it belongs to that template, and the backend refuses it as
+  the start or evidence of any other. One raised from a **retired** template (`standardChange.templateState`) offers
+  neither: a retired template is never revised.
 
 ## Change request Approval tab: opening an Assignment group
 

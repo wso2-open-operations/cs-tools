@@ -810,6 +810,14 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	if req.StandardChangeTemplateID != nil || req.StandardChangeTemplateVersionID != nil || len(req.StandardChangeParameters) > 0 {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "standard change templates are only supported on the PostgreSQL data source"}
 	}
+	// Nor which change request this one was cloned from. It is lineage, not
+	// content, and the portal's Clone sends it for every clone, so it is dropped
+	// rather than refused (a clone must not fail on this data source), as the
+	// dual-write service drops it before it mirrors.
+	if req.ClonedFromChangeRequestID != nil {
+		slog.DebugContext(ctx, "change request create: clonedFromChangeRequestId ignored on the ServiceNow data source")
+		req.ClonedFromChangeRequestID = nil
+	}
 	if req.Subject == "" {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "subject is required"}
 	}

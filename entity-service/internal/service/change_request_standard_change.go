@@ -133,6 +133,18 @@ func (s *changeRequestService) prepareStandardChange(ctx context.Context, req do
 	req.IsPlanningVisibleToCustomers = &content.IsPlanningVisibleToCustomers
 	req.CustomerApprovalRequired = &content.CustomerApprovalRequired
 	req.CustomerReviewRequired = &content.CustomerReviewRequired
+	// What the template leaves open the caller chooses; what it fixes it fixes.
+	if v := tpl.CurrentVersion; v.Priority != nil {
+		if req.Priority != nil && *req.Priority != *v.Priority {
+			return req, &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,
+				Msg: fmt.Sprintf("priority cannot be set: the standard change template %q fixes it (%s); leave it out", tpl.Name, *v.Priority)}
+		}
+		p := *v.Priority
+		req.Priority = &p
+	}
+	// The deployment types it fixes are checked against the chosen deployments by
+	// the repository, on both create paths (repository.ValidateChangeRequestLinks
+	// before the previous system is called, the create transaction after).
 	versionID := tpl.CurrentVersion.ID
 	req.StandardChangeTemplateVersionID = &versionID
 	req.StandardChangeParameters = stored

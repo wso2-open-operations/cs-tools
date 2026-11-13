@@ -7965,6 +7965,14 @@ paths:
                   description: >-
                     The "Implementation Plan visible to customers" checkbox, stored and
                     returned as sent.
+                clonedFromChangeRequestId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The change request this one is a clone of (the portal's Clone),
+                    read back as `clonedFrom` on the detail and never changed afterwards.
+                    A value that is not a UUID string is a 400 here; one that is not an
+                    existing change request is the entity service's 400, echoed.
                 projectId:
                   type: string
                   format: uuid
@@ -16001,7 +16009,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-templates/{id}/versions/{versionId}:
     get:
-      summary: One CAB-approved version of a template.
+      summary: One approved version of a template.
       operationId: getStandardChangeTemplateVersion
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -16130,13 +16138,20 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-templates/{id}/resume:
     post:
-      summary: Resume a suspended template (its owner or a CAB member).
+      summary: Resume a suspended template (a CAB member, with a note).
       operationId: resumeStandardChangeTemplate
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
-        (400, 403, 404, 409) is returned with its own message and errorCode.
+        (400, 403, 404, 409) is returned with its own message and errorCode. Body
+        {note}, required by the entity service.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
       responses:
         "200":
           description: Ok.
@@ -16183,13 +16198,19 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-templates/{id}/clear-review:
     post:
-      summary: Clear the review flag a failed change raised (its owner or a CAB member).
+      summary: Clear the review flag a failed change raised (a CAB member, with a note).
       operationId: clearStandardChangeTemplateReview
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
       responses:
         "200":
           description: Ok.
@@ -16359,11 +16380,18 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-proposals/{id}:
     get:
-      summary: A proposal with its evidence, CAB approvers and what the caller may do.
+      summary: A proposal with its evidence, approvers, CAB history and what the caller may do.
       operationId: getStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
-        (400, 403, 404, 409) is returned with its own message and errorCode.
+        (400, 403, 404, 409) is returned with its own message and errorCode. The
+        proposal carries cabHistory (the CAB's rejections and comments on its source
+        and evidence change requests and on the customer's CAB-rejected change requests
+        with the same subject, read live) and each evidence row hasDeviation and
+        cabRejected. The stage it waits on carries eligibleApprovers and
+        cannotReachQuorum (true when members who left the CAB since submit leave it
+        short of the approvals it needs); see the entity service's openapi.yaml,
+        StandardChangeProposal and StandardChangeProposalStage.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -16471,9 +16499,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Delete a draft that was never submitted (its proposer).
+      operationId: deleteStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /standard-change-proposals/{id}/submit:
     post:
-      summary: Send a complete proposal to the CAB (its proposer).
+      summary: Send a complete proposal to the CAB (its proposer); two CAB members other than the proposer must approve it.
       operationId: submitStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
@@ -16579,8 +16654,80 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-proposals/{id}/decision:
     post:
-      summary: Approve or reject a proposal in CAB review (a CAB member other than the proposer; a rejection needs a comment).
+      summary: Approve or reject a proposal (two CAB members; never the proposer; a rejection needs a comment).
       operationId: decideStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode. stageId
+        is required (400 when absent, blank or not a UUID; 409 with errorCode
+        standard_change_decision_stage_stale when it is not the stage the proposal
+        waits on), a proposal no longer in review is a 409 with errorCode
+        standard_change_proposal_not_in_review, and only a current CAB member with a
+        pending row decides (403 for one who has left the CAB since the proposal was
+        submitted). Any other 409 (the approval would clash: a template took the
+        name, the template moved on, a piece of evidence is no longer a closed change
+        request of the customer) carries no errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, stageId]
+              properties:
+                decision: {type: string, enum: [approved, rejected]}
+                comment: {type: string, nullable: true, description: 'Required when rejecting.'}
+                stageId: {type: string, format: uuid, description: 'The stage the caller decides on, as their page showed it.'}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals/{id}/cancel:
+    post:
+      summary: Cancel someone else's open proposal (a CAB member; body {reason}).
+      operationId: cancelStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
@@ -16627,6 +16774,155 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
           description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions:
+    get:
+      summary: The last computed standard change suggestions.
+      operationId: getStandardChangeSuggestions
+      description: >
+        Forwarded to the entity service, which answers from the snapshot its
+        scheduled refresh last published (once a day; computedOn says when, and it
+        is absent with an empty list before the first): a read never computes. See
+        its openapi.yaml for the response, which includes each suggestion's CAB
+        pushback (cabRejectionCount, cabRejections, cabCommentCount, cabComments) and
+        deviationCount, shown only and never a criterion. The answer is one page (limit, default
+        20, at most 50; offset) of the list sorted across customers, with total, limit and offset.
+        Only these parameters are forwarded, each checked for shape here (400 with no upstream call
+        otherwise); a limit over 50 is the entity service's 400.
+      parameters:
+        - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: includeIneligible, in: query, required: false, schema: {type: boolean}}
+        - {name: includeDismissed, in: query, required: false, schema: {type: boolean}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 50, default: 20}, description: "Page size; 0 or absent is 20."}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [suggestions, total, limit, offset]
+                additionalProperties: true
+                properties:
+                  suggestions: {type: array, items: {type: object, additionalProperties: true}}
+                  total: {type: integer, minimum: 0, description: "The suggestions the query matches, on every page."}
+                  limit: {type: integer, minimum: 1, maximum: 50}
+                  offset: {type: integer, minimum: 0}
+        "400":
+          description: "Bad request: accountId is not a UUID, a flag is not true or false, limit or offset is not a non-negative integer, or limit exceeds 50."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions/dismissals:
+    post:
+      summary: Dismiss a standard change suggestion for a customer (body {accountId, key, reason}).
+      operationId: dismissStandardChangeSuggestion
+      description: >
+        Forwarded to the entity service; its refusal (400, 403, 404, 409) is returned
+        with its own message and errorCode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: The dismissal.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions/dismissals/{id}:
+    delete:
+      summary: Restore a dismissed standard change suggestion.
+      operationId: restoreStandardChangeSuggestion
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Restored.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
           content:
             application/json:
               schema:
@@ -23306,7 +23602,8 @@ components:
         machine-readable name entity-service gave a refusal, passed through unchanged
         on the 400, 403, 409 and 422 of PATCH /change-requests/{id}, on the 403 and
         409 of POST /change-requests/{id}/approvals/decision, and on the 400 of POST
-        /incidents for a refused assignment group; it is omitted when the
+        /incidents for a refused assignment group, and on the 400, 403, 404 and 409 of
+        the standard change template and proposal routes; it is omitted when the
         refusal has none, which is the body this API has always returned, so a client
         treats its absence, and a value it does not know, as "no more specific than the
         status". The status and the message are the same with or without it.
@@ -23333,7 +23630,10 @@ components:
             closed, canceled or rolled back; nothing written) and
             `change_request_deviation_not_incorporated` (400: Request Approval while a
             deviation a clone carried over is not yet folded into the implementation plan
-            and cleared; nothing written); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
+            and cleared; nothing written); on POST /standard-change-proposals/{id}/decision,
+            `standard_change_proposal_not_in_review` (409: the proposal is no longer waiting for a
+            decision; nothing recorded) and `standard_change_decision_stage_stale` (409: the
+            stageId sent is not the stage the proposal now waits on; nothing recorded); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
             the assignmentGroupId sent is not the active support group of any service).
             Every other create-incident failure keeps the generic message and carries no
             code. The list grows, so this is deliberately not a closed enum.
@@ -29076,6 +29376,11 @@ components:
             requestedBy:
               $ref: '#/components/schemas/EntityRef'
               nullable: true
+            clonedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              description: >-
+                The change request this one was cloned from (id, and its number as name),
+                when one was recorded on create. Omitted otherwise.
             justification:
               type: string
               nullable: true

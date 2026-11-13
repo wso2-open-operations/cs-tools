@@ -379,6 +379,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// (migration 0252); Postgres only. standardChangeRepo is also what the change
 	// request create and PATCH use to apply a template.
 	var standardChangeHandler *handler.StandardChangeHandler
+	var standardChangeSuggestionHandler *handler.StandardChangeSuggestionHandler
 	var standardChangeRepo repository.StandardChangeRepository
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
@@ -1710,7 +1711,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Standard change templates and the proposals that create, modify or
 		// retire them: internal callers only.
 		standardChangeRepo = repository.NewStandardChangeRepository(repository.NewScoped(db))
-		standardChangeHandler = handler.NewStandardChangeHandler(service.NewStandardChangeService(standardChangeRepo, accessSvc))
+		standardChangeSuggestionRepo := repository.NewStandardChangeSuggestionRepository(repository.NewScoped(db))
+		// A proposal shows its approvers the CAB's rejections and comments on
+		// changes like it, looked for within the suggestion window.
+		standardChangeHandler = handler.NewStandardChangeHandler(service.WithCABHistory(
+			service.NewStandardChangeService(standardChangeRepo, accessSvc),
+			standardChangeSuggestionRepo, cfg.StandardChangeSuggestionWindowMonths))
+		// What a customer's completed change requests suggest as standard changes.
+		standardChangeSuggestionHandler = handler.NewStandardChangeSuggestionHandler(service.NewStandardChangeSuggestionService(
+			standardChangeSuggestionRepo, accessSvc,
+			domain.StandardChangeSuggestionCriteria{
+				WindowMonths:          cfg.StandardChangeSuggestionWindowMonths,
+				MinClosed:             cfg.StandardChangeSuggestionMinClosed,
+				MinSuccessPercent:     cfg.StandardChangeSuggestionMinSuccessPercent,
+				PlanSimilarityPercent: cfg.StandardChangeSuggestionPlanSimilarityPercent,
+			}))
 		// From here on a standard change is raised from a template of this
 		// catalogue (the change request service is a pointer the handler shares; a
 		// ServiceNow-backed one is returned unchanged).
@@ -2347,6 +2362,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /standard-change-proposals/{id}/submit", internalOnly(accessSvc, standardChangeHandler.SubmitProposal))
 		mux.HandleFunc("POST /standard-change-proposals/{id}/withdraw", internalOnly(accessSvc, standardChangeHandler.WithdrawProposal))
 		mux.HandleFunc("POST /standard-change-proposals/{id}/decision", internalOnly(accessSvc, standardChangeHandler.DecideProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/cancel", internalOnly(accessSvc, standardChangeHandler.CancelProposal))
+		mux.HandleFunc("DELETE /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.DeleteProposal))
+		mux.HandleFunc("GET /standard-change-suggestions", internalOnly(accessSvc, standardChangeSuggestionHandler.GetSuggestions))
+		// The scheduled refresh (operations/csm-scheduled-tasks'
+		// standard_change_suggestions_refresh): a service credential only, so a
+		// person's page view can never start the computation.
+		mux.HandleFunc("POST /standard-change-suggestions/refresh", serviceOnly(accessSvc, standardChangeSuggestionHandler.Refresh))
+		mux.HandleFunc("POST /standard-change-suggestions/dismissals", internalOnly(accessSvc, standardChangeSuggestionHandler.DismissSuggestion))
+		mux.HandleFunc("DELETE /standard-change-suggestions/dismissals/{id}", internalOnly(accessSvc, standardChangeSuggestionHandler.RestoreSuggestion))
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that

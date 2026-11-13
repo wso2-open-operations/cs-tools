@@ -24,6 +24,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -38,7 +40,7 @@ type entityStandardChangeClient interface {
 
 // StandardChangeHandler proxies the standard change catalogue and its proposals.
 // entity-service decides everything about them (who may suspend a template, edit
-// or submit a proposal, decide as the CAB) and its refusals are shown as they are.
+// or submit a proposal, decide one) and its refusals are shown as they are.
 type StandardChangeHandler struct {
 	entity entityStandardChangeClient
 }
@@ -74,14 +76,16 @@ func (h *StandardChangeHandler) SuspendTemplate(w http.ResponseWriter, r *http.R
 	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/suspend", "Failed to suspend the template.")
 }
 
-// ResumeTemplate handles POST /standard-change-templates/{id}/resume.
+// ResumeTemplate handles POST /standard-change-templates/{id}/resume. The body
+// {note} is forwarded; entity-service requires it.
 func (h *StandardChangeHandler) ResumeTemplate(w http.ResponseWriter, r *http.Request) {
-	h.noBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/resume", "Failed to resume the template.")
+	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/resume", "Failed to resume the template.")
 }
 
 // ClearTemplateReview handles POST /standard-change-templates/{id}/clear-review.
+// The body {note} is forwarded; entity-service requires it.
 func (h *StandardChangeHandler) ClearTemplateReview(w http.ResponseWriter, r *http.Request) {
-	h.noBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/clear-review", "Failed to clear the review flag.")
+	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/clear-review", "Failed to clear the review flag.")
 }
 
 // CreateProposal handles POST /standard-change-proposals.
@@ -129,6 +133,77 @@ func (h *StandardChangeHandler) DecideProposal(w http.ResponseWriter, r *http.Re
 	h.withBody(w, r, http.MethodPost, "/standard-change-proposals/"+id+"/decision", http.StatusOK, "Failed to record the decision.")
 }
 
+// CancelProposal handles POST /standard-change-proposals/{id}/cancel.
+func (h *StandardChangeHandler) CancelProposal(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	h.withBody(w, r, http.MethodPost, "/standard-change-proposals/"+id+"/cancel", http.StatusOK, "Failed to cancel the proposal.")
+}
+
+// DeleteProposal handles DELETE /standard-change-proposals/{id}: 204.
+func (h *StandardChangeHandler) DeleteProposal(w http.ResponseWriter, r *http.Request) {
+	h.noBody(w, r, http.MethodDelete, "/standard-change-proposals/{id}", "", "Failed to delete the draft.")
+}
+
+// GetSuggestions handles GET /standard-change-suggestions: the snapshot of
+// standard changes suggested by completed change requests, which entity-service
+// computes on a schedule (a read never computes). Only the known parameters are
+// forwarded, each checked for shape (accountId a UUID, the flags true or false,
+// limit and offset non-negative integers; the page size's bounds are the entity
+// service's).
+func (h *StandardChangeHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	in := r.URL.Query()
+	out := url.Values{}
+	if v := strings.TrimSpace(in.Get("accountId")); v != "" {
+		if !uuidRe.MatchString(v) {
+			writeError(w, http.StatusBadRequest, "accountId must be a UUID")
+			return
+		}
+		out.Set("accountId", v)
+	}
+	for _, flag := range []string{"includeIneligible", "includeDismissed"} {
+		if v := strings.TrimSpace(in.Get(flag)); v != "" {
+			if v != "true" && v != "false" {
+				writeError(w, http.StatusBadRequest, flag+" must be true or false")
+				return
+			}
+			out.Set(flag, v)
+		}
+	}
+	for _, name := range []string{"limit", "offset"} {
+		if v := strings.TrimSpace(in.Get(name)); v != "" {
+			if n, err := strconv.Atoi(v); err != nil || n < 0 {
+				writeError(w, http.StatusBadRequest, name+" must be a non-negative integer")
+				return
+			}
+			out.Set(name, v)
+		}
+	}
+	path := "/standard-change-suggestions"
+	if len(out) > 0 {
+		path += "?" + out.Encode()
+	}
+	h.forward(w, r, user.UserID, http.MethodGet, path, nil, http.StatusOK, "Failed to load standard change suggestions.")
+}
+
+// DismissSuggestion handles POST /standard-change-suggestions/dismissals: 201.
+func (h *StandardChangeHandler) DismissSuggestion(w http.ResponseWriter, r *http.Request) {
+	h.withBody(w, r, http.MethodPost, "/standard-change-suggestions/dismissals", http.StatusCreated, "Failed to dismiss the suggestion.")
+}
+
+// RestoreSuggestion handles DELETE /standard-change-suggestions/dismissals/{id}: 204.
+func (h *StandardChangeHandler) RestoreSuggestion(w http.ResponseWriter, r *http.Request) {
+	h.noBody(w, r, http.MethodDelete, "/standard-change-suggestions/dismissals/{id}", "", "Failed to restore the suggestion.")
+}
+
 // noBody forwards a call that carries no body. base holds "{id}", replaced by the
 // validated path id; suffix is appended.
 func (h *StandardChangeHandler) noBody(w http.ResponseWriter, r *http.Request, method, base, suffix, fallback string) {
@@ -143,7 +218,11 @@ func (h *StandardChangeHandler) noBody(w http.ResponseWriter, r *http.Request, m
 		return
 	}
 	path := strings.Replace(base, "{id}", id, 1) + suffix
-	h.forward(w, r, user.UserID, method, path, nil, http.StatusOK, fallback)
+	ok := http.StatusOK
+	if method == http.MethodDelete {
+		ok = http.StatusNoContent
+	}
+	h.forward(w, r, user.UserID, method, path, nil, ok, fallback)
 }
 
 // optionalBody is noBody for a call whose JSON body may be left out: an empty
@@ -209,6 +288,10 @@ func (h *StandardChangeHandler) forward(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 		mapUpstreamError(w, err, fallback)
+		return
+	}
+	if okStatus == http.StatusNoContent {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	writeJSON(w, okStatus, result)

@@ -130,8 +130,10 @@ vi.mock("@features/csm-operations/api/useGroupDetail", () => ({
 }));
 // "Propose as standard change" (a closed change request): starts a proposal.
 const proposeStandardMutateMock = vi.fn();
+const citeEvidenceMutateMock = vi.fn();
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useCreateStandardChangeProposal: () => ({ mutate: proposeStandardMutateMock, isPending: false }),
+  useUpdateStandardChangeProposal: () => ({ mutate: citeEvidenceMutateMock, isPending: false }),
 }));
 const decideApprovalMutateMock = vi.fn();
 vi.mock("@features/csm-operations/api/useDecideChangeRequestApproval", () => ({
@@ -4915,6 +4917,24 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
     expect(banner).toHaveTextContent(/approval cannot be requested/i);
   });
 
+  it("warns a change request still New that its retired template can no longer be used, and what is left", () => {
+    mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, templateState: "retired" } } });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveClass("MuiAlert-standardWarning");
+    expect(within(banner).getByTestId("standard-change-template-unusable")).toHaveTextContent(
+      "STD0000001 has been retired, so approval cannot be requested for this change request. Cancel it, and raise a Normal change if the work is still needed.",
+    );
+  });
+
+  it("does not warn about the template once the change request has left New", () => {
+    mockQueryResult({
+      data: { ...STANDARD_CR, state: "scheduled", standardChange: { ...STANDARD_CR.standardChange!, templateState: "retired" } },
+    });
+    renderPage();
+    expect(screen.queryByTestId("standard-change-template-unusable")).not.toBeInTheDocument();
+  });
+
   it("names no customer when the response carries none", () => {
     mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, customer: null } } });
     renderPage();
@@ -4959,6 +4979,62 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
       expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
         state: { from: "/operations/change-requests/chg-1" },
       });
+    });
+
+    it("offers no proposal for a change raised from a retired template", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({
+        data: {
+          ...CLOSED,
+          standardChange: {
+            template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+            templateNumber: "STD0000001",
+            templateState: "retired",
+            versionId: "ver-1",
+            version: 1,
+            parameters: [],
+          },
+        },
+      });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose a revision/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+    });
+
+    it("proposes a revision of the template a closed change was raised from, citing it, never a new template", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({
+        data: {
+          ...CLOSED,
+          standardChange: {
+            template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+            templateNumber: "STD0000001",
+            versionId: "ver-1",
+            version: 1,
+            parameters: [],
+          },
+        },
+      });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Propose a revision of STD0000001" }));
+      expect(proposeStandardMutateMock).toHaveBeenCalledWith({ kind: "modify", templateId: "tpl-1" }, expect.anything());
+      proposeStandardMutateMock.mock.calls[0]![1].onSuccess({ id: "scp-2" });
+      expect(citeEvidenceMutateMock).toHaveBeenCalledWith(
+        { id: "scp-2", patch: { evidenceChangeRequestIds: ["chg-1"] } },
+        expect.anything(),
+      );
+      citeEvidenceMutateMock.mock.calls[0]![1].onSettled();
+      expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-2", {
+        state: { from: "/operations/change-requests/chg-1" },
+      });
+      // A refused citation is said, not dropped; the revision still opens.
+      const refusal = new Error("evidence must be change requests of the proposal's customer");
+      citeEvidenceMutateMock.mock.calls[0]![1].onError(refusal);
+      expect(showErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^The revision was started, but CHG\S+ could not be cited as its evidence\.$/),
+        refusal,
+      );
     });
 
     it("shows a refusal in the error banner", () => {

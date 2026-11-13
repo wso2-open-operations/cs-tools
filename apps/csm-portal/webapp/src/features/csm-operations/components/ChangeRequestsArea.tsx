@@ -39,7 +39,7 @@ const SUB_VIEWS: ReadonlyArray<{ value: ChangeRequestsView; label: string }> = [
  * Operations > Change requests. Standard changes are templated change requests,
  * so they are not a tab of their own beside this one: they are one sub-view of
  * it, next to the change request list (`?view=standard`), which opens on the
- * template catalogue and holds the proposals to the CAB as a secondary view
+ * template catalogue and holds the proposals as a secondary view
  * (`StandardChangesTab`). The sub-view is in the URL (`changeRequestsView`), so
  * it is linkable and Back from a template or a proposal returns to it. Without
  * it this is the change request list, with its own `cr*` URL filters, exactly

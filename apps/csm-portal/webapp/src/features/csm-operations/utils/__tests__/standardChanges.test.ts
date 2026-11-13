@@ -17,7 +17,13 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { CR_FILTER_PARAM_KEYS } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
+import { changeRequestChoiceLabel } from "@features/csm-operations/utils/changeRequests";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 import {
+  deploymentFitsTypes,
+  isStandardChangeProposalFinal,
+  isStandardChangeProposalInReview,
+  standardChangeProposalStateLabel,
   appendPlaceholderToHtml,
   canonicalStandardChangesSearch,
   CHANGE_REQUEST_LIST_PARAM_PREFIX,
@@ -38,6 +44,7 @@ import {
   proposalStateFilter,
   renderStandardChangePlainText,
   splitPlaceholders,
+  STANDARD_CHANGE_PROPOSAL_STATES,
   STANDARD_CHANGE_PROPOSALS_PATH,
   standardChangeProposalCustomerEditable,
   standardChangeProposalCustomerFixedReason,
@@ -55,6 +62,8 @@ import {
   undeclaredPlaceholders,
   unusedParameters,
   validateStandardChangeParameters,
+  retirementChangeRequestsInNewText,
+  standardChangeTemplateUnusableWarning,
 } from "@features/csm-operations/utils/standardChanges";
 import type { BeStandardChangeParameter } from "@api/backend/types";
 
@@ -244,7 +253,9 @@ describe("what a proposal still needs before the CAB", () => {
     name: "Rotate",
     rationale: "<p>Done often.</p>",
     accountId: "acct-1",
+    summary: "Rotates a host's keys.",
     subject: "Rotate {{host}}",
+    description: "<p>Rotate the keys of {{host}}</p>",
     implementationPlan: "<p>a</p>",
     backoutPlan: "<p>b</p>",
     testPlan: "<p>c</p>",
@@ -262,7 +273,9 @@ describe("what a proposal still needs before the CAB", () => {
         name: " ",
         rationale: "<p><br></p>",
         accountId: "",
+        summary: " ",
         subject: "",
+        description: "<p><br></p>",
         implementationPlan: "",
         backoutPlan: "<p></p>",
         testPlan: "",
@@ -272,7 +285,9 @@ describe("what a proposal still needs before the CAB", () => {
     ).toEqual([
       "a name",
       "a rationale",
+      "a summary",
       "a subject",
+      "a description",
       "an implementation plan",
       "a backout plan",
       "a test plan",
@@ -282,7 +297,9 @@ describe("what a proposal still needs before the CAB", () => {
   });
 
   it("asks a retirement only for its name and rationale", () => {
-    expect(standardChangeProposalGaps("retire", { ...complete, subject: "", implementationPlan: "", impact: "", risk: "" })).toEqual([]);
+    expect(
+      standardChangeProposalGaps("retire", { ...complete, summary: "", description: "", subject: "", implementationPlan: "", impact: "", risk: "" }),
+    ).toEqual([]);
     expect(standardChangeProposalGaps("retire", { ...complete, rationale: "" })).toEqual(["a rationale"]);
   });
 
@@ -388,7 +405,9 @@ describe("standard changes inside Operations > Change requests", () => {
     expect(proposalScope(q("scope=everyone"))).toBe("all");
     expect(proposalStateFilter(q(""))).toBe("");
     expect(proposalStateFilter(q("state=draft"))).toBe("draft");
-    expect(proposalStateFilter(q("state=cab_review"))).toBe("cab_review");
+    expect(proposalStateFilter(q("state=authority_review"))).toBe("authority_review");
+    // CAB review is no longer a state (the CAB does not decide a proposal): an old link's filter is dropped.
+    expect(proposalStateFilter(q("state=cab_review"))).toBe("");
     expect(proposalStateFilter(q("state=open"))).toBe("");
   });
 
@@ -491,5 +510,69 @@ describe("standard changes inside Operations > Change requests", () => {
     expect(standardChangeRecentEntry("proposal", { id: "scp-6", number: "SCP0000006", name: "  " }).title).toBe(
       "SCP0000006 · Untitled proposal",
     );
+  });
+});
+
+describe("the proposal states, and what a template fixes", () => {
+  it("names the one review state and the cancelled one", () => {
+    expect(standardChangeProposalStateLabel("authority_review")).toBe("Awaiting CAB approval");
+    expect(standardChangeProposalStateLabel("cancelled")).toBe("Cancelled");
+    expect(STANDARD_CHANGE_PROPOSAL_STATES).toEqual(["draft", "authority_review", "approved", "rejected", "withdrawn", "cancelled"]);
+    // A state the page does not know is shown as it comes, never as a CAB stage.
+    expect(standardChangeProposalStateLabel("cab_review")).toBe("cab_review");
+    expect(isStandardChangeProposalInReview("cab_review")).toBe(false);
+    expect(isStandardChangeProposalInReview("authority_review")).toBe(true);
+    expect(isStandardChangeProposalInReview("draft")).toBe(false);
+    expect(isStandardChangeProposalFinal("cancelled")).toBe(true);
+    expect(isStandardChangeProposalFinal("authority_review")).toBe(false);
+  });
+
+  it("words a template's deployment types and priority", () => {
+    expect(deploymentTypesText(["primary_production"])).toBe("Primary Production");
+    expect(deploymentTypesText(["primary_production", "staging", "uat"])).toBe("Primary Production, Staging or UAT");
+    expect(deploymentTypesText(null)).toBe("");
+    expect(changeRequestChoiceLabel("moderate")).toBe("Moderate");
+    expect(changeRequestChoiceLabel(null)).toBe("—");
+  });
+
+  it("offers only the deployments of a template's types", () => {
+    expect(deploymentFitsTypes("staging", ["primary_production", "staging"])).toBe(true);
+    expect(deploymentFitsTypes("uat", ["primary_production", "staging"])).toBe(false);
+    expect(deploymentFitsTypes(undefined, ["staging"])).toBe(false);
+  });
+});
+
+describe("a template that can no longer be used", () => {
+  const sc = { templateNumber: "STD0000020", templateState: "active" as const, superseded: false };
+
+  it("warns a change request still New when its template is retired, suspended or revised", () => {
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "retired" }, "new")).toBe(
+      "STD0000020 has been retired, so approval cannot be requested for this change request. " +
+        "Cancel it, and raise a Normal change if the work is still needed.",
+    );
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "suspended" }, "new")).toMatch(
+      /^STD0000020 is suspended, so approval cannot be requested for this change request until it is resumed by a CAB member\.$/,
+    );
+    expect(standardChangeTemplateUnusableWarning({ ...sc, superseded: true }, "new")).toMatch(/has been revised since/);
+  });
+
+  it("names the revision, not the suspension, of a template both suspended and revised: resuming it would not help", () => {
+    const warning = standardChangeTemplateUnusableWarning({ ...sc, templateState: "suspended", superseded: true }, "new");
+    expect(warning).toMatch(/has been revised since .* Cancel it and raise a new one from the current version\.$/);
+    expect(warning).not.toMatch(/suspended|resumed/);
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "retired", superseded: true }, "new")).toMatch(/has been retired/);
+  });
+
+  it("says nothing when the template can be used, or once the change request has left New", () => {
+    expect(standardChangeTemplateUnusableWarning(sc, "new")).toBeNull();
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "retired" }, "scheduled")).toBeNull();
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: undefined }, "new")).toBeNull();
+  });
+
+  it("counts a retirement's change requests still New", () => {
+    expect(retirementChangeRequestsInNewText(0)).toBeNull();
+    expect(retirementChangeRequestsInNewText(undefined)).toBeNull();
+    expect(retirementChangeRequestsInNewText(1)).toMatch(/^1 change request raised from this template is still New\. Once the template is retired it cannot/);
+    expect(retirementChangeRequestsInNewText(4)).toMatch(/^4 change requests raised from this template are still New\. Once the template is retired they cannot/);
   });
 });

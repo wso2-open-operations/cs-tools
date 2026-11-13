@@ -45,7 +45,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Ban, Braces, Check, CopyPlus, Save, Send, Trash2, X } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Ban, Braces, Check, CopyPlus, Save, Send, Trash2, X, XCircle } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
@@ -58,8 +58,10 @@ import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import {
+  useCancelStandardChangeProposal,
   useCreateStandardChangeProposal,
   useDecideStandardChangeProposal,
+  useDeleteStandardChangeProposal,
   useGetStandardChangeProposal,
   useSearchClosedChangeRequestsForSelect,
   useSearchStandardChangeCustomersForSelect,
@@ -68,7 +70,10 @@ import {
   useWithdrawStandardChangeProposal,
 } from "@features/csm-operations/api/useStandardChanges";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
+import StandardChangeCabPushback from "@features/csm-operations/components/StandardChangeCabPushback";
+import { cabHistoryHeadline, cabHistoryOf, cabHistorySummary, NO_CAB_PUSHBACK } from "@features/csm-operations/utils/cabHistory";
 import StandardChangeContentView, {
+  Field,
   StandardChangeParametersTable,
 } from "@features/csm-operations/components/StandardChangeContentView";
 import StandardChangeParameterInputs from "@features/csm-operations/components/StandardChangeParameterInputs";
@@ -79,7 +84,10 @@ import {
   approvalStatusLabel,
   CHANGE_REQUEST_CATEGORY_OPTIONS,
   CHANGE_REQUEST_IMPACT_OPTIONS,
+  CHANGE_REQUEST_PRIORITY_OPTIONS,
   CHANGE_REQUEST_ROLLBACK_DURATION_MAX,
+  backendErrorCode,
+  errorText,
 } from "@features/csm-operations/utils/changeRequests";
 import {
   appendPlaceholderToHtml,
@@ -87,7 +95,16 @@ import {
   hasParameterIssues,
   insertPlaceholderAt,
   isStandardChangeProposalFinal,
+  isStandardChangeProposalInReview,
+  MAX_STANDARD_CHANGE_NAME,
+  MAX_STANDARD_CHANGE_SUMMARY,
   normalizeStandardChangeParameters,
+  retirementChangeRequestsInNewText,
+  STANDARD_CHANGE_APPROVAL_RULE,
+  STANDARD_CHANGE_CAB_APPROVALS,
+  STANDARD_CHANGE_CAB_AUTHORISES_SINCE,
+  STANDARD_CHANGE_CAB_STAGE,
+  STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE,
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
   STANDARD_CHANGE_PROPOSALS_PATH,
@@ -104,28 +121,31 @@ import {
   unusedParameters,
   validateStandardChangeParameters,
 } from "@features/csm-operations/utils/standardChanges";
+import {
+  DEPLOYMENT_TYPES,
+  deploymentTypeLabel,
+  deploymentTypesText,
+} from "@features/csm-projects/utils/deployments";
 import type {
   BeChangeRequestCategory,
   BeChangeRequestImpact,
+  BeChangeRequestPriority,
   BeChangeRequestRisk,
   BeChangeRequestSearchView,
+  BeDeploymentType,
   BeEntityRef,
+  BeStandardChangeCabHistory,
   BeStandardChangeContent,
   BeStandardChangeEvidence,
   BeStandardChangeParameter,
   BeStandardChangeProposal,
+  BeStandardChangeProposalApprover,
+  BeStandardChangeProposalStage,
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
-/** The proposal's subject is the template's name on the change requests raised from it (work_item.subject). */
-const NAME_MAX = 255;
-
 function formatDateTime(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "short" }) ?? "—";
-}
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
 }
 
 function personLabel(p?: { name?: string | null; email?: string | null } | null): string {
@@ -134,7 +154,11 @@ function personLabel(p?: { name?: string | null; email?: string | null } | null)
 
 /** The proposal's rich-text fields, in the order the form shows them. */
 const RICH_FIELDS = [
-  { field: "description", label: "Description", helper: "What the change does." },
+  {
+    field: "description",
+    label: "Description",
+    helper: "Required. The description of every change request raised from this template; placeholders are filled in.",
+  },
   { field: "justification", label: "Justification", helper: "Why the change is made." },
   { field: "implementationPlan", label: "Implementation plan", helper: "Required. The steps, generalised: mark what varies as {{key}}." },
   { field: "riskImpactAnalysis", label: "Risk and impact analysis", helper: "What could go wrong, and what is affected if it does." },
@@ -152,6 +176,7 @@ interface ProposalForm {
   /** Its name, for the picker before a search has run. */
   customerName: string;
   rationale: string;
+  summary: string;
   subject: string;
   description: string;
   justification: string;
@@ -163,6 +188,10 @@ interface ProposalForm {
   impact: BeChangeRequestImpact | "";
   risk: BeChangeRequestRisk | "";
   rollbackDurationText: string;
+  /** "" leaves the priority to whoever raises the change. */
+  priority: BeChangeRequestPriority | "";
+  /** Empty: any deployment. */
+  deploymentTypes: BeDeploymentType[];
   isPlanningVisibleToCustomers: boolean;
   customerApprovalRequired: boolean;
   customerReviewRequired: boolean;
@@ -176,6 +205,7 @@ function formFromProposal(p: BeStandardChangeProposal): ProposalForm {
     accountId: p.customer?.id ?? "",
     customerName: p.customer?.name ?? "",
     rationale: p.rationale ?? "",
+    summary: p.summary ?? "",
     subject: p.subject ?? "",
     description: p.description ?? "",
     justification: p.justification ?? "",
@@ -187,6 +217,8 @@ function formFromProposal(p: BeStandardChangeProposal): ProposalForm {
     impact: p.impact ?? "",
     risk: p.risk ?? "",
     rollbackDurationText: p.rollbackDurationText ?? "",
+    priority: p.priority ?? "",
+    deploymentTypes: p.deploymentTypes ?? [],
     isPlanningVisibleToCustomers: p.isPlanningVisibleToCustomers,
     customerApprovalRequired: p.customerApprovalRequired,
     customerReviewRequired: p.customerReviewRequired,
@@ -213,6 +245,7 @@ function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: 
   };
   if (customerEditable && form.accountId) patch.accountId = form.accountId;
   if (kind === "retire") return patch;
+  patch.summary = form.summary.trim();
   patch.subject = form.subject.trim();
   for (const { field } of RICH_FIELDS) patch[field] = richOut(form[field]);
   // Always sent: an empty value clears the stored one, so "-- Select --" saves as shown.
@@ -220,6 +253,8 @@ function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: 
   patch.impact = form.impact;
   patch.risk = form.risk;
   patch.rollbackDurationText = form.rollbackDurationText.trim();
+  patch.priority = form.priority;
+  patch.deploymentTypes = form.deploymentTypes;
   patch.isPlanningVisibleToCustomers = form.isPlanningVisibleToCustomers;
   patch.customerApprovalRequired = form.customerApprovalRequired;
   patch.customerReviewRequired = form.customerReviewRequired;
@@ -230,6 +265,7 @@ function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: 
 /** The form as template content, for the live preview and the placeholder checks. */
 function formContent(form: ProposalForm): BeStandardChangeContent {
   return {
+    summary: form.summary,
     subject: form.subject,
     description: form.description,
     justification: form.justification,
@@ -241,6 +277,8 @@ function formContent(form: ProposalForm): BeStandardChangeContent {
     impact: form.impact || null,
     risk: form.risk || null,
     rollbackDurationText: form.rollbackDurationText,
+    priority: form.priority || null,
+    deploymentTypes: form.deploymentTypes.length > 0 ? form.deploymentTypes : null,
     isPlanningVisibleToCustomers: form.isPlanningVisibleToCustomers,
     customerApprovalRequired: form.customerApprovalRequired,
     customerReviewRequired: form.customerReviewRequired,
@@ -322,14 +360,16 @@ function EvidenceTable({
   disabled,
   customerId,
 }: {
-  evidence: Array<ProposalForm["evidence"][number] & Pick<Partial<BeStandardChangeEvidence>, "customer">>;
+  evidence: Array<
+    ProposalForm["evidence"][number] & Pick<Partial<BeStandardChangeEvidence>, "customer" | "hasDeviation" | "cabRejected">
+  >;
   onOpen: (id: string) => void;
   onRemove?: (id: string) => void;
   disabled?: boolean;
   /**
    * The proposal's customer: a change request whose project now belongs to
-   * another customer (or to none) is marked, since the CAB cannot approve the
-   * proposal while it cites one.
+   * another customer (or to none) is marked, since the CAB cannot approve
+   * the proposal while it cites one.
    */
   customerId?: string | null;
 }): JSX.Element {
@@ -369,6 +409,12 @@ function EvidenceTable({
                         : "Now a change request of no customer"}
                     </Typography>
                   )}
+                  {(e.cabRejected || e.hasDeviation) && (
+                    <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>
+                      {e.cabRejected && <Chip size="small" variant="outlined" color="error" label="Rejected by the CAB" />}
+                      {e.hasDeviation && <Chip size="small" variant="outlined" color="warning" label="Deviated from plan" />}
+                    </Box>
+                  )}
                 </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(e.closedOn)}</TableCell>
                 {onRemove && (
@@ -397,10 +443,12 @@ function ProposalEditor({
   proposal,
   onOpenChangeRequest,
   onWithdraw,
+  onDelete,
 }: {
   proposal: BeStandardChangeProposal;
   onOpenChangeRequest: (id: string) => void;
   onWithdraw: () => void;
+  onDelete: () => void;
 }): JSX.Element {
   const [form, setForm] = useState<ProposalForm>(() => formFromProposal(proposal));
   // Bumped to remount a rich-text editor whose value was changed from outside
@@ -478,7 +526,7 @@ function ProposalEditor({
     try {
       await submit.mutateAsync(proposal.id);
     } catch (err) {
-      setNotice({ severity: "error", text: `Saved, but not sent to the CAB: ${errorText(err, "the submission was refused.")}` });
+      setNotice({ severity: "error", text: `Saved, but not submitted: ${errorText(err, "the submission was refused.")}` });
     }
   };
 
@@ -513,15 +561,29 @@ function ProposalEditor({
       )}
 
       <Section title="Proposal">
+        {/* A retirement is named after its template and renames nothing, so its name is not edited (the server refuses another). */}
         <TextField
           label="Name"
-          required
+          required={!isRetire}
           size="small"
           value={form.name}
-          disabled={busy}
-          onChange={(e) => set("name", e.target.value.slice(0, NAME_MAX))}
+          disabled={busy || isRetire}
+          onChange={(e) => set("name", e.target.value.slice(0, MAX_STANDARD_CHANGE_NAME))}
           helperText={isRetire ? "The template being retired." : "The template's name in the catalogue."}
         />
+        {!isRetire && (
+          <TextField
+            label="Summary"
+            required
+            size="small"
+            multiline
+            minRows={2}
+            value={form.summary}
+            disabled={busy}
+            onChange={(e) => set("summary", e.target.value.slice(0, MAX_STANDARD_CHANGE_SUMMARY))}
+            helperText="What the template is for, when to use it and what it does not cover. Shown in the catalogue and when a template is picked; never copied onto a change request, so no placeholders."
+          />
+        )}
         {customerEditable ? (
           <AsyncEntitySelect<BeEntityRef>
             id="std-proposal-customer"
@@ -599,7 +661,7 @@ function ProposalEditor({
               value={form.subject}
               disabled={busy}
               inputRef={subjectRef}
-              onChange={(e) => set("subject", e.target.value.slice(0, NAME_MAX))}
+              onChange={(e) => set("subject", e.target.value.slice(0, MAX_STANDARD_CHANGE_NAME))}
               helperText="The change request's subject (plain text). Placeholders are filled in."
             />
             <Box>
@@ -694,6 +756,80 @@ function ProposalEditor({
                 )}
               </Select>
               <FormHelperText>{highRisk ? STANDARD_CHANGE_HIGH_RISK_REASON : "High is not allowed for a standard change."}</FormHelperText>
+            </FormControl>
+          </Box>
+          <Box
+            sx={{
+              display: "grid",
+              gap: 2,
+              gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(0, 2fr)" },
+              alignItems: "start",
+            }}
+          >
+            <FormControl size="small" fullWidth disabled={busy}>
+              <InputLabel id="std-proposal-priority-label" shrink>
+                Priority
+              </InputLabel>
+              <Select
+                labelId="std-proposal-priority-label"
+                label="Priority"
+                value={form.priority}
+                displayEmpty
+                onChange={(e) => set("priority", e.target.value as BeChangeRequestPriority | "")}
+              >
+                <MenuItem value="">
+                  <Typography component="span" color="text.secondary">
+                    Chosen per change
+                  </Typography>
+                </MenuItem>
+                {CHANGE_REQUEST_PRIORITY_OPTIONS.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {form.priority
+                  ? "Every change raised from the template has this priority."
+                  : "Left to whoever raises the change."}
+              </FormHelperText>
+            </FormControl>
+            <FormControl size="small" fullWidth disabled={busy}>
+              <InputLabel id="std-proposal-deployment-types-label" shrink>
+                Deployment types
+              </InputLabel>
+              <Select<BeDeploymentType[]>
+                labelId="std-proposal-deployment-types-label"
+                label="Deployment types"
+                multiple
+                displayEmpty
+                value={form.deploymentTypes}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  set("deploymentTypes", (typeof v === "string" ? v.split(",") : v) as BeDeploymentType[]);
+                }}
+                renderValue={(selected) =>
+                  selected.length === 0 ? (
+                    <Typography component="span" color="text.secondary">
+                      Any deployment
+                    </Typography>
+                  ) : (
+                    selected.map((t) => deploymentTypeLabel(t)).join(", ")
+                  )
+                }
+              >
+                {DEPLOYMENT_TYPES.map((t) => (
+                  <MenuItem key={t} value={t}>
+                    <Checkbox size="small" checked={form.deploymentTypes.includes(t)} sx={{ p: 0, mr: 1 }} />
+                    {deploymentTypeLabel(t)}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {form.deploymentTypes.length > 0
+                  ? `A change raised from the template needs at least one deployment, all ${deploymentTypesText(form.deploymentTypes)}.`
+                  : "The deployments are chosen when the change is raised, of any type, or none."}
+              </FormHelperText>
             </FormControl>
           </Box>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
@@ -816,12 +952,13 @@ function ProposalEditor({
             </Typography>
           ) : canSubmitNow ? (
             <Typography variant="body2" color="text.secondary">
-              Ready to send to the CAB. Submitting saves first.
+              Ready to submit: two CAB members other than you must authorise it.
+              Submitting saves first.
             </Typography>
           ) : (
             <Typography variant="body2" color="text.secondary">
               {[
-                gaps.length ? `Before it can be sent to the CAB it still needs ${gaps.join(", ")}.` : "",
+                gaps.length ? `Before it can be submitted it still needs ${gaps.join(", ")}.` : "",
                 undeclared.length ? "Every placeholder needs a parameter." : "",
                 highRisk ? "The risk cannot be high." : "",
               ]
@@ -831,10 +968,17 @@ function ProposalEditor({
           )}
         </Box>
         <Box sx={{ display: "flex", gap: 1 }}>
-          {proposal.canWithdraw && (
-            <Button variant="outlined" color="error" size="small" startIcon={<Ban size={16} />} disabled={busy} onClick={onWithdraw}>
-              Withdraw
+          {/* A draft never submitted is deleted, not withdrawn: it has been before nobody. */}
+          {proposal.canDelete ? (
+            <Button variant="outlined" color="error" size="small" startIcon={<Trash2 size={16} />} disabled={busy} onClick={onDelete}>
+              Delete draft
             </Button>
+          ) : (
+            proposal.canWithdraw && (
+              <Button variant="outlined" color="error" size="small" startIcon={<Ban size={16} />} disabled={busy} onClick={onWithdraw}>
+                Withdraw
+              </Button>
+            )
           )}
           <Button
             variant="outlined"
@@ -855,7 +999,7 @@ function ProposalEditor({
               loading={submit.isPending}
               onClick={() => void saveAndSubmit()}
             >
-              Submit to CAB
+              Submit for approval
             </Button>
           )}
         </Box>
@@ -864,49 +1008,67 @@ function ProposalEditor({
   );
 }
 
-/** A CAB member's Approve / Reject; a rejection needs a comment. */
-function DecisionDialog({
-  decision,
+/**
+ * A dialog that asks for a text before its action: kept open while the action is
+ * pending, cleared once closed, and the action held back while a required text
+ * is blank.
+ */
+function ReasonDialog({
+  open,
+  titleId,
+  title,
+  text,
+  label,
+  required,
+  helperText,
+  notice,
+  confirmLabel,
+  confirmColor,
   pending,
   error,
   onClose,
-  onDecide,
+  onConfirm,
 }: {
-  decision: "approved" | "rejected" | null;
+  open: boolean;
+  titleId: string;
+  title: ReactNode;
+  text: ReactNode;
+  label: string;
+  required: boolean;
+  helperText?: string;
+  /** Shown under the text, before the field (e.g. the CAB history's summary). */
+  notice?: ReactNode;
+  confirmLabel: string;
+  confirmColor: "error" | "success";
   pending: boolean;
   error: string | null;
   onClose: () => void;
-  onDecide: (comment: string) => void;
+  onConfirm: (text: string) => void;
 }): JSX.Element {
-  const [comment, setComment] = useState("");
-  const reject = decision === "rejected";
-  const commentMissing = reject && !comment.trim();
+  const [value, setValue] = useState("");
   return (
     <Dialog
-      open={decision !== null}
+      open={open}
       onClose={pending ? undefined : onClose}
-      aria-labelledby="std-decision-title"
+      aria-labelledby={titleId}
       fullWidth
       maxWidth="sm"
-      slotProps={{ transition: { onExited: () => setComment("") } }}
+      slotProps={{ transition: { onExited: () => setValue("") } }}
     >
-      <DialogTitle id="std-decision-title">{reject ? "Reject the proposal" : "Approve the proposal"}</DialogTitle>
+      <DialogTitle id={titleId}>{title}</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <DialogContentText>
-          {reject
-            ? "The catalogue is left as it is and the proposal is kept as the record, with your comment."
-            : "The first decision settles the proposal: approving it writes the template change for the CAB."}
-        </DialogContentText>
+        <DialogContentText>{text}</DialogContentText>
+        {notice}
         {error && <Alert severity="error">{error}</Alert>}
         <TextField
-          label={reject ? "Comment (required)" : "Comment (optional)"}
+          label={label}
           multiline
           minRows={3}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          required={reject}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          required={required}
           disabled={pending}
-          helperText={reject ? "Say why, so the proposer can act on it." : undefined}
+          helperText={helperText}
         />
       </DialogContent>
       <DialogActions>
@@ -915,12 +1077,12 @@ function DecisionDialog({
         </Button>
         <Button
           variant="contained"
-          color={reject ? "error" : "success"}
-          disabled={pending || commentMissing}
+          color={confirmColor}
+          disabled={pending || (required && !value.trim())}
           loading={pending}
-          onClick={() => onDecide(comment.trim())}
+          onClick={() => onConfirm(value.trim())}
         >
-          {reject ? "Reject" : "Approve"}
+          {confirmLabel}
         </Button>
       </DialogActions>
     </Dialog>
@@ -928,15 +1090,427 @@ function DecisionDialog({
 }
 
 /**
+ * What the decision dialog was opened on, kept as it was when it opened: the
+ * decision sends this `stageId` and nothing else, so a refetch behind the open
+ * dialog (another member's decision, or the proposal returned to draft and
+ * submitted again with a new stage) never turns a click into a decision on a
+ * stage the approver was not shown. The server refuses (409) a stage that is no
+ * longer the one the proposal waits on.
+ */
+interface DecisionSnapshot {
+  verdict: "approved" | "rejected";
+  stageId: string;
+  stage: BeStandardChangeProposalStage | null;
+  cabHistory: BeStandardChangeCabHistory | null | undefined;
+}
+
+/** Said on the page when a decision was refused because the proposal moved on while the dialog was open. */
+const STANDARD_CHANGE_DECISION_STALE_NOTICE =
+  "The proposal changed after you opened it, so your decision was not recorded. Review it again: the page now shows where it stands.";
+
+/**
+ * The `errorCode`s of the two decision refusals that mean the proposal moved on
+ * behind the dialog: the stage named was settled or replaced, or the proposal
+ * left review. The same request would be refused again, so the page closes the
+ * dialog and reads the proposal again. The decision endpoint's other 409s (a
+ * template took the name, the template moved on, a piece of evidence is no
+ * longer a closed change request of the customer) are about the approval
+ * itself: they carry no code and stay in the dialog with the backend's words.
+ */
+const StandardChangeDecisionErrorCode = {
+  /** The proposal is no longer waiting for a decision. */
+  NOT_IN_REVIEW: "standard_change_proposal_not_in_review",
+  /** The stage sent is not the one the proposal now waits on. */
+  STAGE_STALE: "standard_change_decision_stage_stale",
+} as const;
+
+const STALE_DECISION_CODES: ReadonlySet<string> = new Set(Object.values(StandardChangeDecisionErrorCode));
+
+/**
+ * Whether a refused decision was refused because the proposal is no longer what
+ * the dialog was opened on: a 409 naming one of {@link StandardChangeDecisionErrorCode}.
+ * A 409 with no code or another one (an older backend included) stays in the
+ * dialog, which shows the backend's message, as every other refusal does.
+ */
+function isStaleDecisionError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null || (err as { status?: unknown }).status !== 409) return false;
+  const code = backendErrorCode(err);
+  return code !== undefined && STALE_DECISION_CODES.has(code);
+}
+
+/**
+ * What the open stage says when departures from the CAB since submit leave it
+ * fewer people who can still approve than it needs (`cannotReachQuorum`): it
+ * can never be approved as it stands, and nothing ends it on its own. Null when
+ * it can still be approved, or the backend sent no count (an older build).
+ */
+function cannotReachQuorumText(stage: BeStandardChangeProposalStage | null | undefined): string | null {
+  if (!stage?.cannotReachQuorum) return null;
+  const reach = stage.eligibleApprovers ?? 0;
+  const who = reach === 1 ? "1 CAB member" : `${reach} CAB members`;
+  return (
+    `Only ${who} can still approve this stage, which needs ${stage.requiredApprovals}: ` +
+    "members asked have left the CAB since it was submitted, so it cannot be approved as it stands. " +
+    "A CAB member can cancel it, or its proposer can withdraw it and submit a copy, which asks the CAB as it is now."
+  );
+}
+
+/** An approver's Approve / Reject on the stage the proposal waits on; a rejection needs a comment. */
+function DecisionDialog({
+  decision,
+  moved,
+  pending,
+  error,
+  onClose,
+  onDecide,
+}: {
+  /** What the dialog was opened on (null: closed). */
+  decision: DecisionSnapshot | null;
+  /** The page, refetched, no longer offers the caller the stage the dialog was opened on. */
+  moved: boolean;
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onDecide: (comment: string) => void;
+}): JSX.Element {
+  const reject = decision?.verdict === "rejected";
+  const stage = decision?.stage ?? null;
+  const cabHistory = decision?.cabHistory;
+  // From the page as loaded: another member may have authorised since, so it
+  // never promises that nothing will be applied.
+  const required = stage?.requiredApprovals ?? STANDARD_CHANGE_CAB_APPROVALS;
+  const remaining = Math.max(required - (stage?.approvals ?? 0), 1);
+  const approveText =
+    remaining > 1
+      ? `${required} different CAB members must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
+      : `Yours is the last approval needed: authorising applies the template change.`;
+  return (
+    <ReasonDialog
+      open={decision !== null}
+      titleId="std-decision-title"
+      title={reject ? "Reject the proposal" : "Authorise the proposal"}
+      text={
+        reject
+          ? "A rejection ends the proposal: the catalogue is left as it is and the proposal is kept as the record, with your comment."
+          : approveText
+      }
+      label={reject ? "Comment (required)" : "Comment (optional)"}
+      required={reject}
+      helperText={reject ? "Say why, so the proposer can act on it." : undefined}
+      notice={
+        moved || cabHistory ? (
+          <>
+            {moved && (
+              <Alert severity="warning" role="alert" aria-label="Proposal changed">
+                The proposal has changed since you opened this. Your decision is only recorded on the stage you were
+                shown, and is refused if that stage is no longer open: go back and review it again.
+              </Alert>
+            )}
+            {cabHistory && (
+              <Alert severity={cabHistoryOf(cabHistory).rejectionCount > 0 ? "warning" : "info"} role="note" aria-label="CAB history summary">
+                {cabHistorySummary(cabHistory)}
+              </Alert>
+            )}
+          </>
+        ) : undefined
+      }
+      confirmLabel={reject ? "Reject" : "Authorise"}
+      confirmColor={reject ? "error" : "success"}
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onConfirm={onDecide}
+    />
+  );
+}
+
+/** A CAB member ends someone else's open proposal; the reason is required. */
+function CancelDialog({
+  open,
+  number,
+  pending,
+  error,
+  onClose,
+  onCancel,
+}: {
+  open: boolean;
+  number: string;
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onCancel: (reason: string) => void;
+}): JSX.Element {
+  return (
+    <ReasonDialog
+      open={open}
+      titleId="std-cancel-title"
+      title={`Cancel ${number}?`}
+      text={
+        <>
+          For a proposal its proposer has abandoned or can no longer take forward. It is kept as the record with your
+          reason; approvals still waiting are cancelled, and a revision or retirement no longer holds its template.
+        </>
+      }
+      label="Reason (required)"
+      required
+      helperText="Shown to the proposer and on the proposal's record."
+      confirmLabel="Cancel the proposal"
+      confirmColor="error"
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onConfirm={onCancel}
+    />
+  );
+}
+
+/** A yes / no question before a destructive action, answered with "Go back" or the action. */
+function ConfirmDialog({
+  open,
+  titleId,
+  title,
+  text,
+  confirmLabel,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  titleId: string;
+  title: string;
+  text: string;
+  confirmLabel: string;
+  pending?: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  return (
+    <Dialog open={open} onClose={onClose} aria-labelledby={titleId}>
+      <DialogTitle id={titleId}>{title}</DialogTitle>
+      <DialogContent>
+        <DialogContentText>{text}</DialogContentText>
+      </DialogContent>
+      <DialogActions>
+        <Button color="inherit" onClick={onClose}>
+          Go back
+        </Button>
+        <Button variant="contained" color="error" loading={pending} onClick={onConfirm}>
+          {confirmLabel}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/**
+ * One approval stage, named by its own label: its progress and its approvers. A
+ * proposal has one stage now, the CAB's ("CAB Approval"); one decided before may
+ * show the Standard Change Authority's instead, and an earlier one-approval CAB
+ * stage too, numbered in order.
+ */
+function StageApprovers({
+  stage,
+  index,
+  latest,
+  approvers,
+  proposalState,
+}: {
+  stage: BeStandardChangeProposalStage | null;
+  /** Its place among several stages; null when it is the only one. */
+  index: number | null;
+  /** Whether it is the proposal's latest stage, the only one that can still be open. */
+  latest: boolean;
+  approvers: BeStandardChangeProposalApprover[];
+  proposalState: string;
+}): JSX.Element {
+  const label = stage?.label || STANDARD_CHANGE_CAB_STAGE;
+  const status = !stage
+    ? null
+    : stage.decision === "APPROVED"
+      ? { text: "Approved", color: "success" as const }
+      : stage.decision === "REJECTED"
+        ? { text: "Rejected", color: "error" as const }
+        : !latest || !isStandardChangeProposalInReview(proposalState)
+          ? // Ended before the stage was settled (or a later stage replaced it,
+            // as the CAB stage of a proposal returned to draft): it waits for nobody now.
+            {
+              text:
+                latest && proposalState === "cancelled"
+                  ? "Cancelled"
+                  : latest && proposalState === "withdrawn"
+                    ? "Withdrawn"
+                    : "Not decided",
+              color: "default" as const,
+            }
+          : {
+            text:
+              stage.requiredApprovals > 1
+                ? `${stage.approvals} of ${stage.requiredApprovals} approvals`
+                : "Waiting for a decision",
+            color: "info" as const,
+          };
+  // Only the stage the proposal still waits on can fall short; a settled or
+  // abandoned one waits for nobody.
+  const quorumWarning =
+    latest && stage && stage.decision === null && isStandardChangeProposalInReview(proposalState)
+      ? cannotReachQuorumText(stage)
+      : null;
+  return (
+    <Box component="section" aria-label={`${label} approvers`} sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+        <Typography variant="subtitle2">{index === null ? label : `${index + 1}. ${label}`}</Typography>
+        {status && <Chip size="small" variant="outlined" color={status.color} label={status.text} />}
+      </Box>
+      {quorumWarning && (
+        <Alert severity="warning" aria-label="Cannot be approved as it stands">
+          {quorumWarning}
+        </Alert>
+      )}
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+        <TableContainer>
+          <Table size="small" aria-label={`${label} approvers`} sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
+                <TableCell>Approver</TableCell>
+                <TableCell sx={{ width: 130 }}>State</TableCell>
+                <TableCell>Comment</TableCell>
+                <TableCell sx={{ width: 170 }}>Updated</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {approvers.map((a) => (
+                <TableRow key={a.id} selected={a.canDecide}>
+                  <TableCell sx={{ maxWidth: 260, wordBreak: "break-word" }}>
+                    {personLabel(a.approver)}
+                    {a.canDecide && (
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        {" "}
+                        (you)
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Chip size="small" variant="outlined" color={approvalStatusColor(a.state)} label={approvalStatusLabel(a.state)} />
+                  </TableCell>
+                  <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>{a.comments || "—"}</TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(a.updatedOn)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * Who settled a proposal: the CAB (its two-approval "CAB Approval" stage), the
+ * Standard Change Authority on one decided before 2026-11-10, or, on one decided
+ * before that under the oldest flow, the stage named by its own label (its
+ * one-approval "CAB Approval" stage, told apart by the approvals it needed).
+ */
+function settledBy(verb: "Approved" | "Rejected", stage: BeStandardChangeProposalStage | undefined): string {
+  if (!stage || (stage.label === STANDARD_CHANGE_CAB_STAGE && stage.requiredApprovals >= STANDARD_CHANGE_CAB_APPROVALS)) {
+    return `${verb} by the CAB`;
+  }
+  if (stage.label === STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE) return `${verb} by the ${STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE}`;
+  return `${verb} at the ${stage.label} stage`;
+}
+
+/**
+ * Who cancelled someone else's proposal. A CAB member may since 2026-11-10;
+ * before that only a member of the Standard Change Authority could, whatever
+ * stage the proposal had reached (a draft has none, and the oldest flow's
+ * one-approval "CAB Approval" stage was not the CAB's to end). So the latest
+ * stage settles it when it is today's CAB stage or the authority's, and the
+ * date it was cancelled settles the rest.
+ */
+function cancelledBy(latest: BeStandardChangeProposalStage | undefined, decidedOn: string | null): string {
+  const byAuthority = `Cancelled by the ${STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE}`;
+  if (latest?.label === STANDARD_CHANGE_LEGACY_AUTHORITY_STAGE) return byAuthority;
+  if (latest?.label === STANDARD_CHANGE_CAB_STAGE && latest.requiredApprovals >= STANDARD_CHANGE_CAB_APPROVALS) {
+    return "Cancelled by a CAB member";
+  }
+  return decidedOn && decidedOn < STANDARD_CHANGE_CAB_AUTHORISES_SINCE ? byAuthority : "Cancelled by a CAB member";
+}
+
+/** How a final proposal ended, for the decision banner. */
+function decisionHeadline(proposal: BeStandardChangeProposal): string {
+  const stages = proposal.stages ?? [];
+  switch (proposal.state) {
+    case "approved":
+      // The last stage approved is the one that applied it.
+      return settledBy("Approved", stages.filter((s) => s.decision === "APPROVED").pop());
+    case "rejected":
+      return settledBy("Rejected", stages.find((s) => s.decision === "REJECTED"));
+    case "cancelled":
+      return cancelledBy(stages[stages.length - 1], proposal.decidedOn);
+    default:
+      return "Withdrawn by the proposer";
+  }
+}
+
+/**
  * One standard change proposal (`/operations/standard-change-proposals/:id`): a
- * request to the CAB to add a template to the catalogue, revise one or retire one.
- * Its proposer edits a draft here (`canEdit`): the content, generalised with
- * `{{key}}` placeholders, the parameters they need, a live preview and the
- * evidence, then sends it to the CAB. Everybody else (and the proposer once it is
- * submitted) reads it; a CAB member decides on their own row (`canDecide`). A
+ * request to the CAB to add a template to the catalogue,
+ * revise one or retire one. Its proposer edits a draft here (`canEdit`): the
+ * content, generalised with `{{key}}` placeholders, the parameters they need, a
+ * live preview and the evidence, then submits it. Everybody else (and the
+ * proposer once it is submitted) reads it; a CAB member decides on their
+ * own row (`canDecide`), and the second approval applies it. A
  * rejected or withdrawn new-template proposal stays as the record and can be
  * copied into a new one.
  */
+/**
+ * What the CAB said about changes like this one (the proposal's `cabHistory`,
+ * read live by entity-service: its rejections and comments on the source and
+ * evidence change requests, and the customer's CAB-rejected look-alikes). Put
+ * directly above the Approval section, so an approver reads it before the
+ * Authorise / Reject buttons; coloured by what it holds (a rejection is a
+ * warning). It decides nothing.
+ */
+function CabHistorySection({ history, onOpen }: { history: BeStandardChangeCabHistory; onOpen: (id: string) => void }): JSX.Element {
+  const { rejectionCount, commentCount } = cabHistoryOf(history);
+  const empty = rejectionCount === 0 && commentCount === 0;
+  return (
+    <Card
+      component="section"
+      aria-label="CAB history"
+      sx={{
+        p: 2.5,
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        borderLeft: 4,
+        borderColor: rejectionCount > 0 ? "warning.main" : empty ? "divider" : "info.main",
+      }}
+    >
+      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+        CAB history
+      </Typography>
+      {empty ? (
+        <Typography variant="body2" color="text.secondary">
+          {NO_CAB_PUSHBACK}
+        </Typography>
+      ) : (
+        <>
+          <Alert severity={rejectionCount > 0 ? "warning" : "info"}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {cabHistoryHeadline(history)}
+            </Typography>
+            <Typography variant="body2">
+              Read what the CAB said before you decide. A look-alike is one of the customer&apos;s change requests with
+              the same subject that the CAB rejected.
+            </Typography>
+          </Alert>
+          <StandardChangeCabPushback history={history} onOpen={onOpen} memberWord="source or evidence change request" />
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function StandardChangeProposalPage(): JSX.Element {
   const id = useNormalizedIdParam("id");
   const navigate = useNavTransition();
@@ -954,9 +1528,21 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const withdraw = useWithdrawStandardChangeProposal();
   const decide = useDecideStandardChangeProposal();
   const copy = useCreateStandardChangeProposal();
+  const cancel = useCancelStandardChangeProposal();
+  const remove = useDeleteStandardChangeProposal();
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
-  const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [decision, setDecision] = useState<DecisionSnapshot | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  // Why the decision dialog was closed for the approver (the proposal moved on
+  // while it was open). It takes focus once the dialog is gone: the button that
+  // opened the dialog may not be there any more.
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  const staleNoticeRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (staleNotice) staleNoticeRef.current?.focus();
+  }, [staleNotice]);
 
   const openChangeRequest = (crId: string): void =>
     navigate(`/operations/change-requests/${encodeURIComponent(crId)}`, { state: { from: here } });
@@ -1005,13 +1591,41 @@ export default function StandardChangeProposalPage(): JSX.Element {
 
   const editing = proposal.canEdit && proposal.state === "draft";
   const approvers = proposal.approvers ?? [];
-  const myRow = approvers.find((a) => a.canDecide);
-  const canCopy = canWrite && proposal.kind === "new" && (proposal.state === "rejected" || proposal.state === "withdrawn");
+  // A decision names its stage, so a row without one is not offered.
+  const myRow = approvers.find((a) => a.canDecide && !!a.stageId);
+  const stages = proposal.stages ?? [];
+  const myStage = stages.find((st) => st.id === myRow?.stageId) ?? stages[stages.length - 1] ?? null;
+  // One table per stage, oldest first (an older decided proposal may hold a
+  // stage before its last). An answer without stages is one table.
+  const stageGroups =
+    stages.length > 0
+      ? stages.map((st) => ({ stage: st, rows: approvers.filter((a) => a.stageId === st.id) }))
+      : [{ stage: null, rows: approvers }];
+  const canCopy =
+    canWrite &&
+    proposal.kind === "new" &&
+    (proposal.state === "rejected" || proposal.state === "withdrawn" || proposal.state === "cancelled");
+
+  const openDecision = (verdict: DecisionSnapshot["verdict"]): void => {
+    if (!myRow?.stageId) return;
+    setStaleNotice(null);
+    setDecision({ verdict, stageId: myRow.stageId, stage: myStage, cabHistory: proposal.cabHistory });
+  };
+  const decisionMoved = decision !== null && myRow?.stageId !== decision.stageId;
 
   const runWithdraw = (): void => {
     setConfirmWithdraw(false);
     setPageError(null);
     withdraw.mutate(proposal.id, { onError: (err) => setPageError(errorText(err, "Could not withdraw the proposal.")) });
+  };
+
+  const runDelete = (): void => {
+    setConfirmDelete(false);
+    setPageError(null);
+    remove.mutate(proposal.id, {
+      onSuccess: () => navigate(backTarget),
+      onError: (err) => setPageError(errorText(err, "Could not delete the draft.")),
+    });
   };
 
   const runCopy = (): void => {
@@ -1046,7 +1660,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
           <Typography variant="h5">{proposal.name || "Untitled proposal"}</Typography>
           <Typography variant="body2" color="text.secondary">
             {`Proposed by ${personLabel(proposal.proposedBy)} on ${formatDateTime(proposal.createdOn)}`}
-            {proposal.submittedOn ? `; sent to the CAB ${formatDateTime(proposal.submittedOn)}` : ""}
+            {proposal.submittedOn ? `; submitted ${formatDateTime(proposal.submittedOn)}` : ""}
           </Typography>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Typography variant="body2">
@@ -1097,6 +1711,11 @@ export default function StandardChangeProposalPage(): JSX.Element {
               Withdraw
             </Button>
           )}
+          {proposal.canCancel && (
+            <Button variant="outlined" color="error" size="small" startIcon={<XCircle size={16} />} onClick={() => setCancelling(true)}>
+              Cancel proposal
+            </Button>
+          )}
           {canCopy && (
             <Button variant="outlined" size="small" startIcon={<CopyPlus size={16} />} loading={copy.isPending} onClick={runCopy}>
               Copy into a new proposal
@@ -1111,6 +1730,30 @@ export default function StandardChangeProposalPage(): JSX.Element {
         </Alert>
       )}
 
+      {staleNotice && (
+        <Alert ref={staleNoticeRef} severity="warning" role="alert" tabIndex={-1} onClose={() => setStaleNotice(null)}>
+          {staleNotice}
+        </Alert>
+      )}
+
+      {proposal.kind === "retire" && retirementChangeRequestsInNewText(proposal.changeRequestsInNewTotal) && (
+        <Alert severity="warning" role="region" aria-label="Change requests still New">
+          <Typography variant="body2">{retirementChangeRequestsInNewText(proposal.changeRequestsInNewTotal)}</Typography>
+          <Typography variant="body2">
+            {(proposal.changeRequestsInNew ?? []).map((c, i) => (
+              <span key={c.id}>
+                {i > 0 && ", "}
+                <Link component="button" variant="body2" onClick={() => openChangeRequest(c.id)} sx={{ verticalAlign: "baseline" }}>
+                  {c.name || "change request"}
+                </Link>
+              </span>
+            ))}
+            {(proposal.changeRequestsInNewTotal ?? 0) > (proposal.changeRequestsInNew ?? []).length &&
+              ` and ${(proposal.changeRequestsInNewTotal ?? 0) - (proposal.changeRequestsInNew ?? []).length} more`}
+          </Typography>
+        </Alert>
+      )}
+
       {isStandardChangeProposalFinal(proposal.state) && (
         <Alert
           severity={proposal.state === "approved" ? "success" : proposal.state === "rejected" ? "error" : "info"}
@@ -1118,11 +1761,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
           aria-label="Decision"
         >
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {proposal.state === "approved"
-              ? "Approved by the CAB"
-              : proposal.state === "rejected"
-                ? "Rejected by the CAB"
-                : "Withdrawn by the proposer"}
+            {decisionHeadline(proposal)}
             {proposal.decidedOn ? ` on ${formatDateTime(proposal.decidedOn)}` : ""}
             {proposal.decidedBy ? ` (${personLabel(proposal.decidedBy)})` : ""}
           </Typography>
@@ -1150,6 +1789,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
           proposal={proposal}
           onOpenChangeRequest={openChangeRequest}
           onWithdraw={() => setConfirmWithdraw(true)}
+          onDelete={() => setConfirmDelete(true)}
         />
       ) : (
         <>
@@ -1164,6 +1804,9 @@ export default function StandardChangeProposalPage(): JSX.Element {
           </Section>
           {proposal.kind !== "retire" && (
             <Section title="What the template specifies">
+              <Field label="Summary">
+                <Box sx={{ whiteSpace: "pre-wrap" }}>{proposal.summary?.trim() || "—"}</Box>
+              </Field>
               <StandardChangeContentView content={proposal} />
               <Typography variant="subtitle2">Parameters</Typography>
               <StandardChangeParametersTable parameters={proposal.parameters ?? []} />
@@ -1175,92 +1818,113 @@ export default function StandardChangeProposalPage(): JSX.Element {
         </>
       )}
 
+      {proposal.cabHistory && <CabHistorySection history={proposal.cabHistory} onOpen={openChangeRequest} />}
+
       {approvers.length > 0 && (
         <Section
-          title="CAB approval"
+          title="Approval"
           action={
             myRow ? (
               <Box sx={{ display: "flex", gap: 1 }}>
-                <Button size="small" variant="contained" color="success" startIcon={<Check size={16} />} onClick={() => setDecision("approved")}>
-                  Approve
+                <Button size="small" variant="contained" color="success" startIcon={<Check size={16} />} onClick={() => openDecision("approved")}>
+                  Authorise
                 </Button>
-                <Button size="small" variant="outlined" color="error" startIcon={<X size={16} />} onClick={() => setDecision("rejected")}>
+                <Button size="small" variant="outlined" color="error" startIcon={<X size={16} />} onClick={() => openDecision("rejected")}>
                   Reject
                 </Button>
               </Box>
             ) : undefined
           }
         >
-          <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
-            <TableContainer>
-              <Table size="small" aria-label="CAB approvers" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: "action.hover" }}>
-                    <TableCell>Approver</TableCell>
-                    <TableCell sx={{ width: 130 }}>State</TableCell>
-                    <TableCell>Comment</TableCell>
-                    <TableCell sx={{ width: 170 }}>Updated</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {approvers.map((a) => (
-                    <TableRow key={a.id} selected={a.canDecide}>
-                      <TableCell sx={{ maxWidth: 260, wordBreak: "break-word" }}>
-                        {personLabel(a.approver)}
-                        {a.canDecide && (
-                          <Typography component="span" variant="caption" color="text.secondary">
-                            {" "}
-                            (you)
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Chip size="small" variant="outlined" color={approvalStatusColor(a.state)} label={approvalStatusLabel(a.state)} />
-                      </TableCell>
-                      <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>{a.comments || "—"}</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(a.updatedOn)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
+          {/* The rule holds for a proposal still to be decided, not one decided under an older one. */}
+          {(proposal.state === "draft" || isStandardChangeProposalInReview(proposal.state)) && (
+            <Typography variant="body2" color="text.secondary">
+              {STANDARD_CHANGE_APPROVAL_RULE}
+            </Typography>
+          )}
+          {stageGroups.map((g, i) => (
+            <StageApprovers
+              key={g.stage?.id ?? "all"}
+              stage={g.stage}
+              index={stageGroups.length > 1 ? i : null}
+              latest={i === stageGroups.length - 1}
+              approvers={g.rows}
+              proposalState={proposal.state}
+            />
+          ))}
         </Section>
       )}
 
       <DecisionDialog
         decision={decision}
+        moved={decisionMoved}
         pending={decide.isPending}
         error={decide.isError ? errorText(decide.error, "Could not record the decision.") : null}
         onClose={() => {
           setDecision(null);
           decide.reset();
         }}
-        onDecide={(comment) =>
+        onDecide={(comment) => {
+          if (!decision) return;
           decide.mutate(
-            { id: proposal.id, decision: decision!, ...(comment ? { comment } : {}) },
-            { onSuccess: () => setDecision(null) },
-          )
-        }
+            {
+              id: proposal.id,
+              decision: decision.verdict,
+              ...(comment ? { comment } : {}),
+              // The stage the dialog was opened on, never the page's current one:
+              // the decision is refused, not recorded elsewhere, if that stage was
+              // settled or replaced meanwhile.
+              stageId: decision.stageId,
+            },
+            {
+              onSuccess: () => setDecision(null),
+              onError: (err) => {
+                // Sending it again would be refused the same way, and retrying on
+                // whatever the page shows now would decide a stage nobody reviewed:
+                // close, say why, and show the proposal as it is.
+                if (!isStaleDecisionError(err)) return;
+                setDecision(null);
+                decide.reset();
+                setStaleNotice(STANDARD_CHANGE_DECISION_STALE_NOTICE);
+                void refetch({ cancelRefetch: false });
+              },
+            },
+          );
+        }}
       />
 
-      <Dialog open={confirmWithdraw} onClose={() => setConfirmWithdraw(false)} aria-labelledby="std-withdraw-title">
-        <DialogTitle id="std-withdraw-title">Withdraw {proposal.number}?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            The proposal is kept as the record but can no longer be edited or sent to the CAB; any approvals still
-            waiting are cancelled.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button color="inherit" onClick={() => setConfirmWithdraw(false)}>
-            Go back
-          </Button>
-          <Button variant="contained" color="error" onClick={runWithdraw}>
-            Withdraw
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <CancelDialog
+        open={cancelling}
+        number={proposal.number}
+        pending={cancel.isPending}
+        error={cancel.isError ? errorText(cancel.error, "Could not cancel the proposal.") : null}
+        onClose={() => {
+          setCancelling(false);
+          cancel.reset();
+        }}
+        onCancel={(reason) => cancel.mutate({ id: proposal.id, reason }, { onSuccess: () => setCancelling(false) })}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        titleId="std-delete-title"
+        title={`Delete ${proposal.number}?`}
+        text="The draft has never been submitted, so it is deleted with everything in it. This cannot be undone."
+        confirmLabel="Delete draft"
+        pending={remove.isPending}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={runDelete}
+      />
+
+      <ConfirmDialog
+        open={confirmWithdraw}
+        titleId="std-withdraw-title"
+        title={`Withdraw ${proposal.number}?`}
+        text="The proposal is kept as the record but can no longer be edited or approved; any approvals still waiting are cancelled."
+        confirmLabel="Withdraw"
+        onClose={() => setConfirmWithdraw(false)}
+        onConfirm={runWithdraw}
+      />
     </Box>
   );
 }

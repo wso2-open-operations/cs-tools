@@ -861,10 +861,11 @@ func main() {
 	route("DELETE /team-schedule/case-alerts/settings/routes/{routeId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertRoute)
 	route("PUT /team-schedule/case-alerts/settings/values", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertValues)
 	route("DELETE /team-schedule/case-alerts/settings/values/{valueId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertValue)
-	// Operations > Change requests > Standard changes: the CAB-approved standard change templates and the
+	// Operations > Change requests > Standard changes: the approved standard change templates and the
 	// proposals that create, revise or retire them. Reading is for whoever sees
 	// Operations; every write is checked again by entity-service (the proposer edits
-	// and submits, a CAB member decides, the owner or the CAB suspends).
+	// and submits, two CAB members decide, the owner or the CAB suspends, only the
+	// CAB resumes).
 	standardChangeHandler := handler.NewStandardChangeHandler(customerEntityClient)
 	route("POST /standard-change-templates/search", handler.PermViewOperations, standardChangeHandler.SearchTemplates)
 	route("GET /standard-change-templates/{id}", handler.PermViewOperations, standardChangeHandler.GetTemplate)
@@ -879,6 +880,13 @@ func main() {
 	route("POST /standard-change-proposals/{id}/submit", handler.PermWrite, standardChangeHandler.SubmitProposal)
 	route("POST /standard-change-proposals/{id}/withdraw", handler.PermWrite, standardChangeHandler.WithdrawProposal)
 	route("POST /standard-change-proposals/{id}/decision", handler.PermWrite, standardChangeHandler.DecideProposal)
+	route("POST /standard-change-proposals/{id}/cancel", handler.PermWrite, standardChangeHandler.CancelProposal)
+	route("DELETE /standard-change-proposals/{id}", handler.PermWrite, standardChangeHandler.DeleteProposal)
+	// What a customer's completed change requests suggest as standard changes, and
+	// their dismissals (entity-service computes them; the BFF checks shapes).
+	route("GET /standard-change-suggestions", handler.PermViewOperations, standardChangeHandler.GetSuggestions)
+	route("POST /standard-change-suggestions/dismissals", handler.PermWrite, standardChangeHandler.DismissSuggestion)
+	route("DELETE /standard-change-suggestions/dismissals/{id}", handler.PermWrite, standardChangeHandler.RestoreSuggestion)
 
 	// Operations > Runbooks: the alert-name to runbook catalog new incidents are matched against.
 	runbookHandler := handler.NewRunbookHandler(customerEntityClient)

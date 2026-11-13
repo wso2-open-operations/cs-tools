@@ -1055,6 +1055,12 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 		} else {
 			cr.StandardChange = sc
 		}
+		// The change request it was cloned from: staff only, best-effort too.
+		if src, err := readChangeRequestClonedFrom(ctx, r.db, id); err != nil {
+			slog.WarnContext(ctx, "get change request: clone source lookup failed", "changeRequestId", id, "error", err)
+		} else {
+			cr.ClonedFrom = src
+		}
 	}
 
 	// While the customer group's review request is pending (a live "Customer
@@ -1864,6 +1870,11 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	}
 	if effectiveState != nil {
 		addCR("state = $%d::change_request_state_enum", strings.ToUpper(string(*effectiveState)))
+		// Entering Closed / Rollback records when and by whom (the CASE reads the
+		// state before this UPDATE, so a resend keeps the first stamp).
+		crSets = append(crSets, changeRequestClosureSets(fmt.Sprintf("$%d", crIdx-1), fmt.Sprintf("$%d", crIdx)))
+		crArgs = append(crArgs, actorEmail)
+		crIdx++
 	}
 	if req.Type != nil {
 		enumValue, ok := changeRequestTypeToChangeModel[*req.Type]
@@ -2057,6 +2068,15 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	// Join rows for the scope fields, then the journal entries.
 	if err := applyChangeRequestLinkPlan(ctx, tx, id, linkPlan); err != nil {
 		return "", fmt.Errorf("patch change request: %w", err)
+	}
+	// A change raised from a standard change template that names deployment
+	// types keeps at least one deployment, all of those types (the single
+	// deploymentId an older client sends included). Either field makes the PATCH
+	// read the gates (changeRequestPatchNeedsGate), so templateVersionID is known.
+	if gates.templateVersionID != nil && ((linkPlan != nil && linkPlan.writeDeployments) || req.DeploymentID != nil) {
+		if err := checkStandardChangeDeployments(ctx, tx, id, *gates.templateVersionID); err != nil {
+			return "", err
+		}
 	}
 	if req.Comment != nil {
 		if err := insertChangeRequestJournalEntry(ctx, tx, id, "COMMENT", actorEmail, *req.Comment); err != nil {
@@ -2370,7 +2390,7 @@ func provisionApprovalStage(ctx context.Context, tx pgx.Tx, workItemID string, a
 	if err != nil {
 		return false, err
 	}
-	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, checkpoint.Label, pool, creatorIDs); err != nil {
+	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, checkpoint.Label, 1, pool, creatorIDs); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -2384,13 +2404,15 @@ func provisionApprovalStage(ctx context.Context, tx pgx.Tx, workItemID string, a
 //
 // checkpoint_label (migration 0179) records which checkpoint this is
 // explicitly; GetChangeRequestApprovals prefers it over the ordinal heuristic.
-func insertApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail, label string, pool approvalPool, creatorIDs map[string]bool) error {
+// required is how many different people must approve the stage
+// (required_approvals, migration 0287): 1 for every change request stage.
+func insertApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail, label string, required int, pool approvalPool, creatorIDs map[string]bool) error {
 	var stageID string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, checkpoint_label)
-		 VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, NULLIF($3::text, '')::uuid, $4)
+		`INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, checkpoint_label, required_approvals)
+		 VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, NULLIF($3::text, '')::uuid, $4, $5)
 		 RETURNING id`,
-		actorEmail, workItemID, pool.groupID, label).Scan(&stageID); err != nil {
+		actorEmail, workItemID, pool.groupID, label, required).Scan(&stageID); err != nil {
 		return fmt.Errorf("patch change request: create approval stage: %w", err)
 	}
 
@@ -2448,7 +2470,7 @@ const createChangeRequestPortalQuery = `
 			start_on, end_on, requested_by_user_id, customer_group_id,
 			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration,
 			customer_approval_required, customer_review_required, category,
-			impact_description, rollback_process, implementation_deviation
+			impact_description, rollback_process, implementation_deviation, cloned_from_change_request_id
 		)
 		SELECT id, 'NEW'::change_request_state_enum, $5::uuid, $6::uuid, $7::change_request_impact_enum, $8::change_request_risk_enum,
 		       $9::change_request_priority_enum, $10::change_request_change_model_enum,
@@ -2456,7 +2478,7 @@ const createChangeRequestPortalQuery = `
 		       $16::text::timestamptz, $17::text::timestamptz, $18::uuid, $19::uuid,
 		       $20, $21, $22, $23, COALESCE($25::boolean, false), COALESCE($26::boolean, false),
 		       $30::change_request_category_enum,
-		       $13, $14, $31
+		       $13, $14, $31, $32::uuid
 		FROM inserted_work_item
 		RETURNING id
 	)
@@ -2495,16 +2517,17 @@ func changeRequestCreateCategory(req domain.CreateChangeRequestRequest) (*string
 // createChangeRequestWithScope is the part of both create paths that is not
 // the insert itself: inside one transaction it validates and derives the
 // customer-scope selection (project, deployments, environments, deployment
-// products -- change_request_links.go), runs insert (which writes the
-// work_item/change_request rows, project, the first deployment/deployed
-// product and the category), writes the three join tables, and appends the
+// products -- change_request_links.go) and the clone source, runs insert (which
+// writes the work_item/change_request rows, project, the first
+// deployment/deployed product, the category and the clone source), writes the
+// three join tables, and appends the
 // "Additional comments" / "Work notes" journal entries as comment rows. All or
 // nothing: a refused combination leaves no change request behind.
 func (r *changeRequestRepo) createChangeRequestWithScope(
 	ctx context.Context,
 	req domain.CreateChangeRequestRequest,
 	createdBy string,
-	insert func(ctx context.Context, tx pgx.Tx, projectID, deploymentID, deployedProductID, category *string) (createdChangeRequestRow, error),
+	insert func(ctx context.Context, tx pgx.Tx, projectID, deploymentID, deployedProductID, category, cloneSourceID *string) (createdChangeRequestRow, error),
 ) (createdChangeRequestRow, error) {
 	if err := RejectRemovedCreateFields(req); err != nil {
 		return createdChangeRequestRow{}, err
@@ -2527,7 +2550,11 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 		if links.projectID != "" {
 			projectID = &links.projectID
 		}
-		row, err := insert(ctx, tx, projectID, firstOrNil(links.deploymentIDs()), firstOrNil(links.productIDs()), category)
+		cloneSource, err := checkCloneSource(ctx, tx, req.ClonedFromChangeRequestID)
+		if err != nil {
+			return createdChangeRequestRow{}, err
+		}
+		row, err := insert(ctx, tx, projectID, firstOrNil(links.deploymentIDs()), firstOrNil(links.productIDs()), category, cloneSource)
 		if err != nil {
 			return createdChangeRequestRow{}, err
 		}
@@ -2552,6 +2579,9 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 		// when the template stopped being usable since (change_request_standard_change.go).
 		if req.StandardChangeTemplateVersionID != nil {
 			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, projectID, req.StandardChangeParameters); err != nil {
+				return createdChangeRequestRow{}, err
+			}
+			if err := checkStandardChangeDeployments(ctx, tx, row.id, *req.StandardChangeTemplateVersionID); err != nil {
 				return createdChangeRequestRow{}, err
 			}
 		}
@@ -2599,7 +2629,7 @@ func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.
 	changeModel := ptrString(changeRequestTypeToChangeModel[*req.Type])
 	impact, risk, priority := changeRequestEnumArgs(req)
 
-	row, err := r.createChangeRequestWithScope(ctx, req, createdBy, func(ctx context.Context, tx pgx.Tx, projectID, deploymentID, deployedProductID, category *string) (createdChangeRequestRow, error) {
+	row, err := r.createChangeRequestWithScope(ctx, req, createdBy, func(ctx context.Context, tx pgx.Tx, projectID, deploymentID, deployedProductID, category, cloneSourceID *string) (createdChangeRequestRow, error) {
 		var out createdChangeRequestRow
 		err := tx.QueryRow(ctx, createChangeRequestPortalQuery,
 			createdBy, req.Subject, req.Description, req.AssignedEngineerID,
@@ -2609,7 +2639,7 @@ func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.
 			req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
 			req.GroupID, req.CustomerApprovalRequired, req.CustomerReviewRequired,
 			projectID, deploymentID, deployedProductID, category,
-			normalizeImplementationDeviation(req.ImplementationDeviation),
+			normalizeImplementationDeviation(req.ImplementationDeviation), cloneSourceID,
 		).Scan(&out.id, &out.number, &out.subject, &out.createdOn, &out.updatedOn, &out.createdBy)
 		return out, err
 	})
@@ -2684,7 +2714,7 @@ const createChangeRequestFromServiceNowQuery = `
 			start_on, end_on, requested_by_user_id, customer_group_id,
 			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration,
 			customer_approval_required, customer_review_required, category,
-			impact_description, rollback_process, implementation_deviation
+			impact_description, rollback_process, implementation_deviation, cloned_from_change_request_id
 		)
 		VALUES (
 			$1, 'NEW'::change_request_state_enum, $7::uuid, $8::uuid, $9::change_request_impact_enum, $10::change_request_risk_enum,
@@ -2693,7 +2723,7 @@ const createChangeRequestFromServiceNowQuery = `
 			$18::text::timestamptz, $19::text::timestamptz, $20::uuid, $21::uuid,
 			$22, $23, $24, $25, COALESCE($27::boolean, false), COALESCE($28::boolean, false),
 			$32::change_request_category_enum,
-			$15, $16, $33
+			$15, $16, $33, $34::uuid
 		)
 		RETURNING id
 	)
@@ -2736,7 +2766,7 @@ func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Contex
 	// whatever identity happened to be on ctx. The project, if any, is the one
 	// the caller selected on the form (validated in the same transaction).
 	ctx = WithSystemIdentity(ctx)
-	row, err := r.createChangeRequestWithScope(ctx, req, createdBy, func(ctx context.Context, tx pgx.Tx, projectID, deploymentID, deployedProductID, category *string) (createdChangeRequestRow, error) {
+	row, err := r.createChangeRequestWithScope(ctx, req, createdBy, func(ctx context.Context, tx pgx.Tx, projectID, deploymentID, deployedProductID, category, cloneSourceID *string) (createdChangeRequestRow, error) {
 		var out createdChangeRequestRow
 		err := tx.QueryRow(ctx, createChangeRequestFromServiceNowQuery,
 			id, createdBy,
@@ -2747,7 +2777,7 @@ func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Contex
 			req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
 			req.GroupID, req.CustomerApprovalRequired, req.CustomerReviewRequired,
 			projectID, deploymentID, deployedProductID, category,
-			normalizeImplementationDeviation(req.ImplementationDeviation),
+			normalizeImplementationDeviation(req.ImplementationDeviation), cloneSourceID,
 		).Scan(&out.id, &out.number, &out.subject, &out.createdOn, &out.updatedOn, &out.createdBy)
 		return out, err
 	})
@@ -3388,7 +3418,7 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 // uses (answerCustomerStageViaPatch), so both mechanisms record the same stage
 // rows, move the state the same way and stamp the same flags.
 func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverUserID, decision, actorEmail string) (string, error) {
-	// The approval tables also hold the CAB stage of a standard change proposal
+	// The approval tables also hold the approval stages of a standard change proposal
 	// (another work item type, decided only through its own route, which records
 	// the outcome on the proposal): never decided here.
 	if err := refuseOtherWorkItemType(ctx, tx, id); err != nil {
@@ -3510,7 +3540,7 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 				// The customer group's answer: Customer Approval ->
 				// Scheduled (customer approval recorded), Customer Review
 				// -> Closed (customer review recorded).
-				if _, err := applyCustomerStageOutcome(ctx, tx, id, customerStageSpecForKind(stageKind), currentState.String, true); err != nil {
+				if _, err := applyCustomerStageOutcome(ctx, tx, id, customerStageSpecForKind(stageKind), currentState.String, true, actorEmail); err != nil {
 					return "", err
 				}
 			}
@@ -3546,7 +3576,7 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 					return "", fmt.Errorf("decide change request approval: check current state: %w", err)
 				}
 				if currentState.Valid {
-					if _, err := applyCustomerStageOutcome(ctx, tx, id, spec, currentState.String, false); err != nil {
+					if _, err := applyCustomerStageOutcome(ctx, tx, id, spec, currentState.String, false, actorEmail); err != nil {
 						return "", err
 					}
 				}

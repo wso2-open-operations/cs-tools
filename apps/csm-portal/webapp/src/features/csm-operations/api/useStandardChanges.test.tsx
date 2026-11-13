@@ -30,6 +30,7 @@ vi.mock("@api/backend/client", () => ({
 
 import {
   STANDARD_CHANGES_KEY,
+  SUGGESTIONS_STALE_TIME_MS,
   useClearStandardChangeTemplateReview,
   useCreateStandardChangeProposal,
   useDecideStandardChangeProposal,
@@ -43,6 +44,7 @@ import {
   useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeProposals,
   useSearchStandardChangeTemplates,
+  useStandardChangeSuggestions,
   useSubmitStandardChangeProposal,
   useSuspendStandardChangeTemplate,
   useUpdateStandardChangeProposal,
@@ -125,7 +127,7 @@ describe("standard change reads", () => {
 
   it("searches proposals with the body as given", async () => {
     const client = newClient();
-    const body = { awaitingMyDecision: true, states: ["cab_review" as const], pagination: { offset: 0, limit: 20 } };
+    const body = { awaitingMyDecision: true, states: ["authority_review" as const], pagination: { offset: 0, limit: 20 } };
     const { result } = renderHook(() => useSearchStandardChangeProposals(body), { wrapper: wrapper(client) });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/search", body);
@@ -214,6 +216,39 @@ describe("standard change reads", () => {
     expect(result.current.nothing.fetchStatus).toBe("idle");
     expect(getMock.mock.calls.map((c) => c[0]).sort()).toEqual(["/projects/proj-1", "/projects/proj-2"]);
   });
+
+  it("keeps the suggestions for five minutes, under the standard changes key", async () => {
+    expect(SUGGESTIONS_STALE_TIME_MS).toBe(5 * 60_000);
+    getMock.mockResolvedValue({ suggestions: [], criteria: {}, scanned: {} });
+    const client = newClient();
+    const first = renderHook(() => useStandardChangeSuggestions({ accountId: "acct-1" }), { wrapper: wrapper(client) });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    first.unmount();
+    // Coming back to Suggested reads the cache.
+    const again = renderHook(() => useStandardChangeSuggestions({ accountId: "acct-1" }), { wrapper: wrapper(client) });
+    await waitFor(() => expect(again.result.current.isSuccess).toBe(true));
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock).toHaveBeenCalledWith("/standard-change-suggestions?accountId=acct-1");
+    const cached = client.getQueryCache().findAll({ queryKey: STANDARD_CHANGES_KEY });
+    expect(cached.some((q) => q.queryKey.includes("suggestions"))).toBe(true);
+    // A write's invalidation of the standard changes key still refreshes it.
+    await act(() => client.invalidateQueries({ queryKey: STANDARD_CHANGES_KEY }));
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("asks for one page of the suggestions, each page its own cache entry", async () => {
+    getMock.mockResolvedValue({ suggestions: [], total: 0, limit: 20, offset: 0, criteria: {}, scanned: {} });
+    const client = newClient();
+    const { result } = renderHook(
+      () => ({ first: useStandardChangeSuggestions({ limit: 20 }), second: useStandardChangeSuggestions({ limit: 20, offset: 20 }) }),
+      { wrapper: wrapper(client) },
+    );
+    await waitFor(() => expect(result.current.second.isSuccess).toBe(true));
+    expect(getMock.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "/standard-change-suggestions?limit=20",
+      "/standard-change-suggestions?limit=20&offset=20",
+    ]);
+  });
 });
 
 describe("standard change writes", () => {
@@ -231,9 +266,9 @@ describe("standard change writes", () => {
   it.each([
     ["resume", useResumeStandardChangeTemplate, "/standard-change-templates/tpl-1/resume"],
     ["clear the review flag of", useClearStandardChangeTemplateReview, "/standard-change-templates/tpl-1/clear-review"],
-  ] as const)("posts to %s a template, with no body, and refreshes every standard change query", async (_n, hook, path) => {
-    const keys = await run(hook, "tpl-1");
-    expect(postEmptyMock).toHaveBeenCalledWith(path);
+  ] as const)("posts to %s a template with the note, trimmed, and refreshes every standard change query", async (_n, hook, path) => {
+    const keys = await run(hook, { id: "tpl-1", note: "  Root cause fixed \n" });
+    expect(postMock).toHaveBeenCalledWith(path, { note: "Root cause fixed" });
     expect(keys).toContainEqual([...STANDARD_CHANGES_KEY]);
   });
 
@@ -275,8 +310,8 @@ describe("standard change writes", () => {
   });
 
   it("posts a decision without the id in the body", async () => {
-    await run(useDecideStandardChangeProposal, { id: "scp-1", decision: "rejected" as const, comment: "Too risky" });
-    expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/scp-1/decision", { decision: "rejected", comment: "Too risky" });
+    await run(useDecideStandardChangeProposal, { id: "scp-1", decision: "rejected" as const, comment: "Too risky", stageId: "st-1" });
+    expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/scp-1/decision", { decision: "rejected", comment: "Too risky", stageId: "st-1" });
   });
 
   it("refreshes after a refused write too, and hands the error to the caller", async () => {

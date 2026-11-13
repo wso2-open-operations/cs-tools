@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   proposalCount: vi.fn(),
   createProposal: vi.fn(),
   customerSearch: vi.fn(),
+  suggestions: vi.fn(),
 }));
 
 vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () => mocks.access }));
@@ -44,7 +45,12 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useCreateStandardChangeProposal: () => ({ mutate: mocks.createProposal, isPending: false, isError: false, reset: vi.fn() }),
   // The customer filter's type-ahead (POST /accounts/search), as the real AsyncEntitySelect calls it.
   useSearchStandardChangeCustomersForSelect: (query: string, enabled: boolean) => mocks.customerSearch(query, enabled),
+  useStandardChangeSuggestions: (query: unknown) => mocks.suggestions(query),
+  useUpdateStandardChangeProposal: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissStandardChangeSuggestion: () => ({ mutate: vi.fn(), isPending: false }),
+  useRestoreStandardChangeSuggestion: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({ useErrorBanner: () => ({ showError: vi.fn() }) }));
 
 import StandardChangesTab from "@features/csm-operations/components/StandardChangesTab";
 import { standardChangesShow } from "@features/csm-operations/utils/standardChanges";
@@ -77,7 +83,7 @@ const PROPOSALS = [
     id: "scp-1",
     number: "SCP0000001",
     kind: "new",
-    state: "cab_review",
+    state: "authority_review",
     name: "Rotate a TLS certificate",
     customer: { id: "acct-2", name: "Other Corp" },
     template: null,
@@ -128,7 +134,7 @@ const count = (n: number): CountResult => ({ data: n, isPending: false, isSucces
 const PENDING: CountResult = { isPending: true, isSuccess: false, isError: false };
 const FAILED: CountResult = { isPending: false, isSuccess: false, isError: true };
 
-/** What the two counts answer: proposals awaiting my CAB decision, and my drafts. */
+/** What the two counts answer: proposals awaiting my authorisation, and my drafts. */
 function counts(awaiting: CountResult, drafts: CountResult): void {
   mocks.proposalCount.mockImplementation((filter: Record<string, unknown>) =>
     filter.awaitingMyDecision ? awaiting : drafts,
@@ -214,16 +220,31 @@ describe("StandardChangesTab — catalogue", () => {
     });
   });
 
-  it("has Templates | Proposals beside the search, on Templates, and nothing else in a strip of its own", () => {
+  it("has Templates | Proposals | Suggested beside the search, on Templates, and nothing else in a strip of its own", () => {
     renderTab();
-    const show = screen.getByRole("group", { name: "Templates or proposals" });
-    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Templates", "Proposals"]);
+    const show = screen.getByRole("group", { name: "Templates, proposals or suggestions" });
+    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Templates", "Proposals", "Suggested"]);
     expect(within(show).getByRole("button", { name: "Templates" })).toHaveAttribute("aria-pressed", "true");
     expect(within(show).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Standard change proposals" })).not.toBeInTheDocument();
     // The proposals' scope select keeps "Show"; the toggle has a name of its own.
     expect(screen.queryByRole("group", { name: "Show" })).not.toBeInTheDocument();
+  });
+
+  it("shows the suggestions on show=suggested, and Suggested switches to them", () => {
+    mocks.suggestions.mockReturnValue({
+      data: { suggestions: [], criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 }, scanned: { changeRequests: 0, clusters: 0, eligible: 0, dismissed: 0 } },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Suggested" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/operations/change-requests?view=standard&show=suggested");
+    expect(screen.getByRole("table", { name: "Suggested standard changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Standard change templates" })).not.toBeInTheDocument();
   });
 
   it("opens the old ?view=catalogue link on the catalogue", () => {
@@ -310,7 +331,7 @@ describe("StandardChangesTab — proposals", () => {
     const row = within(screen.getByRole("table", { name: "Standard change proposals" })).getAllByRole("row")[1]!;
     expect(row).toHaveTextContent("SCP0000001");
     expect(row).toHaveTextContent("New template");
-    expect(row).toHaveTextContent("CAB review");
+    expect(row).toHaveTextContent("Awaiting CAB approval");
     expect(row).toHaveTextContent("Jane Doe");
   });
 
@@ -327,6 +348,20 @@ describe("StandardChangesTab — proposals", () => {
       "All proposals",
       "Proposed by me",
       "Awaiting my decision",
+    ]);
+  });
+
+  it("offers the proposal states, one review state among them: the CAB's", () => {
+    renderTab(PROPOSALS_VIEW);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "State" }));
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Any state",
+      "Draft",
+      "Awaiting CAB approval",
+      "Approved",
+      "Rejected",
+      "Withdrawn",
+      "Cancelled",
     ]);
   });
 
@@ -348,7 +383,9 @@ describe("StandardChangesTab — proposals", () => {
   it.each([
     ["&scope=awaiting", { awaitingMyDecision: true }, "Awaiting my decision", "Any state"],
     ["&scope=mine&state=draft", { proposedByMe: true, states: ["draft"] }, "Proposed by me", "Draft"],
-    ["&scope=all&state=cab_review", { states: ["cab_review"] }, "All proposals", "CAB review"],
+    ["&scope=all&state=authority_review", { states: ["authority_review"] }, "All proposals", "Awaiting CAB approval"],
+    // CAB review is no longer a state: an old link's filter is dropped.
+    ["&state=cab_review", {}, "All proposals", "Any state"],
     ["&scope=nonsense&state=open", {}, "All proposals", "Any state"],
   ])("reads its filters from a link (%s)", (query, payload, scopeLabel, stateLabel) => {
     renderTab(`${PROPOSALS_VIEW}${query}`);
@@ -384,7 +421,7 @@ describe("StandardChangesTab — proposals", () => {
 });
 
 describe("StandardChangesTab — what needs your attention", () => {
-  it("asks for the proposals awaiting my CAB decision and my own drafts", () => {
+  it("asks for the proposals awaiting my authorisation and my own drafts", () => {
     renderTab();
     expect(mocks.proposalCount).toHaveBeenCalledWith({ awaitingMyDecision: true });
     expect(mocks.proposalCount).toHaveBeenCalledWith({ proposedByMe: true, states: ["draft"] });
@@ -394,15 +431,15 @@ describe("StandardChangesTab — what needs your attention", () => {
     counts(count(0), count(0));
     renderTab();
     expect(attention()).not.toBeInTheDocument();
-    expect(screen.queryByText(/your CAB decision|of yours/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/your decision|of yours/)).not.toBeInTheDocument();
   });
 
   it("says both, each a link to the proposals filtered to it", () => {
     counts(count(2), count(1));
     renderTab();
     const line = attention()!;
-    expect(line).toHaveTextContent("2 proposals await your CAB decision · 1 draft of yours");
-    expect(within(line).getByRole("link", { name: "2 proposals await your CAB decision" })).toHaveAttribute(
+    expect(line).toHaveTextContent("2 proposals await your decision · 1 draft of yours");
+    expect(within(line).getByRole("link", { name: "2 proposals await your decision" })).toHaveAttribute(
       "href",
       `${PROPOSALS_VIEW}&scope=awaiting`,
     );
@@ -415,7 +452,7 @@ describe("StandardChangesTab — what needs your attention", () => {
   it("keeps the change request list's filters in its links", () => {
     counts(count(2), count(1));
     renderTab(`${CATALOGUE}&crQ=gateway`);
-    expect(screen.getByRole("link", { name: "2 proposals await your CAB decision" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "2 proposals await your decision" })).toHaveAttribute(
       "href",
       `${PROPOSALS_VIEW}&scope=awaiting&crQ=gateway`,
     );
@@ -428,7 +465,7 @@ describe("StandardChangesTab — what needs your attention", () => {
   it("says only what applies, in the singular or plural", () => {
     counts(count(1), count(0));
     renderTab();
-    expect(attention()).toHaveTextContent(/^1 proposal awaits your CAB decision$/);
+    expect(attention()).toHaveTextContent(/^1 proposal awaits your decision$/);
   });
 
   it("says only my drafts when nothing awaits my decision", () => {
@@ -441,7 +478,7 @@ describe("StandardChangesTab — what needs your attention", () => {
   it("opens the filtered proposals from a link", () => {
     counts(count(2), count(1));
     renderTab();
-    fireEvent.click(screen.getByRole("link", { name: "2 proposals await your CAB decision" }));
+    fireEvent.click(screen.getByRole("link", { name: "2 proposals await your decision" }));
     expect(currentUrl()).toBe(`${PROPOSALS_VIEW}&scope=awaiting`);
     expect(lastProposalPayload()).toEqual({ awaitingMyDecision: true, pagination: { offset: 0, limit: 20 } });
     expect(screen.getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
@@ -481,19 +518,65 @@ describe("StandardChangesTab — what needs your attention", () => {
 });
 
 describe("StandardChangesTab — Propose a standard change", () => {
-  it("starts an empty new proposal and opens it", () => {
+  /** Opens the dialog and fills in the name and the customer. */
+  async function fillDialog(name: string): Promise<HTMLElement> {
+    fireEvent.click(screen.getByRole("button", { name: /propose a standard change/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Propose a standard change" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /name/i }), { target: { value: name } });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: /customer/i }), { target: { value: "Oth" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Other Corp" }));
+    return dialog;
+  }
+
+  it("asks for the name and the customer before any draft exists, then starts it and opens it", async () => {
     renderTab();
     fireEvent.click(screen.getByRole("button", { name: /propose a standard change/i }));
-    expect(mocks.createProposal).toHaveBeenCalledWith({ kind: "new" }, expect.anything());
+    const dialog = await screen.findByRole("dialog", { name: "Propose a standard change" });
+    const start = within(dialog).getByRole("button", { name: "Start the draft" });
+    expect(start).toBeDisabled();
+    expect(mocks.createProposal).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /name/i }), { target: { value: "  Restart a gateway  " } });
+    expect(start).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("combobox", { name: /customer/i }), { target: { value: "Oth" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Other Corp" }));
+    fireEvent.click(start);
+    expect(mocks.createProposal).toHaveBeenCalledWith(
+      { kind: "new", name: "Restart a gateway", accountId: "acct-2" },
+      expect.anything(),
+    );
     mocks.createProposal.mock.calls[0]![1].onSuccess({ id: "scp-9" });
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-9", {
       state: { from: CATALOGUE },
     });
   });
 
-  it("is offered from the proposals view too, with Back returning there", () => {
+  it("lists the customer's templates, so a change one already covers is revised instead", async () => {
+    renderTab();
+    const dialog = await fillDialog("Rotate certs");
+    expect(mocks.templateSearch).toHaveBeenCalledWith({ accountId: "acct-2", pagination: { offset: 0, limit: 8 } });
+    const listed = within(dialog).getByRole("region", { name: "Other Corp's templates" });
+    fireEvent.click(within(listed).getByRole("button", { name: "STD0000001 Rotate a TLS certificate" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", { state: { from: CATALOGUE } });
+    expect(mocks.createProposal).not.toHaveBeenCalled();
+  });
+
+  it("does not show the previous customer's templates while the chosen one's load", async () => {
+    renderTab();
+    mocks.templateSearch.mockImplementation((payload: { accountId?: string }) => ({
+      data: { templates: TEMPLATES, total: 2, limit: 8, offset: 0 },
+      isPlaceholderData: !!payload.accountId,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }));
+    const dialog = await fillDialog("Rotate certs");
+    expect(within(dialog).queryByRole("region", { name: /templates$/ })).not.toBeInTheDocument();
+  });
+
+  it("is offered from the proposals view too, with Back returning there", async () => {
     renderTab(PROPOSALS_VIEW);
-    fireEvent.click(screen.getByRole("button", { name: /propose a standard change/i }));
+    const dialog = await fillDialog("Restart a gateway");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start the draft" }));
     mocks.createProposal.mock.calls[0]![1].onSuccess({ id: "scp-9" });
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-9", {
       state: { from: PROPOSALS_VIEW },

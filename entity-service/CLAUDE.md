@@ -103,6 +103,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription` | Project type names (exact match) that list a case, service request or security report analysis (each row carries `type`) in `GET /reports/long-open-cases?variant=open-before-yesterday` whatever its product. Blank falls back to the default |
 | `OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES` | no | `Cloud Support` | Project type names that list a case in that variant only when the case has a product set. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` | no | `12` / `5` / `90` / `50` | Thresholds the daily refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. A value outside its range (1-60 months, 1-1000 closes, 1-100 percent) or not a whole number takes the default, with a warning. Starting values, to be measured on production data |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -5173,6 +5174,69 @@ the same `validChangeRequestSortField`/`validChangeRequestSortOrder` maps
 value is a 400 on both data sources instead of silently falling back to
 `created_on DESC` only on Postgres.
 
+### Completion: `closed_on` / `closed_by_user_id` (migration 0288)
+
+Both columns (0043) were written only by the previous system's sync, never by this service, so
+a change request completed in the CSM had no completion time (the `closedStartDate` /
+`closedEndDate` search filters matched nothing for it). Every writer that moves a change request
+INTO **Closed or Rollback** now stamps them, in the same UPDATE as the state
+(`changeRequestClosureSets`, `change_request_closure.go`, the CASE shape of `case_repo.go`'s
+`closed_on`): the PATCH path (`patchChangeRequestTx`, the actor's `"user"` by email), the
+customer stage's outcome (`applyCustomerStageOutcome`: the customer who answered the review
+closes or rolls back the change) and the GitHub sync (`SetState`: a time, no closer). Rollback
+counts because it is a completion too (a failed one), and both states are final, so nothing
+clears the stamp; a resend of the state keeps the first one; Canceled stamps nothing. An actor
+email with no `"user"` row records no closer.
+
+`0288_change_request_closed_on_backfill.sql` fills the rows completed before this from
+`event_outbox` (0051): the first outbox row whose `state` went from any other state to Closed /
+Rollback gives `closed_on` (its `occurred_on`, the writing transaction's `NOW()`); the closer is
+`work_item.updated_by` only while the work item still carries that exact `updated_on` (the PATCH
+stamps both in the same transaction; anything written since leaves no closer rather than a
+guess). Rows with `closed_on` already set, or with no recorded transition, are left alone;
+re-running it writes nothing else.
+- **Run it as internal.** `change_request` and `work_item` have FORCE row-level security
+  (100006, 100008), so a migrating role without BYPASSRLS that is not flagged internal would see no
+  row and update none, with no error, and the file would be recorded as applied. It brackets the
+  UPDATE with `set_config('app.is_internal', 'true' / '', false)` as 0193 does (session-level: a
+  migration runs in autocommit).
+- **Post-deploy step: run it again once the new code is fully rolled out.** `make migrate` runs
+  before the rollout, so change requests completed by pods still on the old code meanwhile get no
+  `closed_on`, and `make migrate` never runs the recorded file again. Its UPDATE is idempotent, so
+  run it by hand afterwards: `psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0288_change_request_closed_on_backfill.sql`.
+  (No copy under a new filename: the repo has no precedent for shipping a migration twice.)
+
+Tests: `change_request_closure_integration_test.go` (`CHANGE_REQUEST_TEST_DSN`, superuser and
+`csm_app`; the backfill runs on a plain pooled connection with nobody flagged internal, as `make
+migrate` runs it, and checks the flag is cleared afterwards).
+
+### Clone lineage: `cloned_from_change_request_id` (migration 0290)
+
+The portal's Clone used to leave no trace: a clone could not be told apart from a change request
+typed from scratch. `change_request.cloned_from_change_request_id` (UUID, `REFERENCES
+change_request(id) ON DELETE SET NULL`) records the source. 0290 adds the column under
+`lock_timeout = '5s'` (it takes an ACCESS EXCLUSIVE lock on `change_request`, so it fails fast
+rather than queueing every reader behind a long transaction; re-run it if it times out), and its
+partial index is built by 0292 with `CREATE INDEX CONCURRENTLY`, alone in its file as 0152/0226/0263
+are (an interrupted build leaves an INVALID index that `IF NOT EXISTS` skips: find it with
+`SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it and re-run).
+- **Write**: `POST /change-requests` `clonedFromChangeRequestId` (`change_request_clone_source.go`):
+  trimmed and lower-cased, blank is none, not a UUID or not an existing change request (a work item
+  of another type included, read under the caller's identity) is a 400 naming the field that
+  creates nothing. Checked in the create transaction and written by the create's own INSERT
+  (`checkCloneSource`, both create paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
+  called (`ValidateChangeRequestLinks`, `ChangeRequestLinkSelection.CloneSourceID`). The mirror
+  leaves it out, and the legacy data source ignores it (dropped with a debug log: the portal's
+  Clone sends it for every clone, and lineage is not content, so it must not fail the create; the
+  standard change template fields are still refused there, and so is `projectId`). Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
+  is a 400).
+- **Read**: `clonedFrom` {id, name: the source's number} on the detail, staff only and best-effort
+  like the tags; omitted when none was recorded or the source was deleted.
+- No backfill: clones made before this are not recognisable. The standard change suggestions
+  (below) join a clone to its source's cluster directly.
+
+Tests: `change_request_clone_source_integration_test.go`, `TestSNChangeRequestService_IgnoresTheCloneSource`.
+
 ### Tags
 
 A change request's tags are the case's tags, on its own work item: the same
@@ -8568,28 +8632,38 @@ so that function, and the internal caller's right to stamp the flags, are gone:
   code's own `ForbiddenError` instead of `work_item`'s RLS `NotFoundError`; the tests' doc comments
   say so, and the suite is also run as `csm_app` (RLS enforced).
 
-## Standard changes: templates, proposals and the CAB
+## Standard changes: templates, proposals and the CAB's authorisation
 
 A **standard change** is pre-authorised at the level of its *template* (ITIL 4 change enablement):
-the CAB approves a template once, and every change request raised from it follows it without a CAB
-stage of its own. Before this, choosing Standard opened the ordinary create form with every field
+two CAB members approve a template once, and every change request
+raised from it follows it without a CAB stage of its own. Before this, choosing Standard opened the ordinary create form with every field
 free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repository and
 service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
 migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, number series
 `STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by), `0254`
-(the customer: `account_id` on template and proposal) and `100026` (row-level security). PostgreSQL data
-sources only; every route is `internalOnly`.
+(the customer: `account_id` on template and proposal), `0287` (the authority, its stage,
+summary / priority / deployment types, the template history), `0295` (no CAB stage: the proposals
+still in CAB review returned to draft, `CAB_REVIEW` out of the state check), `0296` (retirement in the
+template history: `RETIRED` and `proposal_id`, backfilled; retired templates' review flags cleared), `0297` (the CAB
+authorises: proposals still waiting on the authority returned to draft) and `100026` / `100031`
+(row-level security). PostgreSQL data sources only; every route is `internalOnly`.
 
 **Tables.** `standard_change_template` (STD number, its customer `account_id`, name unique among the
 live templates OF THAT CUSTOMER ignoring case and surrounding spaces, state `ACTIVE` / `SUSPENDED` / `RETIRED`, owner, `current_version_id`, the review flag),
 `standard_change_template_version` (immutable: the content a change request takes, its `parameters`
 JSON array, who approved it and from which proposal), `standard_change_proposal` (a work item, so it
-reuses `approval_stage` / `approval_stage_approver` for its CAB stage; kind `NEW` / `MODIFY` /
-`RETIRE`, state `DRAFT` / `CAB_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN`, the same content
+reuses `approval_stage` / `approval_stage_approver` for its approval stage; kind `NEW` / `MODIFY` /
+`RETIRE`, state `DRAFT` / `AUTHORITY_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN` /
+`CANCELLED`, the same content
 columns as a version) and `standard_change_proposal_evidence` (closed change requests the proposer
 cites). `change_request.standard_change_template_version_id` (`ON DELETE RESTRICT`) and
-`standard_change_parameter_values` (JSONB object) record what a change request was raised from. All
-four tables are internal-only under row-level security (`100026`).
+`standard_change_parameter_values` (JSONB object) record what a change request was raised from.
+`standard_change_template_event` (0287) is the template's append-only history
+(`SUSPENDED` / `RESUMED` / `REVIEW_FLAGGED` / `REVIEW_CLEARED`, and since 0296 `RETIRED`; a note, the
+flagging change request, the retirement proposal `proposal_id`, the actor; a `RETIRED` entry's note is
+the proposal's rationale, rich text, every other note plain text), read newest first as `history` on `GET /standard-change-templates/{id}`; the template row
+itself keeps only the current values. All five tables are internal-only under row-level security
+(`100026`, `100031`).
 
 **A template is one customer's** (migration 0254; the user's rule: "one standard change of a customer
 cannot be added against another customer"). A customer is an `account`; a change request's customer
@@ -8645,13 +8719,14 @@ is its project's account.
   change request a proposal starts from must be a change request of the proposal's customer that was
   completed (closed): CHG.. (another customer: X)"), checked at create (from a change request, and for a
   copy, which carries the copied proposal's source change request over) and again at Submit.
-- **The CAB's approval re-checks both** (`checkProposalCustomerAtDecision`, in `applyApprovedProposal`,
-  NEW and MODIFY): a source change request or a piece of evidence that is no longer a closed change
-  request of the proposal's customer (its project moved after Submit) makes the approval a **409** ("the
-  CAB cannot approve this proposal now: ... reject it, or ask the proposer to withdraw it and propose
-  again"), written nothing (the decision's transaction rolls back, the CAB rows stay REQUESTED). A
-  rejection is still accepted. Each evidence item reads its current `customer` {id, name}, so the CAB
-  sees which one moved.
+- **Approval re-checks both** (`checkProposalCustomerAtDecision`, NEW and MODIFY), at the
+  CAB's final approval (in `applyApprovedProposal`): a source change request
+  or a piece of evidence that is no longer a closed change request of the proposal's customer (its
+  project moved after Submit) makes the approval a **409** ("this proposal cannot be approved now: ...
+  reject it, or ask the proposer to withdraw it and propose again"), written nothing (the decision's
+  transaction rolls back, the rows stay REQUESTED). A
+  rejection is still accepted. Each evidence item reads its current `customer` {id, name}, so the
+  CAB sees which one moved.
 - **Projects move.** A change request's customer is its project's account, and the Salesforce project
   sync (`salesforce_project_repo.go`, `updateSalesforceProjectQuery`) can re-parent a project to
   another account. The sync is the source of truth and is NOT blocked; instead what depends on the
@@ -8667,7 +8742,7 @@ is its project's account.
   `standardChange.customerMismatch` is true while the project's account differs from the template's
   (`t.account_id IS DISTINCT FROM p.account_id`, so also a project with no account), in any state; the
   webapp's template banner turns into a warning on it. A change already past New is left alone (the
-  CAB pre-authorisation was used when it was scheduled); the flag is how staff see it.
+  pre-authorisation was used when it was scheduled); the flag is how staff see it.
 - **Raising a change request** (R4): `POST /change-requests` with `standardChangeTemplateId` needs
   `projectId`, a project of the template's account: else 400 `standard_change_template_other_customer`
   (`repository.TemplateCustomerRefusal`, shared). Checked in `prepareStandardChange` (via
@@ -8687,15 +8762,160 @@ mark the varying bits as `{{key}}` placeholders, each declared as a parameter (t
 number, date, select; up to 30). A new proposal can start from a closed change request (its content
 is copied and it becomes the first evidence) or copy an earlier proposal (a rejected one, say).
 Evidence is any number of closed change requests: the CAB judges it. Submit checks completeness
-(name, rationale, subject, the three plans, impact, a risk that is not high, every placeholder
-declared) and opens one "CAB Approval" stage on the CAB group (`domain.CABApprovalGroupName`), its
-active internal members, the proposer listed cancelled. A CAB member decides on their own row; the
-first decision settles it and cancels the others. **Approved**: `NEW` writes the template and version
-1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and clears the review flag, `RETIRE`
-retires it. **Rejected** needs a comment; the catalogue is untouched and the proposal stays as the
-record. A modification or retirement starts from the current version and is refused (409) when the
-template moved on since; at most one is open per template (unique partial index). The approval stage
-writes `approval_stage.raw_status` in the enum's own spelling (`APPROVED` / `REJECTED`).
+(name, rationale, **summary** (what the template is for, when to use it, what it does not cover; plain
+text, no placeholders, at most 2000 characters), subject, **description**, the three plans, impact, a
+risk that is not high, every placeholder declared) and opens the proposal's one approval stage
+(`DRAFT` -> `AUTHORITY_REVIEW`).
+
+**One stage: the CAB** (the user's rule, 2026-11-10: "Two CAB approvals to make a change template
+viable"; migration 0297). The group is the CAB that approves normal change requests,
+`domain.CABApprovalGroupName` ("CAB Approval", 0188), resolved by name through the same
+`resolveApprovalPool` / `namedGroup` as a change request's CAB stage (members: `team_member.group_id`,
+`group_member`, a team of that name; active internal users only). The stage
+(`standardChangeCABCheckpoint`, position 0, label "CAB Approval", `assignment_group_id` the CAB) lists
+those members, the proposer listed cancelled by every user row of their email
+(`changeRequestCreatorUserIDs`). `approval_stage.required_approvals` (0287, default 1, so every change
+request stage is unchanged) is `domain.StandardChangeCABApprovals` = 2: the stage stays open until two
+different CAB members approve, each once; the second approval applies the proposal. Any rejection ends
+it and needs a comment. Only a REQUESTED row on the stage lets someone decide (403 otherwise), and only while they are still on the CAB: the rows are written at submit, from the
+CAB as it was then, so `DecideProposal` checks membership again under the proposal's lock (`isGroupMember`,
+the same `groupMemberSQL` as `IsGroupMember`) and refuses (403) someone who has left since. `canDecide`
+needs current membership too, and `awaitingMyDecision` lists nothing for a member who has left, so
+neither offers a decision the server refuses. An approval already given stands if its member leaves
+later. **A stage nobody can finish is flagged, not cancelled**: the stage an open proposal waits on
+carries `eligibleApprovers` (approvals so far plus the distinct people still asked, open row, active
+internal, still on the CAB, `proposalStageReach`) and `cannotReachQuorum` (`eligibleApprovers` below the
+required 2). Nothing cancels such a proposal automatically, as nothing closes any other open proposal
+on its own: a CAB member cancels it, or its proposer withdraws it and submits a copy, which asks the CAB
+as it is then. Members added to the CAB after submit are not asked (the pool is fixed at submit).
+**People, not user rows**: `"user".email` is not unique, so the quorum and the approvals a proposal's
+`stages` show both count distinct emails of APPROVED rows (`stageApprovalsSQL`), an approval cancels
+the approver's other REQUESTED rows on the stage, a second decision by an email that already approved
+is a 403, and `resolveProposalCABPool` counts eligible members by distinct email. This is still the one
+stage 0295 left: no CAB stage in front of another, no hand-over, no `CAB_REVIEW` (stored state
+`AUTHORITY_REVIEW` keeps its name and now means "awaiting CAB approval").
+
+History, kept short: until 2026-11-10 a separate Standard Change Authority group (0287, `…05ca`, the
+heads of SaaS SRE, each SaaS ABT and SRE) held this stage; before 0295 (2026-11-06) a proposal also
+went through a one-approval CAB stage first. The proposal shares the label "CAB Approval" with a change
+request's CAB stage, which mixes nothing up: a proposal's stages are only read by its own id (every
+change request read joins or filters on the change request's id). Migration 0295 therefore tells the
+old flow's CAB stage by the "Standard Change Authority" stage after it, never by the label alone: it
+runs again on any database that recorded it under an earlier number, and must leave today's stage
+(and its approvals) alone.
+
+`DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision must name
+the stage it was meant for (`stageId`, the stage the page showed; 400 when absent or blank, so an old
+cached page or a script cannot skip the guard): when that is not the stage the proposal waits on (its
+old stage, on a page loaded before 0295 or 0297, or one submitted again while the page was open), it
+is a 409 `standard_change_decision_stage_stale` with nothing written, and a decision on a proposal that
+is no longer in review (a draft, or one already decided, withdrawn or cancelled) is a 409
+`standard_change_proposal_not_in_review`. Those two codes are how the page tells "the proposal moved on
+behind you" (it closes the dialog and reads the proposal again) from the route's other 409s, which are
+about the approval itself (a template that took the name, the template moved on, evidence that is no
+longer a closed change request of the customer), carry no code and keep the dialog open with their
+words. Submit refuses (400) when the CAB has fewer than two
+eligible members besides the proposer (`resolveProposalCABPool`, the message names the CAB), so a
+proposal never waits on a group that could not authorise it. **Approved**: `NEW`
+writes the template and version 1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and
+clears the review flag, `RETIRE` retires it (below); `decided_by_user_id` and the version's `approved_by` are
+the final CAB approver, every decision is in the approver rows. **Rejected**: the catalogue is
+untouched and the proposal stays as the record. A modification starts from the current version and is
+refused (409) at submit and approval when the template moved on to another version since; a
+retirement is checked only for the template having been retired meanwhile (it carries no content, so
+a revision approved in between does not stop it); at most one is open (`DRAFT`,
+`AUTHORITY_REVIEW`) per template (unique partial index, recreated by 0287; its predicate still names
+`CAB_REVIEW`, which no row can hold). The approval stage writes `approval_stage.raw_status` in the
+enum's own spelling (`APPROVED` / `REJECTED`). The proposal reads `stages` (label, required and
+received approvals, decision, generically: a proposal decided before 2026-11-10 shows a "Standard
+Change Authority" stage, and one decided before 0295 also a "CAB Approval" stage, required 1, before
+it; an open proposal has only its "CAB Approval" stage, required 2) and each approver row's `stageId`;
+`awaitingMyDecision` covers `AUTHORITY_REVIEW` only.
+
+**Retirement.** Anyone internal with write access may propose one (as for a modification; the two
+authorisations are the check). Its draft carries only a rationale and evidence: content is a 400, and
+so is a name other than the template's, on create or edit (it is named after the template, and
+approving it renames nothing; resending that name is accepted). While it is open (`DRAFT`, `AUTHORITY_REVIEW`) the
+proposal reads `changeRequestsInNew` (the change requests raised from any version of the template that
+are still `NEW`, newest 100, id and number) and `changeRequestsInNewTotal`: once the template is retired
+they cannot request approval (409 `standard_change_template_unavailable`) and can only be cancelled,
+so the proposer and the CAB see them before deciding. Change requests past `NEW` are not
+affected (the template is checked only at Request Approval). Approved, it sets the template
+`RETIRED`, clears its suspension and its review flag (nothing is left to review on a template never
+used again, and clear-review refuses a retired one), and writes a `RETIRED` history entry with the
+proposal (`proposal_id`, read as the entry's `proposal`) and its rationale (rich text, rendered as such) as the note (migration
+0296, which also backfilled the entry for templates retired before it and cleared their flag). A
+rollback or deviation of a change raised from a retired template no longer flags it
+(`flagStandardTemplateReview` skips `RETIRED`). Final: there is no un-retire.
+
+**0295** returned every proposal still in `CAB_REVIEW` to `DRAFT` (`submitted_on` cleared,
+`customer_locked` kept), then deleted the old flow's CAB stage (any stage not labelled "Standard
+Change Authority"; its approver rows go with it) from a `DRAFT` proposal and from an
+`AUTHORITY_REVIEW` one whose CAB stage is older than an authority stage on it (the old flow opened the
+authority's stage when the CAB approved): a returned draft is a clean draft again (it can be
+deleted), and a proposal the CAB approved under the old flow carries on in `AUTHORITY_REVIEW` with only
+the authority's stage. Today's "CAB Approval" stage has no authority stage after it and is never
+touched. Decided proposals keep their stages, the record of who approved the template in force. Then
+it recreated `standard_change_proposal_state_check` without `CAB_REVIEW`. Each proposal it changes is
+a `RAISE WARNING` in the migration's output (number, id, and every decision on the deleted stage:
+who, what, when, the comment), with the query that finds them afterwards (`work_item.updated_by =
+'migration:0295_standard_change_no_cab_stage'`).
+**Run 0295 immediately before rolling out the entity-service build without the CAB stage**: a new pod
+before 0295 does not know `CAB_REVIEW`, so the proposals still in it are stranded until 0295 runs; an
+old pod after 0295 fails only on submit (its `CAB_REVIEW` write breaks the new check, nothing
+written) until it is replaced. 0295 locks the `work_item` rows of the open proposals it changes before taking
+`standard_change_proposal`'s ACCESS EXCLUSIVE lock, the order `lockProposal` takes, so a concurrent
+proposal write waits instead of deadlocking. `SearchProposals` still accepts `states: ["cab_review"]`
+(it matches nothing) for a webapp deployed before this release; remove that
+(`legacyCABReviewState`) in the next release.
+
+**0297** (2026-11-10) returned every proposal still in `AUTHORITY_REVIEW` with no "CAB Approval"
+stage (so still waiting on the authority) to `DRAFT` (`submitted_on` cleared, `customer_locked`
+kept) and deleted its stage, approver rows and any approval already given with it, as 0295 did for
+`CAB_REVIEW`: the proposer submits it again, to the CAB. Each one is a `RAISE WARNING` in the output
+(number, id, every decision on the deleted stage), with the query that finds them afterwards
+(`updated_by = 'migration:0297_standard_change_cab_authorises'`). It cannot match where 0287 to 0297
+run together before the new build (nothing writes `AUTHORITY_REVIEW` before 0297's code), only on a
+database that ran an earlier build of this work. The stages are deleted rather than kept on the
+draft because the code reads every stage of a proposal: the page lists them, `DeleteProposal` refuses
+a draft that has one, and a decision goes to the latest. Decided proposals keep their "Standard Change
+Authority" stages; the group row stays (they point at it) and its description says it is no longer
+used (reworded only while it reads as 0295 left it, or as 0287 wrote it). One transaction,
+`lock_timeout` 5s, the `app.is_internal` bracket and `lockProposal`'s lock order; safe to re-run (a
+proposal submitted to the CAB is never selected). **Run 0297 immediately before rolling out the build
+that asks the CAB**; a proposal an old pod submits after it asks the authority's members and still
+works (decisions go by the latest stage's rows), it is just not returned (a re-run of 0297 would
+return it, and report it).
+
+**Every migration of this work is safe to re-run after the new code has written data**
+(`0287`–`0297`, `100029`–`100031`). They were renumbered twice to stay above dev's (`0277`…,
+`0282`…, now `0287`…; `100028` became `100031`), and `make migrate` keys a file by its name, so a
+database that ran them under an earlier name runs every one again, in order, over proposals submitted
+and decided under the CAB, suggestions, dismissals, clones and retirements. Additions are `IF NOT
+EXISTS` / `WHERE NOT EXISTS`, backfills only fill what is empty, and 0295 and 0297 select only the old
+flows' proposals. `0287` is one transaction (`BEGIN` / `SET LOCAL lock_timeout` / `COMMIT`, passing
+under `psql -1` like its siblings): it drops and recreates the state check and the
+one-open-per-template index, which in autocommit a lock timeout could leave missing.
+`TestStandardChangeIntegration_MigrationsReplay` pins this: it applies every file, writes that data
+through the service, replays every file and compares the rows and definitions.
+
+**Drafts, withdrawal, cancellation.** A draft that was never submitted is deleted by its proposer
+(`DELETE /standard-change-proposals/{id}`, 204; the work item's delete cascades to the proposal and
+its evidence): it has never been before anyone. Once submitted a proposal is never deleted: the
+proposer withdraws it (any open state; `decided_by_user_id` records who), and a CAB member can
+**cancel** someone else's open proposal with a reason (`POST .../cancel`,
+state `CANCELLED`, the reason in `decision_comment`): the way out for a proposal whose proposer left,
+and for an abandoned revision that otherwise holds its template's one-open slot. `canDelete` /
+`canCancel` on the proposal say which applies to the caller.
+
+**One change, one template** (`changeRequestsFromOtherTemplate`). A change request raised from a
+template belongs to that template: it cannot start a NEW proposal or be its evidence, nor be evidence
+of a revision of another template (400 naming the template and pointing to "propose a revision of
+STD…"); it is evidence for a revision of its own template. Checked at create, on every evidence set
+and at Submit. Submit also refuses (409) a name another open proposal of the same customer is already
+waiting for approval under (under a transaction-scoped advisory lock on customer + name, so two
+submits at once cannot both pass), and the placeholder name "Untitled standard change" (400). Not built yet:
+a similarity search of existing templates (proposed separately).
 
 **Raising a change request** (`changeRequestService.prepareStandardChange`, wired by
 `WithStandardChangeTemplates` in `routes.go`): `POST /change-requests` with
@@ -8705,7 +8925,14 @@ standard (or none). The template must be `ACTIVE`; its current version is render
 (rich-text fields HTML-escape them, a textarea's lines become `<br>`, the subject stays plain text and
 is held to 512 characters) and overwrites subject, description, justification, the plans,
 risk/impact analysis, category, impact, risk, rollback duration, planning visibility and the two
-customer boxes. Sending any of those (or `implementationDeviation`) is a 400. The repository records
+customer boxes. Sending any of those (or `implementationDeviation`) is a 400. What the template
+leaves open the caller chooses: when the version sets `priority` it is the change request's (another
+`priority` sent is a 400 `change_request_standard_template_field`), else the caller's; when it sets
+`deploymentTypes` the change request needs at least one deployment and every deployment of those
+types (`checkStandardChangeDeployments`, in the create transaction once the deployments are written:
+400 naming the others by name, an untyped deployment included; on dual-write the same check runs
+before the previous system is called, through `ValidateChangeRequestLinks` with the version id; both
+judge through `templateDeploymentsRefusal`). The repository records
 the version and values in the create transaction under `FOR SHARE` on the template, refusing (409)
 a template suspended, retired or revised in between. On dual-write the previous system gets the
 rendered content and none of the template fields (`DATA_SOURCE=servicenow` refuses them: 400).
@@ -8713,44 +8940,364 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 **On the change request afterwards.**
 - **Frozen**: a PATCH that changes a template-specified field is a 400 in every state
   (`checkStandardChangeTemplateFields`, before the approved-content lock); resending the stored value
-  is accepted. The parameters cannot be edited either (decision: a typo in New is a cancel and
-  re-raise; editing them would need a re-render the dual-write mirror does not have).
+  is accepted. `priority` is frozen only when the version fixes one. A PATCH that writes the
+  deployments of a change whose version names deployment types (`deploymentIds`, or the single
+  `deploymentId` an older client sends, which writes `work_item.deployment_id`) is checked again
+  (`checkStandardChangeDeployments`, after the rows are written, over both, only for a change raised
+  from a template): at least one, all of those types. The detail's `standardChange` carries the
+  version's `priority` and `deploymentTypes` so an edit form can keep them. The parameters cannot be
+  edited either (decision: a typo in New is a cancel and re-raise; editing them would need a re-render
+  the dual-write mirror does not have).
 - **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
   standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).
 - **Request Approval** needs the template still `ACTIVE` and still at the version raised from (409
-  `standard_change_template_unavailable`): a revised template's old version is no longer authorised;
+  `standard_change_template_unavailable`): a revised template's old version is no longer authorised.
+  `templateUsableRefusal` names a retirement first, then a revision (it still refuses once a suspension
+  is lifted), then a suspension, and only a change request already raised is told to cancel itself (the
+  create path says to raise a Normal change, or to reload the template);
   and the project still the template's customer's (400 `standard_change_template_other_customer`, see
   "Projects move" above).
 - **Review flag**: a rollback (manual, or a customer's failed review) or a non-blank deviation from the
   implementation plan sets `review_required` on the template with the change request and a reason
   (`flagStandardTemplateOnFailure`, last in the PATCH / decision transaction since it escalates the
-  identity). It does not suspend the template; the owner or a CAB member clears it, or approving a
-  modification does.
-- **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`, version,
-  parameters with values), staff only, best-effort like the tags.
+  identity) and is recorded in the template's history. It does not suspend the template; a CAB member
+  clears it (with a note), or approving a modification does. A retired
+  template is never flagged.
+- **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`,
+  `templateState` and `superseded` (revised since; with the state, what Request Approval checks, so the
+  page can warn a change still New before anyone tries), version, parameters with values), staff only,
+  best-effort like the tags.
 
 **Error codes**: `change_request_standard_template_field` (400),
-`standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400).
+`standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400); on a
+proposal's decision, `standard_change_proposal_not_in_review` (409) and
+`standard_change_decision_stage_stale` (409).
 
-**Who may**: suspend / resume / clear the flag: the template's owner or a CAB member. Edit, submit,
-withdraw a proposal: its proposer. Decide: a CAB member other than the proposer.
+**Who may**: suspend (a brake, so open): the template's owner or a CAB member. Resume and clear the
+review flag (both put the template back in use with no review): a CAB member only, with a required
+note (`{note}`, at most 1000 characters);
+clearing is refused (409) on a retired template or one not flagged. `canSuspend` / `canResume` /
+`canClearReview` on the template say what the caller may do. Propose a new template, a revision or a
+retirement: any internal user with write access, not only the template's owner (decided 2026-11-06:
+the two CAB approvals are the check). Edit, submit, withdraw, delete a draft: its proposer. Cancel: a
+CAB member, not on their own. Decide: two CAB members asked on the stage; never the proposer.
 
 **Suspension.** `POST .../suspend` takes an optional body `{reason}` (`decodeOptionalRequest`: an
 empty body is `{}`; trimmed, blank is none, at most 1000 characters or 400). `SetTemplateState`
 writes `suspended_reason` / `suspended_on` / `suspended_by` (the actor's email) on the move to
 `SUSPENDED` and clears all three on any other move; a retirement clears them too. The template reads
 them as `suspendedReason` / `suspendedOn` / `suspendedBy`, null unless the template is suspended.
+Every suspension and resumption (with its reason or note) also goes into the template's history.
 
 **Not done**: no import of the previous system's standard change templates (decision: they are
-re-proposed through this flow); no notices (mail / chat) on submit or decision.
+re-proposed through this flow); no notices (mail / chat) on submit or decision, so the CAB learns
+of pending proposals only from the "awaiting my decision" view.
 
-Tests: `standard_change_template_test.go` (parameters, completeness incl. the customer, placeholders,
-rendering, the suspension reason), `change_request_standard_change_customer_test.go` (the customer
+Tests: `standard_change_template_test.go` (parameters, completeness incl. the customer, the summary and
+the description, placeholders, rendering, the suspension reason, deployment types), `change_request_standard_change_customer_test.go` (the customer
 check before the previous system is called), `handler/standard_change_handler_test.go` (the optional
 suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
 (real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
-without BYPASSRLS so the internal-only policies apply; run with `-p 1`).
+without BYPASSRLS so the internal-only policies apply; run with `-p 1`). The tests seat their own
+authorisers on the CAB and take everyone else off it while they run (`isolateStdCAB`, put back on
+cleanup, as the change request flow tests' `isolateApprovalGroup` does), since a local or synced
+database has real CAB members. `standard_change_migrations_integration_test.go` runs the migrations:
+`TestStandardChangeIntegration_NoCABStageMigration` (0295),
+`TestStandardChangeIntegration_CABAuthorisesMigration` (0297) and
+`TestStandardChangeIntegration_MigrationsReplay` (every file of this work replayed over the new
+code's data). They run migration files, DB-wide, as `make migrate` would: use a test database.
+
+## Standard change suggestions (`GET /standard-change-suggestions`)
+
+Which of a customer's completed change requests look like the same change done again and again, so a
+standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
+normalising, clustering, judging), `standard_change_suggestion_service.go`,
+`standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0289` (the
+dismissals), `0291` (the snapshot), `0293` (skipped customers), `0294` (the keys a skip carries) and
+`100029` / `100030` (their row-level security, internal only). The refresh needs 0291, 0293, 0294 and
+100030 applied before csm-scheduled-tasks' task is turned on.
+PostgreSQL data sources only.
+
+**Computed on a schedule, read from a snapshot.** Reading every completed change request with its plan
+text and comparing the plans is too much to do whenever the page opens (there can be tens of thousands),
+so `GET /standard-change-suggestions` (`internalOnly`) **never computes**: it reads the snapshot the
+scheduled refresh last published (`computedOn`; with none yet, an empty list and no `computedOn`, not an
+error). `POST /standard-change-suggestions/refresh` (`serviceOnly`: an internal client in
+`M2M_CLIENT_IDS` with no user token, so a page view can never start it) computes a new one, driven once
+a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh` (its CLAUDE.md,
+"Standard change suggestions refresh"), the way `/incidents/autoclose` is driven by `incident_autoclose`.
+- **Paged by customer, published at the end.** The first call (`{}`) starts a run
+  (`standard_change_suggestion_run`, carrying the criteria it computes by) and **lists its customers once**
+  (`StartRun`: every customer with a candidate in the window, one `standard_change_suggestion_run_customer`
+  row each; a customer whose first candidate completes later waits for the next run). Each call then walks
+  that list (`NextCustomers`) in id order after `cursor`, **one customer at a time** (only that customer's
+  change requests and plans are held), at most `limit` (default 50, at most 500).
+- **A page answers within 45 seconds, 15 inside both 60s timeouts.** Everything a call does, the run's
+  start included, runs under `suggestionPageTimeout` (45s; the request's own deadline when that is
+  sooner), so it ends well inside `REQUEST_TIMEOUT` (60s) and the scheduled task's per-call timeout (60s)
+  whatever its customers and writes do. Inside it each customer's compute has
+  `suggestionCustomerTimeout` (20s) and each write (its save, or the skip that records it)
+  `suggestionWriteTimeout` (5s). A customer is **started only while the page has the time for its
+  compute and two writes** (30s: a save that fails and then its skip), so a customer that starts always
+  gets its whole deadline and the page's deadline is never what stops it; the last one starts by 15s.
+  The publish (with the error check below) gets `suggestionPublishTimeout` (10s): a page that finishes
+  its customers with less left answers `more` and the next call, which finds no customer left,
+  publishes. A page with no time for even one customer (a slow start of the run, or a request deadline
+  under 30s) computes none and logs a WARN: on the first page that only starts the run (`runId`, empty
+  `nextCursor`, `more`), which the scheduled task counts as progress; on a later page the task sees no
+  progress and fails the run.
+- **One customer can never fail the run.** A customer that overruns its own deadline (not the page's:
+  a cancelled call is still an error) is logged at WARN with its account id and candidate count and
+  recorded as skipped with the reason `suggestionSkippedTooLarge`. A customer whose compute fails for any
+  other reason (a bad row, a decode failure, a panic, which is recovered) or whose save fails is logged at
+  ERROR with the cause and recorded as skipped with the reason `suggestionSkippedError`, and the page
+  carries on with the next customer. Only what is not that customer's stops the page: the call ending,
+  a run no longer open (409, from the save), or a skip that cannot be recorded (the database). A skip is
+  `SkipCustomer`: `run_customer.skipped_reason`, its `change_requests` NULL, no rows, its previous keys
+  carried; it is counted in the page's `skipped` and the run's `totals.skipped` (column
+  `standard_change_suggestion_run.skipped`). `GET` returns `skippedCustomers` (`[{customer, reason}]`, of
+  the one customer asked for or all) and `scanned.skipped`, so the page can say that customer's
+  suggestions were not computed, and why, rather than that it has none (the webapp matches the two reason
+  strings exactly: change them together). A later page that computes it after all (a page sent again)
+  clears the skip.
+- **Most customers failing fails the run.** Before publishing, a run in which more than half of its
+  listed customers (`suggestionMaxErrorShare`, `RunCustomerCount`) were skipped for an error is not
+  published: the last page answers 500, logs `most customers failed` at ERROR, and readers keep the
+  previous snapshot. One customer's error is that customer's; most of them failing is a fault of the
+  system (a query, the schema, the database), and publishing would replace every customer's suggestions
+  with "not computed". Overruns do not count: they are bounded by each customer's own size.
+- **Continued, then published.** While `more` is true the caller sends `{runId, cursor: nextCursor}`. The call that answers
+  `more: false` **publishes**: in one transaction the run gets `completed_on` and its totals (summed from
+  `standard_change_suggestion_run_customer` and the rows), and every other run is deleted with its rows
+  (`ON DELETE CASCADE`). Readers read the newest published run, so they see the old snapshot until that
+  commit and the whole new one after it. A page sent again replaces that customer's rows and count
+  (`SaveCustomer`), never counting it twice; a run that never finishes is never read, and is deleted by
+  the next publish or by a run started a day later. A page of a published or replaced run is a 409.
+- **The window and the criteria are the run's**: the window counts back from the run's start, and every
+  page judges by the criteria stored with it.
+- **One snapshot per read.** GET reads the latest run, its counts, its skipped customers and its rows as
+  separate statements; a refresh publishing in between deletes the run read first and would answer its
+  `computedOn` and totals with no rows. So after the rows it looks up the latest run again, and when that
+  moved it reads once more (a second publish within one read is not retried).
+- **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
+  dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
+  are as they were at the refresh.
+- **One page per read, sorted in the query.** One suggestion carries up to 100 members, up to 99 evidence
+  refs and up to 20 CAB rejections and 20 comments (measured: about 3 KB at 5 members, 44 KB at 100, 50 KB
+  with a few CAB entries, 137 KB at every cap), so a read across every customer is never sent whole. GET
+  takes `limit` (default 20, at most 50, `normalizePagination`) and `offset` and answers `total`, `limit`
+  and `offset` beside the page. `SuggestionPage` sorts and pages in one statement, across customers when
+  no `accountId` is given: eligible first, then `closedCount` descending, then `lastCompletedOn`
+  descending, then the customer's name and the key in byte order (`COLLATE "C"`), then the row id. The
+  sort keys are read from the stored JSON (no column for them, no migration); the dismissals are joined in
+  the same statement, so `total` (the rows the filters match) and `scanned.dismissed` (the matching rows
+  that are dismissed, shown or not) agree with the page. The open proposals are read for the page's members
+  only. `TestStandardChangeSuggestionPageIntegration` checks the query's order against the reference sort
+  (`sgListOrder`, the fake repository's) at every page size, on a database whose collation is not C.
+- **Logged**: each page (`refresh page`: customers, skipped, change requests, suggestions, `more`,
+  `pageMs`), each customer skipped as too large (WARN) or for an error (ERROR, with the cause), a page
+  with no time for a customer (WARN), a run refused for its errors (ERROR) and the publish (`refresh published`: customers, skipped, change
+  requests, clusters, eligible, `durationMs` of the run).
+- **Cost.** The customer list once per run (it used to be re-read on every page: 8.5 s a page on the
+  200,000-change-request benchmark), then per customer one read of its window's completed change
+  requests with their plans, its clusters' incidents, and the writes. The pairwise plan comparison is
+  inside one subject group of one customer, capped (below), and checks the deadline every 4,096 pairs
+  (`suggestionCtxCheckEvery`) and before each group.
+- **Benchmark** (2026-11-06, a generated 200,038-change-request database, one customer with 20,031
+  candidates and a single 3,000-member "Monthly OS patching" subject; scratch scripts, never committed):
+  before the cap, the one-pass tokenizer and the per-run customer list, that customer took 44 s alone,
+  its page 41.7 s (close to the 60 s timeout) and the whole run 86 s, with 8.5 s of every page spent
+  re-listing the customers; after, 1.2 s, 6.0 s and 8.4 s (the list once, 2.6 s, then 3 ms a page), and one
+  subject group clusters in about 0.34 s at 500, 1,000, 3,000 or 6,000 members (17 s at 3,000 before).
+  Same totals (3,955 clusters, 23 eligible).
+
+**What is considered.** Change requests in Closed or Rollback, completed within `windowMonths` (by
+`closed_on`, which 0288 made reliable; a row with none falls back to the work item's last update), **not**
+raised from a template (`standard_change_template_version_id IS NULL`: those already are standard changes),
+whose project has a customer. Clusters never mix customers: a template belongs to one
+(`project.account_id`), so the clustering runs per customer.
+
+**A cluster** (`clusterSuggestionCandidates`):
+1. Same normalised subject (`suggestionKey`): HTML and `{{placeholders}}` removed, lower case, `[tags]`,
+   ticket numbers (`CHG…`, `INC…`, `SCP…`, …), dates, times, versions, ordinals and digits removed, then
+   filler words (articles, prepositions, "please", "change", month and day names) and one-letter words
+   dropped. The subject key (`subjectKey`) groups the candidates; it is not the cluster's key (below).
+2. Confirmed by the implementation plans: inside one subject group, two members whose plans both have at
+   least three meaningful words are the same change only when the plans' word sets are at least
+   `planSimilarityPercent` alike (Jaccard), single linkage. A member with no usable plan cannot contradict
+   the subject, so it joins the group's largest confirmed cluster (it never bridges two).
+   - **Capped at the newest 500 of a subject group** (`suggestionMaxCompared`). The comparison is pairwise
+     (500 members are 124,750 pairs, well under a second; 3,000 were 4.5 million, 17 s; 6,000 over a
+     minute). The older members of a larger group are in no cluster (nor pulled in by a clone of one), and
+     the cluster carries `sample: {compared, total}`, which the page shows as "Newest 500 of 3,000". Its
+     counts (`memberCount`, closed, success rate) are of the compared ones, which already pass any sane
+     `minClosed`.
+   - `similarAtLeast` decides `jaccard >= threshold` without the whole intersection: it loops over the
+     smaller set and stops as soon as the answer is known (`I*(1+t) >= t*(A+B)`); `TestSimilarAtLeast_SameAsJaccard`
+     checks it against `jaccard` on 2,000 random pairs and every threshold.
+   - Plans are tokenised only for members of a subject group of two or more (a lone subject has nothing
+     to compare), in one pass (`suggestionWords`: a combined ticket/date/time/version/ordinal regexp only
+     when the text has a digit, the HTML / entity / placeholder / tag passes only when their marker is
+     present, then one `FieldsFunc`); `TestSuggestionWords_SameAsTheRegexPasses` pins it to the old
+     ten-pass version (about 4x faster on plain text).
+3. Clone lineage (`cloned_from_change_request_id`, 0290) joins a member to its source's cluster directly,
+   whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
+Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
+self-hosted models would be allowed anyway.
+
+**A cluster's key** (`key`; `assignSuggestionIdentities`). One subject can split into several clusters
+(step 2: "Update the firewall rules for partner integrations" done five times with a security-group plan
+and five with a WAF plan), so the subject key does not tell a customer's clusters apart. Keyed by subject,
+the two came back as two suggestions with one key, so the page expanded both on one click, left ghost rows
+(a duplicate React key), marked both busy on Propose, and one dismissal hid both. So every cluster has a key
+of its own, unique within its customer: the snapshot's `suggestion_key`, what a dismissal is stored under
+and matched by, the API's `key` and the page's row identity. It must also **stay the same from one daily
+refresh to the next**, or a dismissal stops applying:
+- Nothing about a cluster alone is that stable. Its members change daily (new completions, the oldest
+  leaving the window and the newest-500 cap), so a key taken from, say, its oldest member would move every
+  time that member left: monthly for a monthly change. So the key is **carried over**: a cluster takes the
+  key of the previous published snapshot's cluster of the same customer that it shares the most change
+  requests with (each key to one cluster, largest overlaps first), **whatever the subjects**: a cluster
+  joined by clone lineage can change its largest subject group, and keeps its key. Nothing parses a subject
+  out of a key; the subject is `subjectKey`. Consecutive runs share nearly
+  every member, so a cluster keeps its key as long as it exists, and when a subject splits the part with the
+  larger overlap keeps it. One extra read per customer (`SnapshotKeys` of the previous run: keys and member ids only).
+- **A skipped customer keeps its keys.** A skip stores no rows, and publishing deletes the previous run, so
+  `SkipCustomer` copies the customer's keys and member ids from the latest published run (its rows, or what
+  that run carried when it skipped the customer too) into `run_customer.carried_keys` (migration 0294).
+  `SnapshotKeys` returns them after the run's own rows; GET and the counts never read them. Computing the
+  customer after all (`SaveCustomer`) clears them.
+- A cluster with no predecessor (new, or the first refresh) is **minted** a key, largest first: the bare subject key when no other cluster of that subject holds it,
+  else the subject key, `#` and 12 hex digits of a SHA-256 of its oldest core member's id (the next
+  oldest's on a clash). So most suggestions, a subject with one cluster, keep the bare subject key, and the
+  dismissals made before this (bare subject keys, local stacks only) **keep matching** the cluster that holds
+  it; none were dropped.
+- `subjectKey` is the subject key, returned beside it. A subject key is capped at 499 bytes so a key
+  (512, the column) always fits the suffix.
+
+**Eligible** (`judgeSuggestionCluster`, every threshold configurable): closed at least `minClosed` times in
+the window; success rate closed / (closed + rolled back) at least `minSuccessPercent`; no incident names a
+member, as `incident.caused_by_id` **or** `incident.change_request_id` (both are counted, as asked; the
+incident form labels them "Caused by" and "Change request", and the second may name a change raised to
+fix the incident rather than one that caused it, which then blocks its cluster too: check this against
+production data); no member with high risk; no member with high impact. An unknown
+risk or impact is counted (`unknown`) and does not block. `unmet` says, in words, each one it misses.
+`proposeFrom` is the newest closed member that neither deviated from its plan nor was ever rejected by
+the CAB, else the newest closed one with no deviation (none: nothing to propose from), `evidence` the other
+closed members newest first, at most 99, so the source plus the evidence fit
+the 100 a proposal may cite. `openProposals` are the open proposals (draft or awaiting CAB approval)
+already started from or citing a member.
+
+**The CAB's pushback** (added 2026-11-10; `standard_change_cab_history.go` in `service` and in
+`repository`). Shown like a deviation from the plan, never a criterion: no cluster, count, key or `unmet`
+depends on it. Computed in the refresh and stored in the snapshot JSON (no migration; a snapshot computed
+before reads zero counts and empty lists until the next refresh, and GET returns `[]`, never null):
+- **Which stage is the CAB's** is decided in Go, by the change request approvals view's own functions
+  (`isCABStageInHistory`): the stage the view names as the CAB's (`changeRequestApprovalStageLabel`
+  classified by `classifyApprovalStage`: "CAB Approval", the legacy "Authorize", the historic "ECAB
+  Approval", or an unlabelled stage at position 1), and also an unlabelled stage of the "CAB Approval"
+  group wherever it sits (runtimeApprovalStageKind's first, provable, rule). The rest of
+  `runtimeApprovalStageKind` is not used: it judges a stage by the state the change is in now, which says
+  nothing about a finished change. `TestIsCABStageInHistory_AgreesWithTheApprovalsView` pins the two
+  together. The SQL (`cabDecisionRowsQuery`) only reads each stage's label, group and position (ordered as
+  the view orders them) and the approver rows that are REJECTED or carry a comment.
+- **A member's own**: `members[].cabRejected` (the CAB rejected it at least once, then it was resubmitted
+  and completed) and `cabCommentCount`.
+- **Look-alikes** (`CABRejectedLookalikes`): a change request the CAB rejects stays in Authorize and is
+  usually cancelled, so it is never a member. The customer's change requests the CAB rejected within the
+  window (the rejection's `updated_on`), in any state but Closed and Rollback, not raised from a template,
+  newest 1,000, are attached by subject (`attachCABLookalikes`): to the cluster whose core key is their
+  `suggestionKey(subject)`; when several clusters share the key, to the one whose core members' plans are
+  most like theirs (best word-set Jaccard), else the largest, then the smaller key. No cluster with the key:
+  shown nowhere.
+- **The lists**: `cabRejectionCount` / `cabRejections` (each change request once, its latest CAB rejection:
+  number, subject, state, when, by whom, the comment; `member` false for a look-alike) and `cabCommentCount`
+  / `cabComments` (every non-blank comment on a CAB stage of a member or an attached look-alike, with any
+  decision: an approval that says "add the verification steps" is pushback too). Newest first, at most 20
+  each, the counts true. Comments migrated from the previous system can be rich text, so they are sent as plain text
+  (`cabPlainText`: tags removed, entities decoded, white space collapsed, at most 2,000 characters). The
+  portal's own CR decision path writes no comment yet, so today only migrated rows have them.
+- `deviationCount` counts every member that deviated (the listed `members` stop at 100). A snapshot computed
+  before it was kept decodes it as 0, so `readSuggestions` raises it to the listed members that deviated
+  (`listedDeviations`); a kept count is never below those, so it is left alone.
+- **On a proposal** (`GetProposal` and every proposal an action returns, `WithCABHistory` in `routes.go`):
+  `cabHistory`, the same shape, read live (not from the snapshot) over the source and evidence change
+  requests and the same customer's CAB-rejected look-alikes whose subject key is the source's or an evidence
+  change request's, in the last `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS`. Each evidence row also says
+  `hasDeviation` and `cabRejected`. The proposal page shows it to the approvers above the Approval section
+  and in the decision dialog. Null only on a service built without `WithCABHistory`.
+- Cost: two more reads per customer in the refresh (the members' CAB rows by id, and the look-alikes by
+  account through `approval_stage_approver.work_item_id`), two per proposal read. No index was added: both
+  are keyed by work item id or by the customer's projects.
+
+Tests: `standard_change_cab_history_test.go` in `repository` (the stage rule against the view's and the
+flow's) and in `service` (plain text, the lists and caps, the attachment rule, `proposeFrom`, the refresh
+over the in-memory repository, an older snapshot), `standard_change_cab_history_integration_test.go`
+(real PostgreSQL: labelled and unlabelled stages, peer rejections ignored, the window, another customer's
+look-alikes; a proposal's `cabHistory` and evidence marks).
+
+**Not related to the customer's templates, on purpose.** An earlier version labelled each cluster
+"covered by STD…", "close to STD…: revise it" or "new" by the word overlap of its subject and plan with the
+customer's live templates. That was removed, together with the similar-templates check on a proposal
+(user decision 2026-11-06): whether two changes are "the same" by word overlap can be wildly off, and the
+dynamics of defining similarity are too complicated to decide that way for now. What remains is exact: a
+change request raised from a template is never a candidate, and a suggestion lists the open proposals
+already started from or citing one of its change requests (`openProposals`). Whether a suggestion is
+already covered by a template is for the person reading it to judge.
+
+**Thresholds** (server settings, environment variables read at startup by `config.Load`, applied when the
+snapshot is computed; listed with their meaning in `.env.example`; the user chose server settings over a
+portal screen):
+
+| Variable | Default | Range | Meaning |
+|---|---|---|---|
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` | 12 | 1-60 | Months back a completed change request counts |
+| `STANDARD_CHANGE_SUGGESTION_MIN_CLOSED` | 5 | 1-1000 | Closes (not rollbacks) in the window before a repeated change is suggested |
+| `STANDARD_CHANGE_SUGGESTION_MIN_SUCCESS_PERCENT` | 90 | 1-100 | Closed / (closed + rolled back), at least this |
+| `STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT` | 50 | 1-100 | Plan word-set similarity for two members with one subject to be one change |
+
+A value that is not a whole number in its range (zero, negative, a percent over 100, a typo) falls back to
+the default with a warning naming the key (`envIntInRange`); it never stops the service. The minimum was 3
+at first and raised to 5 (user decision 2026-11-06). How often the refresh runs is csm-scheduled-tasks'
+`SUB_CRON_SCHEDULES` (daily by default, `0 2 * * *`). The other criteria (no linked incident, no high risk
+or impact) are fixed. Starting values, **not yet measured on production data**. They are no longer request parameters: to
+measure them, read with `includeIneligible=true` (every cluster of two or more with its `unmet`), change
+the variables and refresh. The response carries the `criteria` the snapshot used and `scanned` counts
+(the run's, or the one customer's when `accountId` is given; `dismissed` is counted when read).
+
+**Request**: `accountId` (optional, a UUID: one customer), `includeIneligible`, `includeDismissed`, applied
+over the stored rows. Order: eligible first, then most often closed, then most recent. At most 100 members
+are listed per suggestion (`memberCount` is the true count).
+
+**Dismissals** (`standard_change_suggestion_dismissal`, one row per customer and key, who and why):
+`POST /standard-change-suggestions/dismissals {accountId, key, reason}` (201; the key must be a
+cluster key as minted, `validSuggestionKey`: a normalised subject key, optionally `#` and 12 lower-case
+hex digits; a reason of at most 1000 characters is required; a
+second one is a 409, no such customer a 400) hides the suggestion for that customer however many members
+it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
+/standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
+for a machine caller).
+
+Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging; the refresh's
+paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
+`standard_change_suggestion_scale_test.go` (the cap and its sample, `similarAtLeast` against `jaccard`,
+the context checks, a customer that overruns its deadline skipped while the call ending is an
+error, the customer list read once per run), `standard_change_suggestion_refresh_test.go` (a customer
+whose read, computation or save fails skipped with the error reason and the cause logged; a 409 or a
+failed skip still failing the page; most customers failing refused and the previous snapshot kept, half
+of them published, overruns not counted; the page timing: the numbers against the 60s timeouts, the worst
+case on a fake clock, customers started only while one fits, the hard stop in real time, a slow start, a
+publish left to the next call, a request deadline too short for any customer),
+`standard_change_suggestion_identity_test.go` (two clusters of
+one subject get keys of their own and are dismissed apart; keys kept across a refresh whose oldest members
+left, and across a skipped refresh; a key kept when the subject changes; a split, minting, one key per
+cluster; key validation; GET reading again when a refresh publishes during it), `standard_change_suggestion_words_test.go` (the tokenizer
+against the old passes, and its benchmark), `standard_change_suggestion_integration_test.go` (real
+PostgreSQL, a full paged refresh twice, a split subject dismissed by its suffixed key and still dismissed
+after the next refresh, then the listed customers, the keys a skip carries (twice running, and cleared
+when the customer is computed after all), a skip and its totals and names,
+`STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s
 
@@ -12512,6 +13059,8 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |
 | `POST /incidents/{id}/specialist-handoffs` on an incident nobody is assigned to; nothing written | `incident_handoff_needs_assignee` | 409 |
+| A decision on a standard change proposal (`POST /standard-change-proposals/{id}/decision`) that is no longer waiting for one: a draft, or already approved, rejected, withdrawn or cancelled; nothing recorded | `standard_change_proposal_not_in_review` | 409 |
+| A decision on a standard change proposal whose `stageId` is not the stage the proposal now waits on (settled, or replaced when it was submitted again); nothing recorded. The route's other 409s, about the approval itself, carry no code | `standard_change_decision_stage_stale` | 409 |
 | A PATCH that changes the deviation from the implementation plan of a change request that is closed, canceled or rolled back (resending the stored value is accepted); nothing written | `change_request_deviation_final` | 400 |
 | A PATCH that changes the deviation from the implementation plan before implementation has started, judged on the stored state: in New anything but clearing one a clone carried over, in Assess, Authorize, Customer Approval and Scheduled any change (resending the stored value is accepted); nothing written | `change_request_deviation_not_yet` | 400 |
 | Request Approval (`{state: "assess"}` on a change request in New) while a deviation from the implementation plan is in effect (the request's own value, else the stored one): a clone carried it over, and it has to be folded into the implementation plan and cleared first (the same PATCH may clear it); nothing written | `change_request_deviation_not_incorporated` | 400 |

@@ -74,7 +74,7 @@ describe("useChangeRequestScopeLookups", () => {
     const { result } = renderHook(() => useChangeRequestScopeLookups("proj-a", []), { wrapper });
     await waitFor(() => expect(result.current.deployments).toHaveLength(3));
     const [prod] = result.current.deployments;
-    expect(prod).toEqual({ id: "dep-prod", label: "Acme Production", products: undefined });
+    expect(prod).toEqual({ id: "dep-prod", label: "Acme Production", type: "primary_production", products: undefined });
     expect(Object.keys(prod!)).not.toContain("environments");
   });
 

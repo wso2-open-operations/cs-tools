@@ -2826,6 +2826,9 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * What the template specifies cannot be edited (400
    * `change_request_standard_template_field`). */
   standardChange?: BeChangeRequestStandardChange | null;
+  /** The change request this one was cloned from ({id, name: its number}), when
+   * one was recorded on create (staff only; absent otherwise). */
+  clonedFrom?: { id: string; name: string } | null;
 }
 
 /**
@@ -3080,6 +3083,9 @@ export interface BeCreateChangeRequestPayload {
   standardChangeTemplateVersionId?: string;
   /** The values of the version's parameters, by key. */
   standardChangeParameters?: Record<string, string>;
+  /** The change request this one is a clone of (the detail page's Clone):
+   * recorded once, read back as `clonedFrom`. */
+  clonedFromChangeRequestId?: string;
 }
 
 /**
@@ -5451,14 +5457,25 @@ export interface BeSpecialistHandoffSummary {
 
 
 // ---------------------------------------------------------------------------
-// Standard changes: the CAB-approved template catalogue and its proposals
+// Standard changes: the template catalogue the CAB approves, and its proposals
 // (`/standard-change-templates/...`, `/standard-change-proposals/...`; entity
 // service `domain/standard_change.go`)
 // ---------------------------------------------------------------------------
 
 export type BeStandardChangeTemplateState = "active" | "suspended" | "retired";
 export type BeStandardChangeProposalKind = "new" | "modify" | "retire";
-export type BeStandardChangeProposalState = "draft" | "cab_review" | "approved" | "rejected" | "withdrawn";
+/**
+ * `authority_review`: submitted, awaiting CAB approval; two different CAB members
+ * must approve it (until 2026-11-10 the Standard Change Authority did, hence the
+ * name). `cancelled`: a CAB member ended someone else's open proposal, with a reason.
+ */
+export type BeStandardChangeProposalState =
+  | "draft"
+  | "authority_review"
+  | "approved"
+  | "rejected"
+  | "withdrawn"
+  | "cancelled";
 export type BeStandardChangeParameterType = "text" | "textarea" | "number" | "date" | "select";
 /** A change request's risk (`change_request_risk_enum`). A standard change is never `high`. */
 export type BeChangeRequestRisk = "high" | "moderate" | "low";
@@ -5477,6 +5494,12 @@ export interface BeStandardChangeParameter {
 
 /** What a template fixes on every change request raised from it. On a draft proposal any part may be missing. */
 export interface BeStandardChangeContent {
+  /**
+   * What the template is for, when to use it and what it does not cover (plain
+   * text, no placeholders). The template's own description, never copied onto a
+   * change request. Required to submit; null on versions approved before it existed.
+   */
+  summary?: string | null;
   /** Plain text: the change request's subject. */
   subject: string | null;
   description: string | null;
@@ -5489,6 +5512,13 @@ export interface BeStandardChangeContent {
   impact: BeChangeRequestImpact | null;
   risk: BeChangeRequestRisk | null;
   rollbackDurationText: string | null;
+  /** When set, every change request raised from the template has this priority; null: chosen per change. */
+  priority?: BeChangeRequestPriority | null;
+  /**
+   * When set, a change request raised from the template needs at least one
+   * deployment, all of these types; null: any deployments, or none.
+   */
+  deploymentTypes?: BeDeploymentType[] | null;
   isPlanningVisibleToCustomers: boolean;
   customerApprovalRequired: boolean;
   customerReviewRequired: boolean;
@@ -5505,7 +5535,7 @@ export interface BeStandardChangeTemplateUsage {
   lastUsedOn: string | null;
 }
 
-/** One CAB-approved version of a template; never changed once written. */
+/** One approved version of a template; never changed once written. */
 export interface BeStandardChangeTemplateVersion extends BeStandardChangeContent {
   id: string;
   templateId: string;
@@ -5552,7 +5582,7 @@ export interface BeStandardChangeTemplate {
   suspendedReason: string | null;
   suspendedOn: string | null;
   suspendedBy: string | null;
-  /** The modification or retirement now in draft or CAB review, if any. */
+  /** The modification or retirement now in draft or in review, if any. */
   openProposal: BeEntityRef | null;
   usage: BeStandardChangeTemplateUsage;
   createdOn: string;
@@ -5561,6 +5591,37 @@ export interface BeStandardChangeTemplate {
   updatedBy: string;
   /** On `GET /standard-change-templates/{id}` only, newest first. */
   versions?: BeStandardChangeTemplateVersionSummary[];
+  /** On `GET /standard-change-templates/{id}` only, newest first: suspensions, resumptions, review flags. */
+  history?: BeStandardChangeTemplateEvent[];
+  /**
+   * What the caller may do (advisory). Suspend: its owner or a CAB member.
+   * Resume and clear the review flag: a CAB member only.
+   */
+  canSuspend?: boolean;
+  canResume?: boolean;
+  canClearReview?: boolean;
+}
+
+export type BeStandardChangeTemplateEventAction = "suspended" | "resumed" | "review_flagged" | "review_cleared" | "retired";
+
+/** One entry of a template's history. */
+export interface BeStandardChangeTemplateEvent {
+  action: BeStandardChangeTemplateEventAction;
+  /** The suspension reason, the resume or clear note, why it was flagged, or (retired) the retirement's rationale. */
+  note: string | null;
+  /** The change request that flagged it for review. */
+  changeRequest: BeEntityRef | null;
+  /** The retirement proposal whose approval retired it (`name` is its number); null otherwise. */
+  proposal?: BeEntityRef | null;
+  /** An email, or a service name. */
+  actor: string;
+  createdOn: string;
+}
+
+/** Body of `POST /standard-change-templates/{id}/resume` and `.../clear-review`. */
+export interface BeStandardChangeTemplateNotePayload {
+  /** Why the template may be used again: required, at most 1000 characters. */
+  note: string;
 }
 
 /** Body of `POST /standard-change-templates/{id}/suspend` (optional). */
@@ -5595,17 +5656,104 @@ export interface BeStandardChangeEvidence {
   closedOn: string | null;
   /** The change request's customer now (its project's account); null when it has none. */
   customer?: BeEntityRef | null;
+  /** It deviated from its implementation plan. */
+  hasDeviation?: boolean;
+  /** The CAB rejected it at least once before it was done (see the proposal's `cabHistory`). */
+  cabRejected?: boolean;
 }
 
-/** One CAB member asked to decide a proposal. */
+/** The change request a CAB decision is on. */
+export interface BeStandardChangeCabChangeRequest {
+  id: string;
+  number: string;
+  subject: string;
+  /** Its state now, lower case ("canceled", "closed", ...). */
+  state: string;
+}
+
+/** A change request the CAB rejected: its latest CAB rejection. */
+export interface BeStandardChangeCabRejection {
+  changeRequest: BeStandardChangeCabChangeRequest;
+  /** One of the suggestion's members (a proposal's source or evidence); false for a look-alike. */
+  member: boolean;
+  rejectedOn: string;
+  /** The CAB member's name; empty when unknown. */
+  rejectedBy: string;
+  /** The rejection's comment as plain text; empty when none. */
+  comment: string;
+}
+
+/** A comment a CAB approver wrote on a change request, with any decision. */
+export interface BeStandardChangeCabComment {
+  changeRequest: BeStandardChangeCabChangeRequest;
+  member: boolean;
+  approverName: string;
+  /** APPROVED, REJECTED, REQUESTED, CANCELLED, ... */
+  state: string;
+  /** Plain text. */
+  comment: string;
+  decidedOn: string;
+}
+
+/**
+ * What the CAB said about a set of change requests (entity-service, "The CAB's
+ * pushback"): its rejections (each change request once) and its comments, newest
+ * first, at most 20 each, with the true counts. A look-alike is one of the same
+ * customer's change requests the CAB rejected, with the same normalised subject.
+ * Shown only: it decides nothing.
+ */
+export interface BeStandardChangeCabHistory {
+  cabRejectionCount: number;
+  cabRejections: BeStandardChangeCabRejection[] | null;
+  cabCommentCount: number;
+  cabComments: BeStandardChangeCabComment[] | null;
+}
+
+/**
+ * One approval stage of a proposal: the CAB's ("CAB Approval", two approvals),
+ * the only one now. A proposal decided before 2026-11-10 holds a "Standard Change
+ * Authority" stage instead, and one decided before migration 0295 also an
+ * earlier one-approval "CAB Approval" stage.
+ */
+export interface BeStandardChangeProposalStage {
+  id: string;
+  /** "CAB Approval" (or, on an older proposal, "Standard Change Authority"). */
+  label: string;
+  /** How many different approvers must approve (2; 1 on the oldest CAB stage). */
+  requiredApprovals: number;
+  approvals: number;
+  /** APPROVED or REJECTED once settled; null while open. */
+  decision: "APPROVED" | "REJECTED" | null;
+  /**
+   * Only on the stage a proposal awaiting the CAB waits on (null elsewhere):
+   * approvals so far plus the people still asked who are still on the CAB, the
+   * most approvals the stage can still reach. Optional, as is the flag below:
+   * an entity-service build from before they existed sends neither.
+   */
+  eligibleApprovers?: number | null;
+  /**
+   * True when eligibleApprovers is below requiredApprovals: members have left
+   * the CAB since submit and the proposal can never be approved as it stands (a
+   * CAB member cancels it, or its proposer withdraws it and submits a copy).
+   * The proposal page says so on the open stage.
+   */
+  cannotReachQuorum?: boolean;
+}
+
+/** One person asked to decide a proposal. */
 export interface BeStandardChangeProposalApprover {
   id: string;
+  /** The stage (`stages`) the row belongs to. */
+  stageId?: string;
   approver: BeUserReference | null;
   /** REQUESTED, APPROVED, REJECTED or CANCELLED. */
   state: string;
   comments: string | null;
   updatedOn: string;
-  /** The caller's own REQUESTED row while the proposal is in CAB review. */
+  /**
+   * The caller's own REQUESTED row of the stage the proposal waits on, while
+   * the caller is still on the CAB.
+   */
   canDecide: boolean;
 }
 
@@ -5640,6 +5788,8 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
    */
   copiedFrom?: BeEntityRef | null;
   evidence: BeStandardChangeEvidence[] | null;
+  /** The approval stages, oldest first. */
+  stages?: BeStandardChangeProposalStage[] | null;
   approvers: BeStandardChangeProposalApprover[] | null;
   proposedBy: BeUserReference | null;
   createdOn: string;
@@ -5650,10 +5800,34 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
   decisionComment: string | null;
   /** The version an approved new or modify proposal wrote. */
   resultingVersion: number | null;
+  /**
+   * An open retirement only (empty otherwise): the change requests raised from the
+   * template that are still New, newest 100 (`name` is the number). Once it is
+   * retired they cannot request approval and can only be cancelled.
+   */
+  changeRequestsInNew?: BeEntityRef[] | null;
+  /** How many change requests `changeRequestsInNew` stands for. */
+  changeRequestsInNewTotal?: number;
+  /**
+   * The CAB's rejections and comments on the source and evidence change requests
+   * and on the customer's CAB-rejected look-alikes, read live; shown to the
+   * approvers. Null or absent where entity-service does not provide it.
+   */
+  cabHistory?: BeStandardChangeCabHistory | null;
   /** What the caller may do now (advisory: every action re-checks). */
   canEdit: boolean;
   canSubmit: boolean;
   canWithdraw: boolean;
+  /** The proposer, on a draft never submitted. */
+  canDelete?: boolean;
+  /** A CAB member, on someone else's open proposal. */
+  canCancel?: boolean;
+}
+
+/** `POST /standard-change-proposals/{id}/cancel`. */
+export interface BeCancelStandardChangeProposalPayload {
+  /** Why it is cancelled: required. */
+  reason: string;
 }
 
 /** `POST /standard-change-proposals`. */
@@ -5695,6 +5869,11 @@ export interface BeUpdateStandardChangeProposalPayload {
   impact?: BeChangeRequestImpact | "";
   risk?: BeChangeRequestRisk | "";
   rollbackDurationText?: string;
+  summary?: string;
+  /** An empty string clears it (chosen per change). */
+  priority?: BeChangeRequestPriority | "";
+  /** Replaces the list; an empty list clears it (any deployment). */
+  deploymentTypes?: BeDeploymentType[];
   isPlanningVisibleToCustomers?: boolean;
   customerApprovalRequired?: boolean;
   customerReviewRequired?: boolean;
@@ -5706,6 +5885,12 @@ export interface BeDecideStandardChangeProposalPayload {
   decision: "approved" | "rejected";
   /** Required for a rejection. */
   comment?: string;
+  /**
+   * The stage the page showed the caller deciding on (required: 400 without it).
+   * If the proposal has moved on since (that stage was settled or closed while
+   * the page was open), the server refuses (409) and writes nothing.
+   */
+  stageId: string;
 }
 
 export interface BeSearchStandardChangeProposalsPayload {
@@ -5715,7 +5900,7 @@ export interface BeSearchStandardChangeProposalsPayload {
   /** Narrows the list to the proposals for one customer (account). */
   accountId?: string;
   proposedByMe?: boolean;
-  /** In CAB review, with a pending approval of the caller's. */
+  /** Awaiting CAB approval, with a pending approval of the caller's. */
   awaitingMyDecision?: boolean;
   query?: string;
   pagination: BePagination;
@@ -5758,8 +5943,169 @@ export interface BeChangeRequestStandardChange {
    * `standard_change_template_other_customer`).
    */
   customerMismatch?: boolean;
+  /**
+   * The template's state now. A change request still New can request approval
+   * only while it is active and its version current (409
+   * `standard_change_template_unavailable` otherwise).
+   */
+  templateState?: BeStandardChangeTemplateState;
+  /** The template has been revised since this change request was raised. */
+  superseded?: boolean;
   versionId: string;
   version: number;
+  /** The priority the version fixes (a PATCH cannot change it); null when it fixes none. */
+  priority?: BeChangeRequestPriority | null;
+  /** The deployment types the version fixes (every deployment of them, one required); null when none. */
+  deploymentTypes?: BeDeploymentType[] | null;
   /** The version's parameters with the values the change request was raised with. */
   parameters: Array<BeStandardChangeParameter & { value: string | null }> | null;
+}
+
+// ---------------------------------------------------------------------------
+// Standard change suggestions (GET /standard-change-suggestions): clusters of one
+// customer's completed change requests that look like the same change done again.
+// entity-service computes them on a schedule and the read returns the last
+// snapshot (see its openapi.yaml).
+
+export interface BeStandardChangeSuggestionCriteria {
+  windowMonths: number;
+  minClosed: number;
+  minSuccessPercent: number;
+  planSimilarityPercent: number;
+}
+
+export interface BeStandardChangeSuggestionBreakdown {
+  low: number;
+  moderate: number;
+  high: number;
+  unknown: number;
+}
+
+export interface BeStandardChangeSuggestionMember {
+  id: string;
+  number: string;
+  subject: string;
+  state: "closed" | "rollback";
+  completedOn: string;
+  risk?: string | null;
+  impact?: string | null;
+  clonedFromId?: string | null;
+  hasDeviation: boolean;
+  /** The CAB rejected it at least once (it was then resubmitted and completed). */
+  cabRejected?: boolean;
+  /** Comments CAB approvers wrote on it. */
+  cabCommentCount?: number;
+  /** "subject": same normalised subject and a similar (or no) plan; "clone": cloned from a member. */
+  joinedBy: "subject" | "clone";
+}
+
+export interface BeStandardChangeSuggestionDismissal {
+  id: string;
+  reason: string;
+  dismissedBy?: BeEntityRef | null;
+  dismissedOn: string;
+}
+
+/**
+ * A suggestion also carries the CAB's pushback (`BeStandardChangeCabHistory`, its
+ * members and attached look-alikes); a snapshot computed before it existed has
+ * zero counts and empty lists, an older entity-service none at all.
+ */
+export interface BeStandardChangeSuggestion extends Partial<BeStandardChangeCabHistory> {
+  /**
+   * The cluster's own key: unique within its customer, kept across refreshes,
+   * what it is dismissed by. Several clusters can share a subject (`subjectKey`),
+   * so this, never the subject, identifies a row.
+   */
+  key: string;
+  /** The normalised subject the cluster's members share. */
+  subjectKey?: string;
+  customer: BeEntityRef;
+  /** The newest member's subject, as written. */
+  subject: string;
+  memberCount: number;
+  closedCount: number;
+  rollbackCount: number;
+  /** closed / (closed + rolled back), 0 to 1. */
+  successRate: number;
+  incidents: BeEntityRef[];
+  risk: BeStandardChangeSuggestionBreakdown;
+  impact: BeStandardChangeSuggestionBreakdown;
+  firstCompletedOn: string;
+  lastCompletedOn: string;
+  eligible: boolean;
+  /** Each criterion it misses, in words. */
+  unmet: string[];
+  /** The newest closed member with no deviation and no CAB rejection (else no deviation): what a new proposal starts from. */
+  proposeFrom?: BeEntityRef | null;
+  /** Every other closed member, newest first, at most 99. */
+  evidence: BeEntityRef[];
+  /** Open proposals already started from or citing a member. */
+  openProposals: BeEntityRef[];
+  members: BeStandardChangeSuggestionMember[];
+  dismissal?: BeStandardChangeSuggestionDismissal | null;
+  /** Members that deviated from their plan (all of them, not only those listed). */
+  deviationCount?: number;
+  /**
+   * Present when the subject had more change requests than entity-service
+   * compares (500): the cluster was built from the newest `compared` of `total`.
+   */
+  sample?: { compared: number; total: number } | null;
+}
+
+/**
+ * A customer the latest refresh could not compute: too large for its deadline,
+ * or an error stopped its computation (the refresh logged the cause). The
+ * snapshot holds nothing for it, and the next refresh tries again.
+ */
+export interface BeStandardChangeSuggestionSkipped {
+  customer: BeEntityRef;
+  /**
+   * Why, as one of two exact sentences entity-service writes, which the page
+   * matches: `SUGGESTION_SKIPPED_TOO_LARGE` or `SUGGESTION_SKIPPED_ERROR`
+   * (`csm-operations/utils/standardChangeSuggestions.ts`). Any other text is
+   * shown as it is.
+   */
+  reason: string;
+}
+
+export interface BeStandardChangeSuggestionsQuery {
+  accountId?: string;
+  includeIneligible?: boolean;
+  includeDismissed?: boolean;
+  /** Page size: 20 when absent, at most 50. */
+  limit?: number;
+  offset?: number;
+}
+
+export interface BeStandardChangeSuggestionsResponse {
+  /**
+   * One page: eligible first, then the most often closed, then the most
+   * recent, across customers when no accountId is given.
+   */
+  suggestions: BeStandardChangeSuggestion[];
+  /** The suggestions the query matches, on every page. */
+  total: number;
+  limit: number;
+  offset: number;
+  /** The thresholds the snapshot was computed by (configuration, not a request parameter). */
+  criteria: BeStandardChangeSuggestionCriteria;
+  /** When the snapshot was published (a scheduled refresh, once a day); null before the first. */
+  computedOn?: string | null;
+  scanned: {
+    customers?: number;
+    changeRequests: number;
+    clusters: number;
+    eligible: number;
+    dismissed: number;
+    skipped?: number;
+  };
+  /** Customers (the one asked for, or all) whose suggestions were not computed in the latest refresh. */
+  skippedCustomers?: BeStandardChangeSuggestionSkipped[];
+}
+
+export interface BeDismissStandardChangeSuggestionPayload {
+  accountId: string;
+  key: string;
+  reason: string;
 }

@@ -241,7 +241,7 @@ type AlertMuteRuleService interface {
 }
 
 // StandardChangeService serves the standard change catalogue (templates and their
-// CAB-approved versions) and the proposals that create, modify or retire them.
+// approved versions) and the proposals that create, modify or retire them.
 // Internal (WSO2) callers only.
 type StandardChangeService interface {
 	SearchTemplates(ctx context.Context, req domain.SearchStandardChangeTemplatesRequest) (domain.SearchStandardChangeTemplatesResponse, error)
@@ -249,15 +249,34 @@ type StandardChangeService interface {
 	GetTemplateVersion(ctx context.Context, templateID, versionID string) (domain.StandardChangeTemplateVersion, error)
 	// SuspendTemplate suspends an active template, recording the optional reason.
 	SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error)
-	ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
-	ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	// ResumeTemplate and ClearTemplateReview put a template back in use: a CAB
+	// member only, with a note.
+	ResumeTemplate(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error)
+	ClearTemplateReview(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error)
 	CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 	GetProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
 	SearchProposals(ctx context.Context, req domain.SearchStandardChangeProposalsRequest) (domain.SearchStandardChangeProposalsResponse, error)
 	UpdateProposal(ctx context.Context, id string, req domain.UpdateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 	SubmitProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
 	WithdrawProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	// CancelProposal: a CAB member ends someone else's open proposal, with a
+	// reason.
+	CancelProposal(ctx context.Context, id string, req domain.CancelStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+	// DeleteProposal: the proposer deletes their draft that was never submitted.
+	DeleteProposal(ctx context.Context, id string) error
 	DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+}
+
+// StandardChangeSuggestionService finds the standard changes a customer's
+// completed change requests suggest (standard_change_suggestion.go) and keeps
+// the dismissals. Internal callers only; a dismissal also needs a person.
+type StandardChangeSuggestionService interface {
+	// GetSuggestions reads one page of the last published snapshot; it never computes.
+	GetSuggestions(ctx context.Context, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, error)
+	// Refresh computes one page of a snapshot run (service credentials only).
+	Refresh(ctx context.Context, req domain.RefreshStandardChangeSuggestionsRequest) (domain.RefreshStandardChangeSuggestionsResponse, error)
+	DismissSuggestion(ctx context.Context, req domain.DismissStandardChangeSuggestionRequest) (domain.StandardChangeSuggestionDismissal, error)
+	RestoreSuggestion(ctx context.Context, id string) error
 }
 
 // SNUserService defines the user operations backed by the ServiceNow data source.

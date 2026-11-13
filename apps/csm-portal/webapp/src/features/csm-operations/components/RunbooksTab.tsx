@@ -76,6 +76,7 @@ import {
   type Runbook,
   type RunbookFilters,
 } from "@features/csm-operations/utils/runbooks";
+import { errorText } from "@features/csm-operations/utils/changeRequests";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 // A Select treats "" as no selection and leaves its label inside the box, so "Anyone" needs a real value.
@@ -91,10 +92,6 @@ function exportFileName(ext: "json" | "csv"): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `runbooks-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.${ext}`;
-}
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
 }
 
 /**

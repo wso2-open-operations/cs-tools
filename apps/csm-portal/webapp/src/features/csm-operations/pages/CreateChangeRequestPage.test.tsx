@@ -199,12 +199,13 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
 // contacts (the read-only Customer Group) are the project's own, per project.
 const SCOPE_FIXTURE: Record<
   string,
-  Array<{ id: string; label: string; products: Array<{ id: string; label: string }> }>
+  Array<{ id: string; label: string; type?: string; products: Array<{ id: string; label: string }> }>
 > = {
   "proj-a": [
     {
       id: "dep-prod",
       label: "Acme Production",
+      type: "primary_production",
       products: [
         { id: "dp-apim", label: "API Manager 4.3.0" },
         { id: "dp-is", label: "Identity Server 7.0.0" },
@@ -213,6 +214,7 @@ const SCOPE_FIXTURE: Record<
     {
       id: "dep-stg",
       label: "Acme Staging",
+      type: "staging",
       products: [{ id: "dp-apim-stg", label: "API Manager 4.2.0" }],
     },
   ],
@@ -239,6 +241,7 @@ vi.mock("@features/csm-operations/api/useChangeRequestScopeLookups", () => ({
     deployments: (projectId ? (SCOPE_FIXTURE[projectId] ?? []) : []).map((d) => ({
       id: d.id,
       label: d.label,
+      type: d.type,
       products: deploymentIds.includes(d.id) ? d.products : undefined,
     })),
     customerContacts: projectId ? (CONTACTS_FIXTURE[projectId] ?? []) : [],
@@ -314,6 +317,22 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     expect(screen.getByLabelText(/subject/i)).toHaveValue("Upgrade the gateway cluster");
     expect(screen.getByRole("radio", { name: /^emergency/i })).toBeChecked();
     expect(screen.getByText("High")).toBeInTheDocument();
+  });
+
+  it("sends the source as clonedFromChangeRequestId, and nothing when not a clone", () => {
+    locationState = { sourceNumber: "CHG0009988", sourceId: "chg-1", subject: "Upgrade the gateway cluster", type: "normal" };
+    const { unmount } = render(<CreateChangeRequestPage />);
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({ clonedFromChangeRequestId: "chg-1" });
+    unmount();
+    sessionStorage.clear();
+    postChangeRequestMutateMock.mockReset();
+    locationState = undefined;
+    render(<CreateChangeRequestPage />);
+    fireEvent.change(screen.getByLabelText(/subject/i), { target: { value: "From scratch" } });
+    fireEvent.click(screen.getByRole("radio", { name: /^normal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).not.toHaveProperty("clonedFromChangeRequestId");
   });
 
   it("shows a banner naming the source record and the fields that could not be copied", () => {
@@ -1104,7 +1123,8 @@ describe("CreateChangeRequestPage — required change type (Normal / Standard / 
     locationState = { subject: "Clone me", type: "standard" };
     render(<CreateChangeRequestPage />);
     expect(screen.getByRole("radio", { name: /^standard/i })).toBeChecked();
-    expect(screen.getByText(/select a standard change template to continue/i)).toBeInTheDocument();
+    // The project comes first: that is what is asked for, then the template.
+    expect(screen.getByText("Select a Customer Project to continue.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create change request/i })).toBeDisabled();
   });
 
@@ -1484,6 +1504,66 @@ describe("CreateChangeRequestPage — customer project, deployments, deployment 
     for (let i = 0; i < order.length - 1; i++) {
       expect(order[i]!.compareDocumentPosition(order[i + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
+  });
+
+  it.each(["Normal", "Emergency"] as const)("keeps that order for a %s change: Priority, then the Customer Project", (type) => {
+    render(<CreateChangeRequestPage />);
+    selectType(type);
+    const order = [
+      screen.getByRole("combobox", { name: /^priority/i }),
+      screen.getByLabelText("Customer Project"),
+      screen.getByRole("combobox", { name: "Deployments" }),
+      screen.getByLabelText("Customer Group"),
+      screen.getByRole("combobox", { name: "Category" }),
+    ];
+    for (let i = 0; i < order.length - 1; i++) {
+      expect(order[i]!.compareDocumentPosition(order[i + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(screen.getByRole("group", { name: "Customer project and deployments" })).toContainElement(
+      screen.getByLabelText("Customer Project"),
+    );
+  });
+
+  it("puts the Customer Project alone first for a Standard change: its customer decides the templates", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    const project = screen.getByRole("group", { name: "Customer project" });
+    expect(project).toHaveTextContent(/belongs to one customer and is used only for that customer's projects/i);
+    expect(project).toContainElement(screen.getByLabelText("Customer Project"));
+    // The rest of the project block is not about the template: it stays in its usual place.
+    expect(project).not.toContainElement(screen.getByRole("combobox", { name: "Deployments" }));
+    expect(project).not.toContainElement(screen.getByLabelText("Customer Group"));
+    expect(screen.getByRole("group", { name: "Deployments" })).toContainElement(
+      screen.getByRole("combobox", { name: "Deployments" }),
+    );
+    const order = [
+      screen.getByRole("radio", { name: /^standard/i }),
+      screen.getByLabelText("Customer Project"),
+      screen.getByRole("group", { name: "Standard change template" }),
+      screen.getByRole("combobox", { name: /^priority/i }),
+      screen.getByRole("combobox", { name: "Deployments" }),
+      screen.getByLabelText("Deployment products"),
+      screen.getByLabelText("Customer Group"),
+    ];
+    for (let i = 0; i < order.length - 1; i++) {
+      expect(order[i]!.compareDocumentPosition(order[i + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    // Each drawn once.
+    expect(screen.getAllByLabelText("Customer Project")).toHaveLength(1);
+    expect(screen.getAllByRole("combobox", { name: "Deployments" })).toHaveLength(1);
+  });
+
+  it("says nothing beside Create for a Normal change, or before a type is chosen", () => {
+    render(<CreateChangeRequestPage />);
+    const create = screen.getByRole("button", { name: /create change request/i });
+    expect(create).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(/still needs/i)).not.toBeInTheDocument();
+    selectType("Normal");
+    expect(create).toBeDisabled();
+    expect(create).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(/still needs/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: /^subject/i }), { target: { value: "Rotate keys" } });
+    expect(create).toBeEnabled();
   });
 
   it("has no Environments field: a deployment carries its own environment", () => {
@@ -2248,6 +2328,10 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     expect(screen.queryByRole("checkbox", { name: "Customer Review" })).not.toBeInTheDocument();
     expect(screen.queryByText("Planning")).not.toBeInTheDocument();
     expect(screen.queryAllByLabelText("editor")).toHaveLength(0);
+    expect(screen.getByText("Select a Customer Project to continue.")).toBeInTheDocument();
+    expect(screen.queryByText(/select a standard change template to continue/i)).not.toBeInTheDocument();
+    pickProject();
+    expect(screen.queryByText("Select a Customer Project to continue.")).not.toBeInTheDocument();
     expect(screen.getByText(/select a standard change template to continue/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create change request/i })).toBeDisabled();
     // What the template does not specify stays editable.
@@ -2458,6 +2542,57 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-2");
   });
 
+  it("uses the priority the template fixes, shown read-only, and never sends one", () => {
+    templateFixture = { ...TEMPLATE, currentVersion: { ...VERSION, priority: "high" } };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickProject();
+    pickTemplate();
+    expect(screen.queryByRole("combobox", { name: /^priority/i })).not.toBeInTheDocument();
+    const priority = screen.getByRole("textbox", { name: /^priority/i });
+    expect(priority).toHaveValue("High");
+    expect(priority).toHaveAttribute("readonly");
+    expect(screen.getByText("Fixed by the standard change template.")).toBeInTheDocument();
+    fillSpecifics();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0]![0]).not.toHaveProperty("priority");
+  });
+
+  it("offers only the deployments of the template's types, and needs one", () => {
+    templateFixture = { ...TEMPLATE, currentVersion: { ...VERSION, deploymentTypes: ["primary_production"] } };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickProject();
+    pickTemplate();
+    fillSpecifics();
+    const create = screen.getByRole("button", { name: /create change request/i });
+    expect(create).toBeDisabled();
+    expect(screen.getByText(/still needs a Primary Production deployment/)).toBeInTheDocument();
+    expect(screen.getByText("Required: the template is for Primary Production deployments only.")).toBeInTheDocument();
+    const deployments = screen.getByRole("combobox", { name: /^deployments/i });
+    fireEvent.mouseDown(deployments);
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Acme Production"]);
+    fireEvent.click(screen.getByRole("option", { name: "Acme Production" }));
+    fireEvent.keyDown(deployments, { key: "Escape" });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+    expect(postChangeRequestMutateMock.mock.calls[0]![0]).toMatchObject({ deploymentIds: ["dep-prod"] });
+  });
+
+  it("drops a deployment of another type chosen before the template", () => {
+    templateFixture = { ...TEMPLATE, currentVersion: { ...VERSION, deploymentTypes: ["primary_production"] } };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickProject();
+    const deployments = screen.getByRole("combobox", { name: /^deployments/i });
+    fireEvent.mouseDown(deployments);
+    fireEvent.click(screen.getByRole("option", { name: "Acme Staging" }));
+    fireEvent.keyDown(deployments, { key: "Escape" });
+    pickTemplate();
+    const root = screen.getByRole("combobox", { name: /^deployments/i }).closest(".MuiInputBase-root");
+    expect(Array.from(root?.querySelectorAll(".MuiChip-label") ?? []).map((c) => c.textContent)).toEqual([]);
+  });
+
   describe("a template is one customer's: the Customer Project's", () => {
     const templateField = (): HTMLElement => screen.getByRole("textbox", { name: "Standard change template" });
     const createButton = (): HTMLElement => screen.getByRole("button", { name: /create change request/i });
@@ -2466,10 +2601,23 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
       render(<CreateChangeRequestPage />);
       selectType("Standard");
       expect(templateField()).toBeDisabled();
-      expect(templateField()).toHaveAccessibleDescription(/select the customer project first/i);
-      expect(templateField()).toHaveAccessibleDescription(/belongs to one customer and is used only for that customer's projects/i);
+      expect(templateField()).toHaveAccessibleDescription("Choose the Customer Project above to see its customer's templates.");
       expect(screen.getByLabelText("Customer Project")).toBeRequired();
       expect(createButton()).toBeDisabled();
+    });
+
+    it("says beside Create what a Standard change still needs: the project, then the template", () => {
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      expect(createButton()).toHaveAccessibleDescription(
+        "Before it can be created it still needs a Customer Project and a standard change template.",
+      );
+      pickProject("proj-a");
+      expect(createButton()).toHaveAccessibleDescription("Before it can be created it still needs a standard change template.");
+      pickTemplate();
+      fillSpecifics();
+      expect(createButton()).toBeEnabled();
+      expect(screen.queryByText(/still needs/i)).not.toBeInTheDocument();
     });
 
     it("lists only the active templates of the project's customer once a project is chosen", () => {

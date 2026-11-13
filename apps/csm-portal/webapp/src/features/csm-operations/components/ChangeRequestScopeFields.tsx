@@ -20,6 +20,8 @@ import type { JSX, ReactNode } from "react";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import type { ScopeOption } from "@features/csm-operations/api/useChangeRequestScopeLookups";
 import type { ChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
+import { deploymentFitsTypes } from "@features/csm-operations/utils/standardChanges";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 
 interface ChangeRequestScopeFieldsProps {
   scope: ChangeRequestScope;
@@ -49,6 +51,19 @@ interface ChangeRequestScopeFieldsProps {
   projectRequired?: boolean;
   /** Text under the Customer Project picker (e.g. why it is required or narrowed). */
   projectHelperText?: ReactNode;
+  /**
+   * Which fields to draw: all of them (the default), the Customer Project alone,
+   * or Deployments and Deployment products alone. A standard change shows the
+   * project first (it decides the templates) and the deployments in their usual
+   * place, so the create page draws the two parts in two places.
+   */
+  parts?: "all" | "project" | "deployments";
+  /**
+   * The deployment types a standard change template is for: only deployments of
+   * these types are offered, and at least one is required (asterisk). Empty or
+   * absent: any deployment, none required.
+   */
+  deploymentTypes?: readonly string[] | null;
 }
 
 function selectedOptions(
@@ -74,33 +89,43 @@ export default function ChangeRequestScopeFields({
   projectAccountId,
   projectRequired = false,
   projectHelperText,
+  parts = "all",
+  deploymentTypes,
 }: ChangeRequestScopeFieldsProps): JSX.Element {
   const hasProject = !!scope.projectId;
 
   const deploymentValue = selectedOptions(scope.deploymentIds, scope.deploymentLabels);
   const productValue = selectedOptions(scope.deploymentProductIds, scope.deploymentProductLabels);
 
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <AsyncProjectSelect
-        id={`${idPrefix}-project`}
-        label="Customer Project"
-        value={scope.projectId}
-        knownLabel={scope.projectLabel || undefined}
-        onChange={scope.setProject}
-        disabled={disabled || projectDisabled}
-        disableClearable={!projectClearable}
-        accountId={projectAccountId}
-        required={projectRequired}
-        helperText={projectHelperText}
-      />
-
+  const projectField = (
+    <AsyncProjectSelect
+      id={`${idPrefix}-project`}
+      label="Customer Project"
+      value={scope.projectId}
+      knownLabel={scope.projectLabel || undefined}
+      onChange={scope.setProject}
+      disabled={disabled || projectDisabled}
+      disableClearable={!projectClearable}
+      accountId={projectAccountId}
+      required={projectRequired}
+      helperText={projectHelperText}
+    />
+  );
+  const typed = (deploymentTypes?.length ?? 0) > 0;
+  const deploymentOptions = typed
+    ? scope.deploymentOptions.filter((o) => deploymentFitsTypes(o.type, deploymentTypes!))
+    : scope.deploymentOptions;
+  const typesHelper = typed
+    ? `Required: the template is for ${deploymentTypesText(deploymentTypes)} deployments only.`
+    : undefined;
+  const deploymentFields = (
+    <>
       <Autocomplete<ScopeOption, true>
         multiple
         fullWidth
         size="small"
         id={`${idPrefix}-deployments`}
-        options={scope.deploymentOptions}
+        options={deploymentOptions}
         value={deploymentValue}
         disabled={disabled || !hasProject}
         loading={scope.lookups.isLoading}
@@ -113,12 +138,16 @@ export default function ChangeRequestScopeFields({
             ? "Couldn't load deployments. Try again."
             : scope.lookups.isLoading
               ? "Loading deployments…"
-              : "This project has no deployments"
+              : typed
+                ? `This project has no ${deploymentTypesText(deploymentTypes)} deployments`
+                : "This project has no deployments"
         }
         renderInput={(params) => (
           <TextField
             {...params}
             label="Deployments"
+            // Only while it can be filled in: a locked field asks for nothing.
+            required={typed && hasProject && !disabled}
             placeholder={deploymentValue.length ? undefined : "Select deployments…"}
             error={scope.lookups.isError}
             helperText={
@@ -131,7 +160,9 @@ export default function ChangeRequestScopeFields({
                 </>
               ) : !hasProject ? (
                 "Select a Customer Project first."
-              ) : undefined
+              ) : (
+                typesHelper
+              )
             }
           />
         )}
@@ -161,6 +192,13 @@ export default function ChangeRequestScopeFields({
           htmlInput: { "aria-readonly": true },
         }}
       />
+    </>
+  );
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {parts !== "deployments" && projectField}
+      {parts !== "project" && deploymentFields}
     </Box>
   );
 }
