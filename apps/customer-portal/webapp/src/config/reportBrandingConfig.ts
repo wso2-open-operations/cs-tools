@@ -17,6 +17,9 @@
 /** Company name the PDF footers print when `CUSTOMER_PORTAL_COMPANY_NAME` is not set. */
 export const DEFAULT_REPORT_COMPANY_NAME = "WSO2";
 
+/** What follows the company name in the footer line. */
+export const REPORT_SUPPORT_LINE_SUFFIX = " Support 24x7";
+
 /** A trimmed, non-empty string from `window.config`, else undefined. */
 function configuredString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -54,7 +57,7 @@ export function hasConfiguredReportCompanyName(): boolean {
  * @returns {string} The footer text.
  */
 export function reportSupportLine(): string {
-  return `${reportCompanyName()} Support 24x7`;
+  return `${reportCompanyName()}${REPORT_SUPPORT_LINE_SUFFIX}`;
 }
 
 /**
