@@ -143,35 +143,64 @@ func TestDeployedProductDefaultCategoryIntegration(t *testing.T) {
 		kept := "a5000000-0000-0000-0000-0000000000d3"
 		snCreate(t, kept, "DPDC-SN-3", req(depProjectOne, depDeployOne, str("cl")))
 
-		// One connection for both runs and the session check below, so the
-		// check reads the very session the migration ran on.
-		conn, err := pool.Acquire(context.Background())
+		// The migration updates every uncategorised product in the database,
+		// not only this test's, so it runs in a transaction that is rolled
+		// back: nothing it writes outlives the test. Its own statements, the
+		// clearing of app.is_internal included, run in that transaction, so the
+		// flag read there right after it says whether the migration cleared it.
+		ctx := context.Background()
+		tx, err := pool.Begin(ctx)
 		if err != nil {
-			t.Fatalf("acquire connection: %v", err)
+			t.Fatalf("begin: %v", err)
 		}
-		defer conn.Release()
+		defer func() { _ = tx.Rollback(ctx) }()
+		expectIn := func(t *testing.T, id string, want *string) {
+			t.Helper()
+			var got *string
+			if err := tx.QueryRow(ctx, `SELECT product_category::text FROM deployed_product WHERE id = $1`, id).Scan(&got); err != nil {
+				t.Fatalf("read category: %v", err)
+			}
+			switch {
+			case want == nil && got != nil:
+				t.Errorf("category = %s, want none", *got)
+			case want != nil && got == nil:
+				t.Errorf("category = none, want %s", *want)
+			case want != nil && *got != *want:
+				t.Errorf("category = %s, want %s", *got, *want)
+			}
+		}
 		for range 2 { // a second run must change nothing
-			if _, err := conn.Exec(context.Background(), string(sql)); err != nil {
+			if _, err := tx.Exec(ctx, string(sql)); err != nil {
 				t.Fatalf("apply 0292: %v", err)
 			}
-			expect(t, depDPOneSet, str("MS"))
-			expect(t, depDPOneLegacy, str("MS"))
-			expect(t, depDPTwo, nil)
-			expect(t, kept, str("CL"))
+			var internalAfter string
+			if err := tx.QueryRow(ctx, `SELECT current_setting('app.is_internal', true)`).Scan(&internalAfter); err != nil {
+				t.Fatalf("read setting: %v", err)
+			}
+			if internalAfter == "true" {
+				t.Fatalf("the migration left the session marked internal")
+			}
+			// deployed_product is row-level secured: read the results as an
+			// internal session, for this transaction only.
+			if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', 'true', true)`); err != nil {
+				t.Fatalf("mark internal: %v", err)
+			}
+			expectIn(t, depDPOneSet, str("MS"))
+			expectIn(t, depDPOneLegacy, str("MS"))
+			expectIn(t, depDPTwo, nil)
+			expectIn(t, kept, str("CL"))
 		}
 		var by string
-		if err := scoped.QueryRow(sys, `SELECT updated_by FROM deployed_product WHERE id = $1`, depDPOneLegacy).Scan(&by); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT updated_by FROM deployed_product WHERE id = $1`, depDPOneLegacy).Scan(&by); err != nil {
 			t.Fatalf("read updated_by: %v", err)
 		}
 		if by != "migration:0292_deployed_product_category_backfill" {
 			t.Errorf("updated_by = %q", by)
 		}
-		var internalAfter string
-		if err := conn.QueryRow(context.Background(), `SELECT current_setting('app.is_internal', true)`).Scan(&internalAfter); err != nil {
-			t.Fatalf("read setting: %v", err)
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatalf("rollback: %v", err)
 		}
-		if internalAfter == "true" {
-			t.Errorf("the migration left the session marked internal")
-		}
+		// Rolled back: the fixture's products have no category again.
+		expect(t, depDPOneSet, nil)
 	})
 }
