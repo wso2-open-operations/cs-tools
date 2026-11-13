@@ -64,8 +64,10 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onImageUpload,
     onPasteError,
     enterInsertsLineBreak,
+    markdownPaste,
   }: {
     enterInsertsLineBreak?: boolean;
+    markdownPaste?: boolean;
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
@@ -74,7 +76,7 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onImageUpload?: (file: File) => string;
     onPasteError?: (reason: "size" | "type" | "count") => void;
   }) => (
-    <div data-testid="editor-stub" data-enter-line-break={String(Boolean(enterInsertsLineBreak))}>
+    <div data-testid="editor-stub" data-enter-line-break={String(Boolean(enterInsertsLineBreak))} data-markdown-paste={String(Boolean(markdownPaste))}>
       <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
       {onPasteError && (
         <button type="button" onClick={() => onPasteError("count")}>
@@ -709,6 +711,7 @@ describe("CsmCaseCommentInput — Enter inserts a line break", () => {
   it("asks the editor for GitHub-style new lines", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     expect(screen.getByTestId("editor-stub")).toHaveAttribute("data-enter-line-break", "true");
+    expect(screen.getByTestId("editor-stub")).toHaveAttribute("data-markdown-paste", "true");
     // Ctrl/Cmd+Enter is still the send shortcut.
     expect(screen.getByText("Ctrl/Cmd + Enter to send.")).toBeInTheDocument();
   });

@@ -793,6 +793,7 @@ export default function CsmCaseCommentInput({
           autoFocus={autoFocus}
           enterToSubmit={false}
           enterInsertsLineBreak
+          markdownPaste
           onAttachmentClick={attachmentsDisabled ? undefined : onAttachmentClick}
           attachments={attachments.map((a) => a.file)}
           maxAttachments={COMMENT_MAX_ATTACHMENTS}

@@ -53,6 +53,9 @@ import {
   type ImagePasteRefusal,
   type InlineImageRoom,
 } from "@components/rich-text-editor/inlineImageLimits";
+import { looksLikeMarkdown } from "@components/rich-text-editor/looksLikeMarkdown";
+import { isFlatClipboardHtml } from "@components/rich-text-editor/isFlatClipboardHtml";
+import { markdownToPasteDom, mergeAdjacentParagraphs } from "@components/rich-text-editor/markdownPaste";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -68,13 +71,13 @@ import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
 import { LinkNode } from "@lexical/link";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
-import { CodeNode } from "@lexical/code";
+import { CodeNode, $isCodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
 import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
-import { $getRoot } from "lexical";
+import { $createParagraphNode, $getRoot, type RangeSelection } from "lexical";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import {
   KEY_ENTER_COMMAND,
@@ -221,6 +224,54 @@ const EnterSubmitPlugin = ({
 };
 
 /**
+ * Puts a caret that sits on the root itself inside a paragraph. Clicking into an
+ * EMPTY editor leaves the selection as an element point on the root (`root`, 0),
+ * not on a paragraph, so "is the selection in a plain paragraph" would be false for
+ * the first thing typed or pasted. If the root has a block at that offset the caret
+ * goes to its start (or the end of the last block); an empty root gets a paragraph.
+ * Anything other than a collapsed root caret is left alone. Call it inside a
+ * command handler or an update.
+ */
+function $moveRootCaretIntoBlock(): void {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
+  const root = $getRoot();
+  if (selection.anchor.type !== "element" || !selection.anchor.getNode().is(root)) return;
+  const offset = selection.anchor.offset;
+  const target = root.getChildAtIndex(offset);
+  if (target && $isElementNode(target)) {
+    target.selectStart();
+    return;
+  }
+  const previous = root.getChildAtIndex(offset - 1);
+  if (previous && $isElementNode(previous)) {
+    previous.selectEnd();
+    return;
+  }
+  if (root.getChildrenSize() === 0) {
+    const paragraph = $createParagraphNode();
+    root.append(paragraph);
+    paragraph.select();
+  }
+}
+
+/**
+ * The current range selection; with none (the editor lost its selection before a
+ * dialog action ran) the end of the root, adding an empty paragraph to an empty
+ * root, so a held paste is never dropped silently.
+ */
+function $getOrCreateRangeSelection(): RangeSelection {
+  const selection = $getSelection();
+  if ($isRangeSelection(selection)) return selection;
+  const root = $getRoot();
+  const last = root.getLastChild();
+  if (last && $isElementNode(last)) return last.selectEnd();
+  const paragraph = $createParagraphNode();
+  root.append(paragraph);
+  return paragraph.select();
+}
+
+/**
  * True when the whole selection sits in plain paragraphs -- the only place the
  * `enterInsertsLineBreak` mode applies (Enter and plain-text paste). Lists,
  * headings, quotes, code and table cells keep Lexical's own behaviour. Call it
@@ -274,6 +325,7 @@ const EnterLineBreakPlugin = () => {
         // Mirrors @lexical/rich-text: these browsers send Enter as a
         // `beforeinput` instead, which the INSERT_PARAGRAPH_COMMAND handler covers.
         if ((IS_IOS || IS_SAFARI || IS_APPLE_WEBKIT) && CAN_USE_BEFORE_INPUT) return false;
+        $moveRootCaretIntoBlock();
         if (!$selectionInPlainParagraphs()) return false;
         event.preventDefault();
         editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
@@ -285,7 +337,9 @@ const EnterLineBreakPlugin = () => {
     const unregParagraph = editor.registerCommand(
       INSERT_PARAGRAPH_COMMAND,
       () => {
-        if (editor.isComposing() || !$selectionInPlainParagraphs()) return false;
+        if (editor.isComposing()) return false;
+        $moveRootCaretIntoBlock();
+        if (!$selectionInPlainParagraphs()) return false;
         editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
         return true;
       },
@@ -452,9 +506,24 @@ function isImageOnlyHtml(html: string): boolean {
   return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
 }
 
+/** True when the selection starts or ends inside a code block (never prompted on paste). */
+function $selectionInCodeBlock(): boolean {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection)) return false;
+  return [selection.anchor, selection.focus].some(
+    (point) => $findMatchingParent(point.getNode(), $isCodeNode) !== null,
+  );
+}
+
 const PasteNormalizationPlugin = ({
   lineBreaks = false,
+  markdownPaste = false,
 }: {
+  /**
+   * `markdownPaste` mode: pasted text that looks like Markdown gets a "Paste as
+   * Markdown" / "Remove Formatting" prompt instead of its normal path.
+   */
+  markdownPaste?: boolean;
   /** `enterInsertsLineBreak` mode: plain-text newlines become `<br>`s, not paragraphs. */
   lineBreaks?: boolean;
 }): JSX.Element | null => {
@@ -462,6 +531,7 @@ const PasteNormalizationPlugin = ({
   const [pendingPaste, setPendingPaste] = useState<{
     html: string;
     text: string;
+    variant: "html" | "markdown";
   } | null>(null);
 
   useEffect(() => {
@@ -489,13 +559,30 @@ const PasteNormalizationPlugin = ({
           return true;
         }
 
+        // Markdown source (VS Code, a chat's copy button) arrives as text/plain,
+        // with no HTML or only a flat code-view one. Rendered HTML (a Word list, a
+        // Gmail quote) has rendered text/plain that can look like Markdown, so it keeps
+        // the Keep/Remove prompt. Never offered inside a code block.
+        if (
+          markdownPaste &&
+          text &&
+          looksLikeMarkdown(text) &&
+          isFlatClipboardHtml(html) &&
+          !$selectionInCodeBlock()
+        ) {
+          event.preventDefault();
+          setPendingPaste({ html, text, variant: "markdown" });
+          return true;
+        }
+
         if (html.trim()) {
           event.preventDefault();
-          setPendingPaste({ html, text });
+          setPendingPaste({ html, text, variant: "html" });
           return true;
         }
 
         if (text) {
+          if (lineBreaks) $moveRootCaretIntoBlock();
           const tokens = tokenizePlainTextPaste(text, {
             lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
           });
@@ -528,26 +615,34 @@ const PasteNormalizationPlugin = ({
       },
       COMMAND_PRIORITY_HIGH,
     );
-  }, [editor, lineBreaks]);
+  }, [editor, lineBreaks, markdownPaste]);
 
   /** "Keep Formatting" -- exactly the normalized-HTML insertion path above. */
   const applyKeepFormatting = useCallback(() => {
     if (!pendingPaste) return;
-    const dom = new DOMParser().parseFromString(pendingPaste.html, "text/html");
-    unwrapNestedPreCodeElements(dom);
-    collapseEmptyParagraphElements(dom);
+    // "Paste as Markdown": the pasted text converted, not the clipboard's HTML.
+    const markdown = pendingPaste.variant === "markdown";
+    const dom = markdown
+      ? markdownToPasteDom(pendingPaste.text)
+      : new DOMParser().parseFromString(pendingPaste.html, "text/html");
+    if (!markdown) {
+      unwrapNestedPreCodeElements(dom);
+      collapseEmptyParagraphElements(dom);
+    }
 
     editor.update(
       () => {
-        const selection = $getSelection();
-        if (!$isRangeSelection(selection)) return;
+        $moveRootCaretIntoBlock();
+        const selection = $getOrCreateRangeSelection();
+        // Keep a pasted blank line the same markup as a typed one.
+        if (markdown && lineBreaks && $selectionInPlainParagraphs()) mergeAdjacentParagraphs(dom);
         const nodes = $generateNodesFromDOM(editor, dom);
         selection.insertNodes(nodes);
       },
       { tag: PASTE_TAG },
     );
     setPendingPaste(null);
-  }, [editor, pendingPaste]);
+  }, [editor, pendingPaste, lineBreaks]);
 
   /**
    * "Remove Formatting" -- discards all structure and treats the paste
@@ -562,6 +657,8 @@ const PasteNormalizationPlugin = ({
 
     editor.update(
       () => {
+        $moveRootCaretIntoBlock();
+        $getOrCreateRangeSelection();
         const tokens = tokenizePlainTextPaste(plainText, {
           lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
         });
@@ -594,6 +691,7 @@ const PasteNormalizationPlugin = ({
       onKeepFormatting={applyKeepFormatting}
       onRemoveFormatting={applyRemoveFormatting}
       onClose={cancelPendingPaste}
+      variant={pendingPaste.variant}
     />
   );
 };
@@ -656,6 +754,7 @@ const Editor = ({
   onSubmitKeyDown,
   enterToSubmit = false,
   enterInsertsLineBreak = false,
+  markdownPaste = false,
   placeholder = "Enter description...",
   id,
   showKeyboardHint = false,
@@ -693,6 +792,11 @@ const Editor = ({
    * `enterToSubmit`. See `EnterLineBreakPlugin`.
    */
   enterInsertsLineBreak?: boolean;
+  /**
+   * Pasted text that looks like Markdown prompts "Paste as Markdown" / "Remove
+   * Formatting" (see `looksLikeMarkdown`). Off by default.
+   */
+  markdownPaste?: boolean;
   placeholder?: string;
   id?: string;
   showKeyboardHint?: boolean;
@@ -969,7 +1073,7 @@ const Editor = ({
           <TablePlugin />
           <ImagesPlugin />
           <ClipboardImagePlugin onPasteError={onImageRefused} onImageUpload={onImageUpload} />
-          <PasteNormalizationPlugin lineBreaks={lineBreakMode} />
+          <PasteNormalizationPlugin lineBreaks={lineBreakMode} markdownPaste={markdownPaste} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />
