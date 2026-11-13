@@ -227,6 +227,28 @@ func ctEngagementPlan(id string) repository.CaseTypeTransfer {
 	return repository.CaseTypeTransfer{CaseID: id, TargetType: "engagement", EngagementType: &et, EngagementPaymentType: &pt, ActorEmail: ctActor}
 }
 
+// Fixed ids of the catalog request a transfer into a service request stores; the
+// rows they name are seeded by seedCTCatalog.
+const (
+	ctCatalogID     = "92000000-0000-0000-0000-0000000000c1"
+	ctCatalogItemID = "92000000-0000-0000-0000-0000000000c2"
+	ctVarFirstID    = "92000000-0000-0000-0000-0000000000c3" // order 2
+	ctVarSecondID   = "92000000-0000-0000-0000-0000000000c4" // order 1
+	ctVarUnknownID  = "92000000-0000-0000-0000-0000000000c5" // in no catalog
+)
+
+func ctServiceRequestPlan(id string) repository.CaseTypeTransfer {
+	return repository.CaseTypeTransfer{
+		CaseID: id, TargetType: "service_request", ActorEmail: ctActor,
+		CatalogID: ctCatalogID, CatalogItemID: ctCatalogItemID,
+		Variables: []domain.Variable{
+			{ID: ctVarFirstID, Value: "answer to the second question"},
+			{ID: ctVarSecondID, Value: "answer to the first question"},
+			{ID: ctVarUnknownID, Value: "answer to a question no longer in the catalog"},
+		},
+	}
+}
+
 func ctCasePlan(id string, sev domain.CaseSeverity) repository.CaseTypeTransfer {
 	it := domain.CaseIssueTypeError
 	return repository.CaseTypeTransfer{CaseID: id, TargetType: "case", Severity: &sev, IssueType: &it, ActorEmail: ctActor}
@@ -259,7 +281,7 @@ func TestCaseTypeTransferIntegration_OutOfCase_IncidentAndQuery(t *testing.T) {
 	targets := map[string]func(id string) repository.CaseTypeTransfer{
 		"engagement": ctEngagementPlan,
 		"service_request": func(id string) repository.CaseTypeTransfer {
-			return repository.CaseTypeTransfer{CaseID: id, TargetType: "service_request", ActorEmail: ctActor}
+			return ctServiceRequestPlan(id)
 		},
 		"security_report_analysis": func(id string) repository.CaseTypeTransfer {
 			return repository.CaseTypeTransfer{CaseID: id, TargetType: "security_report_analysis", ActorEmail: ctActor}
