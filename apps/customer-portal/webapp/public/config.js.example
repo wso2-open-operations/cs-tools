@@ -64,15 +64,23 @@ window.config = {
   // CUSTOMER_PORTAL_APP_NAME  (default: "Customer Portal")
   //   Product name shown beside the logo in the header and in the browser tab.
   // CUSTOMER_PORTAL_COMPANY_NAME  (default: "WSO2 LLC")
-  //   Company name in the footer copyright line.
+  //   Company name in the footer copyright line. Also used in the PDF report
+  //   footers ("<name> Support 24x7") and in the labels "<name> Products",
+  //   "Add <name> Product" (project deployments) and "<name> Resolution"
+  //   (vulnerability details); those default to "WSO2".
   // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL  (default: "/logo-dark.svg")
   //   Logo for the light colour scheme and the light-mode tab icon. A path
   //   under public/ or an absolute https URL. When no dark-mode logo is set,
   //   this one is used for both colour schemes. The defaults are the stock
   //   files public/logo-dark.svg and public/logo-white.svg; to use your own
   //   logos without changing this file, mount your SVGs over those two paths.
+  //   Also drawn in the footer of the PDF reports (Change Request details,
+  //   Update Summary), which print on white; a URL on another origin must
+  //   allow CORS, or the report is printed without a logo. The reports have
+  //   no logo when neither logo key is set.
   // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL  (default: "/logo-white.svg")
-  //   Logo for the dark colour scheme and the dark-mode tab icon.
+  //   Logo for the dark colour scheme and the dark-mode tab icon. The PDF
+  //   reports use it only when no light-mode logo is set.
   // CUSTOMER_PORTAL_APP_NAME: "<your-portal-name>",
   // CUSTOMER_PORTAL_COMPANY_NAME: "<your-company-name>",
   // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: "/logo-dark.svg",
@@ -189,27 +197,6 @@ window.config = {
   //   less skip the dialog. Only the boolean false or the string "false" turns it
   //   off; true (or leaving it unset) keeps it on.
   // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,
-
-  // ── PDF report footers ──────────────────────────────────────────────────────
-  //
-  // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL  (optional — default: no logo)
-  //   Logo for a light background, drawn in the footer of the PDF reports
-  //   (Change Request details, Update Summary). A path under public/ or an
-  //   absolute URL; a URL on another origin must allow CORS, or the footer is
-  //   printed without a logo.
-  // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: "<your-logo-url>",
-  //
-  // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL  (optional — default: no logo)
-  //   Logo for a dark background. The PDF footers use it only when no light-mode
-  //   logo is set.
-  // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL: "<your-dark-mode-logo-url>",
-  //
-  // CUSTOMER_PORTAL_COMPANY_NAME  (optional — default: "WSO2")
-  //   Company name in the PDF report footers, printed as "<name> Support 24x7",
-  //   and in the portal labels that name the company: "<name> Products" and
-  //   "Add <name> Product" (project deployments), "<name> Resolution"
-  //   (vulnerability details).
-  // CUSTOMER_PORTAL_COMPANY_NAME: "<your-company-name>",
 
   // ── Top banners ─────────────────────────────────────────────────────────────
   //

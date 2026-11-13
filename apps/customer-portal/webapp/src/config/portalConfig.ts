@@ -34,8 +34,16 @@ export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_THEME: string;
   /** Optional name and logo settings. Each falls back to the stock WSO2 value when unset. */
   CUSTOMER_PORTAL_APP_NAME?: string;
+  /**
+   * Also used in the PDF report footers ("<name> Support 24x7") and in labels
+   * such as "<name> Products" and "<name> Resolution", which default to "WSO2".
+   */
   CUSTOMER_PORTAL_COMPANY_NAME?: string;
-  /** Logo for the light colour scheme; also used for dark when no dark-mode logo is set. */
+  /**
+   * Logo for the light colour scheme; also used for dark when no dark-mode logo is set.
+   * The PDF report footers draw this one (the dark-mode one only when it is unset), and
+   * have no logo when neither is set. A URL on another origin must allow CORS for that.
+   */
   CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL?: string;
   CUSTOMER_PORTAL_LOGO_DARK_MODE_URL?: string;
   CUSTOMER_PORTAL_LOG_LEVEL: string;
@@ -123,23 +131,6 @@ export interface CustomerPortalWindowConfig {
    * browser supports it. On unless `false` (boolean or "false").
    */
   CUSTOMER_PORTAL_DOWNLOAD_TO_DISK?: boolean | string;
-  /**
-   * Optional. Logo for a light background (a path under `public/` or an absolute
-   * URL). Drawn in the footer of the PDF reports, which print on white. An
-   * absolute URL on another origin must allow CORS, or the footer has no logo.
-   */
-  CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL?: string;
-  /**
-   * Optional. Logo for a dark background. The PDF footers use it only when no
-   * light-mode logo is set.
-   */
-  CUSTOMER_PORTAL_LOGO_DARK_MODE_URL?: string;
-  /**
-   * Optional. Company name in the PDF report footers ("<name> Support 24x7") and
-   * in labels that name the company ("<name> Products", "Add <name> Product",
-   * "<name> Resolution"). Defaults to "WSO2".
-   */
-  CUSTOMER_PORTAL_COMPANY_NAME?: string;
 }
 
 declare global {
