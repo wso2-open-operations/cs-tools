@@ -8777,7 +8777,17 @@ those members, the proposer listed cancelled by every user row of their email
 (`changeRequestCreatorUserIDs`). `approval_stage.required_approvals` (0287, default 1, so every change
 request stage is unchanged) is `domain.StandardChangeCABApprovals` = 2: the stage stays open until two
 different CAB members approve, each once; the second approval applies the proposal. Any rejection ends
-it and needs a comment. Only a REQUESTED row on the stage lets someone decide (403 otherwise).
+it and needs a comment. Only a REQUESTED row on the stage lets someone decide (403 otherwise), and only while they are still on the CAB: the rows are written at submit, from the
+CAB as it was then, so `DecideProposal` checks membership again under the proposal's lock (`isGroupMember`,
+the same `groupMemberSQL` as `IsGroupMember`) and refuses (403) someone who has left since. `canDecide`
+needs current membership too, and `awaitingMyDecision` lists nothing for a member who has left, so
+neither offers a decision the server refuses. An approval already given stands if its member leaves
+later. **A stage nobody can finish is flagged, not cancelled**: the stage an open proposal waits on
+carries `eligibleApprovers` (approvals so far plus the distinct people still asked, open row, active
+internal, still on the CAB, `proposalStageReach`) and `cannotReachQuorum` (`eligibleApprovers` below the
+required 2). Nothing cancels such a proposal automatically, as nothing closes any other open proposal
+on its own: a CAB member cancels it, or its proposer withdraws it and submits a copy, which asks the CAB
+as it is then. Members added to the CAB after submit are not asked (the pool is fixed at submit).
 **People, not user rows**: `"user".email` is not unique, so the quorum and the approvals a proposal's
 `stages` show both count distinct emails of APPROVED rows (`stageApprovalsSQL`), an approval cancels
 the approver's other REQUESTED rows on the stage, a second decision by an email that already approved
@@ -8794,9 +8804,10 @@ old flow's CAB stage by the "Standard Change Authority" stage after it, never by
 runs again on any database that recorded it under an earlier number, and must leave today's stage
 (and its approvals) alone.
 
-`DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
-the stage it was meant for (`stageId`, which the webapp always sends): when that is not the stage the
-proposal waits on (its old stage, on a page loaded before 0295 or 0297), it
+`DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision must name
+the stage it was meant for (`stageId`, the stage the page showed; 400 when absent or blank, so an old
+cached page or a script cannot skip the guard): when that is not the stage the proposal waits on (its
+old stage, on a page loaded before 0295 or 0297, or one submitted again while the page was open), it
 is a 409 with nothing written. Submit refuses (400) when the CAB has fewer than two
 eligible members besides the proposer (`resolveProposalCABPool`, the message names the CAB), so a
 proposal never waits on a group that could not authorise it. **Approved**: `NEW`

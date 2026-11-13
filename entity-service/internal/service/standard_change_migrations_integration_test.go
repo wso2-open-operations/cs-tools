@@ -145,7 +145,7 @@ func TestStandardChangeIntegration_MigrationsReplay(t *testing.T) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), atCAB.ID); err != nil {
 		t.Fatal(err)
 	}
-	atCAB, err := env.svc.DecideProposal(stdCtx(stdAuth1), atCAB.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	atCAB, err := env.svc.DecideProposal(stdCtx(stdAuth1), atCAB.ID, atStage(t, env, atCAB.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	if err != nil || atCAB.State != domain.StandardChangeProposalStateAuthorityReview || len(atCAB.Stages) != 1 ||
 		atCAB.Stages[0].Label != domain.CABApprovalGroupName || atCAB.Stages[0].Approvals != 1 {
 		t.Fatalf("CAB fixture = %s %+v, %v", atCAB.State, atCAB.Stages, err)
@@ -230,7 +230,7 @@ func TestStandardChangeIntegration_MigrationsReplay(t *testing.T) {
 		return
 	}
 	// And the proposal carries on: the second approval decides it.
-	if p, err := env.svc.DecideProposal(stdCtx(stdAuth2), atCAB.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil ||
+	if p, err := env.svc.DecideProposal(stdCtx(stdAuth2), atCAB.ID, atStage(t, env, atCAB.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil ||
 		p.State != domain.StandardChangeProposalStateApproved || p.Template == nil {
 		t.Fatalf("the second approval after the replay = %s, %v", p.State, err)
 	}
@@ -343,7 +343,7 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	if got, err := env.svc.GetProposal(stdCtx(stdProposer), waiting.ID); err != nil || len(got.Stages) != 2 {
 		t.Fatalf("authority review fixture = %+v, %v", got.Stages, err)
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), waiting.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), waiting.ID, atStage(t, env, waiting.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
 	decided := readyDraft(t, env, stdTag+" Decided")
@@ -360,7 +360,7 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), today.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), today.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), today.ID, atStage(t, env, today.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
 	today, err = env.svc.GetProposal(stdCtx(stdProposer), today.ID)
@@ -542,7 +542,7 @@ func TestStandardChangeIntegration_CABAuthorisesMigration(t *testing.T) {
 		return got
 	}
 	waiting := toAuthority(stdTag + " Waiting on the authority")
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), waiting.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), waiting.ID, atStage(t, env, waiting.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatalf("one authorisation before the migration: %v", err)
 	}
 	decided := toAuthority(stdTag + " Decided by the authority")

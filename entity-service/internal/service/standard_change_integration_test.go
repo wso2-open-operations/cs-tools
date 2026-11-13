@@ -205,15 +205,31 @@ func approverStates(p domain.StandardChangeProposal) map[string]string {
 	return out
 }
 
+// atStage is req with StageID set as the webapp sends it: the stage proposal id
+// waits on now (its latest). A proposal with no stage gets a well-formed id of
+// no stage, so the decision reaches the server's own refusal (not waiting for a
+// decision) rather than the missing-stage 400.
+func atStage(t *testing.T, env *stdEnv, id string, req domain.DecideStandardChangeProposalRequest) domain.DecideStandardChangeProposalRequest {
+	t.Helper()
+	stage := "00000000-0000-4000-8000-000000000000"
+	if err := env.scoped.QueryRow(repository.WithSystemIdentity(context.Background()),
+		`SELECT COALESCE((SELECT id::text FROM approval_stage WHERE work_item_id = $1::uuid ORDER BY created_on DESC, id DESC LIMIT 1), $2)`,
+		id, stage).Scan(&stage); err != nil {
+		t.Fatalf("read the stage of %s: %v", id, err)
+	}
+	req.StageID = &stage
+	return req
+}
+
 // authorise has two CAB members approve a submitted proposal, and returns it
 // (approved).
 func authorise(t *testing.T, env *stdEnv, id string) domain.StandardChangeProposal {
 	t.Helper()
-	p, err := env.svc.DecideProposal(stdCtx(stdAuth1), id, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	p, err := env.svc.DecideProposal(stdCtx(stdAuth1), id, atStage(t, env, id, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	if err != nil || p.State != domain.StandardChangeProposalStateAuthorityReview {
 		t.Fatalf("first authorisation: %s, %v", p.State, err)
 	}
-	p, err = env.svc.DecideProposal(stdCtx(stdAuth2), id, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	p, err = env.svc.DecideProposal(stdCtx(stdAuth2), id, atStage(t, env, id, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	if err != nil || p.State != domain.StandardChangeProposalStateApproved {
 		t.Fatalf("second authorisation: %s, %v", p.State, err)
 	}
@@ -254,6 +270,8 @@ func TestStandardChangeIntegration(t *testing.T) {
 			t.Run("change requests that move to another customer", func(t *testing.T) { stdMovedChangeRequests(t, env) })
 			t.Run("the customer stays fixed, and the CAB approves for it", func(t *testing.T) { stdCustomerHolds(t, env) })
 			t.Run("the CAB's stage", func(t *testing.T) { stdCABStage(t, env) })
+			t.Run("members who leave the CAB after submit", func(t *testing.T) { stdCABLeavers(t, env) })
+			t.Run("a decision names its stage", func(t *testing.T) { stdDecisionNamesStage(t, env) })
 			t.Run("deleting and cancelling", func(t *testing.T) { stdDeleteCancel(t, env) })
 			t.Run("who puts a template back in use, and its history", func(t *testing.T) { stdTemplateGates(t, env) })
 			t.Run("one change, one template", func(t *testing.T) { stdDuplicates(t, env) })
@@ -283,7 +301,7 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	// Only the proposer edits; a draft is not decided.
 	_, err = env.svc.UpdateProposal(stdCtx(stdOutsider), p.ID, domain.UpdateStandardChangeProposalRequest{Rationale: stdp("x")})
 	expectErr[*apierror.ForbiddenError](t, err, "outsider edits")
-	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ConflictError](t, err, "decide a draft")
 
 	// Not complete: the placeholders must be declared and the rationale given.
@@ -327,11 +345,11 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 
 	// Who may decide: not the proposer, not a non-member, and not a colleague who
 	// is not on the CAB.
-	_, err = env.svc.DecideProposal(stdCtx(stdProposer), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdProposer), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "the proposer decides")
-	_, err = env.svc.DecideProposal(stdCtx(stdOutsider), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdOutsider), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "a non-member decides")
-	_, err = env.svc.DecideProposal(stdCtx(stdColleague), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdColleague), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "a colleague who is not on the CAB decides")
 	if got, _ := env.svc.GetProposal(stdCtx(stdColleague), p.ID); got.Stages[0].Approvals != 0 {
 		t.Fatalf("a refused decision was recorded: %+v", got.Stages)
@@ -350,14 +368,14 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 		t.Fatalf("awaiting a colleague not on the CAB = %+v, %v", awaiting, err)
 	}
 	// One authorisation is not enough, and nobody authorises twice.
-	p, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", Comment: stdp("ok")})
+	p, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", Comment: stdp("ok")}))
 	if err != nil || p.State != domain.StandardChangeProposalStateAuthorityReview || p.Stages[0].Approvals != 1 || p.Template != nil {
 		t.Fatalf("after one authorisation = %s %+v, %v", p.State, p.Stages, err)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "authorise twice")
 	// The second approval, by another member, applies the proposal.
-	p, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", Comment: stdp("agreed")})
+	p, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", Comment: stdp("agreed")}))
 	if err != nil {
 		t.Fatalf("second authorisation: %v", err)
 	}
@@ -368,7 +386,7 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	if s := approverStates(p); s[stdAuth1] != "APPROVED" || s[stdAuth2] != "APPROVED" || s[stdCAB1] != "CANCELLED" {
 		t.Fatalf("after the second authorisation = %v", s)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("late")})
+	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("late")}))
 	expectErr[*apierror.ConflictError](t, err, "decide again")
 
 	tpl, err := env.svc.GetTemplate(stdCtx(stdOutsider), p.Template.ID)
@@ -496,10 +514,10 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	if _, err := env.scoped.Exec(sys, `UPDATE standard_change_template SET name = $2 WHERE id = $1::uuid`, tpl.ID, other); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), dup.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), dup.ID, atStage(t, env, dup.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatalf("first authorisation: %v", err)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), dup.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), dup.ID, atStage(t, env, dup.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ConflictError](t, err, "approve a duplicate name")
 	if _, err := env.scoped.Exec(sys, `UPDATE standard_change_template SET name = $2 WHERE id = $1::uuid`, tpl.ID, name); err != nil {
 		t.Fatal(err)
@@ -552,13 +570,13 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	if _, err := env.svc.SuspendTemplate(stdCtx(stdCAB1), tpl.ID, domain.SuspendStandardChangeTemplateRequest{Reason: "Going away"}); err != nil {
 		t.Fatalf("suspend before retiring: %v", err)
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), r.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), r.ID, atStage(t, env, r.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
 	if tpl, _ = env.svc.GetTemplate(stdCtx(stdOutsider), tpl.ID); tpl.State == domain.StandardChangeTemplateStateRetired {
 		t.Fatal("one authorisation alone retired the template")
 	}
-	if p, err := env.svc.DecideProposal(stdCtx(stdCAB1), r.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil ||
+	if p, err := env.svc.DecideProposal(stdCtx(stdCAB1), r.ID, atStage(t, env, r.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil ||
 		p.State != domain.StandardChangeProposalStateApproved {
 		t.Fatalf("the second authorisation, by another CAB member: %s, %v", p.State, err)
 	}
@@ -635,9 +653,9 @@ func stdRejection(t *testing.T, env *stdEnv) {
 	if err != nil || awaiting.Total != 1 || awaiting.Proposals[0].ID != p.ID {
 		t.Fatalf("awaiting my decision = %+v, %v", awaiting, err)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected"}))
 	expectErr[*apierror.ValidationError](t, err, "a rejection without a comment")
-	p, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("Not low risk enough")})
+	p, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("Not low risk enough")}))
 	if err != nil {
 		t.Fatalf("reject: %v", err)
 	}
@@ -1133,10 +1151,10 @@ func stdCustomerHolds(t *testing.T, env *stdEnv) {
 		t.Fatalf("the evidence shows its customer: %+v", got.Evidence)
 	}
 	move("closedDriftSource", "B")
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), src.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), src.ID, atStage(t, env, src.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), src.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), src.ID, atStage(t, env, src.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ConflictError](t, err, "approve with the source change request now another customer's")
 	if !strings.Contains(err.Error(), "this proposal cannot be approved now") {
 		t.Fatalf("refusal = %v", err)
@@ -1146,7 +1164,7 @@ func stdCustomerHolds(t *testing.T, env *stdEnv) {
 		t.Fatalf("a refused approval changed the proposal: %s %+v %v", got.State, got.Template, approverStates(got))
 	}
 	// Rejecting is still possible; nothing is written to the catalogue.
-	if got, err := env.svc.DecideProposal(stdCtx(stdAuth2), src.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("Moved customer")}); err != nil ||
+	if got, err := env.svc.DecideProposal(stdCtx(stdAuth2), src.ID, atStage(t, env, src.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("Moved customer")})); err != nil ||
 		got.State != domain.StandardChangeProposalStateRejected {
 		t.Fatalf("reject: %v", err)
 	}
@@ -1168,14 +1186,14 @@ func stdCustomerHolds(t *testing.T, env *stdEnv) {
 	if err == nil {
 		t.Fatal("a submitted proposal's customer changed")
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), ev.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), ev.ID, atStage(t, env, ev.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
 	move("closedDriftEvidence", "B")
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), ev.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), ev.ID, atStage(t, env, ev.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ConflictError](t, err, "authorise with evidence now another customer's")
 	move("closedDriftEvidence", "A")
-	got, err := env.svc.DecideProposal(stdCtx(stdAuth2), ev.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	got, err := env.svc.DecideProposal(stdCtx(stdAuth2), ev.ID, atStage(t, env, ev.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	if err != nil || got.State != domain.StandardChangeProposalStateApproved || got.Template == nil {
 		t.Fatalf("approve once the evidence is back: %+v, %v", got.Template, err)
 	}
@@ -1198,10 +1216,10 @@ func stdCustomerHolds(t *testing.T, env *stdEnv) {
 		t.Fatal(err)
 	}
 	exec("drop the customer", `UPDATE standard_change_proposal SET account_id = NULL WHERE id = $1::uuid`, orphan.ID)
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), orphan.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), orphan.ID, atStage(t, env, orphan.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), orphan.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), orphan.ID, atStage(t, env, orphan.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ConflictError](t, err, "approve a proposal that names no customer")
 	if !strings.Contains(err.Error(), "it names no customer") {
 		t.Fatalf("refusal = %v", err)
@@ -1323,9 +1341,9 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 	if _, err := env.svc.SubmitProposal(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err := env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected"})
+	_, err := env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected"}))
 	expectErr[*apierror.ValidationError](t, err, "a CAB member rejects without a comment")
-	p, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("Too broad")})
+	p, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("Too broad")}))
 	if err != nil || p.State != domain.StandardChangeProposalStateRejected || p.Template != nil || p.DecidedBy == nil || p.DecidedBy.Email != stdAuth1 {
 		t.Fatalf("rejected by the CAB = %s %+v, %v", p.State, p.DecidedBy, err)
 	}
@@ -1362,10 +1380,10 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 	if _, err := env.svc.SubmitProposal(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatal(err)
 	}
-	if p, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("No")}); err != nil ||
+	if p, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("No")})); err != nil ||
 		p.State != domain.StandardChangeProposalStateRejected || p.Template != nil {
 		t.Fatalf("split decision = %s, %v", p.State, err)
 	}
@@ -1394,7 +1412,7 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 			t.Fatalf("the proposer is offered a decision: %+v", a)
 		}
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), mine.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), mine.ID, atStage(t, env, mine.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "the proposer, on the CAB, decides")
 	if _, err := env.svc.WithdrawProposal(stdCtx(stdAuth1), mine.ID); err != nil {
 		t.Fatal(err)
@@ -1454,7 +1472,7 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 	if _, err := env.svc.SubmitProposal(ctx, twice.ID); err != nil {
 		t.Fatal(err)
 	}
-	if twice, err = env.svc.DecideProposal(stdCtx(stdAuth1), twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+	if twice, err = env.svc.DecideProposal(stdCtx(stdAuth1), twice.ID, atStage(t, env, twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
 		t.Fatalf("first authorisation: %v", err)
 	}
 	if twice.State != domain.StandardChangeProposalStateAuthorityReview || twice.Stages[0].Approvals != 1 {
@@ -1465,7 +1483,7 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 			t.Fatalf("stdAuth1 is offered a second authorisation: %+v", a)
 		}
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), twice.ID, atStage(t, env, twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "the same person authorises through a second user row")
 	if got, _ := env.svc.GetProposal(ctx, twice.ID); got.State != domain.StandardChangeProposalStateAuthorityReview {
 		t.Fatalf("one person applied the proposal alone: %s", got.State)
@@ -1494,6 +1512,117 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 	setCABMember(t, env, stdAuth2, true)
 	setCABMember(t, env, stdCAB1, true)
 	if err := env.svc.DeleteProposal(stdCtx(stdColleague), one.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stdCABLeavers: the people asked are fixed at submit, but only current CAB
+// members decide. One who has left keeps their open row yet is refused (403,
+// nothing written), is not offered a decision and does not see it awaiting
+// them; and a stage left with fewer possible approvals than it needs is
+// flagged on the proposal, and stops being flagged once enough are back.
+func stdCABLeavers(t *testing.T, env *stdEnv) {
+	ctx := stdCtx(stdProposer)
+	t.Cleanup(func() {
+		setCABMember(t, env, stdAuth2, false)
+		setCABMember(t, env, stdAuth2, true)
+		setCABMember(t, env, stdCAB1, false)
+		setCABMember(t, env, stdCAB1, true)
+	})
+	reach := func(p domain.StandardChangeProposal) (int, bool) {
+		t.Helper()
+		st := p.Stages[len(p.Stages)-1]
+		if st.EligibleApprovers == nil {
+			t.Fatalf("the open stage has no eligibleApprovers: %+v", st)
+		}
+		return *st.EligibleApprovers, st.CannotReachQuorum
+	}
+
+	p := readyDraft(t, env, stdTag+" CAB leavers")
+	p, err := env.svc.SubmitProposal(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, flagged := reach(p); n != 3 || flagged {
+		t.Fatalf("submitted to three members: reach %d, flagged %v", n, flagged)
+	}
+
+	// stdAuth2 leaves the CAB: their row stays open, but they have no say.
+	setCABMember(t, env, stdAuth2, false)
+	viewed, err := env.svc.GetProposal(stdCtx(stdAuth2), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approverStates(viewed)[stdAuth2] != "REQUESTED" {
+		t.Fatalf("the leaver's row = %v", approverStates(viewed))
+	}
+	for _, a := range viewed.Approvers {
+		if a.CanDecide {
+			t.Fatalf("a member who left the CAB is offered a decision: %+v", a)
+		}
+	}
+	if awaiting, err := env.svc.SearchProposals(stdCtx(stdAuth2), domain.SearchStandardChangeProposalsRequest{AwaitingMyDecision: true}); err != nil || awaiting.Total != 0 {
+		t.Fatalf("awaiting a member who left the CAB = %+v, %v", awaiting, err)
+	}
+	for _, d := range []domain.DecideStandardChangeProposalRequest{{Decision: "approved"}, {Decision: "rejected", Comment: stdp("No")}} {
+		_, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, atStage(t, env, p.ID, d))
+		expectErr[*apierror.ForbiddenError](t, err, "a member who left the CAB decides ("+d.Decision+")")
+		if !strings.Contains(err.Error(), "no longer a member of the CAB") {
+			t.Fatalf("refusal = %v", err)
+		}
+	}
+	got, _ := env.svc.GetProposal(ctx, p.ID)
+	if got.State != domain.StandardChangeProposalStateAuthorityReview || got.Stages[0].Approvals != 0 || approverStates(got)[stdAuth2] != "REQUESTED" {
+		t.Fatalf("a refused decision was recorded: %s %+v %v", got.State, got.Stages, approverStates(got))
+	}
+	if n, flagged := reach(got); n != 2 || flagged {
+		t.Fatalf("one of three left: reach %d, flagged %v", n, flagged)
+	}
+
+	// stdAuth1 approves; then stdCAB1 leaves too: one approval, nobody left
+	// who may give the second.
+	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})); err != nil {
+		t.Fatal(err)
+	}
+	setCABMember(t, env, stdCAB1, false)
+	got, _ = env.svc.GetProposal(ctx, p.ID)
+	if n, flagged := reach(got); n != 1 || !flagged {
+		t.Fatalf("one approval and nobody left to give the second: reach %d, flagged %v (%+v)", n, flagged, got.Stages)
+	}
+	if got.State != domain.StandardChangeProposalStateAuthorityReview {
+		t.Fatalf("a proposal that cannot reach quorum was moved: %s", got.State)
+	}
+
+	// stdAuth2 is back on the CAB: the flag clears and their approval counts.
+	setCABMember(t, env, stdAuth2, true)
+	got, _ = env.svc.GetProposal(stdCtx(stdAuth2), p.ID)
+	if n, flagged := reach(got); n != 2 || flagged {
+		t.Fatalf("a member back on the CAB: reach %d, flagged %v", n, flagged)
+	}
+	got, err = env.svc.DecideProposal(stdCtx(stdAuth2), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
+	if err != nil || got.State != domain.StandardChangeProposalStateApproved {
+		t.Fatalf("a member back on the CAB authorises: %s, %v", got.State, err)
+	}
+	if got.Stages[0].EligibleApprovers != nil || got.Stages[0].CannotReachQuorum {
+		t.Fatalf("a settled stage carries a reach: %+v", got.Stages[0])
+	}
+}
+
+// stdDecisionNamesStage: a decision without the stage it was made on is a 400
+// and writes nothing, whoever sends it.
+func stdDecisionNamesStage(t *testing.T, env *stdEnv) {
+	ctx := stdCtx(stdProposer)
+	p := readyDraft(t, env, stdTag+" No stage named")
+	p, err := env.svc.SubmitProposal(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	expectErr[*apierror.ValidationError](t, err, "a decision with no stage")
+	if got, _ := env.svc.GetProposal(ctx, p.ID); got.Stages[0].Approvals != 0 || approverStates(got)[stdAuth1] != "REQUESTED" {
+		t.Fatalf("a decision with no stage was recorded: %+v %v", got.Stages, approverStates(got))
+	}
+	if _, err := env.svc.WithdrawProposal(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1777,7 +1906,7 @@ func stdOldLabelledProposal(t *testing.T, env *stdEnv) {
 	if !strings.Contains(err.Error(), "nothing was recorded") {
 		t.Fatalf("stale-stage refusal = %v", err)
 	}
-	_, err = env.svc.DecideProposal(stdCtx(stdColleague), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	_, err = env.svc.DecideProposal(stdCtx(stdColleague), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
 	expectErr[*apierror.ForbiddenError](t, err, "the CAB approver decides again")
 
 	p1, err := env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", StageID: &authorityStage})

@@ -16388,7 +16388,10 @@ paths:
         proposal carries cabHistory (the CAB's rejections and comments on its source
         and evidence change requests and on the customer's CAB-rejected change requests
         with the same subject, read live) and each evidence row hasDeviation and
-        cabRejected; see the entity service's openapi.yaml, StandardChangeProposal.
+        cabRejected. The stage it waits on carries eligibleApprovers and
+        cannotReachQuorum (true when members who left the CAB since submit leave it
+        short of the approvals it needs); see the entity service's openapi.yaml,
+        StandardChangeProposal and StandardChangeProposalStage.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -16655,7 +16658,11 @@ paths:
       operationId: decideStandardChangeProposal
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
-        (400, 403, 404, 409) is returned with its own message and errorCode.
+        (400, 403, 404, 409) is returned with its own message and errorCode. stageId
+        is required (400 when absent, blank or not a UUID; 409 when it is not the
+        stage the proposal waits on), and only a current CAB member with a pending
+        row decides (403 for one who has left the CAB since the proposal was
+        submitted).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -16664,7 +16671,11 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              required: [decision, stageId]
+              properties:
+                decision: {type: string, enum: [approved, rejected]}
+                comment: {type: string, nullable: true, description: 'Required when rejecting.'}
+                stageId: {type: string, format: uuid, description: 'The stage the caller decides on, as their page showed it.'}
       responses:
         "200":
           description: Ok.

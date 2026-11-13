@@ -14453,10 +14453,12 @@ paths:
       description: >-
         A decision on the caller's own pending approver row of the stage the proposal
         waits on (the CAB's); the proposer never decides, nor does anyone without a
-        pending row there (403). The stage needs two different CAB members' approvals: the second one applies the proposal (a new
+        pending row there, nor someone who has left the CAB since the proposal was
+        submitted (their row stays, but only current CAB members decide) (403). The stage needs two different CAB members' approvals: the second one applies the proposal (a new
         template (version 1), a new version of the template, or the template retired).
         Any rejection ends the proposal; it needs a comment, nothing in the catalogue
-        changes and the proposal is kept as the record. 409 when it is not waiting for a
+        changes and the proposal is kept as the record. stageId is required (400 when
+        absent, blank or not a UUID). 409 when it is not waiting for a
         decision, when stageId is not the stage it waits on, or the approval would clash
         (a live template of the same name for the customer, the template moved on, or the
         source change request or a piece of evidence is no longer a closed change request
@@ -36674,6 +36676,20 @@ components:
         requiredApprovals: {type: integer, description: 'How many different approvers must approve the stage (2; 1 on the older one-approval CAB stage).'}
         approvals: {type: integer}
         decision: {type: string, nullable: true, enum: [APPROVED, REJECTED], description: 'Null while the stage is open.'}
+        eligibleApprovers:
+          type: integer
+          nullable: true
+          description: >-
+            Set only on the stage a proposal awaiting CAB approval waits on (null on every other stage):
+            approvals so far plus the people still asked (an open row) who are still active internal CAB
+            members. The people asked are fixed at submit and a member who has left the CAB since cannot
+            decide, so this is the most approvals the stage can still reach.
+        cannotReachQuorum:
+          type: boolean
+          description: >-
+            True on that stage when eligibleApprovers is below requiredApprovals: the proposal can never be
+            approved as it stands. A CAB member should cancel it, or its proposer withdraw it and submit a
+            copy (which asks the CAB as it is then). Nothing cancels it automatically.
     SuspendStandardChangeTemplateRequest:
       type: object
       additionalProperties: false
@@ -36725,7 +36741,7 @@ components:
         state: {type: string, description: 'REQUESTED, APPROVED, REJECTED or CANCELLED.'}
         comments: {type: string, nullable: true}
         updatedOn: {type: string, format: date-time, nullable: true}
-        canDecide: {type: boolean}
+        canDecide: {type: boolean, description: "The caller's own pending row of the stage the proposal waits on, while the caller is still on the CAB."}
     StandardChangeProposal:
       allOf:
         - $ref: '#/components/schemas/StandardChangeContent'
@@ -36874,18 +36890,17 @@ components:
           items: {type: string, format: uuid}
     DecideStandardChangeProposalRequest:
       type: object
-      required: [decision]
+      required: [decision, stageId]
       properties:
         decision: {type: string, enum: [approved, rejected]}
         comment: {type: string, nullable: true, description: 'Required when rejecting.'}
         stageId:
           type: string
           format: uuid
-          nullable: true
           description: >-
-            The stage the caller decides on, as their page showed it. When sent and it is not the stage
-            the proposal waits on (it was submitted again while the page was open), the decision is a 409
-            and nothing is written.
+            The stage the caller decides on, as their page showed it (the proposal's stages). Required:
+            400 when absent, blank or not a UUID. When it is not the stage the proposal waits on (it was
+            submitted again while the page was open), the decision is a 409 and nothing is written.
     SearchStandardChangeProposalsRequest:
       type: object
       properties:
@@ -36901,7 +36916,7 @@ components:
         templateId: {type: string, format: uuid, nullable: true}
         accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to the proposals for one customer.'}
         proposedByMe: {type: boolean}
-        awaitingMyDecision: {type: boolean, description: 'Proposals in authority_review (awaiting CAB approval) on which the caller holds a pending approver row.'}
+        awaitingMyDecision: {type: boolean, description: 'Proposals in authority_review (awaiting CAB approval) on which the caller holds a pending approver row, while the caller is still on the CAB (a member who has left lists none).'}
         query: {type: string, nullable: true}
         pagination: {$ref: '#/components/schemas/Pagination'}
     StandardChangeProposalSummary:

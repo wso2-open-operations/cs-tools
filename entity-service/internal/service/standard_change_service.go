@@ -458,9 +458,13 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 	p.CanSubmit = p.CanEdit
 	p.CanWithdraw = mine && p.State.IsOpen()
 	p.CanDelete = p.CanEdit && p.SubmittedOn == nil && len(p.Stages) == 0
+	// cab: the viewer is on the CAB now. Cancelling someone else's open proposal
+	// and deciding one both need it; the rows a decision is made on were written
+	// at submit, so a member who has left since still has one and must not be
+	// offered a decision the server refuses (DecideProposal).
+	var cab bool
 	if !mine && viewer != "" && p.State.IsOpen() {
-		cab, err := s.repo.IsGroupMember(ctx, viewer, domain.CABApprovalGroupName)
-		if err != nil {
+		if cab, err = s.repo.IsGroupMember(ctx, viewer, domain.CABApprovalGroupName); err != nil {
 			return domain.StandardChangeProposal{}, err
 		}
 		p.CanCancel = cab
@@ -478,7 +482,7 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 	// Only the stage the proposal waits on (its latest) has REQUESTED rows.
 	for i := range p.Approvers {
 		a := &p.Approvers[i]
-		a.CanDecide = !mine && viewer != "" && p.State.IsInReview() &&
+		a.CanDecide = !mine && viewer != "" && cab && p.State.IsInReview() &&
 			a.State == "REQUESTED" && a.Approver != nil && strings.EqualFold(a.Approver.Email, viewer)
 	}
 	return *p, nil
@@ -739,12 +743,16 @@ func (s *standardChangeService) DecideProposal(ctx context.Context, id string, r
 	if !approve && comment == nil {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "a rejection needs a comment saying why, for the proposal's record"}
 	}
-	if req.StageID != nil {
-		if err := checkUUIDFields(map[string]string{"stageId": *req.StageID}); err != nil {
-			return domain.StandardChangeProposal{}, err
-		}
+	// The stage is required: a decision is only ever made on the stage the
+	// caller's page showed, so one sent for no stage at all (an old cached page,
+	// a script) cannot land on a stage its sender never saw.
+	if req.StageID == nil || strings.TrimSpace(*req.StageID) == "" {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "stageId is required: send the id of the stage you are deciding on (the proposal's stages), as your page showed it"}
 	}
-	if err := s.repo.DecideProposal(ctx, id, actor, approve, comment, lowerPtr(req.StageID)); err != nil {
+	if err := checkUUIDFields(map[string]string{"stageId": strings.TrimSpace(*req.StageID)}); err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	if err := s.repo.DecideProposal(ctx, id, actor, approve, comment, *lowerPtr(req.StageID)); err != nil {
 		return domain.StandardChangeProposal{}, err
 	}
 	return s.proposalFor(ctx, actor, id)

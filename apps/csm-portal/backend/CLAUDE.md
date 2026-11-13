@@ -547,7 +547,10 @@ CAB suspends; only the CAB resumes, clears a review flag or cancels someone else
 `mapUpstreamError`'s generic one); a 5xx is the generic fallback. Suspend's body `{reason}` and the
 `{note}` of resume and clear-review go through `optionalBody` (empty is forwarded as none, otherwise
 a JSON object under the 1 MiB cap; entity-service requires the note). `POST
-/standard-change-proposals/{id}/cancel` forwards `{reason}`; `DELETE /standard-change-proposals/{id}`
+/standard-change-proposals/{id}/cancel` forwards `{reason}`; `POST /standard-change-proposals/{id}/decision`
+forwards `{decision, comment?, stageId}` as it is: `stageId` (the stage the page showed) is required, and
+entity-service refuses a body without it (400), one for another stage (409) and a member who has left the CAB
+since submit (403); `DELETE /standard-change-proposals/{id}`
 answers 204 with no body (`forward` writes no body for a 204). A change request raised from a template is an ordinary
 `POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
 `standardChangeParameters`, forwarded like every other create field. A template is one customer's

@@ -91,9 +91,10 @@ type StandardChangeRepository interface {
 	// CAB's). Its last required approval applies the
 	// proposal (new template, new version, or retirement) in the same
 	// transaction. Any rejection ends it.
-	// expectedStage, when not nil, is the stage the caller meant: another
-	// (latest) stage is a 409 with nothing written.
-	DecideProposal(ctx context.Context, id, actor string, approve bool, comment, expectedStage *string) error
+	// expectedStage is the stage the caller meant (required): another (latest)
+	// stage is a 409 with nothing written. The actor must have an open row on
+	// the stage and still be on the CAB (403 otherwise).
+	DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string, expectedStage string) error
 }
 
 // StandardChangeProposalCreate is what CreateProposal writes.
@@ -115,7 +116,7 @@ type StandardChangeProposalFilter struct {
 	TemplateID      *string
 	AccountID       *string
 	ProposedByEmail string // "" = anyone
-	AwaitingEmail   string // "" = no filter: proposals awaiting CAB approval with a REQUESTED row for this email
+	AwaitingEmail   string // "" = no filter: proposals awaiting CAB approval with a REQUESTED row for this email, while it is still on the CAB
 	Query           string
 	Limit, Offset   int
 }
@@ -723,21 +724,33 @@ func customerName(ref *domain.EntityRef) string {
 }
 
 func (r *standardChangeRepo) IsGroupMember(ctx context.Context, email, group string) (bool, error) {
+	return isGroupMember(ctx, r.db, email, group)
+}
+
+// isGroupMember is IsGroupMember on q (a transaction, when the answer decides
+// what it writes).
+func isGroupMember(ctx context.Context, q crQuerier, email, group string) (bool, error) {
 	var ok bool
-	err := r.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		  SELECT 1 FROM "user" u
-		   WHERE LOWER(u.email) = LOWER($1) AND COALESCE(u.is_active, true) AND u.user_type::text = 'INTERNAL'
-		     AND (u.id IN (SELECT tm.user_id FROM team_member tm
-		                    WHERE tm.group_id IN (SELECT id FROM "group" WHERE name = $2)
-		                       OR tm.team_id IN (SELECT id FROM team WHERE name = $2))
-		       OR u.id IN (SELECT gm.user_id FROM group_member gm
-		                    WHERE gm.group_id IN (SELECT id FROM "group" WHERE name = $2))))`,
-		strings.TrimSpace(email), group).Scan(&ok)
+	err := q.QueryRow(ctx, `SELECT `+groupMemberSQL("$1", "$2"), strings.TrimSpace(email), group).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("check %s membership: %w", group, err)
 	}
 	return ok, nil
+}
+
+// groupMemberSQL is true when the email emailExpr names is an active internal
+// member of the group groupExpr names (any "user" row of that email): every
+// group of that name (team_member.group_id, group_member) and any team of that
+// name (team_member.team_id), as namedGroup resolves the CAB's pool.
+func groupMemberSQL(emailExpr, groupExpr string) string {
+	return `EXISTS (
+		  SELECT 1 FROM "user" gu
+		   WHERE LOWER(gu.email) = LOWER(` + emailExpr + `) AND COALESCE(gu.is_active, true) AND gu.user_type::text = 'INTERNAL'
+		     AND (gu.id IN (SELECT tm.user_id FROM team_member tm
+		                     WHERE tm.group_id IN (SELECT id FROM "group" WHERE name = ` + groupExpr + `)
+		                        OR tm.team_id IN (SELECT id FROM team WHERE name = ` + groupExpr + `))
+		       OR gu.id IN (SELECT gm.user_id FROM group_member gm
+		                     WHERE gm.group_id IN (SELECT id FROM "group" WHERE name = ` + groupExpr + `))))`
 }
 
 // ---------------------------------------------------------------------------
@@ -1301,6 +1314,11 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("get standard change proposal: stages: %w", err)
 	}
+	if proposalState(state).IsInReview() && len(p.Stages) > 0 {
+		if err := proposalStageReach(ctx, q, &p.Stages[len(p.Stages)-1]); err != nil {
+			return nil, err
+		}
+	}
 
 	p.ChangeRequestsInNew = []domain.EntityRef{}
 	if p.Kind == domain.StandardChangeProposalKindRetire && tplID != nil && (state == "DRAFT" || state == "AUTHORITY_REVIEW") {
@@ -1367,10 +1385,11 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 	   AND ($4 = '' OR LOWER(wi.created_by) = LOWER($4))
 	   AND ($5 = '' OR (p.state = 'AUTHORITY_REVIEW' AND EXISTS (
 	         SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
-	          WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($5))))
+	          WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($5))
+	         AND ` + groupMemberSQL("$5", "$8") + `))
 	   AND ($6 = '' OR wi.subject ILIKE '%' || $6 || '%' ESCAPE '\' OR wi.number ILIKE '%' || $6 || '%' ESCAPE '\')
 	   AND ($7::uuid IS NULL OR p.account_id = $7::uuid)`
-	args := []any{f.States, f.Kinds, f.TemplateID, strings.TrimSpace(f.ProposedByEmail), strings.TrimSpace(f.AwaitingEmail), escapeLikeWildcards(strings.TrimSpace(f.Query)), f.AccountID}
+	args := []any{f.States, f.Kinds, f.TemplateID, strings.TrimSpace(f.ProposedByEmail), strings.TrimSpace(f.AwaitingEmail), escapeLikeWildcards(strings.TrimSpace(f.Query)), f.AccountID, domain.CABApprovalGroupName}
 	if f.States == nil {
 		args[0] = []string{}
 	}
@@ -1389,7 +1408,7 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 		  LEFT JOIN standard_change_template t ON t.id = p.template_id
 		  LEFT JOIN account acc ON acc.id = p.account_id
 		  LEFT JOIN LATERAL (SELECT u.id, u.name FROM "user" u WHERE LOWER(u.email) = LOWER(wi.created_by) ORDER BY u.id LIMIT 1) pu ON TRUE
-		`+where+` ORDER BY wi.created_on DESC, wi.id LIMIT $8 OFFSET $9`, append(args, f.Limit, f.Offset)...)
+		`+where+` ORDER BY wi.created_on DESC, wi.id LIMIT $9 OFFSET $10`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search standard change proposals: %w", err)
 	}
@@ -1910,8 +1929,33 @@ func stageApprovalsSQL(stageExpr string) string {
 		WHERE a.stage_id = ` + stageExpr + ` AND a.state = 'APPROVED')`
 }
 
+// proposalStageReach sets EligibleApprovers and CannotReachQuorum on st, the
+// stage a proposal in review waits on: its approvals so far, plus the people
+// still asked (an open row of an active internal user) who have not approved
+// and are still on the CAB, counted by email as the quorum is. It is what
+// DecideProposal would still accept, so a stage short of its required approvals
+// is flagged rather than left waiting for decisions nobody can make.
+func proposalStageReach(ctx context.Context, q crQuerier, st *domain.StandardChangeProposalStage) error {
+	var open int
+	if err := q.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT LOWER(u.email))
+		  FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED'
+		   AND COALESCE(u.is_active, true) AND u.user_type::text = 'INTERNAL'
+		   AND `+groupMemberSQL("u.email", "$2")+`
+		   AND NOT EXISTS (SELECT 1 FROM approval_stage_approver b JOIN "user" bu ON bu.id = b.approver_user_id
+		                    WHERE b.stage_id = a.stage_id AND b.state = 'APPROVED' AND LOWER(bu.email) = LOWER(u.email))`,
+		st.ID, domain.CABApprovalGroupName).Scan(&open); err != nil {
+		return fmt.Errorf("get standard change proposal: eligible approvers: %w", err)
+	}
+	reach := st.Approvals + open
+	st.EligibleApprovers = &reach
+	st.CannotReachQuorum = reach < st.RequiredApprovals
+	return nil
+}
+
 // crvis: internal callers only; decides the approval rows of a standard change proposal, never a change request's
-func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment, expectedStage *string) error {
+func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string, expectedStage string) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		kind, state, proposer, err := lockProposal(ctx, tx, id)
 		if err != nil {
@@ -1930,7 +1974,7 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		if err != nil {
 			return err
 		}
-		if expectedStage != nil && !strings.EqualFold(*expectedStage, stage.id) {
+		if !strings.EqualFold(strings.TrimSpace(expectedStage), stage.id) {
 			return &apierror.ConflictError{Msg: "the stage you decided on is not the one this proposal now waits on, so nothing was recorded: reload it to see what you are asked to decide"}
 		}
 		rowID, userID, err := requestedProposalApprover(ctx, tx, stage, actor)
@@ -1943,6 +1987,15 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		}
 		if !internal[strings.ToLower(userID)] {
 			return &apierror.ForbiddenError{Msg: "only active internal (WSO2) users can decide a standard change proposal"}
+		}
+		// The row was written at submit, from the CAB as it was then: someone who
+		// has left the CAB since keeps it, but no longer has a say.
+		cab, err := isGroupMember(ctx, tx, actor, domain.CABApprovalGroupName)
+		if err != nil {
+			return fmt.Errorf("decide standard change proposal: %w", err)
+		}
+		if !cab {
+			return &apierror.ForbiddenError{Msg: fmt.Sprintf("you are no longer a member of the CAB (the %q group), so you cannot decide this proposal: only current CAB members can", domain.CABApprovalGroupName)}
 		}
 		decision := "REJECTED"
 		if approve {

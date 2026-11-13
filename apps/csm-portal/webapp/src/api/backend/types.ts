@@ -5724,6 +5724,19 @@ export interface BeStandardChangeProposalStage {
   approvals: number;
   /** APPROVED or REJECTED once settled; null while open. */
   decision: "APPROVED" | "REJECTED" | null;
+  /**
+   * Only on the stage a proposal awaiting the CAB waits on (null elsewhere):
+   * approvals so far plus the people still asked who are still on the CAB, the
+   * most approvals the stage can still reach. Optional, as is the flag below:
+   * an entity-service build from before they existed sends neither.
+   */
+  eligibleApprovers?: number | null;
+  /**
+   * True when eligibleApprovers is below requiredApprovals: members have left
+   * the CAB since submit and the proposal can never be approved as it stands (a
+   * CAB member cancels it, or its proposer withdraws it and submits a copy).
+   */
+  cannotReachQuorum?: boolean;
 }
 
 /** One person asked to decide a proposal. */
@@ -5736,7 +5749,10 @@ export interface BeStandardChangeProposalApprover {
   state: string;
   comments: string | null;
   updatedOn: string;
-  /** The caller's own REQUESTED row of the stage the proposal waits on. */
+  /**
+   * The caller's own REQUESTED row of the stage the proposal waits on, while
+   * the caller is still on the CAB.
+   */
   canDecide: boolean;
 }
 
@@ -5869,11 +5885,11 @@ export interface BeDecideStandardChangeProposalPayload {
   /** Required for a rejection. */
   comment?: string;
   /**
-   * The stage the page showed the caller deciding on: if the proposal has moved
-   * on since (that stage was settled or closed while the page was open), the
-   * server refuses (409) and writes nothing.
+   * The stage the page showed the caller deciding on (required: 400 without it).
+   * If the proposal has moved on since (that stage was settled or closed while
+   * the page was open), the server refuses (409) and writes nothing.
    */
-  stageId?: string;
+  stageId: string;
 }
 
 export interface BeSearchStandardChangeProposalsPayload {

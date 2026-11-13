@@ -339,6 +339,17 @@ type StandardChangeProposalStage struct {
 	Approvals         int `json:"approvals"`
 	// Decision is APPROVED or REJECTED once the stage is settled, else null.
 	Decision *string `json:"decision"`
+	// EligibleApprovers is set only on the stage a proposal in review waits
+	// on: Approvals plus the people still asked (an open row) who are still
+	// active internal CAB members. The approvers were fixed at submit, and a
+	// member who has left the CAB since cannot decide, so this is the most
+	// approvals the stage can still reach. Null on any other stage.
+	EligibleApprovers *int `json:"eligibleApprovers"`
+	// CannotReachQuorum is true on that stage when EligibleApprovers is below
+	// RequiredApprovals: the proposal can never be approved as it stands, so a
+	// CAB member should cancel it (or its proposer withdraw it and submit a
+	// copy, which asks the CAB as it is now).
+	CannotReachQuorum bool `json:"cannotReachQuorum"`
 }
 
 // StandardChangeProposalApprover is one person asked to decide a proposal.
@@ -483,11 +494,11 @@ type DecideStandardChangeProposalRequest struct {
 	Decision string `json:"decision"`
 	// Comment is required for a rejection.
 	Comment *string `json:"comment,omitempty"`
-	// StageID is the stage the caller decides on, as their page showed it. When
-	// sent and it is not the stage the proposal waits on (the proposal was
-	// returned to draft and submitted again while the page was open), the
-	// decision is refused (409) and nothing is written. The webapp always sends
-	// it.
+	// StageID is the stage the caller decides on, as their page showed it
+	// (required: 400 when absent or blank). When it is not the stage the
+	// proposal waits on (the proposal was submitted again while the page was
+	// open), the decision is refused (409) and nothing is written. A pointer
+	// only so that "absent" can be told apart and refused by name.
 	StageID *string `json:"stageId,omitempty"`
 }
 

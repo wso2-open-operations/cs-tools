@@ -296,8 +296,8 @@ describe("standard change writes", () => {
   });
 
   it("posts a decision without the id in the body", async () => {
-    await run(useDecideStandardChangeProposal, { id: "scp-1", decision: "rejected" as const, comment: "Too risky" });
-    expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/scp-1/decision", { decision: "rejected", comment: "Too risky" });
+    await run(useDecideStandardChangeProposal, { id: "scp-1", decision: "rejected" as const, comment: "Too risky", stageId: "st-1" });
+    expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/scp-1/decision", { decision: "rejected", comment: "Too risky", stageId: "st-1" });
   });
 
   it("refreshes after a refused write too, and hands the error to the caller", async () => {

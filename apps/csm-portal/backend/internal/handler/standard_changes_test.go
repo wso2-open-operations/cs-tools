@@ -94,7 +94,7 @@ func TestStandardChangeHandler_ForwardsEachRoute(t *testing.T) {
 		{"withdraw", http.MethodPost, "/x", "", map[string]string{"id": stdID},
 			func(h *StandardChangeHandler) http.HandlerFunc { return h.WithdrawProposal },
 			http.MethodPost, "/standard-change-proposals/" + stdID + "/withdraw", http.StatusOK},
-		{"decide", http.MethodPost, "/x", `{"decision":"approved"}`, map[string]string{"id": stdID},
+		{"decide", http.MethodPost, "/x", `{"decision":"approved","stageId":"` + stdID + `"}`, map[string]string{"id": stdID},
 			func(h *StandardChangeHandler) http.HandlerFunc { return h.DecideProposal },
 			http.MethodPost, "/standard-change-proposals/" + stdID + "/decision", http.StatusOK},
 		{"resume with a note", http.MethodPost, "/x", `{"note":"fixed"}`, map[string]string{"id": stdID},
