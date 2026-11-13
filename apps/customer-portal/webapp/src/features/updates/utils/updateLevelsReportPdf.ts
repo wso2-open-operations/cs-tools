@@ -22,13 +22,14 @@ import type {
   UpdateLevelsReportParams,
   UpdateLevelsReportTableRow,
 } from "@features/updates/types/updates";
-import {
-  hasConfiguredReportCompanyName,
-  reportSupportLine,
-} from "@config/reportBrandingConfig";
+import { hasConfiguredReportCompanyName } from "@config/reportBrandingConfig";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
-import { drawReportFooterLogo, loadReportLogo } from "@utils/pdfBranding";
-import { toPdfSafeText } from "@utils/pdfText";
+import {
+  drawReportFooterLogo,
+  fitSupportLine,
+  FOOTER_TEXT_GAP_MM,
+  loadReportLogo,
+} from "@utils/pdfBranding";
 
 export type {
   UpdateLevelsReportData,
@@ -815,10 +816,9 @@ export async function generateUpdateLevelsReportPdf(
   // ===== FOOTER: LOGO, COMPANY AND PAGE NUMBERS =====
   // With no logo or company name configured, only the page text is printed, as
   // before. A configured company name adds "<company> Support 24x7" on the left
-  // and moves the page text to the right.
-  const supportLine = hasConfiguredReportCompanyName()
-    ? toPdfSafeText(reportSupportLine())
-    : null;
+  // and moves the page text to the right; the support line is shortened so the
+  // two never overlap.
+  const showSupportLine = hasConfiguredReportCompanyName();
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
@@ -828,9 +828,12 @@ export async function generateUpdateLevelsReportPdf(
     const footerY = pageH - 10;
     const logoWidth = drawReportFooterLogo(doc, logo, margin, footerY);
     const pageText = `${reportData.productName} ${reportData.productVersion} - Update Summary  |  Page ${i} of ${totalPages}`;
-    if (supportLine) {
-      doc.text(supportLine, margin + logoWidth, footerY);
-      doc.text(pageText, pageW - margin - doc.getTextWidth(pageText), footerY);
+    if (showSupportLine) {
+      const pageTextX = pageW - margin - doc.getTextWidth(pageText);
+      const supportX = margin + logoWidth;
+      const supportLine = fitSupportLine(doc, pageTextX - FOOTER_TEXT_GAP_MM - supportX);
+      if (supportLine) doc.text(supportLine, supportX, footerY);
+      doc.text(pageText, pageTextX, footerY);
     } else {
       doc.text(pageText, margin + logoWidth, footerY);
     }
