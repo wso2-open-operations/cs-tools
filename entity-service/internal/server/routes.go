@@ -2468,6 +2468,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /teams/{id}/members", teamHandler.GetTeamMembers)
 		mux.HandleFunc("POST /teams/search", teamHandler.SearchTeams)
 		mux.HandleFunc("GET /teams/chat-webhooks", teamHandler.ListChatWebhooks)
+		mux.HandleFunc("GET /teams/group-emails", teamHandler.ListGroupEmails)
 		mux.HandleFunc("GET /teams/{id}", teamHandler.GetTeam)
 		mux.HandleFunc("PATCH /teams/{id}", teamHandler.UpdateTeam)
 		mux.HandleFunc("POST /teams/{id}/lead", teamHandler.AssignLead)

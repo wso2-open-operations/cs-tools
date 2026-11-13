@@ -6208,6 +6208,25 @@ type ListTeamChatWebhooksResponse struct {
 	Teams []TeamChatWebhook `json:"teams"`
 }
 
+// TeamGroupEmail is one team's own configured notification mailbox
+// (team.group_email, migration 0117), keyed by team.key (migration 0152)
+// rather than name -- a caller like csm-notification-service looks this up
+// by a specific team's stable handle (e.g. "americas_cre_team"), not by its
+// possibly-changing display name.
+type TeamGroupEmail struct {
+	Key        string `json:"key"`
+	GroupEmail string `json:"groupEmail"`
+}
+
+// ListTeamGroupEmailsResponse is the response for GET /teams/group-emails --
+// internal-caller-only (see TeamService.ListGroupEmails), same posture as
+// GET /teams/chat-webhooks even though a group email is less sensitive than
+// a webhook URL: this is still routing data for an internal notification
+// feature, not something meant for general consumption.
+type ListTeamGroupEmailsResponse struct {
+	Teams []TeamGroupEmail `json:"teams"`
+}
+
 // TeamDetail is the response for GET /teams/{id} -- the same id/name/type
 // POST /teams/search already returns for a row, plus ChatWebhookURL (nil
 // when unset), the one field PATCH /teams/{id} accepts today. A single

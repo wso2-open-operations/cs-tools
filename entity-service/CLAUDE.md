@@ -9114,6 +9114,24 @@ teams at all ("Incident Monitor", "Onboarding", "Americas", "Evaluation") stay
 config-driven on that service's own side — this table only ever holds a real
 team's own space.
 
+**`GET /teams/group-emails`** (`team_repo.go` `ListGroupEmails`, `team.group_email`,
+migration `0117`) mirrors `GET /teams/chat-webhooks` exactly, for a team's own
+notification mailbox instead of its Chat webhook: `{teams: [{key, groupEmail}]}`
+for every team that has one set, a team with none left out. **Keyed by
+`team.key` (migration `0152`), not `name`** — unlike the Chat-webhook route,
+this one exists so a caller can look up one *specific* team's email by its
+stable handle (e.g. `csm-notification-service`'s SLA breach engine looking up
+`"americas_cre_team"` to also email that team during its overnight coverage
+window — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine"), and a
+team's `name` is a display string with no such stability guarantee the way
+`key` is designed to have. **Internal-caller-only**
+(`TeamService.ListGroupEmails` → `RequireInternalCaller`), same reasoning as
+`GET /teams/chat-webhooks` even though a plain email address is less
+sensitive than a webhook URL — this is still routing data for an internal
+notification feature, not general-purpose team data (`POST /teams/search`
+deliberately never includes `group_email` either, same as it excludes
+`chat_webhook_url`).
+
 **`GET`/`PATCH /teams/{id}`** (`team_repo.go`'s `GetTeamDetail`/
 `SetChatWebhookURL`, the latter against the same `team.chat_webhook_url`
 column) is the single-team counterpart to the bulk `GET /teams/chat-webhooks`
