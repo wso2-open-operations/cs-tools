@@ -390,7 +390,7 @@ type Config struct {
 	// and WSO2 Case ID as a portal-created one does. Off by default: turn it on
 	// once the integration service serving /github-cases is deployed, or every
 	// new issue fails to create. Off, an issue's SR is written to Postgres only
-	// and numbered SR-GH-<n>. See GithubServiceNowFirst.
+	// and numbered as a portal SR is (CS number, <KEY>-<n> id) when its repository maps to a project, SR-GH-<n> when not. See GithubServiceNowFirst.
 	GithubSRServiceNowFirst bool
 	// GithubOutboundInterval is how often to drain the outbound queue when the
 	// last pass came back short. A backlog drains at full speed regardless.
@@ -832,6 +832,22 @@ type Config struct {
 	SCIMClientSecret string
 	SCIMScopes       string
 
+	// HolidayCalendar* is the Choreo connection to the shared calendar-events
+	// service the WSO2 leave app reads public holidays from
+	// (GET /holidays?countries=...). HREntity* is the connection to the HR
+	// entity GraphQL service (employee(email){location}), whose location
+	// decides whose holidays a Team Schedule member keeps. Each set is
+	// all-or-nothing; unset, the daily public holiday refresh skips that
+	// source and the roster reads what is already stored.
+	HolidayCalendarBaseURL      string
+	HolidayCalendarTokenURL     string
+	HolidayCalendarClientID     string
+	HolidayCalendarClientSecret string
+	HREntityBaseURL             string
+	HREntityTokenURL            string
+	HREntityClientID            string
+	HREntityClientSecret        string
+
 	// Escalation* are the fixed EL1/EL2 case-escalation notification
 	// recipients EscalationService.CreateEscalation (Postgres data sources)
 	// adds to the per-case ones -- see EscalationRepository.CreateEscalation's
@@ -1033,6 +1049,14 @@ func Load() *Config {
 		SCIMClientID:                                  os.Getenv("SCIM_CLIENT_ID"),
 		SCIMClientSecret:                              os.Getenv("SCIM_CLIENT_SECRET"),
 		SCIMScopes:                                    os.Getenv("SCIM_SCOPES"),
+		HolidayCalendarBaseURL:                        os.Getenv("HOLIDAY_CALENDAR_BASE_URL"),
+		HolidayCalendarTokenURL:                       os.Getenv("HOLIDAY_CALENDAR_TOKEN_URL"),
+		HolidayCalendarClientID:                       os.Getenv("HOLIDAY_CALENDAR_CLIENT_ID"),
+		HolidayCalendarClientSecret:                   os.Getenv("HOLIDAY_CALENDAR_CLIENT_SECRET"),
+		HREntityBaseURL:                               os.Getenv("HR_ENTITY_BASE_URL"),
+		HREntityTokenURL:                              os.Getenv("HR_ENTITY_TOKEN_URL"),
+		HREntityClientID:                              os.Getenv("HR_ENTITY_CLIENT_ID"),
+		HREntityClientSecret:                          os.Getenv("HR_ENTITY_CLIENT_SECRET"),
 		CSMMigrationMembershipRegistrationEnabled:     envFlagOn("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED"),
 		EscalationEL1AmericasTLEmails:                 splitComma(os.Getenv("ESCALATION_EL1_AMERICAS_TL_EMAILS")),
 		EscalationEL2AmericasTUEmails:                 splitComma(os.Getenv("ESCALATION_EL2_AMERICAS_TU_EMAILS")),
@@ -1395,6 +1419,14 @@ func (c *Config) Validate() error {
 	if scimSet && !c.SCIMConfigured() {
 		return fmt.Errorf("SCIM_BASE_URL, SCIM_TOKEN_URL, SCIM_CLIENT_ID, and SCIM_CLIENT_SECRET must be set together or not at all")
 	}
+	holidayCalendarSet := c.HolidayCalendarBaseURL != "" || c.HolidayCalendarTokenURL != "" || c.HolidayCalendarClientID != "" || c.HolidayCalendarClientSecret != ""
+	if holidayCalendarSet && !c.HolidayCalendarConfigured() {
+		return fmt.Errorf("HOLIDAY_CALENDAR_BASE_URL, HOLIDAY_CALENDAR_TOKEN_URL, HOLIDAY_CALENDAR_CLIENT_ID, and HOLIDAY_CALENDAR_CLIENT_SECRET must be set together or not at all")
+	}
+	hrEntitySet := c.HREntityBaseURL != "" || c.HREntityTokenURL != "" || c.HREntityClientID != "" || c.HREntityClientSecret != ""
+	if hrEntitySet && !c.HREntityConfigured() {
+		return fmt.Errorf("HR_ENTITY_BASE_URL, HR_ENTITY_TOKEN_URL, HR_ENTITY_CLIENT_ID, and HR_ENTITY_CLIENT_SECRET must be set together or not at all")
+	}
 	if (c.CSMPortalBackendClientID == "") != (c.CSMPortalUserDomain == "") {
 		return fmt.Errorf("CSM_PORTAL_BACKEND_CLIENT_ID and CSM_PORTAL_USER_DOMAIN must be set together or not at all")
 	}
@@ -1578,6 +1610,18 @@ func (c *Config) SCIMConfigured() bool {
 		c.SCIMTokenURL != "" &&
 		c.SCIMClientID != "" &&
 		c.SCIMClientSecret != ""
+}
+
+// HolidayCalendarConfigured reports whether every HOLIDAY_CALENDAR_* env var is set.
+func (c *Config) HolidayCalendarConfigured() bool {
+	return c.HolidayCalendarBaseURL != "" && c.HolidayCalendarTokenURL != "" &&
+		c.HolidayCalendarClientID != "" && c.HolidayCalendarClientSecret != ""
+}
+
+// HREntityConfigured reports whether every HR_ENTITY_* env var is set.
+func (c *Config) HREntityConfigured() bool {
+	return c.HREntityBaseURL != "" && c.HREntityTokenURL != "" &&
+		c.HREntityClientID != "" && c.HREntityClientSecret != ""
 }
 
 // DSN constructs a PostgreSQL connection string from the config fields.

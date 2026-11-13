@@ -18,7 +18,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -144,17 +146,82 @@ func validCreateDeployedProductRequest() domain.CreateDeployedProductRequest {
 	}
 }
 
-// A plain Postgres data source (no SN mirror wired at all) must keep
-// rejecting CreateDeployedProduct/UpdateDeployedProduct -- same "not
-// supported without dual-write" contract as deployment/incident.
-func TestDeployedProductService_NotSupportedOnPlainPostgres(t *testing.T) {
+// A plain Postgres data source (no SN mirror wired at all) still rejects
+// CreateDeployedProduct, which is SN-first by design.
+func TestDeployedProductService_CreateNotSupportedOnPlainPostgres(t *testing.T) {
 	svc := NewDeployedProductService(&stubDeployedProductRepo{})
 
 	if _, err := svc.CreateDeployedProduct(context.Background(), validCreateDeployedProductRequest()); err == nil {
 		t.Error("CreateDeployedProduct: expected an error on the plain Postgres data source")
 	}
+}
+
+// On plain PostgreSQL (no mirror wired) every update branch reaches the
+// repository with the validated request and the caller's email.
+func TestDeployedProductService_UpdateDeployedProduct_PlainPostgres(t *testing.T) {
+	cores := 8
+	tps := 12.5
+	category := "pdp"
+	deploymentID := testDeployedProdID
+	cases := []struct {
+		name string
+		req  domain.UpdateDeployedProductRequest
+	}{
+		{"cores", domain.UpdateDeployedProductRequest{Cores: &cores}},
+		{"tps", domain.UpdateDeployedProductRequest{TPS: &tps}},
+		{"description", domain.UpdateDeployedProductRequest{Description: json.RawMessage(`{"type":"doc"}`)}},
+		{"updates", domain.UpdateDeployedProductRequest{Updates: []domain.ProductUpdateEntry{{UpdateLevel: 3, Date: "2026-01-15"}}}},
+		{"category", domain.UpdateDeployedProductRequest{Category: &category}},
+		{"deactivate", domain.UpdateDeployedProductRequest{Active: boolPtr(false)}},
+		{"scoped to deployment", domain.UpdateDeployedProductRequest{Cores: &cores, DeploymentID: &deploymentID}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotReq domain.UpdateDeployedProductRequest
+			var gotBy string
+			calls := 0
+			repo := &stubDeployedProductRepo{
+				updateDeployedProductFields: func(_ context.Context, r domain.UpdateDeployedProductRequest, updatedBy string) (domain.UpdatedDeployedProduct, error) {
+					calls++
+					gotReq, gotBy = r, updatedBy
+					return domain.UpdatedDeployedProduct{ID: r.ID, UpdatedBy: updatedBy}, nil
+				},
+			}
+			svc := NewDeployedProductService(repo)
+			req := tc.req
+			req.ID = testDeploymentUUID
+
+			ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+			resp, err := svc.UpdateDeployedProduct(ctx, req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("repo called %d times, want 1", calls)
+			}
+			if !reflect.DeepEqual(gotReq, req) {
+				t.Errorf("repo got %+v, want %+v", gotReq, req)
+			}
+			if gotBy != "jane.doe@example.com" || resp.DeployedProduct.UpdatedBy != gotBy {
+				t.Errorf("updatedBy = %q / %q", gotBy, resp.DeployedProduct.UpdatedBy)
+			}
+		})
+	}
+}
+
+// Plain PostgreSQL runs the same validation as the dual-write path and never
+// reaches the repository with an invalid request.
+func TestDeployedProductService_UpdateDeployedProduct_PlainPostgres_Validation(t *testing.T) {
+	svc := NewDeployedProductService(&stubDeployedProductRepo{}) // repo panics if called
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	_, err := svc.UpdateDeployedProduct(ctx, domain.UpdateDeployedProductRequest{ID: testDeploymentUUID})
+	var ve *apierror.ValidationError
+	if !asValidationError(err, &ve) {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
 	if _, err := svc.UpdateDeployedProduct(context.Background(), domain.UpdateDeployedProductRequest{ID: testDeploymentUUID, Active: boolPtr(false)}); err == nil {
-		t.Error("UpdateDeployedProduct: expected an error on the plain Postgres data source")
+		t.Error("expected an error when x-user-id-token is missing")
 	}
 }
 

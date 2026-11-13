@@ -22,6 +22,7 @@ import type {
 } from "@features/operations/types/changeRequests";
 import { formatImpactLabel } from "@features/operations/utils/changeRequestUi";
 import { formatBackendTimestampForDisplay, resolveDisplayTimeZone } from "@utils/dateTime";
+import { drawReportSupportFooters, loadReportLogo } from "@utils/pdfBranding";
 
 /**
  * Formats a date string for display in the PDF.
@@ -44,15 +45,18 @@ function formatScheduledDate(dateStr: string | null | undefined): string {
 }
 
 /**
- * Generates and downloads a Change Requests Schedule PDF.
+ * Generates and downloads a Change Requests Schedule PDF. The footer carries the
+ * configured logo and company name ("WSO2 Support 24x7" when none are set).
  *
  * @param {ChangeRequestItem[]} changeRequests - List of change requests.
  * @param {ChangeRequestStats} stats - Statistics for change requests.
+ * @returns {Promise<void>} Resolves once the PDF is saved.
  */
-export function generateChangeRequestsSchedulePdf(
+export async function generateChangeRequestsSchedulePdf(
   changeRequests: ChangeRequestItem[],
   stats: ChangeRequestStats,
-): void {
+): Promise<void> {
+  const logo = await loadReportLogo();
   const doc = new jsPDF();
 
   // Title
@@ -125,7 +129,7 @@ export function generateChangeRequestsSchedulePdf(
     margin: { left: 14 },
   });
 
-  // Add footer with WSO2 Support, page numbers, and created date
+  // Footer: logo and "<company> Support 24x7", page numbers, and created date
   const createdDateTime = new Date().toLocaleString("en-US", {
     year: "numeric",
     month: "short",
@@ -135,27 +139,12 @@ export function generateChangeRequestsSchedulePdf(
     hour12: true,
     timeZone: displayTimeZone,
   });
-  const totalPages = doc.getNumberOfPages();
-  const pageWidth = doc.internal.pageSize.getWidth();
-
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const footerY = pageHeight - 10;
-
-    // Left: WSO2 Support 24x7
-    doc.text("WSO2 Support 24x7", 14, footerY);
-
-    // Center: Page numbers with title
-    const pageText = `Change Requests Schedule - Page ${i} of ${totalPages}`;
-    const textWidth = doc.getTextWidth(pageText);
-    doc.text(pageText, (pageWidth - textWidth) / 2, footerY);
-
-    // Right: Created date and time
-    const dateWidth = doc.getTextWidth(createdDateTime);
-    doc.text(createdDateTime, pageWidth - 14 - dateWidth, footerY);
-  }
+  drawReportSupportFooters(
+    doc,
+    logo,
+    (page, totalPages) => `Change Requests Schedule - Page ${page} of ${totalPages}`,
+    createdDateTime,
+  );
 
   // Download the PDF
   const fileName = `Change-Requests-Schedule-${new Date().toISOString().split("T")[0]}.pdf`;

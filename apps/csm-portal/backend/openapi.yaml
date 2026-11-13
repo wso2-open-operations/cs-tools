@@ -4906,12 +4906,23 @@ paths:
         backend: the draft's id when it is a UUID, else a new one); without
         it, a sample dashboard is returned for every valid request. A team named in a
         creTeam / sreTeam filter (its team registry key) is turned into that
-        team's group id before the reply. 422 when the model declines (the
-        message says why), refuses, or names a team that cannot be filtered
-        (unknown, in the wrong field, or with no group configured; the message
-        says which); 502 when its answer is not
-        a usable dashboard, was cut off (its own message), or the model cannot
-        be reached; 504 when it takes too long; 503 when generation is
+        team's group id before the reply; a product filter's names become the
+        products' catalog names and a productVersion filter's versions that
+        product's recorded versions; a project or account filter (a key, name
+        or account number) becomes a projectId / accountId filter on the
+        record's id, with the same op; a region filter's regions are
+        matched, ignoring case and surrounding spaces, against the regions of
+        the cases' accounts and written as the account writes them. 422 when
+        the model declines (the
+        message says why, at most 300 characters), refuses, or names a team
+        that cannot be filtered (unknown, in the wrong field, or with no group
+        configured), or a product, version, project or account that names
+        nothing or several (generate_product, generate_project,
+        generate_account; the message names the candidates), or a region no
+        case's account has (generate_region; the message names the regions);
+        502 when its answer is not a usable dashboard, was cut off (its own
+        message), the model cannot be reached, or a product, project, account
+        or region lookup fails; 504 when it takes too long; 503 when generation is
         unavailable (no sample loaded, or the AI integration service has no
         model key), or when the AI side's usage limit is reached (the model
         gateway's 429; its own message, unlike the caller's limit below). 413 when the dashboard being edited is over
@@ -11009,6 +11020,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+  /plg/organizations/aggregate:
+    post:
+      summary: Count organisations per owner or per country.
+      description: >-
+        Passed through to entity-service's POST /plg/organizations/aggregate
+        after the filters are checked as the organisation search checks
+        them. groupBy "owner": one group per PLG CS owner (key the owner's
+        user id) and "unowned" ("Unowned"); "country": one group per country
+        (key and label the country as written) and "unknown" ("Unknown").
+        Backs the dashboard's PLG pie and bar widgets grouped on the server.
+      operationId: plgAggregateOrganizations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateOrganizationsRequest"
+      responses:
+        "200":
+          description: Organisations per group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country filter) with its message."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
   /plg/organizations/{organizationId}:
     get:
       summary: One organisation, with its platform cards.
@@ -11543,6 +11602,103 @@ paths:
                 $ref: "#/components/schemas/PlgRegistrationSearchResponse"
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+  /plg/registrations/volume-trend:
+    post:
+      summary: Registrations per day, week or month, for a dashboard chart.
+      description: >-
+        Passed through to entity-service's POST /plg/registrations/volume-trend
+        after the filters are checked as the registration search checks them.
+        The window is taken as POST /cases/volume-trend takes it; one series,
+        "Registered", counted on the registration date. An empty body is every
+        registration over the trailing 30 days. Backs the dashboard's PLG
+        registration line widget.
+      operationId: plgRegistrationVolumeTrend
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgRegistrationVolumeTrendRequest"
+      responses:
+        "200":
+          description: Registrations per point of the window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgRegistrationVolumeTrendResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (the window, a date, or an owner email, country or playbook answer filter) with its message."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+  /plg/registrations/aggregate:
+    post:
+      summary: Count registrations per country or per playbook answer.
+      description: >-
+        Passed through to entity-service's POST /plg/registrations/aggregate
+        after the filters are checked as the registration search checks them:
+        the registrations counted per their organisation's country ("unknown",
+        "Unknown", for none) or, with groupBy "playbookAnswer", per their
+        answer to filters.playbookTask (the option code and label;
+        "unanswered", "Not answered", for none). Backs the dashboard's PLG
+        registration pie and bar widgets grouped by country or by answer.
+      operationId: plgAggregateRegistrations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateRegistrationsRequest"
+      responses:
+        "200":
+          description: Registrations per country or per answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country or playbook answer filter) with its message."
           content:
             application/json:
               schema:
@@ -14633,8 +14789,9 @@ paths:
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
         by shift code), inviteRotations (whether each rotation's reminders carry a calendar
-        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
-        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        invitation, by shift code), copyTo (copied on the reminder emails, never with the
+        invitation), weekendCopyTo (copied on the weekend summary only), inviteCopyTo (copied on
+        the emails that carry an invitation or a cancellation only), updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -14723,6 +14880,9 @@ paths:
                   example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  description: >-
+                    Copied (Cc) on the reminder emails (weekday reminders and the weekend summary),
+                    never with the calendar invitation attached.
                   maxItems: 20
                   items: { type: string, format: email }
                 weekendCopyTo:
@@ -14730,6 +14890,13 @@ paths:
                   description: >-
                     Copied (Cc) on the weekend summary email only. Optional: when absent the stored
                     value is kept.
+                  maxItems: 20
+                  items: { type: string, format: email }
+                inviteCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the emails that carry a calendar invitation or its cancellation,
+                    and on no other; never a guest. Optional: when absent the stored value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:
@@ -16204,6 +16371,227 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays/search:
+    post:
+      summary: Public holidays of the given engineers over a date window.
+      operationId: searchTeamSchedulePublicHolidays
+      description: >
+        Each engineer's public holidays (their own location's, else their
+        team's country: India for the India team, Sri Lanka otherwise), for the
+        roster to shade. Not leave; moves no shift. Body is validated by the
+        entity service and forwarded unchanged; the response is returned as sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userIds, from, to]
+              properties:
+                userIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+                from: { type: string, format: date, description: "First day of the window, inclusive." }
+                to: { type: string, format: date, description: "Last day of the window, inclusive; at most 70 days after `from`." }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, count]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      type: object
+                      required: [userId, date, title, country, countrySource]
+                      properties:
+                        userId: { type: string, format: uuid }
+                        date: { type: string, format: date }
+                        title: { type: string }
+                        country: { type: string, description: 'e.g. "Sri Lanka", "India".' }
+                        countrySource: { type: string, enum: [EMPLOYEE, TEAM] }
+                  count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/holiday-availability/search:
+    post:
+      summary: Each CRE team's availability on each public holiday in a window.
+      operationId: searchTeamScheduleHolidayAvailability
+      description: >
+        A CRE member is off on a public holiday of their country (a "Public
+        holiday" tag, placed three weeks ahead). One entry per team and holiday
+        with who is tagged, who was made available, the rota turns with nobody,
+        the confirmation and whether the caller may confirm. Forwarded unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date, description: "Inclusive; at most 70 days after `from`." }
+                teamKeys: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, count]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HolidayAvailability'
+                  count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/holiday-availability/{teamKey}/{date}/confirmation:
+    parameters:
+      - { name: teamKey, in: path, required: true, schema: { type: string } }
+      - { name: date, in: path, required: true, schema: { type: string, format: date } }
+    put:
+      summary: Confirm a CRE team's availability on a public holiday.
+      operationId: confirmTeamScheduleHolidayAvailability
+      description: >
+        The team's lead, its rota manager, a CRE rota admin or an admin. Refused
+        (409, with the entity service's reason naming the turns) while a rota
+        turn that day has nobody available.
+      responses:
+        "200":
+          description: The team's availability, now confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailability'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No member of the team is tagged for a holiday that day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: A rota turn that day has nobody available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Withdraw a CRE team's holiday availability confirmation.
+      operationId: withdrawTeamScheduleHolidayAvailability
+      responses:
+        "200":
+          description: The team's availability, no longer confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailability'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
           content:
             application/json:
               schema:
@@ -18915,6 +19303,46 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    HolidayAvailability:
+      type: object
+      description: >
+        One CRE team's availability on one public holiday; the entity
+        service's HolidayAvailability, passed through unchanged.
+      required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+      properties:
+        teamKey: { type: string }
+        teamName: { type: string }
+        date: { type: string, format: date }
+        titles: { type: array, items: { type: string } }
+        countries: { type: array, items: { type: string } }
+        status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+        fullyMarked: { type: boolean }
+        members:
+          type: array
+          items:
+            type: object
+            required: [userId, name, status]
+            properties:
+              userId: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: string }
+              status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
+              absenceId: { type: string, format: uuid }
+              awayKind: { type: string }
+        turns: { type: integer }
+        uncovered:
+          type: array
+          items:
+            type: object
+            required: [shiftCode, shiftLabel, userId, name]
+            properties:
+              shiftCode: { type: string }
+              shiftLabel: { type: string }
+              userId: { type: string, format: uuid }
+              name: { type: string }
+        confirmedBy: { type: string }
+        confirmedOn: { type: string, format: date-time }
+        canConfirm: { type: boolean }
     DismissScheduleEngagementAllocationRequest:
       type: object
       required: [id, teamKey, from, to]
@@ -19852,6 +20280,19 @@ components:
             type: string
             format: uuid
           description: Match cards submitted by any of these users.
+        teamIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only time cards of the people on any of these teams today (the
+            Team Schedule's team ids: a CRE team's CRE group id, an SRE team's
+            SRE group id; a person counts
+            once however many of the teams list them). Membership is the
+            current roster, whenever the card was logged. Not supported on
+            the legacy data source (400).
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -19871,11 +20312,13 @@ components:
           $ref: '#/components/schemas/SearchTimeCardsFilters'
         groupBy:
           type: string
-          enum: [state, user, project, day]
+          enum: [state, user, project, day, team]
           description: >-
             "day" groups by work date and needs filters.startDate and
             filters.endDate (at most 31 days, both inclusive). A card with no
-            project has no "project" bucket.
+            project has no "project" bucket. "team" needs filters.teamIds:
+            one bucket per one of those teams (a team with no cards at 0), a
+            card counted in every one of them its engineer is on.
         measure:
           type: string
           enum: [count, minutes]
@@ -20573,6 +21016,8 @@ components:
             - accountEscalationActive
             - number
             - internalId
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -20632,6 +21077,20 @@ components:
           RFC3339 timestamp or YYYY-MM-DD date bounding the case's created,
           last-updated, or closed timestamp respectively. gte is inclusive
           "on or after"; lte is inclusive "on or before".
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change to any of them ("moved to
+          Waiting on WSO2"), whatever their state now; a case that moved there
+          several times matches once. Only logged changes are seen: the
+          history starts on 2026-10-11 and a case's creation state is not
+          logged. Not supported inside an anyOf branch.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged:
+          a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
+          placeholder such as `__today__` or `__startOfMonth:-1__`; gte is
+          inclusive, a date-only lte covers the whole day. The dashboards
+          resolve a placeholder to the viewer's local day before the request,
+          as for createdOn. Needs a stateEntered filter in the same request;
+          without a stateEnteredOn, stateEntered means at any time. Not
+          supported inside an anyOf branch.
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
           product. Only applied by the ServiceNow data source.
@@ -20896,7 +21355,7 @@ components:
       description: >-
         The shared result shape for every resource's dedicated aggregate
         endpoint (cases, incidents, problems, change requests, incident
-        tasks). groups holds the top buckets by count, capped at the
+        tasks, time cards, PLG organisations and registrations). groups holds the top buckets by count, capped at the
         request's maxGroups when set; othersCount folds every bucket beyond
         that cap into a single count. totalRecords is the total number of
         records matching the request's filters, and always equals the sum
@@ -21143,6 +21602,8 @@ components:
             - announcement
             - engagement
             - case_feedback
+            - plg_organization
+            - plg_registration
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
@@ -21155,7 +21616,11 @@ components:
             by the caller against POST /cases/feedback/aggregate instead;
             there is no server-side resourceType-to-endpoint mapping, the
             caller picks the endpoint from resourceType on its own, same as
-            every other value here.
+            every other value here. plg_organization is PLG organisations,
+            searched with POST /plg/organizations/search, which only PLG
+            users may call. plg_registration is PLG registrations (one per
+            organisation and product), searched with POST
+            /plg/registrations/search, PLG users only as well.
         shape:
           type: string
           enum:
@@ -29501,6 +29966,181 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationSearchFilters:
+      type: object
+      description: >-
+        The filters the PLG organisation and registration searches, the
+        registration trend and both PLG aggregates share, passed to
+        entity-service as they are. Every key is optional; lists match any
+        of their values; keys are ANDed.
+      properties:
+        query:
+          type: string
+          description: Matches the organisation name or registered email, ignoring case.
+        organizationName:
+          type: string
+        registeredEmail:
+          type: string
+        productCodes:
+          type: array
+          items:
+            type: string
+        lifecycleStages:
+          type: array
+          items:
+            type: string
+        subscriptionTiers:
+          type: array
+          items:
+            type: string
+        ownerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        unowned:
+          type: boolean
+          nullable: true
+          description: true matches the organisations with no CS owner.
+        ownerEmails:
+          type: array
+          items:
+            type: string
+            maxLength: 254
+          description: >-
+            Matches the organisation's CS owner by email address, any of
+            these, ignoring case; a registration matches by its organisation's
+            owner. entity-service checks each entry (an email address of at
+            most 254 characters). Not with unowned.
+        registeredFrom:
+          type: string
+          format: date-time
+        registeredTo:
+          type: string
+          format: date-time
+        countryNames:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+          description: >-
+            Matches the organisation's country, any of these, ignoring case;
+            a registration matches by its organisation's country.
+            entity-service checks each entry (1 to 100 characters).
+        countryUnknown:
+          type: boolean
+          nullable: true
+          description: true matches the organisations (registrations) with no country. Not with countryNames.
+        playbookTask:
+          type: string
+          description: >-
+            A playbook task's code, the task playbookAnswers and
+            playbookUnanswered match on (and the registration aggregate's
+            playbookAnswer grouping groups by).
+        playbookAnswers:
+          type: array
+          items:
+            type: string
+          description: >-
+            Matches the registrations that answered playbookTask with any of
+            these option codes; an organisation matches when any of its
+            registrations does. Needs playbookTask; not with
+            playbookUnanswered. entity-service checks the codes (1 to 100
+            characters).
+        playbookUnanswered:
+          type: boolean
+          nullable: true
+          description: true matches the registrations with no answer to playbookTask. Needs playbookTask; not with playbookAnswers.
+    PlgAggregateOrganizationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [owner, country]
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: The groups after the first maxGroups are folded into othersCount; 0 or omitted keeps every group.
+    PlgAggregateRegistrationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [country, playbookAnswer]
+          description: playbookAnswer needs filters.playbookTask.
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: As PlgAggregateOrganizationsRequest's maxGroups.
+    PlgRegistrationVolumeTrendRequest:
+      type: object
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        days:
+          type: integer
+          description: The trailing days, ending today (UTC), 1 to 90; 30 when no window is given. Not with startDate/endDate.
+        startDate:
+          type: string
+          description: First day of a fixed window, a YYYY-MM-DD date or a relative date placeholder. Needs endDate.
+        endDate:
+          type: string
+          description: Last day of a fixed window, in startDate's forms. Needs startDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: How a fixed window's days are grouped (day at most 90 days, week 54 weeks, month 24 months).
+    PlgRegistrationVolumeTrendResponse:
+      type: object
+      description: >-
+        Registrations per day, week or month: the case trend's window fields
+        and always exactly one series, "Registered" (by registration date).
+      properties:
+        days:
+          type: integer
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlgRegistrationVolumeTrendSeries"
+    PlgRegistrationVolumeTrendSeries:
+      type: object
+      properties:
+        label:
+          type: string
+          description: '"Registered".'
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseVolumeTrendPoint"
+          description: >-
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no registrations is still present,
+            with count 0.
     PlgPatchOrganizationRequest:
       type: object
       required:

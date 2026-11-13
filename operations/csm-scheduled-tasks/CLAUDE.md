@@ -39,6 +39,9 @@ either it's fixed or its own next period supersedes it.
    `Complete` (success) or `Fail` (failure —
    sets `nextRetryOn`, never a permanent give-up state).
 
+A denied claim (not this task's window, or the period already done) is logged at debug only, so a
+tick's info output is the tasks that ran plus one `tick complete` summary line.
+
 There is deliberately no second "sweep" pass here: an earlier design had one whose job was to
 rescue an old failed period after the calendar moved past it, but once the rule became "only ever
 chase the newest period," there is nothing left to rescue — an unresolved old period is meant to be
@@ -270,8 +273,13 @@ schedules assume `TZ=UTC` like every other here.
   `windows` override `ROTA_REMINDER_WEEKEND_REQUIRED` / `ROTA_REMINDER_WINDOWS` code by code
   (a code the saved settings do not name keeps the configured value; the card saves a code
   only once somebody changes it there), and `copyTo` is copied on top of the configured copy
-  list, `weekendCopyTo` (migration 0271) on the weekend summary only (`Config.WeekendCopy`: never on
-  a weekday reminder, an invitation email or a cancellation). So saving one field never replaces a deployment setting nobody changed. **Nothing
+  list on the reminder emails only (`Config.Copy`: the weekday reminders, the weekend summary and the
+  rota admins' email, never an email carrying an invitation or a cancellation; a weekday reminder
+  that carries its invitation goes to its people Cc the invitation copies, and the `copyTo` addresses
+  not on it get a separate copy without the invitation, `buildReminderCopy`, uncounted and never
+  failing the run), `weekendCopyTo` (migration 0271) on the weekend summary only (`Config.WeekendCopy`: never on
+  a weekday reminder, an invitation email or a cancellation), and `inviteCopyTo` (migration 0284) on
+  the emails carrying an invitation or a cancellation only (`Config.InviteCopy`; Cc, never a guest). So saving one field never replaces a deployment setting nobody changed. **Nothing
   saved (a 404, also from an entity-service without the route) sends no scheduled reminder**:
   only the card's switches turn them on. Send now still goes out, with the environment's values.
   A failed read fails the run, so it is retried
@@ -372,6 +380,32 @@ schedules assume `TZ=UTC` like every other here.
   `ROTA_REMINDER_FAMILY` and the shift lists; the date rules assume CRE's weekday and weekend
   split), and cancelling a weekday invitation (weekday sends are not recorded). Unlike the report
   tasks, these own no template file.
+
+## Holiday availability reminders
+
+`internal/holidayreminder`, registered as **`holiday_availability_reminder`** (default
+`30 3 * * 1-5`, 09:00 Colombo on weekdays), emails each CRE team's leads and rota managers
+ahead of a public holiday so they mark who works that day. Registered with the rota reminders
+(whenever `EMAIL_BASE_URL` is set); `ALERTS_ENABLED=false` silences it.
+
+- **The rule is entity-service's** (its CLAUDE.md, "Working on a public holiday"): a CRE member
+  is tagged "Public holiday" for a holiday of their country, off the timesheet and the rota; a
+  lead removes the tag from whoever works and confirms the team. This task asks
+  `POST /team-schedule/holiday-availability/reminders/due {today}` (today in
+  `ROTA_REMINDER_TIME_ZONE`, from the run's period key) which reminders are due -- 14 days
+  before (always), then 7 days, 2 and 1 working days before while the team is not fully marked
+  -- sends each, and records it (`PUT .../reminders/{teamKey}/{date}/{stage}`), so each goes once.
+  Every reminder day is a weekday (a weekend holiday gets no tag), hence Monday to Friday.
+- **To** the team's leads and rota managers; a team with neither goes to the CRE rota admins.
+  `ROTA_REMINDER_REDIRECT_TO` and `ROTA_REMINDER_SCHEDULE_URL` apply as for the rota reminders.
+  No new setting.
+- **A plain message**: the holiday, its date, the members with "Off (Public holiday)" /
+  "Working" / "Away", the rota turns with nobody, and what to do (remove the tag, then
+  "Confirm team availability").
+- **Failures.** A send that fails is not recorded and fails the run (retried next tick, which
+  sends only what is still unrecorded). A send whose record fails also fails the run and goes
+  once more. Deploy entity-service (migration 0283) first: against an older one the run fails
+  with a 404 and alerts.
 
 ## Availability recalculation
 
@@ -696,6 +730,17 @@ both places.
   Salesforce read. `ACP_EXCLUDED_PROJECT_IDS` stays as the manual per-project exclusion (no flag needed).
   One difference remains: the legacy process evaluated Open and Restricted projects; the list here asks
   for Open only.
+- **Parity with the previous process (checked 2026-11, rule tests updated).** The date itself is still the
+  7-day window: a project is suspended the day AFTER its end date or invoice due date (`daysRemaining < 0`
+  in `closure.decideFromDaysRemaining`, shared by both tracks, which the previous process counted alike).
+  A customer contact's email must match `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$` as stored
+  (`recipients.validEmail`, both tiers); a malformed one counts as no address, so its tier falls through.
+  Checked and already matching, no change: partner accounts are never selected by the previous process either
+  (a customer with a primary partner is, and keeps the grace-period rule); the four excluded project types are
+  the same set; its internal-account special case never applies, since that account has no `Customer` status
+  and is filtered by the status rule above. entity-service's reopen copy still reads "reopen only above 0
+  days" (`acpDaysBetween`'s comment): that is safe (a project is never suspended on day 0 now) but is
+  conservative by one day for a paid project.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof

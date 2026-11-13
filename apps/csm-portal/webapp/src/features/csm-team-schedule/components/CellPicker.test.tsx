@@ -418,10 +418,10 @@ describe("CellPicker: adding a tag", () => {
         onClose={vi.fn()}
       />,
     );
-    const mark = screen.getByText("Not on the timesheet").closest("button");
+    const mark = screen.getByText("Exclude from timesheet").closest("button");
     expect(mark).not.toBeNull();
     expect(mark?.getAttribute("title")).toContain("On the SRE rota");
-    expect(mark?.getAttribute("title")).toContain("Not on the timesheet");
+    expect(mark?.getAttribute("title")).toContain("Exclude from timesheet");
   });
 
   it("says the new tag is for the roster's family only", () => {
@@ -456,7 +456,7 @@ describe("CellPicker: adding a tag", () => {
     expect(add).toBeEnabled();
     expect(preview).toHaveTextContent("SRE");
     expect(preview).toHaveTextContent("SRE rotation");
-    expect(preview).toHaveTextContent("Allocation · not on the timesheet");
+    expect(preview).toHaveTextContent("Allocation · Exclude from timesheet");
     expect(screen.getByRole("group", { name: "What the roster shows" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "How it counts" })).toBeInTheDocument();
   });

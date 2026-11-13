@@ -53,6 +53,24 @@ describe("resolveRelativeDateFilters", () => {
     });
   });
 
+  it("resolves a stateEnteredOn 'today' window to the viewer's local day, leaving stateEntered alone", () => {
+    const filters = {
+      filters: [
+        { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+        { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+        { field: "stateEnteredOn", op: "lte", values: ["__today__"] },
+      ],
+    };
+
+    expect(resolveRelativeDateFilters(filters, NOW)).toEqual({
+      filters: [
+        { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+        { field: "stateEnteredOn", op: "gte", values: [localMidnightIso(2026, 7, 15)] },
+        { field: "stateEnteredOn", op: "lte", values: [localEndOfDayIso(2026, 7, 15)] },
+      ],
+    });
+  });
+
   it("resolves placeholders in a mixed array, leaving non-predicate entries untouched", () => {
     const filters = {
       filters: [
@@ -193,6 +211,18 @@ describe("resolveRelativeDateFilters", () => {
     it("leaves literal onboarding date bounds untouched", () => {
       const filters = { goLiveDateFrom: "2026-01-01", closureStates: ["Open"] };
       expect(resolveRelativeDateFilters(filters, NOW)).toBe(filters);
+    });
+
+    it("resolves a PLG widget's registeredFrom / registeredTo against the UTC date", () => {
+      // 23:30 UTC on Aug 31 is already Sep 1 for a viewer east of UTC (05:00
+      // in Colombo); the bounds are UTC days, as the trend's window is, so
+      // "this month" and "today" are still August's, in any local timezone.
+      expect(
+        resolveRelativeDateFilters(
+          { productCodes: ["IAM"], registeredFrom: "__startOfMonth:0__", registeredTo: "__today__" },
+          new Date(Date.UTC(2026, 7, 31, 23, 30)),
+        ),
+      ).toEqual({ productCodes: ["IAM"], registeredFrom: "2026-08-01", registeredTo: "2026-08-31" });
     });
 
     it("does not touch a case_feedback widget's own dateFrom / dateTo", () => {

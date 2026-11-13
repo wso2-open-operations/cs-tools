@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Besides the case family, a generated dashboard may hold widgets of the
@@ -44,7 +45,25 @@ const (
 	valuesJSONBool                     // a flat key's JSON true / false
 	valuesTeamName                     // a flat key's single team name or key (checked against the registry later)
 	valuesRating                       // a flat key's JSON whole number 1 to 5
+	valuesText                         // free text: 1 to maxGeneratedTextValues values, each 1 to maxGeneratedTextLength characters
+	valuesCode                         // a flat key's single string, 1 to maxGeneratedTextLength characters
+	valuesEmail                        // 1 to maxGeneratedTextValues email addresses, each at most maxGeneratedEmailLength characters
+	valuesTeamNames                    // 1 to maxGeneratedTeams team keys or names (checked against the registry later)
 )
+
+// The most values a valuesText list holds, and the longest one (entity-service
+// refuses a PLG country name over 100 characters).
+const (
+	maxGeneratedTextValues = 20
+	maxGeneratedTextLength = 100
+)
+
+// maxGeneratedEmailLength is the longest email address a valuesEmail list
+// holds (as entity-service's PLG owner email filter takes).
+const maxGeneratedEmailLength = 254
+
+// maxGeneratedTeams is the most teams one valuesTeamNames list may name.
+const maxGeneratedTeams = 20
 
 // valueRule checks a value list: a flat key's list, or a field filter's values.
 type valueRule struct {
@@ -70,8 +89,13 @@ type resourceRules struct {
 	sortBy     []string             // allowed list sortBy fields; none means a list sets no sortBy
 	slicesVia  string               // the grouping to suggest when groupBy is not allowed
 	plainDates bool                 // dateKeys take YYYY-MM-DD or a relative date token, never an RFC 3339 time (the backing search rejects one)
+	groupByOn  []Shape              // the shapes a groupBy may be on; none means any
+	exclusive  [][2]string          // flat keys never set together in one query (with a slice's added), the second a JSON boolean set true
+	needs      map[string]string    // flat key -> the flat key a query holding it must hold too (with a slice's added)
+	groupNeeds map[string]string    // groupBy.field -> the flat key the widget's own query must hold
 	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
 	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
+	maxGroups  int                  // the largest groupBy.maxGroups the read takes (0 is its default); none means no bound here
 }
 
 // dayWindowRule is a "day" grouping's window: both keys must be set, and the
@@ -104,10 +128,11 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	ResourceTimeCard: {
 		noun:    "time card",
 		shapes:  opsShapes,
-		groupBy: []string{"state", "user", "project", "day"},
+		groupBy: []string{"state", "user", "project", "day", "team"},
 		flat: map[string]valueRule{
 			"states":    {kind: valuesEnum, values: []string{"pending", "submitted", "approved", "rejected", "processed", "recalled"}},
 			"userIds":   onlyMe,
+			"teamIds":   {kind: valuesTeamNames},
 			"startDate": aDate,
 			"endDate":   aDate,
 		},
@@ -206,6 +231,56 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"reasons_neutral", "reasons_satisfied", "reasons_very_satisfied"},
 		slicesVia: "group with groupBy.bucket or with rating slices",
 	},
+	// PLG organisations and registrations (POST /plg/organizations/search,
+	// /plg/registrations/search) take the PLG list's flat filters, and only
+	// those a prompt can name: products, lifecycle stages, subscription
+	// tiers, the registration dates, "unowned" and the viewer's own (ownerIds
+	// exactly ["__current_user__"], which the webapp resolves to the viewer's
+	// user id, the id an owner is; no other owner ids), no free
+	// text). A pie or bar uses slices (one search per slice, each slice's
+	// query held to the same filters); organisations may instead group by
+	// owner on the server (POST /plg/organizations/aggregate, "Unowned" its
+	// own group), and either type by country (/plg/organizations/aggregate,
+	// /plg/registrations/aggregate, "Unknown" its own group), on a pie or bar
+	// only. A country filter is countryNames (names as written, matched
+	// ignoring case) or countryUnknown, never both in one query. A playbook
+	// answer filter names its task (playbookTask, a task code) and then the
+	// answers (playbookAnswers, option codes) or playbookUnanswered, never
+	// both; registrations may group by their answer to the query's
+	// playbookTask (groupBy playbookAnswer, /plg/registrations/aggregate, "Not
+	// answered" its own group), on a pie or bar only. The codes are checked
+	// against the live playbooks after generation. The
+	// organisation search sorts by name or registration date; the
+	// registration search has one order and takes no sortBy.
+	// Registrations may also be a line: registrations per day, week or month
+	// (POST /plg/registrations/volume-trend), with the case line's days or
+	// fixed window and chart, checked as for any definition; never series.
+	ResourcePlgOrganization: {
+		noun:      "PLG organisation",
+		shapes:    plgShapes,
+		groupBy:   []string{"owner", "country"},
+		flat:      plgFilters,
+		dateKeys:  plgDateKeys,
+		sortBy:    []string{"name", "registeredOn"},
+		slicesVia: "group with slices",
+		groupByOn: plgGroupByShapes,
+		exclusive: plgExclusive,
+		needs:     plgNeeds,
+		maxGroups: maxPlgGroups,
+	},
+	ResourcePlgRegistration: {
+		noun:       "PLG registration",
+		shapes:     plgRegistrationShapes,
+		groupBy:    []string{"country", "playbookAnswer"},
+		flat:       withRule(plgFilters, "unacknowledgedOnly", valueRule{kind: valuesJSONBool}),
+		dateKeys:   plgDateKeys,
+		slicesVia:  "group with slices",
+		groupByOn:  plgGroupByShapes,
+		exclusive:  plgExclusive,
+		needs:      plgNeeds,
+		groupNeeds: map[string]string{"playbookAnswer": "playbookTask"},
+		maxGroups:  maxPlgGroups,
+	},
 	ResourceProblem: {
 		noun:    "problem",
 		shapes:  opsShapes,
@@ -215,6 +290,49 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"assignedUserId": assignee,
 		},
 	},
+}
+
+// The PLG widgets' shared rules: the values are the PLG domain's own
+// (plg/domain ValidLifecycleStage, ValidSubscriptionTier) and the products
+// seeded in plg_product.
+var (
+	plgShapes  = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar}
+	plgFilters = map[string]valueRule{
+		"productCodes":       {kind: valuesEnum, values: []string{"IAM", "API_PLATFORM", "INTEGRATION_PLATFORM", "AGENT_PLATFORM", "ENG_PLATFORM"}},
+		"lifecycleStages":    {kind: valuesEnum, values: []string{"REGISTRATION", "PLG_CS_ELIGIBLE", "FIRST_VALUE_ACHIEVED", "ACTIVATED", "COMMERCIAL", "ABANDONED"}},
+		"subscriptionTiers":  {kind: valuesEnum, values: []string{"FREE", "TRIAL", "TRIAL_EXTENDED", "PAYG"}},
+		"registeredFrom":     aDate,
+		"registeredTo":       aDate,
+		"unowned":            {kind: valuesJSONBool},
+		"ownerIds":           onlyMe,
+		"ownerEmails":        {kind: valuesEmail},
+		"countryNames":       {kind: valuesText},
+		"countryUnknown":     {kind: valuesJSONBool},
+		"playbookTask":       {kind: valuesCode},
+		"playbookAnswers":    {kind: valuesText},
+		"playbookUnanswered": {kind: valuesJSONBool},
+	}
+	plgDateKeys      = map[string]bool{"registeredFrom": true, "registeredTo": true}
+	plgGroupByShapes = []Shape{ShapePie, ShapeBar}
+	plgExclusive     = [][2]string{{"countryNames", "countryUnknown"}, {"playbookAnswers", "playbookUnanswered"}, {"ownerEmails", "unowned"}}
+	plgNeeds         = map[string]string{"playbookAnswers": "playbookTask", "playbookUnanswered": "playbookTask"}
+)
+
+// maxPlgGroups is the largest maxGroups entity-service's PLG aggregates take
+// (maxPlgAggregateGroups there); a larger one is refused when the tile loads.
+const maxPlgGroups = 50
+
+// plgRegistrationShapes are plgShapes and the registration trend.
+var plgRegistrationShapes = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar, ShapeLine}
+
+// withRule is rules plus one more key, as a new map.
+func withRule(rules map[string]valueRule, key string, rule valueRule) map[string]valueRule {
+	out := make(map[string]valueRule, len(rules)+1)
+	for k, v := range rules {
+		out[k] = v
+	}
+	out[key] = rule
+	return out
 }
 
 // generatedRelativeDate is a relative date placeholder the webapp turns into
@@ -240,9 +358,32 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		case w.GroupBy.Bucket != "" || !contains(rules.groupBy, w.GroupBy.Field):
 			return fmt.Errorf("%w: %s.groupBy: a %s widget groups by %s only", ErrGeneratedInvalid, at, rules.noun, orList(rules.groupBy))
 		}
+		if len(rules.groupByOn) > 0 && !containsShape(rules.groupByOn, w.Shape) {
+			return fmt.Errorf("%w: %s.groupBy: a %s widget groups only as a %s, not a %q", ErrGeneratedInvalid, at, rules.noun, orList(shapeNames(rules.groupByOn)), w.Shape)
+		}
+		if need, ok := rules.groupNeeds[w.GroupBy.Field]; ok {
+			if _, has := w.Query[need]; !has {
+				return fmt.Errorf("%w: %s.groupBy: grouping by %s needs query.%s", ErrGeneratedInvalid, at, w.GroupBy.Field, need)
+			}
+		}
+		if rules.maxGroups > 0 && (w.GroupBy.MaxGroups < 0 || w.GroupBy.MaxGroups > rules.maxGroups) {
+			return fmt.Errorf("%w: %s.groupBy.maxGroups is %d; it must be between 1 and %d (or omitted for the default)", ErrGeneratedInvalid, at, w.GroupBy.MaxGroups, rules.maxGroups)
+		}
 		if w.GroupBy.Field == "day" && rules.dayWindow != nil {
 			if err := checkDayWindow(at, w.Query, *rules.dayWindow); err != nil {
 				return err
+			}
+		}
+		// Time cards by team: one group per team the widget names, so the
+		// widget's own query must name them. A bar, never a pie: someone on
+		// two of the teams counts in both, so the slices would not add up to
+		// the cards and a pie would misstate the whole.
+		if w.GroupBy.Field == "team" {
+			if _, has := w.Query["teamIds"]; !has {
+				return fmt.Errorf("%w: %s.groupBy: grouping by team needs query.teamIds (the teams to show)", ErrGeneratedInvalid, at)
+			}
+			if w.Shape == ShapePie {
+				return fmt.Errorf("%w: %s: a widget grouped by team must be a bar, not a pie (someone on two of the teams counts in both)", ErrGeneratedInvalid, at)
 			}
 		}
 	}
@@ -250,8 +391,21 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 	if err := checkGeneratedQuery(at+".query", w.Query, rules); err != nil {
 		return err
 	}
+	if err := checkExclusive(at+".query", w.Query, nil, rules); err != nil {
+		return err
+	}
+	if err := checkNeeds(at+".query", w.Query, nil, rules); err != nil {
+		return err
+	}
 	for j, sl := range w.Slices {
-		if err := checkGeneratedQuery(fmt.Sprintf("%s.slices[%d].query", at, j), sl.Query, rules); err != nil {
+		sat := fmt.Sprintf("%s.slices[%d].query", at, j)
+		if err := checkGeneratedQuery(sat, sl.Query, rules); err != nil {
+			return err
+		}
+		if err := checkExclusive(sat, w.Query, sl.Query, rules); err != nil {
+			return err
+		}
+		if err := checkNeeds(sat, w.Query, sl.Query, rules); err != nil {
 			return err
 		}
 	}
@@ -263,6 +417,42 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		order, _ := w.SortBy["order"].(string)
 		if !contains(rules.sortBy, field) || (order != "asc" && order != "desc") {
 			return fmt.Errorf("%w: %s.sortBy: a %s list sorts by %s, asc or desc", ErrGeneratedInvalid, at, rules.noun, orList(rules.sortBy))
+		}
+	}
+	return nil
+}
+
+// checkExclusive refuses a query (the widget's, with a slice's added when
+// slice is set) that holds both keys of one of rules.exclusive, the second
+// set true: no record matches both.
+func checkExclusive(at string, query, slice map[string]any, rules resourceRules) error {
+	for _, pair := range rules.exclusive {
+		_, inQuery := query[pair[0]]
+		_, inSlice := slice[pair[0]]
+		on := query[pair[1]] == true || slice[pair[1]] == true
+		if (inQuery || inSlice) && on {
+			return fmt.Errorf("%w: %s: %q and %q cannot be combined (with a slice's, the widget's own query counts too)", ErrGeneratedInvalid, at, pair[0], pair[1])
+		}
+	}
+	return nil
+}
+
+// checkNeeds refuses a query (the widget's, with a slice's added when slice
+// is set) that holds a key of rules.needs without the key it needs.
+func checkNeeds(at string, query, slice map[string]any, rules resourceRules) error {
+	keys := make([]string, 0, len(rules.needs))
+	for k := range rules.needs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		need := rules.needs[k]
+		_, inQuery := query[k]
+		_, inSlice := slice[k]
+		_, hasQuery := query[need]
+		_, hasSlice := slice[need]
+		if (inQuery || inSlice) && !hasQuery && !hasSlice {
+			return fmt.Errorf("%w: %s: %q needs %q (with a slice's, the widget's own query counts too)", ErrGeneratedInvalid, at, k, need)
 		}
 	}
 	return nil
@@ -297,6 +487,11 @@ func checkGeneratedQuery(at string, query map[string]any, rules resourceRules) e
 		case valuesJSONBool:
 			if _, ok := v.(bool); !ok {
 				return fmt.Errorf("%w: %s.%s must be true or false", ErrGeneratedInvalid, at, k)
+			}
+			continue
+		case valuesCode:
+			if s, ok := v.(string); !ok || utf8.RuneCountInString(strings.TrimSpace(s)) == 0 || utf8.RuneCountInString(strings.TrimSpace(s)) > maxGeneratedTextLength {
+				return fmt.Errorf("%w: %s.%s must be one code of 1 to %d characters", ErrGeneratedInvalid, at, k, maxGeneratedTextLength)
 			}
 			continue
 		case valuesTeamName:
@@ -389,6 +584,15 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 				return fmt.Errorf("%w: %s: %q is not a %s %s (%s)", ErrGeneratedInvalid, at, v, noun, singular(key), strings.Join(rule.values, ", "))
 			}
 		}
+	case valuesTeamNames:
+		if len(values) == 0 || len(values) > maxGeneratedTeams {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d team keys from the Teams section", ErrGeneratedInvalid, at, maxGeneratedTeams)
+		}
+		for _, v := range values {
+			if strings.TrimSpace(v) == "" {
+				return fmt.Errorf("%w: %s: each value must be a team's key from the Teams section", ErrGeneratedInvalid, at)
+			}
+		}
 	case valuesOneOf:
 		if len(values) != 1 || !contains(rule.values, values[0]) {
 			return fmt.Errorf("%w: %s must be exactly one of %s", ErrGeneratedInvalid, at, strings.Join(rule.values, ", "))
@@ -405,6 +609,25 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
 			return fmt.Errorf("%w: %s must be exactly one of \"true\", \"false\"", ErrGeneratedInvalid, at)
 		}
+	case valuesEmail:
+		if len(values) == 0 || len(values) > maxGeneratedTextValues {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d email addresses", ErrGeneratedInvalid, at, maxGeneratedTextValues)
+		}
+		for _, v := range values {
+			v = strings.TrimSpace(v)
+			if local, host, ok := strings.Cut(v, "@"); !ok || local == "" || host == "" || utf8.RuneCountInString(v) > maxGeneratedEmailLength {
+				return fmt.Errorf("%w: %s: each value must be an email address of at most %d characters", ErrGeneratedInvalid, at, maxGeneratedEmailLength)
+			}
+		}
+	case valuesText:
+		if len(values) == 0 || len(values) > maxGeneratedTextValues {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d values", ErrGeneratedInvalid, at, maxGeneratedTextValues)
+		}
+		for _, v := range values {
+			if n := utf8.RuneCountInString(strings.TrimSpace(v)); n == 0 || n > maxGeneratedTextLength {
+				return fmt.Errorf("%w: %s: each value must be 1 to %d characters", ErrGeneratedInvalid, at, maxGeneratedTextLength)
+			}
+		}
 	}
 	return nil
 }
@@ -413,6 +636,7 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 var valueNames = map[string]string{
 	"states": "state", "priorities": "priority", "impacts": "impact", "risks": "risk",
 	"onboardingStatus": "onboarding status", "excludeClosureStates": "closure state",
+	"productCodes": "product", "lifecycleStages": "lifecycle stage", "subscriptionTiers": "subscription tier",
 }
 
 // singular is the readable name of one value of key (valueNames), for error

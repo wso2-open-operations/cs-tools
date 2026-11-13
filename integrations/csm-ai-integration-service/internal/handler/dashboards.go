@@ -31,6 +31,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/dashboards"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/playbooks"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/teams"
 )
 
@@ -43,6 +44,10 @@ const (
 	promptMaxLength = 2000
 	// maxTeams caps the team list.
 	maxTeams = 500
+	// maxPlaybookAnswers caps the playbook answer fields, and
+	// maxPlaybookOptions each one's answers.
+	maxPlaybookAnswers = 200
+	maxPlaybookOptions = 100
 	// draftMaxBytes caps the draft (64 KiB), the size entity-service allows
 	// a saved definition: the draft is the definition being edited, so a real
 	// one always fits, and it bounds what one call can send the model.
@@ -87,11 +92,14 @@ func NewDashboardHandler(generator *dashboards.Generator) *DashboardHandler {
 // generateRequest is the body of POST /ai/dashboards/generate. Draft is the
 // dashboard being edited in the definition file format (the backend's
 // draftToDefinition), absent or null on a first message. Teams are the teams
-// a dashboard can filter by (only those with a group configured).
+// a dashboard can filter by (only those with a group configured);
+// PlaybookAnswers the PLG playbook tasks a widget can filter or group by,
+// absent when there are none.
 type generateRequest struct {
-	Prompt string          `json:"prompt"`
-	Draft  json.RawMessage `json:"draft,omitempty"`
-	Teams  []teams.Team    `json:"teams"`
+	Prompt          string            `json:"prompt"`
+	Draft           json.RawMessage   `json:"draft,omitempty"`
+	Teams           []teams.Team      `json:"teams"`
+	PlaybookAnswers []playbooks.Field `json:"playbookAnswers,omitempty"`
 }
 
 // generateResponse is a 200: either the model's decline sentence, or every
@@ -212,7 +220,41 @@ func decodeGenerateRequest(w http.ResponseWriter, r *http.Request) (dashboards.R
 			return dashboards.Request{}, "a team's key, name, family or field holds a character the Teams table cannot hold"
 		}
 	}
-	return dashboards.Request{Prompt: prompt, Draft: draft, Teams: body.Teams}, ""
+	if msg := checkPlaybookAnswers(body.PlaybookAnswers); msg != "" {
+		return dashboards.Request{}, msg
+	}
+	return dashboards.Request{Prompt: prompt, Draft: draft, Teams: body.Teams, PlaybookAnswers: body.PlaybookAnswers}, ""
+}
+
+// checkPlaybookAnswers checks the playbook answer fields the way the team
+// list is checked: within the caps, every code, name and label present, and
+// nothing the section's table cannot hold.
+func checkPlaybookAnswers(fields []playbooks.Field) string {
+	if len(fields) > maxPlaybookAnswers {
+		return "too many playbook answer fields"
+	}
+	for _, f := range fields {
+		if strings.TrimSpace(f.Code) == "" || strings.TrimSpace(f.Name) == "" {
+			return "every playbook answer field needs a code and a name"
+		}
+		if f.ValueType != "SINGLE_SELECT" && f.ValueType != "CHECKLIST" {
+			return "a playbook answer field's valueType must be SINGLE_SELECT or CHECKLIST"
+		}
+		if len(f.Options) == 0 || len(f.Options) > maxPlaybookOptions {
+			return "a playbook answer field needs 1 to 100 options"
+		}
+		text := f.Code + f.Name
+		for _, o := range f.Options {
+			if strings.TrimSpace(o.Code) == "" || strings.TrimSpace(o.Label) == "" {
+				return "every playbook answer option needs a code and a label"
+			}
+			text += o.Code + o.Label
+		}
+		if strings.ContainsAny(text, "|\n\r`") {
+			return "a playbook answer field holds a character the section's table cannot hold"
+		}
+	}
+	return ""
 }
 
 // writeGenerateError maps a generator error to a status and code, and logs

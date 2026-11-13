@@ -49,7 +49,7 @@ func TestProcessProject_SavedSuspendIsNotRepeated(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	for _, section := range []string{savedLegacyOK, savedACP} {
 		t.Run("end date "+section, func(t *testing.T) {
-			end := now // day 0
+			end := now.AddDate(0, 0, -1) // the day after the end date
 			proj := project{
 				ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 				EndDate: &end, ClosureState: strPtr("Open"),
@@ -83,7 +83,7 @@ func TestProcessProject_SavedSuspendIsNotRepeated(t *testing.T) {
 // A suspension the legacy process saved as failed was not completed: ACP acts.
 func TestProcessProject_SavedSuspendFailedActsAsBefore(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := now
+	end := now.AddDate(0, 0, -1) // the day after the end date
 	proj := project{
 		ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 		EndDate: &end, ClosureState: strPtr("Open"),
@@ -101,7 +101,7 @@ func TestProcessProject_SavedSuspendFailedActsAsBefore(t *testing.T) {
 // No saved record: unchanged (notice and suspension).
 func TestProcessProject_NoSavedRecordUnchanged(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := now
+	end := now.AddDate(0, 0, -1) // the day after the end date
 	proj := project{
 		ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 		EndDate: &end, ClosureState: strPtr("Open"),

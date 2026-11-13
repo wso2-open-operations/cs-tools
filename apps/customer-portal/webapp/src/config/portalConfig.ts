@@ -123,6 +123,22 @@ export interface CustomerPortalWindowConfig {
    * browser supports it. On unless `false` (boolean or "false").
    */
   CUSTOMER_PORTAL_DOWNLOAD_TO_DISK?: boolean | string;
+  /**
+   * Optional. Logo for a light background (a path under `public/` or an absolute
+   * URL). Drawn in the footer of the PDF reports, which print on white. An
+   * absolute URL on another origin must allow CORS, or the footer has no logo.
+   */
+  CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL?: string;
+  /**
+   * Optional. Logo for a dark background. The PDF footers use it only when no
+   * light-mode logo is set.
+   */
+  CUSTOMER_PORTAL_LOGO_DARK_MODE_URL?: string;
+  /**
+   * Optional. Company name in the PDF report footers ("<name> Support 24x7").
+   * Defaults to "WSO2".
+   */
+  CUSTOMER_PORTAL_COMPANY_NAME?: string;
 }
 
 declare global {

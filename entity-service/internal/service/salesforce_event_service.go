@@ -60,6 +60,8 @@ var accountColumnLimits = map[string]int{
 	"lost_reason":          255,
 	"account_vertical":     255,
 	"lost_reason_category": 255,
+	// primary_partner_sf_id is migration 0291's.
+	"primary_partner_sf_id": 100,
 }
 
 // SalesEntityCustomerClient fetches a REST sales/sales-entity-service Customer by Salesforce Account Id.
@@ -597,6 +599,8 @@ func mapSalesEntityCustomer(ctx context.Context, cust salesentity.Customer) doma
 		AccountVertical:    bounded("account_vertical", cust.AccountVertical),
 		LostReasonCategory: bounded("lost_reason_category", cust.LostReasonCategory),
 		DeactivationDate:   salesforceDate(ctx, cust.ID, "deactivation_date", cust.DeactivationDate),
+
+		PrimaryPartnerSfID: bounded("primary_partner_sf_id", cust.PrimaryPartnerAccountID),
 	}
 }
 

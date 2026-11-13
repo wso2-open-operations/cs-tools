@@ -1635,6 +1635,60 @@ describe("MonthRoster: the legend across 1 Nov 2026 from blank weekdays alone", 
   });
 });
 
+describe("MonthRoster: public holidays", () => {
+  const poya = {
+    userId: "u-Asela",
+    date: "2026-09-21",
+    title: "Binara Full Moon Poya Day",
+    country: "Sri Lanka",
+    countrySource: "TEAM" as const,
+  };
+
+  it("shades the day and names it on hover, for the person it applies to only", () => {
+    const { container } = renderRoster({
+      assignments: [
+        assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: EVENING.code }),
+        assignment({ name: "Priya", rotaDate: "2026-09-21", shiftCode: EVENING.code }),
+      ],
+      publicHolidays: [poya],
+    });
+    const shaded = container.querySelectorAll("tbody td.ph");
+    expect(shaded).toHaveLength(1);
+    expect(shaded[0]).toHaveAttribute("title", expect.stringContaining("Asela"));
+    expect(shaded[0]).toHaveAttribute(
+      "title",
+      expect.stringContaining("Public holiday: Binara Full Moon Poya Day (Sri Lanka)"),
+    );
+    // Not leave, and it moves no shift: the turn is still drawn, no clash.
+    expect(shaded[0]).toHaveTextContent("6-9p");
+    expect(container.querySelector("tbody td.clash")).toBeNull();
+  });
+
+  it("shows a Public holiday tag over a turn as an uncovered turn, like leave", () => {
+    // The tag takes its person off the rota (Case Alerts does not call them),
+    // so a turn they hold that day needs cover until a lead removes the tag.
+    const PH = {
+      id: "k-ph", code: "PH", shortCode: "PH", label: "Public holiday", bucket: "ALLOCATION" as const,
+      colourToken: "EXC", sortOrder: 74, excludesFromTimesheet: true,
+    };
+    const { container } = renderRoster({
+      absenceKinds: [ANNUAL_LEAVE, PH],
+      absences: [absence({ name: "Asela", startsOn: "2026-09-21", endsOn: "2026-09-21", kindCode: "PH" })],
+      publicHolidays: [poya],
+    });
+    const td = container.querySelector("tbody td.clash");
+    expect(td).not.toBeNull();
+    expect(td?.querySelector(".chip:not(.gone)")).toHaveTextContent("PH");
+    expect(td?.querySelector(".chip.gone")).toHaveTextContent("6-9p");
+    expect(td).toHaveAttribute("title", expect.stringContaining("needs cover"));
+  });
+
+  it("draws nothing extra without holidays", () => {
+    const { container } = renderRoster();
+    expect(container.querySelector("tbody td.ph")).toBeNull();
+  });
+});
+
 describe("MonthRoster: days left on a team the person is not on", () => {
   const member = (userId: string, name: string) => ({ userId, name, email: `${userId}@example.com`, isLead: false, role: "engineer" });
   // Somebody whose Brazil rotation ended, with Bravo days still filed for

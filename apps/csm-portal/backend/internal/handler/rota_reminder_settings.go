@@ -63,6 +63,8 @@ type rotaReminderSettingsBody struct {
 	CopyTo          []string        `json:"copyTo"`
 	// WeekendCopyTo likewise: null from an older card keeps what is stored.
 	WeekendCopyTo []string `json:"weekendCopyTo"`
+	// InviteCopyTo likewise.
+	InviteCopyTo []string `json:"inviteCopyTo"`
 }
 
 type reminderWindow struct {

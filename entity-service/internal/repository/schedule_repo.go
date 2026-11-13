@@ -606,6 +606,8 @@ func absenceOn(exists, day string) string {
 // reminder. Leave and "excluded from rota" still count, and so does an
 // allocation that moves its person to another team (Brazil rotation,
 // Migration), with absenceOn's same exception for the team it moved them to.
+// So does the Public holiday tag (PH, migration 0283): it takes its person off
+// the rota that day, so they must not be reminded of a turn on it.
 // A moving tag whose destination is not set (no team matched when 0202 set
 // it, or the team was deleted: ON DELETE SET NULL) still counts as away: it is
 // told apart by works_rota_there, shows_as_shift_code or its built-in code,
@@ -618,7 +620,7 @@ func reminderAbsenceOn(day string) string {
 		          AND k.moves_to_team_key IS NULL
 		          AND NOT k.works_rota_there
 		          AND k.shows_as_shift_code IS NULL
-		          AND k.code NOT IN ('ALLO_BR', 'MIGRATION'))`)
+		          AND k.code NOT IN ('ALLO_BR', 'MIGRATION', 'PH'))`)
 }
 
 // awayOn is the shared body of absenceOn and reminderAbsenceOn; also is a

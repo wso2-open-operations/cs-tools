@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,6 +30,9 @@ type OrgPlatformRepository interface {
 	CreateNote(ctx context.Context, req domain.CreateNoteRequest, actor string) error
 	UpdateNote(ctx context.Context, req domain.UpdateNoteRequest, actor string) (res domain.WriteResult, orgID, productCode string, err error)
 	SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error)
+	RegistrationVolumeTrend(ctx context.Context, req domain.SearchRegistrationsRequest, start, end time.Time) (map[string]int, error)
+	AggregateRegistrationsByCountry(ctx context.Context, req domain.SearchRegistrationsRequest, maxGroups int) (domain.AggregateResponse, error)
+	AggregateRegistrationsByPlaybookAnswer(ctx context.Context, req domain.SearchRegistrationsRequest, maxGroups int) (domain.AggregateResponse, error)
 	LocatePairing(ctx context.Context, orgPlatformID string) (orgID, productCode string, err error)
 }
 
@@ -1081,13 +1085,107 @@ func buildRegistrationConditions(f *domain.OrganizationSearchFilters, b *argBuil
 	if f.Unowned != nil && *f.Unowned {
 		conds = append(conds, `v.plg_cs_owner IS NULL`)
 	}
+	conds = append(conds, ownerEmailConditions(f, b, `v.plg_cs_owner_email`)...)
 	if f.RegisteredFrom != nil {
 		conds = append(conds, `v.registered_on >= `+b.add(*f.RegisteredFrom))
 	}
 	if f.RegisteredTo != nil {
 		conds = append(conds, `v.registered_on <= `+b.add(*f.RegisteredTo))
 	}
-	return conds
+	conds = append(conds, countryConditions(f, b, registrationCountry)...)
+	return append(conds, playbookConditions(f, b, `v.org_platform_id`)...)
+}
+
+// registrationCountry is a registration's country: its organisation's, as
+// plg_organization_v resolves it (plg_org_platform_v does not carry it).
+const registrationCountry = `(SELECT ov.country_name FROM plg_organization_v ov WHERE ov.organization_id = v.organization_id)`
+
+// AggregateRegistrationsByCountry counts the registrations req matches (the
+// same filters and unacknowledgedOnly as SearchRegistrations) per their
+// organisation's country, grouped, keyed, ranked and folded as
+// AggregateByCountry groups organisations. It backs
+// POST /plg/registrations/aggregate.
+func (r *orgPlatformRepository) AggregateRegistrationsByCountry(ctx context.Context, req domain.SearchRegistrationsRequest, maxGroups int) (domain.AggregateResponse, error) {
+	b := &argBuilder{}
+	conds := buildRegistrationConditions(&req.Filters, b)
+	if req.UnacknowledgedOnly {
+		conds = append(conds, `v.is_new`)
+	}
+
+	q := `
+		SELECT ` + countryGroupLabel(`ov.country_name`) + `, COUNT(*)
+		FROM   plg_org_platform_v v
+		JOIN   plg_organization_v ov ON ov.organization_id = v.organization_id` +
+		whereClause(conds) + `
+		GROUP  BY ` + countryGroupKey(`ov.country_name`)
+
+	groups, total, err := scanCountryGroups(ctx, r.db, q, b.list())
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate registrations by country: %w", err)
+	}
+	return rankGroups(groups, total, maxGroups), nil
+}
+
+// AggregateRegistrationsByPlaybookAnswer counts the registrations req matches
+// (the same filters and unacknowledgedOnly as SearchRegistrations) per their
+// answer to the task req.Filters.PlaybookTask names, on their attached runs:
+// each group's key is an option code, labelled with the option's label (the
+// code when the run's copy of the options has no such code), and the
+// registrations with no answer are one group, PlgUnansweredGroupKey labelled
+// "Not answered", so each group is exactly what its playbookAnswers (or
+// playbookUnanswered) filter lists. With playbookAnswers the groups are those
+// answers only. A checklist registration is counted once per ticked option,
+// so its groups (and TotalRecords, their sum) count ticks. Ranked and folded
+// as rankGroups does.
+func (r *orgPlatformRepository) AggregateRegistrationsByPlaybookAnswer(ctx context.Context, req domain.SearchRegistrationsRequest, maxGroups int) (domain.AggregateResponse, error) {
+	b := &argBuilder{}
+	// The answer's arguments come first: the join is ahead of the WHERE.
+	answers := `SELECT r.org_platform_id, a.reason_code, a.reason_label
+		FROM   plg_run_task_reason_v a
+		JOIN   plg_playbook_run r ON r.id = a.playbook_run_id
+		WHERE  r.detached_on IS NULL AND a.task_code = ` + b.add(strings.TrimSpace(req.Filters.PlaybookTask))
+	if len(req.Filters.PlaybookAnswers) > 0 {
+		codes := make([]string, len(req.Filters.PlaybookAnswers))
+		for i, c := range req.Filters.PlaybookAnswers {
+			codes[i] = strings.TrimSpace(c)
+		}
+		answers += ` AND a.reason_code = ANY(` + b.add(codes) + `::TEXT[])`
+	}
+	conds := buildRegistrationConditions(&req.Filters, b)
+	if req.UnacknowledgedOnly {
+		conds = append(conds, `v.is_new`)
+	}
+
+	q := `
+		SELECT COALESCE(ans.reason_code, ''), COALESCE(MIN(ans.reason_label), ans.reason_code, ''),
+		       COUNT(DISTINCT v.org_platform_id)
+		FROM   plg_org_platform_v v
+		LEFT   JOIN (` + answers + `) ans ON ans.org_platform_id = v.org_platform_id` +
+		whereClause(conds) + `
+		GROUP  BY ans.reason_code`
+
+	rows, err := r.db.Query(ctx, q, b.list()...)
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate registrations by playbook answer: %w", err)
+	}
+	defer rows.Close()
+	groups := []domain.AggregateBucket{}
+	total := 0
+	for rows.Next() {
+		var g domain.AggregateBucket
+		if err := rows.Scan(&g.Key, &g.Label, &g.Count); err != nil {
+			return domain.AggregateResponse{}, fmt.Errorf("aggregate registrations by playbook answer: %w", err)
+		}
+		if g.Key == "" {
+			g.Key, g.Label = domain.PlgUnansweredGroupKey, "Not answered"
+		}
+		groups = append(groups, g)
+		total += g.Count
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate registrations by playbook answer: %w", err)
+	}
+	return rankGroups(groups, total, maxGroups), nil
 }
 
 func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error) {
@@ -1137,4 +1235,53 @@ func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req dom
 		items = append(items, it)
 	}
 	return items, total, rows.Err()
+}
+
+// RegistrationVolumeTrend counts the registrations req matches (the same
+// filters and unacknowledgedOnly as SearchRegistrations) per UTC day of
+// registered_on, for every day from start to end, both UTC days and
+// inclusive. Every day of the window is in the map, a day with none as 0, so
+// the caller draws a continuous series. It backs
+// POST /plg/registrations/volume-trend, which groups the days into weeks or
+// months.
+func (r *orgPlatformRepository) RegistrationVolumeTrend(ctx context.Context, req domain.SearchRegistrationsRequest, start, end time.Time) (map[string]int, error) {
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	if end.Before(start) {
+		return nil, fmt.Errorf("registration volume trend: end %s is before start %s", end.Format("2006-01-02"), start.Format("2006-01-02"))
+	}
+	out := map[string]int{}
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		out[d.Format("2006-01-02")] = 0
+	}
+
+	b := &argBuilder{}
+	conds := buildRegistrationConditions(&req.Filters, b)
+	if req.UnacknowledgedOnly {
+		conds = append(conds, `v.is_new`)
+	}
+	// A half-open range on the column itself, so the registered_on index
+	// can serve it; the day is read in UTC, whatever the session's zone.
+	conds = append(conds, `v.registered_on >= `+b.add(start), `v.registered_on < `+b.add(end.AddDate(0, 0, 1)))
+
+	q := `
+		SELECT to_char(v.registered_on AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)
+		FROM   plg_org_platform_v v` +
+		whereClause(conds) + `
+		GROUP  BY day`
+
+	rows, err := r.db.Query(ctx, q, b.list()...)
+	if err != nil {
+		return nil, fmt.Errorf("registration volume trend: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day string
+		var count int
+		if err := rows.Scan(&day, &count); err != nil {
+			return nil, fmt.Errorf("scan registration volume trend day: %w", err)
+		}
+		out[day] = count
+	}
+	return out, rows.Err()
 }

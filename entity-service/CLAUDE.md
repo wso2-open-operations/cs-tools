@@ -100,6 +100,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `HOLIDAY_CALENDAR_BASE_URL` / `HOLIDAY_CALENDAR_TOKEN_URL` / `HOLIDAY_CALENDAR_CLIENT_ID` / `HOLIDAY_CALENDAR_CLIENT_SECRET` | no* | — | Choreo connection to the calendar-events service the leave app reads holidays from (`GET /holidays`). All four or none (`Validate`). Unset: no holidays are fetched; the roster shows what is stored. See "Team Schedule public holidays" |
+| `HR_ENTITY_BASE_URL` / `HR_ENTITY_TOKEN_URL` / `HR_ENTITY_CLIENT_ID` / `HR_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection to the HR entity GraphQL service (the GraphQL endpoint URL), for each member's location. All four or none. Unset: every member falls back to their team's country |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -116,6 +118,66 @@ A failed Event Hub publish is logged instead of recorded — see
 and the assignable-role allow-list are organisation vocabulary and live in the CSM
 portal backend (`apps/csm-portal/backend`), resolved once at startup. This service
 holds no organisation vocabulary at all — do not reintroduce it.
+
+## Team Schedule public holidays
+
+Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`,
+`repository/public_holiday_repo.go`, `handler/public_holiday_handler.go`; tables
+`team_schedule_public_holiday` and `team_schedule_person_location` (migration 0283).
+
+- **Source** is the leave app's: `GET /holidays?countries=<country>&startTimeMin&startTimeMax`
+  on the calendar-events service (people-ops-suite `calendar_events:fetchHolidaysForCountry`).
+  An all-day event's end date is exclusive, so it becomes one row per day (`expandEvents`,
+  as `getHolidaysFromEvents`); timed events are skipped. Two holidays on one day are one row,
+  titles joined with " / ".
+- **Whose holiday:** the employee-service location (`employee(email){location}`, as
+  `employee:getEmployeeLocation`), stored per member. Unknown: India for a member of the
+  India team (the team absence kind `ALLO_IND` moves people to), else Sri Lanka. The country
+  string is the leave app's (`Sri Lanka`, `India`), passed to the calendar service as is.
+- **Refresh:** daily (first run two minutes after start) in every replica, and on demand
+  with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
+  One run at a time per process. It upserts the current and next year for every country in
+  use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
+  transient answer never wipes a year. Re-running is safe.
+- **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
+  roster works while the services are down. A holiday is not leave and moves no shift.
+- **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
+  `repository/holiday_availability_repo.go`, `handler/holiday_availability_handler.go`, same
+  migration (0283):
+  - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
+    places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
+    colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
+    on every member of a rostered CRE team (management left out) for each weekday holiday of
+    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
+    Alerts does not call them. A lead or rota manager makes somebody available by removing the
+    tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
+    changed.
+  - **Placed once.** `team_schedule_holiday_tag_placed` (unique on user and day) records each
+    placement and is kept after the tag is removed, so a removed tag is never placed again. A
+    day the person already has any tag on (leave wins) is skipped and tried again the next day.
+    A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
+    touched (still one day, created and updated by the actor) and forgets the placements.
+  - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
+    its person available (no tag that day) **and** the team is confirmed
+    (`team_schedule_holiday_confirmation`, one row per team and day). Confirm
+    (`PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation`) and withdraw
+    (`DELETE`) need a user token of whoever may change the team's rota (`RotaWriterCheck`: its
+    lead, its rota manager, a CRE rota admin or the CRE/CS head, a portal or CSM admin); a
+    confirm is refused with 409 `holiday_turns_uncovered`, naming the turns, while a turn has
+    nobody. A turn that loses its person after the confirm reads `NEEDS_ATTENTION` and the
+    reminders resume. Statuses: `NEEDS_MARKING`, `AWAITING_CONFIRMATION`, `CONFIRMED`,
+    `NEEDS_ATTENTION`.
+  - **Reads.** `POST /team-schedule/holiday-availability/search` (internal staff, at most 70
+    days): one entry per team and day with each member's status (TAGGED / AVAILABLE / AWAY),
+    the uncovered turns, the confirmation and `canConfirm` for the caller.
+  - **Reminders** (service credential only, for csm-scheduled-tasks'
+    `holiday_availability_reminder`): `POST .../reminders/due {today}` lists, per team and
+    holiday in the next 14 days, the latest stage whose day has come -- `notice` (14 days
+    before, always), `week` (7 days), `two_days` / `one_day` (working days; a Monday holiday:
+    Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
+    leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
+    (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
 
 ## Health probes
 
@@ -245,8 +307,8 @@ Chat cards in the SR's SRE-team space.
 - `sr.created`: every SR created on the plain-Postgres path
   (`caseService.CreateCase`). Under dual-write the SR is created in ServiceNow
   first and its own flow still runs there, so nothing happens here.
-  **An SR created from a GitHub issue** (`githubSyncService`, the `SR-GH-`
-  series) gets the same `OnCreated` -- assignment, acknowledgement and
+  **An SR created from a GitHub issue** (`githubSyncService`; numbered natively -- CS number and
+  `<KEY>-<n>` id -- when the repository maps to a project, `SR-GH-` series otherwise) gets the same `OnCreated` -- assignment, acknowledgement and
   `sr.created` -- in every mode (`WithGithubSRNotices`, routes.go): it exists
   only in Postgres, so no ServiceNow flow ever announces it. Only a new record;
   a delivery that finds the issue's record already there announces nothing.
@@ -460,7 +522,8 @@ the list.
   stored phone), `sales_region`, `sub_region`, `life_cycle` (`status`),
   `naics_industry`, `sub_industry`, `classification`, `technical_owner_id`, the
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
-  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`.
+  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
+  `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
 - `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
@@ -494,6 +557,35 @@ later CREATED/UPDATED/RESTORED clears `deleted_on`. Never `DELETE FROM account`
 `deleted_on IS NOT NULL`; `GetAccountByID`, `LookupAccountIDBySfID` (so
 `EnsureAccount`), the partner lookup and the joins from projects/cases/global search
 still see the row.
+
+**Primary partner and life cycle on the account reads.** `hasPrimaryPartner` on
+`GET /accounts/{id}` and `POST /accounts/search` is `primary_partner_sf_id IS NOT NULL`;
+it used to be "any partner link in `account_relationship`", which has no primary
+marker and overstated it for an account with a non-primary partner. The column fills
+only when the Account ingest writes the account, and until then `hasPrimaryPartner`
+reads false. Its only reader is ACP's CSM-only mode (`ACP_SALES_ENTITY_READS=off` in
+csm-scheduled-tasks), where it moves an invoice suspend date. Both reads also return
+`lifeCycle` (`account.life_cycle`), and the opportunity and project-opportunity link
+reads return `sfId` (`sf_opportunity.sf_id`, `sf_opportunity_link.link_sf_id`), all
+`null` on the ServiceNow data source.
+
+**Backfill after 0291: `POST /salesforce/accounts/{sfId}/refresh`, not replayed events.**
+A replayed `UPDATED` event for an account the ledger already holds at that version is
+skipped by the duplicate guard, so it never writes the new column. `RefreshAccount`
+(`salesforce_account_refresh.go`) writes the account from its current Salesforce record
+with the guard off; incoming events keep it. Internal callers only, registered only
+with the Account ingest on; it does not refresh partner links. Call it once per account
+(`SELECT sf_id FROM account WHERE sf_id IS NOT NULL AND deleted_on IS NULL`). Every
+refresh stamps the account's ledger row (`updated_on`, and `status` FAILED when the
+write failed), so before turning on ACP's CSM-only mode this must return 0, or only
+accounts that are known to be broken (`<start>` = when the backfill began):
+
+```sql
+SELECT COUNT(*) FROM account a
+LEFT JOIN salesforce_ingest_state s ON s.entity = 'account' AND s.sf_id = a.sf_id
+WHERE a.sf_id IS NOT NULL AND a.deleted_on IS NULL
+  AND (s.updated_on IS NULL OR s.updated_on < '<start>' OR s.status <> 'SUCCEEDED');
+```
 
 ### One row per sf_id
 
@@ -1079,9 +1171,10 @@ reopen logs a WARN at every start as the reminder.
   `acp_reopen_rules.go`; `testdata/acp_rules_parity.json` holds the cases both copies must agree on
   (`TestACPRulesParity` here, ACP's parity tests over the same file), since a disagreement makes ACP
   suspend a project every day and this check reopen it:
-  - end-date track: the Salesforce project end date is set and in the future (`acpDaysBetween > 0`;
-    ACP suspends at 0 or less);
-  - invoice track: no counted invoice is past its suspend date. Counted = opportunity stage
+  - end-date track: the Salesforce project end date is set and not yet past (`acpDaysBetween >= 0`;
+    ACP suspends only once the date is past, `acpDaysBetween < 0`, so a project renewed to an end date
+    of today reopens and is not suspended again);
+  - invoice track: no counted invoice is past its suspend date (`acpDaysBetween(suspend date) >= 0`, same boundary). Counted = opportunity stage
     "50 - Closed Won" with a EULA that is present and not "Customer contract" (an empty EULA text
     counts, as in ACP); invoice unpaid, has a due date, not PP/CO/TAM, not "Auto Created PS", not due
     before the project start. The earliest due one decides; its suspend date is the due date, or with
@@ -4282,7 +4375,7 @@ already use — no route path, request, or response shape changed.
 ## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
 
 Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
-the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+the minutes logged on them, per `groupBy`: `state`, `user`, `project`, `day` or `team`. It reuses
 `timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
 `project_stats_repo.go`), so the aggregate can never count a different set of cards from
 the search, or a different total from the search's `totalTime`; keep it that way.
@@ -4305,15 +4398,28 @@ the search, or a different total from the search's `totalTime`; keep it that way
   `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
   The query runs `generate_series` over the window, so every day comes back in date order,
   days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`teamIds` (search and aggregate):** the cards of the people on any of the teams **today**:
+  `EXISTS` over `team_member` (the Team Schedule's roster, the list `GET /teams/{id}/members`
+  shows; it can hold a person twice and includes engineers moved onto a team), so a card is
+  matched once however many of the teams, or rows of one team, list its engineer. A team id is
+  the Team Schedule's `team.id`, which is a CRE team's CRE group id or an SRE team's SRE group
+  id. There is no membership
+  history: someone who moved teams counts in the new one, for old cards too.
+- **`team`:** needs `filters.teamIds` and returns one bucket per one of those teams (key the
+  team id, label its name), a team without cards at 0 and an id with no team left out
+  (`aggregateTimeCardsByTeam`). A card counts in every one of the teams its engineer is on, so
+  unlike the other groupings the buckets may overlap: `totalRecords` and `totalMinutes` are the
+  buckets' sums, not the search's total. `measure` and `maxGroups` apply as for `user`.
 - **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
-  time card aggregate.
+  time card aggregate. Its time card search refuses `teamIds` (400) too.
 - **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
   (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
   `CLAUDE.md`).
 
 Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
-check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
-(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+check, the ServiceNow refusal, `teamIds` and `team`), `time_card_aggregate_integration_test.go`
+and `time_card_team_filter_integration_test.go` (both `CASE_STATS_TEST_DSN`; the latter seeds
+teams with a duplicated member, a shared member and no members). The integration fixture is built so that ranking by count and
 ranking by minutes disagree, it has a card with all five minute columns NULL, and the
 search-parity test compares both counts and minutes with `SearchTimeCards`.
 
@@ -8761,6 +8867,16 @@ drainer, which creates `TASK`-numbered tasks) -- wait for in-flight work to fini
 until the seed has committed: `setval()` is not atomic with the maximum it was computed from, so an
 allocation in between can be overwritten and a number issued twice.
 
+**Update (migration `0290`): `next_wso2_id` heals a stale counter.** It now checks each candidate
+`<key>-<n>` against `work_item.wso2_id` (the unique index) and advances `project.wso2_id_counter`
+past any existing id, never lowering it, so the counter seed is no longer required for `wso2_id`
+correctness and precondition (2) no longer applies to it (`CS` numbers and the other series still
+need the seed). The check runs with `app.is_internal = 'true'` set by `set_config` inside the body
+around the `work_item` reads only (saved and restored before return or raise), so a
+customer-initiated create also sees ids it cannot read; the caller's own visibility is unchanged. Not
+a function-level `SET app.is_internal`: that needs superuser or `GRANT SET ON PARAMETER`, which the
+migration role lacks.
+
 > **Historical.** The rest of this section, down to the `CaseRepository.CreateCase` paragraph, describes
 > migration `0140`'s `CS-PORTAL-` / `<key>-PORTAL-<n>` generators as they were introduced. Everything it
 > says about *which functions the create queries use* is superseded by the update above (migration
@@ -10606,6 +10722,45 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   one endpoint reads Postgres directly (unlike `SearchCatalogs`, which still
   falls back to ServiceNow -- see `catalogService.snMirror`'s own doc comment).
 
+## Case search `stateEntered` / `stateEnteredOn`: cases that entered a state in a window
+
+"Cases moved to Waiting on WSO2 today" is not "cases in Waiting on WSO2 now": a case that moved there
+this morning may have left again, and one that has been there for a week did not move today. The
+case search's `stateEntered` (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, `createdOn`'s
+date forms and relative placeholders) answer the first: `buildCaseSearchWhere` adds `EXISTS` over
+`work_item_activity` (`field_name = 'state'`, `LOWER(new_value)` one of the states' display labels,
+`created_on` in the window), so the search, count, aggregate and volume trend all see it.
+
+- **Values:** the history records a state under its display label (`caseStateDisplayLabel`,
+  "Waiting on WSO2"), so `ParseCaseFieldFilters` turns each state into its label, lower-cased, in
+  `ParsedCaseFilters.EnteredStateLabels`, and the query compares lower-cased, in case a sync writes
+  another letter case. An unknown state is a 400.
+- **Meaning:** whatever the case's state is now, and once per case however many times it entered
+  (`EXISTS`). Add `state in` for "entered today and still there".
+- **Rules:** `stateEnteredOn` needs `stateEntered`; a `lte` before its `gte` is refused; both are top
+  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` (the legacy data source) refuses both
+  (search and aggregate) before any call: it keeps no history, and dropping them would widen the result.
+- **Coverage:** only what was logged, so a period reaching further back undercounts.
+  - The history starts when the portal began logging (2026-10-11). Whether csm-sync-service copies
+    changes made in the legacy data source into this table is not known here.
+  - `caseService.UpdateCase` logs every state change made through the portal, including the automatic
+    moves to Waiting on WSO2 on a customer's reply or attachment, best effort: a failed write is
+    logged and dropped, and `recordFieldChangeActivity` skips the row when no actor email is resolved.
+  - Case creation logs no state row, so `stateEntered in [open]` matches only cases moved back to
+    Open, never one created and left there. The AI catalogue treats "moved to Open" as not expressible.
+- **Cost:** `idx_work_item_activity_state_entered` (migration 0283, partial on `field_name = 'state'`,
+  keyed `LOWER(new_value), created_on`) serves the predicate. Without it the planner seq-scanned the whole
+  table: on 100k cases and 1.5M activity rows, "moved to Waiting on WSO2 today" went from ~100 ms to
+  2-3 ms, and "this month" takes ~25 ms. There is no `updated_on` pre-filter, because it is not confirmed
+  that every writer bumps `updated_on` with the state.
+
+Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the legacy data source's
+refusal) and `repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`, run locally:
+no CI workflow runs the entity-service Go tests; left again, entered twice, yesterday, an upper-case
+label, a non-state row and a change out of the state, created in the state with no history row, window
+edges, the aggregate, and a customer caller inside and outside the case's project, since
+`work_item_activity` has forced row-level security).
+
 ## Case search `countOnly`, and the projectOnboardingStatus `in` filter's exclusion-list rewrite
 
 Reported as a dashboard-performance finding, measured against a real load test and the perf
@@ -10860,6 +11015,38 @@ by always checking every table regardless of the request's own type filter
 -- that would reproduce the exact cost this rewrite exists to avoid, to
 compensate for a handful of rows a separate sync-side data-quality issue
 produced, not something every case search should pay for indefinitely.
+
+## Case search and aggregate: products, versions and projects (AI dashboards)
+
+The CSM portal's generated dashboards filter and group cases by product, product version and project
+(the backend turns the names the user wrote into what these match; its `CLAUDE.md`, "Custom dashboards",
+has that side). Everything here is new to these fields, so no request that worked before changes.
+
+- **`product` `in` / `notIn`.** `in` matches the deployed product's catalog name exactly (`prod.name`,
+  every catalog row of that name). `notIn` (`ParsedCaseFilters.ExcludeProductNames`) keeps the cases
+  whose product is none of them, a case without a deployed product included, as `projectId notIn` does.
+  Neither is allowed in an `anyOf` branch. The ServiceNow data source has no exclusion and refuses
+  `notIn` (`refuseSNProductFilters`) rather than drop it and count every product.
+- **`productVersion` `in`** matches `product_version.version` exactly ("4.3.0"). A version is shared by
+  many products, so it needs a product filter naming exactly one product in the same search
+  (`checkProductVersionFilters`; only `product in` counts, a `notIn` names no product); never in an
+  `anyOf` branch; refused by the ServiceNow data source.
+- **`groupBy`** (`POST /cases/aggregate`, `caseAggregateColumns`): `product` (key and label the name,
+  as the product filter takes it), `productVersion` (needs one product, as above) and `project` (key the
+  project's id, as `projectId` takes it; label its name, else its key). A case without one is in no
+  bucket. The ServiceNow data source refuses all three. Each bucket's count is the matching filter's
+  total: the real-database tests (`case_product_aggregate_integration_test.go`,
+  `case_product_version_integration_test.go`, `case_project_aggregate_integration_test.go`) check it
+  bucket by bucket.
+- `projectId` and `accountId` (`in` / `notIn`) are unchanged; the dashboards use them for projects and
+  customers named by the user.
+- **`region` `in` / `notIn`** (`ParsedCaseFilters.Regions` / `ExcludeRegions`) matches the case's account
+  `region`, compared trimmed and lower-cased (`LOWER(TRIM(a.region))`), so "APAC", " apac " and "apac"
+  are one region. `notIn` keeps the cases with no region or no account. Never in an `anyOf` branch;
+  refused by the other data source. **`groupBy: region`** buckets on the same key (a blank region is in
+  no bucket) and labels each bucket with the spelling most of its cases' accounts have
+  (`caseAggregateLabels`, `mode()`), so the label is "APAC" even when one account wrote "apac"; the other
+  data source refuses it. `case_region_integration_test.go` checks each bucket against its filter total.
 
 ## Announcement requests
 

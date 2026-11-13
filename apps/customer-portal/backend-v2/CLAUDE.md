@@ -832,7 +832,9 @@ What it covers, so a new endpoint that surfaces a case state should go through t
 `stateCount`, counts added), `expandInProgressStateIDs` (a filter on `10` also matches
 `waiting_on_wso2` cases, otherwise they would vanish from results) and the activity feed
 (`MapSearchCaseActivities` rewrites state changes to the merged label and drops a move between the
-two, which shows the customer nothing). `PATCH /cases/{id}` still accepts `1003`, because the
+two, which shows the customer nothing), and global search (`globalSearchCaseState` in `global.go`:
+`POST /search` feeds the Project Hub's case lists, search and export, and passed the state through
+as entity-service sent it until it was added here). `PATCH /cases/{id}` still accepts `1003`, because the
 "Wait on WSO2" and "Reject Solution" actions send it directly now that it is not in the state list.
 Not covered: emails to customers still carry the real status text.
 

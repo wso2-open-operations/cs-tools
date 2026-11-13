@@ -651,8 +651,8 @@ func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
 }
 
 // A weekend-only copy is on the Cc of the summary and nothing else: not the
-// invitation emails. The every-reminder copy is on both, and an address on
-// both lists is copied once.
+// invitation emails. The reminder copy is on the summary too, and an address
+// on both lists is copied once.
 func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
 	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Copy = []string{"lead@example.com"}
@@ -669,6 +669,58 @@ func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
 		if strings.Contains(m.subject, "Calendar invitation") && slices.Contains(m.cc, "head@example.com") {
 			t.Errorf("the weekend-only copy is on %q", m.subject)
 		}
+	}
+}
+
+// The invitation copies are on every weekend invitation email and not on the
+// summary; the reminder and weekend copies are on the summary and not on the
+// invitations.
+func TestWeekendNotice_InvitationCopiesAreOnTheInvitationsOnly(t *testing.T) {
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.WeekendCopy = []string{"head@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	if strings.Join(summary.cc, ",") != "lead@example.com,head@example.com" {
+		t.Errorf("summary cc = %v, want the lead and the head, not the invitation copy", summary.cc)
+	}
+	invitations := 0
+	for _, m := range mail.sent {
+		if !strings.Contains(m.subject, "Calendar invitation") {
+			continue
+		}
+		invitations++
+		if strings.Join(m.cc, ",") != "admin@example.com" {
+			t.Errorf("%q cc = %v, want the invitation copy only", m.subject, m.cc)
+		}
+	}
+	if invitations == 0 {
+		t.Fatal("no invitation email was sent")
+	}
+}
+
+// A cancellation is copied to the invitation copies only, never to the
+// reminder copies.
+func TestWeekendReminder_CancellationGoesToTheInvitationCopies(t *testing.T) {
+	store := &fakeStore{records: map[string]*teamschedule.ReminderRecord{
+		"2026-10-24": {Invites: []teamschedule.ReminderInvite{
+			{UID: "cre-rota-2026-10-25-cre_weekend@csm-team-schedule", Sequence: 1, Attendees: []string{"ann@example.com", "ben@example.com", "dan@example.com"}},
+		}},
+	}}
+	cfg := weekendConfig("2026-10-23 09:00", "rota_weekend_reminder")
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekendReminder(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	cancel := emailWith(t, mail.sent, "Cancelled:")
+	if strings.Join(cancel.cc, ",") != "admin@example.com" {
+		t.Errorf("cancellation cc = %v, want the invitation copy only", cancel.cc)
 	}
 }
 
