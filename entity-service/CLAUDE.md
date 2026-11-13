@@ -527,13 +527,17 @@ the list.
   Also plain assignment: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
-  `deactivation_date`. A NULL (cleared in Salesforce, or an email with no user)
-  clears the column; nothing keeps the stored value.
+  `deactivation_date`. A NULL cleared in Salesforce clears the column. For the
+  three person columns only, an empty email clears but an email CSM cannot resolve
+  to a user (no match, provisioning off or failed) keeps the stored value
+  (`Keep*` flags on `SalesforceAccountUpsert`, `$33`-`$35`); the event still succeeds.
 - Never written: `number` on an existing row (a new row gets the Salesforce Id,
   decision D9), `cre_team_id`, `sre_team_id`, `support_tier`, `support_timezone`,
   `suspension_process_state`, the two AI flags, `drive_location`.
 - Person references resolve by email against `"user"` (`LookupUserIDByEmail`); an
-  email with no user writes NULL and logs a WARN with the role and email.
+  email with no user logs a WARN with the role and email, and writes NULL
+  (`account_manager_id`, `technical_owner_id`) or keeps the stored value (the three
+  person columns above).
 - A value longer than its VARCHAR column (`accountColumnLimits`) or a date that does
   not parse (`2006-01-02`) is written as NULL with a WARN, so one bad field cannot
   fail the event.

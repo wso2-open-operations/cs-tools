@@ -408,18 +408,25 @@ func (s *salesforceEventService) upsertAccount(ctx context.Context, sfID, eventT
 		role  string
 		email *string
 		dest  **string
+		// keep, when set, is raised if the email is non-empty but resolved to
+		// no user, so the stored column survives instead of being nulled. Only
+		// an empty email (cleared in Salesforce) may write NULL there.
+		keep *bool
 	}{
-		{"owner", ownerEmail(cust.Owner), &row.AccountManagerID},
-		{"technicalOwner", cust.TechnicalOwner, &row.TechnicalOwnerID},
-		{"csm", cust.CsmEmail, &row.CustomerSuccessManagerID},
-		{"secondaryTechnicalOwner", cust.SecondaryTechnicalOwner, &row.SecondaryTechnicalOwnerID},
-		{"renewalManager", ownerEmail(cust.RenewalManager), &row.RenewalAccountManagerID},
+		{"owner", ownerEmail(cust.Owner), &row.AccountManagerID, nil},
+		{"technicalOwner", cust.TechnicalOwner, &row.TechnicalOwnerID, nil},
+		{"csm", cust.CsmEmail, &row.CustomerSuccessManagerID, &row.KeepCustomerSuccessManager},
+		{"secondaryTechnicalOwner", cust.SecondaryTechnicalOwner, &row.SecondaryTechnicalOwnerID, &row.KeepSecondaryTechnicalOwner},
+		{"renewalManager", ownerEmail(cust.RenewalManager), &row.RenewalAccountManagerID, &row.KeepRenewalAccountManager},
 	}
 	for _, p := range people {
 		*p.dest, err = s.lookupOwner(ctx, sfID, p.role, derefString(p.email))
 		if err != nil {
 			s.recordAccountIngestFailed(ctx, state, err)
 			return err
+		}
+		if p.keep != nil {
+			*p.keep = *p.dest == nil && strings.TrimSpace(derefString(p.email)) != ""
 		}
 	}
 	if err := s.repo.UpsertFromSalesforce(ctx, row, state); err != nil {
@@ -449,7 +456,9 @@ func (s *salesforceEventService) recordAccountIngestFailed(ctx context.Context, 
 
 // lookupOwner resolves a person reference on the account (owner, technical
 // owner, CSM, renewal manager) to a "user" id by email. An email with no
-// matching user writes NULL and logs a warning: WSO2 staff reach "user" only
+// matching user returns nil and logs a warning (the caller writes NULL for the
+// owner and technical owner, and keeps the stored value for the CSM, secondary
+// technical owner and renewal manager): WSO2 staff reach "user" only
 // through the ServiceNow sys_user sync today, so a missing one is a data gap
 // to see, not a reason to fail the event.
 func (s *salesforceEventService) lookupOwner(ctx context.Context, sfID, role, email string) (*string, error) {
@@ -465,7 +474,7 @@ func (s *salesforceEventService) lookupOwner(ctx context.Context, sfID, role, em
 		return id, nil
 	}
 	if !s.support.Owners.enabled() {
-		slog.WarnContext(ctx, "salesforce: account person reference does not match a CSM user, writing NULL",
+		slog.WarnContext(ctx, "salesforce: account person reference does not match a CSM user, no user id resolved",
 			"accountSfId", sfID, "role", role, "email", email)
 		return nil, nil
 	}
@@ -473,12 +482,12 @@ func (s *salesforceEventService) lookupOwner(ctx context.Context, sfID, role, em
 	if err != nil {
 		// A provisioning hiccup (SCIM outage, create failure) must not fail
 		// the whole account event: fall back to today's behaviour instead.
-		slog.ErrorContext(ctx, "salesforce: failed to auto-provision a CSM user for an account person reference, writing NULL",
+		slog.ErrorContext(ctx, "salesforce: failed to auto-provision a CSM user for an account person reference, no user id resolved",
 			"accountSfId", sfID, "role", role, "email", email, "err", err)
 		return nil, nil
 	}
 	if id == nil {
-		slog.WarnContext(ctx, "salesforce: account person reference not found in the internal directory either, writing NULL",
+		slog.WarnContext(ctx, "salesforce: account person reference not found in the internal directory either, no user id resolved",
 			"accountSfId", sfID, "role", role, "email", email)
 	}
 	return id, nil

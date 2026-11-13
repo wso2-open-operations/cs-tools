@@ -106,10 +106,11 @@ func TestUpdateAccountFromSalesforceQuery_ColumnSet(t *testing.T) {
 		{"activation_date", `^\$22$`},
 		{"lost_date", `^\$23$`},
 		{"lost_reason", `^\$24$`},
-		// A value cleared in Salesforce (NULL) clears the column.
-		{"customer_success_manager_id", `^\$25$`},
-		{"secondary_technical_owner_id", `^\$26$`},
-		{"renewal_account_manager_id", `^\$27$`},
+		// A value cleared in Salesforce (NULL) clears the column, unless the
+		// keep flag says the email was sent but resolved to no user.
+		{"customer_success_manager_id", `^CASE WHEN \$33::boolean THEN account\.customer_success_manager_id ELSE \$25 END$`},
+		{"secondary_technical_owner_id", `^CASE WHEN \$34::boolean THEN account\.secondary_technical_owner_id ELSE \$26 END$`},
+		{"renewal_account_manager_id", `^CASE WHEN \$35::boolean THEN account\.renewal_account_manager_id ELSE \$27 END$`},
 		{"account_vertical", `^\$28$`},
 		{"lost_reason_category", `^\$29$`},
 		{"deactivation_date", `^\$30$`},
@@ -302,8 +303,13 @@ func TestUpsertAccountFromSalesforce_AbsentSE1FieldsAreNull(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 	args := q.statements("UPDATE account")[0].args
-	if len(args) != 32 {
-		t.Fatalf("update args = %d, want 32", len(args))
+	if len(args) != 35 {
+		t.Fatalf("update args = %d, want 35", len(args))
+	}
+	for i := 31; i <= 34; i++ {
+		if b, ok := args[i].(bool); !ok || b {
+			t.Errorf("$%d = %v, want false (keep flags default to writing the value)", i+1, args[i])
+		}
 	}
 	if p, ok := args[20].(*string); !ok || p == nil || *p != "user-1" {
 		t.Errorf("$21 account_manager_id = %v, want user-1", args[20])

@@ -237,8 +237,27 @@ func TestAccountSalesforceIntegration(t *testing.T) {
 		t.Errorf("search total after RESTORED = %d, want 1", n)
 	}
 
-	// UPDATED with every SE-1 field NULL (cleared in Salesforce, or an email
-	// with no user): the six columns clear, the rest of the row is unaffected.
+	// UPDATED whose CSM email resolved to no user: id nil but the keep flag set,
+	// so the stored CSM survives while the other plain columns still follow the
+	// event.
+	unresolved := row
+	unresolved.CustomerSuccessManagerID, unresolved.KeepCustomerSuccessManager = nil, true
+	unresolved.AccountVertical = sp("Insurance")
+	v15 := v1.Add(30 * time.Second)
+	if err := r.UpsertFromSalesforce(ctx, unresolved, sfiState(sfiSfID, domain.SalesforceEventUpdated, v15)); err != nil {
+		t.Fatalf("UPDATED (unresolved CSM): %v", err)
+	}
+	a = readSfiAccount(t, pool, sfiSfID)
+	if !eqp(a.csmID, sfiCsmID) {
+		t.Errorf("csm after unresolved email = %v, want the stored %s kept", a.csmID, sfiCsmID)
+	}
+	if !eqp(a.accountVertical, "Insurance") {
+		t.Errorf("vertical = %v, want Insurance (keep flag must not freeze other columns)", a.accountVertical)
+	}
+
+	// UPDATED with every SE-1 field NULL and no keep flag (cleared in
+	// Salesforce, empty email): the six columns clear, the rest of the row is
+	// unaffected.
 	cleared := row
 	cleared.CustomerSuccessManagerID, cleared.SecondaryTechnicalOwnerID, cleared.RenewalAccountManagerID = nil, nil, nil
 	cleared.AccountVertical, cleared.LostReasonCategory, cleared.DeactivationDate = nil, nil, nil
