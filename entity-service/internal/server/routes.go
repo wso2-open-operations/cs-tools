@@ -134,7 +134,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
 	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
-	var systemDashboardHandler *handler.SystemDashboardHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -148,9 +147,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
 			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
-		)
-		systemDashboardHandler = handler.NewSystemDashboardHandler(
-			service.NewSystemDashboardService(repository.NewSystemDashboardRepository(db), cfg.CSMPortalBackendClientID),
 		)
 	}
 
@@ -2413,15 +2409,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/me/dashboards/{id}", customDashboardHandler.Get)
 		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
-	}
-	if systemDashboardHandler != nil {
-		// System dashboards (no owner): the CSM portal backend upserts them
-		// on startup, reads them back and removes the ones whose file is gone;
-		// no other caller is admitted.
-		mux.HandleFunc("GET /system-dashboards", systemDashboardHandler.List)
-		mux.HandleFunc("GET /system-dashboards/{key}", systemDashboardHandler.Get)
-		mux.HandleFunc("PUT /system-dashboards/{key}", systemDashboardHandler.Save)
-		mux.HandleFunc("DELETE /system-dashboards/{key}", systemDashboardHandler.Delete)
 	}
 	if customDashboardShareHandler != nil {
 		// Sharing the caller's saved dashboards (owner) and the ones shared

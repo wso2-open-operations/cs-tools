@@ -4719,12 +4719,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: "The stored dashboards could not be read. Retry later."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
 
   /dashboards/filter-presets:
     get:
@@ -4891,12 +4885,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: "The stored dashboards could not be read. Retry later."
           content:
             application/json:
               schema:
