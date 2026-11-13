@@ -58,15 +58,21 @@ func PeriodKey(expr string, now time.Time) (time.Time, error) {
 }
 
 // LongestGap is the longest time between two consecutive firings of expr over
-// the eight days after from, which covers any daily or weekly expression.
+// the eight days after from, which covers any daily or weekly expression. It
+// fails for one that can go more than a week between firings (monthly, say),
+// which that sample cannot bound.
 func LongestGap(expr string, from time.Time) (time.Duration, error) {
 	if !gronx.IsValid(expr) {
 		return 0, fmt.Errorf("schedule: invalid cron expression %q", expr)
 	}
-	end := from.Add(8 * 24 * time.Hour)
+	const week = 7 * 24 * time.Hour
+	end := from.Add(week + 24*time.Hour)
 	prev, err := gronx.NextTickAfter(expr, from, false)
 	if err != nil {
 		return 0, err
+	}
+	if !prev.Before(end) {
+		return 0, fmt.Errorf("schedule: %q fires less than weekly", expr)
 	}
 	var longest time.Duration
 	for prev.Before(end) {
@@ -76,6 +82,9 @@ func LongestGap(expr string, from time.Time) (time.Duration, error) {
 		}
 		longest = max(longest, next.Sub(prev))
 		prev = next
+	}
+	if longest > week {
+		return 0, fmt.Errorf("schedule: %q fires less than weekly", expr)
 	}
 	return longest, nil
 }
