@@ -35,8 +35,9 @@ export interface CustomerPortalWindowConfig {
   /** Optional name and logo settings. Each falls back to the stock WSO2 value when unset. */
   CUSTOMER_PORTAL_APP_NAME?: string;
   /**
-   * Also used in the PDF report footers ("<name> Support 24x7") and in labels
-   * such as "<name> Products" and "<name> Resolution", which default to "WSO2".
+   * Company name, without "LLC": the footer prints "© <year> <name> LLC". Also
+   * used in the PDF report footers ("<name> Support 24x7") and in labels such as
+   * "<name> Products" and "<name> Resolution". Defaults to "WSO2".
    */
   CUSTOMER_PORTAL_COMPANY_NAME?: string;
   /**

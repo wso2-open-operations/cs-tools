@@ -14,8 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { companyName } from "@config/brandingConfig";
+
 const DEFAULT_PORTAL_NAME = "Customer Portal";
-const DEFAULT_ORGANIZATION_NAME = "WSO2 LLC";
+const COMPANY_LEGAL_SUFFIX = "LLC";
 const DEFAULT_LOGO_LIGHT_MODE_URL = "/logo-dark.svg";
 const DEFAULT_LOGO_DARK_MODE_URL = "/logo-white.svg";
 
@@ -58,10 +60,8 @@ export const appearanceConfig = {
   name:
     optionalString(window.config?.CUSTOMER_PORTAL_APP_NAME) ??
     DEFAULT_PORTAL_NAME,
-  /** Company name in the footer copyright line. */
-  companyName:
-    optionalString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) ??
-    DEFAULT_ORGANIZATION_NAME,
+  /** Company name in the footer copyright line, "<name> LLC". */
+  companyName: `${companyName()} ${COMPANY_LEGAL_SUFFIX}`,
   /** Logo for the light colour scheme (also the tab icon). */
   logoLightModeUrl: logoLightModeUrl ?? DEFAULT_LOGO_LIGHT_MODE_URL,
   /** Logo for the dark colour scheme (also the tab icon). */
