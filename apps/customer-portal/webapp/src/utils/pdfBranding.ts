@@ -15,7 +15,12 @@
 // under the License.
 
 import type { jsPDF } from "jspdf";
-import { reportLogoUrl, reportSupportLine } from "@config/reportBrandingConfig";
+import {
+  REPORT_SUPPORT_LINE_SUFFIX,
+  reportCompanyName,
+  reportLogoUrl,
+  reportSupportLine,
+} from "@config/reportBrandingConfig";
 import { toPdfSafeText } from "@utils/pdfText";
 
 /** A logo ready for `jsPDF.addImage`: a PNG data URL and its pixel size. */
@@ -36,6 +41,10 @@ const FOOTER_LOGO_MAX_WIDTH_MM = 30;
 const FOOTER_LOGO_GAP_MM = 2;
 /** Left and right page margin of the footers, in mm. */
 const FOOTER_MARGIN_MM = 14;
+/** Least space kept between two texts on the footer line, in mm. */
+export const FOOTER_TEXT_GAP_MM = 4;
+/** Marks text that was shortened to fit. */
+const ELLIPSIS = "...";
 
 const logoCache = new Map<string, Promise<ReportLogo | null>>();
 
@@ -115,6 +124,44 @@ export function clearReportLogoCache(): void {
 }
 
 /**
+ * The text cut at the end, with "...", to fit `maxWidth` at the document's
+ * current font size. Empty when not even "..." fits.
+ *
+ * @param doc - The PDF, with the footer font already set.
+ * @param text - Text to fit.
+ * @param maxWidth - Room for it, in mm.
+ * @returns {string} The text, shortened when needed.
+ */
+export function fitTextToWidth(doc: jsPDF, text: string, maxWidth: number): string {
+  if (doc.getTextWidth(text) <= maxWidth) return text;
+  for (let end = text.length - 1; end > 0; end--) {
+    const candidate = `${text.slice(0, end).trimEnd()}${ELLIPSIS}`;
+    if (doc.getTextWidth(candidate) <= maxWidth) return candidate;
+  }
+  return doc.getTextWidth(ELLIPSIS) <= maxWidth ? ELLIPSIS : "";
+}
+
+/**
+ * The "<company> Support 24x7" footer line, fitted to `maxWidth` at the current
+ * font size. A long company name is shortened with "..." so " Support 24x7"
+ * stays whole; only when even that does not fit is the whole line cut.
+ *
+ * @param doc - The PDF, with the footer font already set.
+ * @param maxWidth - Room for the line, in mm.
+ * @returns {string} The line to draw, possibly shortened, or empty.
+ */
+export function fitSupportLine(doc: jsPDF, maxWidth: number): string {
+  const full = toPdfSafeText(reportSupportLine());
+  if (doc.getTextWidth(full) <= maxWidth) return full;
+  const name = toPdfSafeText(reportCompanyName());
+  for (let end = name.length - 1; end > 0; end--) {
+    const candidate = `${name.slice(0, end).trimEnd()}${ELLIPSIS}${REPORT_SUPPORT_LINE_SUFFIX}`;
+    if (doc.getTextWidth(candidate) <= maxWidth) return candidate;
+  }
+  return fitTextToWidth(doc, full, maxWidth);
+}
+
+/**
  * Draws the logo at the left of a footer line, its bottom just under the text
  * baseline, and returns how far the text after it has to move right.
  *
@@ -149,7 +196,8 @@ export function drawReportFooterLogo(
  * Draws the support footer on every page: logo and "<company> Support 24x7" on
  * the left, the page text in the middle and the generated time on the right.
  * With nothing configured this is the "WSO2 Support 24x7" footer the reports
- * always had.
+ * always had. The support line is shortened so it never runs into the page
+ * text ({@link fitSupportLine}).
  *
  * @param doc - The PDF, after all of its pages are written.
  * @param logo - The logo from {@link loadReportLogo}, or null.
@@ -164,7 +212,6 @@ export function drawReportSupportFooters(
 ): void {
   const totalPages = doc.getNumberOfPages();
   const pageWidth = doc.internal.pageSize.getWidth();
-  const supportLine = toPdfSafeText(reportSupportLine());
 
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
@@ -172,11 +219,15 @@ export function drawReportSupportFooters(
     doc.setFont("helvetica", "normal");
     const footerY = doc.internal.pageSize.getHeight() - 10;
 
-    const logoWidth = drawReportFooterLogo(doc, logo, FOOTER_MARGIN_MM, footerY);
-    doc.text(supportLine, FOOTER_MARGIN_MM + logoWidth, footerY);
-
     const middle = pageText(i, totalPages);
-    doc.text(middle, (pageWidth - doc.getTextWidth(middle)) / 2, footerY);
+    const middleX = (pageWidth - doc.getTextWidth(middle)) / 2;
+
+    const logoWidth = drawReportFooterLogo(doc, logo, FOOTER_MARGIN_MM, footerY);
+    const supportX = FOOTER_MARGIN_MM + logoWidth;
+    const supportLine = fitSupportLine(doc, middleX - FOOTER_TEXT_GAP_MM - supportX);
+    if (supportLine) doc.text(supportLine, supportX, footerY);
+
+    doc.text(middle, middleX, footerY);
 
     const dateWidth = doc.getTextWidth(createdDateTime);
     doc.text(createdDateTime, pageWidth - FOOTER_MARGIN_MM - dateWidth, footerY);
