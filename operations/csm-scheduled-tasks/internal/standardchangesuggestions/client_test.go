@@ -102,3 +102,43 @@ func TestNewClient_RefusesPlainHTTP(t *testing.T) {
 		t.Error("a plain-http base URL was accepted")
 	}
 }
+
+// A misbehaving upstream or proxy cannot make the client hold an unbounded
+// body: a success body is refused past maxResponseBytes, and a refusal keeps
+// at most maxErrorBodyBytes of its body.
+func TestClient_BoundsTheBody(t *testing.T) {
+	t.Run("a success body past the limit is an error", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"runId":"r1","nextCursor":"`))
+			_, _ = w.Write([]byte(strings.Repeat("a", maxResponseBytes)))
+			_, _ = w.Write([]byte(`"}`))
+		})
+		_, err := c.Refresh(context.Background(), Request{})
+		if err == nil || !strings.Contains(err.Error(), "larger than") {
+			t.Fatalf("err = %v, want the body refused", err)
+		}
+	})
+	t.Run("a body at the limit is read", func(t *testing.T) {
+		body := `{"runId":"r1","nextCursor":"`
+		body += strings.Repeat("a", maxResponseBytes-len(body)-2) + `"}`
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+		resp, err := c.Refresh(context.Background(), Request{})
+		if err != nil || resp.RunID != "r1" {
+			t.Fatalf("resp = %+v, %v", resp.RunID, err)
+		}
+	})
+	t.Run("a refusal keeps only the start of its body", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(strings.Repeat("<html>", 10000)))
+		})
+		_, err := c.Refresh(context.Background(), Request{})
+		var apiErr *apierror.Error
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadGateway {
+			t.Fatalf("err = %v, want the 502", err)
+		}
+		if len(apiErr.Body) != maxErrorBodyBytes {
+			t.Errorf("kept %d bytes of the body, want %d", len(apiErr.Body), maxErrorBodyBytes)
+		}
+	})
+}

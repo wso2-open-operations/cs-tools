@@ -48,13 +48,23 @@ import (
 // tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
 var tokenFetchTimeout = 10 * time.Second
 
-// callTimeout bounds one page. entity-service stops starting customers after
-// 20 seconds of a page and gives each customer at most 30 (one that overruns
-// is skipped, not failed), so a page ends within about 50; its REQUEST_TIMEOUT
-// (60s by default) cancels the request anyway, so waiting longer gains nothing.
-// A page cut short fails the run but publishes nothing: the snapshot readers
-// see is the previous one until a run finishes.
+// callTimeout bounds one page. entity-service runs a whole page under its own
+// 45-second deadline (each customer 20s, each write 5s, the publish 10s; a
+// customer starts only when the page has the time for it), so a page answers
+// within 45s; its REQUEST_TIMEOUT (60s by default) cancels the request anyway,
+// so waiting longer gains nothing. A page cut short fails the run but publishes
+// nothing: the snapshot readers see is the previous one until a run finishes.
 var callTimeout = 60 * time.Second
+
+// maxResponseBytes bounds a page's answer, a handful of counts and ids (well
+// under 1 KiB); a larger body is a misbehaving upstream or proxy, not a page.
+// maxErrorBodyBytes bounds what a refusal's body keeps (apierror.Error.Body):
+// entity-service's error JSON is far smaller, and a proxy's HTML page need
+// not be held whole.
+const (
+	maxResponseBytes  = 1 << 20
+	maxErrorBodyBytes = 4 << 10
+)
 
 // ClientConfig holds this client's configuration.
 type ClientConfig struct {
@@ -106,8 +116,8 @@ type Totals struct {
 	ChangeRequests int `json:"changeRequests"`
 	Clusters       int `json:"clusters"`
 	Eligible       int `json:"eligible"`
-	// Skipped: customers entity-service could not compute within their
-	// deadline; the snapshot holds nothing for them.
+	// Skipped: customers entity-service could not compute (too large for
+	// their deadline, or an error); the snapshot holds nothing for them.
 	Skipped int `json:"skipped"`
 }
 
@@ -145,12 +155,18 @@ func (c *Client) Refresh(ctx context.Context, req Request) (Response, error) {
 		return out, fmt.Errorf("standardchangesuggestions: POST %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(resp.Body)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		// The status is the error; the body is kept for a caller that asks,
+		// at most maxErrorBodyBytes of it (a failed read keeps what it got).
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return out, &apierror.Error{StatusCode: resp.StatusCode, Body: string(raw)}
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return out, fmt.Errorf("standardchangesuggestions: read response: %w", err)
 	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return out, &apierror.Error{StatusCode: resp.StatusCode, Body: string(raw)}
+	if len(raw) > maxResponseBytes {
+		return out, fmt.Errorf("standardchangesuggestions: response larger than %d bytes", maxResponseBytes)
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return out, fmt.Errorf("standardchangesuggestions: decode response: %w", err)

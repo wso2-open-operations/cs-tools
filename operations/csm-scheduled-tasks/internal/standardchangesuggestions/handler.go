@@ -92,13 +92,19 @@ func Run(client refresher) func(ctx context.Context) error {
 					"skipped", totals.Skipped, "suggestionsComputed", suggestions, "durationMs", time.Since(started).Milliseconds())
 				if totals.Skipped > 0 {
 					// Published all the same: one customer must not cost every other one
-					// its suggestions. entity-service logged which, and why.
-					slog.WarnContext(ctx, "standard change suggestions refresh: some customers were too large to compute in time and have no suggestions in this snapshot",
+					// its suggestions. entity-service logged which, and why (too large
+					// to compute in time, or an error).
+					slog.WarnContext(ctx, "standard change suggestions refresh: some customers could not be computed and have no suggestions in this snapshot",
 						"runId", resp.RunID, "skipped", totals.Skipped)
 				}
 				return nil
 			}
-			if resp.RunID == "" || resp.NextCursor == "" || resp.NextCursor == req.Cursor || (req.RunID != "" && resp.RunID != req.RunID) {
+			// Progress: the cursor moved on within the run, or the first page
+			// started the run (a slow start can leave it no time for a customer,
+			// so its cursor may still be empty).
+			started := req.RunID == "" && resp.RunID != ""
+			moved := req.RunID != "" && resp.RunID == req.RunID && resp.NextCursor != "" && resp.NextCursor != req.Cursor
+			if !started && !moved {
 				return fmt.Errorf("standard change suggestions refresh: no progress on page %d (more is set but the run or cursor did not move on); nothing was published", page)
 			}
 			req = Request{RunID: resp.RunID, Cursor: resp.NextCursor, Limit: PageSize}

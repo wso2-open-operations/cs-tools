@@ -78,7 +78,8 @@ func TestRun_AFailedPageFailsTheRun(t *testing.T) {
 func TestRun_NoProgressFailsTheRun(t *testing.T) {
 	for name, pages := range map[string][]Response{
 		"cursor did not move": {{RunID: "r1", More: true, NextCursor: "a1"}, {RunID: "r1", More: true, NextCursor: "a1"}},
-		"no cursor":           {{RunID: "r1", More: true}},
+		"no cursor":           {{RunID: "r1", More: true, NextCursor: "a1"}, {RunID: "r1", More: true}},
+		"no run":              {{More: true, NextCursor: "a1"}},
 		"another run":         {{RunID: "r1", More: true, NextCursor: "a1"}, {RunID: "r2", More: true, NextCursor: "a2"}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -87,6 +88,21 @@ func TestRun_NoProgressFailsTheRun(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 		})
+	}
+}
+
+// A first page with no time left for a customer (a slow start) only starts
+// the run: that is progress, and the next page starts from the beginning.
+func TestRun_AFirstPageThatOnlyStartsTheRun(t *testing.T) {
+	f := &fakeRefresher{pages: []Response{
+		{RunID: "r1", More: true},
+		{RunID: "r1", Customers: 3, ComputedOn: "2026-11-06T14:00:05Z", Totals: &Totals{Customers: 3}},
+	}}
+	if err := Run(f)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.reqs) != 2 || f.reqs[1] != (Request{RunID: "r1", Limit: PageSize}) {
+		t.Errorf("requests = %+v, want the run continued from its start", f.reqs)
 	}
 }
 
