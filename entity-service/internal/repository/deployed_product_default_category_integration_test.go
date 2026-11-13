@@ -162,8 +162,15 @@ func TestDeployedProductDefaultCategoryIntegration(t *testing.T) {
 		kept := "a5000000-0000-0000-0000-0000000000d3"
 		snCreate(t, kept, "DPDC-SN-3", req(depProjectOne, depDeployOne, str("cl")))
 
+		// One connection for both runs and the session check below, so the
+		// check reads the very session the migration ran on.
+		conn, err := pool.Acquire(context.Background())
+		if err != nil {
+			t.Fatalf("acquire connection: %v", err)
+		}
+		defer conn.Release()
 		for range 2 { // a second run must change nothing
-			if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
+			if _, err := conn.Exec(context.Background(), string(sql)); err != nil {
 				t.Fatalf("apply 0292: %v", err)
 			}
 			expect(t, depDPOneSet, str("MS"))
@@ -179,7 +186,7 @@ func TestDeployedProductDefaultCategoryIntegration(t *testing.T) {
 			t.Errorf("updated_by = %q", by)
 		}
 		var internalAfter string
-		if err := pool.QueryRow(context.Background(), `SELECT current_setting('app.is_internal', true)`).Scan(&internalAfter); err != nil {
+		if err := conn.QueryRow(context.Background(), `SELECT current_setting('app.is_internal', true)`).Scan(&internalAfter); err != nil {
 			t.Fatalf("read setting: %v", err)
 		}
 		if internalAfter == "true" {
