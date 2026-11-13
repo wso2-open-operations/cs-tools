@@ -12194,6 +12194,18 @@ new repository method this needed — a single-row lookup
 lower-cased before returning), deliberately not reusing
 `SearchDeployedProducts`' list/filter machinery for a one-row check.
 
+## A deployed product's default category comes from its project's type (migrations 0291/0292)
+
+`project_type.default_deployed_product_category` (0291, entity-service's own column like 0130's, seeded by type
+name only where unset): Managed Cloud Subscription `MS`; Subscription, Professional Services, Evaluation Subscription,
+Internal `PS`; Cloud Support, Cloud Evaluation Support `CL`; every other type none. The create
+(`CreateDeployedProductFromServiceNow`) writes `COALESCE(<request category>, <the project type's default>)` in the same
+`INSERT` (`projectTypeDefaultCategorySQL`), so a category in the request always wins and a type with no default leaves it
+unset; a plain-PostgreSQL create should do the same. Read once, at create: a later change of the project's type or of the default does not touch existing products,
+and PATCH never applies it. 0292 backfilled every product with no category the same way, finding the project through the
+deployment when `project_id` is NULL, as the RLS policy does. Tests: `deployed_product_default_category_integration_test.go`
+(`CASE_STATS_TEST_DSN`).
+
 ## Skills (`/skills`, Postgres only)
 
 `SkillService` (`internal/service/skill_service.go`, plus `skill_management_service.go`) serves the skill
