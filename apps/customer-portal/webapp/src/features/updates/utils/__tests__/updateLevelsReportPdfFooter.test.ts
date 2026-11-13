@@ -98,4 +98,16 @@ describe("generateUpdateLevelsReportPdf footer", () => {
     expect(pdf).toContain("(Acme Corp Support 24x7) Tj");
     expect(pdf).toMatch(pageText);
   });
+
+  it("shortens a company name too long to fit beside the page text", async () => {
+    const longName =
+      "Example International Technology and Business Services Corporation of the Americas";
+    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: longName };
+    await generateUpdateLevelsReportPdf(reportData);
+
+    const pdf = captured.pdfs[0];
+    expect(pdf).toMatch(/\(Example[^)]*\.\.\. Support 24x7\) Tj/);
+    expect(pdf).not.toContain(longName);
+    expect(pdf).toMatch(pageText);
+  });
 });
