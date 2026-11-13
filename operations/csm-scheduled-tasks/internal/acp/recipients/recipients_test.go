@@ -290,3 +290,62 @@ func TestHasBusinessContacts(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveCustomerContacts_DropsMalformedEmails: an address that fails the
+// pattern the previous process used is not a recipient, in either tier, and
+// a tier left with none falls through to the next. The pattern is matched as
+// stored, so surrounding whitespace fails it.
+func TestResolveCustomerContacts_DropsMalformedEmails(t *testing.T) {
+	tests := []struct {
+		email string
+		valid bool
+	}{
+		{"jane.doe@example.com", true},
+		{"jane+tag@mail.example.co.uk", true},
+		{"JANE_DOE%x@Example.COM", true},
+		{"", false},
+		{"jane.doe", false},
+		{"jane.doe@example", false},
+		{"jane.doe@example.c", false},
+		{"@example.com", false},
+		{"jane doe@example.com", false},
+		{"jane.doe@example.com ", false},
+		{" jane.doe@example.com", false},
+		{"Jane Doe <jane.doe@example.com>", false},
+		{"jane@@example.com", false},
+		{"jane.doe@example..com", true}, // the pattern allows it; only its shape is checked
+		{"jane.doe@example.com\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.email, func(t *testing.T) {
+			got := ResolveCustomerContacts([]ProjectContact{
+				{Name: "Bea", Email: tt.email, Roles: []string{BusinessContactRole}},
+			}, nil)
+			if gotValid := !got.NeedsAMNudge; gotValid != tt.valid {
+				t.Errorf("business contact with email %q usable = %v, want %v", tt.email, gotValid, tt.valid)
+			}
+		})
+	}
+
+	t.Run("a tier of only malformed addresses falls through to the next", func(t *testing.T) {
+		got := ResolveCustomerContacts(
+			[]ProjectContact{{Name: "Bea", Email: "not-an-email", Roles: []string{BusinessContactRole}}},
+			[]AccountContact{
+				{Name: "Pat", Email: "pat@example.com", IsPrimary: true},
+				{Name: "Quinn", Email: "quinn@example", IsPrimary: true},
+			})
+		want := []Contact{{Name: "Pat", Email: "pat@example.com"}}
+		if got.ResolvedVia != ResolvedViaPrimaryContact || !slices.Equal(got.CustomerContacts, want) {
+			t.Errorf("got %+v, want primary tier %+v", got, want)
+		}
+	})
+
+	t.Run("only malformed addresses everywhere nudges the account manager", func(t *testing.T) {
+		got := ResolveCustomerContacts(
+			[]ProjectContact{{Name: "Bea", Email: "bea", Roles: []string{BusinessContactRole}}},
+			[]AccountContact{{Name: "Pat", Email: "pat@", IsPrimary: true}})
+		if !got.NeedsAMNudge || got.ResolvedVia != ResolvedViaNone {
+			t.Errorf("got %+v, want a nudge", got)
+		}
+	})
+}

@@ -47,6 +47,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/holidayreminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
@@ -712,6 +713,8 @@ func main() {
 	rotaWeekendReminderTo, rotaWeekendReminderCc := recipientsFor(recipientOverrides, rotaWeekendReminderTaskName)
 	const rotaManualTaskName = "rota_manual_reminder"
 	rotaManualTo, rotaManualCc := recipientsFor(recipientOverrides, rotaManualTaskName)
+	const holidayReminderTaskName = "holiday_availability_reminder"
+	holidayReminderTo, holidayReminderCc := recipientsFor(recipientOverrides, holidayReminderTaskName)
 
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
@@ -1062,17 +1065,18 @@ func main() {
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
-	// asked for (Colombo has no DST; TZ=UTC-dependent like every schedule
-	// here, see internal/schedule.PeriodKey):
-	//   - rota_weekday_reminder, 09:30 UTC = 15:00 Colombo, Mon-Fri: the next
-	//     working day's windows (Friday announces Monday), one email each with
-	//     its calendar invitation;
-	//   - rota_weekend_notice, 14:30 UTC = 20:00 Colombo, Sun-Thu: once the
-	//     coming weekend is fully marked, its summary and one invitation per
-	//     team per day, sent once; until then the rota admins are asked every
-	//     evening;
-	//   - rota_weekend_reminder, 09:30 UTC = 15:00 Colombo, Fri: the weekend
-	//     summary again, the invitations as updates, and cancellations.
+	// asked for, all at 03:30 UTC = 09:00 Colombo (Colombo has no DST;
+	// TZ=UTC-dependent like every schedule here, see
+	// internal/schedule.PeriodKey):
+	//   - rota_weekday_reminder, Sun-Thu: the next working day's windows, the
+	//     day before each (Sunday announces Monday), one email each with its
+	//     calendar invitation;
+	//   - rota_weekend_notice, Mon-Thu: once the coming weekend is fully
+	//     marked, its summary and one invitation per team per day, sent once
+	//     (on Monday when it is already marked); until then the rota admins
+	//     are asked every morning;
+	//   - rota_weekend_reminder, Fri: the weekend summary again, the
+	//     invitations as updates, and cancellations.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
 	if rotaRemindersAvailable {
@@ -1142,9 +1146,9 @@ func main() {
 			envString("ROTA_REMINDER_WEEKDAY_SHIFTS", "CRE_MORNING=Morning,CRE_MORNING_OC=On-call,CRE_EVENING=Evening"))
 		weekendRotations := parseRotations("ROTA_REMINDER_WEEKEND_SHIFTS",
 			envString("ROTA_REMINDER_WEEKEND_SHIFTS", "CRE_WEEKEND=LK Weekend,CRE_WEEKEND_NIGHT=Americas Weekend,CRE_WEEKEND_NIGHT_OC=Americas On-call"))
-		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 9 * * 1-5")
-		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 14 * * 0-4")
-		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 9 * * 5")
+		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 3 * * 0-4")
+		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 3 * * 1-4")
+		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 3 * * 5")
 		// "Send now" requests are picked up at every run: the schedule is finer
 		// than the driver, so it is due at each tick.
 		rotaManualSchedule := scheduleFor(scheduleOverrides, rotaManualTaskName, "*/5 * * * *")
@@ -1183,6 +1187,28 @@ func main() {
 				Cc: rotaManualCc,
 			},
 		)
+
+		// Working on a public holiday (CRE): 09:00 Colombo on weekdays, each
+		// CRE team's leads and rota managers are reminded to mark who works
+		// on a coming public holiday -- 14 days before, then 7 days, 2 and 1
+		// working days before while the team is not fully marked. Which
+		// reminders are due is entity-service's decision; each is recorded
+		// there, so it goes once. Every reminder day is a weekday (a weekend
+		// holiday gets no tag), so the task runs Monday to Friday.
+		holidayReminderSchedule := scheduleFor(scheduleOverrides, holidayReminderTaskName, "30 3 * * 1-5")
+		tasks = append(tasks, registry.Task{
+			Name:     holidayReminderTaskName,
+			Schedule: holidayReminderSchedule,
+			Handler: holidayreminder.Run(teamScheduleClient, emailClient, holidayreminder.Config{
+				ScheduleURL:   scheduleURL,
+				RedirectTo:    splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
+				EmailsEnabled: alertsEnabled,
+				Zone:          rotaZone,
+				Anchor:        periodStart(holidayReminderSchedule),
+			}),
+			To: holidayReminderTo,
+			Cc: holidayReminderCc,
+		})
 	}
 
 	// Daily at 02:30 UTC (08:00 IST), every day including weekends, the slot the
@@ -1487,19 +1513,6 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
-	// Salesforce: sales-entity-service, with its own client credentials.
-	salesEntityClient, err := salesentity.NewClient(salesentity.Config{
-		BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
-		TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
-		ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
-		ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
-		Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
-	})
-	if err != nil {
-		slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
-		os.Exit(1)
-	}
-
 	// The unsafe combinations are refused here, not warned about: see
 	// acpConfig.
 	debug := debugFor(recipientOverrides, acpTaskName)
@@ -1512,19 +1525,53 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
+	// Salesforce: sales-entity-service, with its own client credentials. It is
+	// read by the live path and written by a suspension (State__c). With
+	// ACP_SALES_ENTITY_READS=off nothing is read, so a dry run builds no client
+	// and needs no ACP_SALES_ENTITY_* setting; a real run still needs it for the
+	// write.
+	var salesEntity acp.SalesEntity
+	if !cfg.NoSalesEntityReads || !cfg.DryRun {
+		salesEntityClient, err := salesentity.NewClient(salesentity.Config{
+			BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
+			TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
+			ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
+			ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
+			Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		salesEntity = salesEntityClient
+	}
+
 	to, cc := recipientsFor(recipientOverrides, acpTaskName)
+	clients := acp.Clients{
+		CSM:         csmClient,
+		SalesEntity: salesEntity,
+		// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
+		// instead, the same as a report task's debug mail mode.
+		Email: notify.ForReport(emailClient, debug),
+	}
+	// An on-demand run uses the configured settings narrowed by --dry-run and
+	// --limit, which can only tighten them (narrowACP).
+	runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		runCfg, err := narrowACP(cfg, o, len(debug) > 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		return acp.Run(clients, runCfg),
+			[]any{"dryRun", runCfg.DryRun, "emailEnabled", runCfg.EmailEnabled, "dailyLimit", runCfg.DailyLimit}, nil
+	}
 	return registry.Task{
 		// 04:00 UTC is 09:30 in Colombo, Monday to Friday. The handler also
 		// skips a weekend in Colombo time, for a retry that lands on one.
-		Name:     acpTaskName,
-		Schedule: scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
-		Handler: acp.Run(acp.Clients{
-			CSM:         csmClient,
-			SalesEntity: salesEntityClient,
-			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
-			// instead, the same as a report task's debug mail mode.
-			Email: notify.ForReport(emailClient, debug),
-		}, cfg),
+		Name:         acpTaskName,
+		Schedule:     scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
+		Handler:      acp.Run(clients, cfg),
+		RunNowNarrow: runNowNarrow,
+		RunNowFlags:  []string{"--dry-run", "--limit", "--full-sweep"},
 		RetryBackoff: acpRetryBackoff,
 		MaxAttempts:  acpMaxAttempts,
 		To:           to,

@@ -151,10 +151,10 @@ func (s *deploymentService) createDeploymentSNFirst(ctx context.Context, req dom
 	}, nil
 }
 
-// UpdateDeployment implements DeploymentService. Not supported for the plain
-// PostgreSQL data source (s.snMirror == nil); Postgres-first with an
-// asynchronous ServiceNow mirror under
-// DATA_SOURCE=postgres-servicenow-dual-write.
+// UpdateDeployment implements DeploymentService. Postgres-first on every data
+// source; with a dual-write mirror wired an asynchronous mirror write
+// follows, and on plain PostgreSQL (s.snMirror == nil) the repository update
+// is the whole write.
 //
 // UPDATE stays Postgres-first/async — unlike CreateDeployment (see that
 // method's own doc comment for why create is SN-first/synchronous instead):
@@ -169,10 +169,6 @@ func (s *deploymentService) createDeploymentSNFirst(ctx context.Context, req dom
 // event-publish side effects to avoid duplicating (see its own doc
 // comment) — the same request can be forwarded to it directly.
 func (s *deploymentService) UpdateDeployment(ctx context.Context, req domain.UpdateDeploymentRequest) (domain.UpdateDeploymentResponse, error) {
-	if s.snMirror == nil {
-		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "UpdateDeployment is not supported for the PostgreSQL data source"}
-	}
-
 	if err := validateUpdateDeploymentRequest(req); err != nil {
 		return domain.UpdateDeploymentResponse{}, err
 	}
@@ -187,7 +183,9 @@ func (s *deploymentService) UpdateDeployment(ctx context.Context, req domain.Upd
 		return domain.UpdateDeploymentResponse{}, err
 	}
 
-	if s.snWriteback != nil {
+	// Mirror only when a dual-write mirror is wired; plain PostgreSQL stops
+	// at the repository update above.
+	if s.snMirror != nil && s.snWriteback != nil {
 		s.snWriteback.Dispatch(ctx, "deployment", req.ID, "update", req,
 			func(writeCtx context.Context) error {
 				_, err := s.snMirror.UpdateDeployment(writeCtx, req)

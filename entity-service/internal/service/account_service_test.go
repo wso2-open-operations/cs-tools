@@ -140,27 +140,34 @@ func TestAccountRowToView_NilTeamsWhenUnset(t *testing.T) {
 	}
 }
 
-// TestAccountRow_PartnerFlags pins isPartner (classification "Partner") and the
-// hasPrimaryPartner approximation (any partner relationship) on both shapes.
+// TestAccountRow_PartnerFlags pins isPartner (classification "Partner"),
+// hasPrimaryPartner (the stored primary partner) and lifeCycle on both shapes.
 func TestAccountRow_PartnerFlags(t *testing.T) {
-	partner, customer := " partner ", "Customer"
+	partner, customer, prospect := " partner ", "Customer", "Prospect"
 	cases := []struct {
-		name           string
-		classification *string
-		hasPartner     bool
-		wantIsPartner  bool
+		name              string
+		classification    *string
+		hasPrimaryPartner bool
+		lifeCycle         *string
+		wantIsPartner     bool
 	}{
-		{"partner, case and space insensitive", &partner, false, true},
-		{"customer with a partner", &customer, true, false},
-		{"no classification", nil, false, false},
+		{"partner, case and space insensitive", &partner, false, &customer, true},
+		{"customer with a primary partner", &customer, true, &customer, false},
+		{"no classification, no life cycle", nil, false, nil, false},
+		{"prospect", nil, false, &prospect, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			row := repository.AccountRow{Classification: tc.classification, HasPartner: tc.hasPartner}
+			row := repository.AccountRow{Classification: tc.classification, HasPrimaryPartner: tc.hasPrimaryPartner, LifeCycle: tc.lifeCycle}
 			view, detail := accountRowToView(row), accountRowToDetail(row)
 			for _, got := range [][2]*bool{{view.IsPartner, view.HasPrimaryPartner}, {detail.IsPartner, detail.HasPrimaryPartner}} {
-				if got[0] == nil || *got[0] != tc.wantIsPartner || got[1] == nil || *got[1] != tc.hasPartner {
-					t.Fatalf("isPartner/hasPrimaryPartner = %v/%v, want %v/%v", got[0], got[1], tc.wantIsPartner, tc.hasPartner)
+				if got[0] == nil || *got[0] != tc.wantIsPartner || got[1] == nil || *got[1] != tc.hasPrimaryPartner {
+					t.Fatalf("isPartner/hasPrimaryPartner = %v/%v, want %v/%v", got[0], got[1], tc.wantIsPartner, tc.hasPrimaryPartner)
+				}
+			}
+			for _, got := range []*string{view.LifeCycle, detail.LifeCycle} {
+				if (got == nil) != (tc.lifeCycle == nil) || (got != nil && *got != *tc.lifeCycle) {
+					t.Fatalf("lifeCycle = %v, want %v", got, tc.lifeCycle)
 				}
 			}
 		})

@@ -15,6 +15,7 @@
 // under the License.
 
 import { buildCsvContent, downloadCsvFile } from "@utils/csv";
+import { formatClosureState } from "@features/project-hub/utils/closureState";
 import { downloadPdfFile, type PdfColumnStyle } from "@utils/pdf";
 import type {
   GlobalSearchPayload,
@@ -77,20 +78,6 @@ function formatDate(value: string | null | undefined): string {
   const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value;
   const d = new Date(normalized);
   return isNaN(d.getTime()) ? "--" : d.toLocaleDateString(DATE_LOCALE, DATE_FORMAT);
-}
-
-/**
- * The status as the export has always printed it: "Open", "Read Only", "Pending Notified".
- * POST /search returns the raw lowercase value ("read_only"); the endpoint the export used to
- * read title-cased it (INITCAP(REPLACE(state, '_', ' '))), so do the same here to keep the
- * exported files unchanged. No status is "Active".
- */
-function formatClosureState(value: string | null | undefined): string {
-  if (!value) return "Active";
-  return value
-    .replace(/_/g, " ")
-    .toLowerCase()
-    .replace(/(^|[^a-z0-9])([a-z])/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
 function buildFilename(ext: "csv" | "pdf"): string {

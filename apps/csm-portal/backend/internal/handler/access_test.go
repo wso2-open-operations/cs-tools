@@ -715,6 +715,37 @@ func TestAccessGuard_PlgIsForCsEngineersAndAdmins(t *testing.T) {
 	}
 }
 
+// TestAccessGuard_DashboardWritersCanReadPlg: generating and saving a
+// dashboard is PermWrite, and a generated dashboard may hold PLG widgets,
+// whose data is PermUsePlg. Every role that holds PermWrite must also hold
+// PermUsePlg, or its holders could build and save PLG widgets they cannot
+// read themselves. Every role in testAccessConfig is checked, so a role
+// added to PermWrite later is covered too.
+func TestAccessGuard_DashboardWritersCanReadPlg(t *testing.T) {
+	cfg := testAccessConfig()
+	g := NewAccessGuard(cfg)
+	v := reflect.ValueOf(cfg)
+	writers := 0
+	for i := range v.NumField() {
+		roles, ok := v.Field(i).Interface().([]string)
+		if !ok {
+			continue
+		}
+		for _, role := range roles {
+			if status, _ := serveWithRoles(g, PermWrite, []string{role}); status != http.StatusNoContent {
+				continue
+			}
+			writers++
+			if status, _ := serveWithRoles(g, PermUsePlg, []string{role}); status != http.StatusNoContent {
+				t.Errorf("%s holds PermWrite but not PermUsePlg: status = %d, want 204", role, status)
+			}
+		}
+	}
+	if writers == 0 {
+		t.Fatal("no role in testAccessConfig holds PermWrite; the check above ran on nothing")
+	}
+}
+
 // TestAccessGuard_CustomerHealthIsForViewersCsEngineersAndAdmins pins
 // PermViewCustomerHealth as wider than PermViewerAccess (Viewer only) but
 // still narrower than PermView: a cs_engineer or admin reaches the dashboard

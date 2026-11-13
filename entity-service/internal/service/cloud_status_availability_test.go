@@ -46,6 +46,9 @@ type fakeDashboardRepo struct {
 	detail                      *repository.IncidentDetailRow
 	comments                    []repository.OutageCommentRow
 	gotDetailID, gotDetailCloud string
+
+	// registry overrides the seeded clouds when a test needs its own.
+	registry *fixtureClouds
 }
 
 func (f *fakeDashboardRepo) Monitors(context.Context, string) ([]repository.MonitorRow, error) {
@@ -85,7 +88,7 @@ func (f *fakeDashboardRepo) OutageComments(context.Context, string) ([]repositor
 // database fact -- so what is checkable here is the whole-cloud total, which
 // must be 100 per region. A weight mistyped by a digit fails this.
 func TestAvailabilityWeightsSumPerRegion(t *testing.T) {
-	for cloud, plan := range domain.CloudAvailabilityPlans {
+	for cloud, plan := range seededCloudPlans {
 		if !plan.Weighted() {
 			continue
 		}
@@ -107,13 +110,13 @@ func TestAvailabilityWeightsSumPerRegion(t *testing.T) {
 // validateCloud accepts seven slugs and every one needs a plan, or the
 // endpoint 400s on a cloud the other endpoints serve.
 func TestAvailabilityPlansCoverEveryCloud(t *testing.T) {
-	for slug := range cloudStatusClouds {
-		if _, ok := domain.CloudAvailabilityPlans[slug]; !ok {
+	for slug := range seededCloudOfferings {
+		if _, ok := seededCloudPlans[slug]; !ok {
 			t.Errorf("cloud %q is accepted but has no availability plan", slug)
 		}
 	}
-	for slug := range domain.CloudAvailabilityPlans {
-		if _, ok := cloudStatusClouds[slug]; !ok {
+	for slug := range seededCloudPlans {
+		if _, ok := seededCloudOfferings[slug]; !ok {
 			t.Errorf("cloud %q has a plan but is not an accepted cloud", slug)
 		}
 	}
@@ -182,7 +185,7 @@ func TestAvailabilitiesWireTypes(t *testing.T) {
 	svc := NewCloudStatusDashboardService(repo)
 
 	// asgardeo: unweighted, two offerings, both perfect -> the number 100.
-	as := domain.CloudAvailabilityPlans["asgardeo"]
+	as := seededCloudPlans["asgardeo"]
 	for _, r := range as.Regions {
 		repo.parentAvail[r.ParentID] = []repository.ParentAvailabilityRow{
 			{ServiceOfferingID: "a", Window: "LAST_7_DAYS", Availability: 100},
@@ -199,7 +202,7 @@ func TestAvailabilitiesWireTypes(t *testing.T) {
 	}
 
 	// moesif: weighted, every offering at 100 -> the string "100.000".
-	mo := domain.CloudAvailabilityPlans["moesif"]
+	mo := seededCloudPlans["moesif"]
 	rows := make([]repository.ParentAvailabilityRow, 0, len(mo.Weights))
 	for id := range mo.Weights {
 		rows = append(rows, repository.ParentAvailabilityRow{
@@ -223,7 +226,7 @@ func TestAvailabilitiesWireTypes(t *testing.T) {
 // for good, and the whole region publishes "NaN". Here it is skipped, so one
 // unweighted offering costs its own share and nothing else.
 func TestAvailabilitiesSkipsUnmappedOffering(t *testing.T) {
-	mo := domain.CloudAvailabilityPlans["moesif"]
+	mo := seededCloudPlans["moesif"]
 	rows := []repository.ParentAvailabilityRow{
 		{ServiceOfferingID: "not-in-any-weight-map", Window: "LAST_7_DAYS", Availability: 42},
 	}
@@ -248,7 +251,7 @@ func TestAvailabilitiesSkipsUnmappedOffering(t *testing.T) {
 // monitors endpoint needed two, this one needs four and the frontend renders
 // them in this sequence.
 func TestAvailabilitiesAllFourWindows(t *testing.T) {
-	mo := domain.CloudAvailabilityPlans["moesif"]
+	mo := seededCloudPlans["moesif"]
 	repo := &fakeDashboardRepo{parentAvail: map[string][]repository.ParentAvailabilityRow{}}
 	got, err := NewCloudStatusDashboardService(repo).Availabilities(context.Background(), "moesif")
 	if err != nil {

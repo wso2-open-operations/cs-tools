@@ -32,6 +32,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/holidays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
@@ -133,6 +134,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
 	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
+	var systemDashboardHandler *handler.SystemDashboardHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -146,6 +148,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
 			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
+		)
+		systemDashboardHandler = handler.NewSystemDashboardHandler(
+			service.NewSystemDashboardService(repository.NewSystemDashboardRepository(db), cfg.CSMPortalBackendClientID),
 		)
 	}
 
@@ -357,6 +362,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// only in Postgres, so its routes are registered only when a pool is
 	// configured.
 	var scheduleHandler *handler.ScheduleHandler
+	// The Team Schedule's public holidays (migration 0283): the roster reads
+	// the stored copy; a daily refresh fills it from the calendar-events and
+	// employee services when those connections are configured.
+	var publicHolidayHandler *handler.PublicHolidayHandler
+	// Working on a public holiday (CRE, migration 0283): the Public holiday
+	// tags, the teams' confirmations and the reminders.
+	var holidayAvailabilityHandler *handler.HolidayAvailabilityHandler
 	// Customer engagement allocations for the CSM Allocations page: Postgres-only,
 	// internal staff only.
 	var engagementAllocationViewHandler *handler.EngagementAllocationViewHandler
@@ -448,6 +460,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// admin resync compares and overwrites through those same ingests, so a
 	// component whose ingest flag is off reports "skipped".
 	var salesforceResyncHandler *handler.SalesforceResyncHandler
+	// salesforceAccountRefreshHandler is set when the Account ingest is on.
+	var salesforceAccountRefreshHandler *handler.SalesforceAccountRefreshHandler
 	// membershipRegistrationHandler and projectContactSyncHandler both need
 	// the very same membership-ingest-enabled SalesforceEventService this
 	// block builds, so all three are wired together rather than side by side.
@@ -520,6 +534,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			States:   repository.NewSalesforceIngestStateRepository(db),
 			Projects: projectIngestRepo,
 			Owners:   owners,
+		}
+		// The Account refresh (the primary partner backfill) writes accounts
+		// with the duplicate guard off, so it exists only while the Account
+		// ingest is on; it needs none of the other families.
+		if accountIngestRepo != nil {
+			base := service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport)
+			if refresher, ok := base.(service.AccountRefresher); ok {
+				salesforceAccountRefreshHandler = handler.NewSalesforceAccountRefreshHandler(service.NewAccountRefreshService(refresher, accessSvc))
+			}
 		}
 		// The Project branch is update-only unless its insert switch is on
 		// too (csm-sync-service still inserts project rows until cutover).
@@ -860,7 +883,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.WithServiceNowGithubCases(githubSync, service.NewSNGithubCases(serviceNowIntegrationServiceClient))
 			slog.Info("github: service requests from issues are created in ServiceNow first (dual-write)")
 		} else if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
-			slog.Info("github: service requests from issues are written to Postgres only and numbered SR-GH-<n> (GITHUB_SR_SERVICENOW_FIRST is off)")
+			slog.Info("github: service requests from issues are written to Postgres only and numbered natively, SR-GH-<n> only when the repository has no project (GITHUB_SR_SERVICENOW_FIRST is off)")
 		}
 	}
 
@@ -1308,9 +1331,52 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		announcementRequestHandler = handler.NewAnnouncementRequestHandler(
 			service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db), activeCaseSvc, accessSvc),
 		)
-		scheduleHandler = handler.NewScheduleHandler(
-			service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles),
-		)
+		scheduleSvc := service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles)
+		scheduleHandler = handler.NewScheduleHandler(scheduleSvc)
+		// Keep both nil interfaces when unconfigured: a nil *Client stored in
+		// the interface would make the service think it has a source.
+		var holidayCalendar service.HolidayCalendar
+		if cfg.HolidayCalendarConfigured() {
+			holidayCalendar = holidays.NewCalendarClient(cfg.HolidayCalendarBaseURL, holidays.Credentials{
+				TokenURL: cfg.HolidayCalendarTokenURL, ClientID: cfg.HolidayCalendarClientID, ClientSecret: cfg.HolidayCalendarClientSecret,
+			})
+		}
+		var employeeLocations service.EmployeeLocations
+		if cfg.HREntityConfigured() {
+			employeeLocations = holidays.NewEmployeeClient(cfg.HREntityBaseURL, holidays.Credentials{
+				TokenURL: cfg.HREntityTokenURL, ClientID: cfg.HREntityClientID, ClientSecret: cfg.HREntityClientSecret,
+			})
+		}
+		publicHolidayRepo := repository.NewPublicHolidayRepository(db)
+		// Working on a public holiday (CRE): every refresh places the coming
+		// weeks' Public holiday tags; the leads mark who works by removing
+		// them and confirm the team. Whoever may change a team's rota may
+		// confirm it (the schedule service's own check).
+		rotaZone, zoneErr := time.LoadLocation("Asia/Colombo")
+		if zoneErr != nil {
+			rotaZone = time.UTC
+		}
+		holidayAvailabilitySvc := service.NewHolidayAvailabilityService(
+			repository.NewHolidayAvailabilityRepository(db), publicHolidayRepo, accessSvc,
+			service.RotaWriterCheck(scheduleSvc), rotaZone)
+		holidayAvailabilityHandler = handler.NewHolidayAvailabilityHandler(holidayAvailabilitySvc)
+		publicHolidaySvc := service.WithHolidayTagPlacer(
+			service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
+			holidayAvailabilitySvc)
+		publicHolidayHandler = handler.NewPublicHolidayHandler(publicHolidaySvc)
+		if holidayCalendar != nil || employeeLocations != nil {
+			// First run shortly after start, then daily. Stopped with the
+			// other background workers by closePublishers.
+			ingestRetryWG.Add(1)
+			go func() {
+				defer ingestRetryWG.Done()
+				service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
+			}()
+			slog.Info("team schedule public holidays: daily refresh enabled",
+				"calendar", holidayCalendar != nil, "employeeLocations", employeeLocations != nil)
+		} else {
+			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; no refresh runs, the roster shows only stored holidays")
+		}
 		engagementAllocationViewHandler = handler.NewEngagementAllocationViewHandler(
 			service.NewEngagementAllocationViewService(repository.NewEngagementAllocationViewRepository(db), accessSvc),
 		)
@@ -2125,6 +2191,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /salesforce/resync/preview", salesforceResyncHandler.Preview)
 		mux.HandleFunc("POST /salesforce/resync/apply", salesforceResyncHandler.Apply)
 	}
+	if salesforceAccountRefreshHandler != nil {
+		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh", salesforceAccountRefreshHandler.Refresh)
+	}
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)
 	}
@@ -2169,7 +2238,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
 	if caseSLARecalcHandler != nil {
-		mux.HandleFunc("POST /cases/{id}/sla/recalculate-pause", caseSLARecalcHandler.RecalculatePauseTotals)
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate", caseSLARecalcHandler.RecalculatePauseTotals)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
@@ -2217,6 +2286,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /team-schedule/absences/search", scheduleHandler.SearchScheduleAbsences)
 		mux.HandleFunc("POST /team-schedule/engagement-allocations/search", scheduleHandler.SearchScheduleEngagementAllocations)
 		mux.HandleFunc("GET /team-schedule/on-duty", scheduleHandler.GetScheduleOnDuty)
+	}
+	if publicHolidayHandler != nil {
+		mux.HandleFunc("POST /team-schedule/public-holidays/search", publicHolidayHandler.SearchPublicHolidays)
+		mux.HandleFunc("POST /team-schedule/public-holidays/refresh", serviceOnly(accessSvc, publicHolidayHandler.RefreshPublicHolidays))
+	}
+	if holidayAvailabilityHandler != nil {
+		mux.HandleFunc("POST /team-schedule/holiday-availability/search", holidayAvailabilityHandler.SearchHolidayAvailability)
+		mux.HandleFunc("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", holidayAvailabilityHandler.ConfirmHolidayAvailability)
+		mux.HandleFunc("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", holidayAvailabilityHandler.WithdrawHolidayAvailability)
+		mux.HandleFunc("POST /team-schedule/holiday-availability/reminders/due", serviceOnly(accessSvc, holidayAvailabilityHandler.DueHolidayReminders))
+		mux.HandleFunc("PUT /team-schedule/holiday-availability/reminders/{teamKey}/{date}/{stage}", serviceOnly(accessSvc, holidayAvailabilityHandler.RecordHolidayReminder))
 	}
 	if teamMemberHandler != nil {
 		// Who holds which rank. The call-escalation ladder resolves four of its
@@ -2488,6 +2568,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/me/dashboards/{id}", customDashboardHandler.Get)
 		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
+	}
+	if systemDashboardHandler != nil {
+		// System dashboards (no owner): the CSM portal backend upserts them
+		// on startup, reads them back and removes the ones whose file is gone;
+		// no other caller is admitted.
+		mux.HandleFunc("GET /system-dashboards", systemDashboardHandler.List)
+		mux.HandleFunc("GET /system-dashboards/{key}", systemDashboardHandler.Get)
+		mux.HandleFunc("PUT /system-dashboards/{key}", systemDashboardHandler.Save)
+		mux.HandleFunc("DELETE /system-dashboards/{key}", systemDashboardHandler.Delete)
 	}
 	if customDashboardShareHandler != nil {
 		// Sharing the caller's saved dashboards (owner) and the ones shared

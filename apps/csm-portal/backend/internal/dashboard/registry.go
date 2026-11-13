@@ -17,6 +17,7 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -198,6 +199,11 @@ type Registry struct {
 	// is no reason to make every dashboard read carry this too. nil for a
 	// static registry.
 	loadCatalogues func() (map[string]map[string]any, map[string]SharedSection, error)
+
+	// system, when set, makes the database the source of what is served
+	// (see NewSystemRegistry); everything above is then only the file source
+	// it migrates from, held in system.src.
+	system *systemBacking
 }
 
 // NewStaticRegistry wraps an already-decoded set of dashboards. It never
@@ -274,6 +280,15 @@ func (r *Registry) Dashboards() []Dashboard {
 	if r == nil {
 		return nil
 	}
+	if r.system != nil {
+		// No context and no error to return here: this is for callers that
+		// cannot report one. The request path uses List.
+		dashboards, err := r.system.list(context.Background())
+		if err != nil {
+			slog.Error("dashboard definitions: database read failed", "err", err)
+		}
+		return dashboards
+	}
 	if r.hotReload && r.load != nil {
 		if dashboards, err := r.load(r.dir); err != nil {
 			slog.Error("dashboard definitions: hot reload failed; continuing to serve the last known-good definitions",
@@ -288,6 +303,30 @@ func (r *Registry) Dashboards() []Dashboard {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.cached
+}
+
+// List returns the registry's dashboards like Dashboards, but reports a failed
+// database read instead of logging it: the registry backed by the database
+// (see NewSystemRegistry) never answers a failed read with an empty list.
+func (r *Registry) List(ctx context.Context) ([]Dashboard, error) {
+	if r != nil && r.system != nil {
+		return r.system.list(ctx)
+	}
+	return r.Dashboards(), nil
+}
+
+// Get looks a dashboard up by id like ByID, reporting a failed database read.
+func (r *Registry) Get(ctx context.Context, id string) (Dashboard, bool, error) {
+	dashboards, err := r.List(ctx)
+	if err != nil {
+		return Dashboard{}, false, err
+	}
+	for _, d := range dashboards {
+		if d.ID == id {
+			return d, true, nil
+		}
+	}
+	return Dashboard{}, false, nil
 }
 
 // ByID looks a dashboard up by id, returning ok=false if the id is not in the
@@ -317,6 +356,11 @@ func (r *Registry) FilterPresets() map[string]map[string]any {
 	if r == nil {
 		return nil
 	}
+	if r.system != nil {
+		// The catalogues are not stored in the database: only the mounted
+		// definition files carry them.
+		return r.system.src.FilterPresets()
+	}
 	r.refreshCatalogues()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -328,6 +372,9 @@ func (r *Registry) FilterPresets() map[string]map[string]any {
 func (r *Registry) SharedSections() map[string]SharedSection {
 	if r == nil {
 		return nil
+	}
+	if r.system != nil {
+		return r.system.src.SharedSections()
 	}
 	r.refreshCatalogues()
 	r.mu.RLock()
@@ -381,6 +428,14 @@ func Active() *Registry {
 
 // All returns every dashboard the active registry serves.
 func All() []Dashboard { return Active().Dashboards() }
+
+// List returns every dashboard the active registry serves, reporting a failed
+// database read.
+func List(ctx context.Context) ([]Dashboard, error) { return Active().List(ctx) }
+
+// Lookup looks a dashboard up by id in the active registry, reporting a failed
+// database read.
+func Lookup(ctx context.Context, id string) (Dashboard, bool, error) { return Active().Get(ctx, id) }
 
 // ByID looks a dashboard up by id in the active registry.
 func ByID(id string) (Dashboard, bool) { return Active().ByID(id) }
@@ -772,7 +827,9 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	// injectImpliedTypeFilters).
 	ResourceServiceRequest: true, ResourceSecurityReportAnalysis: true,
 	ResourceAnnouncement: true, ResourceEngagement: true,
-	ResourceCaseFeedback: true,
+	ResourceCaseFeedback:    true,
+	ResourcePlgOrganization: true,
+	ResourcePlgRegistration: true,
 }
 
 var validWidgetShapes = map[Shape]bool{
@@ -1094,9 +1151,16 @@ func validateWidgets(d Dashboard, source string) error {
 			}
 		}
 		if w.Shape == ShapeLine {
-			if w.ResourceType != ResourceCase {
-				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: shape %q only supports resourceType %q, got %q",
-					source, d.ID, w.ID, ShapeLine, ResourceCase, w.ResourceType)
+			// Cases (Opened and Closed, POST /cases/volume-trend) and PLG
+			// registrations (one line, Registered, POST
+			// /plg/registrations/volume-trend), with the same window rules.
+			if w.ResourceType != ResourceCase && w.ResourceType != ResourcePlgRegistration {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: shape %q only supports resourceType %q or %q, got %q",
+					source, d.ID, w.ID, ShapeLine, ResourceCase, ResourcePlgRegistration, w.ResourceType)
+			}
+			if w.ResourceType == ResourcePlgRegistration && w.Series != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"series\" is only meaningful for resourceType %q; a %q line has one line",
+					source, d.ID, w.ID, ResourceCase, ResourcePlgRegistration)
 			}
 			if w.Days < 0 || w.Days > maxWidgetLineDays {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"days\" is %d; it must be between 1 and %d (or omitted for the default)",

@@ -140,7 +140,7 @@ func TestAvailability_SweepFeedsTheDashboard(t *testing.T) {
 	// link this test is for (period types, offering ids, the sweep's output
 	// reaching the published number) without inventing a partition. The
 	// weighted path has its own coverage in cloud_status_availability_test.
-	plan, ok := domain.CloudAvailabilityPlans["asgardeo"]
+	plan, ok := seededCloudPlans["asgardeo"]
 	if !ok {
 		t.Fatal("no asgardeo availability plan")
 	}

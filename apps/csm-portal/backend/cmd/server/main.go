@@ -58,8 +58,6 @@ func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
 
-	dashboard.SetActive(loadDashboards())
-
 	// Reference data is resolved once, here, and then only ever read from
 	// memory: the team registry (key <-> display name <-> backing group id <->
 	// platform UUID) and the assignable-role allow-list are both derivable from
@@ -143,6 +141,10 @@ func main() {
 	}
 
 	customerEntityClient := entity.NewCustomerEntityClient(customerEntityCfg)
+
+	// The dashboards API serves from the database; any mounted definition
+	// files are migrated into it first. Needs the entity client above.
+	dashboard.SetActive(loadDashboards(customerEntityClient))
 
 	caseHandler := handler.NewCaseHandler(customerEntityClient)
 	// Optional: with the engineering entity service configured, "Open Git issue"
@@ -398,13 +400,43 @@ func main() {
 	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
 	// answers with a fixed sample. This backend holds no model client.
 	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	// PLG reaches entity-service as csm-portal does (see plg.Mount below).
+	plgEntityDefaults := plgconfig.EntityDefaults{
+		BaseURL:      customerEntityCfg.BaseURL,
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
+	}
 	if aiClient != nil {
 		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+		// The PLG playbooks' answer fields go with every generate request,
+		// read with PLG's own entity-service configuration (see plg.Mount).
+		playbooks, err := plg.NewPlaybookLister(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults)
+		if err != nil {
+			slog.Error("failed to configure the PLG playbook list", "err", err)
+			os.Exit(1)
+		}
+		dashboardGenerator = handler.WithPlaybooks(dashboardGenerator, playbooks)
 	}
 	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
 	// A team named in a generated dashboard's creTeam / sreTeam filter (its
 	// registry key) becomes the team's group id, once, here.
 	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	// A product named in a generated dashboard's product filter ("API
+	// Manager") becomes the product's own name ("WSO2 API Manager"), once,
+	// here: the case search matches product names exactly.
+	dashboardGenerator = handler.WithDashboardProducts(dashboardGenerator, customerEntityClient)
+	// A project named in a generated dashboard's project filter (its key or
+	// name) becomes a projectId filter on the project's id, once, here: the
+	// case search filters projects by id.
+	dashboardGenerator = handler.WithDashboardProjects(dashboardGenerator, customerEntityClient)
+	// Likewise an account (a customer's name or account number) becomes an
+	// accountId filter on the account's id.
+	dashboardGenerator = handler.WithDashboardAccounts(dashboardGenerator, customerEntityClient)
+	// A region filter's values are checked against the regions of the
+	// cases' accounts, and written as an account writes them.
+	dashboardGenerator = handler.WithDashboardRegions(dashboardGenerator, customerEntityClient)
 	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
 		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
 	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
@@ -517,6 +549,8 @@ func main() {
 	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
 	// the webapp's `canWrite` on that menu section. A literal path, so it never
 	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	// A generated dashboard may hold PLG widgets; every PermWrite role also
+	// holds PermUsePlg (TestAccessGuard_DashboardWritersCanReadPlg).
 	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
 	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
 	// Same permission as generating one. "custom" is a literal segment, so it
@@ -747,6 +781,12 @@ func main() {
 	route("POST /team-schedule/assignments/search", handler.PermView, scheduleHandler.SearchScheduleAssignments)
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
 	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
+	route("POST /team-schedule/public-holidays/search", handler.PermView, scheduleHandler.SearchSchedulePublicHolidays)
+	route("POST /team-schedule/holiday-availability/search", handler.PermView, scheduleHandler.SearchHolidayAvailability)
+	// Confirming a team's holiday availability (CRE): entity-service allows
+	// the team's lead, its rota manager, a CRE rota admin or an admin.
+	route("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.ConfirmHolidayAvailability)
+	route("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.WithdrawHolidayAvailability)
 	route("GET /team-schedule/on-duty", handler.PermView, scheduleHandler.GetScheduleOnDuty)
 
 	// Lead edit. PermWrite keeps the control away from a caller who could not
@@ -896,7 +936,7 @@ func main() {
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
 	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
-	route("POST /cases/{id}/sla/recalculate-pause", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
+	route("POST /cases/{id}/sla/recalculate", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)
@@ -1054,13 +1094,7 @@ func main() {
 	// its own copy: it reaches the same service as the same OAuth2 application
 	// as every other upstream client above. PLG_* overrides exist but are not
 	// normally set.
-	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgconfig.EntityDefaults{
-		BaseURL:      customerEntityCfg.BaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
-	}, route); err != nil {
+	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults, route); err != nil {
 		slog.Error("failed to mount PLG", "err", err)
 		os.Exit(1)
 	}
@@ -1127,7 +1161,50 @@ func main() {
 	slog.Info("CSM Portal Backend stopped")
 }
 
-// loadDashboards builds the dashboard registry from configuration, and exits
+// loadDashboards builds the registry the dashboards API serves, and exits the
+// process on any failure to read or validate the definition files.
+//
+// The database is the source of truth: the registry serves the system
+// dashboards stored through the entity service. Definition files are only a
+// migration source. When DASHBOARDS_DIR (or the deprecated DASHBOARDS_CONFIG)
+// is set, every definition, fully expanded (shared sections, presets and
+// all), is upserted at startup, overwriting what the database holds under the
+// same key (see dashboard.SystemKey), so while files are mounted they are
+// authoritative. When neither is set nothing is migrated and the registry
+// serves whatever the database already holds; removing the variables never
+// stops the service starting.
+//
+// Failure behaviour:
+//
+//   - A bad definition file, a duplicate id or two ids that map to the same
+//     key are misconfigured deploys and fatal, exactly as before.
+//   - A failed upsert (entity service down, rejected) is NOT fatal: each
+//     dashboard is retried a few times, then the failure is logged per
+//     dashboard and startup continues, serving what the database has. There
+//     is no in-memory fallback to the files. The whole migration is bounded by
+//     dashboard.SystemMigrationTimeout.
+//   - A failed read of the database at request time is an upstream error
+//     response, never an empty list.
+//
+// A dashboard list read from the database is cached for a few seconds
+// (invalidated right after the startup upsert); see dashboard.NewSystemRegistry.
+func loadDashboards(store dashboard.SystemStore) *dashboard.Registry {
+	src := loadDashboardSource()
+	registry, err := dashboard.NewSystemRegistry(store, src)
+	if err != nil {
+		slog.Error("invalid dashboard definitions", "err", err)
+		os.Exit(1)
+	}
+	if src != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), dashboard.SystemMigrationTimeout)
+		defer cancel()
+		registry.Migrate(ctx)
+	}
+	return registry
+}
+
+// loadDashboardSource builds the file-backed registry the system dashboards are
+// migrated from, and exits
 // the process on any failure. Every failure mode here is a misconfigured
 // deploy, and the alternative — starting up with dashboards silently missing
 // — is exactly the class of quiet failure this codebase keeps getting bitten
@@ -1165,12 +1242,19 @@ func main() {
 //	                       DASHBOARD_PRESETS_FILE: DASHBOARDS_DIR path only,
 //	                       unset is legal and means no shared sections.
 //
-// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and yields no
-// dashboards: a deployment that has not configured any must still start and
-// serve every other endpoint.
-func loadDashboards() *dashboard.Registry {
+// Neither DASHBOARDS_DIR nor DASHBOARDS_CONFIG set is legal and returns nil:
+// a deployment that has not configured any must still start and serve every
+// other endpoint, with the dashboards the database already holds.
+//
+// With DASHBOARDS_HOT_RELOAD on, each dashboards request re-reads the
+// directory and upserts only the definitions that changed since this process
+// last wrote them, then serves from the database. Local development only.
+func loadDashboardSource() *dashboard.Registry {
 	dir := strings.TrimSpace(os.Getenv("DASHBOARDS_DIR"))
 	if dir == "" {
+		if strings.TrimSpace(os.Getenv("DASHBOARDS_CONFIG")) == "" {
+			return nil
+		}
 		dashboards, err := dashboard.ParseDashboardsConfig(os.Getenv("DASHBOARDS_CONFIG"))
 		if err != nil {
 			slog.Error("invalid DASHBOARDS_CONFIG", "err", err)
@@ -1203,7 +1287,7 @@ func loadDashboards() *dashboard.Registry {
 		os.Exit(1)
 	}
 	if hotReload {
-		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request. Intended for local development only",
+		slog.Warn("DASHBOARDS_HOT_RELOAD is on: dashboard definitions are re-read from disk on every request and changed ones upserted into the database. Intended for local development only",
 			"dir", dir)
 	}
 	slog.Info("loaded dashboard definitions", "dir", dir, "presetsFile", presetsFile, "count", len(registry.Dashboards()), "hotReload", hotReload)

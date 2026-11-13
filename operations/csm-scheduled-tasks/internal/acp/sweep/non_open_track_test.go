@@ -33,14 +33,14 @@ func TestProcessProject_NonOpenTrackDoesNothing(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	for _, state := range []string{"Pending Suspended", "Pending Closed", "Notified", "Closed", "Suspended"} {
 		t.Run("end date "+state, func(t *testing.T) {
-			end := now // day 0: notify and suspend
+			end := now.AddDate(0, 0, -1) // the day after: notify and suspend
 			proj := project{
 				ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 				EndDate: &end, ClosureState: strPtr("Open"),
 				EndDateClosureState: strPtr(state),
 			}
 			updater, ntf := &mockProjectUpdater{}, &mockNotifier{}
-			err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
+			_, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
 			if err != nil {
 				t.Fatalf("processProject() error = %v", err)
 			}
@@ -55,7 +55,7 @@ func TestProcessProject_NonOpenTrackDoesNothing(t *testing.T) {
 				ClosureState: strPtr("Open"), InvoiceDueDateClosureState: strPtr(state),
 			}
 			updater, ntf := &mockProjectUpdater{}, &mockNotifier{}
-			err := processProject(context.Background(), reader, updater, ntf, now, proj)
+			_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 			if err != nil {
 				t.Fatalf("processProject() error = %v", err)
 			}
@@ -101,7 +101,7 @@ func TestProcessProject_NonOpenEndDateTrackDoesNotSilenceInvoiceNotice(t *testin
 		EndDateClosureState: strPtr("Pending Suspended"), InvoiceDueDateClosureState: strPtr("Open"),
 	}
 	updater, ntf := &mockProjectUpdater{}, delivering()
-	if err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v", err)
 	}
 	if len(ntf.sent) == 0 {
@@ -120,14 +120,14 @@ func TestProcessProject_NonOpenEndDateTrackDoesNotSilenceInvoiceNotice(t *testin
 // An Open track behaves as before: notice, record, suspend.
 func TestProcessProject_OpenTrackUnchanged(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := now
+	end := now.AddDate(0, 0, -1) // the day after the end date
 	for _, state := range []*string{strPtr("Open"), nil} {
 		proj := project{
 			ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 			EndDate: &end, ClosureState: strPtr("Open"), EndDateClosureState: state,
 		}
 		updater, ntf := &mockProjectUpdater{}, delivering()
-		err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
+		_, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj)
 		if err != nil {
 			t.Fatalf("processProject() error = %v", err)
 		}

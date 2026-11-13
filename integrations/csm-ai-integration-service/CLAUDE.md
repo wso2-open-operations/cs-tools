@@ -27,10 +27,13 @@ the registry itself, so it is configured in one place.
 
 ### `POST /ai/dashboards/generate`
 
-Body `{prompt, draft?, teams}`: the prompt (trimmed, 1-2000 characters), the dashboard being edited in the
+Body `{prompt, draft?, teams, playbookAnswers?}`: the prompt (trimmed, 1-2000 characters), the dashboard being edited in the
 definition file format (the backend's `draftToDefinition`; absent or null on a first message; at most 64 KiB,
-the size entity-service allows a saved definition) and the teams a dashboard can filter by
-(`{key, name, family, field}`, only teams with a group). Unknown fields are a 400. The draft cap bounds what
+the size entity-service allows a saved definition), the teams a dashboard can filter by
+(`{key, name, family, field}`, only teams with a group) and the PLG playbook tasks a widget can filter or
+group by answer (`{code, name, valueType, options: [{code, label}]}`, `valueType` `SINGLE_SELECT` or
+`CHECKLIST`; at most 200, each with 1 to 100 options; absent when there are none). Unknown fields are a 400,
+so this service is deployed before a backend that sends a new one. The draft cap bounds what
 one call can send the model; the per-user rate limit is the CSM portal backend's.
 
 The service makes one call and returns **every JSON object in the reply, in order** (`candidates`), or the
@@ -44,7 +47,7 @@ the backend maps the code to its own status and user-facing text:
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `invalid_request` | the body, prompt, draft or teams |
+| 400 | `invalid_request` | the body, prompt, draft, teams or playbook answers |
 | 503 | `not_configured` | no `ANTHROPIC_API_KEY` |
 | 422 | `refused` | the model refused (stop reason `refusal`) |
 | 502 | `truncated` / `unusable` | the reply was cut off / holds nothing usable (no JSON object; for code, no usable code block) |
@@ -96,8 +99,8 @@ fails before the call (an invalid body, `not_configured`) writes no usage line.
 
 ## Prompt caching
 
-The system prompt (the catalogue and the Teams section) is the same for every user and call of one
-deployment, so `Generate` marks it with `cache_control` (`ephemeral`, the default 5-minute lifetime, renewed
+The system prompt (the catalogue, the Teams section and the PLG playbook answers section) is the same for every user and call of one
+deployment (the playbook answers change only when a PLG admin edits a playbook, and the backend sorts them), so `Generate` marks it with `cache_control` (`ephemeral`, the default 5-minute lifetime, renewed
 by each hit). A call within that time reads it at the model's cache-hit price (0.05 times the input
 price on Sonnet 5.5, the default, and Opus 5.5; 0.1 times on most other models); the first call after it
 expires writes it at 1.25 times. Generation happens in short sessions (a prompt, then follow-ups), so the
@@ -119,13 +122,33 @@ removed.
 `TestParseGenerated_TheCatalogueExampleIsValid` (`apps/csm-portal/backend/internal/dashboard`) reads this
 file and runs its section 10 example through the backend's own check, and
 `TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` does the same for every grouped time card
-example in section 5a (at least three), so the catalogue and the rules that judge the model's output
-cannot drift apart. After editing it, run the backend's
+example in section 5a (at least three), and `TestParseGenerated_TheCataloguePlgExamplesAreValid` for every
+PLG example in section 5e (filling in `id`, `displayName` and `gridWidth` when the example leaves them
+out), so the catalogue and the rules that judge the model's output cannot drift apart. After editing it, run the backend's
 `go test ./internal/dashboard`, then the three steps above. In the local stack, an edit to the built-in catalogue needs this service's
 image rebuilt (`docker compose up -d --build csm-ai-integration-service`), not the backend's.
 
+**The chat tells users what they can ask about.** The webapp's `GenerateChatPanel` (`ASK_ABOUT`) lists, in
+plain words, the data types and filters this catalogue supports. It is not generated from this file: a data
+type or filter added here (or taken out) is changed in that list in the same change.
+
+**The model writes names as the user wrote them.** Products, versions, projects (key or name),
+customers (name or account number) and regions (the customer's sales region) are written as the request gives them, never ids; the backend
+resolves them after the reply and tells the user when one names nothing or several, so the catalogue
+never asks the model to refuse a name as not exact (the backend's
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project,Region}ExamplesAreValid` run section 7's
+examples through its check, as the tests above do for theirs). An edit's draft holds the resolved `projectId` /
+`accountId` filters, which the model keeps as they are. The `{"error": ...}` text is shown to the user
+(section 1: at most two plain sentences, no field names or catalogue words), and a "not", "except" or
+"without" the catalogue has no filter for is declined rather than dropped. Never put a real customer's
+name, project key or account number in the catalogue: the repository is public; the examples use
+made-up or seed names.
+
 The Teams section is not in the file: the backend sends the team list with each request and
-`internal/teams` appends it to the catalogue (the same text the backend wrote before the move).
+`internal/teams` appends it to the catalogue (the same text the backend wrote before the move). Nor is the
+"PLG playbook answers" section: the backend reads the playbooks with each request and `internal/playbooks`
+appends their tasks and answer codes after the Teams section, so the catalogue's section 5e names no code
+of its own beyond an example; the backend checks every code the model writes against the same list.
 
 ## Conventions
 

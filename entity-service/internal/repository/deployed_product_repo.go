@@ -99,6 +99,11 @@ type DeployedProductRepository interface {
 	// before CreateDeploymentFromServiceNow.
 	CreateDeployedProductFromServiceNow(ctx context.Context, req domain.CreateDeployedProductRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployedProduct, error)
 
+	// CreateDeployedProduct inserts a deployed product on the plain PostgreSQL
+	// data source, numbered from the IBITM series (ServiceNow's own format)
+	// and checked against its deployment's project and its version's product.
+	CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest, createdBy string) (domain.CreatedDeployedProduct, error)
+
 	// UpdateDeployedProductFields applies a Postgres-side update for the same
 	// field group UpdateDeployedProductRequest itself enforces (detail
 	// fields XOR Active=false) -- called on the dual-write data source's
@@ -884,6 +889,144 @@ func (r *deployedProductRepo) CreateDeployedProductFromServiceNow(ctx context.Co
 	}
 	return created, nil
 }
+
+// advanceDeployedProductNumberSeqQuery moves ibitm_number_seq (migration
+// 0180's IBITM series) past the highest IBITM number already stored, and only
+// forwards. Deployed products synced from ServiceNow already hold IBITM
+// numbers, and the sequence starts at 1 until the cutover seed has run, so
+// without this the first native create would take a number a synced row
+// already has. Run as the system identity: under the caller's row-level
+// security the maximum would be taken over the rows they can see only.
+const advanceDeployedProductNumberSeqQuery = `
+	SELECT setval('ibitm_number_seq', m.max_n, true)
+	FROM (
+		SELECT max(substring(number FROM 6)::bigint) AS max_n
+		FROM deployed_product
+		WHERE number ~ '^IBITM[0-9]{1,15}$'
+	) m,
+	(SELECT CASE WHEN is_called THEN last_value ELSE last_value - 1 END AS issued FROM ibitm_number_seq) s
+	WHERE m.max_n IS NOT NULL AND m.max_n > s.issued`
+
+// deployedProductCreateRefsQuery reads, under the caller's row-level security,
+// the project of the deployment and whether the version belongs to the
+// product. A deployment the caller may not see reads as absent.
+const deployedProductCreateRefsQuery = `
+	SELECT
+		(SELECT d.project_id::text FROM deployment d WHERE d.id = $1::uuid),
+		EXISTS (SELECT 1 FROM product_version v WHERE v.id = $2::uuid AND v.product_id = $3::uuid)`
+
+const createDeployedProductQuery = `
+	INSERT INTO deployed_product (
+		id, created_on, updated_on, created_by, updated_by,
+		number, description, active,
+		core_count, tps_count,
+		project_id, deployment_id, product_id, version_id,
+		product_category
+	)
+	VALUES (
+		gen_random_uuid(), NOW(), NOW(), $1, $1,
+		next_series_number('IBITM'), $2, TRUE,
+		$3, $4,
+		$5::uuid, $6::uuid, $7::uuid, $8::uuid,
+		$9::text::deployed_product_category_enum
+	)
+	RETURNING id, created_on, created_by`
+
+// CreateDeployedProduct implements DeployedProductRepository for the plain
+// PostgreSQL data source. The deployment must belong to the request's project
+// and the version to its product (an internal caller skips row-level security,
+// so these are checked here, not left to the insert policy). A number another
+// writer took between the sequence advance and the insert (a ServiceNow sync
+// still running) fails on deployed_product's unique number; that one case is
+// retried once, after advancing the sequence again.
+func (r *deployedProductRepo) CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest, createdBy string) (domain.CreatedDeployedProduct, error) {
+	var category *string
+	if req.Category != nil {
+		c := strings.ToUpper(*req.Category)
+		category = &c
+	}
+
+	for attempt := 0; ; attempt++ {
+		if _, err := r.db.Exec(WithSystemIdentity(ctx), advanceDeployedProductNumberSeqQuery); err != nil {
+			return domain.CreatedDeployedProduct{}, fmt.Errorf("create deployed product: advance number sequence: %w", err)
+		}
+		created, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) (domain.CreatedDeployedProduct, error) {
+			var deploymentProjectID *string
+			var versionOfProduct bool
+			if err := tx.QueryRow(ctx, deployedProductCreateRefsQuery, req.DeploymentID, req.VersionID, req.ProductID).
+				Scan(&deploymentProjectID, &versionOfProduct); err != nil {
+				return domain.CreatedDeployedProduct{}, fmt.Errorf("create deployed product: read references: %w", err)
+			}
+			if deploymentProjectID == nil {
+				return domain.CreatedDeployedProduct{}, &apierror.ValidationError{Msg: "deploymentId does not refer to an existing record"}
+			}
+			if !strings.EqualFold(*deploymentProjectID, req.ProjectID) {
+				return domain.CreatedDeployedProduct{}, &apierror.ValidationError{Msg: "deploymentId does not belong to projectId"}
+			}
+			if !versionOfProduct {
+				return domain.CreatedDeployedProduct{}, &apierror.ValidationError{Msg: "versionId is not a version of productId"}
+			}
+			if beforeDeployedProductInsert != nil {
+				beforeDeployedProductInsert(ctx)
+			}
+
+			var c domain.CreatedDeployedProduct
+			err := tx.QueryRow(ctx, createDeployedProductQuery,
+				createdBy, req.Description,
+				req.Cores, req.TPS,
+				req.ProjectID, req.DeploymentID, req.ProductID, req.VersionID,
+				category,
+			).Scan(&c.ID, &c.CreatedOn, &c.CreatedBy)
+			return c, err
+		})
+		if err == nil {
+			return created, nil
+		}
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505": // unique_violation: the number was taken in the meantime
+				if attempt == 0 {
+					continue
+				}
+				return domain.CreatedDeployedProduct{}, &apierror.ConflictError{Msg: "the deployed product could not be numbered; please try again"}
+			case "23503": // foreign_key_violation: one of the referenced ids does not exist
+				field := deployedProductCreateFKField[pgErr.ConstraintName]
+				if field == "" {
+					field = "one or more referenced fields"
+				}
+				return domain.CreatedDeployedProduct{}, &apierror.ValidationError{Msg: field + " does not refer to an existing record"}
+			case "42501": // insufficient_privilege
+				// The insert policy refusing the caller is the caller's answer. The same
+				// code also means the role lacks USAGE on ibitm_number_seq
+				// (next_series_number runs in this transaction): a deployment problem,
+				// left to fall through as a 500 rather than read as "project not found".
+				if isRowSecurityRefusal(pgErr) {
+					return domain.CreatedDeployedProduct{}, &apierror.NotFoundError{Msg: "project not found"}
+				}
+			}
+		}
+		var ve *apierror.ValidationError
+		if errors.As(err, &ve) {
+			return domain.CreatedDeployedProduct{}, err
+		}
+		return domain.CreatedDeployedProduct{}, fmt.Errorf("create deployed product: %w", err)
+	}
+}
+
+// isRowSecurityRefusal reports whether an insufficient_privilege (42501) error
+// is a row-level security policy refusing the row, as opposed to a missing
+// privilege on an object (PostgreSQL says "permission denied for ..." then).
+// Both share the SQLSTATE, so only the message tells them apart.
+func isRowSecurityRefusal(pgErr *pgconn.PgError) bool {
+	return pgErr.Code == "42501" && strings.Contains(pgErr.Message, "row-level security policy")
+}
+
+// beforeDeployedProductInsert, when set, runs inside CreateDeployedProduct's
+// transaction after the sequence advance and the reference checks, right
+// before the insert. Always nil in the service; only tests set it (through
+// export_test.go), to commit a row that takes the next number in between and
+// so exercise the retry.
+var beforeDeployedProductInsert func(ctx context.Context)
 
 // parseUpdateDeployedProductDescription reports whether req.Description (a
 // json.RawMessage, see that field's own doc comment) was provided at all,

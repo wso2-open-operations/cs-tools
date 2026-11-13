@@ -86,6 +86,18 @@ describe("mergeWidgetFilters", () => {
     expect(merged.filters).toEqual([{ field: "state", op: "in", values: ["closed"] }]);
   });
 
+  it("keeps the widget's stateEntered under a slice that sets only the window", () => {
+    const merged = mergeWidgetFilters(
+      { filters: [{ field: "stateEntered", op: "in", values: ["waiting_on_wso2"] }] },
+      { filters: [{ field: "stateEnteredOn", op: "gte", values: ["__today__"] }] },
+    );
+
+    expect(merged.filters).toEqual([
+      { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+      { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+    ]);
+  });
+
   it("keeps a non-case flat criteria record's base keys", () => {
     const merged = mergeWidgetFilters({ states: ["pending"] }, { approverIds: ["u1"] });
 
@@ -176,6 +188,18 @@ describe("mergeWidgetFilters", () => {
       { filters: [{ field: "severity", op: "in", values: ["critical"] }] },
     ]);
     expect(merged.filters).toEqual([{ field: "state", op: "in", values: ["open"] }]);
+  });
+
+  it("keeps the widget's product under a version bar's own filter", () => {
+    const merged = mergeWidgetFilters(
+      { filters: [{ field: "product", op: "in", values: ["WSO2 API Manager"] }] },
+      { filters: [{ field: "productVersion", op: "in", values: ["4.3.0"] }] },
+    );
+
+    expect(merged.filters).toEqual([
+      { field: "product", op: "in", values: ["WSO2 API Manager"] },
+      { field: "productVersion", op: "in", values: ["4.3.0"] },
+    ]);
   });
 
   // An unrecognisable `anyOf` (not an array of {filters: [...]}) must not be

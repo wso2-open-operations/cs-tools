@@ -222,6 +222,30 @@ func TestSearchProjects(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards onboarding date filters, closureStates and sort keys verbatim", func(t *testing.T) {
+		const reqPayload = `{"goLivePlanDateFrom":"2026-01-01","goLivePlanDateTo":"2026-03-31","goLiveDateFrom":"2026-01-01","onboardingExpiryDateTo":"2026-12-31","onboardingStartDateFrom":"2026-01-01","productionReadinessCompletionDateFrom":"2026-02-01","closureStates":["Open","Suspended"],"sortBy":"productionReadinessCompletionDate","sortOrder":"desc"}`
+		const respPayload = `{"projects":[{"id":"proj-1","goLivePlanDate":"2026-02-01T00:00:00Z","onboardingExpiryDate":"2026-12-31T00:00:00Z","onboardingStartDate":"2026-01-05T00:00:00Z","productionReadinessCompletionDate":"2026-02-20T00:00:00Z"}],"total":1}`
+		var capturedBody []byte
+		client := &mockEntityProjectClient{
+			searchProjectsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(respPayload), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/search", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.SearchProjects(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		if got := strings.TrimSpace(w.Body.String()); got != respPayload {
+			t.Errorf("response = %q, want %q", got, respPayload)
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrorsGeneric("Failed to search projects.") {
 			t.Run(tc.name, func(t *testing.T) {
@@ -681,6 +705,10 @@ func TestUpdateProject(t *testing.T) {
 			{"onboarding_lead may set onboardingGoLivePlanDate", []string{"test-onboarding-lead"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusOK},
 			{"onboarding_lead may set onboardingGoLiveDate", []string{"test-onboarding-lead"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusOK},
 			{"onboarding_lead may set onboardingExpiryDate", []string{"test-onboarding-lead"}, `{"onboardingExpiryDate":"2026-12-31"}`, http.StatusOK},
+			{"onboarding_lead may set onboardingProductionReadinessCompletionDate", []string{"test-onboarding-lead"}, `{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`, http.StatusOK},
+			{"admin may set onboardingProductionReadinessCompletionDate", []string{"test-admin"}, `{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`, http.StatusOK},
+			{"cs_engineer alone is denied onboardingProductionReadinessCompletionDate", []string{"test-cs-engineer"}, `{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`, http.StatusForbidden},
+			{"cs_engineer alone is denied a differently-cased production-readiness key", []string{"test-cs-engineer"}, `{"ONBOARDINGPRODUCTIONREADINESSCOMPLETIONDATE":"2026-02-20"}`, http.StatusForbidden},
 			{"admin may set onboardingStartDate", []string{"test-admin"}, `{"onboardingStartDate":"2026-01-05"}`, http.StatusOK},
 			{"admin may set onboardingGoLivePlanDate", []string{"test-admin"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusOK},
 			{"admin may set onboardingGoLiveDate", []string{"test-admin"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusOK},
@@ -778,6 +806,10 @@ func TestProjectUpdateKeyChecksFoldLikeDecoder(t *testing.T) {
 	onb, other = projectUpdateTargets([]byte(`{"ONBOARDINGSTARTDATE":"2026-01-05"}`))
 	if !onb || other {
 		t.Errorf("upper-case onboardingStartDate: onboarding=%v other=%v, want true/false", onb, other)
+	}
+	onb, other = projectUpdateTargets([]byte(`{"onboardingProductionReadinessCompletionDate":"2026-02-20"}`))
+	if !onb || other {
+		t.Errorf("onboardingProductionReadinessCompletionDate: onboarding=%v other=%v, want true/false", onb, other)
 	}
 	var req struct {
 		ClosureState string `json:"closureState"`

@@ -16,6 +16,8 @@
 
 package events
 
+import "regexp"
+
 // The two outage emails, published on the outage-events topic by
 // entity-service's outage notice drainer. Kept in sync by hand with
 // entity-service's internal/events/outage.go.
@@ -56,8 +58,9 @@ type OutageStatusPageDuePayload struct {
 	ClaimToken string `json:"claimToken"`
 	OutageID   string `json:"outageId"`
 	Number     string `json:"number,omitempty"`
-	// Cloud is the dashboard's slug: asgardeo, choreo, bijira, devant,
-	// moesif, choreo-eu or agent-manager.
+	// Cloud is the dashboard's slug, e.g. "cloud-a" or "cloud-b-eu": the key
+	// of CLOUD_STATUS_WEBHOOK_URLS. Any well-formed slug passes validation;
+	// one with no configured URL is reported as a failed attempt.
 	Cloud string `json:"cloud"`
 	// Event is outage_begin or outage_end.
 	Event string `json:"event"`
@@ -68,10 +71,18 @@ type OutageStatusPageDuePayload struct {
 // validStatusPageEvent are the only wire events the dashboards parse.
 var validStatusPageEvent = map[string]bool{"outage_begin": true, "outage_end": true}
 
-// validStatusPageCloud are the dashboards' cloud slugs.
-var validStatusPageCloud = map[string]bool{
-	"asgardeo": true, "choreo": true, "bijira": true, "devant": true,
-	"moesif": true, "choreo-eu": true, "agent-manager": true,
+// statusPageCloudPattern is the shape of a cloud slug: lowercase letters and
+// digits separated by single hyphens. The same format entity-service's cloud
+// registry enforces. Which slugs exist is configuration
+// (CLOUD_STATUS_WEBHOOK_URLS), not code.
+var statusPageCloudPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// maxStatusPageCloudLen is the longest accepted cloud slug.
+const maxStatusPageCloudLen = 40
+
+// validStatusPageCloud reports whether cloud is a well-formed slug.
+func validStatusPageCloud(cloud string) bool {
+	return len(cloud) <= maxStatusPageCloudLen && statusPageCloudPattern.MatchString(cloud)
 }
 
 // statusPageTimestampLayout is the instant format the dashboards parse:

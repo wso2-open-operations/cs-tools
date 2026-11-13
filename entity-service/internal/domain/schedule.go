@@ -119,6 +119,14 @@ type ScheduleAbsenceKind struct {
 	// on the roster -- on the team it moves someone to, they work its normal
 	// hours. The span is still what the day holds.
 	ShowsAsShiftCode *string `json:"showsAsShiftCode,omitempty"`
+	// ExcludesFromTimesheet is true for a tag whose days take a person off
+	// the worklog timesheet (an SRE rotation, a customer allocation); a tag
+	// without it leaves them on it (work from home). Leave kinds never set
+	// it: leave shows on the timesheet as leave.
+	ExcludesFromTimesheet bool `json:"excludesFromTimesheet"`
+	// Description says what the tag is for, shown when hovering it; absent
+	// when it has none.
+	Description *string `json:"description,omitempty"`
 }
 
 // ScheduleCatalogue is everything the UI needs before it can draw a rota:
@@ -237,6 +245,12 @@ type ApplyScheduleRangeRequest struct {
 	// ZoneCode narrows a clear (ShiftCode empty) to that zone's turn, leaving
 	// the rest of the person's day. Only meaningful when clearing.
 	ZoneCode *string `json:"zoneCode,omitempty"`
+	// MayReplaceOn says whether the caller may take somebody's regular hours
+	// off another team's rota, so that the regular hours being set replace
+	// them for the day (IST set on Vega replaces PDT held on Americas). Set
+	// by the service from the caller's rights; nil -- a rota import, or any
+	// other caller -- refuses a second set of regular hours instead.
+	MayReplaceOn func(teamKey string) bool `json:"-"`
 }
 
 // ApplyScheduleRangeResponse says what actually happened, because it is
@@ -285,11 +299,17 @@ type CreateScheduleAbsenceKindRequest struct {
 	Label       string `json:"label"`
 	Bucket      string `json:"bucket"`
 	ColourToken string `json:"colourToken"`
-	// Family is the rota family the kind is for (CRE, SRE or SME). Optional:
-	// a rota admin's kind is for their own family whatever is sent, and this
-	// only picks one for an admin of several families. A team lead who is no
-	// rota admin adds a kind shared by every family, as before.
+	// Family is the rota family the kind is for (CRE, SRE or SME); only that
+	// family's rosters offer it. Optional: a rota admin's or team lead's kind
+	// is their own family's whatever is sent, and this only picks one when
+	// they run or lead more than one. A portal admin who runs no rota may name
+	// one, else the kind is shared.
 	Family string `json:"family,omitempty"`
+	// ExcludesFromTimesheet makes the tag take people off the worklog
+	// timesheet on its days. Allocation tags only: a leave tag shows as leave.
+	ExcludesFromTimesheet bool `json:"excludesFromTimesheet,omitempty"`
+	// Description is optional, at most 300 characters, shown on hover.
+	Description string `json:"description,omitempty"`
 }
 
 // ApplyScheduleAbsenceResponse says what the span did to what was already
@@ -405,8 +425,9 @@ type SearchScheduleAssignmentsRequest struct {
 	UserEmail        string `json:"userEmail,omitempty"`
 	IncludeOvernight bool   `json:"includeOvernight,omitempty"`
 	// ExcludeAbsent leaves out an assignment whose person is away on its rota
-	// day: the same rule /team-schedule/on-duty applies, asked of a day rather
-	// than an instant. The rota views leave it off because they draw leave over
+	// day: /team-schedule/on-duty's rule asked of a day rather than an instant,
+	// except that an allocation that moves nobody does not count (it does not
+	// hide a turn). The rota views leave it off because they draw leave over
 	// the rota; a reminder email sets it, or it tells somebody on leave that
 	// they are working.
 	ExcludeAbsent bool `json:"excludeAbsent,omitempty"`

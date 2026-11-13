@@ -226,8 +226,8 @@ func TestMapSearchCases_MatchesFrontendCaseListItemShape(t *testing.T) {
 	if c.Project.ID != "proj-1" || c.Project.Label != "Customer Project" {
 		t.Fatalf("Project = %+v, want {id: proj-1, label: Customer Project}", c.Project)
 	}
-	if c.Status == nil || c.Status.Label != "Work In Progress" || c.Status.ID != "10" {
-		t.Fatalf("Status = %+v, want {id: 10, label: Work In Progress}", c.Status)
+	if c.Status == nil || c.Status.Label != "In Progress" || c.Status.ID != "10" {
+		t.Fatalf("Status = %+v, want {id: 10, label: In Progress}", c.Status)
 	}
 	if c.Severity == nil || c.Severity.Label != "High (P2)" || c.Severity.ID != "11" {
 		t.Fatalf("Severity = %+v, want {id: 11, label: High (P2)}", c.Severity)

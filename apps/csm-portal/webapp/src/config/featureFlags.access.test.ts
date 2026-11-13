@@ -134,7 +134,11 @@ describe("feature visibility by portal access", () => {
   it("hides every Security Center tab and route along with the section, for every role but cs_engineer/admin", () => {
     const securityCenter = navNodeById("security-center");
     expect(securityCenter).toBeDefined();
-    for (const role of ["viewer", "escalator", "attachment_downloader", "usage_metrics_viewer", "timecard_approver", "dashboard_designer"]) {
+    // Not "viewer": that role holds canViewSecurityReportCases, the broader
+    // flag "security-center.reports" now checks on its own (see the next
+    // test) -- it is the one role in this list for which the section itself
+    // staying hidden does not also hide that one node's own narrower routes.
+    for (const role of ["escalator", "attachment_downloader", "usage_metrics_viewer", "timecard_approver", "dashboard_designer"]) {
       const access = getPortalAccess([role]);
       expect(visibleNavChildren(securityCenter!, access)).toEqual([]);
       expect(featureState("security-center.reports", access)).toBe("hidden");
@@ -148,6 +152,27 @@ describe("feature visibility by portal access", () => {
       expect(featureStateForPath("/security-center", access)).toBe("enabled");
       expect(featureStateForPath("/security-center/vulnerabilities", access)).toBe("enabled");
     }
+  });
+
+  // Reported live: a viewer clicking a security report case (opened from a
+  // project's Work Items list, which already shows it to them -- see
+  // visibleCaseTypes/canViewSecurityReportCases below) was bounced to the
+  // Dashboard. "/security-center/security-reports/:caseId" is that case's
+  // detail route (caseTypeDetailBasePath), owned by the same
+  // "security-center.reports" node as the Security Reports tab, but gated by
+  // its own canViewSecurityReportCases rather than the section's
+  // canUseSecurityCenter -- the same split the backend's
+  // PermViewSecurityReportCases/PermViewSecurityCenter already draws. The
+  // Security Center section itself, and Vulnerabilities, stay hidden: a
+  // viewer still can't reach the section's own landing page or tab strip.
+  it("opens a security report case's own detail route for a viewer, without opening the rest of Security Center", () => {
+    expect(featureStateForPath("/security-center/security-reports/CASE0001", viewer)).toBe(
+      "enabled",
+    );
+    expect(featureState("security-center.reports", viewer)).toBe("enabled");
+    expect(featureState("security-center.vulnerabilities", viewer)).toBe("hidden");
+    expect(featureStateForPath("/security-center", viewer)).toBe("hidden");
+    expect(featureStateForPath("/security-center/vulnerabilities", viewer)).toBe("hidden");
   });
 
   // canViewSettings is a dedicated, narrower allow-list than canViewStaffSections

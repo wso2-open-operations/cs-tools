@@ -79,19 +79,24 @@ type RotaReminderSettings struct {
 	// its reminders carry a calendar invitation. A rotation not named does.
 	// InvitesEnabled off turns every rotation's off.
 	InviteRotations map[string]bool `json:"inviteRotations"`
-	CopyTo          []string        `json:"copyTo"`
+	// CopyTo is copied (Cc) on the reminder emails: the weekday reminders and
+	// the weekend summary, never with the calendar invitation attached.
+	CopyTo []string `json:"copyTo"`
 	// WeekendCopyTo is copied (Cc) on the weekend summary email only, beside
-	// CopyTo, which is copied on every reminder.
-	WeekendCopyTo []string  `json:"weekendCopyTo"`
-	UpdatedBy     string    `json:"updatedBy"`
-	UpdatedOn     time.Time `json:"updatedOn"`
+	// CopyTo.
+	WeekendCopyTo []string `json:"weekendCopyTo"`
+	// InviteCopyTo is copied (Cc) on the emails that carry a calendar
+	// invitation or its cancellation, and on no other. Never a guest.
+	InviteCopyTo []string  `json:"inviteCopyTo"`
+	UpdatedBy    string    `json:"updatedBy"`
+	UpdatedOn    time.Time `json:"updatedOn"`
 }
 
 // SaveRotaReminderSettingsRequest replaces a family's settings. Every field
 // is required, the card always sending the whole form, except
-// InviteRotations and WeekendCopyTo: a card from before they existed sends
-// neither, and its save keeps what is stored rather than turning every
-// rotation's invitations back on or dropping the weekend copies.
+// InviteRotations, WeekendCopyTo and InviteCopyTo: a card from before they
+// existed does not send them, and its save keeps what is stored rather than
+// turning every rotation's invitations back on or dropping the copies.
 type SaveRotaReminderSettingsRequest struct {
 	WeekdayEnabled  *bool                     `json:"weekdayEnabled"`
 	WeekendEnabled  *bool                     `json:"weekendEnabled"`
@@ -101,6 +106,7 @@ type SaveRotaReminderSettingsRequest struct {
 	InviteRotations map[string]bool           `json:"inviteRotations"`
 	CopyTo          []string                  `json:"copyTo"`
 	WeekendCopyTo   []string                  `json:"weekendCopyTo"`
+	InviteCopyTo    []string                  `json:"inviteCopyTo"`
 }
 
 // RotaReminderRequest is a rota reminder asked for by hand ("Send now"),

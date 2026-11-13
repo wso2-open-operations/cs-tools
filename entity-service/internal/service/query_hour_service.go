@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -93,6 +94,39 @@ type queryHourService struct {
 	// internal report.
 	internalDomain string
 	now            func() time.Time
+
+	// projectHoursMu guards projectHoursCursor, the last project the hourly
+	// recompute finished. The next run starts after it, so a run cut short by
+	// its time budget does not leave the same projects at the end of the list
+	// unprocessed every hour. Process-local: a restart starts from the top.
+	projectHoursMu     sync.Mutex
+	projectHoursCursor string
+	// projectHoursDone holds the projects whose hours this process has
+	// recomputed at least once (hourly loop or time card hook). Their stored
+	// figures are at most one rotation old, so skipping them in a run does
+	// not defer their opportunities' state comparison.
+	projectHoursDone map[string]bool
+}
+
+// projectHoursShare is the part of the request's remaining time the hourly
+// recompute may spend on project hours. The rest is reserved for the state
+// comparison after it, which is what produces the usage notifications.
+const projectHoursShare = 2.0 / 3
+
+// rotateAfter returns ids (sorted ascending) reordered to start at the first
+// id after cursor, wrapping round. A blank or last cursor keeps the order.
+func rotateAfter(ids []string, cursor string) []string {
+	if cursor == "" {
+		return ids
+	}
+	i := sort.SearchStrings(ids, cursor)
+	if i < len(ids) && ids[i] == cursor {
+		i++
+	}
+	if i == 0 || i >= len(ids) {
+		return ids
+	}
+	return append(append(make([]string, 0, len(ids)), ids[i:]...), ids[:i]...)
 }
 
 // NewQueryHourService constructs a QueryHourService.
@@ -216,7 +250,39 @@ func (s *queryHourService) computeAll(ctx context.Context) ([]computed, error) {
 
 // RecomputeProjectHours implements QueryHourService.
 func (s *queryHourService) RecomputeProjectHours(ctx context.Context, projectID string) error {
-	return s.repo.RecomputeProjectHours(ctx, projectID)
+	if err := s.repo.RecomputeProjectHours(ctx, projectID); err != nil {
+		return err
+	}
+	s.projectHoursMu.Lock()
+	if s.projectHoursDone == nil {
+		s.projectHoursDone = map[string]bool{}
+	}
+	s.projectHoursDone[projectID] = true
+	s.projectHoursMu.Unlock()
+	return nil
+}
+
+// recomputeProjectHoursBy recomputes one project, cut off at stopAt (when
+// set) so a single slow project cannot spend the time reserved for the state
+// comparison.
+func (s *queryHourService) recomputeProjectHoursBy(ctx context.Context, projectID string, stopAt time.Time) error {
+	if stopAt.IsZero() {
+		return s.RecomputeProjectHours(ctx, projectID)
+	}
+	ctx, cancel := context.WithDeadline(ctx, stopAt)
+	defer cancel()
+	return s.RecomputeProjectHours(ctx, projectID)
+}
+
+// consumesFromSkipped reports the first project consuming from opp that is in
+// skipped.
+func consumesFromSkipped(opp domain.QueryHourOpportunity, skipped map[string]bool) (string, bool) {
+	for _, p := range opp.Projects {
+		if skipped[p.ProjectID] {
+			return p.ProjectID, true
+		}
+	}
+	return "", false
 }
 
 // SiblingProjectIDs implements QueryHourService.
@@ -234,35 +300,74 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 	if err != nil {
 		return nil, err
 	}
+	s.projectHoursMu.Lock()
+	projectIDs = rotateAfter(projectIDs, s.projectHoursCursor)
+	s.projectHoursMu.Unlock()
 	var (
 		started     = time.Now()
 		failures    int
+		skipped     int
 		slowestID   string
 		slowestTook time.Duration
+		stopAt      time.Time
 	)
+	if deadline, ok := ctx.Deadline(); ok {
+		stopAt = started.Add(time.Duration(float64(deadline.Sub(started)) * projectHoursShare))
+	}
+	// skippedIDs are the projects this run did not reach, because its budget
+	// ran out, and that this process has never recomputed. Their stored
+	// onboarding figures may be arbitrarily stale, so the opportunities they
+	// consume from keep their state until a later run reaches them (see the
+	// state comparison below). A skipped project recomputed before is not
+	// included: otherwise two projects of one opportunity that alternate
+	// between runs would defer it on every run.
+	skippedIDs := map[string]bool{}
+	budgetSpent := func() bool {
+		return ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt))
+	}
+	skipRest := func(i int) {
+		// Leave the rest for the next run, which starts at the first
+		// project not reached here, and keep the remaining time for the
+		// state comparison.
+		slog.WarnContext(ctx, "query hours: recompute project hours stopped, time budget spent",
+			"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
+		skipped = len(projectIDs) - i
+		s.projectHoursMu.Lock()
+		for _, id := range projectIDs[i:] {
+			if !s.projectHoursDone[id] {
+				skippedIDs[id] = true
+			}
+		}
+		s.projectHoursMu.Unlock()
+	}
 	for i, id := range projectIDs {
-		if ctx.Err() != nil {
-			// The request budget is spent: the rest would each fail at once.
-			// Leave them for the next run.
-			slog.WarnContext(ctx, "query hours: recompute project hours stopped, request context done",
-				"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
-			failures += len(projectIDs) - i
+		if budgetSpent() {
+			skipRest(i)
 			break
 		}
 		t0 := time.Now()
-		err := s.RecomputeProjectHours(ctx, id)
+		err := s.recomputeProjectHoursBy(ctx, id, stopAt)
 		took := time.Since(t0)
 		if took > slowestTook {
 			slowestID, slowestTook = id, took
 		}
 		slog.DebugContext(ctx, "query hours: project hours recomputed", "projectId", id, "durationMs", took.Milliseconds(), "ok", err == nil)
+		if err != nil && budgetSpent() {
+			// Cut off by the budget, not a failure of its own: it is
+			// skipped, and the next run starts with it.
+			skipRest(i)
+			break
+		}
+		s.projectHoursMu.Lock()
+		s.projectHoursCursor = id
+		s.projectHoursMu.Unlock()
 		if err != nil {
 			failures++
 			slog.ErrorContext(ctx, "query hours: recompute project hours failed", "projectId", id, "error", err)
 		}
 	}
 	slog.InfoContext(ctx, "query hours: project hours recomputed",
-		"projects", len(projectIDs), "failures", failures,
+		"projects", len(projectIDs), "failures", failures, "skipped", skipped,
 		"totalMs", time.Since(started).Milliseconds(),
 		"slowestProjectId", slowestID, "slowestMs", slowestTook.Milliseconds())
 
@@ -277,6 +382,17 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 
 	var transitions []domain.QueryHourTransition
 	for _, c := range all {
+		if p, ok := consumesFromSkipped(c.opp, skippedIDs); ok {
+			// The comparison would use a skipped project's stored
+			// onboarding figure, which may be stale: neither write a state
+			// nor notify from it. The stored state stands until a run that
+			// reaches the project compares again. A project that FAILED is
+			// not deferred this way, so one that keeps failing cannot
+			// silence its opportunity's notices for good.
+			slog.WarnContext(ctx, "query hours: state comparison deferred, a consuming project was not recomputed",
+				"opportunityId", c.opp.OpportunityID, "projectId", p)
+			continue
+		}
 		before := previous[c.opp.OpportunityID]
 		after := c.opp.State
 
