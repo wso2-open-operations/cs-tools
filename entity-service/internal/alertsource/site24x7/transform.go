@@ -77,6 +77,9 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {
 		return Alert{}, fmt.Errorf("%w: %v", ErrMissingBody, err)
 	}
+	if payload == nil {
+		return Alert{}, fmt.Errorf("%w: body is not a JSON object", ErrMissingBody)
+	}
 
 	status := fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "STATUS"), cfg.Defaults["Severity"])
 	if status == "" {

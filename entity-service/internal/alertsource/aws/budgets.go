@@ -57,11 +57,12 @@ func fromBudget(subject, message string, base Alert, tagger BudgetTagFetcher) Al
 	}
 
 	base.MetricName = fieldvalue.FirstNonEmpty(subject, "AWS Budgets alert")
+	// The account comes first, so same-named budgets in different accounts keep distinct identifiers.
+	base.SourceAccount = fieldvalue.FirstNonEmpty(account, base.SourceAccount)
 	if name != "" {
 		base.MetricName = budgetSubjectPrefix + " " + name
-		base.UniqueIdentifier = strings.Trim(account+"/"+name, "/")
+		base.UniqueIdentifier = strings.Trim(base.SourceAccount+"/"+name, "/")
 	}
-	base.SourceAccount = fieldvalue.FirstNonEmpty(account, base.SourceAccount)
 	base.Description = budgetSummary(message)
 	base.Severity = "critical"
 	base.Category = "service_interruption"

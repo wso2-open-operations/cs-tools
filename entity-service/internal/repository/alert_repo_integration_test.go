@@ -74,8 +74,13 @@ func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testin
 	if err != nil {
 		t.Fatalf("ReserveAlertIDs: %v", err)
 	}
-	if len(ids) != 4 || len(ids[0]) != len("ALT000000001") || ids[0] >= ids[3] {
-		t.Fatalf("ids = %v, want four ascending ALT ids", ids)
+	if len(ids) != 4 || len(ids[0]) != len("ALT000000001") {
+		t.Fatalf("ids = %v, want four ALT ids", ids)
+	}
+	for i := 1; i < len(ids); i++ {
+		if ids[i-1] >= ids[i] {
+			t.Fatalf("ids = %v, want each id strictly after the one before", ids)
+		}
 	}
 
 	first, err := repo.InsertAlerts(ctx, []domain.NewAlert{integrationAlert(ids[0], "it-alert-1", 0), integrationAlert(ids[1], "it-alert-1", 1)})
@@ -99,6 +104,14 @@ func TestAlertRepositoryIntegration_RedeliveredMessageStoresNothingNew(t *testin
 
 func TestAlertRepositoryIntegration_NotVisibleWithoutInternalIdentity(t *testing.T) {
 	pool := newAlertIntegrationPool(t)
+	// A superuser or BYPASSRLS role sees every row whatever the policy says, so this check needs an ordinary role.
+	var bypassesRLS bool
+	if err := pool.QueryRow(context.Background(), `SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user`).Scan(&bypassesRLS); err != nil {
+		t.Fatalf("role check: %v", err)
+	}
+	if bypassesRLS {
+		t.Skip("ENTITY_TEST_DATABASE_URL connects as a role that bypasses row-level security; use an ordinary role to run this test")
+	}
 	repo := NewAlertRepository(NewScoped(pool))
 	ctx := WithSystemIdentity(context.Background())
 	ids, err := repo.ReserveAlertIDs(ctx, 1)

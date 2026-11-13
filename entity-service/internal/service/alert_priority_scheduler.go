@@ -44,6 +44,11 @@ func (s *priorityScheduler[T]) next(ctx context.Context) (T, domain.AlertTier, b
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Once shutdown starts, buffered items stay in their lanes so they are handed back rather than processed.
+	if ctx.Err() != nil {
+		var zero T
+		return zero, "", false
+	}
 	if s.streak >= s.weight {
 		select {
 		case item := <-s.standard:

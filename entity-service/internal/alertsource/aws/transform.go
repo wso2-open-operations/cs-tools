@@ -106,7 +106,7 @@ func Transform(raw []byte, cfg Config, tagger BudgetTagFetcher) (Alert, error) {
 	alarmDesc := map[string]any{}
 	if adRaw := strings.TrimSpace(fieldvalue.Str(messageObj, "AlarmDescription")); adRaw != "" {
 		var parsed map[string]any
-		if err := jsonnum.Unmarshal([]byte(adRaw), &parsed); err == nil {
+		if err := jsonnum.Unmarshal([]byte(adRaw), &parsed); err == nil && parsed != nil {
 			alarmDesc = parsed
 		}
 	}

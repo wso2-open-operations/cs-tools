@@ -115,3 +115,13 @@ func TestTransform_NoTypeStillTransforms(t *testing.T) {
 		t.Errorf("alert = %+v, err = %v", a, err)
 	}
 }
+
+func TestTransform_NullAlarmDescriptionOnRecovery(t *testing.T) {
+	a, err := Transform(snsEnvelope(sampleAlarm(map[string]any{"AlarmDescription": "null", "NewStateValue": "OK"})), Config{}, nil)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if a.Severity != "ok" {
+		t.Errorf("severity = %q, want ok for a recovered alarm", a.Severity)
+	}
+}

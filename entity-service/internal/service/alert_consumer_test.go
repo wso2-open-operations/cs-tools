@@ -41,6 +41,8 @@ type fakeAlertReceiver struct {
 	completed    []string
 	abandoned    []string
 	deadLettered map[string]string
+	renewals     int
+	renewErr     error
 }
 
 func newFakeAlertReceiver(messages ...*azservicebus.ReceivedMessage) *fakeAlertReceiver {
@@ -89,6 +91,24 @@ func (r *fakeAlertReceiver) DeadLetterMessage(_ context.Context, m *azservicebus
 	defer r.mu.Unlock()
 	r.deadLettered[m.MessageID] = *o.Reason
 	return nil
+}
+
+func (r *fakeAlertReceiver) RenewMessageLock(_ context.Context, m *azservicebus.ReceivedMessage, _ *azservicebus.RenewMessageLockOptions) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.renewErr != nil {
+		return r.renewErr
+	}
+	r.renewals++
+	lockedUntil := time.Now().Add(time.Minute)
+	m.LockedUntil = &lockedUntil
+	return nil
+}
+
+func (r *fakeAlertReceiver) renewCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.renewals
 }
 
 func (r *fakeAlertReceiver) settledCount() int {
@@ -185,7 +205,7 @@ func alertMessage(id, source, body string) *azservicebus.ReceivedMessage {
 
 const canonicalAlert = `{"service":"svc-a","metric_name":"cpu","severity":"critical","category":"infra","environment":"prod","source":"Test","description":"high cpu"}`
 
-func newTestConsumer(t *testing.T, repo repository.AlertRepository, high, standard AlertReceiver, workers, weight int) *AlertConsumer {
+func newTestConsumer(t *testing.T, repo AlertStore, high, standard AlertReceiver, workers, weight int) *AlertConsumer {
 	t.Helper()
 	c := NewAlertConsumer(repo, mustRegistry(t), high, "priority-queue", standard, "standard-queue", AlertConsumerConfig{Concurrency: workers, PriorityWeight: weight})
 	c.sleep = func(ctx context.Context, _ time.Duration) bool { return ctx.Err() == nil }
@@ -381,4 +401,70 @@ func TestMessageStringProperty(t *testing.T) {
 	if got := messageStringProperty(properties, "empty") + messageStringProperty(properties, "missing"); got != "" {
 		t.Fatalf("absent properties = %q, want empty", got)
 	}
+}
+
+// slowAlertRepo holds every insert for a while, standing in for a slow database.
+type slowAlertRepo struct {
+	*fakeAlertRepo
+	delay time.Duration
+}
+
+func (r slowAlertRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error) {
+	time.Sleep(r.delay)
+	return r.fakeAlertRepo.InsertAlerts(ctx, alerts)
+}
+
+func lockedFor(m *azservicebus.ReceivedMessage, d time.Duration) *azservicebus.ReceivedMessage {
+	lockedUntil := time.Now().Add(d)
+	m.LockedUntil = &lockedUntil
+	return m
+}
+
+func TestAlertConsumerHandle_RenewsTheLockOfAMessageThatWaitedInTheBuffer(t *testing.T) {
+	high := newFakeAlertReceiver()
+	c := newTestConsumer(t, newFakeAlertRepo(), high, newFakeAlertReceiver(), 1, 4)
+
+	c.handle(context.Background(), c.lanes[domain.AlertTierHigh], lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 5*time.Second))
+	if high.renewCount() == 0 || len(high.completed) != 1 {
+		t.Fatalf("renewals %d, completed %v; want the near-expiry lock renewed before the message is completed", high.renewCount(), high.completed)
+	}
+}
+
+func TestAlertConsumerHandle_KeepsTheLockDuringSlowProcessing(t *testing.T) {
+	high := newFakeAlertReceiver()
+	c := newTestConsumer(t, slowAlertRepo{fakeAlertRepo: newFakeAlertRepo(), delay: 300 * time.Millisecond}, high, newFakeAlertReceiver(), 1, 4)
+	c.lockRenewMargin = 950 * time.Millisecond
+
+	c.handle(context.Background(), c.lanes[domain.AlertTierHigh], lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
+	if high.renewCount() == 0 || len(high.completed) != 1 {
+		t.Fatalf("renewals %d, completed %v; want the lock renewed while the insert ran", high.renewCount(), high.completed)
+	}
+}
+
+func TestAlertConsumerHandle_SkipsAMessageWhoseLockIsAlreadyLost(t *testing.T) {
+	high := newFakeAlertReceiver()
+	high.renewErr = errors.New("lock lost")
+	repo := newFakeAlertRepo()
+	c := newTestConsumer(t, repo, high, newFakeAlertReceiver(), 1, 4)
+
+	c.handle(context.Background(), c.lanes[domain.AlertTierHigh], lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), -time.Second))
+	if repo.rowCount() != 0 || high.settledCount() != 0 {
+		t.Fatal("a message whose lock was lost was still processed or settled")
+	}
+}
+
+func TestAlertConsumerProcess_DeadLettersATransformThatPanics(t *testing.T) {
+	c := newTestConsumer(t, newFakeAlertRepo(), newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+	c.transforms = panickingTransforms{}
+
+	decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "anything", canonicalAlert))
+	if decision.settlement != alertDeadLetter || decision.reason != alertDeadLetterTransformFailed {
+		t.Fatalf("decision = %+v, want dead-letter instead of a crash", decision)
+	}
+}
+
+type panickingTransforms struct{}
+
+func (panickingTransforms) Lookup(string) (alertsource.Transform, bool) {
+	return func([]byte) ([]model.Alert, error) { panic("assignment to entry in nil map") }, true
 }
