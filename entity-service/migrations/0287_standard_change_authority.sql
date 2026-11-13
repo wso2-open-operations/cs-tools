@@ -56,7 +56,21 @@
 --                                           cleared. The template row keeps only the
 --                                           current values.
 --
--- Additive and idempotent: safe to re-run.
+-- One transaction with a short lock timeout: the state check and the
+-- one-open-per-template index are each dropped and created again, so in
+-- autocommit a lock timeout between the two would leave the table without the
+-- check or the guard. In one transaction a timeout (5s, rather than queue every
+-- change request approval behind it) leaves the file all-or-nothing: run it
+-- again when the tables are quiet.
+--
+-- Safe to re-run, also after 0295 and 0297 and the code that follows them
+-- (a database that recorded this file under an earlier number runs it again):
+-- every addition is IF NOT EXISTS or WHERE NOT EXISTS, and the state check is
+-- recreated admitting a superset of the states any row can hold, CAB_REVIEW
+-- included until 0295, run next, recreates it without CAB_REVIEW again.
+
+BEGIN;
+SET LOCAL lock_timeout = '5s';
 
 INSERT INTO "group" (id, created_on, updated_on, created_by, updated_by, name, description, is_active)
 SELECT '00000000-0000-4000-8000-0000000005ca'::uuid, now(), now(), 'migration', 'migration',
@@ -65,10 +79,6 @@ SELECT '00000000-0000-4000-8000-0000000005ca'::uuid, now(), now(), 'migration', 
        true
 WHERE NOT EXISTS (SELECT 1 FROM "group" WHERE name = 'Standard Change Authority')
 ON CONFLICT (id) DO NOTHING;
-
--- Every ALTER below waits at most 5s for a lock; a busy table fails the run
--- instead of queueing every change request approval behind it. Reset at the end.
-SET lock_timeout = '5s';
 
 ALTER TABLE approval_stage
     ADD COLUMN IF NOT EXISTS required_approvals SMALLINT NOT NULL DEFAULT 1 CHECK (required_approvals >= 1);
@@ -104,4 +114,4 @@ CREATE TABLE IF NOT EXISTS standard_change_template_event (
 CREATE INDEX IF NOT EXISTS idx_standard_change_template_event_template
     ON standard_change_template_event (template_id, created_on DESC);
 
-RESET lock_timeout;
+COMMIT;
