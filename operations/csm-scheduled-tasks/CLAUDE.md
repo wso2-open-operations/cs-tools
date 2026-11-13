@@ -965,6 +965,7 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
+| `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the deprecated product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
@@ -981,6 +982,44 @@ instead of being cut off mid-request with no chance to react.
 
 `.env` is auto-loaded from the working directory at startup if present (silently ignored if
 absent), matching `integrations/csm-notification-service`'s own convention.
+
+## Monthly deprecated product usage report
+
+`internal/deprecatedusagescan.SendReport`, registered as **`deprecated_product_usage_report`**, is the port of
+ServiceNow's *Deprecated Product Version Usage Monthly Report*: the customers running a product version whose support
+status is Deprecated in an active Primary Production deployment, mailed to the people who should act on it.
+entity-service builds the list (`GET /reports/deprecated-product-usage?asOf=YYYY-MM-DD`, client in
+`internal/deprecatedusagereport`; the joins and the Deprecated rule live there) and this task mails it through its own
+template (`internal/notify/templates/deprecated_product_usage_report.html`,
+`notify.RenderDeprecatedProductUsageReport`): the ServiceNow mail's opening sentence and a call to action, then one
+table per region, each account's cells (account, CS ABT, account manager, technical owner) spanning its rows and each
+project's cell spanning its versions; there is no Region column, as each region has its own heading. A version with
+no EOL date yet shows "Not set". It has the same structure and behaviour as the EOL product usage report; only the
+version rule differs. A deprecated version whose EOL date has passed is in both reports, on purpose.
+
+- **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
+  sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
+  run's period key (`Options.Anchor`, `periodStart` in `cmd/server/main.go`), not the clock: the engine retries a
+  failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
+  A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
+  report can then be sent by hand with `--run-now=deprecated_product_usage_report`. A `--run-now` sends whatever the
+  date (`Options.AnyDay`) and takes `--recipients`/`--cc` like every report task (`reportTaskNames`). A
+  `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use `--run-now` with `--recipients`
+  to test on another day.
+- **Report date.** The run's Monday in Asia/Colombo is the date the email shows; the list is the versions' current
+  Deprecated status.
+- **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
+  audience agreed with CS. It is internal only.
+- **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
+  account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
+  To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
+  `To`/`Cc` nil for the same reason as theirs: failures go to `ALERT_RECIPIENTS` alone, never to every account
+  manager on each retry. Because of that, `main.go` checks its own audience against `EMAIL_BASE_URL` at startup.
+- **No deprecated usage.** An empty report **is sent**: a short "no customers are using deprecated product
+  versions" note to the configured to/cc only, so the leadership group knows the report ran.
+- `DEPRECATED_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages;
+  unset keeps plain text, and a non-https value refuses to start.
 
 ## Monthly product regression reports
 

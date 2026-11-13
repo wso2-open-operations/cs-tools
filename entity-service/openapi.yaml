@@ -13405,6 +13405,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/deprecated-product-usage:
+    get:
+      summary: >-
+        Monthly deprecated product usage report: customers running a product version whose support status is Deprecated in Primary Production.
+      description: >
+        One entry per (project, product version) where an active deployed product of an active
+        PRIMARY_PRODUCTION deployment runs a version whose support status is DEPRECATED, whether its
+        EOL date has passed or not (one past its EOL date is in the EOL product usage report too),
+        grouped by the account's region (ignoring case; accounts with no region last), then account and project.
+        Customers who have left are not listed: deleted accounts, inactive projects and projects WSO2 has closed.
+        A version run by several Primary Production deployments of one project is listed once.
+        Internal callers only; the scheduled task that mails the report is the expected caller.
+      operationId: getDeprecatedProductUsageReport
+      tags: [Reports]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Report date shown in the report, YYYY-MM-DD; the list is the versions' current status whatever the date. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeprecatedProductUsageReport'
+        "400":
+          description: asOf is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/migration-cases:
     get:
       summary: >-
@@ -35407,6 +35460,88 @@ components:
           type: string
         technicalOwnerEmail:
           type: string
+    DeprecatedProductUsageReport:
+      type: object
+      required: [generatedOn, asOf, totalVersions, totalAccounts, regions]
+      properties:
+        generatedOn: {type: string, format: date-time}
+        asOf: {type: string, format: date}
+        totalVersions:
+          type: integer
+          description: (project, product version) entries listed.
+        totalAccounts: {type: integer}
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageRegion'
+    DeprecatedProductUsageRegion:
+      type: object
+      required: [region, accounts]
+      properties:
+        region:
+          type: string
+          nullable: true
+          description: The account's region; null for accounts with no region (listed last).
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageAccount'
+    DeprecatedProductUsageAccount:
+      type: object
+      required: [accountId, accountName, csAbt, region, projects]
+      properties:
+        accountId: {type: string, format: uuid}
+        accountName: {type: string}
+        csAbt:
+          type: string
+          nullable: true
+          description: The account's CRE (ABT) team name; null when it has none.
+        region: {type: string, nullable: true}
+        accountManager:
+          $ref: '#/components/schemas/DeprecatedProductUsagePerson'
+        technicalOwner:
+          $ref: '#/components/schemas/DeprecatedProductUsagePerson'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageProject'
+    DeprecatedProductUsagePerson:
+      type: object
+      nullable: true
+      description: Null when the account has none; a name or email the user record lacks is left out.
+      properties:
+        name: {type: string}
+        email: {type: string}
+    DeprecatedProductUsageProject:
+      type: object
+      required: [projectId, projectName, projectKey, versions]
+      properties:
+        projectId: {type: string, format: uuid}
+        projectName: {type: string}
+        projectKey:
+          type: string
+          nullable: true
+          description: Null when the project has none.
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeprecatedProductUsageVersion'
+    DeprecatedProductUsageVersion:
+      type: object
+      required: [productVersionId, productName, version]
+      properties:
+        productVersionId: {type: string, format: uuid}
+        productName: {type: string}
+        version: {type: string}
+        supportStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        eolDate:
+          type: string
+          format: date
+          nullable: true
+          description: The version's EOL date; null when it has none yet.
     MigrationCaseReport:
       type: object
       description: The weekly migration case scan.
