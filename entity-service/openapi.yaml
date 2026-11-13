@@ -6473,6 +6473,87 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/{id}/slas/report:
+    get:
+      summary: Get the SLA report of the cases a project opened in a date range.
+      description: >-
+        Internal callers only. Postgres SLA data only; with
+        SLA_DATA_SOURCE=servicenow the endpoint returns 400. Covers the cases
+        of the project created from..to, inclusive on both ends (a date-only
+        `to` covers that whole day, UTC). Each case carries its latest clock for
+        the RESPONSE, WORKAROUND and RESOLUTION targets, read from sla_live,
+        so elapsed time, stage and breach reflect this moment, and the target
+        is the policy's own duration. Clocks that already finished are
+        included, and a case with no clock for a target shows "—". The summary
+        has one row per case type (Incident, or Query for a QUESTION case) and
+        severity with at least one case, Incident first then Query, each by
+        severity from S0. For each target a summary cell gives the 95th
+        percentile of the elapsed time of the clocks that finished (ACHIEVED or
+        COMPLETED), the policy target, and how many clocks were met (finished
+        within the target), missed (went past it, finished late or still
+        running and already over) or running (still inside it, in progress or
+        paused). A cancelled clock is in none of them. Durations are display
+        strings such as "2 Days 3 Hours". A range with no cases returns 200
+        with empty summary and cases arrays.
+
+
+        To identify the project by its key rather than its id, resolve the id
+        first with POST /projects/search (searchQuery set to the key; take the
+        result whose key matches exactly), then call this endpoint with that id.
+      operationId: getProjectSlaReport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+          description: First case creation date to include (yyyy-MM-dd, or an RFC 3339 timestamp).
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Last case creation date to include (yyyy-MM-dd covers the whole day, or an RFC 3339 timestamp). Must not be before from.
+      responses:
+        "200":
+          description: The project's SLA report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlaReportResponse'
+        "400":
+          description: >-
+            Bad request: id is not a UUID, from or to is missing or not a date,
+            from is after to, or cases or SLA data are read from ServiceNow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}/change-requests/stats:
     get:
       summary: Get a project's change-request statistics.
@@ -14684,6 +14765,420 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/search:
+    post:
+      summary: Search alert mute rules.
+      description: >
+        Alert mute rules newest created first. filters.states takes active, scheduled and expired (expired
+        also returns rules ended early); omitted means every state. filters.searchQuery matches, ignoring case,
+        the name, number, description, condition values and creator. Internal callers only.
+      operationId: searchAlertMuteRules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAlertMuteRulesRequest'
+      responses:
+        "200":
+          description: A page of alert mute rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAlertMuteRulesResponse'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/active:
+    get:
+      summary: Every alert mute rule muting alerts now.
+      description: Rules not ended early whose window contains now. alert-core polls this through csm-integration-service. Internal callers only.
+      operationId: getActiveAlertMuteRules
+      responses:
+        "200":
+          description: The active alert mute rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveAlertMuteRulesResponse'
+        "400":
+          description: Alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules:
+    post:
+      summary: Create an alert mute rule.
+      description: >
+        The rule gets the next number (AMR0000001). A window lasts at most 72 hours, ends in the future and
+        starts no earlier than a minute ago. Conditions must include service and environment, each field at most
+        once. Internal callers only; the caller's email is createdBy.
+      operationId: createAlertMuteRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAlertMuteRuleRequest'
+      responses:
+        "201":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/{id}:
+    get:
+      summary: Get an alert mute rule.
+      operationId: getAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Edit a scheduled alert mute rule.
+      description: >-
+        Partial update: only the fields present change; the others keep their stored values. The result is
+        validated as create is (a conditions list, when present, replaces the whole list). Only while the rule is
+        scheduled (409 otherwise). 409 also when another write changed the rule after it was read; reload and retry.
+      operationId: updateAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchAlertMuteRuleRequest'
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a scheduled alert mute rule.
+      operationId: deleteAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/{id}/extend:
+    post:
+      summary: Move a scheduled or active alert mute rule's end later.
+      description: The new end must be later than the current end and at most 72 hours after the start. 409 when the rule is expired or ended.
+      operationId: extendAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendAlertMuteRuleRequest'
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not scheduled or active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /alert-mute-rules/{id}/end:
+    post:
+      summary: End an active alert mute rule now.
+      description: Sets endedOn to now and endedBy to the caller. 409 unless the rule is active.
+      operationId: endAlertMuteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The alert mute rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: Invalid request, or alert mute rules are not supported on the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No alert mute rule with that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The rule is not active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /runbooks:
     get:
       summary: List the runbook catalog.
@@ -22241,6 +22736,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create a skill category (catalogue manager).
+      description: >
+        Needs skills.catalogue.manage. A sub-category goes under an active parent with no skills filed directly under it, and the parent stops being a leaf. Sibling names are unique ignoring case; a name cannot contain "/".
+      operationId: createSkillCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillCategoryRequest'
+      responses:
+        "201":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategory'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /skills/search:
     post:
       summary: Search the skill catalogue.
@@ -22743,7 +23292,7 @@ paths:
     post:
       summary: Everybody's skills (skill manager).
       description: >
-        A CSM admin (a token role listed in AUTH_ADMIN_ROLES) or a lead of a CRE or SRE team. One row is one person's one
+        Needs skills.directory.view (AUTH_ADMIN_ROLES or AUTH_SKILL_DIRECTORY_ROLES). One row is one person's one
         active skill; a row must satisfy every filter given. Lists active internal staff and active skills only.
         Filters are applied in SQL. Ordered by person then skill. Default limit 50, at most 200.
       operationId: searchUserSkills
@@ -22773,13 +23322,629 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: "Not a CSM admin or a CRE or SRE team lead, or no user token."
+          description: "Without skills.directory.view, or no user token."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: "Not found: the skills routes register only with a database pool."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /skills/me/capabilities:
+    get:
+      summary: The caller's skills capabilities.
+      description: >
+        Which gated skills tasks the caller holds, so the page builds its tabs from them. Capabilities: skills.directory.view (AUTH_ADMIN_ROLES or AUTH_SKILL_DIRECTORY_ROLES), skills.requests.review (AUTH_ADMIN_ROLES or AUTH_SKILL_REQUEST_REVIEWER_ROLES), skills.catalogue.manage (AUTH_ADMIN_ROLES or AUTH_SKILL_CATALOGUE_MANAGER_ROLES). Each configured list is empty by default, so only admins hold them. pendingRequestCount is set for a request reviewer. A service credential holds none.
+      operationId: getMySkillCapabilities
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCapabilities'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/categories/{id}:
+    patch:
+      summary: Edit a skill category (catalogue manager).
+      description: >
+        Rename (rewrites the stored path of the category and everything under it), describe, deactivate or activate. Deactivating is refused (409) while an active sub-category or active skill is filed under it; activating is refused under an inactive parent. Sibling names are unique ignoring case. Needs skills.catalogue.manage.
+      operationId: updateSkillCategory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillCategoryRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategory'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/check:
+    post:
+      summary: Duplicate preview for a skill request.
+      description: >
+        Any internal caller. An exact match (active or not), similar names (inactive ones only for a catalogue manager), and a pending request for the same name. Names match ignoring case and repeated spaces.
+      operationId: checkSkillRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckSkillRequestRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckSkillRequestResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests:
+    post:
+      summary: Request a skill the catalogue lacks.
+      description: >
+        An internal user with a user record. levelId (a level of the default scale) is required: on approval the skill is added to the requester's profile at it. 409 when an active skill already has the name or a pending request asks for it.
+      operationId: createSkillRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequestRequest'
+      responses:
+        "201":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/mine:
+    get:
+      summary: The caller's own skill requests.
+      description: >
+        Pending first, then the newest 50.
+      operationId: listMySkillRequests
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequestsResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/search:
+    post:
+      summary: The skill request queue (request reviewer).
+      description: >
+        Needs skills.requests.review. Pending requests first (oldest first), then decided ones, newest first.
+      operationId: searchSkillRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillRequestsRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequestsResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/{id}/withdraw:
+    post:
+      summary: Withdraw one's own pending skill request.
+      description: >
+        The requester only; another person's request is 404. 409 once decided.
+      operationId: withdrawSkillRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/{id}/approve:
+    post:
+      summary: Approve a skill request (request reviewer).
+      description: >
+        Needs skills.requests.review. One transaction: create the skill (mode create, on the default scale, in an active leaf category), reactivate an inactive one (reactivate) or point at an active one (existing); mark the request approved; and add the skill to the requester's profile at the requested level mapped onto the skill's scale, or at levelId. 409 when the request was already decided (naming who decided it), the name is taken, or the mode does not fit the skill.
+      operationId: approveSkillRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveSkillRequestRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/requests/{id}/reject:
+    post:
+      summary: Reject a skill request (request reviewer).
+      description: >
+        Needs skills.requests.review. A reason is required and shown to the requester. 409 when already decided.
+      operationId: rejectSkillRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectSkillRequestRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillRequest'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "Conflict: see the message."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/directory/search:
+    post:
+      summary: "The skill directory: one row per person."
+      description: >
+        Needs skills.directory.view. Criteria are (skill, minimum level value) pairs; match ALL (default) keeps people who meet every criterion, ANY those who meet at least one, best matches first. Optional name search, team keys and categories (a category includes its descendants). Each person comes with all their active skills. Default limit 25, at most 100.
+      operationId: searchSkillDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillDirectoryRequest'
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSkillDirectoryResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/users/{userId}:
+    get:
+      summary: One person's skills (directory).
+      description: >
+        Needs skills.directory.view. 404 when no internal user has the id.
+      operationId: getUserSkillProfile
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkillProfileResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /skills/users/{userId}/history:
+    get:
+      summary: One person's skill history (directory).
+      description: >
+        Needs skills.directory.view. Newest first; each entry carries its action (ADDED, LEVEL_CHANGED, REMOVED, READDED).
+      operationId: getUserSkillHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: skillId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          schema: {type: integer}
+        - name: offset
+          in: query
+          schema: {type: integer}
+      responses:
+        "200":
+          description: "Success."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillHistoryResponse'
+        "400":
+          description: "Bad request: a malformed id or field."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "No user token and not an authorized internal client."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: "The caller lacks the capability (see the description), or there is no user token."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "Not found (the skills routes register only with a database pool)."
           content:
             application/json:
               schema:
@@ -22820,6 +23985,157 @@ components:
         do not carry this requirement.
 
   schemas:
+    SkillCapabilities:
+      type: object
+      required: [canViewDirectory, canReviewRequests, canManageCatalogue]
+      properties:
+        canViewDirectory: {type: boolean}
+        canReviewRequests: {type: boolean}
+        canManageCatalogue: {type: boolean}
+        pendingRequestCount: {type: integer, description: Set for a request reviewer.}
+    CreateSkillCategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 255}
+        parentId: {type: string, format: uuid, nullable: true}
+        description: {type: string, nullable: true}
+    UpdateSkillCategoryRequest:
+      type: object
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, description: An empty string clears it.}
+        active: {type: boolean}
+    SkillRef:
+      type: object
+      required: [id, name, active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        active: {type: boolean}
+    SkillPersonRef:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, nullable: true}
+        email: {type: string, nullable: true}
+    SkillRequest:
+      type: object
+      required: [id, requestedName, status, requestedBy, createdOn]
+      properties:
+        id: {type: string, format: uuid}
+        requestedName: {type: string}
+        description: {type: string, nullable: true}
+        category: {type: object, nullable: true, description: "{id, name, categoryPath}"}
+        suggestedCategory: {type: string, nullable: true}
+        requestedLevel: {type: object, nullable: true, description: A skill level.}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN]}
+        requestedBy: {$ref: '#/components/schemas/SkillPersonRef'}
+        createdOn: {type: string, format: date-time}
+        reviewedBy: {allOf: [{$ref: '#/components/schemas/SkillPersonRef'}], nullable: true}
+        reviewedOn: {type: string, format: date-time, nullable: true}
+        reviewComment: {type: string, nullable: true, description: The approval comment or the rejection reason.}
+        resolution: {type: string, nullable: true, enum: [CREATED, REACTIVATED, EXISTING]}
+        resolvedSkill: {allOf: [{$ref: '#/components/schemas/SkillRef'}], nullable: true}
+        autoAddedLevel: {type: object, nullable: true, description: The level the requester was given on approval.}
+        autoAddNote: {type: string, nullable: true, enum: [ADDED, READDED, ALREADY_HELD, LEVEL_ADJUSTED, SKIPPED_INACTIVE_USER, SKIPPED_NO_SCALE]}
+    CheckSkillRequestRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+    CheckSkillRequestResponse:
+      type: object
+      required: [similar]
+      properties:
+        exactMatch: {allOf: [{$ref: '#/components/schemas/SkillRef'}], nullable: true}
+        similar: {type: array, items: {$ref: '#/components/schemas/SkillRef'}}
+        pendingRequest: {allOf: [{$ref: '#/components/schemas/SkillRequest'}], nullable: true}
+    CreateSkillRequestRequest:
+      type: object
+      required: [name, levelId]
+      properties:
+        name: {type: string, maxLength: 255}
+        categoryId: {type: string, format: uuid, nullable: true, description: An active leaf category.}
+        suggestedCategory: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        levelId: {type: string, format: uuid, description: A level of the default scale.}
+    SearchSkillRequestsRequest:
+      type: object
+      properties:
+        statuses: {type: array, items: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN]}}
+        pagination: {type: object, properties: {limit: {type: integer}, offset: {type: integer}}}
+    SkillRequestsResponse:
+      type: object
+      required: [requests, total, limit, offset]
+      properties:
+        requests: {type: array, items: {$ref: '#/components/schemas/SkillRequest'}}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    ApproveSkillRequestRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [create, reactivate, existing]}
+        name: {type: string, description: "mode create: defaults to the requested name."}
+        categoryId: {type: string, format: uuid, description: "mode create or reactivate: an active leaf category; create defaults to the request's."}
+        description: {type: string}
+        keywords: {type: string}
+        skillId: {type: string, format: uuid, description: "mode reactivate (an inactive skill) or existing (an active one)."}
+        levelId: {type: string, format: uuid, description: "Overrides the level the requester is given; a level of the approved skill's scale."}
+        comment: {type: string, description: Shown to the requester.}
+    RejectSkillRequestRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, maxLength: 2000}
+    SearchSkillDirectoryRequest:
+      type: object
+      properties:
+        searchQuery: {type: string}
+        teamKeys: {type: array, items: {type: string}}
+        categoryIds: {type: array, items: {type: string, format: uuid}}
+        criteria:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [skillId]
+            properties:
+              skillId: {type: string, format: uuid}
+              minLevelValue: {type: integer, minimum: 0, description: 0 or absent means any level.}
+        match: {type: string, enum: [ALL, ANY]}
+        pagination: {type: object, properties: {limit: {type: integer}, offset: {type: integer}}}
+    SearchSkillDirectoryResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [userId, teamKeys, matchedCount, skills]
+            properties:
+              userId: {type: string, format: uuid}
+              userName: {type: string, nullable: true}
+              userEmail: {type: string, nullable: true}
+              teamKeys: {type: array, items: {type: string}}
+              matchedCount: {type: integer}
+              skills: {type: array, items: {type: object, description: A UserSkill.}}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    UserSkillProfileResponse:
+      type: object
+      required: [userId, teamKeys, skills]
+      properties:
+        userId: {type: string, format: uuid}
+        userName: {type: string, nullable: true}
+        userEmail: {type: string, nullable: true}
+        teamKeys: {type: array, items: {type: string}}
+        skills: {type: array, items: {type: object, description: A UserSkill.}}
     GenerateRotaMonthRequest:
       type: object
       required: [month]
@@ -34697,6 +36013,149 @@ components:
                         properties:
                           id: { type: string }
                           key: { type: string }
+    AlertMuteRuleCondition:
+      type: object
+      required: [field, value]
+      properties:
+        field:
+          type: string
+          enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        value:
+          type: string
+          maxLength: 255
+    AlertMuteRule:
+      type: object
+      required: [id, number, name, description, timeZone, startOn, endOn, conditions, createdBy, createdOn, updatedBy, updatedOn, endedBy, endedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: The rule's own number (AMR0000001).
+        name:
+          type: string
+        description:
+          type: string
+        timeZone:
+          type: string
+          description: IANA zone the times were entered in; startOn and endOn are UTC.
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        endedBy:
+          type: string
+          nullable: true
+        endedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SaveAlertMuteRuleRequest:
+      type: object
+      required: [name, timeZone, startOn, endOn, conditions]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    PatchAlertMuteRuleRequest:
+      type: object
+      description: The fields to change; at least one is normally sent, and an empty body changes nothing but is still validated.
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          description: Replaces the whole list.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    ExtendAlertMuteRuleRequest:
+      type: object
+      required: [endOn]
+      properties:
+        endOn:
+          type: string
+          format: date-time
+    SearchAlertMuteRulesRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            states:
+              type: array
+              items:
+                type: string
+                enum: [active, scheduled, expired]
+            searchQuery:
+              type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    SearchAlertMuteRulesResponse:
+      type: object
+      required: [alertMuteRules, total, offset, limit]
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+    ActiveAlertMuteRulesResponse:
+      type: object
+      required: [alertMuteRules]
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
     Runbook:
       type: object
       required: [id, number, name, runbookUrl, alerts, createdOn, createdBy, updatedOn, updatedBy]
@@ -38276,6 +39735,121 @@ components:
           description: One row per case with approved time in the range, ordered by case number ascending.
           items:
             $ref: '#/components/schemas/ProjectTimeCardReportCase'
+
+    SlaReportMetric:
+      type: object
+      description: One clock target for one case type and severity.
+      required: [elapsed, target, met, missed, running]
+      properties:
+        elapsed:
+          type: string
+          description: 95th percentile of the elapsed time of the finished clocks, or "—" when none finished.
+          example: 2 Hours 54 Minutes
+        target:
+          type: string
+          description: The policy duration the clocks run against, or "Not applicable" when there is no clock.
+          example: 4 Hours
+        met:
+          type: integer
+          description: Clocks that finished within the target.
+        missed:
+          type: integer
+          description: Clocks that went past the target, whether finished late or still running.
+        running:
+          type: integer
+          description: Clocks still inside the target (in progress or paused).
+    SlaReportSummaryRow:
+      type: object
+      required: [label, caseType, severity, cases, response, workaround, resolution]
+      properties:
+        label:
+          type: string
+          example: Incident - Critical (P1)
+        caseType:
+          type: string
+          enum: [incident, query]
+        severity:
+          type: string
+          description: The case severity code (S0 to S4), empty when a case has none.
+        cases:
+          type: integer
+          description: Cases in this row.
+        response:
+          $ref: '#/components/schemas/SlaReportMetric'
+        workaround:
+          $ref: '#/components/schemas/SlaReportMetric'
+        resolution:
+          $ref: '#/components/schemas/SlaReportMetric'
+    SlaReportClock:
+      type: object
+      required: [elapsed, status]
+      properties:
+        elapsed:
+          type: string
+          description: Elapsed time as a display string, or "—" when the case has no clock for the target.
+        status:
+          type: string
+          enum: ["", Met, Missed, Running, Paused, Cancelled]
+          description: Empty when the case has no clock for the target.
+    SlaReportCase:
+      type: object
+      required: [caseId, caseNumber, caseType, severity, state, openedOn, response, workaround, resolution]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        caseNumber:
+          type: string
+        caseType:
+          type: string
+          enum: [Incident, Query]
+        severity:
+          type: string
+          description: The severity label, for example "Critical (P1)", or "—".
+        state:
+          type: string
+          description: The case state label, for example "Work In Progress".
+        openedOn:
+          type: string
+          format: date-time
+        response:
+          $ref: '#/components/schemas/SlaReportClock'
+        workaround:
+          $ref: '#/components/schemas/SlaReportClock'
+        resolution:
+          $ref: '#/components/schemas/SlaReportClock'
+    SlaReportResponse:
+      type: object
+      description: The response for GET /projects/{id}/slas/report.
+      required: [project, from, to, summary, cases]
+      properties:
+        project:
+          type: object
+          required: [id, key, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            key:
+              type: string
+            name:
+              type: string
+              nullable: true
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        summary:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlaReportSummaryRow'
+        cases:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/SlaReportCase'
 
     ProjectTimeCardReportTotals:
       type: object
@@ -44087,6 +45661,9 @@ components:
         categoryPath: {type: string, nullable: true}
         isLowestCategory: {type: boolean}
         parentId: {type: string, format: uuid, nullable: true}
+        active: {type: boolean, description: "Inactive categories (and everything under one) are listed only to a catalogue manager."}
+        description: {type: string, nullable: true}
+        skillCount: {type: integer, description: Active skills filed directly under it.}
     SkillCategoriesResponse:
       type: object
       required: [categories]
@@ -44208,12 +45785,17 @@ components:
       required: [id, skillId, skillName, changedOn]
       properties:
         id: {type: string, format: uuid}
+        action:
+          type: string
+          enum: [ADDED, LEVEL_CHANGED, REMOVED, READDED, ""]
+          description: What the row records; empty only for a migrated row that recorded neither level.
+        skillRequestId: {type: string, format: uuid, nullable: true, description: Set when an approved skill request made the change.}
         skillId: {type: string, format: uuid}
         skillName: {type: string}
         levelFrom:
           allOf: [{$ref: '#/components/schemas/SkillLevel'}]
           nullable: true
-          description: Null the first time the skill was set.
+          description: Null when the skill was (re)added.
         levelTo:
           allOf: [{$ref: '#/components/schemas/SkillLevel'}]
           nullable: true

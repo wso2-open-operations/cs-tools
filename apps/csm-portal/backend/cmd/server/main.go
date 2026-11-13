@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/alertcore"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
@@ -200,6 +201,21 @@ func main() {
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
+	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
+	// Muted alerts live in sre-alert-core-service's database; without both values the route answers 503.
+	var alertCoreClient *alertcore.Client
+	if base, token := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")), strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")); base != "" && token != "" {
+		// The bearer token must never travel over plain HTTP.
+		base = mustHTTPSBaseURL("ALERT_CORE_BASE_URL", base)
+		alertCoreClient = alertcore.NewClient(alertcore.Config{BaseURL: base, Token: token})
+	} else {
+		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set; the muted-alerts and alert-field-values routes answer 503")
+	}
+	// Pass an untyped nil rather than a nil *alertcore.Client, so the handler's nil check sees it.
+	alertMuteRuleMutedAlertsHandler := handler.NewAlertMuteRuleMutedAlertsHandler(nil)
+	if alertCoreClient != nil {
+		alertMuteRuleMutedAlertsHandler = handler.NewAlertMuteRuleMutedAlertsHandler(alertCoreClient)
+	}
 	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
@@ -787,6 +803,23 @@ func main() {
 	route("POST /skills/me", handler.PermWrite, skillHandler.AddMySkill)
 	route("PUT /skills/me/{skillId}", handler.PermWrite, skillHandler.SetMySkillLevel)
 	route("DELETE /skills/me/{skillId}", handler.PermWrite, skillHandler.RemoveMySkill)
+	// Skill management: who may use the directory, review requests or manage
+	// the catalogue is entity-service's decision (each is a capability held by
+	// admins plus a configured role list); these floors only keep the routes
+	// from a caller who could use none of them.
+	route("GET /skills/me/capabilities", handler.PermView, skillHandler.GetMySkillCapabilities)
+	route("POST /skills/categories", handler.PermWrite, skillHandler.CreateSkillCategory)
+	route("PATCH /skills/categories/{id}", handler.PermWrite, skillHandler.UpdateSkillCategory)
+	route("POST /skills/requests/check", handler.PermView, skillHandler.CheckSkillRequest)
+	route("POST /skills/requests", handler.PermWrite, skillHandler.CreateSkillRequest)
+	route("GET /skills/requests/mine", handler.PermView, skillHandler.ListMySkillRequests)
+	route("POST /skills/requests/search", handler.PermView, skillHandler.SearchSkillRequests)
+	route("POST /skills/requests/{id}/withdraw", handler.PermWrite, skillHandler.WithdrawSkillRequest)
+	route("POST /skills/requests/{id}/approve", handler.PermWrite, skillHandler.ApproveSkillRequest)
+	route("POST /skills/requests/{id}/reject", handler.PermWrite, skillHandler.RejectSkillRequest)
+	route("POST /skills/directory/search", handler.PermView, skillHandler.SearchSkillDirectory)
+	route("GET /skills/users/{userId}", handler.PermView, skillHandler.GetUserSkillProfile)
+	route("GET /skills/users/{userId}/history", handler.PermView, skillHandler.GetUserSkillHistory)
 
 	route("GET /team-schedule/rota-access", handler.PermView, rotaAccessHandler.GetRotaAccess)
 	route("PUT /team-schedule/rota-access/admins/{family}/{userId}", handler.PermWrite, rotaAccessHandler.PutRotaAdmin)
@@ -926,6 +959,18 @@ func main() {
 	route("PATCH /outages/{id}", handler.PermWrite, outageHandler.PatchOutage)
 	route("POST /outages/{id}/communications", handler.PermWrite, outageHandler.AddOutageCommunication)
 	route("POST /outages/{id}/communications/search", handler.PermViewOperations, outageHandler.SearchOutageCommunications)
+	// Alert mute rules: 1:1 proxies to entity-service. GET /alert-mute-rules/active is
+	// deliberately not exposed here; alert-core reads it via csm-integration-service.
+	route("POST /alert-mute-rules/search", handler.PermViewOperations, alertMuteRuleHandler.SearchAlertMuteRules)
+	route("GET /alert-mute-rules/{id}", handler.PermViewOperations, alertMuteRuleHandler.GetAlertMuteRule)
+	route("GET /alert-mute-rules/{id}/muted-alerts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedAlerts)
+	route("GET /alert-field-values", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListAlertFieldValues)
+	route("GET /alert-mute-rules/muted-counts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedCounts)
+	route("POST /alert-mute-rules", handler.PermWrite, alertMuteRuleHandler.CreateAlertMuteRule)
+	route("PATCH /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.PatchAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/extend", handler.PermWrite, alertMuteRuleHandler.ExtendAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/end", handler.PermWrite, alertMuteRuleHandler.EndAlertMuteRule)
+	route("DELETE /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.DeleteAlertMuteRule)
 	// Called manually today; not yet wired into real incident/case creation.
 	route("POST /notifications/google-chat/alerts", handler.PermWrite, notificationHandler.PostGoogleChatAlert)
 
@@ -942,7 +987,7 @@ func main() {
 	// PermViewSharedEntity's own doc comment) -- unlike GET /teams/{id}/members
 	// above, which is a genuinely unconditional CS Portal route (see
 	// teamHandler's own construction) and so is registered outside this
-	// block. The account-scoped escalation list stays here only because CS
+	// rule. The account-scoped escalation list stays here only because CS
 	// Portal's own /cases/{id}/escalations is per-case, not per-account.
 	//
 	// Every route below is registered with PermViewerAccess (Viewer only),
@@ -953,13 +998,14 @@ func main() {
 	// health/* plus the GET /products and GET /abt-teams lists its filters
 	// read), which use PermViewCustomerHealth so a cs_engineer or admin
 	// reaches them without also holding Viewer, and the project reports
-	// (GET /report-details and GET /generate-timelogs-breakdown-report),
-	// which use PermView.
+	// (GET /report-details, GET /generate-timelogs-breakdown-report and
+	// GET /generate-sla-report), which use PermView.
 	route("GET /accounts/{accountId}/escalations", handler.PermViewerAccess, viewerHandlers.accountEsc.GetAccountEscalations)
 	route("GET /products", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetProducts)
 	route("GET /abt-teams", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetABTTeams)
 	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
 	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
+	route("GET /generate-sla-report", handler.PermView, viewerHandlers.reports.GenerateSLAReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)
 	route("GET /files/search", handler.PermViewerAccess, viewerHandlers.files.SearchFolder)

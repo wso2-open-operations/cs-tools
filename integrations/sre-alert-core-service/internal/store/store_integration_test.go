@@ -241,6 +241,216 @@ func TestIncidentRepo_FoldAndDelivery(t *testing.T) {
 	}
 }
 
+func TestIncidentRepo_FoldRaisesSeverityImpactAndUrgency(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := repo.Fold(ctx, "fpsev", []string{"S1"}, func(*model.Incident, map[string]bool) FoldPlan {
+		return FoldPlan{New: []NewIncident{{
+			Incident: model.Incident{Fingerprint: "fpsev", IncidentNumber: "PENDING", Severity: 4, Impact: "MEDIUM", Urgency: "LOW",
+				Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, SeverityLabel: "warning"},
+			Notes: []model.Note{{AlertID: "S1", Kind: model.NoteCreated, Text: "created"}},
+		}}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fold := func(alertID string, c CurrentFold) {
+		t.Helper()
+		if _, err := repo.Fold(ctx, "fpsev", []string{alertID}, func(cur *model.Incident, _ map[string]bool) FoldPlan {
+			c.ID, c.Added, c.LastSeen = cur.ID, 1, at.Add(time.Second)
+			c.Notes = []model.Note{{AlertID: alertID, Kind: model.NoteDuplicate, Text: "dup"}}
+			return FoldPlan{Current: &c}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func() model.Incident {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM incidents_processed WHERE fingerprint = 'fpsev'`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inc, _, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inc
+	}
+
+	fold("S2", CurrentFold{SeverityLabel: "critical", Severity: 1, Impact: "HIGH", Urgency: "HIGH"})
+	if inc := get(); inc.SeverityLabel != "critical" || inc.Severity != 1 || inc.Impact != "HIGH" || inc.Urgency != "HIGH" {
+		t.Fatalf("escalated = %+v, want critical with HIGH impact and urgency", inc)
+	}
+	fold("S3", CurrentFold{}) // no escalation: nothing changes
+	if inc := get(); inc.SeverityLabel != "critical" || inc.Severity != 1 || inc.Impact != "HIGH" || inc.Urgency != "HIGH" {
+		t.Fatalf("after a plain duplicate = %+v, want the escalation kept", inc)
+	}
+}
+
+func TestIncidentRepo_MuteLifecycle(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	newInc := func(fp string, at time.Time, alertID string) model.Incident {
+		t.Helper()
+		_, err := repo.Fold(ctx, fp, []string{alertID}, func(*model.Incident, map[string]bool) FoldPlan {
+			return FoldPlan{New: []NewIncident{{
+				Incident: model.Incident{Fingerprint: fp, IncidentNumber: "PENDING", Severity: 1, Impact: "HIGH", Urgency: "HIGH",
+					Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, UniqueIdentifier: "host-1", SeverityLabel: "Critical"},
+				Notes: []model.Note{{AlertID: alertID, Kind: model.NoteCreated, Text: "created"}},
+			}}}
+		})
+		if err != nil {
+			t.Fatalf("fold: %v", err)
+		}
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM incidents_processed WHERE fingerprint = $1 AND first_seen = $2`, fp, at).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inc, _, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inc
+	}
+	addNote := func(inc model.Incident, alertID, kind string) {
+		t.Helper()
+		if _, err := repo.Fold(ctx, inc.Fingerprint, []string{alertID}, func(cur *model.Incident, _ map[string]bool) FoldPlan {
+			return FoldPlan{Current: &CurrentFold{ID: cur.ID, Added: 1, LastSeen: now.Add(time.Second),
+				Notes: []model.Note{{AlertID: alertID, Kind: kind, Text: kind, ChatPending: true}}}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	inc := newInc("fpm", now, "M1")
+	if inc.UniqueIdentifier != "host-1" || inc.SeverityLabel != "Critical" || inc.Muted || inc.MutedAt != nil || inc.UnmutedAt != nil || !inc.MuteEligible() {
+		t.Fatalf("new incident = %+v", inc)
+	}
+	if err := repo.Mute(ctx, inc.ID, "b1", "AMR0000001"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Mute(ctx, inc.ID, "b2", "AMR0000002"); err != nil {
+		t.Fatal(err)
+	}
+	muted, _, _ := repo.Get(ctx, inc.ID)
+	if !muted.Muted || muted.MutedAt == nil || muted.MuteRuleID != "b2" || muted.MuteRuleNumber != "AMR0000002" {
+		t.Fatalf("muted = %+v", muted)
+	}
+
+	if resolved, superseded, err := repo.MuteOutcome(ctx, muted); err != nil || resolved || superseded {
+		t.Fatalf("outcome = %v %v %v, want still firing", resolved, superseded, err)
+	}
+	addNote(muted, "M2", model.NoteOK)
+	if resolved, _, err := repo.MuteOutcome(ctx, muted); err != nil || !resolved {
+		t.Fatalf("resolved = %v %v, want an OK last note to count as resolved", resolved, err)
+	}
+	newInc("fpm", now.Add(time.Hour), "M3")
+	if _, superseded, err := repo.MuteOutcome(ctx, muted); err != nil || !superseded {
+		t.Fatalf("superseded = %v %v", superseded, err)
+	}
+	cur, _, _ := repo.Get(ctx, muted.ID)
+	if ok, superseded, err := repo.Unmute(ctx, cur); err != nil || ok || !superseded {
+		t.Fatalf("unmute with a newer incident = %v %v %v; want false, true, nil", ok, superseded, err)
+	}
+
+	if closed, err := repo.CloseMuted(ctx, muted.ID, muted.FoldVersion); err != nil || closed {
+		t.Fatalf("close with a stale fold version = %v %v, want no-op", closed, err)
+	}
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	if closed, err := repo.CloseMuted(ctx, cur.ID, cur.FoldVersion); err != nil || !closed {
+		t.Fatalf("close = %v %v", closed, err)
+	}
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	notes, _ := repo.PendingNotes(ctx, cur.ID, 10)
+	var due *time.Time
+	_ = pool.QueryRow(ctx, `SELECT delivery_due_at FROM incidents_processed WHERE id = $1`, cur.ID).Scan(&due)
+	if cur.Muted || cur.Status != "closed" || cur.UnmutedAt == nil || cur.MuteRuleNumber != "AMR0000002" || len(notes) != 0 || due != nil {
+		t.Fatalf("closed = %+v notes = %v due = %v", cur, notes, due)
+	}
+	// An OK folded in after the quiet close is settled by closing again, which keeps the time the mute ended.
+	firstUnmuted := *cur.UnmutedAt
+	addNote(cur, "M4", model.NoteOK)
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	if closed, err := repo.CloseMuted(ctx, cur.ID, cur.FoldVersion); err != nil || !closed {
+		t.Fatalf("second close = %v %v", closed, err)
+	}
+	cur, _, _ = repo.Get(ctx, muted.ID)
+	if cur.UnmutedAt == nil || !cur.UnmutedAt.Equal(firstUnmuted) {
+		t.Fatalf("unmuted_at after a second close = %v, want the first close's %v", cur.UnmutedAt, firstUnmuted)
+	}
+
+	other := newInc("fpu", now, "U1")
+	if err := repo.Mute(ctx, other.ID, "b1", "AMR0000001"); err != nil {
+		t.Fatal(err)
+	}
+	stale := other
+	stale.FoldVersion++
+	if ok, superseded, err := repo.Unmute(ctx, stale); err != nil || ok || superseded {
+		t.Fatalf("stale unmute = %v %v %v; want false, false, nil", ok, superseded, err)
+	}
+	if ok, superseded, err := repo.Unmute(ctx, other); err != nil || !ok || superseded {
+		t.Fatalf("unmute = %v %v %v", ok, superseded, err)
+	}
+	other, _, _ = repo.Get(ctx, other.ID)
+	if other.Muted || other.UnmutedAt == nil || other.MutedAt == nil || other.MuteEligible() {
+		t.Fatalf("unmuted = %+v", other)
+	}
+}
+
+// The SQL summary must classify exactly as model.Incident.MuteOutcome does.
+func TestIncidentRepo_MutedByRuleSummaryMatchesMuteOutcome(t *testing.T) {
+	pool := testDB(t)
+	repo := NewIncidentRepo(pool, testLocker(t, pool))
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	shapes := []string{
+		`muted = true`,
+		`muted = false, unmuted_at = now(), csm_confirmed = true`,
+		`muted = false, unmuted_at = now(), status = ' Closed '`,
+		`muted = false, unmuted_at = now(), status = 'closed', csm_attempts = 1`,
+		`muted = false, unmuted_at = now(), status = 'closed', fallback = true`,
+		`muted = false, unmuted_at = now(), status = 'new'`,
+		`muted = false, status = 'closed'`,
+	}
+	for i, set := range shapes {
+		fp := fmt.Sprintf("fpsum%d", i)
+		if _, err := repo.Fold(ctx, fp, []string{fp}, func(*model.Incident, map[string]bool) FoldPlan {
+			return FoldPlan{New: []NewIncident{{
+				Incident: model.Incident{Fingerprint: fp, IncidentNumber: "PENDING", Severity: 1, Impact: "HIGH", Urgency: "HIGH",
+					Service: "svc", AlertCount: 1, FirstSeen: at, LastSeen: at, SeverityLabel: "critical"},
+				Notes: []model.Note{{AlertID: fp, Kind: model.NoteCreated, Text: "created"}},
+			}}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE incidents_processed SET mute_rule_id = 'sum-rule', `+set+` WHERE fingerprint = $1`, fp); err != nil {
+			t.Fatalf("shape %q: %v", set, err)
+		}
+	}
+	got, err := repo.MutedByRuleSummary(ctx, "sum-rule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incs, total, err := repo.MutedByRule(ctx, "sum-rule", 100, 0)
+	if err != nil || total != len(shapes) {
+		t.Fatalf("muted by rule = %d, %v; want %d", total, err, len(shapes))
+	}
+	want := map[string]int{}
+	for _, inc := range incs {
+		want[inc.MuteOutcome()]++
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("summary = %v, want what MuteOutcome gives: %v", got, want)
+	}
+	if want[model.MuteOutcomeClosedQuietly] != 1 || want[model.MuteOutcomeDelivering] != 4 {
+		t.Fatalf("shapes classify as %v; the test no longer covers every branch", want)
+	}
+}
+
 func TestIncidentRepo_ConcurrentFoldsSerializePerFingerprint(t *testing.T) {
 	pool := testDB(t)
 	repo := NewIncidentRepo(pool, testLocker(t, pool))

@@ -1348,7 +1348,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Skills exist only in Postgres. Reads are internal-staff-only; a CSM
 		// admin is a token role from AUTH_ADMIN_ROLES, as for rota access.
 		skillHandler = handler.NewSkillHandler(
-			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles),
+			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles, service.SkillCapabilityRoles{
+				domain.SkillCapDirectory:       cfg.AuthSkillDirectoryRoles,
+				domain.SkillCapReviewRequests:  cfg.AuthSkillRequestReviewerRoles,
+				domain.SkillCapManageCatalogue: cfg.AuthSkillCatalogueManagerRoles,
+			}),
 		)
 	}
 	// customer_call (migration 0073) backs call requests on the Postgres
@@ -2083,6 +2087,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	taskSlaHandler := handler.NewTaskSlaHandler(activeTaskSlaSvc)
 
+	// The project SLA report reads the Postgres clocks, so it is switched off
+	// (a 400 saying so) when SLA data is read from ServiceNow, like the task SLA
+	// reads above. It is also switched off when the cases themselves are read
+	// from ServiceNow (DATA_SOURCE=servicenow): the local project and case rows
+	// can be incomplete then, and a report must not silently omit cases.
+	var activeSlaReportSvc service.SlaReportService
+	if cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.DataSource == config.DataSourceServiceNow {
+		activeSlaReportSvc = service.NewSlaReportUnsupportedService()
+	} else {
+		activeSlaReportSvc = service.NewSlaReportService(repository.NewSlaReportRepository(repository.NewScoped(db)))
+	}
+	slaReportHandler := handler.NewSlaReportHandler(activeSlaReportSvc)
+
 	var snUserHandler *handler.SNUserHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		snUserHandler = handler.NewSNUserHandler(snUserService)
@@ -2236,8 +2253,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /skills/me/history", skillHandler.GetMySkillHistory)
 		mux.HandleFunc("PUT /skills/me/{skillId}", skillHandler.SetMySkillLevel)
 		mux.HandleFunc("DELETE /skills/me/{skillId}", skillHandler.RemoveMySkill)
-		// Everybody's skills: a CSM admin or a CRE or SRE team lead.
+		mux.HandleFunc("GET /skills/me/capabilities", skillHandler.GetMySkillCapabilities)
+		// Categories: a catalogue manager.
+		mux.HandleFunc("POST /skills/categories", skillHandler.CreateSkillCategory)
+		mux.HandleFunc("PATCH /skills/categories/{id}", skillHandler.UpdateSkillCategory)
+		// Skill requests: anyone asks; a request reviewer decides.
+		mux.HandleFunc("POST /skills/requests/check", skillHandler.CheckSkillRequest)
+		mux.HandleFunc("POST /skills/requests", skillHandler.CreateSkillRequest)
+		mux.HandleFunc("GET /skills/requests/mine", skillHandler.ListMySkillRequests)
+		mux.HandleFunc("POST /skills/requests/{id}/withdraw", skillHandler.WithdrawSkillRequest)
+		mux.HandleFunc("POST /skills/requests/search", skillHandler.SearchSkillRequests)
+		mux.HandleFunc("POST /skills/requests/{id}/approve", skillHandler.ApproveSkillRequest)
+		mux.HandleFunc("POST /skills/requests/{id}/reject", skillHandler.RejectSkillRequest)
+		// Everybody's skills: the directory capability.
 		mux.HandleFunc("POST /skills/users/search", skillHandler.SearchUserSkills)
+		mux.HandleFunc("POST /skills/directory/search", skillHandler.SearchSkillDirectory)
+		mux.HandleFunc("GET /skills/users/{userId}", skillHandler.GetUserSkillProfile)
+		mux.HandleFunc("GET /skills/users/{userId}/history", skillHandler.GetUserSkillHistory)
 	}
 	if pagingChainHandler != nil {
 		// Who is on each tier of the CRE and SRE paging chains, what the caller
@@ -2268,6 +2300,27 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	// Alert mute rules (Operations > Alert mute rules, migration 0278): Postgres only. On the
+	// ServiceNow data source every route answers 400 (alert-core, through
+	// csm-integration-service, then mutes nothing). internalOnly: the rules
+	// name internal services and the staff who muted them.
+	var alertMuteRuleHandler *handler.AlertMuteRuleHandler
+	switch {
+	case cfg.DataSource == config.DataSourceServiceNow:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewSNAlertMuteRuleService())
+	case db != nil:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewAlertMuteRuleService(repository.NewAlertMuteRuleRepository(repository.NewScoped(db))))
+	}
+	if alertMuteRuleHandler != nil {
+		mux.HandleFunc("POST /alert-mute-rules/search", internalOnly(accessSvc, alertMuteRuleHandler.SearchAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/active", internalOnly(accessSvc, alertMuteRuleHandler.GetActiveAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.GetAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules", internalOnly(accessSvc, alertMuteRuleHandler.CreateAlertMuteRule))
+		mux.HandleFunc("PATCH /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.UpdateAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules/{id}/extend", internalOnly(accessSvc, alertMuteRuleHandler.ExtendAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules/{id}/end", internalOnly(accessSvc, alertMuteRuleHandler.EndAlertMuteRule))
+		mux.HandleFunc("DELETE /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.DeleteAlertMuteRule))
 	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
@@ -2756,6 +2809,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	mux.HandleFunc("GET /slas/{id}", internalOnly(accessSvc, taskSlaHandler.GetTaskSla))
 	mux.HandleFunc("POST /slas/search", internalOnly(accessSvc, taskSlaHandler.SearchTaskSlas))
+	mux.HandleFunc("GET /projects/{id}/slas/report", internalOnly(accessSvc, slaReportHandler.GetProjectSlaReport))
 
 	// Registered unconditionally; the non-ServiceNow data source is served by
 	// service.NewUnavailableTaskService, which answers 503 (see above).

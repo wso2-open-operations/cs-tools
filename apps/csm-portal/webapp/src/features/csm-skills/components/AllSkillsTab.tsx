@@ -53,11 +53,6 @@ import type { SearchSkillsRequest, Skill } from "@features/csm-skills/types";
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 const UNCATEGORISED = "Uncategorised";
 
-interface AllSkillsTabProps {
-  /** Shows create, edit and (de)activate. Hidden for everyone else; the backend still enforces it. */
-  isAdmin: boolean;
-}
-
 /** Groups one page of skills under each category path they are filed in. Display only; filtering is the backend's. */
 function groupByCategory(skills: readonly Skill[]): { path: string; skills: Skill[] }[] {
   const groups = new Map<string, Skill[]>();
@@ -73,11 +68,13 @@ function groupByCategory(skills: readonly Skill[]): { path: string; skills: Skil
 }
 
 /**
- * "All Skills": the read-only catalogue, searched, filtered by category and
- * paged by the backend, grouped by category on screen, with each skill's
- * description and level scale. Admins also get create, edit and (de)activate.
+ * Administration › Skills: the catalogue as a catalogue manager works on it,
+ * searched, filtered by category and paged by the backend, grouped by
+ * category on screen, with create, edit, (de)activate, inactive skills and how
+ * many people hold each (the backend sends the last two to a catalogue manager
+ * only). Everyone else browses the catalogue as a tree (SkillCatalogueBrowser).
  */
-export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Element {
+export default function AllSkillsTab(): JSX.Element {
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [showInactive, setShowInactive] = useState(false);
@@ -96,7 +93,7 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
   const request: SearchSkillsRequest = {
     ...(debounced ? { searchQuery: debounced } : {}),
     ...(categoryId ? { categoryIds: [categoryId] } : {}),
-    ...(isAdmin && showInactive ? { includeInactive: true } : {}),
+    ...(showInactive ? { includeInactive: true } : {}),
     pagination: { limit: rowsPerPage, offset: page * rowsPerPage },
   };
   const result = useSearchSkills(request);
@@ -148,20 +145,18 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
             }}
           />
         </Box>
-        {isAdmin && (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showInactive}
-                onChange={(e) => {
-                  setShowInactive(e.target.checked);
-                  setPage(0);
-                }}
-              />
-            }
-            label="Show inactive"
-          />
-        )}
+        <FormControlLabel
+          control={
+            <Switch
+              checked={showInactive}
+              onChange={(e) => {
+                setShowInactive(e.target.checked);
+                setPage(0);
+              }}
+            />
+          }
+          label="Show inactive"
+        />
         <Box sx={{ flexGrow: 1 }} />
         <RefreshButton
           onRefresh={() => void result.refetch()}
@@ -169,11 +164,9 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
           updatedAt={result.dataUpdatedAt}
           label="Refresh skills"
         />
-        {isAdmin && (
-          <Button variant="contained" startIcon={<Plus size={16} />} onClick={() => setEditing("new")}>
-            New skill
-          </Button>
-        )}
+        <Button variant="contained" startIcon={<Plus size={16} />} onClick={() => setEditing("new")}>
+          New skill
+        </Button>
       </Box>
 
       {error && (
@@ -218,6 +211,13 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                           <Typography variant="body1">{skill.name}</Typography>
                           {!skill.active && <Chip size="small" variant="outlined" label="Inactive" />}
+                          {skill.holderCount !== undefined && (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={`${skill.holderCount} ${skill.holderCount === 1 ? "person" : "people"}`}
+                            />
+                          )}
                         </Box>
                         {skill.description && (
                           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -239,18 +239,16 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
                           ))}
                         </Box>
                       </Box>
-                      {isAdmin && (
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
-                          <Tooltip title="Edit">
-                            <IconButton size="small" aria-label={`Edit ${skill.name}`} onClick={() => setEditing(skill)}>
-                              <Pencil size={16} />
-                            </IconButton>
-                          </Tooltip>
-                          <Button size="small" onClick={() => setToggling(skill)} aria-label={`${skill.active ? "Deactivate" : "Activate"} ${skill.name}`}>
-                            {skill.active ? "Deactivate" : "Activate"}
-                          </Button>
-                        </Box>
-                      )}
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
+                        <Tooltip title="Edit">
+                          <IconButton size="small" aria-label={`Edit ${skill.name}`} onClick={() => setEditing(skill)}>
+                            <Pencil size={16} />
+                          </IconButton>
+                        </Tooltip>
+                        <Button size="small" onClick={() => setToggling(skill)} aria-label={`${skill.active ? "Deactivate" : "Activate"} ${skill.name}`}>
+                          {skill.active ? "Deactivate" : "Activate"}
+                        </Button>
+                      </Box>
                     </Box>
                   );
                 })}
@@ -275,7 +273,7 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
         showLastButton
       />
 
-      {isAdmin && editing && (
+      {editing && (
         <SkillFormDialog
           skill={editing === "new" ? undefined : editing}
           onClose={(saved) => {
@@ -288,7 +286,7 @@ export default function AllSkillsTab({ isAdmin }: AllSkillsTabProps): JSX.Elemen
         />
       )}
 
-      {isAdmin && toggling && (
+      {toggling && (
         <Dialog open onClose={update.isPending ? undefined : () => setToggling(null)} maxWidth="xs" fullWidth aria-labelledby="toggle-skill-title">
           <DialogTitle id="toggle-skill-title">
             {toggling.active ? "Deactivate" : "Activate"} {toggling.name}?

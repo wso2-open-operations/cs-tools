@@ -47,7 +47,8 @@ function useRefreshProfile(): () => Promise<unknown> {
       qc.invalidateQueries({ queryKey: skillKeys.mine }),
       qc.invalidateQueries({ queryKey: [...skillKeys.root, "history"] }),
       // A manager's table lists these same rows.
-      qc.invalidateQueries({ queryKey: [...skillKeys.root, "people"] }),
+      qc.invalidateQueries({ queryKey: [...skillKeys.root, "directory"] }),
+      qc.invalidateQueries({ queryKey: [...skillKeys.root, "person"] }),
     ]);
 }
 

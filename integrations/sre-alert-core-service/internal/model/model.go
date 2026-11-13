@@ -80,6 +80,19 @@ type Incident struct {
 	AlertCount      int       `json:"alert_count" db:"alert_count"`
 	FirstSeen       time.Time `json:"first_seen" db:"first_seen"`
 	LastSeen        time.Time `json:"last_seen" db:"last_seen"`
+
+	// UniqueIdentifier is the first alert's raw value and SeverityLabel the most severe label any of its alerts carried
+	// (a later, more severe duplicate raises it), kept so alert mute rules can match on them.
+	UniqueIdentifier string `json:"unique_identifier" db:"unique_identifier"`
+	SeverityLabel    string `json:"severity_label" db:"severity_label"`
+	// Muted is set while an active alert mute rule matches an incident that was never delivered; nothing is sent while it is.
+	// MuteRuleID/MuteRuleNumber name the last rule that matched; UnmutedAt is when no rule matched any more.
+	Muted          bool       `json:"muted" db:"muted"`
+	MutedAt        *time.Time `json:"muted_at" db:"muted_at"`
+	UnmutedAt      *time.Time `json:"unmuted_at" db:"unmuted_at"`
+	MuteRuleID     string     `json:"mute_rule_id" db:"mute_rule_id"`
+	MuteRuleNumber string     `json:"mute_rule_number" db:"mute_rule_number"`
+
 	// StateCheckedAt throttles CSM status refreshes to one per state_check_interval.
 	StateCheckedAt time.Time `json:"state_checked_at" db:"state_checked_at"`
 	// Fallback and CSMConfirmed are independent delivery obligations tracked separately.
@@ -132,15 +145,61 @@ func (i Incident) NextCSMRetry(base time.Duration, multiplier float64, maxDelay 
 	return i.CSMLastAttemptAt.Add(min(delay, maxDelay))
 }
 
-// IsOpen reports whether an alert at now still folds into this incident: within dedupWindow of FirstSeen and not closed on CSM.
+// IsOpen reports whether an alert at now still folds into this incident: within dedupWindow of FirstSeen and not
+// closed, either on CSM or quietly after it resolved while muted.
 func (i Incident) IsOpen(now time.Time, dedupWindow time.Duration) bool {
 	if now.Sub(i.FirstSeen) >= dedupWindow {
 		return false
 	}
-	if !i.CSMConfirmed {
+	return !strings.EqualFold(strings.TrimSpace(i.Status), "closed")
+}
+
+// MuteEligible reports whether alert mute rules apply to the incident: it is muted, or it has never been sent anywhere,
+// was never released from a mute, and is not closed. Once anything is delivered, a rule no longer stops it.
+func (i Incident) MuteEligible() bool {
+	if i.Muted {
 		return true
 	}
-	return !strings.EqualFold(strings.TrimSpace(i.Status), "closed")
+	return !i.CSMConfirmed && i.CSMAttempts == 0 && !i.Fallback && i.UnmutedAt == nil &&
+		!strings.EqualFold(strings.TrimSpace(i.Status), "closed")
+}
+
+// QuietlyClosed reports whether the incident was closed while muted (it resolved or was replaced) without ever being
+// sent anywhere. A later OK alert can still fold into it; that must not deliver it.
+func (i Incident) QuietlyClosed() bool {
+	return !i.Muted && i.UnmutedAt != nil && !i.CSMConfirmed && i.CSMAttempts == 0 && !i.Fallback &&
+		strings.EqualFold(strings.TrimSpace(i.Status), "closed")
+}
+
+// What happened to an incident an alert mute rule muted, as the CSM portal shows it.
+const (
+	MuteOutcomeMuted         = "muted"          // still held by a rule
+	MuteOutcomeIncident      = "incident"       // released and created in CSM
+	MuteOutcomeClosedQuietly = "closed_quietly" // resolved or replaced while muted; never sent anywhere
+	MuteOutcomeDelivering    = "delivering"     // released and still firing; CSM creation is in progress or failed
+)
+
+// MuteOutcome reports what happened to an incident an alert mute rule muted.
+// store.MutedByRuleSummary counts the same branches in SQL: change both together.
+func (i Incident) MuteOutcome() string {
+	switch {
+	case i.Muted:
+		return MuteOutcomeMuted
+	case i.CSMConfirmed:
+		return MuteOutcomeIncident
+	case i.QuietlyClosed():
+		return MuteOutcomeClosedQuietly
+	default:
+		return MuteOutcomeDelivering
+	}
+}
+
+// DeliverableSince is when the incident became deliverable: its creation, or its release from an alert mute rule mute.
+func (i Incident) DeliverableSince() time.Time {
+	if i.UnmutedAt != nil && i.UnmutedAt.After(i.CreatedAt) {
+		return *i.UnmutedAt
+	}
+	return i.CreatedAt
 }
 
 // Defaults are fallback Alert field values sourced from the CORE_ALERT_DEFAULTS env var.
@@ -201,6 +260,25 @@ func SeverityToNumeric(label string) (n int, recognized bool) {
 		return n, true
 	}
 	return 1, false
+}
+
+// MoreSevere reports whether severity label a is strictly more severe than b (critical > major > minor > warning).
+// Only a recognized, non-resolving a counts: an unknown or OK label never raises an incident's severity, and an unknown
+// b counts as critical, as SeverityToNumeric treats it.
+func MoreSevere(a, b string) bool {
+	na, okA := numericSeverity[strings.ToLower(strings.TrimSpace(a))]
+	if !okA || IsResolving(na) {
+		return false
+	}
+	b = strings.ToLower(strings.TrimSpace(b))
+	if b == "" {
+		return true
+	}
+	nb, okB := numericSeverity[b]
+	if !okB {
+		return false // an unknown label is treated as critical (see SeverityToNumeric), so nothing outranks it
+	}
+	return IsResolving(nb) || na < nb
 }
 
 // IsResolving reports whether severityNum is a recovery signal (OK=5 or Clear=0).

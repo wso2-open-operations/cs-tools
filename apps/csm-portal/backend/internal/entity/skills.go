@@ -94,3 +94,10 @@ func (c *CustomerEntityClient) GetMySkillHistory(ctx context.Context, skillID, l
 func (c *CustomerEntityClient) SearchUserSkills(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/skills/users/search", body)
 }
+
+// SkillCall calls one of the skill management routes (capabilities,
+// categories, requests, directory, a person's profile) with the given method
+// and path. The handler builds the path from validated UUIDs only.
+func (c *CustomerEntityClient) SkillCall(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.do(ctx, method, path, body)
+}

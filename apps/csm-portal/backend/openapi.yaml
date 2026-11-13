@@ -10698,6 +10698,603 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /alert-mute-rules:
+    post:
+      summary: Create an alert mute rule.
+      description: >
+        An alert mute rule mutes SRE alerts matching every condition between
+        startOn and endOn. Proxied to entity-service, which validates the body
+        and answers 400 with the reason (e.g. endOn more than 72h after
+        startOn, a missing service or environment condition).
+      operationId: postAlertMuteRules
+      requestBody:
+        description: Alert mute rule create payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/search:
+    post:
+      summary: Search alert mute rules, newest created first.
+      operationId: postAlertMuteRulesSearch
+      requestBody:
+        description: Alert mute rule search payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAlertMuteRulesPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAlertMuteRulesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}:
+    get:
+      summary: Get an alert mute rule by ID.
+      operationId: getAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    patch:
+      summary: Edit a scheduled alert mute rule.
+      description: Same body as create. Only a scheduled alert mute rule can be edited; otherwise 409.
+      operationId: patchAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Alert mute rule save payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is no longer scheduled). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    delete:
+      summary: Delete a scheduled alert mute rule.
+      operationId: deleteAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is no longer scheduled). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}/extend:
+    post:
+      summary: Move a scheduled or active alert mute rule's end later.
+      description: The new endOn must be after the current one and at most 72h after startOn.
+      operationId: postAlertMuteRuleExtend
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: New end time.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendAlertMuteRulePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is not scheduled or active). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}/end:
+    post:
+      summary: End an active alert mute rule now.
+      description: Sets endedOn to now and endedBy to the caller. Takes no body.
+      operationId: postAlertMuteRuleEnd
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is not active). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/muted-counts:
+    get:
+      summary: Count the alert groups each of several alert mute rules muted.
+      description: >-
+        Read from sre-alert-core-service in one call, for a page of the rules list. Every requested id is in counts,
+        with 0 when the rule muted nothing.
+      operationId: getAlertMuteRuleMutedCounts
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: Comma-separated alert mute rule UUIDs, at most 100.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  counts:
+                    type: object
+                    additionalProperties:
+                      type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /alert-mute-rules/{id}/muted-alerts:
+    get:
+      summary: List the alerts an alert mute rule muted.
+      description: >-
+        Read from sre-alert-core-service, not entity-service. One row per incident (alerts grouped by fingerprint),
+        newest first, with its outcome (muted, incident, closed_quietly or delivering) and counts by outcome over all of
+        them. Rows the alerting service's retention purged are gone.
+      operationId: getAlertMuteRuleMutedAlerts
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AlertMuteRuleMutedAlert'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  summary:
+                    type: object
+                    additionalProperties:
+                      type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /alert-field-values:
+    get:
+      summary: List the values real alerts carry in one field.
+      description: >-
+        Read from sre-alert-core-service. Distinct values of the field among the alerts it still keeps that contain q,
+        most recently seen first. The alert mute rule form suggests them, since a rule matches these strings.
+
+        Data exposure: the values are raw alert metadata from incidents seen in the last 30 days, and
+        unique_identifier in particular can carry hostnames, instance ids or customer references. They are
+        internal operational data, shown to the same audience that already reads those alerts' incidents in the
+        Operations area: PermViewOperations (CS engineers, admins and the security team), never a customer. A
+        unique_identifier search needs at least 3 characters, so the list cannot be enumerated from an empty query.
+      operationId: getAlertFieldValues
+      parameters:
+        - name: field
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        - name: q
+          in: query
+          description: Case-insensitive substring to match.
+          schema:
+            type: string
+            maxLength: 255
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  values:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /outages:
     post:
       summary: Create a new outage (ServiceNow data source only).
@@ -12763,6 +13360,86 @@ paths:
   # than fully typed here. Every endpoint is registered directly on
   # PermUsageMetricsViewer rather than the blanket PermViewerAccess gate --
   # see that permission's own doc comment in internal/handler/access.go.
+
+  /generate-sla-report:
+    get:
+      summary: Generate a project's SLA report.
+      description: >-
+        The SLA clocks of the cases the project opened between from and to
+        (both inclusive; every case is listed, newest first). Each case shows
+        its latest response, workaround and resolution clock: the elapsed time
+        and whether it was met, missed (finished late, or still running and
+        already past the target), is running or paused, or was cancelled. The
+        summary has one row per case type (Incident, or Query for a question)
+        and severity that has a case. For each target it gives the 95th
+        percentile of the elapsed time of the clocks that finished, the policy
+        target, and how many clocks were met, missed or still running.
+        Durations are display strings such as "2 Days 3 Hours".
+      operationId: generateSlaReport
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          description: The project's id or its key.
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          description: First case creation date to include (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: Last case creation date to include (YYYY-MM-DD, the whole day). Must not be before from.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAReportDetails'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /usage-metrics/projects:
     get:
@@ -20440,6 +21117,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    post:
+      summary: Create a skill category.
+      operationId: createSkillCategory
+      description: >
+        A sub-category goes under an active parent with no skills filed directly under it. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "201":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /skills/search:
     post:
       summary: Search the skill catalogue.
@@ -20942,8 +21674,8 @@ paths:
       summary: Everybody's skills (Skill Manager).
       operationId: searchUserSkills
       description: >
-        Requires the view permission here; the entity service allows only a skill manager and refuses anyone
-        else with 403. Paged and filtered by the entity service.
+        Requires the view permission here; the entity service allows only a holder of the skill directory
+        capability and refuses anyone else with 403. Paged and filtered by the entity service.
       requestBody:
         required: true
         content:
@@ -20988,6 +21720,698 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /skills/me/capabilities:
+    get:
+      summary: The caller's skills capabilities.
+      operationId: getMySkillCapabilities
+      description: >
+        canViewDirectory, canReviewRequests, canManageCatalogue and, for a reviewer, pendingRequestCount.
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/categories/{id}:
+    patch:
+      summary: Edit a skill category.
+      operationId: updateSkillCategory
+      description: >
+        Rename, describe, deactivate or activate. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/check:
+    post:
+      summary: Duplicate preview for a skill request.
+      operationId: checkSkillRequest
+      description: >
+        Exact match, similar names and a pending request for the same name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests:
+    post:
+      summary: Request a skill the catalogue lacks.
+      operationId: createSkillRequest
+      description: >
+        levelId is required - the skill is added at it on approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "201":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/mine:
+    get:
+      summary: The caller's own skill requests.
+      operationId: listMySkillRequests
+      description: >
+        Pending first, then the newest.
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/search:
+    post:
+      summary: The skill request queue.
+      operationId: searchSkillRequests
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/withdraw:
+    post:
+      summary: Withdraw one's own pending skill request.
+      operationId: withdrawSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/approve:
+    post:
+      summary: Approve a skill request.
+      operationId: approveSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/reject:
+    post:
+      summary: Reject a skill request (a reason is required).
+      operationId: rejectSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/directory/search:
+    post:
+      summary: The skill directory, one row per person.
+      operationId: searchSkillDirectory
+      description: >
+        Criteria of skill and minimum level matched ALL or ANY. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/users/{userId}:
+    get:
+      summary: One person's skills.
+      operationId: getUserSkillProfile
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/users/{userId}/history:
+    get:
+      summary: One person's skill history.
+      operationId: getUserSkillHistory
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: skillId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 components:
   securitySchemes:
     bearerAuth:
@@ -21978,6 +23402,173 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SalesforceResyncApplyComponent'
+    AlertMuteRuleMutedAlert:
+      type: object
+      description: >-
+        One group of alerts (one fingerprint) an alert mute rule muted, as sre-alert-core-service reports it.
+      properties:
+        id:
+          type: integer
+          format: int64
+        service:
+          type: string
+        environment:
+          type: string
+        source:
+          type: string
+        metricName:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        uniqueIdentifier:
+          type: string
+        alertCount:
+          type: integer
+          description: How many alerts were grouped into this row.
+        firstSeen:
+          type: string
+          format: date-time
+        lastSeen:
+          type: string
+          format: date-time
+        mutedAt:
+          type: string
+          format: date-time
+          nullable: true
+        unmutedAt:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          type: string
+          enum: [muted, incident, closed_quietly, delivering]
+          description: >-
+            muted (still muted), incident (became a CSM incident after the rule ended), closed_quietly (resolved while
+            muted, never paged) or delivering (a CSM incident is being created).
+        incidentNumber:
+          type: string
+          description: The CSM incident number when outcome is incident; empty otherwise.
+    AlertMuteRuleCondition:
+      type: object
+      required: [field, value]
+      properties:
+        field:
+          type: string
+          enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        value:
+          type: string
+          maxLength: 255
+    AlertMuteRuleSavePayload:
+      type: object
+      required: [name, timeZone, startOn, endOn, conditions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+          description: IANA zone the times were entered in, e.g. Asia/Colombo.
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+          description: After startOn, at most 72h after it, and in the future.
+        conditions:
+          type: array
+          description: Each field at most once; must include service and environment.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    ExtendAlertMuteRulePayload:
+      type: object
+      required: [endOn]
+      properties:
+        endOn:
+          type: string
+          format: date-time
+    AlertMuteRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: AMR0000001
+        name:
+          type: string
+        description:
+          type: string
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        endedBy:
+          type: string
+          nullable: true
+        endedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SearchAlertMuteRulesPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            states:
+              type: array
+              description: Omitted means all. expired also returns alert mute rules ended early.
+              items:
+                type: string
+                enum: [active, scheduled, expired]
+            searchQuery:
+              type: string
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+            limit:
+              type: integer
+    SearchAlertMuteRulesResponse:
+      type: object
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
     ErrorPayload:
       type: object
       description: >-
@@ -32553,6 +34144,97 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Comment'
+
+    SLAReportMetric:
+      type: object
+      description: One clock target for one case type and severity.
+      required: [elapsed, target, met, missed, running]
+      properties:
+        elapsed:
+          type: string
+          description: 95th percentile of the elapsed time of the finished clocks, or "—" when none finished.
+        target:
+          type: string
+          description: The policy duration the clocks run against, or "Not applicable".
+        met:
+          type: integer
+        missed:
+          type: integer
+        running:
+          type: integer
+    SLAReportSummaryRow:
+      type: object
+      required: [label, caseType, severity, cases, response, workaround, resolution]
+      properties:
+        label:
+          type: string
+        caseType:
+          type: string
+          enum: [incident, query]
+        severity:
+          type: string
+        cases:
+          type: integer
+        response:
+          $ref: '#/components/schemas/SLAReportMetric'
+        workaround:
+          $ref: '#/components/schemas/SLAReportMetric'
+        resolution:
+          $ref: '#/components/schemas/SLAReportMetric'
+    SLAReportClock:
+      type: object
+      required: [elapsed, status]
+      properties:
+        elapsed:
+          type: string
+        status:
+          type: string
+          enum: ["", Met, Missed, Running, Paused, Cancelled]
+    SLAReportCase:
+      type: object
+      required: [caseId, caseNumber, caseType, severity, state, openedOn, response, workaround, resolution]
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+        caseType:
+          type: string
+        severity:
+          type: string
+        state:
+          type: string
+        openedOn:
+          type: string
+          format: date-time
+        response:
+          $ref: '#/components/schemas/SLAReportClock'
+        workaround:
+          $ref: '#/components/schemas/SLAReportClock'
+        resolution:
+          $ref: '#/components/schemas/SLAReportClock'
+    SLAReportDetails:
+      type: object
+      required: [projectName, projectKey, periodStart, periodEnd, summary, cases]
+      properties:
+        projectName:
+          type: string
+        projectKey:
+          type: string
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        summary:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAReportSummaryRow'
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAReportCase'
 
     TimeLogBreakdownDetails:
       type: object

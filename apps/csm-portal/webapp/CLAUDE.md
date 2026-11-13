@@ -50,13 +50,22 @@ permission (see `apps/csm-portal/backend`'s own `CLAUDE.md`, "PATCH /projects/{i
 requires PermAdmin") — hiding the pencil icon for a `cs_engineer` just avoids offering an action that
 would 403 for them.
 
-**Skills** (`features/csm-skills`, `/skills`) has two more deliberate exceptions, both by explicit product
-decision and both on top of a real backend gate: the **Skill Manager** tab (`CsmSkillsPage.tsx`) is shown only
-when `useIsSkillManager` succeeds. That hook has no flag to read, so it calls `POST /skills/users/search` once
-with `{pagination:{limit:1}}`, caches the answer for the session and treats a `403` as "not a manager" (any other
-failure also hides the tab). And the All Skills tab's create/edit/(de)activate actions render only for
-`usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
-manager table are always sent to the backend, never done in the browser.
+**Skills** (`features/csm-skills`, `/skills`) hides two tabs by explicit product decision, on top of a real backend
+gate: **Skill Directory** and **Administration** (Requests / Skills / Categories sub-tabs) render only for the
+matching capability from `GET /skills/me/capabilities` (`useSkillCapabilities`: `canViewDirectory`,
+`canReviewRequests`, `canManageCatalogue`; entity-service resolves each from the admin roles plus its own configured
+role list, so who does which task is configuration, not code). There is no 403 probe and no `isAdmin` check any more;
+an old `?tab=manager` link lands on the directory. **All Skills** (`SkillCatalogueBrowser`) is a category tree
+(`SkillTree`, built by `utils/skillTree.ts`; the whole active catalogue is read page by page with the search sent to the
+backend) beside the selected skill (`SkillDetailPanel`, kept in the URL as `?skill=`): what it covers, its levels, "On
+your profile" or "Add to my skills", and, **only with `canViewDirectory`**, the people who hold it (the directory search
+with that one skill as its criterion; a person opens `PersonSkillsDrawer`). Without it the panel says the people list
+needs directory access and nothing is asked for. Administration › Skills (`AllSkillsTab`) is the catalogue managers'
+list: create, edit, (de)activate, inactive skills, holder counts. The backend sends inactive skills/categories and
+holder counts only to a catalogue manager, so the tree never has them to hide. A skill the
+catalogue lacks is requested (`RequestSkillDialog`, with a live duplicate check) and reviewed in
+`ReviewSkillRequestDialog`; approving adds it to the requester's profile at the requested level. Filtering and paging
+for the catalogue, the directory and the request queue are always sent to the backend, never done in the browser.
 
 **Products** (`features/csm-products`, `/products`) is another deliberate exception, on top of a real backend
 gate: every edit control (Add product, Add product version and each product's Add version action, the Edit pencil,
@@ -233,9 +242,9 @@ own `CLAUDE.md`): `csm-customer-health`, `csm-usage-metrics`, `csm-reports`. Fou
 interchangeable:
 
 - **`isSplAudience`** — true for anyone holding the `viewer` role, regardless of what else they hold.
-  Gates the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx`
-  and the Time report button added to `CsmProjectDetailPage.tsx` — all of it invisible to a caller
-  who has never held `viewer`.
+  Gates the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx` — invisible
+  to a caller who has never held `viewer`. The SLA, Time and CS report buttons on `CsmProjectDetailPage.tsx` are not
+  gated by it: anyone who can open the project sees them (their routes are `PermView` on the backend).
 - **`canViewCustomerHealth`** — the Customer Health dashboard: `viewer` as well as `cs_engineer`/`admin`
   (mirrors the backend's `PermViewCustomerHealth`). Wider than `isSplAudience` on purpose, so a
   `cs_engineer` or `admin` who does not also hold `viewer` still sees it. Customer Health and Usage Metrics

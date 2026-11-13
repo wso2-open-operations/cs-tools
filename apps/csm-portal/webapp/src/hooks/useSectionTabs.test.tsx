@@ -110,7 +110,7 @@ describe("usePathSectionTabs", () => {
     renderPathTabsAt("/operations/service-requests");
 
     expect(screen.getByTestId("tab-keys")).toHaveTextContent(
-      "service-requests,change-requests,incidents,problems",
+      "service-requests,change-requests,incidents,alert-mute-rules,problems",
     );
   });
 
@@ -215,6 +215,7 @@ describe("firstEnabledPathTab / enabledPathTabKeys", () => {
       "service-requests",
       "change-requests",
       "incidents",
+      "alert-mute-rules",
       "problems",
       "outages",
       "runbooks",
@@ -228,6 +229,7 @@ describe("firstEnabledPathTab / enabledPathTabKeys", () => {
     expect(enabledPathTabKeys("operations")).toEqual([
       "service-requests",
       "change-requests",
+      "alert-mute-rules",
       "problems",
       "outages",
       "runbooks",

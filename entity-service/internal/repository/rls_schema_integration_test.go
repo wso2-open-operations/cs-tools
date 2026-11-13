@@ -80,6 +80,7 @@ var rlsProtectedTables = []string{
 	"standard_change_suggestion_run",          // 100030
 	"standard_change_suggestion_run_customer", // 100030
 	"standard_change_suggestion_snapshot",     // 100030
+	"alert_mute_rule",                         // 100028
 }
 
 // TestRLSSchemaIntegration_EveryProtectedTableHasForceRowLevelSecurity is the
