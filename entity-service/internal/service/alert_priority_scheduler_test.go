@@ -118,3 +118,16 @@ func TestPriorityScheduler_WeightBelowOneActsAsOne(t *testing.T) {
 		}
 	}
 }
+
+func TestPriorityScheduler_StopsWhenContextIsDoneEvenWithWaitingItems(t *testing.T) {
+	high, standard := filled(3, "h"), filled(3, "s")
+	s := newPriorityScheduler(high, standard, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, ok := s.next(ctx); ok {
+		t.Fatal("next handed out an item after the context was cancelled")
+	}
+	if len(high) != 3 || len(standard) != 3 {
+		t.Fatalf("lanes hold %d and %d items, want both untouched so shutdown can hand them back", len(high), len(standard))
+	}
+}

@@ -150,7 +150,7 @@ func transformOne(alert map[string]any, cfg Config, receiver, batchStatus string
 
 // buildMetricName mirrors the reference script: a Grafana alert with an annotations.title uses that, prefixed; otherwise labels.alertname.
 func buildMetricName(isGrafana bool, labels, annotations map[string]any) string {
-	if fieldvalue.Str(labels, "grafana_folder") != "" {
+	if isGrafana {
 		if title := fieldvalue.Str(annotations, "title"); title != "" {
 			return grafanaAlertPrefix + title
 		}

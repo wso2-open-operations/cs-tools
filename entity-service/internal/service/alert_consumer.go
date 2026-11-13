@@ -30,7 +30,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 // AlertReceiver is the part of a Service Bus queue receiver the alert consumer uses; *azservicebus.Receiver satisfies it.
@@ -39,6 +38,13 @@ type AlertReceiver interface {
 	CompleteMessage(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.CompleteMessageOptions) error
 	AbandonMessage(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.AbandonMessageOptions) error
 	DeadLetterMessage(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.DeadLetterOptions) error
+	RenewMessageLock(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.RenewMessageLockOptions) error
+}
+
+// AlertStore is the storage the alert consumer writes to; repository.AlertRepository satisfies it.
+type AlertStore interface {
+	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) (int64, error)
 }
 
 // AlertTransforms finds the transform for a gateway route; *alertsource.Registry satisfies it.
@@ -86,8 +92,14 @@ const (
 // settleTimeout bounds one settlement call, which also runs after shutdown has begun.
 const settleTimeout = 30 * time.Second
 
-// processTimeout bounds one message's processing, kept well inside the queue's 60 second lock.
+// processTimeout bounds one message's processing; the lock is renewed meanwhile, so it may run past the queue's 60 second lock.
 const processTimeout = 45 * time.Second
+
+// defaultLockRenewMargin is how long before a message lock expires it is renewed.
+const defaultLockRenewMargin = 15 * time.Second
+
+// minLockRenewWait keeps renewal from spinning when a lock is already close to expiry.
+const minLockRenewWait = time.Second
 
 type alertSettlement int
 
@@ -115,18 +127,19 @@ type alertLane struct {
 
 // AlertConsumer streams alerts from the priority and standard Service Bus queues into the alert table.
 type AlertConsumer struct {
-	repo       repository.AlertRepository
-	transforms AlertTransforms
-	lanes      map[domain.AlertTier]*alertLane
-	scheduler  *priorityScheduler[*azservicebus.ReceivedMessage]
-	workers    int
-	now        func() time.Time
-	sleep      func(ctx context.Context, d time.Duration) bool
+	repo            AlertStore
+	transforms      AlertTransforms
+	lanes           map[domain.AlertTier]*alertLane
+	scheduler       *priorityScheduler[*azservicebus.ReceivedMessage]
+	workers         int
+	now             func() time.Time
+	sleep           func(ctx context.Context, d time.Duration) bool
+	lockRenewMargin time.Duration
 }
 
 // NewAlertConsumer wires one receiver per queue; each queue buffers at most one message per worker, so locks stay fresh.
 func NewAlertConsumer(
-	repo repository.AlertRepository,
+	repo AlertStore,
 	transforms AlertTransforms,
 	high AlertReceiver, highQueue string,
 	standard AlertReceiver, standardQueue string,
@@ -138,13 +151,14 @@ func NewAlertConsumer(
 		domain.AlertTierDefault: {tier: domain.AlertTierDefault, queue: standardQueue, receiver: standard, messages: make(chan *azservicebus.ReceivedMessage, workers)},
 	}
 	return &AlertConsumer{
-		repo:       repo,
-		transforms: transforms,
-		lanes:      lanes,
-		scheduler:  newPriorityScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
-		workers:    workers,
-		now:        time.Now,
-		sleep:      sleepContext,
+		repo:            repo,
+		transforms:      transforms,
+		lanes:           lanes,
+		scheduler:       newPriorityScheduler(lanes[domain.AlertTierHigh].messages, lanes[domain.AlertTierDefault].messages, cfg.PriorityWeight),
+		workers:         workers,
+		now:             time.Now,
+		sleep:           sleepContext,
+		lockRenewMargin: defaultLockRenewMargin,
 	}
 }
 
@@ -209,8 +223,61 @@ func (c *AlertConsumer) work(ctx context.Context) {
 func (c *AlertConsumer) handle(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage) {
 	processCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processTimeout)
 	defer cancel()
+	if err := c.renewLockIfDue(processCtx, lane, message); err != nil {
+		slog.WarnContext(ctx, "alert consumer: lock lost while the message waited for a worker, Service Bus will redeliver it", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+		return
+	}
+	stopRenewing := c.keepLock(processCtx, lane, message)
 	decision := c.process(processCtx, lane.tier, message)
+	stopRenewing()
+	// Renewal stops before settling, so the two never touch the message at once; a last renewal covers a slow settlement.
+	renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancelRenew()
+	if err := c.renewLockIfDue(renewCtx, lane, message); err != nil {
+		slog.WarnContext(ctx, "alert consumer: lock lost before settlement, Service Bus will redeliver the message", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+		return
+	}
 	c.settle(processCtx, lane, message, decision)
+}
+
+// renewLockIfDue renews the message lock when it expires within lockRenewMargin.
+func (c *AlertConsumer) renewLockIfDue(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage) error {
+	if message.LockedUntil == nil || c.now().Add(c.lockRenewMargin).Before(*message.LockedUntil) {
+		return nil
+	}
+	return lane.receiver.RenewMessageLock(ctx, message, nil)
+}
+
+// keepLock renews the message lock while it is processed and returns the function that stops renewing.
+func (c *AlertConsumer) keepLock(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage) func() {
+	done := make(chan struct{})
+	var renewing sync.WaitGroup
+	renewing.Go(func() {
+		for {
+			wait := c.lockRenewMargin
+			if message.LockedUntil != nil {
+				wait = max(message.LockedUntil.Sub(c.now())-c.lockRenewMargin, minLockRenewWait)
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case <-done:
+				timer.Stop()
+				return
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if err := lane.receiver.RenewMessageLock(ctx, message, nil); err != nil {
+				slog.WarnContext(ctx, "alert consumer: lock renewal failed", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+				return
+			}
+		}
+	})
+	return func() {
+		close(done)
+		renewing.Wait()
+	}
 }
 
 // process stores one message's alerts and decides how to settle it; bad payloads are dead-lettered, store failures retried.
@@ -223,7 +290,7 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 	if !ok {
 		return alertDeadLetterDecision(alertDeadLetterUnknownSource, fmt.Sprintf("no transform for source %q", source))
 	}
-	alerts, err := transform(message.Body)
+	alerts, err := safeTransform(transform, message.Body)
 	if err != nil {
 		return alertDeadLetterDecision(alertDeadLetterTransformFailed, err.Error())
 	}
@@ -256,6 +323,16 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 	return alertDecision{settlement: alertComplete, stored: stored, alerts: len(alerts)}
+}
+
+// safeTransform turns a panic in a transform into an error, so one malformed payload is dead-lettered instead of stopping the service.
+func safeTransform(transform alertsource.Transform, body []byte) (alerts []model.Alert, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			alerts, err = nil, fmt.Errorf("transform panicked: %v", r)
+		}
+	}()
+	return transform(body)
 }
 
 // buildRows gives each alert its id and fingerprint the way alert-ingestion does: an alert with no identifier takes its own id.

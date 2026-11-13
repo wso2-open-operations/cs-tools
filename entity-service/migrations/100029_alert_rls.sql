@@ -15,13 +15,9 @@
 -- under the License.
 
 -- alert is internal only: the Service Bus consumer writes it as the system identity, and no customer may read it.
-BEGIN;
-
 ALTER TABLE alert ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alert FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS alert_internal_only ON alert;
 CREATE POLICY alert_internal_only ON alert FOR ALL
     USING (current_setting('app.is_internal', true) = 'true')
     WITH CHECK (current_setting('app.is_internal', true) = 'true');
-
-COMMIT;
