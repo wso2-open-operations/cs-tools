@@ -185,7 +185,8 @@ export const INSERT_IMAGE_COMMAND: LexicalCommand<
 export type PlainTextPasteToken =
   | { type: "text"; value: string }
   | { type: "tab" }
-  | { type: "paragraph" };
+  | { type: "paragraph" }
+  | { type: "linebreak" };
 
 /**
  * Tokenizes plain-text clipboard content (used whenever the clipboard has
@@ -205,7 +206,11 @@ export type PlainTextPasteToken =
  * A lone newline inside real content still starts a new paragraph, same as
  * before -- only the redundant, content-free break is removed.
  */
-export function tokenizePlainTextPaste(text: string): PlainTextPasteToken[] {
+export function tokenizePlainTextPaste(
+  text: string,
+  options: { lineBreaks?: boolean } = {},
+): PlainTextPasteToken[] {
+  if (options.lineBreaks) return tokenizePlainTextPasteAsLineBreaks(text);
   const parts = text.split(/(\r?\n|\t)/);
   if (parts[parts.length - 1] === "") {
     parts.pop();
@@ -234,6 +239,24 @@ export function tokenizePlainTextPaste(text: string): PlainTextPasteToken[] {
     // it carries no content of its own and is otherwise skipped.
   }
 
+  return tokens;
+}
+
+/**
+ * The `lineBreaks` mode of {@link tokenizePlainTextPaste}, for editors whose
+ * Enter key inserts a `<br>` instead of a paragraph (`enterInsertsLineBreak`):
+ * every newline becomes a "linebreak" token, so a pasted blank line stays one
+ * blank line (two consecutive breaks) and a lone newline stays a single break.
+ * Three or more consecutive newlines collapse to one blank line.
+ */
+function tokenizePlainTextPasteAsLineBreaks(text: string): PlainTextPasteToken[] {
+  const normalized = text.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n");
+  const tokens: PlainTextPasteToken[] = [];
+  for (const part of normalized.split(/(\n|\t)/)) {
+    if (part === "\n") tokens.push({ type: "linebreak" });
+    else if (part === "\t") tokens.push({ type: "tab" });
+    else if (part !== "") tokens.push({ type: "text", value: part });
+  }
   return tokens;
 }
 

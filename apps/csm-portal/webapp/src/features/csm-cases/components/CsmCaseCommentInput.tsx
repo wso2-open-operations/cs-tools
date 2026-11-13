@@ -63,7 +63,7 @@ import {
   useInlineImageStatus,
 } from "@features/csm-cases/api/inlineImageUploads";
 import { PartialSendError } from "@features/csm-cases/utils/sendCommentWithAttachments";
-import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
+import { hasCommentContent, trimTrailingLineBreaks } from "@features/csm-cases/utils/commentContent";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
 
 /** A file staged for upload, with the display name chosen in the modal. */
@@ -520,7 +520,7 @@ export default function CsmCaseCommentInput({
       setError("An image in the comment could not be uploaded. Remove it and add it again.");
       return;
     }
-    const body = resolveInlineImageSources(sendHtml);
+    const body = resolveInlineImageSources(trimTrailingLineBreaks(sendHtml));
     if (hasBlobSource(body)) {
       setError("An image in the comment could not be uploaded. Remove it and add it again.");
       return;
@@ -792,6 +792,7 @@ export default function CsmCaseCommentInput({
           showKeyboardHint
           autoFocus={autoFocus}
           enterToSubmit={false}
+          enterInsertsLineBreak
           onAttachmentClick={attachmentsDisabled ? undefined : onAttachmentClick}
           attachments={attachments.map((a) => a.file)}
           maxAttachments={COMMENT_MAX_ATTACHMENTS}

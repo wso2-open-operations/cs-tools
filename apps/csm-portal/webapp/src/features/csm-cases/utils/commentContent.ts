@@ -342,3 +342,17 @@ export function hasCommentContent(html: string): boolean {
   const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
   return text.length > 0 || /<img\b/i.test(html);
 }
+
+/**
+ * Drops the `<br>`s at the very end of the last paragraph of a composer's HTML.
+ * Enter inserts a line break in the reply box, so a reply that ends with Enters
+ * would otherwise be posted with blank space under it. Only breaks that follow
+ * real content are dropped: a last paragraph that is nothing but breaks is left
+ * as it is (never turned into an empty `<p></p>`).
+ */
+export function trimTrailingLineBreaks(html: string): string {
+  const match = /(?:<br\s*\/?>\s*)+<\/p>\s*$/i.exec(html);
+  if (!match) return html;
+  if (/<p(?:\s[^>]*)?>\s*$/i.test(html.slice(0, match.index))) return html;
+  return html.slice(0, match.index) + match[0].replace(/^(?:<br\s*\/?>\s*)+/i, "");
+}

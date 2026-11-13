@@ -90,6 +90,51 @@ describe("tokenizePlainTextPaste", () => {
   });
 });
 
+describe("tokenizePlainTextPaste with lineBreaks (enterInsertsLineBreak editors)", () => {
+  const lb = (text: string) => tokenizePlainTextPaste(text, { lineBreaks: true });
+  const text = (value: string) => ({ type: "text", value });
+  const br = { type: "linebreak" };
+
+  it("turns a single newline into one line break", () => {
+    expect(lb("Line A\nLine B")).toEqual([text("Line A"), br, text("Line B")]);
+  });
+
+  it("keeps a blank line as one blank line (two line breaks)", () => {
+    expect(lb("Hi team,\n\nLine A\nLine B")).toEqual([
+      text("Hi team,"),
+      br,
+      br,
+      text("Line A"),
+      br,
+      text("Line B"),
+    ]);
+  });
+
+  it("collapses three or more newlines to one blank line", () => {
+    expect(lb("a\n\n\n\nb")).toEqual([text("a"), br, br, text("b")]);
+  });
+
+  it("normalizes CRLF like LF", () => {
+    expect(lb("a\r\n\r\nb")).toEqual([text("a"), br, br, text("b")]);
+  });
+
+  it("leaves tabs unchanged", () => {
+    expect(lb("a\tb")).toEqual([text("a"), { type: "tab" }, text("b")]);
+  });
+
+  it("never emits a paragraph token", () => {
+    expect(lb("a\n\nb\nc").some((t) => t.type === "paragraph")).toBe(false);
+  });
+
+  it("the default mode is unchanged (paragraphs, blank lines dropped)", () => {
+    expect(tokenizePlainTextPaste("a\n\nb")).toEqual([
+      text("a"),
+      { type: "paragraph" },
+      text("b"),
+    ]);
+  });
+});
+
 describe("unwrapNestedPreCodeElements", () => {
   const parse = (html: string) =>
     new DOMParser().parseFromString(html, "text/html");

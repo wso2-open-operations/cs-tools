@@ -107,7 +107,8 @@ import {
   $isHeadingNode,
   $isQuoteNode,
 } from "@lexical/rich-text";
-import { $createParagraphNode } from "lexical";
+import { $createParagraphNode, type LexicalCommand } from "lexical";
+import { $splitSelectedLinesIntoParagraphs } from "@components/rich-text-editor/splitLineBreakLines";
 
 export type ToolbarVariant = "full" | "describeIssue";
 
@@ -118,6 +119,7 @@ const Toolbar = ({
   variant = "full",
   showKeyboardHint = false,
   enterToSubmit = false,
+  enterInsertsLineBreak = false,
   imageUploader,
 }: {
   onAttachmentClick?: () => void;
@@ -127,6 +129,12 @@ const Toolbar = ({
   variant?: ToolbarVariant;
   showKeyboardHint?: boolean;
   enterToSubmit?: boolean;
+  /**
+   * Enter inserts a `<br>` (see Editor): a list or heading conversion first
+   * splits the selected `<br>`-separated lines into paragraphs, so each line
+   * becomes its own item/heading.
+   */
+  enterInsertsLineBreak?: boolean;
   /** Stores a picked image instead of embedding it as base64; see {@link ImageUploadHandler}. */
   imageUploader?: ImageUploadHandler;
 }) => {
@@ -310,6 +318,25 @@ const Toolbar = ({
     }
   };
 
+  /**
+   * See `enterInsertsLineBreak`: one list item per selected line, not one holding
+   * `<br>`s, and the selected blank lines are dropped rather than made empty
+   * items. Split and conversion share one update, so undo is a single step.
+   */
+  const insertListFromLines = (command: LexicalCommand<void>) => {
+    if (!enterInsertsLineBreak) {
+      editor.dispatchCommand(command, undefined);
+      return;
+    }
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        $splitSelectedLinesIntoParagraphs(selection, { dropBlankLines: true });
+      }
+      editor.dispatchCommand(command, undefined);
+    });
+  };
+
   const onFormatCode = () => {
     focusEditor();
     editor.update(() => {
@@ -332,6 +359,7 @@ const Toolbar = ({
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
         if (blockType.startsWith("h")) {
+          if (enterInsertsLineBreak) $splitSelectedLinesIntoParagraphs(selection);
           const level = parseInt(blockType.substring(1)) as
             | 1
             | 2
@@ -344,7 +372,10 @@ const Toolbar = ({
               `h${level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6",
             ),
           );
-          $patchStyleText(selection, { "font-size": null });
+          // $setBlocksType leaves a fresh selection behind; the old object can be
+          // stale once the split above moved lines into paragraphs of their own.
+          const converted = $getSelection();
+          $patchStyleText($isRangeSelection(converted) ? converted : selection, { "font-size": null });
         } else if (blockType === "quote") {
           $setBlocksType(selection, () => $createQuoteNode());
           $patchStyleText(selection, { "font-size": null });
@@ -710,10 +741,7 @@ const Toolbar = ({
                 if (listType === "bullet") {
                   editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
                 } else {
-                  editor.dispatchCommand(
-                    INSERT_UNORDERED_LIST_COMMAND,
-                    undefined,
-                  );
+                  insertListFromLines(INSERT_UNORDERED_LIST_COMMAND);
                 }
               }}
             >
@@ -731,10 +759,7 @@ const Toolbar = ({
                 if (listType === "number") {
                   editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
                 } else {
-                  editor.dispatchCommand(
-                    INSERT_ORDERED_LIST_COMMAND,
-                    undefined,
-                  );
+                  insertListFromLines(INSERT_ORDERED_LIST_COMMAND);
                 }
               }}
             >

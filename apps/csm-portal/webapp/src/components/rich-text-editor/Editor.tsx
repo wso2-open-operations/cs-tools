@@ -82,12 +82,16 @@ import {
   $getSelection,
   $isRangeSelection,
   INSERT_PARAGRAPH_COMMAND,
+  INSERT_LINE_BREAK_COMMAND,
+  $isParagraphNode,
+  $isElementNode,
   PASTE_COMMAND,
   PASTE_TAG,
   $createTabNode,
 } from "lexical";
 import { $isListItemNode } from "@lexical/list";
-import { $findMatchingParent } from "@lexical/utils";
+import { $findMatchingParent, CAN_USE_BEFORE_INPUT, IS_APPLE_WEBKIT, IS_IOS, IS_SAFARI } from "@lexical/utils";
+import { $isTableCellNode } from "@lexical/table";
 
 /**
  * Internal component to handle editable state changes.
@@ -153,7 +157,10 @@ const OnChangeHTMLPlugin = ({
 /**
  * Plugin to handle Enter key for submit.
  *
- * When enterToSubmit=false (default): Ctrl+Enter / Cmd+Enter submits; plain Enter stays in editor.
+ * When enterToSubmit=false (default): Ctrl+Enter / Cmd+Enter submits; plain Enter stays in editor
+ *   (Lexical's default: a new paragraph, or `EnterLineBreakPlugin`'s `<br>` when
+ *   `enterInsertsLineBreak` is on -- that plugin never handles a Ctrl/Cmd+Enter, so the
+ *   two do not conflict).
  * When enterToSubmit=true: plain Enter submits; Shift+Enter in a list inserts a new list item;
  *   Shift+Enter outside a list passes through for a soft line break; Ctrl/Cmd+Enter is ignored.
  */
@@ -209,6 +216,87 @@ const EnterSubmitPlugin = ({
 
     return unregEnter;
   }, [editor, onSubmit, disabled, enterToSubmit]);
+
+  return null;
+};
+
+/**
+ * True when the whole selection sits in plain paragraphs -- the only place the
+ * `enterInsertsLineBreak` mode applies (Enter and plain-text paste). Lists,
+ * headings, quotes, code and table cells keep Lexical's own behaviour. Call it
+ * inside a command handler or an update.
+ */
+function $selectionInPlainParagraphs(): boolean {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection)) return false;
+  return [selection.anchor, selection.focus].every((point) => {
+    const block = $findMatchingParent(
+      point.getNode(),
+      (n) => $isElementNode(n) && !n.isInline(),
+    );
+    return block !== null && $isParagraphNode(block) && $findMatchingParent(block, $isTableCellNode) === null;
+  });
+}
+
+/**
+ * `enterInsertsLineBreak` mode (GitHub-style new lines): plain Enter inserts a
+ * `<br>` inside the current paragraph instead of starting a new one, so two
+ * Enters make one blank line. The exported HTML then looks the same in every
+ * renderer (a paragraph gap is 6px here, ~0.25em in the customer portal, ~1em
+ * in other HTML renderers; a `<br>` is a line everywhere).
+ *
+ * Only a selection that sits entirely in plain paragraphs is handled (see
+ * {@link $selectionInPlainParagraphs}). List items (Enter = new item, Enter on
+ * an empty item exits the list), headings, quotes, code blocks and table cells
+ * keep Lexical's own Enter behaviour (cells keep it so Lexical's table-edge
+ * paragraph handling still works). Shift+Enter already inserts a `<br>`;
+ * Ctrl/Cmd+Enter is left to `EnterSubmitPlugin`. Registered at
+ * COMMAND_PRIORITY_HIGH, above `@lexical/rich-text`'s default handler, and
+ * independent of whether a submit handler is set.
+ *
+ * The keydown path skips an IME composition (`isComposing`). On Safari/iOS
+ * Lexical itself leaves Enter to `beforeinput`, which dispatches
+ * INSERT_PARAGRAPH_COMMAND -- also what a soft keyboard's Enter reaches -- so
+ * that is handled too. By then Lexical has cleared the composition, so the
+ * `isComposing` check there is only a safeguard.
+ */
+const EnterLineBreakPlugin = () => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const unregKey = editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      (event: KeyboardEvent | null) => {
+        if (event === null) return false;
+        if (event.isComposing || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+          return false;
+        }
+        // Mirrors @lexical/rich-text: these browsers send Enter as a
+        // `beforeinput` instead, which the INSERT_PARAGRAPH_COMMAND handler covers.
+        if ((IS_IOS || IS_SAFARI || IS_APPLE_WEBKIT) && CAN_USE_BEFORE_INPUT) return false;
+        if (!$selectionInPlainParagraphs()) return false;
+        event.preventDefault();
+        editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+
+    const unregParagraph = editor.registerCommand(
+      INSERT_PARAGRAPH_COMMAND,
+      () => {
+        if (editor.isComposing() || !$selectionInPlainParagraphs()) return false;
+        editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+
+    return () => {
+      unregKey();
+      unregParagraph();
+    };
+  }, [editor]);
 
   return null;
 };
@@ -364,7 +452,12 @@ function isImageOnlyHtml(html: string): boolean {
   return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
 }
 
-const PasteNormalizationPlugin = (): JSX.Element | null => {
+const PasteNormalizationPlugin = ({
+  lineBreaks = false,
+}: {
+  /** `enterInsertsLineBreak` mode: plain-text newlines become `<br>`s, not paragraphs. */
+  lineBreaks?: boolean;
+}): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
   const [pendingPaste, setPendingPaste] = useState<{
     html: string;
@@ -403,7 +496,9 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
         }
 
         if (text) {
-          const tokens = tokenizePlainTextPaste(text);
+          const tokens = tokenizePlainTextPaste(text, {
+            lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
+          });
           if (tokens.length === 0) return false;
 
           event.preventDefault();
@@ -415,6 +510,8 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
                 if (token.type === "paragraph") {
                   currentSelection.insertParagraph();
+                } else if (token.type === "linebreak") {
+                  currentSelection.insertLineBreak();
                 } else if (token.type === "tab") {
                   currentSelection.insertNodes([$createTabNode()]);
                 } else {
@@ -431,7 +528,7 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
       },
       COMMAND_PRIORITY_HIGH,
     );
-  }, [editor]);
+  }, [editor, lineBreaks]);
 
   /** "Keep Formatting" -- exactly the normalized-HTML insertion path above. */
   const applyKeepFormatting = useCallback(() => {
@@ -462,16 +559,20 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
   const applyRemoveFormatting = useCallback(() => {
     if (!pendingPaste) return;
     const plainText = pendingPaste.text || htmlToPlainText(pendingPaste.html);
-    const tokens = tokenizePlainTextPaste(plainText);
 
     editor.update(
       () => {
+        const tokens = tokenizePlainTextPaste(plainText, {
+          lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
+        });
         for (const token of tokens) {
           const currentSelection = $getSelection();
           if (!$isRangeSelection(currentSelection)) continue;
 
           if (token.type === "paragraph") {
             currentSelection.insertParagraph();
+          } else if (token.type === "linebreak") {
+            currentSelection.insertLineBreak();
           } else if (token.type === "tab") {
             currentSelection.insertNodes([$createTabNode()]);
           } else {
@@ -482,7 +583,7 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
       { tag: PASTE_TAG },
     );
     setPendingPaste(null);
-  }, [editor, pendingPaste]);
+  }, [editor, pendingPaste, lineBreaks]);
 
   const cancelPendingPaste = useCallback(() => setPendingPaste(null), []);
 
@@ -554,6 +655,7 @@ const Editor = ({
   toolbarVariant = "full",
   onSubmitKeyDown,
   enterToSubmit = false,
+  enterInsertsLineBreak = false,
   placeholder = "Enter description...",
   id,
   showKeyboardHint = false,
@@ -584,6 +686,13 @@ const Editor = ({
   toolbarVariant?: ToolbarVariant;
   onSubmitKeyDown?: () => void;
   enterToSubmit?: boolean;
+  /**
+   * GitHub-style new lines: plain Enter inserts a `<br>` in the current paragraph
+   * (two Enters = one blank line) instead of starting a paragraph; toolbar block
+   * conversions and plain-text paste follow suit. Off by default; ignored with
+   * `enterToSubmit`. See `EnterLineBreakPlugin`.
+   */
+  enterInsertsLineBreak?: boolean;
   placeholder?: string;
   id?: string;
   showKeyboardHint?: boolean;
@@ -611,6 +720,7 @@ const Editor = ({
   ariaRequired?: boolean;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
+  const lineBreakMode = enterInsertsLineBreak && !enterToSubmit;
   const logger = useLogger();
   // Without an `onPasteError` handler a refused pasted image is said right
   // below the editor, for a few seconds.
@@ -712,6 +822,7 @@ const Editor = ({
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
               enterToSubmit={enterToSubmit}
+              enterInsertsLineBreak={lineBreakMode}
               imageUploader={onImageUpload}
             />
             <Divider sx={{ my: 1 }} />
@@ -858,12 +969,13 @@ const Editor = ({
           <TablePlugin />
           <ImagesPlugin />
           <ClipboardImagePlugin onPasteError={onImageRefused} onImageUpload={onImageUpload} />
-          <PasteNormalizationPlugin />
+          <PasteNormalizationPlugin lineBreaks={lineBreakMode} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
+          {lineBreakMode && <EnterLineBreakPlugin />}
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>
         {imageNotice && (

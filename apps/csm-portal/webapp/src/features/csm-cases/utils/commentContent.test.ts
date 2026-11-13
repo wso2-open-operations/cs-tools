@@ -32,6 +32,7 @@ import {
   stripCodeWrapper,
   stripCustomerCommentAddedLabel,
   trimLeadingBr,
+  trimTrailingLineBreaks,
 } from "./commentContent";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
@@ -426,5 +427,39 @@ describe("hasCommentContent", () => {
     expect(hasCommentContent("")).toBe(false);
     expect(hasCommentContent("<p>&nbsp;</p><br>")).toBe(false);
     expect(hasCommentContent("<p> </p>")).toBe(false);
+  });
+});
+
+describe("trimTrailingLineBreaks", () => {
+  it("edge cases: uppercase, empty trailing paragraph, table, only breaks", () => {
+    expect(trimTrailingLineBreaks("<p>a<BR/></p>")).toBe("<p>a</p>");
+    expect(trimTrailingLineBreaks("<p>a<br><br></p>")).toBe("<p>a</p>");
+    expect(trimTrailingLineBreaks("<p>a<br>b</p>")).toBe("<p>a<br>b</p>");
+    expect(trimTrailingLineBreaks("<table><tbody><tr><td><p>a<br></p></td></tr></tbody></table>")).toBe(
+      "<table><tbody><tr><td><p>a<br></p></td></tr></tbody></table>",
+    );
+    // A reply that is only breaks must stay "empty" for the send button.
+    expect(hasCommentContent(trimTrailingLineBreaks("<p><br><br></p>"))).toBe(false);
+  });
+
+  it("never empties a paragraph: a last paragraph of only breaks is left as it is", () => {
+    expect(trimTrailingLineBreaks("<p>a</p><p><br></p>")).toBe("<p>a</p><p><br></p>");
+    expect(trimTrailingLineBreaks("<p><br></p>")).toBe("<p><br></p>");
+    expect(trimTrailingLineBreaks("<p><br><br></p>")).toBe("<p><br><br></p>");
+  });
+
+  it("drops the <br>s at the end of the last paragraph", () => {
+    expect(trimTrailingLineBreaks("<p>Hi<br><br></p>")).toBe("<p>Hi</p>");
+    expect(trimTrailingLineBreaks("<p>Hi<br /> <br/></p>\n")).toBe("<p>Hi</p>\n");
+  });
+
+  it("keeps breaks inside the text and in earlier paragraphs", () => {
+    expect(trimTrailingLineBreaks("<p>a<br><br>b</p>")).toBe("<p>a<br><br>b</p>");
+    expect(trimTrailingLineBreaks("<p>a<br></p><p>b</p>")).toBe("<p>a<br></p><p>b</p>");
+  });
+
+  it("leaves other endings alone", () => {
+    expect(trimTrailingLineBreaks("<ul><li>a</li></ul>")).toBe("<ul><li>a</li></ul>");
+    expect(trimTrailingLineBreaks("plain<br>")).toBe("plain<br>");
   });
 });

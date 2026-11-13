@@ -63,7 +63,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     uploadsWaiting = 0,
     onImageUpload,
     onPasteError,
+    enterInsertsLineBreak,
   }: {
+    enterInsertsLineBreak?: boolean;
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
@@ -72,7 +74,7 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onImageUpload?: (file: File) => string;
     onPasteError?: (reason: "size" | "type" | "count") => void;
   }) => (
-    <div data-testid="editor-stub">
+    <div data-testid="editor-stub" data-enter-line-break={String(Boolean(enterInsertsLineBreak))}>
       <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
       {onPasteError && (
         <button type="button" onClick={() => onPasteError("count")}>
@@ -700,5 +702,33 @@ describe("commentUploadProgress", () => {
     ).toEqual({ name: "f.txt", percent: 0, onCancel: undefined });
     expect(commentUploadProgress({ isPending: false, uploadProgress: 7 })).toBeNull();
     expect(commentUploadProgress({ isPending: true, uploadProgress: null })).toBeNull();
+  });
+});
+
+describe("CsmCaseCommentInput — Enter inserts a line break", () => {
+  it("asks the editor for GitHub-style new lines", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    expect(screen.getByTestId("editor-stub")).toHaveAttribute("data-enter-line-break", "true");
+    // Ctrl/Cmd+Enter is still the send shortcut.
+    expect(screen.getByText("Ctrl/Cmd + Enter to send.")).toBeInTheDocument();
+  });
+
+  it("treats a reply made only of Enters (line breaks) as empty", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    for (const html of ["<p><br></p>", "<p><br><br></p>", "<p><br><br><br></p>"]) {
+      fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: html } });
+      expect(screen.getByRole("button", { name: /Send to customer/ })).toBeDisabled();
+    }
+  });
+
+  it("drops trailing line breaks from the posted reply but keeps the ones inside it", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: "<p>Hi<br><br>Line<br><br></p>" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toBe("<p>Hi<br><br>Line</p>");
   });
 });

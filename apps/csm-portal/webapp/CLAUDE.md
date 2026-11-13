@@ -917,6 +917,17 @@ The fix is not to change the container but to clean the body before it is render
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
 
+## Reply box: Enter is a line break, not a paragraph (`enterInsertsLineBreak`)
+
+`CsmCaseCommentInput` passes `enterInsertsLineBreak` to the shared `Editor` (off by default; every other editor keeps Lexical's Enter, and the prop is ignored with `enterToSubmit`). Plain Enter then inserts a `<br>` in the current paragraph, like a newline in a GitHub comment: Enter twice is `<br><br>`, one blank line. Ctrl/Cmd+Enter still sends and Shift+Enter still inserts a `<br>`.
+
+**Why `<br>` and not paragraphs:** a paragraph gap is renderer-specific (6px in the editor and CSM bubble via `p + p`, ~0.25em in the customer portal card, ~1em in other HTML renderers), so the same reply looked different everywhere; a `<br>` is a line in all of them, with no CSS change.
+
+- `EnterLineBreakPlugin` (`Editor.tsx`, HIGH priority, independent of `onSubmit`) handles KEY_ENTER and INSERT_PARAGRAPH_COMMAND (a soft keyboard's Enter) only when the whole selection is in plain paragraphs (`$selectionInPlainParagraphs`). Lists (new item / exit on empty), headings, quotes, code and table cells keep Lexical's default (cells so its table-edge paragraph handling still works). The keydown path skips IME composition; on Safari/iOS Enter arrives as `beforeinput` and only the INSERT_PARAGRAPH_COMMAND handler runs.
+- Toolbar (`enterInsertsLineBreak` on `Toolbar`): a list or heading conversion first splits the *selected* `<br>`-separated lines into paragraphs (`$splitSelectedLinesIntoParagraphs`), otherwise Lexical makes one item holding the `<br>`s. For a bullet/numbered list the selected blank lines are dropped, not made empty items (a line holding only an image is kept; if every selected line is blank, one empty item remains), in the same update so undo is one step. Lines outside the selection stay together. A quote or code block keeps its lines in one block.
+- Plain-text paste (direct, and "Remove Formatting") uses `tokenizePlainTextPaste(text, { lineBreaks: true })` when the selection is in a plain paragraph (in a list item, heading or table cell the old paragraph tokens apply, so a pasted `a\nb\nc` in a bullet is three items): each newline is a break, a blank line stays one, 3+ newlines collapse to one blank line.
+- A reply of only Enters is empty (`<p><br><br></p>` has no text), and `CsmCaseCommentInput` drops trailing `<br>`s from the HTML it sends (`trimTrailingLineBreaks`).
+
 ## Generate chat: what can I ask about
 
 Under the greeting, `GenerateChatPanel`'s "What can I ask about?" opens a short list of what the chat can
