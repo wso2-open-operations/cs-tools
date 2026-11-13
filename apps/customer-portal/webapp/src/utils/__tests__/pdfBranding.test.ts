@@ -20,6 +20,9 @@ import type { CustomerPortalWindowConfig } from "@config/portalConfig";
 import {
   clearReportLogoCache,
   drawReportSupportFooters,
+  fitSupportLine,
+  fitTextToWidth,
+  FOOTER_TEXT_GAP_MM,
   loadReportLogo,
   type ReportLogo,
 } from "@utils/pdfBranding";
@@ -139,5 +142,60 @@ describe("drawReportSupportFooters", () => {
     expect(pdf.match(/\(Acme Corp Support 24x7\) Tj/g)).toHaveLength(2);
     expect(pdf).not.toContain("WSO2 Support 24x7");
     expect(pdf).toContain("/Subtype /Image");
+  });
+
+  it("shortens a long company name so it ends before the page text, logo and long label included", () => {
+    const longName = "Example International Technology and Business Services Corporation";
+    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: longName });
+    const doc = new jsPDF();
+    const drawn: Array<{ text: string; x: number }> = [];
+    const realText = doc.text.bind(doc);
+    vi.spyOn(doc, "text").mockImplementation(((text: string, x: number, y: number) => {
+      drawn.push({ text, x });
+      return realText(text, x, y);
+    }) as typeof doc.text);
+
+    drawReportSupportFooters(
+      doc,
+      { dataUrl: PNG_DATA_URL, width: 576, height: 96 },
+      (page, total) => `Change Requests Schedule - Page ${page} of ${total}`,
+      "Oct 14, 2026, 12:27 PM",
+    );
+
+    const support = drawn.find((d) => d.text.endsWith("Support 24x7"));
+    const middle = drawn.find((d) => d.text.startsWith("Change Requests Schedule"));
+    expect(support?.text).toMatch(/^Exam.*\.\.\. Support 24x7$/);
+    expect(support!.x + doc.getTextWidth(support!.text)).toBeLessThanOrEqual(
+      middle!.x - FOOTER_TEXT_GAP_MM,
+    );
+  });
+});
+
+describe("fitting footer text", () => {
+  /** A document whose text is one mm per character. */
+  const doc = { getTextWidth: (text: string) => text.length } as unknown as jsPDF;
+
+  afterEach(() => {
+    window.config = originalConfig;
+  });
+
+  it("leaves text that fits alone", () => {
+    expect(fitTextToWidth(doc, "Page 1 of 2", 11)).toBe("Page 1 of 2");
+  });
+
+  it("cuts text that does not fit, with an ellipsis", () => {
+    expect(fitTextToWidth(doc, "Page 1 of 2", 8)).toBe("Page...");
+    expect(fitTextToWidth(doc, "Page 1 of 2", 2)).toBe("");
+  });
+
+  it("shortens the company name and keeps ' Support 24x7' whole", () => {
+    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "Acme International" });
+    expect(fitSupportLine(doc, 31)).toBe("Acme International Support 24x7");
+    expect(fitSupportLine(doc, 22)).toBe("Acme I... Support 24x7");
+  });
+
+  it("cuts the whole line when even ' Support 24x7' does not fit", () => {
+    setConfig({ CUSTOMER_PORTAL_COMPANY_NAME: "Acme" });
+    expect(fitSupportLine(doc, 10)).toBe("Acme Su...");
   });
 });
