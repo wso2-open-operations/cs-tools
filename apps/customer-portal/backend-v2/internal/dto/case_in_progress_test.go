@@ -92,3 +92,34 @@ func TestMapSearchCaseActivities_StateChangesUseMergedLabel(t *testing.T) {
 		t.Errorf("second change = %+v, want In Progress -> Closed", c)
 	}
 }
+
+// Global search (the Project Hub's cases, search and export) carries a case's
+// state as entity-service sent it: the raw enum as id and label on Postgres,
+// ServiceNow's id and display text there. Both in-progress states come back as
+// the merged In Progress; every other state, and a missing one, is untouched.
+func TestMapGlobalSearchResponse_InProgressFamilyIsMerged(t *testing.T) {
+	inProgress := &ReferenceItem{ID: "10", Label: "In Progress"}
+	cases := []struct {
+		name  string
+		state *entity.ChoiceListItem
+		want  *ReferenceItem
+	}{
+		{"postgres work in progress", &entity.ChoiceListItem{ID: "WORK_IN_PROGRESS", Label: "WORK_IN_PROGRESS"}, inProgress},
+		{"postgres waiting on wso2", &entity.ChoiceListItem{ID: "WAITING_ON_WSO2", Label: "WAITING_ON_WSO2"}, inProgress},
+		{"servicenow work in progress", &entity.ChoiceListItem{ID: "10", Label: "Work In Progress"}, inProgress},
+		{"servicenow waiting on wso2", &entity.ChoiceListItem{ID: "1003", Label: "Waiting on WSO2"}, inProgress},
+		{"another state is untouched", &entity.ChoiceListItem{ID: "AWAITING_INFO", Label: "AWAITING_INFO"}, &ReferenceItem{ID: "AWAITING_INFO", Label: "AWAITING_INFO"}},
+		{"no state stays none", nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := MapGlobalSearchResponse(entity.GlobalSearchResponse{Cases: []entity.GlobalSearchCase{{ID: "c1", State: tc.state}}})
+			if len(got.Cases) != 1 {
+				t.Fatalf("cases = %d, want 1", len(got.Cases))
+			}
+			if !reflect.DeepEqual(got.Cases[0].State, tc.want) {
+				t.Errorf("state = %+v, want %+v", got.Cases[0].State, tc.want)
+			}
+		})
+	}
+}
