@@ -169,6 +169,24 @@ window.config = {
   //   off; true (or leaving it unset) keeps it on.
   // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,
 
+  // ── PDF report footers ──────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL  (optional — default: no logo)
+  //   Logo for a light background, drawn in the footer of the PDF reports
+  //   (Change Request details, Update Summary). A path under public/ or an
+  //   absolute URL; a URL on another origin must allow CORS, or the footer is
+  //   printed without a logo.
+  // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: "<your-logo-url>",
+  //
+  // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL  (optional — default: no logo)
+  //   Logo for a dark background. The PDF footers use it only when no light-mode
+  //   logo is set.
+  // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL: "<your-dark-mode-logo-url>",
+  //
+  // CUSTOMER_PORTAL_COMPANY_NAME  (optional — default: "WSO2")
+  //   Company name in the PDF report footers, printed as "<name> Support 24x7".
+  // CUSTOMER_PORTAL_COMPANY_NAME: "<your-company-name>",
+
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
   // CUSTOMER_PORTAL_TOP_BANNERS  (optional — default: [])

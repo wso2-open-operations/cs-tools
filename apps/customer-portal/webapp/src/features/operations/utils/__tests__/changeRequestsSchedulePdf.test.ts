@@ -24,6 +24,7 @@ const autoTableMock = vi.fn();
 vi.mock("jspdf", () => ({
   jsPDF: vi.fn().mockImplementation(function MockJsPDF(this: {
     setFontSize: ReturnType<typeof vi.fn>;
+    setFont: ReturnType<typeof vi.fn>;
     text: ReturnType<typeof vi.fn>;
     save: ReturnType<typeof vi.fn>;
     getNumberOfPages: ReturnType<typeof vi.fn>;
@@ -34,6 +35,7 @@ vi.mock("jspdf", () => ({
     };
   }) {
     this.setFontSize = vi.fn();
+    this.setFont = vi.fn();
     this.text = textMock;
     this.save = saveMock;
     this.getNumberOfPages = vi.fn(() => 1);
@@ -50,8 +52,8 @@ vi.mock("jspdf-autotable", () => ({
 }));
 
 describe("generateChangeRequestsSchedulePdf", () => {
-  it("builds schedule PDF and saves", () => {
-    generateChangeRequestsSchedulePdf(
+  it("builds schedule PDF and saves", async () => {
+    await generateChangeRequestsSchedulePdf(
       [
         {
           number: "CHG1",
