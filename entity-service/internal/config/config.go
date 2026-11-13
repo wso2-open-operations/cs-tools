@@ -723,6 +723,22 @@ type Config struct {
 	// ports, it runs wherever the data is.
 	IncidentReportPollInterval time.Duration
 
+	// AlertConsumerEnabled turns on the Service Bus alert consumer (ALERT_CONSUMER_ENABLED, default false).
+	AlertConsumerEnabled bool
+	// AlertServiceBusNamespace is the Service Bus namespace the alerting gateway queues alerts on (ALERT_SERVICEBUS_NAMESPACE).
+	AlertServiceBusNamespace string
+	// AlertServiceBusTenantID, AlertServiceBusClientID and AlertServiceBusClientSecret are the Entra ID application that receives from the queues.
+	AlertServiceBusTenantID     string
+	AlertServiceBusClientID     string
+	AlertServiceBusClientSecret string
+	// AlertPriorityQueue and AlertStandardQueue are the two queue names (ALERT_SERVICEBUS_PRIORITY_QUEUE, ALERT_SERVICEBUS_STANDARD_QUEUE).
+	AlertPriorityQueue string
+	AlertStandardQueue string
+	// AlertConsumerConcurrency is how many alert messages are processed at once (ALERT_CONSUMER_CONCURRENCY, default 8).
+	AlertConsumerConcurrency int
+	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT, default 4).
+	AlertConsumerPriorityWeight int
+
 	AuthIssuer             string
 	AuthJWKSURL            string
 	AuthUserTokenAudiences []string
@@ -1080,6 +1096,15 @@ func Load() *Config {
 		CloudStatusDrainerEnabled:                     os.Getenv("CLOUD_STATUS_DRAINER_ENABLED") == "true",
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
 		IncidentReportPollInterval:                    envDuration("INCIDENT_REPORT_POLL_INTERVAL", 5*time.Second),
+		AlertConsumerEnabled:                          os.Getenv("ALERT_CONSUMER_ENABLED") == "true",
+		AlertServiceBusNamespace:                      strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_NAMESPACE")),
+		AlertServiceBusTenantID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_TENANT_ID")),
+		AlertServiceBusClientID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CLIENT_ID")),
+		AlertServiceBusClientSecret:                   os.Getenv("ALERT_SERVICEBUS_CLIENT_SECRET"),
+		AlertPriorityQueue:                            getEnvOrDefault("ALERT_SERVICEBUS_PRIORITY_QUEUE", "priority-queue"),
+		AlertStandardQueue:                            getEnvOrDefault("ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
+		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
+		AlertConsumerPriorityWeight:                   envPositiveInt("ALERT_CONSUMER_PRIORITY_WEIGHT", 4),
 		SalesforceIngestRetryInterval:                 envDurationOrOff("SALESFORCE_INGEST_RETRY_INTERVAL", 5*time.Minute),
 		SalesforceDeferredWritesEnabled:               os.Getenv("SALESFORCE_DEFERRED_WRITES_ENABLED") == "true",
 		SalesforceWriteEventHubTopic:                  getEnvOrDefault("SALESFORCE_WRITE_EVENT_HUB_TOPIC", "salesforce-writes"),
@@ -1462,6 +1487,9 @@ func (c *Config) Validate() error {
 	eventHubComplete := c.EventHubBroker != "" && c.EventHubConnectionString != "" && c.EventHubTopic != ""
 	if eventHubSet && !eventHubComplete {
 		return fmt.Errorf("EVENT_HUB_BROKER, EVENT_HUB_CONNECTION_STRING, and EVENT_HUB_TOPIC must be set together or not at all")
+	}
+	if err := c.validateAlertConsumer(); err != nil {
+		return err
 	}
 	// Token validation is always on and unconditionally needs to know whose
 	// keys to trust and which audiences make an ID token a user token, or it
@@ -1884,4 +1912,27 @@ func (c *Config) applySREEventHubTopic() {
 	}
 	c.CREventHubTopic = c.SREEventHubTopic
 	c.OutageEventHubTopic = c.SREEventHubTopic
+}
+
+// maxAlertConsumerConcurrency keeps the alert consumer from taking most of the database pool from API requests.
+const maxAlertConsumerConcurrency = 64
+
+// validateAlertConsumer rejects an enabled alert consumer that could never receive or store an alert.
+func (c *Config) validateAlertConsumer() error {
+	if !c.AlertConsumerEnabled {
+		return nil
+	}
+	if !c.HasDatabase() {
+		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs DB_USER, DB_PASSWORD and DB_NAME, because alerts are stored in the database")
+	}
+	if c.AlertServiceBusNamespace == "" || c.AlertServiceBusTenantID == "" || c.AlertServiceBusClientID == "" || c.AlertServiceBusClientSecret == "" {
+		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs ALERT_SERVICEBUS_NAMESPACE, ALERT_SERVICEBUS_TENANT_ID, ALERT_SERVICEBUS_CLIENT_ID and ALERT_SERVICEBUS_CLIENT_SECRET")
+	}
+	if c.AlertPriorityQueue == c.AlertStandardQueue {
+		return fmt.Errorf("ALERT_SERVICEBUS_PRIORITY_QUEUE and ALERT_SERVICEBUS_STANDARD_QUEUE must name different queues")
+	}
+	if c.AlertConsumerConcurrency > maxAlertConsumerConcurrency || int32(c.AlertConsumerConcurrency) >= c.DBPoolMaxConns { // #nosec G115 -- capped at 64 just before
+		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY must be at most %d and below DB_POOL_MAX_CONNS (%d), got %d", maxAlertConsumerConcurrency, c.DBPoolMaxConns, c.AlertConsumerConcurrency)
+	}
+	return nil
 }
