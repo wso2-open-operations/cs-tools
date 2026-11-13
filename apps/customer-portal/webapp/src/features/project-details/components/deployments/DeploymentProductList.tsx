@@ -45,6 +45,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePostDeploymentProductsSearchAll } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import { usePatchDeploymentProduct } from "@features/project-details/api/usePatchDeploymentProduct";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { companyName } from "@config/brandingConfig";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import ErrorBanner from "@components/error-banner/ErrorBanner";
 import AddProductModal from "@features/project-details/components/deployments/AddProductModal";
@@ -210,7 +211,7 @@ export default function DeploymentProductList({
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <Package size={16} />
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              WSO2 Products
+              {`${companyName()} Products`}
             </Typography>
             {isLoading ? (
               <Skeleton

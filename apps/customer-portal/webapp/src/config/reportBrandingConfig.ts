@@ -14,18 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  companyName,
+  configuredString,
+  DEFAULT_COMPANY_NAME,
+  hasConfiguredCompanyName,
+} from "@config/brandingConfig";
+
 /** Company name the PDF footers print when `CUSTOMER_PORTAL_COMPANY_NAME` is not set. */
-export const DEFAULT_REPORT_COMPANY_NAME = "WSO2";
+export const DEFAULT_REPORT_COMPANY_NAME = DEFAULT_COMPANY_NAME;
 
 /** What follows the company name in the footer line. */
 export const REPORT_SUPPORT_LINE_SUFFIX = " Support 24x7";
-
-/** A trimmed, non-empty string from `window.config`, else undefined. */
-function configuredString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
 
 /**
  * Company name for the PDF report footers (`CUSTOMER_PORTAL_COMPANY_NAME`),
@@ -34,10 +34,7 @@ function configuredString(value: unknown): string | undefined {
  * @returns {string} The company name.
  */
 export function reportCompanyName(): string {
-  return (
-    configuredString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) ??
-    DEFAULT_REPORT_COMPANY_NAME
-  );
+  return companyName();
 }
 
 /**
@@ -47,7 +44,7 @@ export function reportCompanyName(): string {
  * @returns {boolean} True when a company name is configured.
  */
 export function hasConfiguredReportCompanyName(): boolean {
-  return configuredString(window.config?.CUSTOMER_PORTAL_COMPANY_NAME) !== undefined;
+  return hasConfiguredCompanyName();
 }
 
 /**

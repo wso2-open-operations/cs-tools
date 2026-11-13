@@ -17,6 +17,7 @@
 import { Shield, FileCheck, Siren, Package } from "@wso2/oxygen-ui-icons-react";
 import type { SupportStatConfig } from "@features/support/constants/supportConstants";
 import type { FilterDefinition } from "@components/list-view/ListFiltersPanel";
+import { companyName } from "@config/brandingConfig";
 import {
   SecurityStatKey,
   SecurityTabId,
@@ -168,7 +169,14 @@ export const VULNERABILITY_DETAILS_PRODUCT_NAME_LABEL = "Product Name";
 
 export const VULNERABILITY_DETAILS_PRODUCT_VERSION_LABEL = "Product Version";
 
-export const VULNERABILITY_DETAILS_WSO2_RESOLUTION_LABEL = "WSO2 Resolution";
+/**
+ * Label of the resolution field: "<company> Resolution" ("WSO2 Resolution" when
+ * no company name is configured).
+ *
+ * @returns {string} The label.
+ */
+export const vulnerabilityDetailsResolutionLabel = (): string =>
+  `${companyName()} Resolution`;
 
 export const VULNERABILITY_DETAILS_COMPONENT_SECTION_TITLE = "Component Information";
 

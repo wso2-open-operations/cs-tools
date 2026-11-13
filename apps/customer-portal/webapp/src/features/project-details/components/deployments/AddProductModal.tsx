@@ -26,12 +26,14 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, type JSX } from "react";
+import { companyName } from "@config/brandingConfig";
 import { useProductForm } from "@features/project-details/components/deployments/useProductForm";
 import { ProductFormFields } from "@features/project-details/components/deployments/ProductFormFields";
 import type { AddProductModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
- * Modal for adding a WSO2 product to a deployment environment.
+ * Modal for adding a product to a deployment environment. The title names the
+ * configured company ("Add WSO2 Product" by default).
  * Product Name and Version come from paginated APIs; Description and optional metrics are user-entered.
  * The actual paginated form fields + mutation logic live in useProductForm/ProductFormFields, shared with
  * the add-deployment wizard's product step - this component only owns the dialog chrome and the
@@ -83,14 +85,14 @@ export default function AddProductModal({
         id="add-product-dialog-title"
         sx={{ pr: 6, position: "relative", pb: 0.5 }}
       >
-        Add WSO2 Product
+        {`Add ${companyName()} Product`}
         <Typography
           id="add-product-dialog-description"
           variant="body2"
           color="text.secondary"
           sx={{ mt: 0.5, fontWeight: "normal", fontSize: "0.875rem" }}
         >
-          Add a WSO2 product to this deployment environment.
+          Add a product to this deployment environment.
         </Typography>
         <IconButton
           aria-label="close"
