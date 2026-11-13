@@ -22,7 +22,13 @@ import type {
   UpdateLevelsReportParams,
   UpdateLevelsReportTableRow,
 } from "@features/updates/types/updates";
+import {
+  hasConfiguredReportCompanyName,
+  reportSupportLine,
+} from "@config/reportBrandingConfig";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
+import { drawReportFooterLogo, loadReportLogo } from "@utils/pdfBranding";
+import { toPdfSafeText } from "@utils/pdfText";
 
 export type {
   UpdateLevelsReportData,
@@ -333,11 +339,16 @@ export function getUpdateLevelsReportData(params: UpdateLevelsReportParams): Upd
 /**
  * Generates and downloads an Update Summary PDF in WSO2 format using jspdf.
  * Bullet lists link internally to their update blocks; advisory IDs link to the
- * Security Advisories section at the end of the document.
+ * Security Advisories section at the end of the document. The footer carries
+ * the configured logo and company name when they are set.
  *
  * @param {UpdateLevelsReportData} reportData - Structured report data from getUpdateLevelsReportData.
+ * @returns {Promise<void>} Resolves once the PDF is saved.
  */
-export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData): void {
+export async function generateUpdateLevelsReportPdf(
+  reportData: UpdateLevelsReportData,
+): Promise<void> {
+  const logo = await loadReportLogo();
   const doc = new jsPDF();
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -801,18 +812,28 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
     }
   }
 
-  // ===== PAGE NUMBERS =====
+  // ===== FOOTER: LOGO, COMPANY AND PAGE NUMBERS =====
+  // With no logo or company name configured, only the page text is printed, as
+  // before. A configured company name adds "<company> Support 24x7" on the left
+  // and moves the page text to the right.
+  const supportLine = hasConfiguredReportCompanyName()
+    ? toPdfSafeText(reportSupportLine())
+    : null;
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 100, 100);
-    doc.text(
-      `${reportData.productName} ${reportData.productVersion} - Update Summary  |  Page ${i} of ${totalPages}`,
-      margin,
-      pageH - 10,
-    );
+    const footerY = pageH - 10;
+    const logoWidth = drawReportFooterLogo(doc, logo, margin, footerY);
+    const pageText = `${reportData.productName} ${reportData.productVersion} - Update Summary  |  Page ${i} of ${totalPages}`;
+    if (supportLine) {
+      doc.text(supportLine, margin + logoWidth, footerY);
+      doc.text(pageText, pageW - margin - doc.getTextWidth(pageText), footerY);
+    } else {
+      doc.text(pageText, margin + logoWidth, footerY);
+    }
   }
 
   const fileName = `Update-Summary-${reportData.productName}-${reportData.productVersion}-${reportData.startLevel}-${reportData.endLevel}.pdf`;
