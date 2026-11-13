@@ -141,18 +141,6 @@ type CustomDashboardService interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// SystemDashboardService is the system dashboards the CSM portal backend
-// stores here (migration 0294): dashboards that belong to nobody and that
-// the backend overwrites by key on every startup. Postgres-only, and only the
-// CSM portal backend's own client credential may call it; no signed-in person
-// is involved.
-type SystemDashboardService interface {
-	List(ctx context.Context) (domain.SystemDashboardList, error)
-	Get(ctx context.Context, key string) (domain.SystemDashboard, error)
-	Save(ctx context.Context, key string, req domain.SaveSystemDashboardRequest) (domain.SystemDashboard, error)
-	Delete(ctx context.Context, key string) error
-}
-
 // CustomDashboardShareService shares the caller's saved dashboards with other
 // users, view only (CSM portal Shared Dashboards). Postgres-only. The caller is
 // always resolved from x-user-id-token. Only a dashboard's owner lists or
