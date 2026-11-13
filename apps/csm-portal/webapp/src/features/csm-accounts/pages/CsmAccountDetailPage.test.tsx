@@ -197,6 +197,34 @@ describe("CsmAccountDetailPage", () => {
     expect(screen.getByText("Sri Lanka")).toBeInTheDocument();
   });
 
+  it("shows the customer success manager's name in the Overview", () => {
+    mockAccount({
+      data: {
+        ...BASE_ACCOUNT,
+        customerSuccessManager: {
+          id: "00000000-0000-0000-0000-000000000000",
+          name: "Jane Doe",
+          email: "jane.doe@example.com",
+        },
+      },
+    });
+    renderPage(<CsmAccountDetailPage />);
+
+    expect(screen.getByText("Customer Success Manager")).toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["null", { customerSuccessManager: null }],
+    ["absent", {}],
+  ])("shows a placeholder for the customer success manager when %s", (_label, overrides) => {
+    mockAccount({ data: { ...BASE_ACCOUNT, ...overrides } });
+    renderPage(<CsmAccountDetailPage />);
+
+    const cell = screen.getByText("Customer Success Manager").parentElement as HTMLElement;
+    expect(within(cell).getByText("—")).toBeInTheDocument();
+  });
+
   it.each([
     ["has no country on record", { country: null }],
     ["carries an empty country", { country: "" }],
