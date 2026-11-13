@@ -8808,7 +8808,13 @@ runs again on any database that recorded it under an earlier number, and must le
 the stage it was meant for (`stageId`, the stage the page showed; 400 when absent or blank, so an old
 cached page or a script cannot skip the guard): when that is not the stage the proposal waits on (its
 old stage, on a page loaded before 0295 or 0297, or one submitted again while the page was open), it
-is a 409 with nothing written. Submit refuses (400) when the CAB has fewer than two
+is a 409 `standard_change_decision_stage_stale` with nothing written, and a decision on a proposal that
+is no longer in review (a draft, or one already decided, withdrawn or cancelled) is a 409
+`standard_change_proposal_not_in_review`. Those two codes are how the page tells "the proposal moved on
+behind you" (it closes the dialog and reads the proposal again) from the route's other 409s, which are
+about the approval itself (a template that took the name, the template moved on, evidence that is no
+longer a closed change request of the customer), carry no code and keep the dialog open with their
+words. Submit refuses (400) when the CAB has fewer than two
 eligible members besides the proposer (`resolveProposalCABPool`, the message names the CAB), so a
 proposal never waits on a group that could not authorise it. **Approved**: `NEW`
 writes the template and version 1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and
@@ -8963,7 +8969,9 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
   best-effort like the tags.
 
 **Error codes**: `change_request_standard_template_field` (400),
-`standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400).
+`standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400); on a
+proposal's decision, `standard_change_proposal_not_in_review` (409) and
+`standard_change_decision_stage_stale` (409).
 
 **Who may**: suspend (a brake, so open): the template's owner or a CAB member. Resume and clear the
 review flag (both put the template back in use with no review): a CAB member only, with a required
@@ -13051,6 +13059,8 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |
 | `POST /incidents/{id}/specialist-handoffs` on an incident nobody is assigned to; nothing written | `incident_handoff_needs_assignee` | 409 |
+| A decision on a standard change proposal (`POST /standard-change-proposals/{id}/decision`) that is no longer waiting for one: a draft, or already approved, rejected, withdrawn or cancelled; nothing recorded | `standard_change_proposal_not_in_review` | 409 |
+| A decision on a standard change proposal whose `stageId` is not the stage the proposal now waits on (settled, or replaced when it was submitted again); nothing recorded. The route's other 409s, about the approval itself, carry no code | `standard_change_decision_stage_stale` | 409 |
 | A PATCH that changes the deviation from the implementation plan of a change request that is closed, canceled or rolled back (resending the stored value is accepted); nothing written | `change_request_deviation_final` | 400 |
 | A PATCH that changes the deviation from the implementation plan before implementation has started, judged on the stored state: in New anything but clearing one a clone carried over, in Assess, Authorize, Customer Approval and Scheduled any change (resending the stored value is accepted); nothing written | `change_request_deviation_not_yet` | 400 |
 | Request Approval (`{state: "assess"}` on a change request in New) while a deviation from the implementation plan is in effect (the request's own value, else the stored one): a clone carried it over, and it has to be folded into the implementation plan and cleared first (the same PATCH may clear it); nothing written | `change_request_deviation_not_incorporated` | 400 |

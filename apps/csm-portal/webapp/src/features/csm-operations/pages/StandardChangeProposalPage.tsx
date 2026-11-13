@@ -86,6 +86,7 @@ import {
   CHANGE_REQUEST_IMPACT_OPTIONS,
   CHANGE_REQUEST_PRIORITY_OPTIONS,
   CHANGE_REQUEST_ROLLBACK_DURATION_MAX,
+  backendErrorCode,
   errorText,
 } from "@features/csm-operations/utils/changeRequests";
 import {
@@ -1108,14 +1109,50 @@ const STANDARD_CHANGE_DECISION_STALE_NOTICE =
   "The proposal changed after you opened it, so your decision was not recorded. Review it again: the page now shows where it stands.";
 
 /**
+ * The `errorCode`s of the two decision refusals that mean the proposal moved on
+ * behind the dialog: the stage named was settled or replaced, or the proposal
+ * left review. The same request would be refused again, so the page closes the
+ * dialog and reads the proposal again. The decision endpoint's other 409s (a
+ * template took the name, the template moved on, a piece of evidence is no
+ * longer a closed change request of the customer) are about the approval
+ * itself: they carry no code and stay in the dialog with the backend's words.
+ */
+const StandardChangeDecisionErrorCode = {
+  /** The proposal is no longer waiting for a decision. */
+  NOT_IN_REVIEW: "standard_change_proposal_not_in_review",
+  /** The stage sent is not the one the proposal now waits on. */
+  STAGE_STALE: "standard_change_decision_stage_stale",
+} as const;
+
+const STALE_DECISION_CODES: ReadonlySet<string> = new Set(Object.values(StandardChangeDecisionErrorCode));
+
+/**
  * Whether a refused decision was refused because the proposal is no longer what
- * the dialog was opened on. The decision endpoint answers 409 for exactly that,
- * whether the stage named was settled or replaced, or the proposal left review,
- * and the same request would be refused again. It names no `errorCode` for it,
- * so the status is what tells it apart; any other refusal stays in the dialog.
+ * the dialog was opened on: a 409 naming one of {@link StandardChangeDecisionErrorCode}.
+ * A 409 with no code or another one (an older backend included) stays in the
+ * dialog, which shows the backend's message, as every other refusal does.
  */
 function isStaleDecisionError(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { status?: unknown }).status === 409;
+  if (typeof err !== "object" || err === null || (err as { status?: unknown }).status !== 409) return false;
+  const code = backendErrorCode(err);
+  return code !== undefined && STALE_DECISION_CODES.has(code);
+}
+
+/**
+ * What the open stage says when departures from the CAB since submit leave it
+ * fewer people who can still approve than it needs (`cannotReachQuorum`): it
+ * can never be approved as it stands, and nothing ends it on its own. Null when
+ * it can still be approved, or the backend sent no count (an older build).
+ */
+function cannotReachQuorumText(stage: BeStandardChangeProposalStage | null | undefined): string | null {
+  if (!stage?.cannotReachQuorum) return null;
+  const reach = stage.eligibleApprovers ?? 0;
+  const who = reach === 1 ? "1 CAB member" : `${reach} CAB members`;
+  return (
+    `Only ${who} can still approve this stage, which needs ${stage.requiredApprovals}: ` +
+    "members asked have left the CAB since it was submitted, so it cannot be approved as it stands. " +
+    "A CAB member can cancel it, or its proposer can withdraw it and submit a copy, which asks the CAB as it is now."
+  );
 }
 
 /** An approver's Approve / Reject on the stage the proposal waits on; a rejection needs a comment. */
@@ -1312,12 +1349,23 @@ function StageApprovers({
                 : "Waiting for a decision",
             color: "info" as const,
           };
+  // Only the stage the proposal still waits on can fall short; a settled or
+  // abandoned one waits for nobody.
+  const quorumWarning =
+    latest && stage && stage.decision === null && isStandardChangeProposalInReview(proposalState)
+      ? cannotReachQuorumText(stage)
+      : null;
   return (
     <Box component="section" aria-label={`${label} approvers`} sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
         <Typography variant="subtitle2">{index === null ? label : `${index + 1}. ${label}`}</Typography>
         {status && <Chip size="small" variant="outlined" color={status.color} label={status.text} />}
       </Box>
+      {quorumWarning && (
+        <Alert severity="warning" aria-label="Cannot be approved as it stands">
+          {quorumWarning}
+        </Alert>
+      )}
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" aria-label={`${label} approvers`} sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>

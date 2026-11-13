@@ -16659,10 +16659,14 @@ paths:
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode. stageId
-        is required (400 when absent, blank or not a UUID; 409 when it is not the
-        stage the proposal waits on), and only a current CAB member with a pending
-        row decides (403 for one who has left the CAB since the proposal was
-        submitted).
+        is required (400 when absent, blank or not a UUID; 409 with errorCode
+        standard_change_decision_stage_stale when it is not the stage the proposal
+        waits on), a proposal no longer in review is a 409 with errorCode
+        standard_change_proposal_not_in_review, and only a current CAB member with a
+        pending row decides (403 for one who has left the CAB since the proposal was
+        submitted). Any other 409 (the approval would clash: a template took the
+        name, the template moved on, a piece of evidence is no longer a closed change
+        request of the customer) carries no errorCode.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -23598,7 +23602,8 @@ components:
         machine-readable name entity-service gave a refusal, passed through unchanged
         on the 400, 403, 409 and 422 of PATCH /change-requests/{id}, on the 403 and
         409 of POST /change-requests/{id}/approvals/decision, and on the 400 of POST
-        /incidents for a refused assignment group; it is omitted when the
+        /incidents for a refused assignment group, and on the 400, 403, 404 and 409 of
+        the standard change template and proposal routes; it is omitted when the
         refusal has none, which is the body this API has always returned, so a client
         treats its absence, and a value it does not know, as "no more specific than the
         status". The status and the message are the same with or without it.
@@ -23625,7 +23630,10 @@ components:
             closed, canceled or rolled back; nothing written) and
             `change_request_deviation_not_incorporated` (400: Request Approval while a
             deviation a clone carried over is not yet folded into the implementation plan
-            and cleared; nothing written); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
+            and cleared; nothing written); on POST /standard-change-proposals/{id}/decision,
+            `standard_change_proposal_not_in_review` (409: the proposal is no longer waiting for a
+            decision; nothing recorded) and `standard_change_decision_stage_stale` (409: the
+            stageId sent is not the stage the proposal now waits on; nothing recorded); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
             the assignmentGroupId sent is not the active support group of any service).
             Every other create-incident failure keeps the generic message and carries no
             code. The list grows, so this is deliberately not a closed enum.

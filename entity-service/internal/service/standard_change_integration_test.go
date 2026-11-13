@@ -195,6 +195,20 @@ func expectErr[T any](t *testing.T, err error, what string) {
 	}
 }
 
+// expectConflictCode checks a 409 and the errorCode it carries ("" for none):
+// the page tells a decision refused because the proposal moved on from one
+// refused about the approval itself by the code alone.
+func expectConflictCode(t *testing.T, err error, code, what string) {
+	t.Helper()
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("%s: err = %v (%T), want *apierror.ConflictError", what, err, err)
+	}
+	if ce.Code != code {
+		t.Fatalf("%s: errorCode = %q, want %q (%v)", what, ce.Code, code, err)
+	}
+}
+
 func approverStates(p domain.StandardChangeProposal) map[string]string {
 	out := map[string]string{}
 	for _, a := range p.Approvers {
@@ -302,7 +316,7 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	_, err = env.svc.UpdateProposal(stdCtx(stdOutsider), p.ID, domain.UpdateStandardChangeProposalRequest{Rationale: stdp("x")})
 	expectErr[*apierror.ForbiddenError](t, err, "outsider edits")
 	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
-	expectErr[*apierror.ConflictError](t, err, "decide a draft")
+	expectConflictCode(t, err, apierror.CodeStandardChangeProposalNotInReview, "decide a draft")
 
 	// Not complete: the placeholders must be declared and the rationale given.
 	_, err = env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{Subject: stdp("Rotate {{cluster}}")})
@@ -387,7 +401,7 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 		t.Fatalf("after the second authorisation = %v", s)
 	}
 	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, atStage(t, env, p.ID, domain.DecideStandardChangeProposalRequest{Decision: "rejected", Comment: stdp("late")}))
-	expectErr[*apierror.ConflictError](t, err, "decide again")
+	expectConflictCode(t, err, apierror.CodeStandardChangeProposalNotInReview, "decide again")
 
 	tpl, err := env.svc.GetTemplate(stdCtx(stdOutsider), p.Template.ID)
 	if err != nil {
@@ -518,7 +532,8 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 		t.Fatalf("first authorisation: %v", err)
 	}
 	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), dup.ID, atStage(t, env, dup.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
-	expectErr[*apierror.ConflictError](t, err, "approve a duplicate name")
+	// A clash with the approval itself is not a stale page: it carries no code.
+	expectConflictCode(t, err, "", "approve a duplicate name")
 	if _, err := env.scoped.Exec(sys, `UPDATE standard_change_template SET name = $2 WHERE id = $1::uuid`, tpl.ID, name); err != nil {
 		t.Fatal(err)
 	}
@@ -1220,7 +1235,7 @@ func stdCustomerHolds(t *testing.T, env *stdEnv) {
 		t.Fatal(err)
 	}
 	_, err = env.svc.DecideProposal(stdCtx(stdAuth2), orphan.ID, atStage(t, env, orphan.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}))
-	expectErr[*apierror.ConflictError](t, err, "approve a proposal that names no customer")
+	expectConflictCode(t, err, "", "approve a proposal that names no customer")
 	if !strings.Contains(err.Error(), "it names no customer") {
 		t.Fatalf("refusal = %v", err)
 	}
@@ -1362,7 +1377,7 @@ func stdCABStage(t *testing.T, env *stdEnv) {
 	}
 	other := p.Stages[0].ID
 	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), stale.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", StageID: &other})
-	expectErr[*apierror.ConflictError](t, err, "a decision for another stage")
+	expectConflictCode(t, err, apierror.CodeStandardChangeDecisionStageStale, "a decision for another stage")
 	if got, _ := env.svc.GetProposal(ctx, stale.ID); got.Stages[0].Approvals != 0 || approverStates(got)[stdAuth1] != "REQUESTED" {
 		t.Fatalf("a decision for another stage was recorded: %+v %v", got.Stages, approverStates(got))
 	}
@@ -1902,7 +1917,7 @@ func stdOldLabelledProposal(t *testing.T, env *stdEnv) {
 	authorityStage := got.Stages[1].ID
 
 	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", StageID: &cabStage})
-	expectErr[*apierror.ConflictError](t, err, "a decision sent for the settled CAB stage")
+	expectConflictCode(t, err, apierror.CodeStandardChangeDecisionStageStale, "a decision sent for the settled CAB stage")
 	if !strings.Contains(err.Error(), "nothing was recorded") {
 		t.Fatalf("stale-stage refusal = %v", err)
 	}

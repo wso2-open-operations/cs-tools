@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
   submitAsync: vi.fn(),
   withdraw: vi.fn(),
   decide: vi.fn(),
+  /** The decision mutation's error as the hook reports it (react-query keeps the last one). */
+  decideError: null as unknown,
   create: vi.fn(),
   cancel: vi.fn(),
   remove: vi.fn(),
@@ -51,7 +53,13 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useUpdateStandardChangeProposal: () => ({ mutate: mocks.update, mutateAsync: mocks.updateAsync, isPending: false }),
   useSubmitStandardChangeProposal: () => ({ mutateAsync: mocks.submitAsync, isPending: false }),
   useWithdrawStandardChangeProposal: () => ({ mutate: mocks.withdraw, isPending: false }),
-  useDecideStandardChangeProposal: () => ({ mutate: mocks.decide, isPending: false, isError: false, reset: vi.fn() }),
+  useDecideStandardChangeProposal: () => ({
+    mutate: mocks.decide,
+    isPending: false,
+    isError: mocks.decideError != null,
+    error: mocks.decideError,
+    reset: vi.fn(),
+  }),
   useCreateStandardChangeProposal: () => ({ mutate: mocks.create, isPending: false }),
   useCancelStandardChangeProposal: () => ({ mutate: mocks.cancel, isPending: false, isError: false, reset: vi.fn() }),
   useDeleteStandardChangeProposal: () => ({ mutate: mocks.remove, isPending: false }),
@@ -173,6 +181,7 @@ beforeEach(() => {
   mocks.recordView.mockReset();
   mocks.access = { canWrite: true };
   mocks.proposal = DRAFT;
+  mocks.decideError = null;
   mocks.calls = [];
   mocks.update.mockReset();
   mocks.updateAsync.mockReset().mockImplementation(async () => {
@@ -642,6 +651,7 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
           new BackendApiError(
             409,
             "the stage you decided on is not the one this proposal now waits on, so nothing was recorded: reload it to see what you are asked to decide",
+            { errorCode: "standard_change_decision_stage_stale" },
           ),
         ),
       );
@@ -656,6 +666,47 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
       expect(mocks.decide).toHaveBeenCalledTimes(1);
     });
 
+    it("closes the dialog the same way when the proposal has left review", async () => {
+      mocks.proposal = IN_REVIEW;
+      mocks.decide.mockImplementation((_vars: unknown, opts: { onError?: (err: unknown) => void }) =>
+        opts.onError?.(
+          new BackendApiError(409, "this proposal is not waiting for a decision: it is withdrawn", {
+            errorCode: "standard_change_proposal_not_in_review",
+          }),
+        ),
+      );
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+      fireEvent.click(within(screen.getByRole("dialog", { name: /authorise the proposal/i })).getByRole("button", { name: "Authorise" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByRole("alert")).toHaveTextContent("The proposal changed after you opened it");
+      expect(mocks.refetch).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["no code", undefined],
+      ["another code", "standard_change_template_unavailable"],
+    ])("keeps a 409 with %s in the dialog, with the backend's words, and reads nothing again", (_label, errorCode) => {
+      // A clash with the approval itself (here: a template took the name since
+      // submit): the proposal has not moved on, and saying it had would be false.
+      const words =
+        'this customer already has a standard change template named "Rotate" (it took the name after this proposal was submitted): reject it, or ask the proposer to withdraw it and propose again under another name';
+      mocks.proposal = IN_REVIEW;
+      mocks.decide.mockImplementation((_vars: unknown, opts: { onError?: (err: unknown) => void }) => {
+        const err = new BackendApiError(409, words, errorCode ? { errorCode } : undefined);
+        mocks.decideError = err;
+        opts.onError?.(err);
+      });
+      const rerender = renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+      fireEvent.click(within(screen.getByRole("dialog", { name: /authorise the proposal/i })).getByRole("button", { name: "Authorise" }));
+      rerender(); // react-query re-renders with the mutation's error
+      const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
+      expect(dialog).toHaveTextContent(words);
+      expect(screen.queryByText(/the proposal changed after you opened it/i)).not.toBeInTheDocument();
+      expect(mocks.refetch).not.toHaveBeenCalled();
+    });
+
     it("keeps the dialog open on any other refusal", () => {
       mocks.proposal = IN_REVIEW;
       mocks.decide.mockImplementation((_vars: unknown, opts: { onError?: (err: unknown) => void }) =>
@@ -667,6 +718,37 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
       fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
       expect(screen.getByRole("dialog", { name: /authorise the proposal/i })).toBeInTheDocument();
       expect(mocks.refetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a stage that departures from the CAB leave short of its approvals", () => {
+    it("says on the open stage that it cannot be approved as it stands, and what can be done", () => {
+      mocks.proposal = {
+        ...IN_REVIEW,
+        stages: [{ ...IN_REVIEW.stages![0]!, approvals: 0, eligibleApprovers: 1, cannotReachQuorum: true }],
+      };
+      renderPage();
+      const stage = screen.getByRole("region", { name: "CAB Approval approvers" });
+      const warning = within(stage).getByRole("alert", { name: "Cannot be approved as it stands" });
+      expect(warning).toHaveTextContent("Only 1 CAB member can still approve this stage, which needs 2");
+      expect(warning).toHaveTextContent("A CAB member can cancel it, or its proposer can withdraw it and submit a copy");
+    });
+
+    it.each([
+      ["it can still reach its approvals", { ...IN_REVIEW, stages: [{ ...IN_REVIEW.stages![0]!, eligibleApprovers: 3, cannotReachQuorum: false }] }],
+      ["the backend sends no count (an older build)", IN_REVIEW],
+      [
+        "the proposal is no longer in review",
+        {
+          ...IN_REVIEW,
+          state: "withdrawn",
+          stages: [{ ...IN_REVIEW.stages![0]!, eligibleApprovers: 1, cannotReachQuorum: true }],
+        },
+      ],
+    ])("says nothing when %s", (_label, proposal) => {
+      mocks.proposal = proposal;
+      renderPage();
+      expect(screen.queryByRole("alert", { name: "Cannot be approved as it stands" })).not.toBeInTheDocument();
     });
   });
 

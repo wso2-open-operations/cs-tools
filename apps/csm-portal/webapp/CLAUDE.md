@@ -788,10 +788,13 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is
     shown, and kept for five minutes (`SUGGESTIONS_STALE_TIME_MS`; the snapshot changes once a day), so going
     back to Suggested or between its filters reads the cache; a dismissal or restore still refreshes it (they
-    invalidate `STANDARD_CHANGES_KEY`, under which the key sits). A customer the refresh could not compute in
-    time (entity-service gives each 30 seconds) comes back in `skippedCustomers`: a warning `Alert` under the
-    status line names them (`suggestionSkippedText`: "<customer>'s suggestions were not computed in the latest
-    refresh: …", up to five names, then "and N more"), and with that one customer selected the empty table
+    invalidate `STANDARD_CHANGES_KEY`, under which the key sits). A customer the refresh could not compute comes
+    back in `skippedCustomers` with one of two exact `reason`s: too large for its deadline (entity-service gives
+    each 20 seconds, `SUGGESTION_SKIPPED_TOO_LARGE`) or an error stopped its computation (`SUGGESTION_SKIPPED_ERROR`;
+    entity-service logs the cause and does not publish a run in which more than half the customers failed so). A
+    warning `Alert` under the status line names them, one sentence per reason (`suggestionSkippedText`:
+    "<customer>'s suggestions were not computed in the latest refresh: …", up to five names, then "and N more";
+    an unknown reason is shown as written), and with that one customer selected the empty table
     says the same instead of "No change is done often enough". A suggestion built from only part of a large
     subject (entity-service compares the newest 500) carries `sample`: a "Newest 500 of 3,000" chip on the
     row (`suggestionSampleLabel`) and a "Based on" line in the details (`suggestionSampleText`). A row is
@@ -959,9 +962,19 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   instead, and one decided before migration 0295 an earlier one-approval "CAB Approval" stage too, shown as "1. CAB
   Approval" above "2. Standard Change Authority". **Authorise** / Reject on the
   viewer's own `canDecide` row (there is no Approve); the dialog says whether a second member must still approve or
-  this one applies it (`STANDARD_CHANGE_CAB_APPROVALS` when the answer has no stage); the decision sends the
-  `stageId` of the row it was offered on, so one from a page loaded before that stage was settled or closed is refused
-  (409, the page reloads). Only the latest stage can read as open, "Withdrawn" or "Cancelled"; an earlier stage left
+  this one applies it (`STANDARD_CHANGE_CAB_APPROVALS` when the answer has no stage). The dialog works from a
+  `DecisionSnapshot` taken when it opens (verdict, `stageId`, the stage's counts, `cabHistory`) and always sends that
+  `stageId` (required by entity-service, 400 without it), so a refetch behind it can neither change nor drop the stage;
+  when the refetched page no longer offers that stage the dialog shows a "Proposal changed" warning. A 409 whose
+  `errorCode` is `standard_change_decision_stage_stale` or `standard_change_proposal_not_in_review`
+  (`isStaleDecisionError`; the code, never the words) closes the dialog, puts a focused page notice that nothing was
+  recorded and reads the proposal again, without retrying; any other refusal, a 409 with no code or another one included
+  (the approval itself clashes: a template took the name, the template moved on, evidence is no longer a closed change
+  request of the customer), stays in the dialog with the backend's words, since the proposal has not moved on. When
+  members have left the CAB since submit and the open stage can no longer reach its approvals (`cannotReachQuorum`, with
+  `eligibleApprovers`), a warning on that stage says how many can still approve, that it cannot be approved as it
+  stands, and that a CAB member can cancel it or its proposer withdraw it and submit a copy (`cannotReachQuorumText`);
+  nothing ends such a proposal on its own. Only the latest stage can read as open, "Withdrawn" or "Cancelled"; an earlier stage left
   undecided reads "Not decided", never as waiting. The read-only view shows the Summary above what the template specifies. A rejection needs a comment.
   `canCancel` (a CAB member, someone else's open proposal) offers **Cancel proposal** with a required reason.
   **CAB history** (`CabHistorySection`, a named region placed directly above the Approval section, so it is read

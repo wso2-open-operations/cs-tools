@@ -1962,7 +1962,7 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			return err
 		}
 		if !proposalState(state).IsInReview() {
-			return &apierror.ConflictError{Msg: "this proposal is not waiting for a decision: it is " + strings.ToLower(state)}
+			return &apierror.ConflictError{Msg: "this proposal is not waiting for a decision: it is " + strings.ToLower(state), Code: apierror.CodeStandardChangeProposalNotInReview}
 		}
 		if sameEmail(proposer, actor) {
 			return &apierror.ForbiddenError{Msg: "the proposer of a standard change cannot decide it"}
@@ -1975,7 +1975,7 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			return err
 		}
 		if !strings.EqualFold(strings.TrimSpace(expectedStage), stage.id) {
-			return &apierror.ConflictError{Msg: "the stage you decided on is not the one this proposal now waits on, so nothing was recorded: reload it to see what you are asked to decide"}
+			return &apierror.ConflictError{Msg: "the stage you decided on is not the one this proposal now waits on, so nothing was recorded: reload it to see what you are asked to decide", Code: apierror.CodeStandardChangeDecisionStageStale}
 		}
 		rowID, userID, err := requestedProposalApprover(ctx, tx, stage, actor)
 		if err != nil {

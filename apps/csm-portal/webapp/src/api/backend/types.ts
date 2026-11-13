@@ -5735,6 +5735,7 @@ export interface BeStandardChangeProposalStage {
    * True when eligibleApprovers is below requiredApprovals: members have left
    * the CAB since submit and the proposal can never be approved as it stands (a
    * CAB member cancels it, or its proposer withdraws it and submits a copy).
+   * The proposal page says so on the open stage.
    */
   cannotReachQuorum?: boolean;
 }
@@ -6052,9 +6053,19 @@ export interface BeStandardChangeSuggestion extends Partial<BeStandardChangeCabH
   sample?: { compared: number; total: number } | null;
 }
 
-/** A customer the latest refresh could not compute in time: the snapshot holds nothing for it. */
+/**
+ * A customer the latest refresh could not compute: too large for its deadline,
+ * or an error stopped its computation (the refresh logged the cause). The
+ * snapshot holds nothing for it, and the next refresh tries again.
+ */
 export interface BeStandardChangeSuggestionSkipped {
   customer: BeEntityRef;
+  /**
+   * Why, as one of two exact sentences entity-service writes, which the page
+   * matches: `SUGGESTION_SKIPPED_TOO_LARGE` or `SUGGESTION_SKIPPED_ERROR`
+   * (`csm-operations/utils/standardChangeSuggestions.ts`). Any other text is
+   * shown as it is.
+   */
   reason: string;
 }
 

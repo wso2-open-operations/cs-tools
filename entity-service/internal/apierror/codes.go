@@ -164,6 +164,25 @@ const (
 	CodeStandardChangeTemplateOtherCustomer = "standard_change_template_other_customer"
 )
 
+// The two refusals of a decision on a standard change proposal (POST
+// /standard-change-proposals/{id}/decision) that mean the proposal moved on
+// behind the caller's page: the same request would be refused again, so a
+// client reads the proposal again rather than offering a retry. Every other
+// 409 of that route (a template that took the name, the template moved on, a
+// piece of evidence no longer a closed change request of the customer) is
+// about the approval itself, carries no code, and its message says what to do.
+const (
+	// CodeStandardChangeProposalNotInReview is the 409 for a decision on a
+	// proposal that is no longer waiting for one: still a draft, or already
+	// approved, rejected, withdrawn or cancelled. Nothing was recorded.
+	CodeStandardChangeProposalNotInReview = "standard_change_proposal_not_in_review"
+
+	// CodeStandardChangeDecisionStageStale is the 409 for a decision that names
+	// a stage the proposal no longer waits on (settled, or replaced when the
+	// proposal returned to draft and was submitted again). Nothing was recorded.
+	CodeStandardChangeDecisionStageStale = "standard_change_decision_stage_stale"
+)
+
 // The refusals of a portal membership write (PATCH / DELETE /
 // projects/{id}/contacts/{email} and the resend) while the contact's
 // Salesforce half is owed by a deferred write (see
