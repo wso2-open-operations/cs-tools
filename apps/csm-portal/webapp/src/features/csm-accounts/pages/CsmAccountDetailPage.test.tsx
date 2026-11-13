@@ -217,12 +217,11 @@ describe("CsmAccountDetailPage", () => {
   it.each([
     ["null", { customerSuccessManager: null }],
     ["absent", {}],
-  ])("shows a placeholder for the customer success manager when %s", (_label, overrides) => {
+  ])("hides the customer success manager cell when %s", (_label, overrides) => {
     mockAccount({ data: { ...BASE_ACCOUNT, ...overrides } });
     renderPage(<CsmAccountDetailPage />);
 
-    const cell = screen.getByText("Customer Success Manager").parentElement as HTMLElement;
-    expect(within(cell).getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("Customer Success Manager")).not.toBeInTheDocument();
   });
 
   it.each([
