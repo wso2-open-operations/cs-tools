@@ -65,11 +65,8 @@ func NewSampleDashboardGenerator() DashboardGenerator {
 }
 
 // Generate returns the sample, or ErrGenerateUnavailable when it is not loaded.
-func (sampleDashboardGenerator) Generate(ctx context.Context, _ string, _ json.RawMessage) (GeneratedDashboard, error) {
-	d, ok, err := dashboard.Lookup(ctx, generateSampleDashboardID)
-	if err != nil {
-		return GeneratedDashboard{}, fmt.Errorf("%w: load sample dashboard %q: %w", ErrGenerateUnavailable, generateSampleDashboardID, err)
-	}
+func (sampleDashboardGenerator) Generate(_ context.Context, _ string, _ json.RawMessage) (GeneratedDashboard, error) {
+	d, ok := dashboard.ByID(generateSampleDashboardID)
 	if !ok {
 		return GeneratedDashboard{}, fmt.Errorf("sample dashboard %q not loaded: %w", generateSampleDashboardID, ErrGenerateUnavailable)
 	}
