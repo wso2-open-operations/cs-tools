@@ -765,6 +765,38 @@ func (c *CustomerEntityClient) SearchScheduleEngagementAllocations(ctx context.C
 	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/search", body)
 }
 
+// SearchSchedulePublicHolidays calls POST /team-schedule/public-holidays/search
+// on the entity service: the given users' public holidays over a date window.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/public-holidays/search", body)
+}
+
+// SearchHolidayAvailability calls POST /team-schedule/holiday-availability/search
+// on the entity service: each CRE team's availability on each public holiday
+// in a window. Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/holiday-availability/search", body)
+}
+
+// ConfirmHolidayAvailability calls
+// PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation.
+func (c *CustomerEntityClient) ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
+	return c.do(ctx, http.MethodPut, holidayConfirmationPath(teamKey, date), nil)
+}
+
+// WithdrawHolidayAvailability calls
+// DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation.
+func (c *CustomerEntityClient) WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, holidayConfirmationPath(teamKey, date), nil)
+}
+
+// holidayConfirmationPath returns the entity-service path of a team's holiday
+// availability confirmation for one day, with both segments path-escaped.
+func holidayConfirmationPath(teamKey, date string) string {
+	return "/team-schedule/holiday-availability/" + url.PathEscape(teamKey) + "/" + url.PathEscape(date) + "/confirmation"
+}
+
 // DismissScheduleEngagementAllocation calls
 // POST /team-schedule/engagement-allocations/dismiss on the entity service:
 // take a synced allocation off a person's roster for some days, or put them

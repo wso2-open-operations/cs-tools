@@ -88,16 +88,15 @@ export default function UpdateLevelsReportModal({
   const [isDownloading, setIsDownloading] = useState(false);
   const isDark = useDarkMode();
 
-  const handleDownloadPdf = useCallback(() => {
+  const handleDownloadPdf = useCallback(async () => {
     if (!reportData) return;
     setIsDownloading(true);
-    setTimeout(() => {
-      try {
-        generateUpdateLevelsReportPdf(reportData);
-      } finally {
-        setIsDownloading(false);
-      }
-    }, 0);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    try {
+      await generateUpdateLevelsReportPdf(reportData);
+    } finally {
+      setIsDownloading(false);
+    }
   }, [reportData]);
 
   const handleLevelClick = useCallback(

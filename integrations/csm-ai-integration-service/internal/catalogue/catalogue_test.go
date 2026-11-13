@@ -36,3 +36,27 @@ func TestNewDashboardIsTheBuiltInCopy(t *testing.T) {
 		t.Error("dashboard Text() is not the built-in catalogue")
 	}
 }
+
+// TestCatalogueListsTheProjectDateFilters checks that the project section names
+// every project query key and sort field, and that no rule still says a project
+// list sorts by the end date alone.
+func TestCatalogueListsTheProjectDateFilters(t *testing.T) {
+	text := DashboardEmbedded()
+	for _, want := range []string{
+		"closureStates",
+		"`endDateFrom`, `endDateTo`",
+		"`onboardingStartDateFrom`, `onboardingStartDateTo`",
+		"`goLivePlanDateFrom`, `goLivePlanDateTo`",
+		"`goLiveDateFrom`, `goLiveDateTo`",
+		"`onboardingExpiryDateFrom`, `onboardingExpiryDateTo`",
+		"`productionReadinessCompletionDateFrom`, `productionReadinessCompletionDateTo`",
+		"`goLivePlanDate`", "`goLiveDate`", "`onboardingExpiryDate`", "`productionReadinessCompletionDate`",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("catalogue does not mention %s", want)
+		}
+	}
+	if strings.Contains(text, "sorts by `endDate` only") || strings.Contains(text, "sort only by `endDate` (") {
+		t.Error("catalogue still says a project list sorts by endDate only")
+	}
+}

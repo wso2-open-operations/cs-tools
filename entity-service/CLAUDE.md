@@ -103,6 +103,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription` | Project type names (exact match) that list a case, service request or security report analysis (each row carries `type`) in `GET /reports/long-open-cases?variant=open-before-yesterday` whatever its product. Blank falls back to the default |
 | `OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES` | no | `Cloud Support` | Project type names that list a case in that variant only when the case has a product set. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `HOLIDAY_CALENDAR_BASE_URL` / `HOLIDAY_CALENDAR_TOKEN_URL` / `HOLIDAY_CALENDAR_CLIENT_ID` / `HOLIDAY_CALENDAR_CLIENT_SECRET` | no* | — | Choreo connection to the calendar-events service the leave app reads holidays from (`GET /holidays`). All four or none (`Validate`). Unset: no holidays are fetched; the roster shows what is stored. See "Team Schedule public holidays" |
+| `HR_ENTITY_BASE_URL` / `HR_ENTITY_TOKEN_URL` / `HR_ENTITY_CLIENT_ID` / `HR_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection to the HR entity GraphQL service (the GraphQL endpoint URL), for each member's location. All four or none. Unset: every member falls back to their team's country |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -119,6 +121,66 @@ A failed Event Hub publish is logged instead of recorded — see
 and the assignable-role allow-list are organisation vocabulary and live in the CSM
 portal backend (`apps/csm-portal/backend`), resolved once at startup. This service
 holds no organisation vocabulary at all — do not reintroduce it.
+
+## Team Schedule public holidays
+
+Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`,
+`repository/public_holiday_repo.go`, `handler/public_holiday_handler.go`; tables
+`team_schedule_public_holiday` and `team_schedule_person_location` (migration 0283).
+
+- **Source** is the leave app's: `GET /holidays?countries=<country>&startTimeMin&startTimeMax`
+  on the calendar-events service (people-ops-suite `calendar_events:fetchHolidaysForCountry`).
+  An all-day event's end date is exclusive, so it becomes one row per day (`expandEvents`,
+  as `getHolidaysFromEvents`); timed events are skipped. Two holidays on one day are one row,
+  titles joined with " / ".
+- **Whose holiday:** the employee-service location (`employee(email){location}`, as
+  `employee:getEmployeeLocation`), stored per member. Unknown: India for a member of the
+  India team (the team absence kind `ALLO_IND` moves people to), else Sri Lanka. The country
+  string is the leave app's (`Sri Lanka`, `India`), passed to the calendar service as is.
+- **Refresh:** daily (first run two minutes after start) in every replica, and on demand
+  with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
+  One run at a time per process. It upserts the current and next year for every country in
+  use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
+  transient answer never wipes a year. Re-running is safe.
+- **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
+  roster works while the services are down. A holiday is not leave and moves no shift.
+- **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
+  `repository/holiday_availability_repo.go`, `handler/holiday_availability_handler.go`, same
+  migration (0283):
+  - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
+    places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
+    colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
+    on every member of a rostered CRE team (management left out) for each weekday holiday of
+    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
+    Alerts does not call them. A lead or rota manager makes somebody available by removing the
+    tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
+    changed.
+  - **Placed once.** `team_schedule_holiday_tag_placed` (unique on user and day) records each
+    placement and is kept after the tag is removed, so a removed tag is never placed again. A
+    day the person already has any tag on (leave wins) is skipped and tried again the next day.
+    A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
+    touched (still one day, created and updated by the actor) and forgets the placements.
+  - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
+    its person available (no tag that day) **and** the team is confirmed
+    (`team_schedule_holiday_confirmation`, one row per team and day). Confirm
+    (`PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation`) and withdraw
+    (`DELETE`) need a user token of whoever may change the team's rota (`RotaWriterCheck`: its
+    lead, its rota manager, a CRE rota admin or the CRE/CS head, a portal or CSM admin); a
+    confirm is refused with 409 `holiday_turns_uncovered`, naming the turns, while a turn has
+    nobody. A turn that loses its person after the confirm reads `NEEDS_ATTENTION` and the
+    reminders resume. Statuses: `NEEDS_MARKING`, `AWAITING_CONFIRMATION`, `CONFIRMED`,
+    `NEEDS_ATTENTION`.
+  - **Reads.** `POST /team-schedule/holiday-availability/search` (internal staff, at most 70
+    days): one entry per team and day with each member's status (TAGGED / AVAILABLE / AWAY),
+    the uncovered turns, the confirmation and `canConfirm` for the caller.
+  - **Reminders** (service credential only, for csm-scheduled-tasks'
+    `holiday_availability_reminder`): `POST .../reminders/due {today}` lists, per team and
+    holiday in the next 14 days, the latest stage whose day has come -- `notice` (14 days
+    before, always), `week` (7 days), `two_days` / `one_day` (working days; a Monday holiday:
+    Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
+    leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
+    (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
 
 ## Health probes
 
@@ -248,8 +310,8 @@ Chat cards in the SR's SRE-team space.
 - `sr.created`: every SR created on the plain-Postgres path
   (`caseService.CreateCase`). Under dual-write the SR is created in ServiceNow
   first and its own flow still runs there, so nothing happens here.
-  **An SR created from a GitHub issue** (`githubSyncService`, the `SR-GH-`
-  series) gets the same `OnCreated` -- assignment, acknowledgement and
+  **An SR created from a GitHub issue** (`githubSyncService`; numbered natively -- CS number and
+  `<KEY>-<n>` id -- when the repository maps to a project, `SR-GH-` series otherwise) gets the same `OnCreated` -- assignment, acknowledgement and
   `sr.created` -- in every mode (`WithGithubSRNotices`, routes.go): it exists
   only in Postgres, so no ServiceNow flow ever announces it. Only a new record;
   a delivery that finds the issue's record already there announces nothing.
@@ -463,7 +525,8 @@ the list.
   stored phone), `sales_region`, `sub_region`, `life_cycle` (`status`),
   `naics_industry`, `sub_industry`, `classification`, `technical_owner_id`, the
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
-  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`.
+  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
+  `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
 - `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
@@ -497,6 +560,35 @@ later CREATED/UPDATED/RESTORED clears `deleted_on`. Never `DELETE FROM account`
 `deleted_on IS NOT NULL`; `GetAccountByID`, `LookupAccountIDBySfID` (so
 `EnsureAccount`), the partner lookup and the joins from projects/cases/global search
 still see the row.
+
+**Primary partner and life cycle on the account reads.** `hasPrimaryPartner` on
+`GET /accounts/{id}` and `POST /accounts/search` is `primary_partner_sf_id IS NOT NULL`;
+it used to be "any partner link in `account_relationship`", which has no primary
+marker and overstated it for an account with a non-primary partner. The column fills
+only when the Account ingest writes the account, and until then `hasPrimaryPartner`
+reads false. Its only reader is ACP's CSM-only mode (`ACP_SALES_ENTITY_READS=off` in
+csm-scheduled-tasks), where it moves an invoice suspend date. Both reads also return
+`lifeCycle` (`account.life_cycle`), and the opportunity and project-opportunity link
+reads return `sfId` (`sf_opportunity.sf_id`, `sf_opportunity_link.link_sf_id`), all
+`null` on the ServiceNow data source.
+
+**Backfill after 0291: `POST /salesforce/accounts/{sfId}/refresh`, not replayed events.**
+A replayed `UPDATED` event for an account the ledger already holds at that version is
+skipped by the duplicate guard, so it never writes the new column. `RefreshAccount`
+(`salesforce_account_refresh.go`) writes the account from its current Salesforce record
+with the guard off; incoming events keep it. Internal callers only, registered only
+with the Account ingest on; it does not refresh partner links. Call it once per account
+(`SELECT sf_id FROM account WHERE sf_id IS NOT NULL AND deleted_on IS NULL`). Every
+refresh stamps the account's ledger row (`updated_on`, and `status` FAILED when the
+write failed), so before turning on ACP's CSM-only mode this must return 0, or only
+accounts that are known to be broken (`<start>` = when the backfill began):
+
+```sql
+SELECT COUNT(*) FROM account a
+LEFT JOIN salesforce_ingest_state s ON s.entity = 'account' AND s.sf_id = a.sf_id
+WHERE a.sf_id IS NOT NULL AND a.deleted_on IS NULL
+  AND (s.updated_on IS NULL OR s.updated_on < '<start>' OR s.status <> 'SUCCEEDED');
+```
 
 ### One row per sf_id
 
@@ -1082,9 +1174,10 @@ reopen logs a WARN at every start as the reminder.
   `acp_reopen_rules.go`; `testdata/acp_rules_parity.json` holds the cases both copies must agree on
   (`TestACPRulesParity` here, ACP's parity tests over the same file), since a disagreement makes ACP
   suspend a project every day and this check reopen it:
-  - end-date track: the Salesforce project end date is set and in the future (`acpDaysBetween > 0`;
-    ACP suspends at 0 or less);
-  - invoice track: no counted invoice is past its suspend date. Counted = opportunity stage
+  - end-date track: the Salesforce project end date is set and not yet past (`acpDaysBetween >= 0`;
+    ACP suspends only once the date is past, `acpDaysBetween < 0`, so a project renewed to an end date
+    of today reopens and is not suspended again);
+  - invoice track: no counted invoice is past its suspend date (`acpDaysBetween(suspend date) >= 0`, same boundary). Counted = opportunity stage
     "50 - Closed Won" with a EULA that is present and not "Customer contract" (an empty EULA text
     counts, as in ACP); invoice unpaid, has a due date, not PP/CO/TAM, not "Auto Created PS", not due
     before the project start. The earliest due one decides; its suspend date is the due date, or with
@@ -1370,6 +1463,18 @@ revisited.
   `csm-notification-service`'s `events.Validate` would reject anyway for an
   empty `recipients` list.
 
+  **`CaseCreatedPayload.EngagementType`** mirrors `CommentAddedPayload.EngagementType`'s
+  own convention (`cv.EngagementType`'s lowercase value, e.g. `"migration"`; `""`
+  for every non-engagement case-like type) — added so `csm-notification-service`'s
+  SLA engine can tell a migration engagement apart from any other the same way
+  `dispatch.checkFrustration` already can from `CommentAddedPayload`'s own copy
+  of this field (see that repo's own `CLAUDE.md`, "SLA breach-alerting engine",
+  for what this closes: a clock can get attached to an engagement via clock
+  re-evaluation, which has no `case_type` gate the way registration at creation
+  does, and its breach must be suppressed the same way a service request's is).
+  Deploy `csm-notification-service` before this field starts being sent, or its
+  strict decode rejects every `case.created` event outright.
+
   **Only `type: "case"` requires a severity to publish at all.**
   `CaseCreatedPayload.Priority` has no `omitempty` (a consumer always
   expects a real value) and `""` is not a real priority, so a nil severity
@@ -1605,6 +1710,12 @@ link-related. `publishStatusChanged`/`publishCaseAssigned` additionally set
 `case.*` email's subject to follow one explicit standard format,
 `"[WSO2 Support] (<wso2 case id>/<case number>) <title>"` (see that
 service's own `CLAUDE.md`, `dispatch.subjectLine`).
+`publishStatusChangedEvent` also sets `PreviousStatus` (the display label of
+`before.State`, empty when the prior state is unknown) so a consumer can tell
+whether the change is visible to a given audience: customers see Work In
+Progress and Waiting On WSO2 as one "In Progress" state, so
+`csm-notification-service` skips the customer email for a move between the two.
+Entity-service itself never merges the states; it only supplies the previous one.
 - **`snCaseService.UpdateCase`** publishes `case.status_changed` via
   `publishStatusChanged`, called only when the PATCH's own `req.State` was
   set (a `nil` `State` — e.g. an `assigneeEmail`-only PATCH — never
@@ -2630,6 +2741,59 @@ otherwise narrow scope (see its own doc comment on why it has no
 work_item/case/announcement join otherwise) — purely for these four
 display-only fields, nothing else case-like is added.
 
+**`GetClockState` also resolves `ProjectOnboardingStatus`/`IsEvaluationAccount`**
+(`project`/`project_type` joins, the same ones `SearchActiveSLAStatuses` already
+uses for the identical two fields) — added because `csm-notification-service`'s
+own SLA breach Chat alert had been routing with these two facts hardcoded to
+`false`/`""` ever since `case.created` stopped carrying them, so an
+onboarding-stage case's breach alert never reached the Onboarding Chat space
+at all, regardless of the project's real `onboarding_status` (the
+frustration-detection alert, which gets these facts off its own event
+payload instead, never had this gap). `csm-notification-service`'s
+`Engine.sendBreachAlert` now reads both straight off this same `GetClockState`
+call — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine", and
+`internal/chataudience`'s own doc comments for the routing side of this fix
+(onboarding now adds the Onboarding Chat audience on top of the case's own
+team space, so both the team actually working the case and whoever is
+running the onboarding see the alert — unlike an Evaluation Subscription
+case, which routes to Evaluation alone).
+
+**`GetClockState` also resolves `OnboardingTeamEmail`, a SEPARATE field from
+`TeamEmail`, not a swap of it** — the Customer Onboarding team's own
+`group_email` (`team.key = "customer_onboarding_team"`), populated only when
+`ProjectOnboardingStatus` is `IN_PROGRESS`/`NOT_STARTED`, `""` otherwise.
+`TeamEmail`/`TeamLeadName` always stay the case's real CRE team, completely
+unaffected by onboarding status — an earlier version of this fix swapped
+them to the onboarding team entirely, which a CodeRabbit review caught
+pairing the Customer Onboarding team's lead with the CRE team's own name on
+the displayed Chat card/email (`meta.Team`), a real mismatch. By explicit
+request, an onboarding-stage case's breach EMAIL should reach BOTH inboxes —
+`csm-notification-service`'s `sendBreachEmails` sends to `TeamEmail` and
+`OnboardingTeamEmail` together in one email's "to" list, the same two-
+audience shape its breach CHAT card now posts to — never one in place of
+the other. Matched by `team.key` (UNIQUE), not `team.name` (`team.name`
+carries no uniqueness constraint) — same reasoning
+`evaluationSubscriptionProjectTypeName`'s own doc comment gives for matching
+`project_type` by name instead of id. `slaClockStateOnboardingStatuses`
+(`sla_status_repo.go`) mirrors `csm-notification-service`'s own
+`chataudience.onboardingStatuses` by hand — keep the two in sync, or the
+Chat card and the email end up disagreeing on whether a given case counts
+as "onboarding." Every other field this method resolves (`AssigneeName`/
+`AssigneeEmail`, and the clock state itself) is unaffected by onboarding
+status.
+
+**`SearchActiveSLAStatuses` also resolves `EngagementType`** (`eng.type::TEXT`,
+lowercased — `caseLikeJoins`' own `engagement` table, already joined for every
+other case-like field here) — added for `csm-notification-service`'s
+`Engine.Reconcile`, its startup rebuild of Redis from this bulk endpoint, so a
+migration engagement's clock metadata survives a Redis wipe/restart instead
+of being rebuilt with `EngagementType` dropped to `""` (a CodeRabbit-caught
+follow-up on the fix above: `ClockMeta.EngagementType` also needs a LIVE
+refresh path, not just a durable one — see `events.CaseTypeChangedPayload`'s
+own new `NewEngagementType` field and `case_type_transfer_service.go`'s
+`publishCaseTypeChanged`, which populates it from a fresh `GetCaseByID` the
+same way `Product`/`Team` already are, for the event-driven half of this).
+
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
 of the same name/reasoning) — `AccessService.ResolveScope`'s scope must be
@@ -3324,7 +3488,7 @@ the Query/SecReport Analysis family) on no severity at all.
   calling their own `publishCaseCreated`/`publishStatusChanged`/
   `publishSeverityChanged`.
 
-- **`POST /cases/{id}/sla/recalculate-pause` (CaseSLARecalcService, admin-only) corrects a case's stored pause_duration/business_pause_duration by replaying its real history, not by trusting what's currently on the row.** A single clock's own `start_on`/`pause_duration`/`business_pause_duration` are write-path state, accumulated incrementally at each live pause/resume event (`setPaused`) — if any one of those writes was ever wrong (the exact class of bug the business-day-elapsed-time fixes elsewhere in this file exist to close), nothing afterward self-corrects it; this action is the one place that does, by rebuilding the total from scratch. Decision order mirrors `applyCaseStateEffectsForPolicy` exactly (`decidePauseTransition`, `sla_case_recalc_service.go`) — stop/cancel/pause/resume, in that order, evaluated against the case's REAL state at each point in its own `work_item_activity` history, with every other fact (severity, product, etc.) pinned to today's current value. That's not an approximation: anything that would make a different fact change mid-clock (a severity revision, a case-type transfer) already cancels the clock outright and registers a fresh one (`ReviseCaseClocks`) rather than merely pausing the old one, so within one clock's own lifetime state is structurally the only fact that can ever matter to its own pause/resume decision.
+- **`POST /cases/{id}/sla/recalculate` (CaseSLARecalcService, admin-only) corrects a case's stored pause_duration/business_pause_duration by replaying its real history, not by trusting what's currently on the row.** A single clock's own `start_on`/`pause_duration`/`business_pause_duration` are write-path state, accumulated incrementally at each live pause/resume event (`setPaused`) — if any one of those writes was ever wrong (the exact class of bug the business-day-elapsed-time fixes elsewhere in this file exist to close), nothing afterward self-corrects it; this action is the one place that does, by rebuilding the total from scratch. Decision order mirrors `applyCaseStateEffectsForPolicy` exactly (`decidePauseTransition`, `sla_case_recalc_service.go`) — stop/cancel/pause/resume, in that order, evaluated against the case's REAL state at each point in its own `work_item_activity` history, with every other fact (severity, product, etc.) pinned to today's current value. That's not an approximation: anything that would make a different fact change mid-clock (a severity revision, a case-type transfer) already cancels the clock outright and registers a fresh one (`ReviseCaseClocks`) rather than merely pausing the old one, so within one clock's own lifetime state is structurally the only fact that can ever matter to its own pause/resume decision.
   - **The ServiceNow-backed case path writes none of this history at all.** `work_item_activity` (migration 0055) is only ever populated by `caseService`'s own Postgres-native write path — `snCaseService` (what this deployment's real `DATA_SOURCE` actually uses for real cases) never calls `RecordCaseFieldChangeActivity`. A case with zero state-activity rows has `HasHistory: false` in the response and every one of its clocks is left exactly as it is — never guessed at from an empty log. This is the common case for a real case today, not a rare edge case.
   - **A later severity/case-type-change activity row (after the clock's own `start_on`) disqualifies that clock from correction entirely**, reported with a reason rather than corrected: if one happened, the real engine would already have cancelled this clock and registered a different one in its place, so finding one here means this row is either stale or something else is inconsistent.
   - **Both `IN_PROGRESS` and `PAUSED` clocks are corrected — only a terminal one (`COMPLETED`/`ACHIEVED`/`CANCELLED`/`BREACHED`) is skipped.** A `PAUSED` clock's own `business_elapsed_percentage`/`business_duration`/`remaining_business_duration` were frozen using its pause total at the exact moment it was written (`setPausedFlat`/`setPausedBusinessDays`); correcting `pause_duration`/`business_pause_duration` underneath it without also recomputing that frozen snapshot would leave the two disagreeing, so this recomputes and overwrites all five columns together (`UpdateClockPausedSnapshot`), using the exact same freeze formula those two functions already use, anchored on the clock's own `paused_on` instant rather than `NOW()`. The replay's own still-open trailing segment (from the last known state change up to now) is never folded into a `PAUSED` clock's total — only completed pause spans are, the same way the live engine's own incremental accumulation only ever grows on resume.
@@ -4082,8 +4246,22 @@ already use — no route path, request, or response shape changed.
     report. Comments on those keep exactly the behaviour they had.
   - **A live comment only.** A comment carrying its own past `createdOn` is
     ServiceNow history being mirrored in at dual-write case creation
-    (`mirrorInitialSNComments`), not something happening now, so it does not move
-    `updated_on`.
+    (`mirrorInitialSNComments`), or the description written as a case's first
+    comment on the plain PostgreSQL create (`addDescriptionAsFirstComment`), not
+    something happening now, so it does not move `updated_on`.
+- **A case starts with its description as the first comment, on every data source.**
+  ServiceNow's case-creation rules write the description as the case's first comment;
+  dual-write copies it (`mirrorInitialSNComments`). With no ServiceNow behind the create
+  (`DATA_SOURCE=postgres`) nothing wrote it, so a new case's activity started without its
+  description. `caseService.addDescriptionAsFirstComment` now writes it right after the
+  insert: a `COMMENT` holding the description HTML unchanged, by the creator, at the case's
+  own `created_on`, through `CreateCaseCommentAsSystem` (no `case.comment_added`, no SLA
+  response, no watcher, no `updated_on`). Skipped for an announcement (its description is
+  shown already; the mirror drops ServiceNow's repeat too) and a blank description. Best
+  effort: the insert has its own 5s deadline (so the SLA clocks and `case.created` after it
+  keep their time), and a failure is logged by SQLSTATE or class only (`dbFailureReason`: a
+  pgx connection error names the host, user and database) while the create still succeeds. Cases created before this have
+  no such comment; nothing backfills them.
   - **Never backwards** (`updated_on <= NOW()`): `NOW()` is the transaction's
     start, so a comment that waited on the row lock behind a later-stamped write
     leaves that newer stamp, and its writer, alone.
@@ -4213,7 +4391,7 @@ already use — no route path, request, or response shape changed.
 ## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
 
 Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
-the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+the minutes logged on them, per `groupBy`: `state`, `user`, `project`, `day` or `team`. It reuses
 `timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
 `project_stats_repo.go`), so the aggregate can never count a different set of cards from
 the search, or a different total from the search's `totalTime`; keep it that way.
@@ -4236,15 +4414,28 @@ the search, or a different total from the search's `totalTime`; keep it that way
   `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
   The query runs `generate_series` over the window, so every day comes back in date order,
   days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`teamIds` (search and aggregate):** the cards of the people on any of the teams **today**:
+  `EXISTS` over `team_member` (the Team Schedule's roster, the list `GET /teams/{id}/members`
+  shows; it can hold a person twice and includes engineers moved onto a team), so a card is
+  matched once however many of the teams, or rows of one team, list its engineer. A team id is
+  the Team Schedule's `team.id`, which is a CRE team's CRE group id or an SRE team's SRE group
+  id. There is no membership
+  history: someone who moved teams counts in the new one, for old cards too.
+- **`team`:** needs `filters.teamIds` and returns one bucket per one of those teams (key the
+  team id, label its name), a team without cards at 0 and an id with no team left out
+  (`aggregateTimeCardsByTeam`). A card counts in every one of the teams its engineer is on, so
+  unlike the other groupings the buckets may overlap: `totalRecords` and `totalMinutes` are the
+  buckets' sums, not the search's total. `measure` and `maxGroups` apply as for `user`.
 - **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
-  time card aggregate.
+  time card aggregate. Its time card search refuses `teamIds` (400) too.
 - **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
   (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
   `CLAUDE.md`).
 
 Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
-check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
-(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+check, the ServiceNow refusal, `teamIds` and `team`), `time_card_aggregate_integration_test.go`
+and `time_card_team_filter_integration_test.go` (both `CASE_STATS_TEST_DSN`; the latter seeds
+teams with a duplicated member, a shared member and no members). The integration fixture is built so that ranking by count and
 ranking by minutes disagree, it has a card with all five minute columns NULL, and the
 search-parity test compares both counts and minutes with `SearchTimeCards`.
 
@@ -4848,9 +5039,18 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   ServiceNow and another in the portal because of a timeout. The transaction (and a row lock on
   that one work item) stays open for the length of the ServiceNow call.
 - **After the commit, best-effort, never undoing it:** an activity entry ("Type: Case ->
-  Engagement") and the SLA clocks above. No event is published (there is no `case.type_changed`).
-  A GitHub-linked service request still gets the one "record created" notice its insert
-  trigger always sends.
+  Engagement") and the SLA clocks above. **`case.type_changed` (`publishCaseTypeChanged`) now
+  also publishes here, but only when `"case"` is the previous or the new type** (`result.Type ==
+  "case"` or `result.PreviousType == "case"`) — a transfer between two non-`"case"` types (e.g.
+  `service_request` straight to `engagement`) still publishes nothing, so
+  `csm-notification-service`'s own `Engine.ReviseClocks` never hears about those. This stayed
+  undocumented here after it was added; see that repo's own `CLAUDE.md`, "SLA breach-alerting
+  engine", for what it's actually for — keeping a clock's Redis-held `CaseType`/`EngagementType`
+  current after a transfer (confirmed live, not hypothetical: entity-service's clock
+  re-evaluation has no `case_type` gate at creation time's own `slaClockEligibleCreateTypes`
+  does, so a case's clock can survive a transfer into an engagement and keep running under
+  stale metadata without this). A GitHub-linked service request still gets the one "record
+  created" notice its insert trigger always sends.
 - **`GetCaseByID` now returns `engagementType` too** (fixed; previously a known gap, not caused
   by the transfer itself) — it used to select only the list search's own `eng.type` and leave
   the detail read's `CaseView.EngagementType` nil, so anything keyed on it from the detail read
@@ -7784,7 +7984,8 @@ v5 can't scan a binary-format timestamptz into a `*string`
 Both approval methods (`GetChangeRequestApprovals`, `DecideChangeRequestApproval`)
 are not -- see below for why. (`CreateChangeRequest` used to be on this list
 too, blocked on the same `work_item.number` gap `CaseRepository.CreateCase`
-had; both are now implemented, via `next_portal_work_item_number()` -- see
+had; both are now implemented, via `next_work_item_number('CHANGE_REQUEST')` (originally
+`next_portal_work_item_number()`) -- see
 "CreateCase and case numbers" above and `ChangeRequestRepository.CreateChangeRequest`'s
 own doc comment. Unlike case, `change_request` is excluded from
 `work_item_wso2_id_required_by_type`, so no `wso2_id` generation is needed
@@ -9218,6 +9419,52 @@ an unknown creator is a validation error. Verified against the real schema with
 `PREPARE` on staging and end to end on a local database built from all
 migrations.
 
+**Update: plain-Postgres creates now use ServiceNow's number format.** `case_repo.go`'s
+five `create*PortalQuery` statements (case, announcement, service request, engagement,
+security report analysis) call `next_work_item_number('<TYPE>')` (`CS0000123`, one shared
+`cs_number_seq`) and `next_wso2_id(project)` (`<project key>-<n>`, `project.wso2_id_counter`)
+from migration `0180`, instead of the `CS-PORTAL-` / `-PORTAL-` generators below. The same
+switch applies to **incident** (`INC...`), **change request** (`CHG...`), **problem**
+(`PRB...`, both `problem_repo.go` and the incident report flow) and **conversation**
+(`CHAT...`); incident tasks were already on the `TASK` series (migration 0201, started at
+`TASK1000000`). The portal generators remain only for records already created and for
+`incident_task_cascade_integration_test.go`'s raw SQL.
+
+**Deploy preconditions, not optional.** (1) ServiceNow must have **stopped allocating** these
+numbers and ids and the final sync must be done: both sides draw from the same series, so a
+number issued here can otherwise be issued by ServiceNow too, and the second insert then
+fails on `work_item_number_key` / `work_item_wso2_id_key`. Re-running the seed after a late
+sync moves *our* counters past ServiceNow's new maximum, but it cannot undo a number that was
+already issued on both sides, so it is not a substitute for stopping ServiceNow first (the
+seed script's own header says the same: run it after the final sync, with the sync stopped).
+If the two systems have to run side by side, this change needs disjoint ranges instead (for
+example seeding the counters well above ServiceNow's range, as incident tasks do). (2) Every
+counter starts at 0/1, so each database must run `scripts/cutover/seed_native_numbering.sql`
+(dry run by default; `-v apply=1` to apply) right before this build is deployed to it, or a
+new case's `<key>-1` collides with an existing synced id and a `CS` number does once the
+sequence reaches a synced one. The dual-write create path takes ServiceNow's own number and
+is unaffected. Existing `CS-PORTAL-` records are not renamed. (3) While the seed runs, stop every native
+allocator -- the entity-service API **and its background workers** (for example the incident report
+drainer, which creates `TASK`-numbered tasks) -- wait for in-flight work to finish, and keep them stopped
+until the seed has committed: `setval()` is not atomic with the maximum it was computed from, so an
+allocation in between can be overwritten and a number issued twice.
+
+**Update (migration `0290`): `next_wso2_id` heals a stale counter.** It now checks each candidate
+`<key>-<n>` against `work_item.wso2_id` (the unique index) and advances `project.wso2_id_counter`
+past any existing id, never lowering it, so the counter seed is no longer required for `wso2_id`
+correctness and precondition (2) no longer applies to it (`CS` numbers and the other series still
+need the seed). The check runs with `app.is_internal = 'true'` set by `set_config` inside the body
+around the `work_item` reads only (saved and restored before return or raise), so a
+customer-initiated create also sees ids it cannot read; the caller's own visibility is unchanged. Not
+a function-level `SET app.is_internal`: that needs superuser or `GRANT SET ON PARAMETER`, which the
+migration role lacks.
+
+> **Historical.** The rest of this section, down to the `CaseRepository.CreateCase` paragraph, describes
+> migration `0140`'s `CS-PORTAL-` / `<key>-PORTAL-<n>` generators as they were introduced. Everything it
+> says about *which functions the create queries use* is superseded by the update above (migration
+> `0180`'s generators); the portal generators now remain only for records already created and for the raw
+> SQL in `incident_task_cascade_integration_test.go`.
+
 **Resolved by migration `0140_portal_created_work_item_numbering.sql`**, which
 this section used to say was still an open product decision. `number` for
 every work_item type comes from `next_portal_work_item_number()`
@@ -9248,7 +9495,8 @@ on `req.Type` to one of five `*PortalQuery` consts (`createCasePortalQuery`/
 each a near-identical CTE to its already-existing `*FromServiceNowQuery`
 sibling (used by the dual-write mirror path, `CreateCaseFromServiceNow`) --
 the only real difference is identity: `gen_random_uuid()`/
-`next_portal_work_item_number()`/`next_portal_wso2_id($N)` generate it here,
+`next_work_item_number('<TYPE>')`/`next_wso2_id($N)` generate it here (before the update above:
+`next_portal_work_item_number()`/`next_portal_wso2_id($N)`),
 rather than taking it from a prior ServiceNow response. Every initial state
 literal (`'OPEN'`) was confirmed against the live enum catalog for each of
 the five state enums, not assumed from case's own convention.
@@ -9897,8 +10145,8 @@ by the generic `work_item_id`. Unlike `SearchCaseActivities`, there is no
 have an `"attachment"` kind entry.
 
 **`UpdateConversation` and `CreateConversation` are both implemented.**
-`CreateConversation` takes its number from `next_portal_work_item_number()`
-(migration 0140), starts the conversation `ACTIVE`, and stores the first
+`CreateConversation` takes its number from `next_work_item_number('CONVERSATION')`
+(migration 0180; originally `next_portal_work_item_number()`, migration 0140), starts the conversation `ACTIVE`, and stores the first
 message the way csm-sync-service lands ServiceNow's `u_initial_message`:
 `work_item.subject` (first 100 runes) and `work_item.description` (in full).
 `InitialMessage` on reads is that description, falling back to the earliest
@@ -9927,7 +10175,9 @@ previous SQL as an oracle against a real RLS-forced database (internal caller, p
 stranger, every filter, both sorts, page by page) and `TestConversationSearchQueries` pins the shape.
 
 **`CreateProblem`/`CreateIncident` are now implemented on the plain-Postgres
-data source too**, via `next_portal_work_item_number()` (migration 0140 --
+data source too**, via `next_work_item_number('PROBLEM')` /
+`next_work_item_number('INCIDENT')` (migration 0180; originally
+`next_portal_work_item_number()`, migration 0140 --
 see "CreateCase and case numbers" above): `ProblemRepository.CreateProblem`/
 `IncidentRepository.CreateIncident`, called from `problemService`/
 `incidentService`'s own `CreateProblem`/`CreateIncident` when `s.snMirror ==
@@ -11056,6 +11306,45 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   one endpoint reads Postgres directly (unlike `SearchCatalogs`, which still
   falls back to ServiceNow -- see `catalogService.snMirror`'s own doc comment).
 
+## Case search `stateEntered` / `stateEnteredOn`: cases that entered a state in a window
+
+"Cases moved to Waiting on WSO2 today" is not "cases in Waiting on WSO2 now": a case that moved there
+this morning may have left again, and one that has been there for a week did not move today. The
+case search's `stateEntered` (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, `createdOn`'s
+date forms and relative placeholders) answer the first: `buildCaseSearchWhere` adds `EXISTS` over
+`work_item_activity` (`field_name = 'state'`, `LOWER(new_value)` one of the states' display labels,
+`created_on` in the window), so the search, count, aggregate and volume trend all see it.
+
+- **Values:** the history records a state under its display label (`caseStateDisplayLabel`,
+  "Waiting on WSO2"), so `ParseCaseFieldFilters` turns each state into its label, lower-cased, in
+  `ParsedCaseFilters.EnteredStateLabels`, and the query compares lower-cased, in case a sync writes
+  another letter case. An unknown state is a 400.
+- **Meaning:** whatever the case's state is now, and once per case however many times it entered
+  (`EXISTS`). Add `state in` for "entered today and still there".
+- **Rules:** `stateEnteredOn` needs `stateEntered`; a `lte` before its `gte` is refused; both are top
+  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` (the legacy data source) refuses both
+  (search and aggregate) before any call: it keeps no history, and dropping them would widen the result.
+- **Coverage:** only what was logged, so a period reaching further back undercounts.
+  - The history starts when the portal began logging (2026-10-11). Whether csm-sync-service copies
+    changes made in the legacy data source into this table is not known here.
+  - `caseService.UpdateCase` logs every state change made through the portal, including the automatic
+    moves to Waiting on WSO2 on a customer's reply or attachment, best effort: a failed write is
+    logged and dropped, and `recordFieldChangeActivity` skips the row when no actor email is resolved.
+  - Case creation logs no state row, so `stateEntered in [open]` matches only cases moved back to
+    Open, never one created and left there. The AI catalogue treats "moved to Open" as not expressible.
+- **Cost:** `idx_work_item_activity_state_entered` (migration 0283, partial on `field_name = 'state'`,
+  keyed `LOWER(new_value), created_on`) serves the predicate. Without it the planner seq-scanned the whole
+  table: on 100k cases and 1.5M activity rows, "moved to Waiting on WSO2 today" went from ~100 ms to
+  2-3 ms, and "this month" takes ~25 ms. There is no `updated_on` pre-filter, because it is not confirmed
+  that every writer bumps `updated_on` with the state.
+
+Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the legacy data source's
+refusal) and `repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`, run locally:
+no CI workflow runs the entity-service Go tests; left again, entered twice, yesterday, an upper-case
+label, a non-state row and a change out of the state, created in the state with no history row, window
+edges, the aggregate, and a customer caller inside and outside the case's project, since
+`work_item_activity` has forced row-level security).
+
 ## Case search `countOnly`, and the projectOnboardingStatus `in` filter's exclusion-list rewrite
 
 Reported as a dashboard-performance finding, measured against a real load test and the perf
@@ -11310,6 +11599,38 @@ by always checking every table regardless of the request's own type filter
 -- that would reproduce the exact cost this rewrite exists to avoid, to
 compensate for a handful of rows a separate sync-side data-quality issue
 produced, not something every case search should pay for indefinitely.
+
+## Case search and aggregate: products, versions and projects (AI dashboards)
+
+The CSM portal's generated dashboards filter and group cases by product, product version and project
+(the backend turns the names the user wrote into what these match; its `CLAUDE.md`, "Custom dashboards",
+has that side). Everything here is new to these fields, so no request that worked before changes.
+
+- **`product` `in` / `notIn`.** `in` matches the deployed product's catalog name exactly (`prod.name`,
+  every catalog row of that name). `notIn` (`ParsedCaseFilters.ExcludeProductNames`) keeps the cases
+  whose product is none of them, a case without a deployed product included, as `projectId notIn` does.
+  Neither is allowed in an `anyOf` branch. The ServiceNow data source has no exclusion and refuses
+  `notIn` (`refuseSNProductFilters`) rather than drop it and count every product.
+- **`productVersion` `in`** matches `product_version.version` exactly ("4.3.0"). A version is shared by
+  many products, so it needs a product filter naming exactly one product in the same search
+  (`checkProductVersionFilters`; only `product in` counts, a `notIn` names no product); never in an
+  `anyOf` branch; refused by the ServiceNow data source.
+- **`groupBy`** (`POST /cases/aggregate`, `caseAggregateColumns`): `product` (key and label the name,
+  as the product filter takes it), `productVersion` (needs one product, as above) and `project` (key the
+  project's id, as `projectId` takes it; label its name, else its key). A case without one is in no
+  bucket. The ServiceNow data source refuses all three. Each bucket's count is the matching filter's
+  total: the real-database tests (`case_product_aggregate_integration_test.go`,
+  `case_product_version_integration_test.go`, `case_project_aggregate_integration_test.go`) check it
+  bucket by bucket.
+- `projectId` and `accountId` (`in` / `notIn`) are unchanged; the dashboards use them for projects and
+  customers named by the user.
+- **`region` `in` / `notIn`** (`ParsedCaseFilters.Regions` / `ExcludeRegions`) matches the case's account
+  `region`, compared trimmed and lower-cased (`LOWER(TRIM(a.region))`), so "APAC", " apac " and "apac"
+  are one region. `notIn` keeps the cases with no region or no account. Never in an `anyOf` branch;
+  refused by the other data source. **`groupBy: region`** buckets on the same key (a blank region is in
+  no bucket) and labels each bucket with the spelling most of its cases' accounts have
+  (`caseAggregateLabels`, `mode()`), so the label is "APAC" even when one account wrote "apac"; the other
+  data source refuses it. `case_region_integration_test.go` checks each bucket against its filter total.
 
 ## Announcement requests
 
@@ -11710,6 +12031,36 @@ unaffected and keeps creating external users exactly as before. `apps/csm-portal
 `UsersHandler.CreateUser` mirrors the same check for a fast 400, and the webapp's Add User form
 disables the "External" option in its type selector rather than offering a choice the backend will
 reject — all three are temporary, meant to come out together once external-type creation is ready.
+
+## Creating a deployed product on PostgreSQL (`POST /deployed-products`)
+
+It used to be refused on the plain PostgreSQL data source with a 400 ("not supported"); dual-write
+was the only way to create one. `deployedProductService.CreateDeployedProduct` now writes it
+(`DeployedProductRepository.CreateDeployedProduct`):
+
+- **Number**: `next_series_number('IBITM')` (migration 0180), ServiceNow's own format. Synced deployed
+  products already hold IBITM numbers and the sequence starts at 1 until the cutover seed has run, so
+  before each create `ibitm_number_seq` is moved past the highest stored `IBITM` number, forwards only,
+  as the system identity (under the caller's row-level security the maximum would be taken over what
+  they can see). A number another writer took in between (a sync still running) fails the unique key;
+  that one case is retried once, then answered 409.
+- **Checks**: the four ids are UUIDs and the category valid (the ServiceNow path's checks), plus what
+  ServiceNow enforced itself: the deployment belongs to `projectId` and the version to `productId`, both
+  400. An internal caller skips row-level security, so these are checked in the repository, not left to
+  the insert policy; a deployment the caller may not see reads as absent (400, so its existence is not
+  revealed).
+- **Who**: `created_by` is the caller's email from `x-user-id-token` (401 without it). A customer can
+  create only in a project they are a registered contact of (`deployed_product_write`, migration
+  100017). The insert policy's refusal is a 404; a 42501 that is not a row-level security refusal
+  (the role lacks USAGE on `ibitm_number_seq`) is a 500, not "project not found"
+  (`isRowSecurityRefusal`: the two share the SQLSTATE, only the message differs).
+
+Tests: `TestDeployedProductService_CreateDeployedProduct_Postgres*`, `TestIsRowSecurityRefusal` and
+`TestDeployedProductCreateIntegration` (`CASE_STATS_TEST_DSN`, a login that does not bypass row-level
+security: numbering with an unseeded sequence, the refusals, a customer in and out of their project, and
+the retry: a number committed by another connection between the advance and the insert is retried once
+and succeeds, and taken before both attempts is a 409 that writes nothing; the test reaches in through
+`SetBeforeDeployedProductInsert` in `export_test.go`, compiled into tests only).
 
 ## Air-gapped deployments (`deployment.air_gapped`)
 
@@ -12787,3 +13138,14 @@ read as `parentIncident`, written as `parentIncidentId`). It is **not** `work_it
 Tests: `incident_child_cascade_integration_test.go` (`INCIDENT_TASK_GATE_TEST_DSN`),
 `TestPostResolutionIntegration_ChildResolvedWithParentGetsNoFollowUps`
 (`INCIDENT_REPORT_TEST_DSN`), `incident_child_resolve_test.go` (unit).
+## Case search `excludeFields`
+
+`SearchCasesRequest.ExcludeFields` (`entity.go`) lets a list leave a heavy field out of every row. Only
+`"description"` is supported (rich text, megabytes on some cases; a 20-row page was ~1.25 MB, almost all
+of it descriptions); anything else is a 400 from `validateSearchExcludeFields`, which both the Postgres
+and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for-byte unchanged:
+`SearchCaseView.Description` keeps its no-`omitempty` tag, so an excluded description serialises as
+`null`, the same as a case with none. On Postgres `caseRepo.SearchCases` swaps `wi.description` for
+`NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
+clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
+`/cases/search` only: aggregate, announcement-registry and every other search ignore it.

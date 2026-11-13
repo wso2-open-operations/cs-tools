@@ -139,6 +139,10 @@ func Resolve(team string, isEvaluationAccount bool, onboardingStatus string, now
 		add(IncidentMonitor)
 	}
 
+	// A case on a project still being onboarded ALSO goes to the Onboarding
+	// audience, on top of its own team's space (or Incident Monitor) above
+	// — by explicit product direction, both the team actually working the
+	// case and whoever is running the onboarding should see the alert.
 	if onboardingStatuses[strings.ToUpper(strings.TrimSpace(onboardingStatus))] {
 		add(Onboarding)
 	}

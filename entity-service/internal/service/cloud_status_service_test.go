@@ -29,6 +29,11 @@ import (
 
 // fakeCloudStatusRepo records what the service asked it to do.
 type fakeCloudStatusRepo struct {
+	// claimCalls counts ClaimPending calls, to prove a refused read claims nothing.
+	claimCalls int
+	// registry overrides the seeded clouds when a test needs its own.
+	registry *fixtureClouds
+
 	candidates []repository.CloudStatusCandidate
 	candErr    error
 
@@ -144,6 +149,7 @@ func (f *fakeCloudStatusRepo) SetMonitorStatus(_ context.Context, ids []string, 
 }
 
 func (f *fakeCloudStatusRepo) ClaimPending(_ context.Context, _, _ int, _ time.Duration) ([]domain.PendingCloudStatusWebhook, error) {
+	f.claimCalls++
 	return f.pending, f.pendingErr
 }
 
@@ -260,15 +266,14 @@ func TestCloudStatusSweep_NoConfiguredScopeIsANoOp(t *testing.T) {
 	}
 }
 
-// TestCloudOfferingSlug_CoversEveryStoredEnumValue is the regression guard for
+// TestCloudCatalog_CoversEverySeededOffering is the regression guard for
 // Defect 1.
 //
-// The list here is cloud_monitor_cloud_offering_enum from csm-sync-service
-// migration 0079, in full. ServiceNow's script covered five of these seven and
-// returned undefined for the other two. If the sync ever adds an eighth value,
-// this test is what should fail -- a missing slug means a cloud whose outages
-// are silently never published.
-func TestCloudOfferingSlug_CoversEveryStoredEnumValue(t *testing.T) {
+// The list here is the old cloud_monitor_cloud_offering_enum, in full, which is
+// also what the monitor sync writes. The legacy status integration covered five
+// of these seven and returned undefined for the other two. A missing slug means a cloud
+// whose outages are silently never published.
+func TestCloudCatalog_CoversEverySeededOffering(t *testing.T) {
 	want := map[string]string{
 		"ASGARDEO":      "asgardeo",
 		"BIJIRA":        "bijira",
@@ -278,12 +283,13 @@ func TestCloudOfferingSlug_CoversEveryStoredEnumValue(t *testing.T) {
 		"CHOREO_EU":     "choreo-eu",
 		"AGENT_MANAGER": "agent-manager",
 	}
+	catalog := domain.NewCloudCatalog(seededDefinitions())
 	for stored, slug := range want {
-		if got := domain.CloudOfferingSlug(stored); got != slug {
-			t.Errorf("CloudOfferingSlug(%q) = %q, want %q", stored, got, slug)
+		if got := catalog.SlugForOffering(stored); got != slug {
+			t.Errorf("SlugForOffering(%q) = %q, want %q", stored, got, slug)
 		}
 	}
-	if got := domain.CloudOfferingSlug("SOMETHING_NEW"); got != "" {
+	if got := catalog.SlugForOffering("SOMETHING_NEW"); got != "" {
 		t.Errorf("an unknown offering must be unroutable, got %q", got)
 	}
 }

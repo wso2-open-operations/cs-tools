@@ -24,15 +24,15 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// OnboardingDates is the parsed form of ProjectUpdateRequest's four onboarding
+// OnboardingDates is the parsed form of ProjectUpdateRequest's five onboarding
 // dates; a nil field was not supplied.
 type OnboardingDates struct {
-	Start, GoLivePlan, GoLive, Expiry *time.Time
+	Start, GoLivePlan, GoLive, Expiry, ProductionReadiness *time.Time
 }
 
 // ParseOnboardingDates parses the request's onboarding dates ("YYYY-MM-DD") and
-// rejects, within the request alone, a go-live plan, go-live or expiry date
-// earlier than the start date. A malformed or impossible date is a
+// rejects, within the request alone, a go-live plan, go-live, expiry or
+// production-readiness completion date earlier than the start date. A malformed or impossible date is a
 // ValidationError. The repository additionally compares against the stored
 // start date.
 func ParseOnboardingDates(req domain.ProjectUpdateRequest) (OnboardingDates, error) {
@@ -46,6 +46,7 @@ func ParseOnboardingDates(req domain.ProjectUpdateRequest) (OnboardingDates, err
 		{"onboardingGoLivePlanDate", req.OnboardingGoLivePlanDate, &d.GoLivePlan},
 		{"onboardingGoLiveDate", req.OnboardingGoLiveDate, &d.GoLive},
 		{"onboardingExpiryDate", req.OnboardingExpiryDate, &d.Expiry},
+		{"onboardingProductionReadinessCompletionDate", req.OnboardingProductionReadinessCompletionDate, &d.ProductionReadiness},
 	} {
 		if f.in == nil {
 			continue
@@ -59,7 +60,8 @@ func ParseOnboardingDates(req domain.ProjectUpdateRequest) (OnboardingDates, err
 	return d, d.checkOrder(d.Start)
 }
 
-// checkOrder rejects a supplied plan/go-live/expiry date earlier than start.
+// checkOrder rejects a supplied plan/go-live/expiry/production-readiness date
+// earlier than start.
 func (d OnboardingDates) checkOrder(start *time.Time) error {
 	if start == nil {
 		return nil
@@ -71,6 +73,7 @@ func (d OnboardingDates) checkOrder(start *time.Time) error {
 		{"onboardingGoLivePlanDate", d.GoLivePlan},
 		{"onboardingGoLiveDate", d.GoLive},
 		{"onboardingExpiryDate", d.Expiry},
+		{"onboardingProductionReadinessCompletionDate", d.ProductionReadiness},
 	} {
 		if f.t != nil && f.t.Before(*start) {
 			return &apierror.ValidationError{Msg: f.field + " must not be earlier than onboardingStartDate"}

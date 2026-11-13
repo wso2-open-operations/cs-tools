@@ -20,7 +20,10 @@
 // closure notice. Pure — no I/O, same philosophy as the closure package.
 package recipients
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // ProjectContact mirrors entity-service's project-contact shape (Supported
 // by the legacy data source only).
@@ -76,8 +79,8 @@ type Resolution struct {
 // tier returns all of its matches, not just the first: the legacy system
 // sends the customer notice to several customer addresses (confirmed by the
 // user from real legacy emails), and real accounts can have more than one
-// Primary Contact. A contact only counts if it has a usable (non-empty)
-// email — a real contact record with no email on file (confirmed elsewhere
+// Primary Contact. A contact only counts if it has a usable email (non-empty and
+// well-formed, see validEmail) — a real contact record with no email on file (confirmed elsewhere
 // in this package, see AccountManagerEmail's doc comment, to be a
 // legitimate, unremarkable data state) is not a usable recipient, and a tier
 // with no usable contact falls through to the next. Each address is listed
@@ -100,9 +103,19 @@ func ResolveCustomerContacts(projectContacts []ProjectContact, accountContacts [
 	return Resolution{NeedsAMNudge: true, ResolvedVia: ResolvedViaNone}
 }
 
-// appendUniqueEmail appends c unless its email is empty or already in list.
+// validEmail is the address shape a customer contact must have to be a
+// recipient. It is deliberately the exact pattern the previous process
+// applied, not net/mail: net/mail accepts forms that pattern drops (display
+// names, quoted local parts, a domain without a dot), so using it would let
+// addresses through that were never mailed before. The address is matched as
+// stored: surrounding whitespace is not trimmed, so it fails, as before.
+var validEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+
+// appendUniqueEmail appends c unless its email is empty, malformed (see
+// validEmail) or already in list. A malformed address counts as no address,
+// so a tier whose contacts are all malformed falls through to the next.
 func appendUniqueEmail(list []Contact, c Contact) []Contact {
-	if c.Email == "" {
+	if !validEmail.MatchString(c.Email) {
 		return list
 	}
 	for _, existing := range list {

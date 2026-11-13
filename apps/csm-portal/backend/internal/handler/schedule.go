@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -36,6 +37,10 @@ type entityScheduleClient interface {
 	SearchScheduleAssignments(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleAbsences(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error)
+	SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error)
+	SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error)
+	ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error)
+	WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error)
 	DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error)
 	GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error)
 
@@ -187,6 +192,107 @@ func (h *ScheduleHandler) SearchScheduleEngagementAllocations(w http.ResponseWri
 		return
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchSchedulePublicHolidays handles
+// POST /team-schedule/public-holidays/search: each given person's public
+// holidays (Sri Lanka, India, or their own location's) over a date window,
+// for the roster to shade. Proxied unchanged.
+func (h *ScheduleHandler) SearchSchedulePublicHolidays(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.SearchSchedulePublicHolidays(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchSchedulePublicHolidays failed", "userID", userID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to load public holidays.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchHolidayAvailability handles
+// POST /team-schedule/holiday-availability/search: each CRE team's
+// availability on each public holiday in a window (who is tagged, who was
+// made available, the turns with nobody, the confirmation). Proxied
+// unchanged.
+func (h *ScheduleHandler) SearchHolidayAvailability(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.SearchHolidayAvailability(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchHolidayAvailability failed", "userID", userID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to load the holiday availability.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ConfirmHolidayAvailability handles
+// PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation: a
+// team's lead, rota manager or a CRE rota admin confirming the team's
+// availability on a holiday. entity-service decides who may and refuses
+// (409, in words) while a rota turn has nobody available.
+func (h *ScheduleHandler) ConfirmHolidayAvailability(w http.ResponseWriter, r *http.Request) {
+	h.holidayConfirmation(w, r, true)
+}
+
+// WithdrawHolidayAvailability handles
+// DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation.
+func (h *ScheduleHandler) WithdrawHolidayAvailability(w http.ResponseWriter, r *http.Request) {
+	h.holidayConfirmation(w, r, false)
+}
+
+// holidayConfirmation is the shared body of the confirm and withdraw handlers: it
+// checks the caller, the team key and the date, then confirms or withdraws the
+// team's availability for that day and passes the entity-service answer through.
+func (h *ScheduleHandler) holidayConfirmation(w http.ResponseWriter, r *http.Request, confirm bool) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	teamKey, date := strings.TrimSpace(r.PathValue("teamKey")), r.PathValue("date")
+	if teamKey == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if _, err := time.Parse(time.DateOnly, date); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	var (
+		result []byte
+		err    error
+		verb   = "WithdrawHolidayAvailability"
+		msg    = "Failed to withdraw the confirmation."
+	)
+	if confirm {
+		verb, msg = "ConfirmHolidayAvailability", "Failed to confirm the team's availability."
+		result, err = h.entity.ConfirmHolidayAvailability(r.Context(), teamKey, date)
+	} else {
+		result, err = h.entity.WithdrawHolidayAvailability(r.Context(), teamKey, date)
+	}
+	if err != nil {
+		// A refusal's body names the people on the uncovered turns: log only
+		// its status. The caller still gets the words.
+		var apiErr *apierror.Error
+		if errors.As(err, &apiErr) {
+			slog.WarnContext(r.Context(), "entity "+verb+" refused", "userID", user.UserID, "status", apiErr.StatusCode)
+		} else {
+			slog.ErrorContext(r.Context(), "entity "+verb+" failed", "userID", user.UserID, "err", err)
+		}
+		mapScheduleRefusalError(w, err, msg)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -662,6 +768,22 @@ func mapScheduleWriteError(w http.ResponseWriter, err error, fallbackMsg string)
 	mapUpstreamErrorGeneric(w, err, fallbackMsg)
 }
 
+// mapScheduleRefusalError is mapScheduleWriteError plus the 400, for the Team
+// Schedule writes whose 400 is written for the person acting: a new tag (the
+// name is taken or too long, a leave tag cannot exclude from the timesheet,
+// which family the tag is for) and a holiday availability confirm or withdraw
+// (the day is not a date, the holiday has passed). The form can only show what
+// is wrong if it gets that reason. Read only from the JSON envelope, never a
+// raw body.
+func mapScheduleRefusalError(w http.ResponseWriter, err error, fallbackMsg string) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+		writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
+		return
+	}
+	mapScheduleWriteError(w, err, fallbackMsg)
+}
+
 // ApplyScheduleRange handles POST /team-schedule/assignments/apply.
 func (h *ScheduleHandler) ApplyScheduleRange(w http.ResponseWriter, r *http.Request) {
 	body, userID, ok := readScheduleBody(w, r)
@@ -725,7 +847,7 @@ func (h *ScheduleHandler) CreateScheduleAbsenceKind(w http.ResponseWriter, r *ht
 	result, err := h.entity.CreateScheduleAbsenceKind(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateScheduleAbsenceKind failed", "userID", userID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to add the tag.")
+		mapScheduleRefusalError(w, err, "Failed to add the tag.")
 		return
 	}
 

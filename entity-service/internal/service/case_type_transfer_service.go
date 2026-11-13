@@ -440,6 +440,7 @@ func (s *caseService) publishCaseTypeChanged(ctx context.Context, caseID string,
 		payload.CaseTitle = cv.Subject
 		payload.Product = caseProductName(cv)
 		payload.Team = caseTeamName(cv)
+		payload.NewEngagementType = derefString(cv.EngagementType)
 	} else {
 		slog.WarnContext(ctx, "update case: could not resolve display fields for case.type_changed, publishing without them", "caseId", caseID, "err", err)
 	}

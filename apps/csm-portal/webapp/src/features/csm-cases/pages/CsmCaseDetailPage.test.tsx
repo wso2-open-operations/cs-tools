@@ -334,6 +334,16 @@ vi.mock("@features/csm-projects/api/useGetProject", () => ({
 vi.mock("@features/csm-sla/api/useGetWorkItemSlas", () => ({
   useGetWorkItemSlas: () => ({ data: undefined }),
 }));
+const recalcCaseSlaMutateAsyncMock = vi.fn();
+afterEach(() => {
+  recalcCaseSlaMutateAsyncMock.mockReset();
+});
+vi.mock("@features/csm-sla/api/usePostCaseSlaRecalculation", () => ({
+  usePostCaseSlaRecalculation: () => ({
+    mutateAsync: recalcCaseSlaMutateAsyncMock,
+    isPending: false,
+  }),
+}));
 vi.mock("@features/csm-cases/api/useCreateCaseTask", () => ({
   useCreateCaseTask: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -1994,6 +2004,27 @@ describe("CsmCaseDetailPage — role-based controls", () => {
     currentUserRoles.value = ["viewer"];
     renderPage();
     expect(screen.queryByRole("button", { name: /export as pdf/i })).not.toBeInTheDocument();
+  });
+
+  it("the Recalculate SLA button on the SLA tab is admin-only", () => {
+    currentUserRoles.value = ["admin"];
+    const { unmount } = renderPageAt("/cases/case-1?tab=sla");
+    expect(screen.getByRole("button", { name: /recalculate sla/i })).toBeInTheDocument();
+    unmount();
+
+    currentUserRoles.value = ["cs_engineer"];
+    renderPageAt("/cases/case-1?tab=sla");
+    expect(screen.queryByRole("button", { name: /recalculate sla/i })).not.toBeInTheDocument();
+  });
+
+  it("clicking Recalculate SLA triggers the recalculation", () => {
+    currentUserRoles.value = ["admin"];
+    recalcCaseSlaMutateAsyncMock.mockResolvedValue({ hasHistory: true, clocks: [] });
+    renderPageAt("/cases/case-1?tab=sla");
+
+    fireEvent.click(screen.getByRole("button", { name: /recalculate sla/i }));
+
+    expect(recalcCaseSlaMutateAsyncMock).toHaveBeenCalledTimes(1);
   });
 
   it("gates the service-request create control on canWrite, not just isClosed", () => {

@@ -238,7 +238,9 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 	// window they depend on has been derived. Durations only, and best-effort:
 	// a failure here must not fail the ingest.
 	bestEffortProjectHours(ctx, q, "opportunity", func(q querier) error {
-		if err := recomputeOpportunityProjectHours(ctx, q, res.OpportunityID); err != nil {
+		// Stale lines deleted above are a known loss: a project left with no
+		// lines clears its query pool instead of keeping the old figures.
+		if err := recomputeOpportunityProjectHoursMode(ctx, q, res.OpportunityID, res.LineItemsDeleted > 0); err != nil {
 			return err
 		}
 		return recomputeMovedOpportunityProjectHours(ctx, q, moved, res.OpportunityID)

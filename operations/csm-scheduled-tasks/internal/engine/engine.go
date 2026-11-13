@@ -89,9 +89,15 @@ func New(tasks []registry.Task, ledgerClient LedgerClient, emailClient EmailSend
 // Tick evaluates every registered task once against now. Call this exactly
 // once per driver invocation — see cmd/server/main.go.
 func (e *Engine) Tick(ctx context.Context, now time.Time) {
+	ran := 0
 	for _, task := range e.Tasks {
-		e.attempt(ctx, task, now)
+		if e.attempt(ctx, task, now) {
+			ran++
+		}
 	}
+	// Tasks that are not due are deliberately not logged one by one (every
+	// tick would repeat the whole registry); this line is the heartbeat.
+	slog.InfoContext(ctx, "csm-scheduled-tasks: tick complete", "ran", ran, "registered", len(e.Tasks))
 }
 
 // staleClaimMargin is how many missed ticks a claim is allowed to go
@@ -105,29 +111,32 @@ const staleClaimMargin = 2
 // retried and the next period supersedes it.
 const noRetryDelay = 10 * 365 * 24 * time.Hour
 
-func (e *Engine) attempt(ctx context.Context, task registry.Task, now time.Time) {
+// attempt reports whether the task was due and its handler ran.
+func (e *Engine) attempt(ctx context.Context, task registry.Task, now time.Time) bool {
 	period, err := schedule.PeriodKey(task.Schedule, now)
 	if err != nil {
 		slog.ErrorContext(ctx, "csm-scheduled-tasks: invalid schedule, skipping this tick", "task", task.Name, "schedule", task.Schedule, "err", err)
-		return
+		return false
 	}
 
 	claim, err := e.Ledger.Attempt(ctx, task.Name, period, staleClaimMargin*e.DriverInterval)
 	if err != nil {
 		slog.ErrorContext(ctx, "csm-scheduled-tasks: claim attempt failed", "task", task.Name, "period", period, "err", err)
-		return
+		return false
 	}
 	if !claim.Allowed {
-		slog.InfoContext(ctx, "csm-scheduled-tasks: not due, skipping", "task", task.Name, "period", period)
-		return
+		// Not this task's window (or the period is already done): debug only.
+		slog.DebugContext(ctx, "csm-scheduled-tasks: not due, skipping", "task", task.Name, "period", period)
+		return false
 	}
 
 	slog.InfoContext(ctx, "csm-scheduled-tasks: running", "task", task.Name, "period", period, "attempt", claim.Run.AttemptCount)
 	if handlerErr := task.Handler(ctx); handlerErr != nil {
 		e.recordFailure(ctx, task, period, claim.Run.ID, claim.Run.AttemptCount, handlerErr, now)
-		return
+		return true
 	}
 	e.recordSuccess(ctx, task, period, claim.Run.ID, claim.Run.AttemptCount)
+	return true
 }
 
 // recordSuccess only updates the ledger — there is no success email yet;

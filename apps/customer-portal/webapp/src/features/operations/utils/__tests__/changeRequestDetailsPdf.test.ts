@@ -41,8 +41,8 @@ describe("generateChangeRequestDetailsPdf", () => {
     captured.pdfs.length = 0;
   });
 
-  it("writes a WSO2 staff assignee as plain text, followed by the circled w", () => {
-    generateChangeRequestDetailsPdf({
+  it("writes a WSO2 staff assignee as plain text, followed by the circled w", async () => {
+    await generateChangeRequestDetailsPdf({
       number: "CHG0041408",
       assignedEngineer: { id: "u1", label: "Vimukthi Perera ⓦ" },
     } as ChangeRequestDetails);
@@ -53,8 +53,8 @@ describe("generateChangeRequestDetailsPdf", () => {
     expect(pdf).not.toContain("\u0000");
   });
 
-  it("draws no marker for an assignee who is not WSO2 staff", () => {
-    generateChangeRequestDetailsPdf({
+  it("draws no marker for an assignee who is not WSO2 staff", async () => {
+    await generateChangeRequestDetailsPdf({
       number: "CHG0041409",
       assignedEngineer: { id: "u2", label: "Jane Smith" },
     } as ChangeRequestDetails);
@@ -64,12 +64,12 @@ describe("generateChangeRequestDetailsPdf", () => {
     expect(pdf).not.toContain("(w) Tj");
   });
 
-  it("keeps the footer date readable when the browser puts U+202F before PM", () => {
+  it("keeps the footer date readable when the browser puts U+202F before PM", async () => {
     const spy = vi
       .spyOn(Date.prototype, "toLocaleString")
       .mockReturnValue(`Oct 14, 2026, 12:27${String.fromCodePoint(0x202f)}PM`);
     try {
-      generateChangeRequestDetailsPdf({ number: "CHG0041410" } as ChangeRequestDetails);
+      await generateChangeRequestDetailsPdf({ number: "CHG0041410" } as ChangeRequestDetails);
     } finally {
       spy.mockRestore();
     }
@@ -77,5 +77,25 @@ describe("generateChangeRequestDetailsPdf", () => {
     const pdf = captured.pdfs[0];
     expect(pdf).toContain("(Oct 14, 2026, 12:27 PM) Tj");
     expect(pdf).not.toContain("\u0000");
+  });
+
+  it("keeps the WSO2 Support 24x7 footer when no company name is configured", async () => {
+    await generateChangeRequestDetailsPdf({ number: "CHG0041411" } as ChangeRequestDetails);
+
+    expect(captured.pdfs[0]).toContain("(WSO2 Support 24x7) Tj");
+  });
+
+  it("puts the configured company name in the footer", async () => {
+    const originalConfig = window.config;
+    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
+    try {
+      await generateChangeRequestDetailsPdf({ number: "CHG0041412" } as ChangeRequestDetails);
+    } finally {
+      window.config = originalConfig;
+    }
+
+    const pdf = captured.pdfs[0];
+    expect(pdf).toContain("(Acme Corp Support 24x7) Tj");
+    expect(pdf).not.toContain("WSO2 Support 24x7");
   });
 });

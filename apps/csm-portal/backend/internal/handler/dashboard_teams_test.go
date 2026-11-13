@@ -323,3 +323,109 @@ func TestDashboardTeams_TurnsAnAccountTeamKeyIntoItsName(t *testing.T) {
 		t.Fatalf("an unknown team: err = %v, want errDashboardTeam naming it", err)
 	}
 }
+
+// timeCardTeamsDashboard is a generated time card bar per team over teams,
+// and a pie whose one slice holds slice.
+func timeCardTeamsDashboard(t *testing.T, teams, slice string) dashboard.Dashboard {
+	t.Helper()
+	d, err := dashboard.ParseGenerated([]byte(`{"displayName":"Hours by ABT","type":"cs","isDefault":false,"targetTeam":"","isTeamBased":false,"widgets":[` +
+		`{"id":"by-abt","displayName":"Hours by ABT","resourceType":"time_card","shape":"bar","gridWidth":6,` +
+		`"query":{"teamIds":` + teams + `,"startDate":"__startOfMonth:0__","endDate":"__today__"},"groupBy":{"field":"team","measure":"hours"}},` +
+		`{"id":"split","displayName":"Split","resourceType":"time_card","shape":"pie","gridWidth":6,"query":{},"slices":[` +
+		`{"label":"A","query":{"teamIds":` + slice + `}}]}]}`))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	return d
+}
+
+// TestDashboardTeams_ResolvesTimeCardTeams: a time card query's teamIds
+// (keys, names, group ids already resolved, any case; CRE and SRE teams)
+// become the group ids entity-service's teamIds matches (a CRE team's CRE
+// group, an SRE team's SRE group), in the widget and its slices; the
+// viewer's team placeholder and the rest of the query are left as they are.
+func TestDashboardTeams_ResolvesTimeCardTeams(t *testing.T) {
+	teams := testDashboardTeams(t)
+	d := timeCardTeamsDashboard(t, `["rigel","Sirius","AMERICAS","`+strings.ToUpper(rigelGroup)+`","__current_team__","apollo"]`, `["Apollo"]`)
+	if err := teams.resolveDashboard(&d); err != nil {
+		t.Fatalf("resolveDashboard: %v", err)
+	}
+	want := []any{rigelGroup, siriusGroup, "6341878a-eb9b-ac6e-73a1-d104b2ab001f", rigelGroup, "__current_team__", apolloGroup}
+	if got, _ := d.Widgets[0].Query["teamIds"].([]any); !equalValues(got, want) {
+		t.Errorf("widget teamIds = %v, want %v", got, want)
+	}
+	if got, _ := d.Widgets[1].Slices[0].Query["teamIds"].([]any); !equalValues(got, []any{apolloGroup}) {
+		t.Errorf("slice teamIds = %v, want [%s]", got, apolloGroup)
+	}
+	if d.Widgets[0].Query["startDate"] != "__startOfMonth:0__" || d.Widgets[0].GroupBy.Field != "team" {
+		t.Errorf("other parts changed: %+v / %+v", d.Widgets[0].Query, d.Widgets[0].GroupBy)
+	}
+
+	// The same through the generator wrapper, from a definition's bytes too.
+	def, err := teams.resolve([]byte(`{"widgets":[{"resourceType":"time_card","query":{"teamIds":["rigel"]}}]}`))
+	if err != nil || !strings.Contains(string(def), rigelGroup) {
+		t.Errorf("resolve = %s, %v; want rigel's group id", def, err)
+	}
+}
+
+// TestDashboardTeams_RefusesTimeCardTeamsItCannotFind: an unknown team, a
+// team of a family with no team filter, and a team with no group are
+// refused with the reason, in a slice as in the widget.
+func TestDashboardTeams_RefusesTimeCardTeamsItCannotFind(t *testing.T) {
+	for _, c := range []struct{ name, teams, slice, want string }{
+		{"unknown", `["vega"]`, `["rigel"]`, `widgets[0]: unknown team "vega" (known teams: americas, apollo, orion, rigel, sirius)`},
+		{"no group", `["rigel","orion"]`, `["rigel"]`, "team Orion has no group configured, so its members' time cards cannot be found"},
+		{"another family", `["experts"]`, `["rigel"]`, `unknown team "experts"`},
+		{"in a slice", `["rigel"]`, `["vega"]`, `widgets[1].slices[0]: unknown team "vega"`},
+	} {
+		d := timeCardTeamsDashboard(t, c.teams, c.slice)
+		err := testDashboardTeams(t).resolveDashboard(&d)
+		if !errors.Is(err, errDashboardTeam) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want errDashboardTeam mentioning %q", c.name, err, c.want)
+		}
+	}
+}
+
+// TestDashboardTeams_RefusesANameTwoTeamsAnswerTo: two teams of one name (a
+// CRE and an SRE "Rigel"), or one team's name another team's key, are
+// refused with the teams it could be, in every place a team is named,
+// rather than resolved to whichever the registry listed last. Each team's
+// own key still resolves.
+func TestDashboardTeams_RefusesANameTwoTeamsAnswerTo(t *testing.T) {
+	teams := newDashboardTeams([]directory.TeamResult{
+		{ID: "rigel", Name: "Rigel", Family: string(directory.FamilyCREAbt), CreGroupID: rigelGroup},
+		{ID: "rigel-sre", Name: "Rigel", Family: string(directory.FamilySREAbt), SreGroupID: apolloGroup},
+		{ID: "sirius", Name: "Vega", Family: string(directory.FamilyCREAbt), CreGroupID: siriusGroup},
+		{ID: "vega", Name: "Vega Team", Family: string(directory.FamilyCREAbt), CreGroupID: "6341878a-eb9b-ac6e-73a1-d104b2ab001f"},
+	})
+	for _, c := range []struct{ name, def, want string }{
+		{"a case team filter", string(teamDashboard(`{"filters":[{"field":"creTeam","op":"in","values":["RIGEL"]}]}`)), `"RIGEL" could be any of the teams rigel, rigel-sre`},
+		{"an account's abtTeam", string(teamDashboard(`{"abtTeam":"Rigel"}`)), `"Rigel" could be any of the teams rigel, rigel-sre`},
+		{"a time card teamIds", `{"widgets":[{"resourceType":"time_card","query":{"teamIds":["rigel"]}}]}`, `"rigel" could be any of the teams rigel, rigel-sre`},
+		{"a name that is another team's key", `{"widgets":[{"resourceType":"time_card","query":{"teamIds":["vega"]}}]}`, `"vega" could be any of the teams sirius, vega`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := teams.resolve([]byte(c.def))
+			if !errors.Is(err, errDashboardTeam) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want errDashboardTeam containing %q", err, c.want)
+			}
+		})
+	}
+
+	def, err := teams.resolve([]byte(`{"widgets":[{"resourceType":"time_card","query":{"teamIds":["rigel-sre","Vega Team"]}}]}`))
+	if err != nil || !strings.Contains(string(def), apolloGroup) || !strings.Contains(string(def), "6341878a-eb9b-ac6e-73a1-d104b2ab001f") {
+		t.Errorf("unambiguous keys and names: resolve = %s, %v; want their group ids", def, err)
+	}
+}
+
+// TestDashboardTeams_LeavesTeamIDsOfOtherResources: teamIds is a list of
+// teams only on a time card widget; on any other resourceType it is left as
+// it is (ParseGenerated decides whether that resource takes it).
+func TestDashboardTeams_LeavesTeamIDsOfOtherResources(t *testing.T) {
+	teams := testDashboardTeams(t)
+	in := `{"widgets":[{"resourceType":"case","query":{"teamIds":["not-a-team"]},"slices":[{"query":{"teamIds":["rigel"]}}]}]}`
+	def, err := teams.resolve([]byte(in))
+	if err != nil || string(def) != in {
+		t.Errorf("resolve = %s, %v; want the definition unchanged", def, err)
+	}
+}

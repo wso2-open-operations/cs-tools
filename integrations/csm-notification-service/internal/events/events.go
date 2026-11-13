@@ -254,8 +254,15 @@ type CaseCreatedPayload struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Priority   string `json:"priority"`
-	Product    string `json:"product,omitempty"`
+	// EngagementType mirrors CommentAddedPayload.EngagementType's own
+	// convention (entity-service's cv.EngagementType, lowercase, e.g.
+	// "migration"; "" for every non-engagement case-like type) — lets
+	// slaengine.Engine tell a migration engagement apart from any other the
+	// same way dispatch.checkFrustration already can from
+	// CommentAddedPayload's own copy of this field.
+	EngagementType string `json:"engagementType,omitempty"`
+	Priority       string `json:"priority"`
+	Product        string `json:"product,omitempty"`
 	// Team is the case's account's CRE team display name (e.g. "Castor") —
 	// displayed in Chat cards; purely a display value, no routing role
 	// (unlike Product).
@@ -374,9 +381,10 @@ type CommentAddedPayload struct {
 	// frustration-detection Chat alert to the Migration audience instead of
 	// the usual team/Incident Monitor routing, when the comment landed on a
 	// migration engagement. CaseType is entity-service's uppercase
-	// strings.ToUpper(cv.Type) (e.g. "ENGAGEMENT"); EngagementType is
-	// entity-service's own lowercase value (e.g. "migration"). Both empty
-	// for every non-engagement case-like type.
+	// strings.ToUpper(cv.Type) (e.g. "ENGAGEMENT", "ANNOUNCEMENT");
+	// EngagementType is entity-service's own lowercase value (e.g.
+	// "migration"), empty for every non-engagement type. CaseType is also
+	// what makes the comment email omit an announcement's commenter name.
 	CaseType       string `json:"caseType,omitempty"`
 	EngagementType string `json:"engagementType,omitempty"`
 }
@@ -393,9 +401,14 @@ type StatusChangedPayload struct {
 	// CaseTitle is used only for the email subject line (dispatch's
 	// subjectLine) — optional, same as CaseNumber, so an older publisher
 	// still produces a valid (just less descriptive) subject.
-	CaseTitle  string   `json:"caseTitle,omitempty"`
-	NewStatus  string   `json:"newStatus"`
-	Recipients []string `json:"recipients"`
+	CaseTitle string `json:"caseTitle,omitempty"`
+	NewStatus string `json:"newStatus"`
+	// PreviousStatus is the state before this change, as a display label.
+	// Optional: an older publisher omits it, and the customer email is then
+	// always sent, since there is nothing to compare against. See
+	// dispatch.handleStatusChanged.
+	PreviousStatus string   `json:"previousStatus,omitempty"`
+	Recipients     []string `json:"recipients"`
 }
 
 // CaseAssignedPayload is TypeCaseAssigned's payload. See CaseCreatedPayload's
@@ -523,6 +536,12 @@ type CaseTypeChangedPayload struct {
 	Priority     string `json:"priority,omitempty"`
 	PreviousType string `json:"previousType,omitempty"`
 	NewType      string `json:"newType,omitempty"`
+	// NewEngagementType mirrors entity-service's own CaseTypeChangedPayload
+	// field of the same name -- see that repo's own events.go doc comment
+	// for why this exists (keeping a transferred clock's Redis-held
+	// EngagementType current for slaengine.Engine.sendBreachAlert's
+	// migration suppression check).
+	NewEngagementType string `json:"newEngagementType,omitempty"`
 }
 
 // IncidentCreatedPayload is TypeIncidentCreated's payload. This event has

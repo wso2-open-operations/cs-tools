@@ -18,7 +18,11 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -169,5 +173,69 @@ func TestDispatcher_Handle_StatusPageDue_TimeoutIsUnknown(t *testing.T) {
 	}
 	if len(reports.reports) != 1 || !strings.Contains(reports.reports[0], "|unknown:") {
 		t.Errorf("reports = %v, want an unknown outcome", reports.reports)
+	}
+}
+
+func statusPageRecordFor(cloud string) eventbus.Record {
+	return eventbus.Record{Value: []byte(`{"type":"outage.status_page_due","entityId":"` + statusPageOutageID + `","payload":{` +
+		`"webhookId":"8b1a7c1e-0000-0000-0000-000000000001","claimToken":"tok-1","outageId":"` + statusPageOutageID + `",` +
+		`"cloud":"` + cloud + `","event":"outage_begin","timestamp":"2026-10-09T06:54:00.000Z"}}`)}
+}
+
+// A cloud onboarded by configuration alone is posted to its own URL with the
+// real sender; one well-formed slug with no URL is claimed and reported as a
+// definite failure (nothing sent) for the scheduled task; a malformed slug is
+// rejected before any claim.
+func TestDispatcher_Handle_StatusPageDue_CloudSlugIsConfigDriven(t *testing.T) {
+	var gotCloud, gotSig string
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		posts++
+		gotSig = r.Header.Get("X-Webhook-Signature")
+		var b map[string]string
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &b)
+		gotCloud = b["cloud"]
+	}))
+	defer srv.Close()
+	page, err := statuspage.New(map[string]string{"acme-cloud": srv.URL}, map[string]string{"default": "Secret tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		cloud      string
+		wantPosts  int
+		wantReport string // substring of the single report; "" means none
+		wantErr    bool
+	}{
+		{"configured new slug", "acme-cloud", 1, "|delivered", false},
+		{"well-formed but unconfigured", "other-cloud", 0, "failed:no dashboard URL configured", false},
+		{"malformed", "Acme_Cloud", 0, "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			posts, gotCloud, gotSig = 0, "", ""
+			reports := &fakeDeliveryReports{}
+			d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithStatusPage(page, reports)
+			err := d.Handle(context.Background(), statusPageRecordFor(c.cloud))
+			if (err != nil) != c.wantErr {
+				t.Fatalf("Handle() error = %v, wantErr %v", err, c.wantErr)
+			}
+			if posts != c.wantPosts {
+				t.Errorf("posts = %d, want %d", posts, c.wantPosts)
+			}
+			if c.wantReport == "" {
+				if len(reports.claims) != 0 || len(reports.reports) != 0 {
+					t.Errorf("claims=%v reports=%v, want none", reports.claims, reports.reports)
+				}
+			} else if len(reports.reports) != 1 || !strings.Contains(reports.reports[0], c.wantReport) {
+				t.Errorf("reports = %v, want one containing %q", reports.reports, c.wantReport)
+			}
+			if c.wantPosts == 1 && (gotCloud != "acme-cloud" || gotSig != "Secret tok") {
+				t.Errorf("cloud=%q sig=%q", gotCloud, gotSig)
+			}
+		})
 	}
 }

@@ -154,6 +154,26 @@ const activeSLAStatusFromJoins = `
 // the stable, portable key here.
 const evaluationSubscriptionProjectTypeName = "Evaluation Subscription"
 
+// onboardingTeamKey is team.key's exact value for the Customer Onboarding
+// team -- matched by key (UNIQUE), not name (team.name carries no such
+// constraint), for the same "stable, portable, can't silently match the
+// wrong row" reasoning evaluationSubscriptionProjectTypeName's own doc
+// comment gives for matching project_type by name instead of id.
+//
+// slaClockStateOnboardingStatuses mirrors csm-notification-service's own
+// chataudience.onboardingStatuses (internal/chataudience/resolve.go) --
+// the same project.onboarding_status raw values that route an SLA breach
+// alert to the Onboarding Chat audience also redirect GetClockState's own
+// TeamEmail/TeamLeadName to the Customer Onboarding team instead of the
+// case's real CRE team, so the breach email lands in the same team's inbox
+// the Chat card now posts to. Kept in sync by hand across the two repos,
+// like internal/events/internal/eventbus already are -- changing one
+// without the other silently desyncs which team gets notified from which
+// channel.
+const onboardingTeamKey = "customer_onboarding_team"
+
+var slaClockStateOnboardingStatuses = []string{"IN_PROGRESS", "NOT_STARTED"}
+
 // stringOrEmpty returns "" for a nil column value rather than propagating a
 // nil *string into a domain type's plain string fields. Shared across this
 // package's repositories (was previously defined alongside the now-removed
@@ -194,7 +214,7 @@ func nullIfEmpty(s string) *string {
 func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error) {
 	var s domain.SLAStatus
 	var target, severity, caseType string
-	var caseNumber, wso2CaseID, caseTitle, productName, state, teamName, onboardingStatus *string
+	var caseNumber, wso2CaseID, caseTitle, engagementType, productName, state, teamName, onboardingStatus *string
 	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
 	var stage, schedule string
 	var isEvaluation bool
@@ -204,7 +224,7 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	err := row.Scan(
 		&s.CaseID, &target, &s.BusinessElapsedPercent, &s.HasBreached, &stage, &s.StartedOn,
 		&s.PausedOn, &pauseDurationSeconds, &durationSeconds, &schedule, &businessPauseSeconds,
-		&caseNumber, &wso2CaseID, &caseTitle, &caseType,
+		&caseNumber, &wso2CaseID, &caseTitle, &caseType, &engagementType,
 		&productName, &severity, &state, &teamName, &onboardingStatus, &isEvaluation,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
 	)
@@ -235,6 +255,10 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	s.WSO2CaseID = stringOrEmpty(wso2CaseID)
 	s.CaseTitle = stringOrEmpty(caseTitle)
 	s.CaseType = caseType
+	// engagement_type_enum is UPPER_SNAKE_CASE ("MIGRATION"); SLAStatus.EngagementType
+	// carries the lowercase domain value ("migration"), same convention as
+	// CaseView.EngagementType (case_repo.go) and CaseCreatedPayload.EngagementType.
+	s.EngagementType = strings.ToLower(stringOrEmpty(engagementType))
 	s.Product = stringOrEmpty(productName)
 	s.State = stringOrEmpty(state)
 	s.Team = stringOrEmpty(teamName)
@@ -381,7 +405,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM als.duration), 0)::BIGINT,
 		       als.schedule, COALESCE(EXTRACT(EPOCH FROM als.business_pause_duration), 0),
-		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
+		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT, eng.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
 		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $1, FALSE),
@@ -495,6 +519,25 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // SLA breach email reaction needed them from the exact same call it
 // already makes before sending a breach alert, rather than resolve any
 // other case-like display data this method still has no need for.
+// Also joins project/project_type for ProjectOnboardingStatus/
+// IsEvaluationAccount, the same two facts SearchActiveSLAStatuses already
+// resolves -- added so csm-notification-service's SLA breach Chat alert can
+// route through chataudience.Resolve with the case's real team/onboarding/
+// evaluation facts instead of the hardcoded false/"" it used before this.
+//
+// OnboardingTeamEmail is a SEPARATE field from TeamEmail, not a swap of it:
+// TeamEmail/TeamLeadName always stay the case's real CRE team (cre_team),
+// unaffected by onboarding status. OnboardingTeamEmail additionally resolves
+// the Customer Onboarding team's own group_email (onboardingTeamKey)
+// whenever p.onboarding_status is one of slaClockStateOnboardingStatuses,
+// "" otherwise -- by explicit request, an onboarding-stage case's breach
+// EMAIL should reach BOTH inboxes (the team actually working the case, and
+// whoever is running the onboarding), the same two-audience shape its
+// breach CHAT card now posts to (see chataudience.Resolve's own doc
+// comment) -- csm-notification-service sends to both addresses together
+// rather than this service picking one. Every other field (AssigneeName/
+// AssigneeEmail, and the Stage/HasBreached/etc. clock state itself) is
+// completely unaffected by onboarding status.
 //
 
 // BusinessElapsedPercent is NOT simply read off sla_live's own
@@ -510,7 +553,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // correct for those (a PAUSED/terminal row's figure was already frozen
 // correctly, business-day-aware, at the moment it was written).
 func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
-	args := []any{workItemID, target}
+	args := []any{workItemID, target, evaluationSubscriptionProjectTypeName, onboardingTeamKey, slaClockStateOnboardingStatuses}
 
 	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
 	// on this): the per-policy registration guard lets two policies
@@ -535,8 +578,11 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
-		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
-		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
+		       cre_team.group_email,
+		       COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
+		       p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
+		       CASE WHEN p.onboarding_status::TEXT = ANY($5::TEXT[]) THEN onboarding_team.group_email ELSE NULL END
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
@@ -551,6 +597,9 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		) lead_tm ON TRUE
 		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
+		LEFT JOIN project p ON p.id = wi.project_id
+		LEFT JOIN project_type pt ON pt.id = p.project_type_id
+		LEFT JOIN team onboarding_team ON onboarding_team.key = $4
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
@@ -567,12 +616,14 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
-	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail, onboardingStatus, onboardingTeamEmail *string
+	var isEvaluation bool
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
+		&onboardingStatus, &isEvaluation, &onboardingTeamEmail,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -593,6 +644,9 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 	state.TeamLeadName = stringOrEmpty(teamLeadName)
 	state.AssigneeName = stringOrEmpty(assigneeName)
 	state.AssigneeEmail = stringOrEmpty(assigneeEmail)
+	state.ProjectOnboardingStatus = stringOrEmpty(onboardingStatus)
+	state.IsEvaluationAccount = isEvaluation
+	state.OnboardingTeamEmail = stringOrEmpty(onboardingTeamEmail)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

@@ -15,9 +15,9 @@
 // under the License.
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Regression test for the "silent re-auth stretches the UI" bug: once the
 // app has initialized (a real page has been shown at least once), a LATER
@@ -77,7 +77,9 @@ vi.mock("@components/notification-banner/GlobalNotificationBanner", () => ({
 vi.mock("@components/portal-banners/PortalBanners", () => ({ default: () => null }));
 vi.mock("@components/mobile-app-banner/MobileAppBanner", () => ({ default: () => null }));
 vi.mock("@components/header/Header", () => ({ default: () => <div data-testid="header" /> }));
-vi.mock("@components/side-nav-bar/CsmSideBar", () => ({ default: () => null }));
+vi.mock("@components/side-nav-bar/CsmSideBar", () => ({
+  default: () => <nav data-testid="sidebar" />,
+}));
 
 const { default: AppLayout } = await import("./AppLayout");
 
@@ -130,5 +132,62 @@ describe("AppLayout content padding across a post-init auth loading flip", () =>
 
     const contentBoxAfter = screen.getByTestId("routed-page").parentElement;
     expect(contentBoxAfter).toHaveStyle({ padding: "24px" });
+  });
+});
+
+describe("AppLayout sidebar across a transient isSignedIn flip", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const tree = () => (
+    <MemoryRouter initialEntries={["/cases"]}>
+      <AppLayout>
+        <div data-testid="routed-page" />
+      </AppLayout>
+    </MemoryRouter>
+  );
+
+  it("keeps the sidebar mounted when isSignedIn flips false then true after init, and hides it on a sustained sign-out", () => {
+    vi.useFakeTimers();
+    asgardeoState.isLoading = false;
+    asgardeoState.isSignedIn = true;
+
+    const { rerender } = render(tree());
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+
+    // Transient flip (refocus after idle): the sidebar must stay.
+    asgardeoState.isSignedIn = false;
+    rerender(tree());
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+
+    // The SDK settles back to signed in: still mounted, and the pending
+    // sign-out timer was cancelled.
+    asgardeoState.isSignedIn = true;
+    rerender(tree());
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+
+    // A sustained sign-out hides the sidebar once the debounce elapses.
+    asgardeoState.isSignedIn = false;
+    rerender(tree());
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
+  });
+
+  it("never shows the sidebar for a session that was never signed in", () => {
+    vi.useFakeTimers();
+    asgardeoState.isLoading = false;
+    asgardeoState.isSignedIn = false;
+    render(tree());
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
   });
 });

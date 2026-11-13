@@ -398,13 +398,43 @@ func main() {
 	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
 	// answers with a fixed sample. This backend holds no model client.
 	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	// PLG reaches entity-service as csm-portal does (see plg.Mount below).
+	plgEntityDefaults := plgconfig.EntityDefaults{
+		BaseURL:      customerEntityCfg.BaseURL,
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
+	}
 	if aiClient != nil {
 		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+		// The PLG playbooks' answer fields go with every generate request,
+		// read with PLG's own entity-service configuration (see plg.Mount).
+		playbooks, err := plg.NewPlaybookLister(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults)
+		if err != nil {
+			slog.Error("failed to configure the PLG playbook list", "err", err)
+			os.Exit(1)
+		}
+		dashboardGenerator = handler.WithPlaybooks(dashboardGenerator, playbooks)
 	}
 	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
 	// A team named in a generated dashboard's creTeam / sreTeam filter (its
 	// registry key) becomes the team's group id, once, here.
 	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	// A product named in a generated dashboard's product filter ("API
+	// Manager") becomes the product's own name ("WSO2 API Manager"), once,
+	// here: the case search matches product names exactly.
+	dashboardGenerator = handler.WithDashboardProducts(dashboardGenerator, customerEntityClient)
+	// A project named in a generated dashboard's project filter (its key or
+	// name) becomes a projectId filter on the project's id, once, here: the
+	// case search filters projects by id.
+	dashboardGenerator = handler.WithDashboardProjects(dashboardGenerator, customerEntityClient)
+	// Likewise an account (a customer's name or account number) becomes an
+	// accountId filter on the account's id.
+	dashboardGenerator = handler.WithDashboardAccounts(dashboardGenerator, customerEntityClient)
+	// A region filter's values are checked against the regions of the
+	// cases' accounts, and written as an account writes them.
+	dashboardGenerator = handler.WithDashboardRegions(dashboardGenerator, customerEntityClient)
 	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
 		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
 	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
@@ -517,6 +547,8 @@ func main() {
 	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
 	// the webapp's `canWrite` on that menu section. A literal path, so it never
 	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	// A generated dashboard may hold PLG widgets; every PermWrite role also
+	// holds PermUsePlg (TestAccessGuard_DashboardWritersCanReadPlg).
 	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
 	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
 	// Same permission as generating one. "custom" is a literal segment, so it
@@ -747,6 +779,12 @@ func main() {
 	route("POST /team-schedule/assignments/search", handler.PermView, scheduleHandler.SearchScheduleAssignments)
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
 	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
+	route("POST /team-schedule/public-holidays/search", handler.PermView, scheduleHandler.SearchSchedulePublicHolidays)
+	route("POST /team-schedule/holiday-availability/search", handler.PermView, scheduleHandler.SearchHolidayAvailability)
+	// Confirming a team's holiday availability (CRE): entity-service allows
+	// the team's lead, its rota manager, a CRE rota admin or an admin.
+	route("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.ConfirmHolidayAvailability)
+	route("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.WithdrawHolidayAvailability)
 	route("GET /team-schedule/on-duty", handler.PermView, scheduleHandler.GetScheduleOnDuty)
 
 	// Lead edit. PermWrite keeps the control away from a caller who could not
@@ -896,7 +934,7 @@ func main() {
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
 	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
-	route("POST /cases/{id}/sla/recalculate-pause", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
+	route("POST /cases/{id}/sla/recalculate", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)
@@ -1054,13 +1092,7 @@ func main() {
 	// its own copy: it reaches the same service as the same OAuth2 application
 	// as every other upstream client above. PLG_* overrides exist but are not
 	// normally set.
-	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgconfig.EntityDefaults{
-		BaseURL:      customerEntityCfg.BaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
-	}, route); err != nil {
+	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults, route); err != nil {
 		slog.Error("failed to mount PLG", "err", err)
 		os.Exit(1)
 	}

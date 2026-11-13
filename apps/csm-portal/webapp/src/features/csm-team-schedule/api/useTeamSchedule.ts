@@ -318,6 +318,8 @@ function invalidateRota(qc: ReturnType<typeof useQueryClient>): void {
   // answer for a minute, so a lead who has just changed a cell and left edit
   // mode sees a grid saying nobody has touched it.
   void qc.invalidateQueries({ queryKey: ["team-schedule", "edit-markers"] });
+  // Who is off on a coming public holiday follows the tags and the turns.
+  void qc.invalidateQueries({ queryKey: ["team-schedule", "holiday-availability"] });
 }
 
 export interface CreateAssignmentPayload {
@@ -524,6 +526,13 @@ export interface CreateAbsenceKindPayload {
   label: string;
   bucket: "LEAVE" | "ALLOCATION";
   colourToken: string;
+  /** The tag's days take people off the timesheet. Allocation tags only. */
+  excludesFromTimesheet?: boolean;
+  /** Optional, at most 300 characters; shown when hovering the tag. */
+  description?: string;
+  /** The rota family the tag is for: the roster being edited. Needed by a
+   *  rota admin of more than one family; the server decides it otherwise. */
+  family?: string;
 }
 
 /**

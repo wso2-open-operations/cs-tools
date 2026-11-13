@@ -48,6 +48,7 @@ import {
   buildBannerHtml,
   colorsForBannerType,
   cssColorToHex,
+  hasVisibleBannerHtml,
   messageKeepingTitle,
   parseBannerHtml,
   TEXT_BANNER_TYPES,
@@ -62,7 +63,7 @@ import { fromApiTimestamp, scheduleError, scheduleLocksStatus, statusOnSchedule,
 import { useCreatePortalBanner, usePortalBanners, useUpdatePortalBanner, type PortalBanner } from "@features/csm-admin/banners/usePortalBanners";
 import Editor from "@components/rich-text-editor/Editor";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
-import { isBlankHtml, sanitizeAnnouncementHtml } from "@utils/sanitizeHtml";
+import { isBlankHtml, sanitizeBannerHtml } from "@utils/sanitizeHtml";
 
 type BannerStatus = "draft" | "published" | "unpublished";
 
@@ -92,6 +93,15 @@ const STATUS_LABEL: Record<BannerStatus, string> = {
   unpublished: "Unpublished",
 };
 
+const CUSTOM_HTML_PLACEHOLDER =
+  '<div style="background:#1f2937;color:#f9fafb;line-height:3rem;text-align:center">Planned maintenance tonight from 22:00 UTC</div>';
+
+/** Said under the Custom box, so an admin knows what to paste and what to expect. */
+const CUSTOM_HTML_HELP =
+  "Paste your own HTML here to make a custom banner. Put the colours and layout in the HTML itself (inline styles work). " +
+  "The banner strip is 3rem (48px) tall, so anything taller is cut off. " +
+  "Scripts, forms and style tags are removed. To close the banner from your own button or link, add the data-close-banner attribute to it.";
+
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, DEFAULT_ROWS_PER_PAGE, BE_MAX_PAGE_LIMIT];
 
@@ -116,6 +126,11 @@ function toPageBanner(row: PortalBanner): Banner {
   };
 }
 
+/** A custom banner needs HTML that shows something once it is sanitised (text or a picture), not only markup. */
+function isBlankBannerMessage(draft: BannerDraft): boolean {
+  return draft.type === "custom" ? !hasVisibleBannerHtml(draft.message) : isBlankHtml(draft.message);
+}
+
 function emptyDraft(order: number): BannerDraft {
   return {
     ...EMPTY_BANNER_CONTENT,
@@ -133,7 +148,8 @@ function draftFromBanner(banner: Banner): BannerDraft {
   return {
     ...parsed,
     title: "",
-    message: parsed.type === "image" ? "" : messageKeepingTitle(parsed.message, parsed.title),
+    message:
+      parsed.type === "image" ? "" : parsed.type === "custom" ? parsed.message : messageKeepingTitle(parsed.message, parsed.title),
     status: banner.status,
     sortOrder: String(banner.sortOrder),
     visibleInCustomerPortal: banner.visibleInCustomerPortal,
@@ -141,115 +157,6 @@ function draftFromBanner(banner: Banner): BannerDraft {
     startsOn: banner.startsOn,
     expiresOn: banner.expiresOn,
   };
-}
-
-function hexChannels(value: string): [number, number, number] {
-  const hex = cssColorToHex(value, "#000000").slice(1);
-  return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
-}
-
-function channelsToHex(channels: [number, number, number]): string {
-  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function ColorField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}): JSX.Element {
-  const hex = cssColorToHex(value, "#000000");
-  const channels = hexChannels(hex);
-  const [hexText, setHexText] = useState(hex);
-  // Re-sync the text box when the committed colour changes from outside.
-  // Adjusting state during render (not in an effect) avoids a cascading render.
-  const [syncedHex, setSyncedHex] = useState(hex);
-  if (syncedHex !== hex) {
-    setSyncedHex(hex);
-    setHexText(hex);
-  }
-
-  const commitHex = (next: string): void => {
-    setHexText(next);
-    const candidate = next.trim().startsWith("#") ? next.trim() : `#${next.trim()}`;
-    if (/^#[0-9a-f]{6}$/i.test(candidate)) onChange(cssColorToHex(candidate, ""));
-  };
-
-  const commitChannel = (index: 0 | 1 | 2, raw: string): void => {
-    if (!/^\d{0,3}$/.test(raw)) return;
-    if (raw === "") return;
-    const next = [...channels] as [number, number, number];
-    next[index] = Math.max(0, Math.min(255, Number(raw)));
-    onChange(channelsToHex(next));
-  };
-
-  return (
-    <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
-        {label}
-      </Typography>
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: "40px minmax(96px, 1.3fr) repeat(3, minmax(58px, 0.7fr))",
-          gap: 1,
-          alignItems: "center",
-        }}
-      >
-      <Box
-        component="input"
-        type="color"
-        aria-label={label}
-        value={hex}
-        onChange={(event: { target: { value: string } }) => onChange(event.target.value)}
-        sx={(theme) => ({
-          width: 40,
-          height: 40,
-          p: 0.25,
-          border: 1,
-          borderColor: "divider",
-          borderRadius: 1,
-          bgcolor: "background.paper",
-          cursor: "pointer",
-          ...theme.applyStyles("dark", { borderColor: "rgba(255,255,255,0.45)" }),
-        })}
-      />
-      <TextField
-        label="Hex"
-        size="small"
-        value={hexText}
-        onChange={(event) => commitHex(event.target.value)}
-        onBlur={() => {
-          const candidate = hexText.trim().startsWith("#") ? hexText.trim() : `#${hexText.trim()}`;
-          const parsed = cssColorToHex(candidate, "");
-          if (parsed) {
-            onChange(parsed);
-            setHexText(parsed);
-          } else {
-            setHexText(hex);
-          }
-        }}
-        slotProps={{ htmlInput: { "aria-label": `${label} hex`, spellCheck: false } }}
-        sx={{ "& input": { fontFamily: "monospace" } }}
-      />
-      {(["R", "G", "B"] as const).map((name, index) => (
-        <TextField
-          key={name}
-          label={name}
-          size="small"
-          type="number"
-          value={channels[index]}
-          onChange={(event) => commitChannel(index as 0 | 1 | 2, event.target.value)}
-          slotProps={{ htmlInput: { "aria-label": `${label} ${name}`, min: 0, max: 255 } }}
-          sx={{ "& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button": { appearance: "none", m: 0 } }}
-        />
-      ))}
-      </Box>
-    </Box>
-  );
 }
 
 function FormatChoice({
@@ -359,7 +266,7 @@ function BannerTypePicker({
                     Custom
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Choose the text and background colours.
+                    Paste your own HTML to make the banner.
                   </Typography>
                 </Box>
               );
@@ -490,7 +397,7 @@ export default function CsmBannersPage(): JSX.Element {
   const orderLocked = draft.status === "unpublished";
   const lockedStatus = scheduleLocksStatus(draft.startsOn, draft.expiresOn, now);
   const imageMissing = showErrors && draft.type === "image" && !draft.imageUrl.trim();
-  const messageMissing = showErrors && draft.type !== "image" && isBlankHtml(draft.message);
+  const messageMissing = showErrors && draft.type !== "image" && isBlankBannerMessage(draft);
   const orderValue = Number(draft.sortOrder);
   const orderMissing =
     showErrors && !orderLocked && (draft.sortOrder.trim() === "" || !Number.isInteger(orderValue) || orderValue < 0);
@@ -561,7 +468,7 @@ export default function CsmBannersPage(): JSX.Element {
     const orderBad = !orderLocked && (draft.sortOrder.trim() === "" || !Number.isInteger(order) || order < 0);
     if (orderBad) return;
     if (draft.type === "image" && !draft.imageUrl.trim()) return;
-    if (draft.type !== "image" && isBlankHtml(draft.message)) return;
+    if (draft.type !== "image" && isBlankBannerMessage(draft)) return;
     if (scheduleError(draft.startsOn, draft.expiresOn)) return;
     setShowErrors(false);
     setSaveError("");
@@ -662,6 +569,8 @@ export default function CsmBannersPage(): JSX.Element {
               data-testid={`banner-body-${banner.id}`}
               sx={{
                 overflow: "hidden",
+                // Keeps a banner with fixed-position content inside its own box.
+                contain: "paint",
                 "& [data-banner='1']": {
                   height: "3rem !important",
                   minHeight: "3rem !important",
@@ -680,7 +589,7 @@ export default function CsmBannersPage(): JSX.Element {
                 "& [data-banner-type='success']": { backgroundColor: `${palette.success.backgroundColor} !important` },
                 "& [data-banner-text] p, & [data-banner-text] div": { margin: "0 !important" },
               }}
-              dangerouslySetInnerHTML={{ __html: sanitizeAnnouncementHtml(banner.html) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeBannerHtml(banner.html) }}
             />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1 }}>
               <Stack direction="row" spacing={0.75} useFlexGap sx={{ flex: "1 1 auto", flexWrap: "wrap" }}>
@@ -821,20 +730,23 @@ export default function CsmBannersPage(): JSX.Element {
                 </>
               ) : (
                 <>
-                  {draft.type === "custom" && (
-                    <Stack spacing={1.25}>
-                      <ColorField
-                        label="Text"
-                        value={draft.textColor}
-                        onChange={(value) => setDraft({ ...draft, textColor: value })}
-                      />
-                      <ColorField
-                        label="Background"
-                        value={draft.backgroundColor}
-                        onChange={(value) => setDraft({ ...draft, backgroundColor: value })}
-                      />
-                    </Stack>
-                  )}
+                  {draft.type === "custom" ? (
+                    <TextField
+                      id="banner-html"
+                      label="Banner HTML"
+                      required
+                      multiline
+                      minRows={6}
+                      maxRows={14}
+                      error={messageMissing}
+                      value={draft.message}
+                      placeholder={CUSTOM_HTML_PLACEHOLDER}
+                      helperText={messageMissing ? "Required. Paste the HTML for the banner." : CUSTOM_HTML_HELP}
+                      onChange={(event) => setDraft((current) => ({ ...current, message: event.target.value }))}
+                      slotProps={{ htmlInput: { spellCheck: false, autoCapitalize: "off", autoCorrect: "off" } }}
+                      sx={{ "& textarea": { fontFamily: "monospace", fontSize: 13 } }}
+                    />
+                  ) : (
                   <Box>
                     <Typography
                       variant="body2"
@@ -883,6 +795,7 @@ export default function CsmBannersPage(): JSX.Element {
                       </Typography>
                     )}
                   </Box>
+                  )}
                 </>
               )}
               <FormControlLabel
@@ -995,6 +908,7 @@ export default function CsmBannersPage(): JSX.Element {
                 sx={{
                   borderRadius: 1,
                   overflow: "hidden",
+                  contain: "paint",
                   border: 1,
                   borderColor: "divider",
                   "& [data-banner='1']": {
@@ -1006,7 +920,7 @@ export default function CsmBannersPage(): JSX.Element {
                   },
                   "& [data-banner-text] p, & [data-banner-text] div": { margin: "0 !important" },
                 }}
-                dangerouslySetInnerHTML={{ __html: sanitizeAnnouncementHtml(previewHtml) }}
+                dangerouslySetInnerHTML={{ __html: sanitizeBannerHtml(previewHtml) }}
               />
               <Accordion disableGutters elevation={0} sx={{ mt: 1, "&:before": { display: "none" } }}>
                 <AccordionSummary expandIcon={<ChevronDown size={16} />}>

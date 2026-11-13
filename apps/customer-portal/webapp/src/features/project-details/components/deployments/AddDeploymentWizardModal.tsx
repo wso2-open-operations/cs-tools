@@ -48,6 +48,7 @@ import {
 } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { usePostCreateDeployment } from "@features/project-details/api/usePostCreateDeployment";
+import { companyName } from "@config/brandingConfig";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import ErrorBanner from "@components/error-banner/ErrorBanner";
@@ -257,7 +258,7 @@ export default function AddDeploymentWizardModal({
           id="add-deployment-wizard-title"
           sx={{ pr: 6, position: "relative", pb: 0.5 }}
         >
-          {step === 1 ? "Add New Deployment" : "Add WSO2 Product"}
+          {step === 1 ? "Add New Deployment" : `Add ${companyName()} Product`}
           <Typography
             id="add-deployment-wizard-description"
             variant="body2"
@@ -266,7 +267,7 @@ export default function AddDeploymentWizardModal({
           >
             {step === 1
               ? "Create a new deployment environment for your project."
-              : `Add one or more WSO2 products to "${createdDeployment?.name}".`}
+              : `Add one or more ${companyName()} products to "${createdDeployment?.name}".`}
           </Typography>
           <IconButton
             aria-label="close"

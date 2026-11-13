@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -38,11 +39,17 @@ import (
 // merely absent.
 const cloudStatusMaxAttempts = 5
 
+// errEmptyCloudRegistry is returned instead of claiming webhooks while the cloud
+// registry holds no active cloud.
+var errEmptyCloudRegistry = errors.New("cloud registry has no active clouds; not claiming webhooks")
+
 // cloudStatusPendingLimit caps one delivery batch.
 const cloudStatusPendingLimit = 50
 
 type cloudStatusService struct {
 	repo repository.CloudStatusRepository
+	// registry maps a stored cloud_offering value to its dashboard slug.
+	registry *cloudRegistry
 	// parentServiceIDs is the trigger's 14 service ids, from configuration.
 	//
 	// NOT hardcoded, despite being stable: ServiceNow kept them in the flow
@@ -90,7 +97,7 @@ func WithCloudStatusPublisher(svc CloudStatusService, publisher EventPublisherSe
 
 // NewCloudStatusService constructs the cloud status webhook decision service.
 func NewCloudStatusService(repo repository.CloudStatusRepository, parentServiceIDs []string) CloudStatusService {
-	return &cloudStatusService{repo: repo, parentServiceIDs: parentServiceIDs}
+	return &cloudStatusService{repo: repo, registry: newCloudRegistry(repo.Clouds), parentServiceIDs: parentServiceIDs}
 }
 
 // Sweep decides which in-scope outages now owe the status dashboard a webhook
@@ -249,14 +256,19 @@ func (s *cloudStatusService) process(ctx context.Context, candidates []repositor
 // to be wrong in.
 //
 // Unroutable clouds are dropped here rather than at the point of sending, so
-// a cloud this build cannot address never reaches the events table and cannot
+// a cloud with no active registry entry never reaches the events table and cannot
 // become a webhook nobody can deliver.
 func (s *cloudStatusService) cloudsFor(ctx context.Context, c repository.CloudStatusCandidate) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
 
+	catalog, err := s.registry.Catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	add := func(cloud string) {
-		if cloud == "" || seen[cloud] || domain.CloudOfferingSlug(cloud) == "" {
+		if cloud == "" || seen[cloud] || catalog.SlugForOffering(cloud) == "" {
 			return
 		}
 		seen[cloud] = true
@@ -274,8 +286,8 @@ func (s *cloudStatusService) cloudsFor(ctx context.Context, c repository.CloudSt
 		return nil, err
 	}
 	for _, cloud := range affected {
-		if domain.CloudOfferingSlug(cloud) == "" {
-			slog.WarnContext(ctx, "affected CI sits on a cloud this build cannot address; no webhook for it",
+		if catalog.SlugForOffering(cloud) == "" {
+			slog.WarnContext(ctx, "affected CI sits on a cloud with no active registry entry; no webhook for it",
 				"outageId", c.OutageID, "number", c.Number, "cloudOffering", cloud)
 			continue
 		}
@@ -356,6 +368,20 @@ func (s *cloudStatusService) applyMonitorStatus(ctx context.Context, c repositor
 // The cloud is translated to its wire slug here rather than in SQL so that the
 // mapping lives in one place next to the reason it exists.
 func (s *cloudStatusService) PendingWebhooks(ctx context.Context) (domain.PendingCloudStatusWebhooksResponse, error) {
+	// Read before claiming: a registry that cannot be read must not leave rows
+	// claimed and unposted.
+	catalog, err := s.registry.Catalog(ctx)
+	if err != nil {
+		return domain.PendingCloudStatusWebhooksResponse{}, err
+	}
+	// An empty registry is a valid load result, not an error, and it is what an
+	// environment looks like between the migration and its seed. It knows no
+	// cloud, so every claimed row would be closed below as a failed attempt:
+	// one of the cloudStatusMaxAttempts per row per tick, until webhooks recorded
+	// before the seed are exhausted and never posted. Refuse before claiming.
+	if len(catalog.Slugs()) == 0 {
+		return domain.PendingCloudStatusWebhooksResponse{}, errEmptyCloudRegistry
+	}
 	rows, err := s.repo.ClaimPending(ctx, cloudStatusPendingLimit, cloudStatusMaxAttempts, cloudStatusDeliveryLease)
 	if err != nil {
 		return domain.PendingCloudStatusWebhooksResponse{}, err
@@ -363,11 +389,11 @@ func (s *cloudStatusService) PendingWebhooks(ctx context.Context) (domain.Pendin
 
 	out := make([]domain.PendingCloudStatusWebhook, 0, len(rows))
 	for _, w := range rows {
-		slug := domain.CloudOfferingSlug(w.Cloud)
+		slug := catalog.SlugForOffering(w.Cloud)
 		wire := w.Event.WireValue()
 		if slug == "" || wire == "" {
-			// Recorded under an offering or an event this build cannot put on
-			// the wire -- only reachable through version skew. Better held
+			// Recorded under a cloud since retired from the registry, or an
+			// event this build cannot put on the wire (version skew). Better held
 			// back visibly than posted as something the dashboard ignores.
 			// Claimed above, so its attempt is closed here as a definite
 			// failure (nothing was sent); left open it would read as an
