@@ -51,33 +51,6 @@ paths:
                 $ref: '#/components/schemas/Settings'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /customers/search:
-    get:
-      summary: Suggest customer names
-      operationId: searchCustomers
-      parameters:
-        - name: q
-          in: query
-          description: Part of a customer's name.
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Matching customers; empty when suggestions are turned off.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Customer'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          description: Customer suggestions are unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
   /submissions:
     get:
       summary: List entries, newest first
@@ -379,14 +352,6 @@ components:
         canModerate:
           type: boolean
           description: Whether the caller may edit and delete anyone's entries.
-    Customer:
-      type: object
-      required: [id, name]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
     Source:
       type: string
       enum: [Customer, Partner, Internal, Other]
@@ -401,7 +366,7 @@ components:
           type: string
         who:
           type: string
-          description: The byline the author shared it under.
+          description: The author's name. A new entry takes it from the author's token.
         where:
           $ref: '#/components/schemas/Source'
         whereDetail:
@@ -448,14 +413,15 @@ components:
     CreateEntryRequest:
       type: object
       additionalProperties: false
-      required: [title, who, where, what]
+      required: [title, where, what]
       properties:
         title:
           type: string
           maxLength: 100
         who:
           type: string
-          maxLength: 200
+          deprecated: true
+          description: Ignored. The byline is the caller's name from their token.
         where:
           $ref: '#/components/schemas/Source'
         whereDetail:

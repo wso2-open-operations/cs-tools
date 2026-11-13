@@ -51,6 +51,8 @@ const (
 
 var idPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+// createRequest's Who is ignored: the byline is the caller's name from their
+// token. It's still accepted so a client that sends it isn't refused.
 type createRequest struct {
 	Title       string  `json:"title"`
 	Who         string  `json:"who"`
@@ -184,7 +186,7 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	who, err := entry.ValidateAuthor(req.Who)
+	who, err := entry.ValidateAuthor(user.DisplayName)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -201,6 +203,7 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, msgInternal)
 		return
 	}
+	slog.InfoContext(r.Context(), "entry created", "entryID", e.ID)
 
 	// Best effort: the entry is saved either way. If the announcement fails,
 	// the entry stays unannounced for a moderator to send again.
@@ -252,6 +255,7 @@ func (h *Handler) NotifyEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, msgInternal)
 		return
 	}
+	slog.InfoContext(r.Context(), "entry sent to Google Chat", "entryID", e.ID)
 	e.NotifiedAt = &at
 	writeJSON(w, http.StatusOK, e)
 }
@@ -337,6 +341,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, msgInternal)
 		return
 	}
+	slog.InfoContext(r.Context(), "entry updated", "entryID", existing.ID, "byAuthor", isAuthor(user, existing))
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -364,6 +369,8 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, msgInternal)
 		return
 	}
+	// The row is gone, so this line is the only record of the delete.
+	slog.InfoContext(r.Context(), "entry deleted", "entryID", existing.ID, "byAuthor", isAuthor(user, existing))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -388,10 +395,16 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (entry.Entry, boo
 	return e, true
 }
 
-// canChange reports whether user may edit or delete e: its author, matched
-// by verified email (never the free-text byline), or a moderator.
+// canChange reports whether user may edit or delete e: its author or a
+// moderator.
 func canChange(user *middleware.User, e entry.Entry) bool {
-	return user.IsModerator || strings.EqualFold(user.Email, e.SubmittedByEmail)
+	return user.IsModerator || isAuthor(user, e)
+}
+
+// isAuthor reports whether user shared e, matched by verified email, never
+// the byline.
+func isAuthor(user *middleware.User, e entry.Entry) bool {
+	return strings.EqualFold(user.Email, e.SubmittedByEmail)
 }
 
 // articleURL is the link to an entry's full-page article in the webapp, or

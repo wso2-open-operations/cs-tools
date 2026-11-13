@@ -163,6 +163,7 @@ func TestAuthRejects(t *testing.T) {
 		"expired":             with(func(c jwt.MapClaims) { c["exp"] = time.Now().Add(-time.Hour).Unix() }),
 		"no expiry":           with(func(c jwt.MapClaims) { delete(c, "exp") }),
 		"no email":            with(func(c jwt.MapClaims) { delete(c, "email") }),
+		"no subject":          with(func(c jwt.MapClaims) { delete(c, "sub") }),
 		"signed by another":   sign(t, newRSAKey(t), baseClaims()),
 		"HS256":               hs256,
 		"unsigned (alg none)": none,

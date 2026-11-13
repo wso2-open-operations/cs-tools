@@ -24,10 +24,6 @@ one can find again.
   verified, signed-in user).
 - **Search** — across titles, learnings, authors and customer names, with
   pages and a total count.
-- **Customer-name autocomplete** — the "Where: Customer" field resolves against
-  real customer names via [entity-service](../../entity-service)'s account
-  search, instead of free-typed names drifting out of sync with the system of
-  record.
 - **Moderation** — authors edit and delete their own entries; members of a
   configured Asgardeo group can edit and delete any.
 - **Chat notifications** — each new entry is announced through Novera, the
@@ -39,7 +35,7 @@ one can find again.
 
 ```bash
 .
-└── backend                  # Go service — entries, search, moderation, customer search
+└── backend                  # Go service — entries, search, moderation
     ├── cmd/server/           # Entry point: configuration, routes, server
     ├── internal/             # Handlers, middleware, storage, entry rules, outbound clients
     ├── sql/                  # Creates the tables; run once before the service starts
