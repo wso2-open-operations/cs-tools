@@ -364,6 +364,8 @@ func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 		{"project lookup", fmt.Errorf("%w: widgets[0].filters[1]: status 500", errDashboardProjectLookup), http.StatusBadGateway, errMsgGenerateProjectLookup, errCodeGenerateProjectLookup},
 		{"account filter", fmt.Errorf("%w: widgets[0].filters[1]: no account is named like %q", errDashboardAccount, "Orion"), http.StatusUnprocessableEntity, `No account is named like "Orion".`, errCodeGenerateAccount},
 		{"account lookup", fmt.Errorf("%w: widgets[0].filters[1]: status 500", errDashboardAccountLookup), http.StatusBadGateway, errMsgGenerateAccountLookup, errCodeGenerateAccountLookup},
+		{"region filter", fmt.Errorf("%w: widgets[0].filters[1]: no case's account has the region %q; the regions are APAC, EMEA", errDashboardRegion, "LATAM"), http.StatusUnprocessableEntity, `No case's account has the region "LATAM"; the regions are APAC, EMEA.`, errCodeGenerateRegion},
+		{"region lookup", fmt.Errorf("%w: status 500: widgets[0].filters[1]", errDashboardRegionLookup), http.StatusBadGateway, errMsgGenerateRegionLookup, errCodeGenerateRegionLookup},
 		{"usage limit", fmt.Errorf("%w: csmai: status 429 (usage_limit)", errGenerateUsageLimit), http.StatusServiceUnavailable, errMsgGenerateUsageLimit, errCodeGenerateUsageLimit},
 		{"call timed out", fmt.Errorf("%w: %w", errGenerateCall, context.DeadlineExceeded), http.StatusGatewayTimeout, errMsgGenerateTimeout, errCodeGenerateTimeout},
 		{"call failed", fmt.Errorf("%w: 401 Unauthorized", errGenerateCall), http.StatusBadGateway, errMsgGenerateCall, errCodeGenerateCall},

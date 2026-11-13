@@ -4602,15 +4602,19 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 	}
 }
 
-// refuseSNProductFilters refuses a productVersion filter and a product notIn
-// filter, which ServiceNow's case search has no field for: refused rather
-// than dropped, which would widen the result to every version or product.
+// refuseSNProductFilters refuses a productVersion filter, a product notIn
+// filter and a region filter, which this data source's case search has no
+// field for: refused rather than dropped, which would widen the result to every
+// version, product or region.
 func refuseSNProductFilters(parsed domain.ParsedCaseFilters) error {
 	if len(parsed.ProductVersions) > 0 {
 		return &apierror.ValidationError{Msg: `field "productVersion" is not supported by this data source`}
 	}
 	if len(parsed.ExcludeProductNames) > 0 {
 		return &apierror.ValidationError{Msg: `field "product" (notIn) is not supported by this data source`}
+	}
+	if len(parsed.Regions) > 0 || len(parsed.ExcludeRegions) > 0 {
+		return &apierror.ValidationError{Msg: `field "region" is not supported by this data source`}
 	}
 	return nil
 }
@@ -4965,10 +4969,10 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 	if !validCaseAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
-	// ServiceNow's aggregate has no product, version or project grouping;
-	// refuse it here rather than pass on a groupBy it would not answer as
+	// This data source's aggregate has no product, version, project or region
+	// grouping; refuse it here rather than pass on a groupBy it would not answer as
 	// this one does.
-	if req.GroupBy == "product" || req.GroupBy == "productVersion" || req.GroupBy == "project" {
+	if req.GroupBy == "product" || req.GroupBy == "productVersion" || req.GroupBy == "project" || req.GroupBy == "region" {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupBy %q is not supported by this data source", req.GroupBy)}
 	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {

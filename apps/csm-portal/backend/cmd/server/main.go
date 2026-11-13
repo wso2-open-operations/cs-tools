@@ -426,6 +426,9 @@ func main() {
 	// Likewise an account (a customer's name or account number) becomes an
 	// accountId filter on the account's id.
 	dashboardGenerator = handler.WithDashboardAccounts(dashboardGenerator, customerEntityClient)
+	// A region filter's values are checked against the regions of the
+	// cases' accounts, and written as an account writes them.
+	dashboardGenerator = handler.WithDashboardRegions(dashboardGenerator, customerEntityClient)
 	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
 		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
 	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())

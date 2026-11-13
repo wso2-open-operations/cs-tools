@@ -11040,6 +11040,13 @@ has that side). Everything here is new to these fields, so no request that worke
   bucket by bucket.
 - `projectId` and `accountId` (`in` / `notIn`) are unchanged; the dashboards use them for projects and
   customers named by the user.
+- **`region` `in` / `notIn`** (`ParsedCaseFilters.Regions` / `ExcludeRegions`) matches the case's account
+  `region`, compared trimmed and lower-cased (`LOWER(TRIM(a.region))`), so "APAC", " apac " and "apac"
+  are one region. `notIn` keeps the cases with no region or no account. Never in an `anyOf` branch;
+  refused by the other data source. **`groupBy: region`** buckets on the same key (a blank region is in
+  no bucket) and labels each bucket with the spelling most of its cases' accounts have
+  (`caseAggregateLabels`, `mode()`), so the label is "APAC" even when one account wrote "apac"; the other
+  data source refuses it. `case_region_integration_test.go` checks each bucket against its filter total.
 
 ## Announcement requests
 

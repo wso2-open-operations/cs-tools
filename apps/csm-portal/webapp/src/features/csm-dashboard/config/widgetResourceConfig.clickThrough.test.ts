@@ -177,6 +177,20 @@ const WIDGETS: WidgetShape[] = [
     lands: "preview",
   },
   {
+    // A region bar of "open cases by region", or "open APAC cases": the case
+    // list has no region filter, so the preview page carries it.
+    name: "open cases of one region",
+    resourceType: "case",
+    filters: { filters: [entry("state", "in", "open"), entry("region", "in", "apac"), ...caseScope] },
+    lands: "preview",
+  },
+  {
+    name: "cases outside two regions",
+    resourceType: "case",
+    filters: { filters: [entry("region", "notIn", "APAC", "EMEA"), ...caseScope] },
+    lands: "preview",
+  },
+  {
     name: "SLA violations (breached SLA, still being worked)",
     resourceType: "case",
     filters: {

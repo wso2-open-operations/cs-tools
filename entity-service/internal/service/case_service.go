@@ -474,6 +474,7 @@ var validCaseAggregateField = map[string]bool{
 	// productVersion: only with a product filter naming one product.
 	"productVersion": true,
 	"project":        true,
+	"region":         true,
 }
 
 var validCaseIssueType = map[domain.CaseIssueType]bool{

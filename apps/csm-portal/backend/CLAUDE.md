@@ -1051,6 +1051,12 @@ and every read need nothing more:
   The search is read page by page, up to `namedSearchPages` (10 pages of 50): a key is taken as soon as
   it is seen, but one exact name only once every page has been read, since another record of that name
   (or the key) may be on a later page; a name matching more than those pages hold is "matches several".
+- `WithDashboardRegions` (`dashboard_regions.go`): a `region` filter stays `region` (entity-service
+  matches it trimmed and lower-cased), but each value is checked against the regions of the caller's
+  cases, read once per dashboard with `/cases/aggregate {groupBy: region}` and only when a region filter
+  is present, and becomes that region's label ("apac" -> "APAC"), duplicates dropped. A region no case's
+  account has is a 422 (`generate_region`) listing the regions there are; a failed read is a 502
+  (`generate_region_lookup`).
 
 A value that names nothing, or several, is a 422 (`generate_product`, `generate_project`,
 `generate_account`) naming the candidates, e.g. `"quartz labs" matches several projects (Quartz Labs
@@ -1059,15 +1065,16 @@ The 422 is logged as which filter it was only, never its reason: that names what
 records it matched, such as a customer's name. Never
 dropped: a `notIn` that left out nothing would count every product or project under a title that says
 otherwise. `ParseGenerated` checks the shapes first (`generated_product_version.go`,
-`generated_project.go`): `product`, `project` and `account` are `in` or `notIn` with names, the last two
-never in an `anyOf` branch; `productVersion` is `in`, never in an `anyOf` branch, and needs exactly one
+`generated_project.go`): `product`, `project`, `account` and `region` are `in` or `notIn` with names,
+the last three never in an `anyOf` branch; `productVersion` is `in`, never in an `anyOf` branch, and needs exactly one
 product kept (`in`) in the same search (a slice's product filter of any op replaces its widget's, as the
 webapp merges a slice by field); a grouping by `productVersion` needs it in the widget's own query.
-`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project}ExamplesAreValid` run the catalogue's
+`TestParseGenerated_TheCatalogue{Product,ProductVersion,Project,Region}ExamplesAreValid` run the catalogue's
 section 7 examples through the same check. An edit sends the resolved ids back to the model; the
 catalogue tells it to keep `projectId` / `accountId` filters as they are. Nothing saved before these
 filters had them, so no saved dashboard changes. Deploy entity-service first (product `notIn`,
-`productVersion`, grouping by `project` and `productVersion`), then this backend, then the AI service.
+`productVersion`, `region`, grouping by `project`, `productVersion` and `region`), then this backend,
+then the AI service.
 
 **What one user can spend on model calls.** Every `POST /dashboards/generate` that passes the prompt
 checks counts against the caller's `handler.GenerateRateLimiter` (keyed by the token's user id):
