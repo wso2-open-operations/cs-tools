@@ -37,6 +37,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
+import { formatClosureState } from "@features/project-hub/utils/closureState";
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 const DEFAULT_ROWS_PER_PAGE = 10;
@@ -277,7 +278,7 @@ export default function PartnerProjectsPage(): JSX.Element {
                       <TableCell>
                         <Chip
                           color={isSuspended ? "warning" : "success"}
-                          label={project.closureState ?? "Active"}
+                          label={formatClosureState(project.closureState)}
                           size="small"
                           sx={{ fontWeight: 500 }}
                           variant="outlined"
