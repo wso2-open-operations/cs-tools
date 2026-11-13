@@ -45,6 +45,7 @@ import {
   resolveDisplayTimeZone,
 } from "@utils/dateTime";
 import { ApiError } from "@utils/ApiError";
+import { drawReportSupportFooters, loadReportLogo } from "@utils/pdfBranding";
 import { buildPdfTableBody, wso2StaffMarkerHooks } from "@utils/pdfStaffMarker";
 import { toPdfSafeText } from "@utils/pdfText";
 
@@ -1189,12 +1190,16 @@ function getDateOrNA(dateStr: string | null | undefined): string {
  *   approved a change on no evidence. When it is not known (source
  *   "unavailable": the approvals could not be read) both rows say
  *   "Not available", so the PDF does not read as if there were no approval.
+ *
+ * The footer carries the configured logo and company name ("WSO2 Support 24x7"
+ * when none are set), so the logo is loaded first.
  */
-export function generateChangeRequestDetailsPdf(
+export async function generateChangeRequestDetailsPdf(
   changeRequest: ChangeRequestDetails,
   comments?: CaseComment[],
   approval: ChangeRequestApprovalRecord = deriveChangeRequestApproval(changeRequest),
-): void {
+): Promise<void> {
+  const logo = await loadReportLogo();
   const doc = new jsPDF() as jsPDF & { lastAutoTable?: { finalY: number } };
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -1303,24 +1308,12 @@ export function generateChangeRequestDetailsPdf(
       timeZone: resolveDisplayTimeZone(),
     }),
   );
-  const totalPages = doc.getNumberOfPages();
-
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const footerY = pageHeight - 10;
-
-    doc.text("WSO2 Support 24x7", 14, footerY);
-
-    const pageText = `Page ${i} of ${totalPages}`;
-    const textWidth = doc.getTextWidth(pageText);
-    doc.text(pageText, (pageWidth - textWidth) / 2, footerY);
-
-    const dateWidth = doc.getTextWidth(createdDateTime);
-    doc.text(createdDateTime, pageWidth - 14 - dateWidth, footerY);
-  }
+  drawReportSupportFooters(
+    doc,
+    logo,
+    (page, totalPages) => `Page ${page} of ${totalPages}`,
+    createdDateTime,
+  );
 
   const fileName = `Change-Request-${changeRequest.number || "Details"}-${new Date().toISOString().split("T")[0]}.pdf`;
   doc.save(fileName);
