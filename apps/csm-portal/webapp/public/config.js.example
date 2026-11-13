@@ -90,9 +90,9 @@ window.config = {
   // .change-requests, .incidents, .problems}, engagements, security-center
   // {.reports, .vulnerabilities}, updates, time-cards, announcements,
   // customers{.accounts, .projects, .customer-health}, customer-health,
-  // usage-metrics, products{.catalogue, .release-lines},
-  // admin{.user-management{.users, .roles,
-  // .groups, .teams, .permissions}, .dashboards}. Unknown ids are ignored
+  // usage-metrics, admin{.user-management{.users, .roles,
+  // .groups, .teams, .permissions}, .dashboards, .banners, .sla-engine,
+  // .product-catalog{.products, .release-lines}}. Unknown ids are ignored
   // with a console warning.
   //
   // "customers.customer-health" is not a Customers tab but a second sidebar

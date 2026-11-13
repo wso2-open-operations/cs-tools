@@ -109,6 +109,7 @@ import CsmDashboardSharedConfigPage from "@features/csm-admin/dashboards/pages/C
 import CsmBannersRouteGuard from "@features/csm-admin/banners/CsmBannersRouteGuard";
 import CsmBannersPage from "@features/csm-admin/banners/CsmBannersPage";
 import CsmSlaEngineRouteGuard from "@features/csm-admin/sla-engine/CsmSlaEngineRouteGuard";
+import ProductCatalogRouteGuard from "@features/csm-products/components/ProductCatalogRouteGuard";
 import CsmSlaEnginePage from "@features/csm-admin/sla-engine/CsmSlaEnginePage";
 import CsmCustomersLayout from "@features/csm-customers/pages/CsmCustomersLayout";
 import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
@@ -420,6 +421,15 @@ export default function App(): JSX.Element {
                     <Route path="sla-engine" element={<CsmSlaEngineRouteGuard />}>
                       <Route index element={<CsmSlaEnginePage />} />
                     </Route>
+                    {/* Product catalogue: the data behind the public Support
+                        Matrix and Release Matrix. Catalogue managers only. */}
+                    <Route path="product-catalog" element={<ProductCatalogRouteGuard />}>
+                      <Route element={<ProductsLayout />}>
+                        <Route index element={<Navigate to="products" replace />} />
+                        <Route path="products" element={<ProductCatalogPage />} />
+                        <Route path="release-lines" element={<ReleaseLinesPage />} />
+                      </Route>
+                    </Route>
                   </Route>
 
                   {/* Legacy Settings paths kept alive so a pinned/deep link to
@@ -726,14 +736,21 @@ export default function App(): JSX.Element {
                     <Route path="admin" element={<CsmKBAdminPage />} />
                   </Route>
 
-                  {/* Products: the product catalogue behind the public Support
-                      Matrix and Release Matrix. Editing is a catalogue
-                      manager's job; the pages offer it only to them. */}
-                  <Route path="products" element={<ProductsLayout />}>
-                    <Route index element={<Navigate to="catalogue" replace />} />
-                    <Route path="catalogue" element={<ProductCatalogPage />} />
-                    <Route path="release-lines" element={<ReleaseLinesPage />} />
-                  </Route>
+                  {/* The product catalogue was a top-level "Products" section
+                      until it moved to Settings ▸ Product catalogue; its old
+                      links land on the new pages. */}
+                  <Route
+                    path="products"
+                    element={<Navigate to="/admin/product-catalog/products" replace />}
+                  />
+                  <Route
+                    path="products/catalogue"
+                    element={<Navigate to="/admin/product-catalog/products" replace />}
+                  />
+                  <Route
+                    path="products/release-lines"
+                    element={<Navigate to="/admin/product-catalog/release-lines" replace />}
+                  />
 
                   {/* Usage Metrics and Customer Health are gated by their own
                       flags, not isSplAudience. Usage Metrics also goes to

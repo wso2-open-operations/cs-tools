@@ -16,6 +16,9 @@
 
 
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -23,19 +26,26 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useCatalogWrite } from "@features/csm-products/api/useCatalogWrite";
+import { useGetReleaseLines } from "@features/csm-products/api/useGetReleaseLines";
+import VersionListingFields from "@features/csm-products/components/VersionListingFields";
 import VersionSupportFields from "@features/csm-products/components/VersionSupportFields";
 import type { CatalogProduct, CatalogVersion } from "@features/csm-products/types/productCatalog";
 import {
-  buildVersionSupportPayload,
+  buildVersionEditPayload,
   validateVersionForm,
   versionToForm,
   type VersionFormValues,
 } from "@features/csm-products/utils/catalogChange";
-import { productDisplayCode } from "@features/csm-products/utils/catalogProducts";
+import { productDisplayCode, type ListingFormValues } from "@features/csm-products/utils/catalogProducts";
+
+/** The Advanced section's fields; an error in one opens the section on save. */
+const ADVANCED_KEYS = ["releaseDate", "publicName", "publicAbbreviation", "tags", "releaseLinks"];
 
 interface VersionEditDialogProps {
   product: CatalogProduct;
@@ -49,10 +59,11 @@ interface VersionEditDialogProps {
 }
 
 /**
- * Edit a version's support status and end-of-life dates. Saving applies the
- * change at once: one PATCH to the row shown, with only the support fields
- * that differ from it, which entity-service applies to every live deployment
- * profile of the version in one transaction. Retiring is here too, behind an
+ * Edit a version: its support status and end-of-life dates up front, and
+ * under a collapsed "Advanced" section the release date and the publishing
+ * settings. Saving applies the change at once: one PATCH to the row shown,
+ * with only the fields that differ from it, which entity-service applies to
+ * every live deployment profile of the version in one transaction. Retiring is here too, behind an
  * in-dialog confirmation step: one call that retires every profile. Retired
  * rows are not listed, so there is no Restore.
  */
@@ -68,16 +79,21 @@ export default function VersionEditDialog({
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingRetire, setConfirmingRetire] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const save = useCatalogWrite();
+  const releaseLines = useGetReleaseLines();
   const pending = save.isPending;
-  const errors = validateVersionForm(form, "update");
+  const errors = validateVersionForm(form, "update", { productCode: product.code ?? null });
   const name = `${productDisplayCode(product)} ${version.version}${listingName ? ` (${listingName})` : ""}`;
 
   const handleSave = async (): Promise<void> => {
     setSubmitted(true);
-    if (Object.keys(errors).length > 0) return;
+    if (Object.keys(errors).length > 0) {
+      if (ADVANCED_KEYS.some((key) => errors[key])) setAdvancedOpen(true);
+      return;
+    }
     setError(null);
-    const payload = buildVersionSupportPayload(version, form);
+    const payload = buildVersionEditPayload(version, form);
     if (Object.keys(payload).length === 0) {
       setError("Nothing has changed.");
       return;
@@ -120,6 +136,44 @@ export default function VersionEditDialog({
             showErrors={submitted}
             showReleaseDate={false}
           />
+          <Accordion
+            disableGutters
+            variant="outlined"
+            expanded={advancedOpen}
+            onChange={(_event, open) => setAdvancedOpen(open)}
+            sx={{ "&::before": { display: "none" } }}
+          >
+            <AccordionSummary expandIcon={<ChevronDown size={16} />}>
+              <Typography variant="body2">
+                <strong>Advanced</strong>
+                {" — release date and publishing: public name, feeds, release line, tags, links, description, Carbon"}
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <TextField
+                  label="Release date"
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={form.releaseDate}
+                  onChange={(event) => setForm((prev) => ({ ...prev, releaseDate: event.target.value }))}
+                  error={submitted && Boolean(errors.releaseDate)}
+                  helperText={submitted ? errors.releaseDate : undefined}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  sx={{ maxWidth: { sm: "50%" } }}
+                />
+                <VersionListingFields
+                  values={form}
+                  onChange={(patch: Partial<ListingFormValues>) => setForm((prev) => ({ ...prev, ...patch }))}
+                  releaseLines={releaseLines.data ?? []}
+                  errors={errors}
+                  showErrors={submitted}
+                  showCarbon
+                />
+              </Box>
+            </AccordionDetails>
+          </Accordion>
           {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </DialogContent>

@@ -1,59 +1,43 @@
-// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
-//
-// WSO2 LLC. licenses this file to you under the Apache License,
-// Version 2.0 (the "License"); you may not use this file except
-// in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
 /**
- * The Products section's entry in csm-portal's navigation: the product
- * catalogue (products, versions and release lines) behind the public Support
- * Matrix and Release Matrix.
+ * The product catalogue's entry in csm-portal's navigation: Settings ▸
+ * Product catalogue (products, versions and release lines), the data behind
+ * the public Support Matrix and Release Matrix. It is a Settings tab, next to
+ * SLA Engine: business data a few people manage, not a daily-work menu.
  *
- * Declared here rather than inline in `csmNavItems.ts`, like PLG's section, so
- * a change to this feature's pages does not touch the portal's navigation
- * source. Its children are route-backed tabs (no `tab`), rendered by
- * `ProductsLayout`'s `SectionTabs` strip.
+ * Declared here rather than inline in `csmNavItems.ts`, so a change to this
+ * feature's pages does not touch the portal's navigation source. Its children
+ * are route-backed tabs (no `tab`), rendered by `ProductsLayout`'s second-level
+ * `SectionTabs` strip under Settings' own.
  *
  * The `id`s are a public contract: deployments key
- * `CSM_PORTAL_FEATURE_OVERRIDES` off them, so `products` hides the whole
- * section — which is what a deployment whose entity service has no catalogue
- * yet should do.
+ * `CSM_PORTAL_FEATURE_OVERRIDES` off them, so `admin.product-catalog` hides
+ * the whole catalogue, which is what a deployment whose entity service has no
+ * catalogue yet should do. (Until 2026-11 this was a top-level "Products"
+ * section with ids `products`, `products.catalogue`, `products.release-lines`;
+ * its `/products/...` links redirect here.)
  */
-import { Package } from "@wso2/oxygen-ui-icons-react";
+import type { CsmNavNode } from "@config/csmNavItems";
 
-import type { CsmNavSection } from "@config/csmNavItems";
+/** Base path for every product catalogue page. */
+export const PRODUCT_CATALOG_BASE = "/admin/product-catalog";
 
-/** Base path for every Products page. */
-export const PRODUCTS_BASE = "/products";
-
-export const PRODUCTS_NAV_SECTION: CsmNavSection = {
-  id: "products",
-  label: "Products",
-  href: PRODUCTS_BASE,
-  icon: Package,
-  // Staff-only, like Knowledge -- see canViewStaffSections's own doc comment.
-  // Reading the catalogue needs only view on the backend.
-  requires: "canViewStaffSections",
+export const PRODUCT_CATALOG_NAV_NODE: CsmNavNode = {
+  id: "admin.product-catalog",
+  label: "Product catalogue",
+  href: PRODUCT_CATALOG_BASE,
+  // Catalogue managers only: the tab, its pages (ProductCatalogRouteGuard)
+  // and its help topic. Admins hold every permission, so they see it too.
+  requires: "canManageProductCatalog",
   children: [
     {
-      id: "products.catalogue",
-      label: "Catalogue",
-      href: `${PRODUCTS_BASE}/catalogue`,
+      id: "admin.product-catalog.products",
+      label: "Products",
+      href: `${PRODUCT_CATALOG_BASE}/products`,
     },
     {
-      id: "products.release-lines",
+      id: "admin.product-catalog.release-lines",
       label: "Release lines",
-      href: `${PRODUCTS_BASE}/release-lines`,
+      href: `${PRODUCT_CATALOG_BASE}/release-lines`,
     },
   ],
 };
