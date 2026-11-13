@@ -23523,6 +23523,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         creTeam:
           nullable: true
           allOf:
@@ -23596,6 +23600,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
