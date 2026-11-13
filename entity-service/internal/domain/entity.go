@@ -4035,11 +4035,11 @@ type WatchListUser struct {
 	// read from a real work_item_watcher row: one of the case's project's
 	// account's five named stakeholders (technical owner, secondary
 	// technical owner, account manager, renewal account manager, and
-	// customer success manager -- a strictly larger set than
-	// AccountDefaultWatcherEmails' own four, which deliberately excludes the
-	// CSM from the default email audience; that is a decision about who
-	// gets emailed, not about who the account's stakeholders are). These
-	// five are never auto-persisted into work_item_watcher (see
+	// customer success manager -- the same five AccountDefaultWatcherEmails
+	// resolves into a case.* email's Recipients, plus, conditionally, the
+	// project's own onboarding owner during active onboarding, which is a
+	// project-level role and so is not one of this display's stakeholders).
+	// These five are never auto-persisted into work_item_watcher (see
 	// addRequestedWatchers' own doc comment) -- fetchCaseWatchers now adds
 	// them to every read, always, specifically so a caller can see every
 	// stakeholder associated with the case -- and this IS an enforcement

@@ -585,21 +585,25 @@ type CaseRepository interface {
 	// over).
 	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
-	// four named stakeholders' email addresses -- technical_owner_id,
+	// named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
-	// renewal_account_manager_id (migration 0012), whichever are set and
-	// have an email on file, deduplicated. customer_success_manager_id is
-	// deliberately excluded: unlike the other four, the CSM is not meant to
-	// receive these default case notifications. A project with no linked
+	// renewal_account_manager_id, customer_success_manager_id (all
+	// migration 0012) -- plus projectID's own onboarding_owner_id
+	// (migration 0104), but the latter only while the project's
+	// onboarding_status is IN_PROGRESS: an onboarding owner is only a
+	// default recipient during the onboarding window itself, not before it
+	// starts or after it finishes. Whichever of these are set and have an
+	// email on file are included, deduplicated. A project with no linked
 	// account, or a project id that does not exist, returns an empty slice
 	// rather than an error: this is a default watch list, not a
 	// requirement. Used to compute a case.* event's email
-	// Recipients fresh at publish time: these four are deliberately never
+	// Recipients fresh at publish time: these are deliberately never
 	// persisted into work_item_watcher (see SetCaseWatchList's own callers'
-	// doc comments) specifically so a later stakeholder reassignment is
-	// reflected on the very next notification, not stuck on whoever held the
-	// role when the case was created or last had its watch list edited. A
-	// stakeholder with no email on file is silently excluded, same as
+	// doc comments) specifically so a later stakeholder reassignment (or
+	// the project moving into or out of onboarding) is reflected on the
+	// very next notification, not stuck on whoever held the role when the
+	// case was created or last had its watch list edited. A stakeholder
+	// with no email on file is silently excluded, same as
 	// watchListUserEmails does for an explicit watcher.
 	AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error)
 	// AccountSRETeam returns the SRE team (account.sre_team_id) of the account owning projectID, "" for none or no such project.
@@ -4116,13 +4120,11 @@ type rowsQuerier interface {
 //     that floor was removed), but the product decision here is to still
 //     *display* them on this read, read-only, so a caller can see every
 //     stakeholder associated with the case without being able to remove
-//     one. This is a strictly larger set than AccountDefaultWatcherEmails'
-//     own four -- that function deliberately excludes
-//     customer_success_manager_id from the default email audience (see its
-//     own doc comment), which is a decision about who gets emailed by
-//     default, not about who the account's named stakeholders are; this
-//     display is the latter, so the CSM is included here even though they
-//     are not unioned into a case.* email's Recipients.
+//     one. AccountDefaultWatcherEmails' own set now includes these same
+//     five (see its own doc comment) plus, conditionally, the project's
+//     onboarding owner during active onboarding -- a project-level role,
+//     not an account stakeholder, so it is not synthesized into this
+//     display at all.
 //   - A user who is both a real persisted watcher AND one of those five
 //     stakeholders appears exactly once, as the locked (stakeholder) copy --
 //     the inner DISTINCT ON picks locked=true first on a duplicate id. The
@@ -4302,17 +4304,20 @@ func (r *caseRepo) AccountSRETeam(ctx context.Context, projectID string) (string
 
 // AccountDefaultWatcherEmails implements CaseRepository.
 func (r *caseRepo) AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error) {
-	var towEmail, stowEmail, amEmail, ramEmail *string
+	var towEmail, stowEmail, amEmail, ramEmail, csmEmail, onboardingOwnerEmail *string
 	err := r.db.QueryRow(ctx, `
-		SELECT tow.email, stow.email, am.email, ram.email
+		SELECT tow.email, stow.email, am.email, ram.email, csm.email,
+			CASE WHEN p.onboarding_status = 'IN_PROGRESS' THEN oo.email END
 		FROM project p
 		JOIN account a ON a.id = p.account_id
 		LEFT JOIN "user" tow ON tow.id = a.technical_owner_id
 		LEFT JOIN "user" stow ON stow.id = a.secondary_technical_owner_id
 		LEFT JOIN "user" am ON am.id = a.account_manager_id
 		LEFT JOIN "user" ram ON ram.id = a.renewal_account_manager_id
+		LEFT JOIN "user" csm ON csm.id = a.customer_success_manager_id
+		LEFT JOIN "user" oo ON oo.id = p.onboarding_owner_id
 		WHERE p.id = $1`, projectID,
-	).Scan(&towEmail, &stowEmail, &amEmail, &ramEmail)
+	).Scan(&towEmail, &stowEmail, &amEmail, &ramEmail, &csmEmail, &onboardingOwnerEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -4320,9 +4325,9 @@ func (r *caseRepo) AccountDefaultWatcherEmails(ctx context.Context, projectID st
 		return nil, fmt.Errorf("account default watcher emails: %w", err)
 	}
 
-	emails := make([]string, 0, 4)
-	seen := make(map[string]struct{}, 4)
-	for _, email := range []*string{towEmail, stowEmail, amEmail, ramEmail} {
+	emails := make([]string, 0, 6)
+	seen := make(map[string]struct{}, 6)
+	for _, email := range []*string{towEmail, stowEmail, amEmail, ramEmail, csmEmail, onboardingOwnerEmail} {
 		if email == nil || *email == "" {
 			continue
 		}

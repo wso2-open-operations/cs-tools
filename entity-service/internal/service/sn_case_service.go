@@ -114,7 +114,7 @@ func watchListUserEmails(watchList []domain.WatchListUser) []string {
 	return recipients
 }
 
-// resolveCaseDefaultWatcherEmails resolves cv's account's four default-
+// resolveCaseDefaultWatcherEmails resolves cv's account's default-
 // watcher stakeholder emails fresh, for every case.* publisher below to
 // union into its own WatchList-derived recipients — see
 // CaseRepository.AccountDefaultWatcherEmails' own doc comment for why these
@@ -1230,7 +1230,7 @@ func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.Creat
 //   - "case"/"engagement"/"service_request"/"security_report_analysis": the
 //     case's own WatchList emails (per explicit decision — this service has
 //     no other notion of "who should be emailed" for these types), unioned
-//     with the account's four default-watcher stakeholders resolved fresh via
+//     with the account's default-watcher stakeholders resolved fresh via
 //     resolveAccountDefaultWatcherEmails — see CaseRepository.
 //     AccountDefaultWatcherEmails' own doc comment for why these are never
 //     persisted into WatchList/work_item_watcher at all (so a later
