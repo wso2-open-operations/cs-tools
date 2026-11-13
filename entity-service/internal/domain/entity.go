@@ -858,9 +858,8 @@ type SalesforceAccountUpsert struct {
 	// (primaryPartnerAccountId), nil when there is none.
 	PrimaryPartnerSfID *string
 
-	// The fields below come from the Sales Entity SE-1 change. Until it is
-	// deployed they are always nil, so the upsert writes them as
-	// COALESCE(new, stored): a nil keeps the value the ServiceNow sync loaded.
+	// The fields below are plain assignments in the upsert: nil (cleared in
+	// Salesforce, or no matching user) clears the column.
 	CustomerSuccessManagerID  *string
 	SecondaryTechnicalOwnerID *string
 	RenewalAccountManagerID   *string

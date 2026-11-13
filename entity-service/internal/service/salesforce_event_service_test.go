@@ -460,7 +460,7 @@ func (s *stubSalesforceAccountRepo) LookupAccountIDBySfID(_ context.Context, sfI
 }
 
 // fullCustomer is sampleCustomer plus every field the Account ingest maps,
-// including the SE-1 ones Sales Entity does not send yet.
+// including the customer success manager, vertical and deactivation fields.
 func fullCustomer() salesentity.Customer {
 	c := sampleCustomer()
 	c.Address = &salesentity.CustomerAddress{
@@ -554,9 +554,9 @@ func TestHandleEvent_MapsFullColumnSet(t *testing.T) {
 	}
 }
 
-// TestHandleEvent_AbsentSE1FieldsStayNil: until Sales Entity sends the SE-1
-// fields they reach the repository as nil, which its COALESCE turns into
-// "keep the stored value" (pinned in account_repo_salesforce_test.go).
+// TestHandleEvent_AbsentSE1FieldsStayNil: fields Sales Entity omits or clears
+// reach the repository as nil, which its plain assignment writes as NULL
+// (pinned in account_repo_salesforce_test.go).
 func TestHandleEvent_AbsentSE1FieldsStayNil(t *testing.T) {
 	se := &stubSalesEntityClient{customer: sampleCustomer()}
 	repo := &stubSalesforceAccountRepo{lookup: fullCustomerLookup()}

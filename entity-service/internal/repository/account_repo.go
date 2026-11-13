@@ -381,12 +381,10 @@ func lockAccountSfID(ctx context.Context, q querier, sfID string) error {
 // upsertAccountFromSalesforce; its parameters match
 // insertAccountFromSalesforceQuery plus $32 (keep the existing phone).
 //
-// $25-$30 are the SE-1 columns (customer success manager, secondary
-// technical owner, renewal manager, account vertical, lost reason category,
-// deactivation date). Sales Entity does not send them yet, so they are
-// COALESCEd with the stored value rather than assigned: a NULL keeps what the
-// ServiceNow sync loaded. Switch them to plain assignment once SE-1 is
-// deployed, so a value cleared in Salesforce clears here too.
+// $25-$30 (customer success manager, secondary technical owner, renewal
+// manager, account vertical, lost reason category, deactivation date) are
+// plain assignments like the rest: Sales Entity sends them, so a NULL (a value
+// cleared in Salesforce, or an email with no matching user) clears the column.
 //
 // number keeps its stored value: it is NOT NULL, so the COALESCE always
 // picks account.number (ServiceNow's "ACC" auto-number, or the Salesforce Id
@@ -418,12 +416,12 @@ const updateAccountFromSalesforceQuery = `
 		activation_date = $22,
 		lost_date = $23,
 		lost_reason = $24,
-		customer_success_manager_id = COALESCE($25, account.customer_success_manager_id),
-		secondary_technical_owner_id = COALESCE($26, account.secondary_technical_owner_id),
-		renewal_account_manager_id = COALESCE($27, account.renewal_account_manager_id),
-		account_vertical = COALESCE($28, account.account_vertical),
-		lost_reason_category = COALESCE($29, account.lost_reason_category),
-		deactivation_date = COALESCE($30, account.deactivation_date),
+		customer_success_manager_id = $25,
+		secondary_technical_owner_id = $26,
+		renewal_account_manager_id = $27,
+		account_vertical = $28,
+		lost_reason_category = $29,
+		deactivation_date = $30,
 		primary_partner_sf_id = $31,
 		deleted_on = NULL,
 		updated_on = now(),

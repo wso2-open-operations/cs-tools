@@ -169,11 +169,14 @@ func TestAccountSalesforceIntegration(t *testing.T) {
 	activation := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	managerID := sfiManagerID
 
-	// UPDATED, with no SE-1 fields (Sales Entity today).
+	// UPDATED carrying the CSM, vertical and deactivation date the sync loaded.
+	csmSeed := sfiCsmID
+	seedDeactivation := time.Date(2027, 1, 31, 0, 0, 0, 0, time.UTC)
 	row := domain.SalesforceAccountUpsert{
 		SfID: sfiSfID, Name: "Acme", Number: sfiSfID, KeepExistingPhone: true,
 		Street: sp("1 Main St"), City: sp("Hamburg"), Country: sp("Germany"),
 		AccountManagerID: &managerID, ActivationDate: &activation,
+		CustomerSuccessManagerID: &csmSeed, AccountVertical: sp("Banking"), DeactivationDate: &seedDeactivation,
 	}
 	if err := r.UpsertFromSalesforce(ctx, row, sfiState(sfiSfID, domain.SalesforceEventUpdated, v1)); err != nil {
 		t.Fatalf("UPDATED: %v", err)
@@ -191,7 +194,7 @@ func TestAccountSalesforceIntegration(t *testing.T) {
 	}
 	if !eqp(a.csmID, sfiCsmID) || !eqp(a.accountVertical, "Banking") ||
 		a.deactivationDate == nil || a.deactivationDate.Format(time.DateOnly) != "2027-01-31" {
-		t.Errorf("SE-1 columns not kept: csm %v vertical %v deactivation %v", a.csmID, a.accountVertical, a.deactivationDate)
+		t.Errorf("SE-1 columns not written: csm %v vertical %v deactivation %v", a.csmID, a.accountVertical, a.deactivationDate)
 	}
 	if eventType, status := readSfiLedger(t, pool, sfiSfID); eventType != domain.SalesforceEventUpdated || status != string(domain.SalesforceIngestSucceeded) {
 		t.Errorf("ledger = %s/%s, want UPDATED/SUCCEEDED", eventType, status)
@@ -232,6 +235,23 @@ func TestAccountSalesforceIntegration(t *testing.T) {
 	}
 	if n := sfiSearch(t, r); n != 1 {
 		t.Errorf("search total after RESTORED = %d, want 1", n)
+	}
+
+	// UPDATED with every SE-1 field NULL (cleared in Salesforce, or an email
+	// with no user): the six columns clear, the rest of the row is unaffected.
+	cleared := row
+	cleared.CustomerSuccessManagerID, cleared.SecondaryTechnicalOwnerID, cleared.RenewalAccountManagerID = nil, nil, nil
+	cleared.AccountVertical, cleared.LostReasonCategory, cleared.DeactivationDate = nil, nil, nil
+	v2 := v1.Add(time.Minute)
+	if err := r.UpsertFromSalesforce(ctx, cleared, sfiState(sfiSfID, domain.SalesforceEventUpdated, v2)); err != nil {
+		t.Fatalf("UPDATED (cleared): %v", err)
+	}
+	a = readSfiAccount(t, pool, sfiSfID)
+	if a.csmID != nil || a.accountVertical != nil || a.deactivationDate != nil {
+		t.Errorf("SE-1 columns not cleared: csm %v vertical %v deactivation %v", a.csmID, a.accountVertical, a.deactivationDate)
+	}
+	if a.driveLocation != "drive://x" || !a.aiGen || a.supportTier != "ENTERPRISE" || !eqp(a.accountManagerID, sfiManagerID) {
+		t.Errorf("clearing touched other columns: %+v", a)
 	}
 
 	// CREATED for an account CSM does not have: inserted, number = sf_id.
