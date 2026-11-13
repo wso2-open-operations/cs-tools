@@ -1516,6 +1516,113 @@ func TestTick_BreachEmail_SendsToAssigneeAndTeam(t *testing.T) {
 	}
 }
 
+// americasWindowInstant is a Wednesday at 22:30 IST (within the 9 PM-6 AM
+// overnight coverage window, chataudience.isAmericasCoverageWindow), the
+// same base day as weekdayDaytime so it's unambiguously not a weekend.
+var americasWindowInstant = time.Date(2026, time.October, 14, 17, 0, 0, 0, time.UTC)
+
+// TestTick_BreachEmail_AmericasWindowAlsoEmailsTheConfiguredAmericasTeam
+// confirms sendBreachEmails sends a third, separate email to
+// slaBreachAmericasTeamKey's resolved group_email during the Americas
+// overnight coverage window, alongside (not instead of) the assignee/team
+// emails.
+func TestTick_BreachEmail_AmericasWindowAlsoEmailsTheConfiguredAmericasTeam(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.now = func() time.Time { return americasWindowInstant }
+	e.email = email
+	e.SetTeamGroupEmails(map[string]string{"americas_cre_team": "americas-cre@example.test"})
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", TeamLeadName: "Lead Person",
+			BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(email.calls) != 3 {
+		t.Fatalf("email calls = %+v, want exactly 3 (assignee + team + americas)", email.calls)
+	}
+	if got := email.calls[2].to; len(got) != 1 || got[0] != "americas-cre@example.test" {
+		t.Errorf("third email to = %v, want [americas-cre@example.test]", got)
+	}
+}
+
+// TestTick_BreachEmail_OutsideAmericasWindow_NoThirdEmail confirms the same
+// setup sends only the usual two emails outside the overnight window.
+func TestTick_BreachEmail_OutsideAmericasWindow_NoThirdEmail(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub) // now defaults to weekdayDaytime, outside the window
+	e.email = email
+	e.SetTeamGroupEmails(map[string]string{"americas_cre_team": "americas-cre@example.test"})
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", TeamLeadName: "Lead Person",
+			BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(email.calls) != 2 {
+		t.Fatalf("email calls = %+v, want exactly 2 (assignee + team, no americas outside the window)", email.calls)
+	}
+}
+
+// TestTick_BreachEmail_AmericasWindow_CasesOwnTeamIsTheAmericasTeam_NoDuplicate
+// confirms a case whose own team already resolves to the configured
+// Americas team's email is not sent the identical breach email twice.
+func TestTick_BreachEmail_AmericasWindow_CasesOwnTeamIsTheAmericasTeam_NoDuplicate(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.now = func() time.Time { return americasWindowInstant }
+	e.email = email
+	e.SetTeamGroupEmails(map[string]string{"americas_cre_team": "team-nova@example.com"})
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", TeamLeadName: "Lead Person",
+			BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(email.calls) != 2 {
+		t.Fatalf("email calls = %+v, want exactly 2 -- the americas team IS the case's own team, no duplicate", email.calls)
+	}
+}
+
 // TestTick_BreachEmail_OnboardingSendsToBothCRETeamAndOnboardingTeam is the
 // regression test for a CodeRabbit-caught gap in an earlier version of the
 // onboarding fix: that version swapped TeamEmail/TeamLeadName to the

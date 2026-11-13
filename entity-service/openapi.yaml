@@ -4938,6 +4938,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /teams/group-emails:
+    get:
+      summary: >-
+        List every team's own configured notification mailbox
+        (team.group_email, migration 0117), keyed by team.key (migration
+        0152) rather than name. Internal callers only — reference data for a
+        backend service (integrations/csm-notification-service's SLA breach
+        engine, which looks up a specific team's email by its stable key,
+        e.g. "americas_cre_team"), not something any portal caller has a
+        legitimate use for. A team with no configured email is left out
+        entirely.
+      operationId: listTeamGroupEmails
+      responses:
+        "200":
+          description: Every team with a configured group_email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTeamGroupEmailsResponse'
+        "403":
+          description: Caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /accounts/search:
     post:
       summary: >-
@@ -31387,6 +31419,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamChatWebhook'
+
+    TeamGroupEmail:
+      type: object
+      properties:
+        key:
+          type: string
+        groupEmail:
+          type: string
+
+    ListTeamGroupEmailsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGroupEmail'
 
     TeamDetail:
       type: object

@@ -581,6 +581,12 @@ func main() {
 	// Case Alerts rung email's "response SLA remaining time"; nil when the
 	// fetch failed (the email then uses the published defaults).
 	var slaDurations map[string]map[string]time.Duration
+	// slaEngine is constructed below (only when Redis is configured) and read
+	// again further down to refresh its team-group-email lookup table on the
+	// same ticker as the Chat team-webhook one -- hoisted to this scope
+	// (rather than a block-local :=) so it's reachable from there; nil when
+	// Redis isn't configured, same as slaProducer above.
+	var slaEngine *slaengine.Engine
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -669,7 +675,7 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		slaEngine = slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
 		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
@@ -723,19 +729,46 @@ func main() {
 	// still listed in GOOGLE_CHAT_SPACES.
 	if os.Getenv("CUSTOMER_ENTITY_BASE_URL") != "" {
 		refreshTeamAudienceSpaces := func(ctx context.Context) error {
-			fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			webhooks, err := customerEntityClient.GetTeamChatWebhooks(fetchCtx)
-			if err != nil {
+			webhookCtx, cancelWebhooks := context.WithTimeout(ctx, 30*time.Second)
+			webhooks, webhooksErr := customerEntityClient.GetTeamChatWebhooks(webhookCtx)
+			cancelWebhooks()
+			if webhooksErr != nil {
 				// Logged, not fatal: this client keeps whatever it already
 				// had (nil on the very first failed fetch, same as a team
 				// simply having no configured space yet) rather than
 				// crash-looping the whole service over a reachability blip.
-				slog.Error("notifications: failed to refresh team chat webhooks from entity-service; keeping the previous set", "err", err)
-				return err
+				slog.Error("notifications: failed to refresh team chat webhooks from entity-service; keeping the previous set", "err", webhooksErr)
+			} else {
+				googleChatClient.SetTeamAudienceSpaces(webhooks)
 			}
-			googleChatClient.SetTeamAudienceSpaces(webhooks)
-			return nil
+
+			// Piggybacks on this same ticker (rather than a second one) to
+			// also refresh slaEngine's team.key -> group_email lookup table
+			// (see Engine.SetTeamGroupEmails's own doc comment) -- a genuinely
+			// independent fetch, on its own context (not shared with the
+			// webhook one above, so a slow webhook call can't starve this
+			// one's own budget) and always attempted regardless of whether
+			// the webhook fetch above succeeded (a CodeRabbit-caught gap: an
+			// early return on a webhook failure used to skip this fetch
+			// entirely, silently going stale until the next scheduled tick).
+			// Only when Redis (and so the SLA engine) is configured at all.
+			if slaEngine != nil {
+				emailCtx, cancelEmails := context.WithTimeout(ctx, 30*time.Second)
+				groupEmails, emailsErr := customerEntityClient.GetTeamGroupEmails(emailCtx)
+				cancelEmails()
+				if emailsErr != nil {
+					slog.Error("slaengine: failed to refresh team group emails from entity-service; keeping the previous set", "err", emailsErr)
+				} else {
+					slaEngine.SetTeamGroupEmails(groupEmails)
+				}
+			}
+
+			// The startup retry loop below only cares about the webhook
+			// fetch's own success (same contract as before this change) --
+			// team-routed Chat is the one dependency that gates it; a
+			// group-email hiccup is logged above and simply retried on the
+			// next ordinary ticker interval, same as any other refresh here.
+			return webhooksErr
 		}
 		// Retry the initial fetch, with backoff, before consumers start --
 		// not just one attempt. googlechat.go's own sendCardToAudience
