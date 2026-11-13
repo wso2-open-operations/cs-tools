@@ -446,7 +446,7 @@ func TestUserService_SearchUsers_SortBy(t *testing.T) {
 					return nil, 0, nil
 				},
 			}
-			_, err := NewUserService(repo, nil).SearchUsers(context.Background(), domain.SearchUsersRequest{SortBy: tt.sort})
+			_, err := NewUserService(repo, alwaysUnrestrictedAccess{}).SearchUsers(context.Background(), domain.SearchUsersRequest{SortBy: tt.sort})
 			if tt.wantErr != "" {
 				var ve *apierror.ValidationError
 				if !errors.As(err, &ve) || ve.Msg != tt.wantErr {
@@ -486,7 +486,7 @@ func TestUserService_SearchUsers_ActiveFilterReachesRepository(t *testing.T) {
 			}
 			active := active
 			req := domain.SearchUsersRequest{Filters: domain.SearchUsersFilters{Active: &active}}
-			if _, err := NewUserService(repo, nil).SearchUsers(context.Background(), req); err != nil {
+			if _, err := NewUserService(repo, alwaysUnrestrictedAccess{}).SearchUsers(context.Background(), req); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got == nil || *got != active {
@@ -517,7 +517,7 @@ func TestUserService_SearchUsers_UserIDsGroupFiltersReachRepository(t *testing.T
 		GroupIDs:   []string{groupID},
 		GroupNames: []string{"CAB Approval"},
 	}}
-	if _, err := NewUserService(repo, nil).SearchUsers(context.Background(), req); err != nil {
+	if _, err := NewUserService(repo, alwaysUnrestrictedAccess{}).SearchUsers(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(got.UserIDs) != 1 || got.UserIDs[0] != userID {
@@ -552,7 +552,7 @@ func TestUserService_SearchUsers_UserIDsGroupFilters_RejectsMalformedUUID(t *tes
 				},
 			}
 			req := domain.SearchUsersRequest{Filters: tt.filters}
-			_, err := NewUserService(repo, nil).SearchUsers(context.Background(), req)
+			_, err := NewUserService(repo, alwaysUnrestrictedAccess{}).SearchUsers(context.Background(), req)
 			var ve *apierror.ValidationError
 			if !errors.As(err, &ve) {
 				t.Fatalf("err = %v, want ValidationError", err)

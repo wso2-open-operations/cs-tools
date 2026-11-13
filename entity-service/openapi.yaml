@@ -4775,6 +4775,16 @@ paths:
         case-insensitively on the display name, falling back to first + last name
         and then the user name for the few rows with no display name, and the
         default with no `sortBy` is newest first.
+
+
+        Who is asking decides what comes back (postgres data source). An internal
+        caller (an internal user or a service credential) searches the whole
+        directory with every filter. Any other caller may only resolve known
+        addresses: `filters.emails` (1 to 50) is required, every other filter is
+        refused with 400, the result is limited to users who share at least one
+        project with the caller, and each user is reduced to `id`, `email` and
+        `name` (`SearchUsersContact`). An address that is not such a co-member
+        yields no row, exactly as an unknown address does.
       operationId: searchUsers
       requestBody:
         required: true
@@ -4790,9 +4800,19 @@ paths:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/SearchUsersResponse'
+                  - $ref: '#/components/schemas/SearchUsersContactsResponse'
                   - $ref: '#/components/schemas/SearchSNUsersResponse'
         "400":
-          description: Bad request — invalid filter value, sort field, or pagination limit.
+          description: >-
+            Bad request — invalid filter value, sort field, or pagination limit. A
+            non-internal caller also gets it for any filter other than `emails`, for
+            no `emails`, or for more than 50.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller's identity does not resolve to an active user.
           content:
             application/json:
               schema:
@@ -24937,7 +24957,9 @@ components:
           maxItems: 50
           items:
             type: string
-          description: Filter to specific email addresses (exact match).
+          description: >
+            Filter to specific email addresses (case-insensitive on postgres). The only filter a non-internal
+            caller may send, and required for them: 1 to 50 addresses.
         userIds:
           type: array
           maxItems: 200
@@ -24982,6 +25004,13 @@ components:
           type: boolean
           nullable: true
           description: When set, restricts results to active or inactive users.
+        userType:
+          type: string
+          enum: [internal, customer, system, external]
+          description: >
+            Restrict to users of one type; `external` is an alias of `customer`. Postgres
+            data source only; internal callers only (a non-internal caller is refused
+            with 400). Omitted means no restriction.
 
     UserSortBy:
       type: object
@@ -25277,6 +25306,40 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/User'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchUsersContact:
+      type: object
+      description: >-
+        What a non-internal caller gets for each user: identity and display name only.
+        No phone, timezone, roles, type or user name.
+      required: [id, email, name]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+
+    SearchUsersContactsResponse:
+      type: object
+      description: >-
+        Paginated result of a user search by a non-internal caller (postgres data
+        source): same envelope as `SearchUsersResponse`, reduced elements.
+      required: [users, total, limit, offset, hasMore]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchUsersContact'
         total:
           type: integer
         limit:

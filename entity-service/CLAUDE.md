@@ -11858,6 +11858,29 @@ lookups (`GetUserByEmail`) leave it nil. Two things worth knowing:
 - `GET /users/{id}` (the profile page) is registered only for the ServiceNow data
   source; it is not available on Postgres at all.
 
+## POST /users/search is scoped to the caller (Postgres data source)
+
+The `user` table has no row-level security and the search had no caller check, so
+any authenticated caller, a customer-portal token included, got the whole
+directory. `userService.SearchUsers` now resolves the caller first
+(`AccessService.ResolveScope`; no access service fails closed with 403):
+- **Internal** (`Unrestricted`: an internal user, or a service credential):
+  unchanged, plus the additive `filters.userType` (`internal|customer|system`,
+  `external` aliasing `customer`), which is how a picker is limited to staff.
+  `userType` is refused for everyone else.
+- **Anyone else** may only send `filters.emails` (1 to 50; any other filter is a
+  400, not silently ignored). `searchCoMembers` returns users whose email matches
+  (case-insensitive) AND who are a REGISTERED `project_contact` of one of the
+  caller's own project ids, via one statement (`SearchUserContactsByEmail`:
+  `idx_user_email_lower` plus `idx_project_contact_project_id_email`, no per-email
+  lookups). A non-co-member address gives no row, byte-identical to an unknown
+  address. Each row is `{id, email, name}` only, serialised by
+  `SearchUsersResponse.MarshalJSON` under the usual `users` key. An identity that
+  does not resolve gets `ResolveScope`'s own 401/403/503, never a 500.
+- The other (non-Postgres) data source's search is not scoped here and ignores `userType`.
+- DB-backed tests: `user_search_scope_integration_test.go`
+  (`ENTITY_TEST_DATABASE_URL`).
+
 ## POST /users/by-ids failed the whole batch on one non-UUID id
 
 Reported live: the staff portal's Knowledge page called `POST /users/by-ids` to
