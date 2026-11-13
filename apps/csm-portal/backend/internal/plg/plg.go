@@ -2,7 +2,7 @@
 //
 // ONE CALL IS ALL csm-portal's main.go NEEDS. Everything PLG requires — its
 // config, its entity-service client, its services, its handlers, its identity
-// middleware and its 26 routes — is assembled here. The merge adds files; it
+// middleware and its 25 routes — is assembled here. The merge adds files; it
 // does not edit csm-portal's own.
 //
 // WHAT CHANGED FROM THE STANDALONE BFF:
@@ -14,25 +14,17 @@
 //     comes from the validated token, so there is no header to spoof.
 //   - No /plg/health. csm-portal has /health; a second liveness endpoint
 //     answering for one application inside a shared service is a probe that lies.
-//   - No registration feed. Registrations are landed by the webhook-queue
-//     service, which posts them straight to entity-service's ingest — see
+//   - No registration feed. Registrations are landed by csm-scheduled-tasks,
+//     which posts them straight to entity-service's ingest — see
 //     WHERE REGISTRATIONS COME FROM below. This package only reads them back.
 //
-// WHERE REGISTRATIONS COME FROM. Nothing here ingests. The analytics source
-// publishes to the webhook-queue service, and that service translates each
-// record out of the source's vocabulary and posts it to entity-service's
-// POST /plg/registrations/ingest on a timer.
+// WHERE REGISTRATIONS COME FROM. Nothing here ingests. The plg_moesif_sync
+// sub-cron in operations/csm-scheduled-tasks reads WSO2 Cloud signups from
+// Moesif and posts them to entity-service's POST /plg/registrations/ingest.
+// (A webhook-queue service in digiops-cs did this before; it is retired.)
 //
-// This backend polled that queue and did the translating itself, which put a
-// poller, a source map, a record resolver and a set of ingest webhooks inside a
-// backend-for-frontend — some 1,900 lines with no bearing on serving the
-// frontend. The queue service already receives the analytics
-// source's traffic, so the knowledge of that source belongs there, and the
-// transaction was always entity-service's.
-//
-// What this means for anyone reading the configuration: there is no PLG_QUEUE_*,
-// no PLG_SOURCE_MAP_PATH and no PLG_INGEST_SHARED_SECRET any more. They moved to
-// the queue service as ENTITY_BASE_URL, SOURCE_MAP_PATH and the OAUTH2_* pair.
+// So there is no PLG_QUEUE_*, PLG_SOURCE_MAP_PATH or PLG_INGEST_SHARED_SECRET
+// here: the sync's settings are csm-scheduled-tasks' PLG_MOESIF_SYNC_*.
 package plg
 
 import (
@@ -47,6 +39,7 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	csmhandler "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/cloudclient"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/config"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/entityclient"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/handler"
@@ -82,8 +75,7 @@ type RouteFunc func(pattern string, perm csmhandler.Permission, h http.HandlerFu
 // permissions and for why the identity middleware is nested inside.
 //
 // It returns no shutdown function because it starts nothing: PLG is a set of
-// handlers on csm-portal's mux and owns no goroutine. It did own one, for the
-// queue poller, until registrations moved to the webhook-queue service.
+// handlers on csm-portal's mux and owns no goroutine.
 func Mount(
 	cfgPath string,
 	entityDefaults config.EntityDefaults,
@@ -109,13 +101,29 @@ func Mount(
 		HTTPClient: entityHTTPClient(cfg.Entity.OAuth, timeout),
 	})
 
+	// Optional: without it, stored names still reveal. Own OAuth2 client.
+	var cloud service.CloudLookup
+	if cfg.Cloud.Enabled() {
+		cloudTimeout := time.Duration(cfg.Cloud.TimeoutSeconds) * time.Second
+		cloud = cloudclient.New(cloudclient.Config{
+			BaseURL:       cfg.Cloud.BaseURL,
+			OrgPath:       cfg.Cloud.OrgPath,
+			UserEmailPath: cfg.Cloud.UserEmailPath,
+			Timeout:       cloudTimeout,
+			HTTPClient:    entityHTTPClient(cfg.Cloud.OAuth, cloudTimeout),
+		})
+	} else {
+		slog.Warn("plg: CLOUD_API_BASE_URL is not set; cloud-platform organisations cannot be revealed")
+	}
+
 	handlers := handler.NewHandlers(
 		service.NewReferenceService(entityclient.ReferenceRepo{Client: entity}),
 		service.NewOrganizationService(entityclient.OrganizationRepo{Client: entity}),
 		service.NewOrgPlatformService(entityclient.OrgPlatformRepo{Client: entity}),
 		service.NewPlaybookService(entityclient.PlaybookRepo{Client: entity}),
 		service.NewAnalyticsService(entityclient.AnalyticsRepo{Client: entity}),
-	)
+	).WithCompanyResolver(service.NewCompanyResolver(entity, cloud)).
+		WithRevealLimit(csmhandler.NewGenerateRateLimiter(cfg.Reveal.PerMinute, cfg.Reveal.PerDay))
 
 	// PLG's routes carry one extra middleware of their own: the identity
 	// resolver, which turns the validated caller into the "user".id every PLG
@@ -161,8 +169,8 @@ func Mount(
 // templates.
 //
 // Every route below is a read or a write made by a person. There is no machine
-// caller: registrations reach the database through the webhook-queue service
-// posting to entity-service, never through this backend.
+// caller: registrations reach the database through csm-scheduled-tasks'
+// plg_moesif_sync posting to entity-service, never through this backend.
 func register(
 	h *handler.Handlers,
 	identity func(http.Handler) http.Handler,
@@ -196,6 +204,9 @@ func register(
 	add("POST /plg/organizations/search", csmhandler.PermUsePlg, h.SearchOrganizations)
 	add("GET /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.GetOrganization)
 	add("PATCH /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.PatchOrganization)
+
+	// The reveal: one organisation's name and email, hidden until asked.
+	add("POST /plg/organizations/{organizationId}/reveal", csmhandler.PermUsePlg, h.RevealOrganization)
 
 	// The product tab — one organisation, one platform.
 	add("GET /plg/organizations/{organizationId}/products/{product}", csmhandler.PermUsePlg, h.GetProduct)

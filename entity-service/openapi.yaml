@@ -20647,6 +20647,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /plg/organizations/identities:
+    post:
+      summary: What is stored to identify each organisation.
+      description: >-
+        For the CSM portal's reveal: company id, name, email and owner per organisation.
+        Name and email are null for a cloud organisation. Unknown ids are absent.
+      operationId: plgOrganizationIdentities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgOrganizationIdentitiesRequest"
+      responses:
+        "200":
+          description: The organisations found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgOrganizationIdentitiesResponse"
+        "400":
+          description: Bad request — no ids, more than 50, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found. Unknown ids are left out of the answer rather than refused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -20692,10 +20736,9 @@ paths:
         - name: organizationId
           in: path
           required: true
-          description: "The organisation's id."
+          description: "The organisation's record id or its Cloud organisation id (moesifCompanyId); the record id wins."
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: The organisation.
@@ -21235,7 +21278,7 @@ paths:
   /plg/registrations/search:
     post:
       summary: Search registrations.
-      description: "`acknowledged` filters over `acknowledged_on IS NULL` rather than a stored flag."
+      description: "`acknowledged` filters over `acknowledged_on IS NULL` rather than a stored flag. Matching registrations are grouped by organisation and paged by organisation, newest registration first. `unacknowledgedOnly` also hides abandoned registrations."
       operationId: plgSearchRegistrations
       requestBody:
         required: true
@@ -21665,6 +21708,109 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/registrations/validation-queue:
+    post:
+      summary: Pairings for the registration validation job.
+      description: >
+        Pairings of one product in REGISTRATION, registered at or after
+        `registeredAfter`, oldest first. Ids only. Service credentials only: a
+        user token gets 403.
+      operationId: plgValidationQueue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgValidationQueueRequest"
+      responses:
+        "200":
+          description: The pairings to validate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgValidationQueueResult"
+        "400":
+          description: Missing productCode or registeredAfter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found — an unknown product code answers an empty queue rather than 404.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /plg/pairings/{orgPlatformId}/registration-validation:
+    put:
+      summary: Write the registration job's results for one pairing.
+      description: >
+        One transaction: attaches the product's active registration playbook
+        when none is attached (added_by NULL), replaces the activity summary,
+        and writes each value marked VALIDATION. A value an engineer set
+        (MANUAL), a code the run lacks, and every value of a closed run are
+        skipped and reported. INITIATE_PLAYBOOK takes true only;
+        CLOSE_PLAYBOOK is refused as a value. With `abandon`, an EXCLUDED
+        outcome the job wrote also closes the run and moves the pairing to
+        ABANDONED, with a history row. Service credentials only: a user token
+        gets 403.
+      operationId: plgApplyRegistrationValidation
+      parameters:
+        - name: orgPlatformId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgApplyValidationRequest"
+      responses:
+        "200":
+          description: Written; read `skipped` for what was left alone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgApplyValidationResult"
+        "400":
+          description: An invalid summary, CLOSE_PLAYBOOK as a value, abandon without EXCLUDED, or a value the task cannot hold. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such pairing, or no active registration playbook for its product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The pairing has left REGISTRATION.
           content:
             application/json:
               schema:
@@ -43329,8 +43475,14 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -43388,11 +43540,13 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
         createdOn:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         registeredName:
           nullable: true
@@ -43413,6 +43567,15 @@ components:
           type: string
         moesifCompanyId:
           type: string
+          description: The Cloud organisation id.
+        cloudUserId:
+          type: string
+          nullable: true
+          description: The Cloud user id of the organisation's owner.
+        emailClassification:
+          type: string
+          nullable: true
+          description: The owner's email classification from a registration playbook, the most recently set one.
         fieldsInherited:
           type: boolean
         platformCards:
@@ -43465,7 +43628,12 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
+        moesifCompanyId:
+          nullable: true
+          type: string
+          description: The company id.
         product:
           type: object
           properties:
@@ -43501,6 +43669,7 @@ components:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         subscriptionTier:
           type: string
@@ -43675,6 +43844,7 @@ components:
                 format: date-time
     PlgRegistrationSearchResponse:
       type: object
+      description: One item per organisation; total counts organisations.
       properties:
         registrations:
           type: array
@@ -43688,7 +43858,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -43700,6 +43875,7 @@ components:
                   name:
                     type: string
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -43721,6 +43897,37 @@ components:
                     type: string
                   name:
                     type: string
+              platforms:
+                type: array
+                description: >
+                  The organisation's matching registrations, newest first. The
+                  top-level registration fields are the newest one's.
+                items:
+                  type: object
+                  properties:
+                    orgPlatformId:
+                      type: string
+                      format: uuid
+                    product:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        code:
+                          type: string
+                        name:
+                          type: string
+                    registeredOn:
+                      type: string
+                      format: date-time
+                    lifecycleStage:
+                      type: string
+                    stageName:
+                      type: string
+                    isNew:
+                      type: boolean
+                      description: Not acknowledged yet.
         total:
           type: integer
         limit:
@@ -44039,7 +44246,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -44171,6 +44383,132 @@ components:
         plg_ingest_failure directly (WHERE resolved_on IS NULL, which the table
         carries a partial index for).
       properties: {}
+    PlgValidationQueueRequest:
+      type: object
+      required: [productCode, registeredAfter]
+      properties:
+        productCode:
+          type: string
+          example: AGENT_PLATFORM
+        registeredAfter:
+          type: string
+          format: date-time
+        limit:
+          type: integer
+          description: Default 200, at most 1000.
+    PlgValidationQueueResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              orgPlatformId:
+                type: string
+                format: uuid
+              companyId:
+                type: string
+              ownerUserId:
+                type: string
+                nullable: true
+              registeredOn:
+                type: string
+                format: date-time
+              emailClassification:
+                type: string
+                nullable: true
+                description: The stored REGISTERED_EMAIL_CLASSIFICATION code, whoever set it.
+              lastValidatedOn:
+                type: string
+                format: date-time
+                nullable: true
+    PlgApplyValidationRequest:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: object
+          required: [windowStart, windowEnd]
+          properties:
+            windowStart:
+              type: string
+              format: date-time
+            windowEnd:
+              type: string
+              format: date-time
+            firstEventOn:
+              type: string
+              format: date-time
+              nullable: true
+            lastEventOn:
+              type: string
+              format: date-time
+              nullable: true
+            eventCount:
+              type: integer
+            actionCounts:
+              type: object
+              additionalProperties:
+                type: integer
+            furthestStep:
+              type: string
+              nullable: true
+        values:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [code]
+            description: The one value field the task's type takes, or none to clear it.
+            properties:
+              code:
+                type: string
+              boolValue:
+                type: boolean
+              numberValue:
+                type: number
+              textValue:
+                type: string
+              checkedCodes:
+                type: array
+                items:
+                  type: string
+        abandon:
+          type: boolean
+          description: Close the run and move the pairing to ABANDONED. Needs ELIGIBILITY_ASSESSMENT_OUTCOME = EXCLUDED among the values.
+    PlgApplyValidationResult:
+      type: object
+      properties:
+        playbookRunId:
+          type: string
+          format: uuid
+        attached:
+          type: boolean
+          description: True when this call attached the registration playbook.
+        written:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              reason:
+                type: string
+                enum: [MANUAL, MISSING, CLOSED]
+        abandoned:
+          type: boolean
+          description: True when this call closed the run and moved the pairing to ABANDONED.
+        stale:
+          type: boolean
+          description: >
+            True when the exclusion no longer matched the classification the run
+            holds (an engineer changed it); nothing was written and the next run
+            decides again.
     PlgRunTaskShape:
       type: object
       properties:
@@ -44266,6 +44604,42 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationIdentitiesRequest:
+      type: object
+      required: [organizationIds]
+      properties:
+        organizationIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    PlgOrganizationIdentitiesResponse:
+      type: object
+      properties:
+        identities:
+          type: array
+          items:
+            type: object
+            properties:
+              organizationId:
+                type: string
+                format: uuid
+              moesifCompanyId:
+                nullable: true
+                type: string
+              organizationName:
+                nullable: true
+                type: string
+              registeredEmail:
+                nullable: true
+                type: string
+              ownerUserId:
+                nullable: true
+                type: string
+                format: uuid
+                description: The owner's WSO2 Cloud user id; resolves a cloud organisation's email.
     PlgPatchOrganizationRequest:
       type: object
       required:
@@ -44559,18 +44933,15 @@ components:
     PlgIngestRegistration:
       type: object
       description: >-
-        One registration, already in the portal's own terms. The caller — the
-        webhook-queue service — has resolved the analytics source's field names
-        and platform words through its source map before sending this, so
-        `initiatedPlatform` must already be a `plg_product.code` and not
-        whatever the source calls it.
-      required:
-        - organizationName
-        - registeredEmail
+        One registration. Moesif: initiatedPlatform plus a stored name and email.
+        WSO2 Cloud: initiatingProduct, companyId and userId; nothing identifying
+        is stored.
       properties:
         organizationName:
           type: string
-          description: Unique. A redelivered registration is a no-op because of it.
+          description: >-
+            Unique. A redelivered registration is a no-op because of it.
+            Ignored for a WSO2 Cloud signup.
         registeredEmail:
           type: string
           format: email
@@ -44587,12 +44958,23 @@ components:
             matching no `plg_product.code` rejects the whole registration, the
             organisation included, because they land in one transaction.
           example: IAM
+        initiatingProduct:
+          type: string
+          description: >-
+            A Cloud signup's entry point, case-insensitive: wso2cloud or core (WSO2 Cloud),
+            agent-manager, api-platform, integration-platform or identity-platform. Makes the registration a Cloud
+            one. Unknown, or naming another product than initiatedPlatform, fails it.
+          example: api-platform
         countryName:
           type: string
         companyNameFromDomain:
           type: string
         companyId:
           type: string
+        userId:
+          type: string
+          format: uuid
+          description: The owner's WSO2 Cloud user UUID; the first one sent is kept. Optional.
         firstName:
           type: string
         lastName:

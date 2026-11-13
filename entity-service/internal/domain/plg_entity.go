@@ -112,22 +112,22 @@ func CanMoveStage(from, to LifecycleStage) bool {
 // HealthState is how a pairing is doing, wherever it has got to.
 //
 // The second axis, and the reason the stage list could shrink from nine to six.
-// Set by an engineer, never derived; defaults to HEALTHY. There is no third
-// "unknown" value, because an engineer who has not looked is not the same as a
-// customer in trouble and the work queue should not treat them alike.
+// Set by an engineer, never derived; NONE until an engineer marks it HEALTHY or
+// AT_RISK, and offers the same playbooks as HEALTHY.
 type HealthState string
 
-// The two health states.
+// The health states.
 const (
+	HealthNone    HealthState = "NONE"
 	HealthHealthy HealthState = "HEALTHY"
 	HealthAtRisk  HealthState = "AT_RISK"
 )
 
 // HealthStateOrder is the display order for filters and tiles.
-var HealthStateOrder = []HealthState{HealthHealthy, HealthAtRisk}
+var HealthStateOrder = []HealthState{HealthNone, HealthHealthy, HealthAtRisk}
 
 // ValidHealthState is the allow-list checked in the service layer.
-var ValidHealthState = map[HealthState]bool{HealthHealthy: true, HealthAtRisk: true}
+var ValidHealthState = map[HealthState]bool{HealthNone: true, HealthHealthy: true, HealthAtRisk: true}
 
 // PlaybookType is what a playbook is trying to do.
 type PlaybookType string
@@ -431,10 +431,14 @@ type PlatformStage struct {
 
 // OrganizationSummary is one row of the organisation list — the five columns the
 // requirement names, plus what the row needs to be clickable.
+//
+// OrganizationName and RegisteredEmail are nil for a cloud organisation, here
+// and on every read type.
 type OrganizationSummary struct {
 	ID               string          `json:"id"`
-	OrganizationName string          `json:"organizationName"`
-	RegisteredEmail  string          `json:"registeredEmail"`
+	OrganizationName *string         `json:"organizationName"`
+	MoesifCompanyID  *string         `json:"moesifCompanyId"`
+	RegisteredEmail  *string         `json:"registeredEmail"`
 	RegisteredName   *string         `json:"registeredName"`
 	RegisteredOn     time.Time       `json:"registeredOn"`
 	PlatformStages   []PlatformStage `json:"platformStages"`
@@ -473,18 +477,47 @@ type PlatformCard struct {
 // says when that happened, so the UI can mark them.
 type OrganizationDetail struct {
 	ID                    string    `json:"id"`
-	OrganizationName      string    `json:"organizationName"`
+	OrganizationName      *string   `json:"organizationName"`
 	CreatedOn             time.Time `json:"createdOn"`
-	RegisteredEmail       string    `json:"registeredEmail"`
+	RegisteredEmail       *string   `json:"registeredEmail"`
 	RegisteredName        *string   `json:"registeredName"`
 	Owner                 *UserRef  `json:"owner"`
 	CountryName           *string   `json:"countryName"`
 	CompanyNameFromDomain *string   `json:"companyNameFromDomain"`
 	// MoesifCompanyID is the source's stable id for the company. Kept for
 	// troubleshooting and for whatever later wants to join on it.
-	MoesifCompanyID *string        `json:"moesifCompanyId"`
-	FieldsInherited bool           `json:"fieldsInherited"`
-	PlatformCards   []PlatformCard `json:"platformCards"`
+	MoesifCompanyID *string `json:"moesifCompanyId"`
+	// CloudUserID is the Cloud user id of the organisation's owner.
+	CloudUserID *string `json:"cloudUserId"`
+	// EmailClassification is the owner's email classification from a
+	// registration playbook, the most recently set one; nil when unanswered.
+	EmailClassification *string        `json:"emailClassification"`
+	FieldsInherited     bool           `json:"fieldsInherited"`
+	PlatformCards       []PlatformCard `json:"platformCards"`
+}
+
+// ---------------------------------------------------------------------------
+// Identities — the reveal
+// ---------------------------------------------------------------------------
+
+// OrganizationIdentitiesRequest asks what is stored to identify organisations.
+type OrganizationIdentitiesRequest struct {
+	OrganizationIDs []string `json:"organizationIds"`
+}
+
+// OrganizationIdentity is what the database holds to identify one organisation.
+type OrganizationIdentity struct {
+	OrganizationID   string  `json:"organizationId"`
+	MoesifCompanyID  *string `json:"moesifCompanyId"`
+	OrganizationName *string `json:"organizationName"`
+	RegisteredEmail  *string `json:"registeredEmail"`
+	// OwnerUserID resolves a cloud organisation's email.
+	OwnerUserID *string `json:"ownerUserId"`
+}
+
+// OrganizationIdentitiesResponse lists the organisations that exist; unknown ids are absent.
+type OrganizationIdentitiesResponse struct {
+	Identities []OrganizationIdentity `json:"identities"`
 }
 
 // PatchOrganizationRequest is the body of PATCH /organizations/{id}.
@@ -639,6 +672,8 @@ type RunTask struct {
 	CompletedOn  *time.Time        `json:"completedOn"`
 	CompletedBy  *UserRef          `json:"completedBy"`
 	IsBookend    bool              `json:"isBookend"`
+	// MANUAL or VALIDATION (set by the registration job); nil when never written.
+	ValueSource *string `json:"valueSource"`
 }
 
 // PlaybookRun is one playbook running on one pairing.
@@ -720,7 +755,8 @@ type LifecycleEntry struct {
 type ProductDetail struct {
 	OrgPlatformID    string        `json:"orgPlatformId"`
 	OrganizationID   string        `json:"organizationId"`
-	OrganizationName string        `json:"organizationName"`
+	OrganizationName *string       `json:"organizationName"`
+	MoesifCompanyID  *string       `json:"moesifCompanyId"`
 	Product          PlgProductRef `json:"product"`
 
 	// The lifecycle diagram — both axes.
@@ -749,7 +785,7 @@ type ProductDetail struct {
 
 	// The registration metadata tile.
 	RegisteredOn    time.Time `json:"registeredOn"`
-	RegisteredEmail string    `json:"registeredEmail"`
+	RegisteredEmail *string   `json:"registeredEmail"`
 
 	// The third axis, with the provenance the other two carry. Nil until
 	// somebody records a tier — there is no subscription feed, so absent means
@@ -853,18 +889,32 @@ type CreateNoteRequest struct {
 // Registrations — the New Registrations panel
 // ---------------------------------------------------------------------------
 
-// RegistrationItem is one pairing awaiting acknowledgement.
+// RegistrationItem is one organisation with registrations awaiting
+// acknowledgement. Platforms lists its matching pairings, newest first; the
+// top-level pairing fields are the newest one's.
 type RegistrationItem struct {
-	OrgPlatformID    string         `json:"orgPlatformId"`
-	OrganizationID   string         `json:"organizationId"`
-	OrganizationName string         `json:"organizationName"`
-	Product          PlgProductRef  `json:"product"`
-	RegisteredEmail  string         `json:"registeredEmail"`
-	RegisteredName   *string        `json:"registeredName"`
-	RegisteredOn     time.Time      `json:"registeredOn"`
-	LifecycleStage   LifecycleStage `json:"lifecycleStage"`
-	StageName        string         `json:"stageName"`
-	Owner            *UserRef       `json:"owner"`
+	OrgPlatformID    string                 `json:"orgPlatformId"`
+	OrganizationID   string                 `json:"organizationId"`
+	OrganizationName *string                `json:"organizationName"`
+	MoesifCompanyID  *string                `json:"moesifCompanyId"`
+	Product          PlgProductRef          `json:"product"`
+	RegisteredEmail  *string                `json:"registeredEmail"`
+	RegisteredName   *string                `json:"registeredName"`
+	RegisteredOn     time.Time              `json:"registeredOn"`
+	LifecycleStage   LifecycleStage         `json:"lifecycleStage"`
+	StageName        string                 `json:"stageName"`
+	Owner            *UserRef               `json:"owner"`
+	Platforms        []RegistrationPlatform `json:"platforms"`
+}
+
+// RegistrationPlatform is one of an organisation's listed pairings.
+type RegistrationPlatform struct {
+	OrgPlatformID  string         `json:"orgPlatformId"`
+	Product        PlgProductRef  `json:"product"`
+	RegisteredOn   time.Time      `json:"registeredOn"`
+	LifecycleStage LifecycleStage `json:"lifecycleStage"`
+	StageName      string         `json:"stageName"`
+	IsNew          bool           `json:"isNew"`
 }
 
 // SearchRegistrationsRequest is the body of POST /registrations/search.
@@ -939,7 +989,8 @@ type WorkQueueItem struct {
 
 	OrgPlatformID    string         `json:"orgPlatformId"`
 	OrganizationID   string         `json:"organizationId"`
-	OrganizationName string         `json:"organizationName"`
+	OrganizationName *string        `json:"organizationName"`
+	MoesifCompanyID  *string        `json:"moesifCompanyId"`
 	Product          PlgProductRef  `json:"product"`
 	CurrentStage     LifecycleStage `json:"currentStage"`
 	StageName        string         `json:"stageName"`
@@ -1110,15 +1161,20 @@ type DashboardAnalytics struct {
 // send it. Absent stays absent: the sparse-upsert rule keeps NULL meaning
 // "never received".
 type Registration struct {
-	OrganizationName      string      `json:"organizationName"`
-	RegisteredEmail       string      `json:"registeredEmail"`
-	CreatedOn             *SourceTime `json:"createdOn"`
-	InitiatedPlatform     string      `json:"initiatedPlatform"`
-	CountryName           string      `json:"countryName"`
-	CompanyNameFromDomain string      `json:"companyNameFromDomain"`
-	CompanyID             string      `json:"companyId"`
-	FirstName             string      `json:"firstName"`
-	LastName              string      `json:"lastName"`
+	OrganizationName  string      `json:"organizationName"`
+	RegisteredEmail   string      `json:"registeredEmail"`
+	CreatedOn         *SourceTime `json:"createdOn"`
+	InitiatedPlatform string      `json:"initiatedPlatform"`
+	// InitiatingProduct is a Cloud signup's entry point (e.g. api-platform);
+	// it makes the registration a Cloud one.
+	InitiatingProduct     string `json:"initiatingProduct"`
+	CountryName           string `json:"countryName"`
+	CompanyNameFromDomain string `json:"companyNameFromDomain"`
+	CompanyID             string `json:"companyId"`
+	// UserID is the owner's WSO2 Cloud UUID. Optional.
+	UserID    string `json:"userId"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
 
 	// Extra holds the mapped extra fields, keyed by their portal-side name.
 	// Not part of the wire contract: the caller sends Attributes instead, which

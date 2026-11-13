@@ -6,7 +6,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 
-import { usePlgApi } from "./client";
+import { usePlgApi, type ApiError } from "./client";
 import type {
   CreatePlaybookRequest,
   DashboardAnalytics,
@@ -26,6 +26,7 @@ import type {
   UserRef,
   WorkQueueQuery,
   WorkQueueResponse,
+  CompanyIdentity,
 } from "./types";
 
 /**
@@ -48,6 +49,7 @@ export const queryKeys = {
   playbook: (id: string) => ["playbook", id] as const,
   dashboard: (from?: string, to?: string) => ["dashboard", from ?? "", to ?? ""] as const,
   workQueue: (q: WorkQueueQuery) => ["work-queue", q] as const,
+  company: (orgId: string) => ["plg", "company", orgId] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -156,7 +158,11 @@ export function useSetOrganizationOwner(
     mutationFn: (ownerId: string | null) =>
       api.patch<OrganizationDetail>(`/organizations/${organizationId}`, { ownerId }),
     onSuccess: (detail) => {
+      // The page is cached under the Cloud id it was opened by, not the record id.
       client.setQueryData(queryKeys.organization(organizationId), detail);
+      if (detail.moesifCompanyId) {
+        client.setQueryData(queryKeys.organization(detail.moesifCompanyId), detail);
+      }
       void client.invalidateQueries({ queryKey: ["organizations"] });
       void client.invalidateQueries({ queryKey: ["work-queue"] });
     },
@@ -198,7 +204,8 @@ function useProductMutation<TVariables>(
     mutationFn,
     onSuccess: (detail) => {
       client.setQueryData(queryKeys.product(organizationId, productCode), detail);
-      void client.invalidateQueries({ queryKey: queryKeys.organization(organizationId) });
+      // Every cached detail of the organisation: it is keyed by the Cloud id or the record id.
+      void client.invalidateQueries({ queryKey: ["organization"] });
       void client.invalidateQueries({ queryKey: ["organizations"] });
       void client.invalidateQueries({ queryKey: ["registrations"] });
       void client.invalidateQueries({ queryKey: ["work-queue"] });
@@ -291,7 +298,7 @@ export function useAcknowledge(): UseMutationResult<
       client.setQueryData(queryKeys.product(detail.organizationId, detail.product.code), detail);
       void client.invalidateQueries({ queryKey: ["registrations"] });
       void client.invalidateQueries({ queryKey: ["organizations"] });
-      void client.invalidateQueries({ queryKey: queryKeys.organization(detail.organizationId) });
+      void client.invalidateQueries({ queryKey: ["organization"] });
       void client.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
@@ -390,4 +397,59 @@ export function useWorkQueue(query: WorkQueueQuery): UseQueryResult<WorkQueueRes
     },
     placeholderData: (previous) => previous,
   });
+}
+
+// ---------------------------------------------------------------------------
+// The reveal
+// ---------------------------------------------------------------------------
+
+export interface CompanyReveal {
+  /** The revealed identity, once asked for; undefined while hidden. */
+  identity: CompanyIdentity | undefined;
+  /** True when the organisation no longer exists (it was not in the answer). */
+  notFound: boolean;
+  isFetching: boolean;
+  error: Error | null;
+  reveal: () => void;
+  hide: () => void;
+}
+
+/**
+ * The reveal for one organisation. Fetches only on reveal(); a row's cells share
+ * one entry, so they change together. hide() masks them again.
+ */
+export function useCompanyReveal(organizationId: string): CompanyReveal {
+  const api = usePlgApi();
+  const client = useQueryClient();
+  const key = queryKeys.company(organizationId);
+  const query = useQuery({
+    queryKey: key,
+    queryFn: async () => {
+      try {
+        return await api.post<CompanyIdentity>(`/organizations/${encodeURIComponent(organizationId)}/reveal`);
+      } catch (e) {
+        // A 404 is an organisation that no longer exists.
+        if ((e as ApiError).status === 404) return null;
+        throw e;
+      }
+    },
+    enabled: false,
+    // Never cached: the Cloud Directory API forbids keeping names and emails.
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+  return {
+    identity: query.data ?? undefined,
+    notFound: query.data === null,
+    isFetching: query.isFetching,
+    error: query.error,
+    reveal: () => {
+      void query.refetch();
+    },
+    // reset, not remove, so mounted cells mask again.
+    hide: () => {
+      void client.resetQueries({ queryKey: key, exact: true });
+    },
+  };
 }

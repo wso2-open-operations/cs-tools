@@ -54,8 +54,11 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/moesif"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgsignups"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/plgvalidation"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -278,6 +281,94 @@ func main() {
 		if err != nil {
 			slog.Error("failed to construct entity-service usage rollup client", "err", err)
 			os.Exit(1)
+		}
+	}
+
+	// PLG signups from Moesif: the Moesif reader and the PLG ingest client.
+	// Off by default; MOESIF_API_KEY is required once it is on.
+	plgMoesifSyncEnabled := envBool("PLG_MOESIF_SYNC_ENABLED", false)
+	plgValidationEnabled := envBool("PLG_REGISTRATION_VALIDATION_ENABLED", false)
+	var (
+		moesifClient        *moesif.Client
+		plgSignupsClient    *plgsignups.Client
+		plgValidationClient *plgvalidation.Client
+	)
+	if plgMoesifSyncEnabled || plgValidationEnabled {
+		moesifClient, err = moesif.NewClient(moesif.Config{
+			BaseURL: envString("MOESIF_BASE_URL", moesif.DefaultBaseURL),
+			APIKey:  mustEnv("MOESIF_API_KEY"),
+			Timeout: envDuration("MOESIF_TIMEOUT", 30*time.Second),
+		})
+		if err != nil {
+			slog.Error("failed to construct Moesif client", "err", err)
+			os.Exit(1)
+		}
+		plgSignupsClient, err = plgsignups.NewClient(plgsignups.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG ingest client", "err", err)
+			os.Exit(1)
+		}
+		plgValidationClient, err = plgvalidation.NewClient(plgvalidation.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service PLG validation client", "err", err)
+			os.Exit(1)
+		}
+	}
+	// Email domain classification: the owner's email from the Cloud Directory
+	// API, the domain to the CSM AI service. Off unless both are configured.
+	var (
+		plgDirectory  *plgvalidation.DirectoryClient
+		plgClassifier *plgvalidation.AIClient
+	)
+	if plgValidationEnabled && os.Getenv("CSM_AI_SERVICE_BASE_URL") != "" && os.Getenv("CLOUD_API_BASE_URL") != "" {
+		plgClassifier, err = plgvalidation.NewAIClient(plgvalidation.Config{
+			BaseURL:      os.Getenv("CSM_AI_SERVICE_BASE_URL"),
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       splitComma(os.Getenv("CSM_AI_SERVICE_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("failed to construct CSM AI service client", "err", err)
+			os.Exit(1)
+		}
+		plgDirectory, err = plgvalidation.NewDirectoryClient(plgvalidation.DirectoryConfig{
+			Config: plgvalidation.Config{
+				BaseURL:      os.Getenv("CLOUD_API_BASE_URL"),
+				TokenURL:     mustEnv("CLOUD_API_TOKEN_URL"),
+				ClientID:     mustEnv("CLOUD_API_CLIENT_ID"),
+				ClientSecret: mustEnv("CLOUD_API_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CLOUD_API_SCOPES")),
+			},
+			UserEmailPath: envString("CLOUD_API_USER_EMAIL_PATH", "/users/{userId}/email"),
+		})
+		if err != nil {
+			slog.Error("failed to construct Cloud Directory client", "err", err)
+			os.Exit(1)
+		}
+	} else if plgValidationEnabled {
+		slog.Warn("plg registration validation: email classification is off; set CSM_AI_SERVICE_BASE_URL and CLOUD_API_BASE_URL")
+	}
+	plgValidationProducts := splitComma(envString("PLG_REGISTRATION_VALIDATION_PRODUCTS", "AGENT_PLATFORM"))
+	if plgValidationEnabled {
+		for i, p := range plgValidationProducts {
+			plgValidationProducts[i] = strings.ToUpper(p)
+			if _, ok := plgvalidation.Platforms[plgValidationProducts[i]]; !ok {
+				slog.Error("PLG_REGISTRATION_VALIDATION_PRODUCTS names a product with no Moesif platform", "product", p)
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -510,6 +601,10 @@ func main() {
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
 	const usageRollupMonthlyTaskName = "usage_rollup_monthly"
 	usageRollupMonthlyTo, usageRollupMonthlyCc := recipientsFor(recipientOverrides, usageRollupMonthlyTaskName)
+	const plgMoesifSyncTaskName = "plg_moesif_sync"
+	plgMoesifSyncTo, plgMoesifSyncCc := recipientsFor(recipientOverrides, plgMoesifSyncTaskName)
+	const plgValidationTaskName = "plg_registration_validation"
+	plgValidationTo, plgValidationCc := recipientsFor(recipientOverrides, plgValidationTaskName)
 	const unresolvedProductsTaskName = "unresolved_products_digest"
 	unresolvedProductsTo, unresolvedProductsCc := recipientsFor(recipientOverrides, unresolvedProductsTaskName)
 	unresolvedProductsEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, unresolvedProductsTaskName))
@@ -1059,6 +1154,77 @@ func main() {
 				Cc:       usageRollupMonthlyCc,
 			},
 		)
+	}
+
+	// PLG signups from Moesif, every 15 minutes by default. A run reads a
+	// window of at least two driver intervals (and 2 hours), so a missed or
+	// failed run is covered by the next; ingest is idempotent, so the overlap
+	// is harmless. The handler reads the wall clock, not the period start: the
+	// window must end now to catch the newest signups.
+	if plgMoesifSyncEnabled {
+		window := max(2*driverInterval, 2*time.Hour)
+		if minutes := envInt("PLG_MOESIF_SYNC_WINDOW_MINUTES", 0); minutes > 0 {
+			window = time.Duration(minutes) * time.Minute
+		}
+		// There is no cursor: a window shorter than the longest time between two
+		// runs (the schedule's gap, plus up to one driver interval of delay) loses events.
+		plgMoesifSyncSchedule := scheduleFor(scheduleOverrides, plgMoesifSyncTaskName, "*/15 * * * *")
+		gap, err := schedule.LongestGap(plgMoesifSyncSchedule, time.Now().UTC())
+		if err != nil {
+			slog.Error("plg moesif sync: invalid schedule", "err", err)
+			os.Exit(1)
+		}
+		if window < gap+driverInterval {
+			slog.Error("PLG_MOESIF_SYNC_WINDOW_MINUTES is shorter than the time between runs; events would be missed",
+				"window", window, "needed", gap+driverInterval)
+			os.Exit(1)
+		}
+		events := splitComma(os.Getenv("PLG_MOESIF_SYNC_EVENTS"))
+		if len(events) == 0 {
+			events = plgsignups.DefaultEvents
+		}
+		productFields := splitComma(os.Getenv("PLG_MOESIF_SYNC_PRODUCT_FIELDS"))
+		if len(productFields) == 0 {
+			productFields = plgsignups.DefaultProductFields
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     plgMoesifSyncTaskName,
+			Schedule: plgMoesifSyncSchedule,
+			Handler: plgsignups.Sync(moesifClient, plgSignupsClient, plgsignups.Options{
+				Events:        events,
+				ProductFields: productFields,
+				Window:        window,
+				BatchSize:     envInt("PLG_MOESIF_SYNC_BATCH_SIZE", 100),
+				MaxPages:      envInt("PLG_MOESIF_SYNC_MAX_PAGES", 100),
+			}, time.Now),
+			To: plgMoesifSyncTo,
+			Cc: plgMoesifSyncCc,
+		})
+	}
+
+	// Registration playbooks filled from Moesif activity, hourly, after the
+	// signups sync. A dry run (the default) derives and logs, writes nothing.
+	if plgValidationEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     plgValidationTaskName,
+			Schedule: scheduleFor(scheduleOverrides, plgValidationTaskName, "20 * * * *"),
+			Handler: plgvalidation.Run(moesifClient, plgValidationClient, plgvalidation.Options{
+				Products: plgValidationProducts,
+				Window:   time.Duration(envInt("PLG_REGISTRATION_VALIDATION_WINDOW_HOURS", 12)) * time.Hour,
+				Thresholds: plgvalidation.Thresholds{
+					Eligible: envInt("PLG_REGISTRATION_VALIDATION_ELIGIBLE_ACTIONS", 10),
+					Moderate: envInt("PLG_REGISTRATION_VALIDATION_MODERATE_ACTIONS", 5),
+				},
+				Grace:    time.Duration(envInt("PLG_REGISTRATION_VALIDATION_GRACE_HOURS", 24)) * time.Hour,
+				DryRun:   envBool("PLG_REGISTRATION_VALIDATION_DRY_RUN", true),
+				MaxPages: envInt("PLG_REGISTRATION_VALIDATION_MAX_PAGES", 100),
+				// Typed nils would make the interfaces non-nil.
+				Directory:  directoryOrNil(plgDirectory),
+				Classifier: classifierOrNil(plgClassifier),
+			}, time.Now),
+			To: plgValidationTo,
+			Cc: plgValidationCc,
+		})
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
@@ -1924,4 +2090,18 @@ func loadDotEnv(path string) {
 	if err := scanner.Err(); err != nil {
 		slog.Warn("loadDotEnv: error reading .env file", "err", err)
 	}
+}
+
+func directoryOrNil(c *plgvalidation.DirectoryClient) plgvalidation.Directory {
+	if c == nil {
+		return nil
+	}
+	return c
+}
+
+func classifierOrNil(c *plgvalidation.AIClient) plgvalidation.DomainClassifier {
+	if c == nil {
+		return nil
+	}
+	return c
 }

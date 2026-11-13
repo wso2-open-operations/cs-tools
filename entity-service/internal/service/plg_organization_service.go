@@ -13,6 +13,7 @@ type OrganizationService interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) (domain.SearchOrganizationsResponse, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) (*domain.OrganizationDetail, error)
+	Identities(ctx context.Context, req domain.OrganizationIdentitiesRequest) (domain.OrganizationIdentitiesResponse, error)
 }
 
 type organizationService struct {
@@ -62,9 +63,10 @@ func (s *organizationService) Search(ctx context.Context, req domain.SearchOrgan
 	}, nil
 }
 
+// Get takes the record id or the Cloud organisation id.
 func (s *organizationService) Get(ctx context.Context, id string) (*domain.OrganizationDetail, error) {
-	if err := validateUUID("organizationId", id); err != nil {
-		return nil, err
+	if !uuidRe.MatchString(id) && !cloudIDRe.MatchString(id) {
+		return nil, invalidField("organizationId must be a record id or a Cloud organisation id")
 	}
 	return s.repo.Get(ctx, id)
 }
@@ -104,4 +106,24 @@ func (s *organizationService) Patch(ctx context.Context, req domain.PatchOrganiz
 	// organisation, and reading it back is what makes the owner's name and email
 	// correct without the caller resolving them.
 	return s.repo.Get(ctx, req.ID)
+}
+
+// maxIdentityLookup bounds one identities request.
+const maxIdentityLookup = 50
+
+func (s *organizationService) Identities(ctx context.Context, req domain.OrganizationIdentitiesRequest) (domain.OrganizationIdentitiesResponse, error) {
+	switch {
+	case len(req.OrganizationIDs) == 0:
+		return domain.OrganizationIdentitiesResponse{}, &apierror.ValidationError{Msg: "organizationIds must not be empty"}
+	case len(req.OrganizationIDs) > maxIdentityLookup:
+		return domain.OrganizationIdentitiesResponse{}, &apierror.ValidationError{Msg: "organizationIds cannot list more than 50 organisations"}
+	}
+	if err := plgValidateUUIDs("organizationIds", req.OrganizationIDs); err != nil {
+		return domain.OrganizationIdentitiesResponse{}, err
+	}
+	ids, err := s.repo.Identities(ctx, req.OrganizationIDs)
+	if err != nil {
+		return domain.OrganizationIdentitiesResponse{}, err
+	}
+	return domain.OrganizationIdentitiesResponse{Identities: ids}, nil
 }

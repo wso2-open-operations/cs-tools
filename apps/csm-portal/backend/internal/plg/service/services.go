@@ -88,9 +88,10 @@ func (s *organizationService) Search(ctx context.Context, req domain.SearchOrgan
 	}, nil
 }
 
+// Get takes the record id or the Cloud organisation id.
 func (s *organizationService) Get(ctx context.Context, id string) (*domain.OrganizationDetail, error) {
-	if err := validateUUID("organizationId", id); err != nil {
-		return nil, err
+	if !uuidRe.MatchString(id) && !cloudIDRe.MatchString(id) {
+		return nil, &apierror.ValidationError{Msg: "organizationId must be a record id or a Cloud organisation id"}
 	}
 	return s.repo.Get(ctx, id)
 }

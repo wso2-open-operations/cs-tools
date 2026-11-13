@@ -40,22 +40,40 @@ const org: OrganizationDetail = {
 
 const setOwner = { mutate: vi.fn(), isPending: false, error: null };
 
+const page = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  current: undefined as OrganizationDetail | undefined,
+}));
+
 vi.mock("react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ organizationId: "o1" }),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => page.navigate,
 }));
 
 vi.mock("@features/plg/api/hooks", () => ({
-  useOrganization: () => ({ data: org, isPending: false, error: null }),
+  useOrganization: () => ({ data: page.current ?? org, isPending: false, error: null }),
   useSetOrganizationOwner: () => setOwner,
   useCSUsers: () => ({ data: engineers, isFetching: false }),
+  // The header shows the company id with a reveal; hidden, it fetches nothing.
+  useCompanyReveal: () => ({
+    identity: undefined,
+    notFound: false,
+    isFetching: false,
+    error: null,
+    reveal: () => {},
+    hide: () => {},
+  }),
 }));
 
 // The product tabs are not on the Overview.
 vi.mock("./ProductTab", () => ({ ProductTab: () => null }));
 
-beforeEach(() => setOwner.mutate.mockReset());
+beforeEach(() => {
+  setOwner.mutate.mockReset();
+  page.navigate.mockReset();
+  page.current = undefined;
+});
 
 describe("OrganizationDetailPage: the owner", () => {
   it("marks the PLG CS owner required", () => {
@@ -83,5 +101,36 @@ describe("OrganizationDetailPage: the owner", () => {
     expect(save).toBeEnabled();
     fireEvent.click(save);
     expect(setOwner.mutate).toHaveBeenCalledWith("u2");
+  });
+});
+
+describe("OrganizationDetailPage: Cloud ids", () => {
+  const cloud: OrganizationDetail = {
+    ...org,
+    organizationName: null,
+    moesifCompanyId: "01a1ba70-b841-718f-86f2-56d0de00d195",
+    cloudUserId: "01a1ba70-b85b-703a-81f9-85f219c4456f",
+    emailClassification: "PERSONAL",
+  };
+
+  it("moves a link by record id to the Cloud organisation id", () => {
+    page.current = cloud;
+    render(<OrganizationDetailPage />);
+    expect(page.navigate).toHaveBeenCalledWith("/plg/organizations/01a1ba70-b841-718f-86f2-56d0de00d195", {
+      replace: true,
+    });
+  });
+
+  it("stays on the record id when there is no Cloud id", () => {
+    render(<OrganizationDetailPage />);
+    expect(page.navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows the Cloud ids and the email classification", () => {
+    page.current = cloud;
+    render(<OrganizationDetailPage />);
+    expect(screen.getByText("01a1ba70-b85b-703a-81f9-85f219c4456f")).toBeInTheDocument();
+    expect(screen.getByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("Cloud organisation id")).toBeInTheDocument();
   });
 });

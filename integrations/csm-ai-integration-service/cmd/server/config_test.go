@@ -35,7 +35,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Enabled() || c.Model != defaultClaudeModel || c.Timeout != defaultClaudeTimeout ||
-		c.BaseURL != "" || c.IgnoredCatalogueVars != nil {
+		c.BaseURL != "" || c.IgnoredCatalogueVars != nil || c.EmailDomainModel != defaultEmailDomainModel {
 		t.Errorf("defaults = %+v", c)
 	}
 	if c.GatewayHost() != "none" {
@@ -47,16 +47,17 @@ func TestLoadConfigDefaults(t *testing.T) {
 // and trimmed.
 func TestLoadConfigReadsAndTrimsEveryVariable(t *testing.T) {
 	c, err := loadConfig(env(map[string]string{
-		"ANTHROPIC_API_KEY": " key\n",
-		"CLAUDE_MODEL":      " claude-opus-5-5 ",
-		"CLAUDE_TIMEOUT":    "90s",
-		"CLAUDE_BASE_URL":   " https://gateway.example.test/v1/anthropic?x=1 ",
+		"ANTHROPIC_API_KEY":  " key\n",
+		"CLAUDE_MODEL":       " claude-opus-5-5 ",
+		"CLAUDE_TIMEOUT":     "90s",
+		"CLAUDE_BASE_URL":    " https://gateway.example.test/v1/anthropic?x=1 ",
+		"EMAIL_DOMAIN_MODEL": " claude-sonnet-5-5 ",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := config{APIKey: "key", Model: "claude-opus-5-5", Timeout: 90 * time.Second,
-		BaseURL: "https://gateway.example.test/v1/anthropic?x=1"}
+		BaseURL: "https://gateway.example.test/v1/anthropic?x=1", EmailDomainModel: "claude-sonnet-5-5"}
 	if !reflect.DeepEqual(c, want) {
 		t.Errorf("config = %+v, want %+v", c, want)
 	}

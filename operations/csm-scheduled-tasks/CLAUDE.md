@@ -853,6 +853,67 @@ next run. Both rollups are idempotent (a rerun over unchanged rows writes nothin
 costs nothing. One failing day or month does not stop the others; the handler returns every failure
 together and the engine retries the whole run. Days and months are UTC, so run with `TZ=UTC`.
 
+## PLG signups from Moesif
+
+**`plg_moesif_sync`** (default `*/15 * * * *`) lands WSO2 Cloud signups in the PLG portal. Moesif is the
+source of truth: a registration event (`metadata.initiating_product`, once per user) and each later
+subscription event (`metadata.product`) become one registration, by company id, user id and product,
+posted to entity-service's `POST /plg/registrations/ingest`. entity-service maps the product name to a
+portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` is then required.
+
+- **Window, not a cursor.** Each run reads the last `PLG_MOESIF_SYNC_WINDOW_MINUTES` (default 2 ×
+  `DRIVER_INTERVAL`, at least 2 hours) of events, ending now. Ingest is idempotent, so the overlap only
+  refreshes what is stored, and a failed or superseded period is covered by the next run as long as the
+  outage is shorter than the window. The handler reads the wall clock, not the period start. Startup
+  refuses a window shorter than the schedule's longest gap between runs plus `DRIVER_INTERVAL`
+  (`schedule.LongestGap`), since events in between would never be read, and a schedule limited to
+  certain days of the month, months or years, whose gaps an eight-day sample cannot bound.
+- **Failures.** An event with no company id or product, or one entity-service rejects, is recorded in
+  `plg_ingest_failure` under its Moesif event id, by ids only; entity-service keeps one open row per
+  event id (a partial unique index, migration 0288), so later runs do not repeat it. Neither fails the
+  run, but a failure that cannot be recorded does, after every other failure was attempted. Moesif or entity-service unreachable,
+  or a window larger than `PLG_MOESIF_SYNC_MAX_PAGES` pages, fails it (retried and alerted as usual).
+- **Personal data.** Only time, action, user id, company id and the product fields are requested from
+  Moesif; names and emails are never read. `internal/moesif` never logs or returns a response body.
+- **`internal/moesif`** is the shared Management API client (event search with `search_after` paging).
+  Later Moesif sub-crons (activity data) reuse it and `MOESIF_API_KEY`; keep their runs bounded, since
+  sub-crons run one after another.
+
+## PLG registration validation
+
+**`plg_registration_validation`** (default `20 * * * *`) fills each product's registration playbook from
+its Moesif activity. **Off unless `PLG_REGISTRATION_VALIDATION_ENABLED=true`**, and a dry run (derive and
+log, write nothing) until `PLG_REGISTRATION_VALIDATION_DRY_RUN=false`. Only `AGENT_PLATFORM` (Moesif
+platform `Agent Manager`) has events today; `plgvalidation.Platforms` maps the others when they do.
+
+- **Each run**: `POST /plg/registrations/validation-queue` lists the product's REGISTRATION pairings signed
+  up within `WINDOW_HOURS` (12) plus `GRACE_HOURS` (24); Moesif is read for 50 companies per query
+  (company id, time and action only); `internal/plgactivity` counts the user's actions in the first
+  `WINDOW_HOURS` after signup; one `PUT /plg/pairings/{id}/registration-validation` per pairing writes the
+  summary and values. entity-service attaches the playbook, never overwrites an engineer's value, and
+  closes and abandons the pairing when the outcome is EXCLUDED. This client's id must be in
+  entity-service's `M2M_CLIENT_IDS`.
+- **Rules**: Agent Manager has no onboarding wizard, so the onboarding tasks are left to the engineer.
+  An action is any Agent Manager action, deletions included; `registered-gateway` and
+  `rotated-gateway-token` are not (the platform emits them minutes after signup), nor are account events
+  such as `Select Subscription Plan`. `ELIGIBLE_ACTIONS` (10) or more is ELIGIBLE and HIGH;
+  `MODERATE_ACTIONS` (5) or more is MODERATE, fewer LOW, none NONE, all MONITOR. A CORPORATE email is
+  ELIGIBLE; INTERNAL or DISPOSABLE is EXCLUDED.
+- **Email classification**, when the pairing has none or UNKNOWN: the owner's email is read from the
+  Cloud Directory API (`CLOUD_API_*`), kept in memory only, and reduced to its domain and a role-mailbox
+  flag (`admin@`, `test+1@`). Only the domain goes to the CSM AI service's
+  `POST /ai/email-domains/classify`; a PERSONAL domain with a role mailbox becomes DISPOSABLE. A Directory
+  or AI failure leaves it unset for the next run. Off, with a warning at start, unless
+  `CSM_AI_SERVICE_BASE_URL` and `CLOUD_API_BASE_URL` are both set. Never log the email or the domain.
+- **Queue order**: pairings never validated come first, then the least recently validated, so a
+  queue over `QueueLimit` (1000) cannot starve the same pairings every run.
+- **Stale exclusions**: entity-service abandons only when the classification the run will hold still
+  excludes (an engineer may have changed it since the queue was read). Otherwise it writes nothing and
+  answers `stale`; the job counts it and the next run decides again. A zero `WINDOW_HOURS` fails the run.
+- **Failures**: Moesif or the queue failing fails the run. A failed write is logged and the others go
+  on; the run then fails naming at most 10 pairing ids. A product without an active registration
+  playbook is skipped with a warning.
+
 ## Unresolved products digest
 
 `internal/unresolvedproducts.SendDigest`, registered as **`unresolved_products_digest`** (default
@@ -969,6 +1030,10 @@ report emails" below for why that's not a generic engine feature.
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
+| `PLG_MOESIF_SYNC_ENABLED` / `MOESIF_API_KEY` / `MOESIF_BASE_URL` / `MOESIF_TIMEOUT` / `PLG_MOESIF_SYNC_*` | No (default `false`; the key is required, and a secret, once enabled) | Registers and tunes `plg_moesif_sync` — see "PLG signups from Moesif" above |
+| `PLG_REGISTRATION_VALIDATION_ENABLED` / `_DRY_RUN` / `_PRODUCTS` / `_WINDOW_HOURS` / `_GRACE_HOURS` / `_ELIGIBLE_ACTIONS` / `_MODERATE_ACTIONS` / `_MAX_PAGES` | No (defaults `false` / `true` / `AGENT_PLATFORM` / `12` / `24` / `10` / `5` / `100`) | Registers and tunes `plg_registration_validation` — see "PLG registration validation" above |
+| `CSM_AI_SERVICE_BASE_URL` / `CSM_AI_SERVICE_SCOPES` | No | The CSM AI service, called with the shared `OAUTH2_*` credentials, for the registration validation's email classification |
+| `CLOUD_API_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` / `_USER_EMAIL_PATH` | With `CLOUD_API_BASE_URL` (path default `/users/{userId}/email`) | The Cloud Directory API (the CSM portal's Directory client) for the owner's email. The secret is a Choreo secret: never commit it |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case UUID>`). Unset renders plain text |

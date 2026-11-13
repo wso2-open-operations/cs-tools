@@ -48,25 +48,62 @@ func (r *ingestRepository) Register(ctx context.Context, in domain.Registration,
 		registeredOn = in.CreatedOn.Time
 	}
 
-	personID, err := upsertPerson(ctx, tx, in)
-	if err != nil {
-		return nil, err
-	}
-
-	orgID, orgCreated, err := upsertOrganization(ctx, tx, in, personID, registeredOn)
-	if err != nil {
-		return nil, err
-	}
-
-	res := &domain.IngestResult{
-		OrganizationID:   orgID,
-		OrganizationName: strings.TrimSpace(in.OrganizationName),
-		PersonEmail:      strings.ToLower(strings.TrimSpace(in.RegisteredEmail)),
-	}
-
 	// A payload with no platform is legitimate — it just registers the customer,
 	// and the pairing arrives with a later event.
 	platform := strings.ToUpper(strings.TrimSpace(in.InitiatedPlatform))
+
+	// initiatingProduct (a Cloud signup) decides the product and makes the
+	// registration a Cloud one.
+	fromCloud := false
+	if key := strings.TrimSpace(in.InitiatingProduct); key != "" {
+		code, err := productForCloudKey(ctx, tx, key)
+		if err != nil {
+			return nil, err
+		}
+		if platform != "" && platform != code {
+			return nil, &apierror.ValidationError{Msg: fmt.Sprintf(
+				"initiatingProduct %q is %s, but initiatedPlatform is %s", key, code, platform)}
+		}
+		platform, fromCloud = code, true
+	}
+
+	cloud, err := isCloudPlatform(ctx, tx, platform)
+	if err != nil {
+		return nil, err
+	}
+
+	// Keyed on the company id unless it carries a name or email (the Moesif feed).
+	idOnly := fromCloud || cloud ||
+		(strings.TrimSpace(in.OrganizationName) == "" && strings.TrimSpace(in.RegisteredEmail) == "")
+
+	var (
+		orgID      string
+		orgCreated bool
+		res        *domain.IngestResult
+	)
+	if idOnly {
+		orgID, orgCreated, err = upsertCloudOrganization(ctx, tx, in, registeredOn)
+		if err != nil {
+			return nil, err
+		}
+		// Nothing identifying is echoed back.
+		res = &domain.IngestResult{OrganizationID: orgID}
+	} else {
+		personID, err := upsertPerson(ctx, tx, in)
+		if err != nil {
+			return nil, err
+		}
+		orgID, orgCreated, err = upsertOrganization(ctx, tx, in, personID, registeredOn)
+		if err != nil {
+			return nil, err
+		}
+		res = &domain.IngestResult{
+			OrganizationID:   orgID,
+			OrganizationName: strings.TrimSpace(in.OrganizationName),
+			PersonEmail:      strings.ToLower(strings.TrimSpace(in.RegisteredEmail)),
+		}
+	}
+
 	var pairingCreated bool
 	if platform != "" {
 		pairID, created, err := upsertOrgPlatform(ctx, tx, in, orgID, platform, registeredOn)
@@ -103,6 +140,71 @@ func describeIngest(orgCreated, pairingCreated bool, platform string) (string, s
 	default:
 		return "unchanged", "organisation and platform were already registered"
 	}
+}
+
+// productForCloudKey maps initiatingProduct to a product code; unknown names are refused.
+func productForCloudKey(ctx context.Context, tx pgx.Tx, key string) (string, error) {
+	const q = `
+		SELECT p.code FROM plg_cloud_product_key k
+		JOIN   plg_product p ON p.id = k.product_id
+		WHERE  k.cloud_key = LOWER($1)`
+	var code string
+	err := tx.QueryRow(ctx, q, key).Scan(&code)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", &apierror.ValidationError{Msg: "unknown initiatingProduct: " + key}
+	}
+	if err != nil {
+		return "", fmt.Errorf("read product for initiatingProduct: %w", err)
+	}
+	return code, nil
+}
+
+// isCloudPlatform reports whether the platform's identity_source is CLOUD_PLATFORM.
+// An unknown platform is not, and is refused when the pairing is written.
+func isCloudPlatform(ctx context.Context, tx pgx.Tx, platform string) (bool, error) {
+	if platform == "" {
+		return false, nil
+	}
+	const q = `SELECT identity_source = 'CLOUD_PLATFORM' FROM plg_product WHERE code = $1`
+	var cloud bool
+	err := tx.QueryRow(ctx, q, platform).Scan(&cloud)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read identity source: %w", err)
+	}
+	return cloud, nil
+}
+
+// upsertCloudOrganization lands a registration keyed on the company id. No name,
+// email or person is stored; the first registration's user stays the owner.
+func upsertCloudOrganization(ctx context.Context, tx pgx.Tx, in domain.Registration,
+	registeredOn time.Time) (string, bool, error) {
+
+	companyID := strings.TrimSpace(in.CompanyID)
+	if companyID == "" {
+		return "", false, &apierror.ValidationError{Msg: "companyId is required for a registration with no organisation name and email"}
+	}
+
+	const q = `
+		INSERT INTO plg_organization (created_on, country_name, moesif_company_id, owner_user_id)
+		VALUES ($1, NULLIF(BTRIM($2), ''), $3, NULLIF($4, '')::UUID)
+		ON CONFLICT ON CONSTRAINT uq_plg_organization_moesif_company DO UPDATE
+		SET country_name  = COALESCE(EXCLUDED.country_name, plg_organization.country_name),
+		    owner_user_id = COALESCE(plg_organization.owner_user_id, EXCLUDED.owner_user_id),
+		    created_on    = LEAST(plg_organization.created_on, EXCLUDED.created_on),
+		    updated_at    = NOW()
+		RETURNING id::TEXT, (xmax = 0) AS inserted`
+
+	var (
+		id       string
+		inserted bool
+	)
+	if err := tx.QueryRow(ctx, q, registeredOn, in.CountryName, companyID, in.UserID).Scan(&id, &inserted); err != nil {
+		return "", false, fmt.Errorf("upsert cloud organization: %w", err)
+	}
+	return id, inserted, nil
 }
 
 // upsertPerson keys on email — the one field every payload carries, and the
@@ -143,14 +245,20 @@ func upsertOrganization(ctx context.Context, tx pgx.Tx, in domain.Registration,
 		return "", false, &apierror.ValidationError{Msg: "Asgardeo_Org_name__c is required"}
 	}
 
+	// A company first seen on a cloud platform takes the Moesif name here.
+	if id, ok, err := adoptCloudOrganization(ctx, tx, in, name, personID, registeredOn); err != nil || ok {
+		return id, false, err
+	}
+
 	const q = `
 		INSERT INTO plg_organization (
 		    organization_name, created_on, registered_user,
-		    country_name, company_name_from_domain, moesif_company_id)
+		    country_name, company_name_from_domain, moesif_company_id, owner_user_id)
 		VALUES ($1, $2, $3::UUID,
-		        NULLIF(BTRIM($4), ''), NULLIF(BTRIM($5), ''), NULLIF(BTRIM($6), ''))
+		        NULLIF(BTRIM($4), ''), NULLIF(BTRIM($5), ''), NULLIF(BTRIM($6), ''), NULLIF($7, '')::UUID)
 		ON CONFLICT (organization_name) DO UPDATE
 		SET country_name             = COALESCE(EXCLUDED.country_name,             plg_organization.country_name),
+		    owner_user_id            = COALESCE(plg_organization.owner_user_id,    EXCLUDED.owner_user_id),
 		    company_name_from_domain = COALESCE(EXCLUDED.company_name_from_domain, plg_organization.company_name_from_domain),
 		    moesif_company_id        = COALESCE(EXCLUDED.moesif_company_id,        plg_organization.moesif_company_id),
 		    created_on               = LEAST(plg_organization.created_on, EXCLUDED.created_on),
@@ -162,7 +270,7 @@ func upsertOrganization(ctx context.Context, tx pgx.Tx, in domain.Registration,
 		inserted bool
 	)
 	err := tx.QueryRow(ctx, q, name, registeredOn, personID,
-		in.CountryName, in.CompanyNameFromDomain, in.CompanyID).Scan(&id, &inserted)
+		in.CountryName, in.CompanyNameFromDomain, in.CompanyID, in.UserID).Scan(&id, &inserted)
 	if err != nil {
 		if isUniqueViolation(err) {
 			// The only other unique key here is the company id: two organisation
@@ -172,6 +280,43 @@ func upsertOrganization(ctx context.Context, tx pgx.Tx, in domain.Registration,
 		return "", false, fmt.Errorf("upsert organization: %w", err)
 	}
 	return id, inserted, nil
+}
+
+// adoptCloudOrganization names an unnamed organisation with this company id;
+// ok is false when there is none.
+func adoptCloudOrganization(ctx context.Context, tx pgx.Tx, in domain.Registration,
+	name, personID string, registeredOn time.Time) (string, bool, error) {
+
+	companyID := strings.TrimSpace(in.CompanyID)
+	if companyID == "" {
+		return "", false, nil
+	}
+
+	const q = `
+		UPDATE plg_organization
+		SET    organization_name        = $1,
+		       registered_user          = COALESCE(registered_user, $3::UUID),
+		       country_name             = COALESCE(NULLIF(BTRIM($4), ''), country_name),
+		       company_name_from_domain = COALESCE(NULLIF(BTRIM($5), ''), company_name_from_domain),
+		       owner_user_id            = COALESCE(owner_user_id, NULLIF($7, '')::UUID),
+		       created_on               = LEAST(created_on, $2),
+		       updated_at               = NOW()
+		WHERE  moesif_company_id = $6 AND organization_name IS NULL
+		RETURNING id::TEXT`
+
+	var id string
+	err := tx.QueryRow(ctx, q, name, registeredOn, personID,
+		in.CountryName, in.CompanyNameFromDomain, companyID, in.UserID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		if isUniqueViolation(err) {
+			return "", false, &apierror.ValidationError{Msg: "organisation name " + name + " is already registered under a different company id"}
+		}
+		return "", false, fmt.Errorf("adopt cloud organization: %w", err)
+	}
+	return id, true, nil
 }
 
 // upsertOrgPlatform lands the pairing — the unit of work.

@@ -1,8 +1,8 @@
 # CSM AI Integration Service
 
 Go HTTP server (`net/http`, Go 1.26+) that holds **every call the CSM platform makes to Claude**. Today
-that is dashboard generation for the CSM portal; other AI features join under `/ai/`. It is the only
-component with a Claude client, the Anthropic SDK and the model credentials: the CSM portal backend
+that is dashboard generation for the CSM portal and email domain classification for csm-scheduled-tasks;
+other AI features join under `/ai/`. It is the only component with a Claude client, the Anthropic SDK and the model credentials: the CSM portal backend
 (`apps/csm-portal/backend`) must hold none of them.
 
 ## What lives here and what does not
@@ -24,6 +24,7 @@ the registry itself, so it is configured in one place.
 |---|---|
 | `GET /health` | liveness, always 200 |
 | `POST /ai/dashboards/generate` | the JSON dashboard generator (`internal/dashboards`, `internal/handler`) |
+| `POST /ai/email-domains/classify` | the email domain classifier (`internal/emaildomains`, `internal/handler`) |
 
 ### `POST /ai/dashboards/generate`
 
@@ -52,6 +53,41 @@ the backend maps the code to its own status and user-facing text:
 | 429 | `usage_limit` | the gateway answered 429 (a request, token or spend limit on the AI side), also after the SDK's one retry; the user is told the AI's usage limit was reached, not that it could not be reached |
 | 502 | `model_call_failed` | any other call failure, an overloaded gateway (529 / 503) included; a gateway 401/403 is this service's key problem, never passed on |
 
+### `POST /ai/email-domains/classify`
+
+Body `{domain}`, the domain alone: never an email or a local part. Called by csm-scheduled-tasks'
+`plg_registration_validation`, which reads the owner's email, keeps the domain and decides role mailboxes
+itself. The answer is `{domain, classification, source, usage}`, `classification` being a portal option code
+of `REGISTERED_EMAIL_CLASSIFICATION`, decided in this order (`source`):
+
+| Rule | `classification` | `source` |
+|---|---|---|
+| `wso2.com` or a subdomain | `INTERNAL` | `rules` |
+| On the disposable list | `DISPOSABLE` | `rules` |
+| A free provider (`gmail.com`, ...) | `PERSONAL` | `rules` |
+| Answered by the model in the last 24 hours | the cached answer | `cache` |
+| DNS finds no mail server and no address (the domain does not exist) | `DISPOSABLE` | `rules` |
+| Otherwise, one model call (`EMAIL_DOMAIN_MODEL`, structured output) | `CORPORATE`, `PERSONAL`, `DISPOSABLE` or `UNKNOWN` | `model` |
+
+- **The disposable list** is a committed copy of the curated disposable-email-domains blocklist (CC0),
+  `internal/emaildomains/disposable_domains.txt`, built into the binary: no outbound call. A DISPOSABLE
+  answer abandons the signup, so the list changes only by PR, where the diff is reviewed. Refresh it with
+  `make disposable-list` (monthly is plenty: a domain not on it yet goes to the model) and never edit it by
+  hand. `TestTheCommittedListIsSafe` fails if it names a free provider or a WSO2 domain. A real provider
+  the upstream list wrongly carries (`21cn.com`) goes in `notDisposable`, which is dropped on load, and in
+  `freeProviders`, so every regenerated list stays corrected.
+- **Logs never hold a gateway reply**: the SDK's error text includes the gateway's response body, which
+  could echo the domain, so a failed call is logged as its status only (`modelErrorForLog`).
+- **DNS never blocks a classification**: only a definite "not found" for both the mail server and the
+  address makes a domain DISPOSABLE. Any other DNS failure (a timeout, a refused or blocked query) is logged
+  as a warning, without the domain, and the model decides. Names are looked up with a trailing dot, so the
+  cluster's search domains are not tried first.
+- **The cache** holds model answers only (not `UNKNOWN`), per instance, in memory, at most 10,000 domains.
+- **Errors**: 400 `invalid_request` (the body or the domain), 503 `not_configured` (only when the model is
+  needed), and the model errors as for dashboards. The caller leaves the
+  classification unset and tries again on its next run.
+- **The prompt** holds the domain and nothing else; the system prompt says it is not on the small lists. Logs never hold the domain: the classification, `source` and token usage only.
+
 ## Model settings
 
 `ANTHROPIC_API_KEY` (a secret) and `CLAUDE_BASE_URL` go together: the key is the CSM AI gateway's, so
@@ -64,10 +100,11 @@ are set per environment in Configs & Secrets (the key as a secret).
 ## Auth model
 
 - **Inbound: no authentication in the application.** The Choreo endpoint is **Organization**-visible
-  (`.choreo/component.yaml`), and the only caller is the CSM portal backend, which uses the platform's
-  shared OAuth2 client-credentials app (the same pattern as `csm-notification-service`). The backend has
-  already authenticated and authorised the end user. Do not make the endpoint Public, and do not add
-  end-user token validation here without confirming that assumption has changed.
+  (`.choreo/component.yaml`), and the callers are the CSM portal backend and csm-scheduled-tasks, both
+  through the platform's shared OAuth2 client-credentials app (the same pattern as
+  `csm-notification-service`). The backend has already authenticated and authorised the end user. Do
+  not make the endpoint Public, and do not add end-user token validation here without confirming that
+  assumption has changed.
 - **The end user's id is forwarded, for the logs only.** The backend sends the signed-in user's id
   (never their email) as `X-CSM-User-ID`; `middleware.UserID` puts it in the context and the log handler
   adds it to every line as `userID`. Nothing is authorised by it, and the model call is the same for
@@ -76,12 +113,13 @@ are set per environment in Configs & Secrets (the key as a secret).
 ## Token usage log
 
 Every model call writes one line, `dashboard generate: token usage` (`logUsage` in
-`internal/dashboards/generate.go`), whatever its outcome, since every reply spends tokens:
+`internal/dashboards/generate.go`) or `email domain classify: token usage` (`internal/emaildomains`), whatever
+its outcome, since every reply spends tokens:
 
 | Field | |
 |---|---|
 | `userID`, `correlationID` | added by the log handler from the request (the same keys as the CSM portal backend's lines) |
-| `model` | `CLAUDE_MODEL` |
+| `model` | `CLAUDE_MODEL`, or `EMAIL_DOMAIN_MODEL` for a domain |
 | `outcome` | `ok`, `declined`, `refused`, `truncated`, `unusable`, `usage_limit` (no reply: the gateway's 429, with 0 tokens), or `failed` (no reply: any other gateway error, a connection failure or a timeout, with 0 tokens) |
 | `stopReason` | the model's, empty when `failed` |
 | `inputTokens` | input neither read from nor written to the prompt cache: mostly the user message once the system prompt is cached (see "Prompt caching") |
