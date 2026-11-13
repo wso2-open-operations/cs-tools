@@ -39,10 +39,9 @@ func TestLongestGap(t *testing.T) {
 	if _, err := LongestGap("not a cron", from); err == nil {
 		t.Error("an invalid expression should fail")
 	}
-	// Monthly: no firing in the sample from the 12th, one from the 28th.
-	for _, start := range []time.Time{from, time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)} {
-		if _, err := LongestGap("0 0 1 * *", start); err == nil {
-			t.Errorf("a monthly expression from %s should fail", start.Format(time.DateOnly))
+	for _, expr := range []string{"0 0 1 * *", "@monthly", "*/15 * * 1 *", "0 0 * * 1 2027"} {
+		if _, err := LongestGap(expr, from); err == nil {
+			t.Errorf("%s should fail: eight days cannot bound it", expr)
 		}
 	}
 }

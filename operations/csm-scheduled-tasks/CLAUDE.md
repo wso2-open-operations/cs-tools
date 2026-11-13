@@ -866,8 +866,8 @@ portal product. **Off unless `PLG_MOESIF_SYNC_ENABLED=true`**; `MOESIF_API_KEY` 
   refreshes what is stored, and a failed or superseded period is covered by the next run as long as the
   outage is shorter than the window. The handler reads the wall clock, not the period start. Startup
   refuses a window shorter than the schedule's longest gap between runs plus `DRIVER_INTERVAL`
-  (`schedule.LongestGap`), since events in between would never be read, and a schedule that can go
-  more than a week between runs.
+  (`schedule.LongestGap`), since events in between would never be read, and a schedule limited to
+  certain days of the month, months or years, whose gaps an eight-day sample cannot bound.
 - **Failures.** An event with no company id or product, or one entity-service rejects, is recorded in
   `plg_ingest_failure` under its Moesif event id, by ids only; entity-service keeps one open row per
   event id (a partial unique index, migration 0288), so later runs do not repeat it. Neither fails the
