@@ -1003,7 +1003,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	s.mirrorInitialSNComments(ctx, c.ID, req.Type, req.Description)
 
 	// Persists whatever the caller's own req.WatchList already asked for --
-	// the account's four named stakeholders are deliberately NOT persisted
+	// the account's named stakeholders are deliberately NOT persisted
 	// here (see addRequestedWatchers' own doc comment): they're resolved
 	// fresh, straight from the account row, every time a case.* event is
 	// about to be emailed instead (publishCaseCreatedEvent and friends,
@@ -1220,9 +1220,12 @@ func mergeUnique(a, b []string) []string {
 
 // addRequestedWatchers persists a just-created case's explicitly requested
 // watchers (the caller's own CreateCaseRequest.WatchList) to
-// work_item_watcher. The account's four named stakeholders (technical
+// work_item_watcher. The account's named stakeholders (technical
 // owner, secondary technical owner, account manager, renewal account
-// manager -- migration 0012) are deliberately NOT added here, and never
+// manager, customer success manager -- migration 0012 -- plus the
+// project's own onboarding owner, migration 0104, while onboarding is
+// IN_PROGRESS; see AccountDefaultWatcherEmails' own doc comment) are
+// deliberately NOT added here, and never
 // persisted into work_item_watcher at all, on either the create or the
 // update path (see updateCaseWatchList's own doc comment for its matching
 // rule) -- a real, reported problem with the old design this replaces: a
@@ -2781,7 +2784,7 @@ func newlyAddedWatcherIDs(current []domain.WatchListUser, submitted []string) []
 
 // updateCaseWatchList implements UpdateCase's WatchList branch: replacing
 // the case's watch list wholesale with req's user ids via
-// CaseRepository.SetCaseWatchList. The account's four named stakeholders are
+// CaseRepository.SetCaseWatchList. The account's named stakeholders are
 // never part of this -- see addRequestedWatchers' own doc comment for why
 // they're not persisted into work_item_watcher at all, on either the create
 // or the update path: they're resolved fresh from the account row at

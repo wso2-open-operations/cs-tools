@@ -1487,9 +1487,9 @@ revisited.
 
   **`Recipients` depends on `req.Type`.** For `case`/`engagement`/
   `service_request`/`security_report_analysis` it's the case's own resolved
-  watch list emails, unioned with the account's four default-watcher
+  watch list emails, unioned with the account's default-watcher
   stakeholders resolved fresh via `CaseRepository.AccountDefaultWatcherEmails`
-  — see "Case watch list" below for why those four are resolved at publish
+  — see "Case watch list" below for why those are resolved at publish
   time rather than read from the persisted watch list. For `announcement`,
   `publishCaseCreatedEvent` instead resolves the audience via
   `CaseService.ProjectContactEmailsByRole` — every `project_contact`
@@ -4584,13 +4584,27 @@ changed.
   `validateWatchListProjectMembership` for a submitted id (nothing exempt
   to submit any more).
 
+  **`customer_success_manager_id` and the project's `onboarding_owner_id`
+  were later added to `AccountDefaultWatcherEmails`, by explicit product
+  request, reversing the original exclusion above.** The CSM is now unioned
+  into a `case.*` email's `Recipients` the same way the other four
+  stakeholders are. The project's own onboarding owner (`project.
+  onboarding_owner_id`, migration 0104) is unioned in too, but only while
+  `project.onboarding_status` is `IN_PROGRESS` — an onboarding owner is a
+  default recipient during the onboarding window itself, not before it
+  starts or after it finishes, so the query gates that one column on the
+  other (`CASE WHEN p.onboarding_status = 'IN_PROGRESS' THEN oo.email END`)
+  rather than always including it. Resolved fresh at publish time like every
+  other stakeholder here, so a project moving into or out of onboarding (or
+  the CSM/onboarding owner being reassigned) is reflected on the very next
+  notification, not stuck on whoever held the role earlier.
+
   **Superseded below: `fetchCaseWatchers` now also synthesizes the
   account's named stakeholders directly into every read, not just into the
   email audience.** The paragraph above (and `AccountDefaultWatcherEmails`)
   is still exactly how `Recipients` is resolved for a `case.*` email — that
-  hasn't changed, `customer_success_manager_id` included: the CSM still
-  isn't unioned into a case.* email's `Recipients`. What changed, by later
-  explicit product request, is the *display* side: a case's "Watchers" list
+  hasn't changed. What changed, by later explicit product request, is the
+  *display* side: a case's "Watchers" list
   in both portals previously showed only real `work_item_watcher` rows, so
   the stakeholders being emailed by default were invisible on that list
   entirely — a customer or engineer looking at "who's watching this case"
@@ -4606,18 +4620,16 @@ changed.
     subject to that check at all, which is also what keeps an engineer's
     own Follow/Unfollow self-subscribe working regardless of
     `project_contact` membership.
-  - `stakeholders` resolves **five** account roles — the same four
-    `AccountDefaultWatcherEmails` resolves, plus
-    `customer_success_manager_id` — and synthesizes one row per resolved
-    stakeholder, every time, with `locked = true`. This is a strictly
-    larger set than the email audience by deliberate product decision: the
-    CSM is a real stakeholder worth *showing* on the case, even though
-    `AccountDefaultWatcherEmails` still deliberately excludes them from the
-    default email audience (see that function's own doc comment — a
-    decision about who gets emailed, not about who the account's
-    stakeholders are). None of these five are auto-persisted into
-    `work_item_watcher` (see above) and still aren't; this is a read-time
-    join, not a write.
+  - `stakeholders` resolves **five** account roles — the same five
+    `AccountDefaultWatcherEmails` resolves (technical owner, secondary
+    technical owner, account manager, renewal account manager, customer
+    success manager) — and synthesizes one row per resolved stakeholder,
+    every time, with `locked = true`. `AccountDefaultWatcherEmails` also
+    unions in the project's own onboarding owner, conditionally, which is
+    a project-level role rather than one of the account's named
+    stakeholders and so is not one of this display's five. None of these
+    five are auto-persisted into `work_item_watcher` (see above) and still
+    aren't; this is a read-time join, not a write.
   - A user who is both a real persisted watcher and one of the five
     stakeholders appears exactly once, as the locked (stakeholder) copy —
     `DISTINCT ON (id)` ordered `locked DESC` after `UNION ALL`-ing the two
