@@ -183,8 +183,11 @@ func TestProcessProject_InvoiceDueMoreThan90DaysAway_ResetsInvoiceToOpen(t *test
 	}
 }
 
-func TestProcessProject_InvoiceStillWithin90Days_NotReset(t *testing.T) {
-	reader := invoiceLinkedReader(t, renewalNow.AddDate(0, 0, 40))
+// TestProcessProject_InvoiceDueWithinRecordedWindow_NotReset: the due date is
+// inside the recorded 30-day window (helper due date = now+24), so the track
+// is untouched.
+func TestProcessProject_InvoiceDueWithinRecordedWindow_NotReset(t *testing.T) {
+	reader := invoiceLinkedReader(t, renewalNow.AddDate(0, 0, 25))
 	updater, _ := runRenewal(t, reader, renewalProject(390, "open", "30_days_notice"))
 
 	if len(updater.calls) != 0 {

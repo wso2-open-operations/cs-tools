@@ -620,8 +620,10 @@ both places.
   its date or invoice moved the event. An Open track whose saved `event_type` is `suspend` (and whose
   `actionSuspendProject`, if present, is `SUCCESSFUL`) does nothing when the decision is to suspend: no notice,
   no suspension, no record, and it does not mark the project closed for the other track
-  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date more than 90 days away
-  still resets the event to `open`, which clears this.
+  (`suspensionstate.SuspensionCompleted`, `SuspensionCompletedForInvoices`). A date that has moved out past the
+  recorded window (`movedOut`: more days remain than the recorded window's day count, 0 for a recorded
+  suspend) resets the event to `open`, which clears this; the reset applies to any distance, not only
+  beyond 90 days (a date extended from +7 to +45 starts the next term's reminders over).
 - **Hybrid evaluation (screening, `ACP_SCREENING`, default ON).** Today every open project costs about six
   sequential Salesforce-backed calls, so a run takes tens of minutes. With screening on, a run first decides
   from **CSM's own copy** of the Salesforce data (entity-service's `/invoices/search` and
@@ -635,7 +637,7 @@ both places.
   - *Superset rule.* A project is a candidate if any of: (date) its CSM end date is missing or on or before
     today + 91 days (the widest window plus a day of margin; past dates included); (state) its
     `suspensionProcessState` records anything but "open" for either track, or cannot be parsed
-    (`suspensionstate.HasRecordedEvent`; the renewal reset still runs for a project far from its end date);
+    (`suspensionstate.HasRecordedEvent`; the reset still runs for a project whose date moved out past its recorded window);
     (invoice) it owns, through a link, an unpaid invoice with a due date on or before today + 91 days. The
     invoice test is safe because the suspend date is the due date, or invoice date + 60 days when the grace
     period applies and the credit period is at most 60 days, which is never earlier than the due date: a
