@@ -2217,12 +2217,38 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		// adminReopen is the one other transition allowed past the table --
 		// req.AdminReopen, set only by apps/csm-portal/backend after its own
 		// PermAdmin check (see UpdateCaseRequest.AdminReopen), moving a
-		// closed case to any other state. isInternalCaller is required here
-		// too, defense in depth against any other caller of this same
-		// domain.UpdateCaseRequest forwarding a client-supplied AdminReopen
-		// verbatim. It only ever applies to a case that is actually closed --
-		// it grants no bypass for any other transition.
+		// closed case to any other state. isInternalCaller alone is NOT
+		// enough: it only distinguishes WSO2 staff from an external/customer
+		// caller, so any internal user (not just an admin) with a valid
+		// token could otherwise call this endpoint directly and set
+		// AdminReopen themselves, bypassing the portal's own PermAdmin
+		// check entirely -- CodeRabbit-caught gap in an earlier revision of
+		// this change. The actual admin-role decision is made once, by the
+		// portal backend; this additionally requires the caller's own
+		// client id to BE the portal backend's configured client id
+		// (s.csmPortalClientID, the same identity mayListDeletedAttachments
+		// already trusts for an equivalent admin-only override), so no
+		// other caller of this same domain.UpdateCaseRequest -- whatever
+		// its own access level -- can ever reach this bypass on its own.
+		// The non-empty check guards against an unset csmPortalClientID
+		// (empty string) matching an equally-empty/unset caller client id.
+		// It only ever applies to a case that is actually closed -- it
+		// grants no bypass for any other transition.
+		//
+		// Scoped to work_item type "case" only -- CaseRepository.UpdateCase's
+		// reopen_reason column write (updateCaseQuery) only exists on the
+		// "case" extension table, not the other four case-like types'
+		// (engagement/service_request/security_report_analysis/
+		// announcement, see caseLikeExtensionUpdate). Rejected explicitly
+		// here rather than silently reaching the repository and having
+		// ReopenReason just disappear unpersisted -- CodeRabbit-caught gap:
+		// an admin reopening one of those other types would otherwise get a
+		// 200 with no signal their reason was never saved.
+		if req.AdminReopen != nil && *req.AdminReopen && before.Type != nil && *before.Type != "case" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen is only supported for cases"}
+		}
 		adminReopen = isInternalCaller && req.AdminReopen != nil && *req.AdminReopen &&
+			s.csmPortalClientID != "" && auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID &&
 			*before.State == domain.CaseStateClosed && *req.State != domain.CaseStateClosed
 		if *before.State != *req.State && !autoclosureClose && !adminReopen && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{

@@ -278,8 +278,15 @@ function buildSecondaryItems(
   // the case is actually closed — every lifecycle button above is already
   // empty for a closed case regardless of caller, since `nextStates` stays
   // terminal for everyone (see case_state_transitions.go); this is the one
-  // deliberate exception to that rule.
-  if (caseDetail.state === "closed" && isAdmin) {
+  // deliberate exception to that rule. Scoped to plain cases only (undefined
+  // caseType reads as "case" too, same as a legacy row with none set) --
+  // entity-service's own reopen_reason column only exists on the "case"
+  // extension table, so the backend rejects this for every other type.
+  if (
+    caseDetail.state === "closed" &&
+    isAdmin &&
+    (caseDetail.caseType === "case" || caseDetail.caseType === undefined)
+  ) {
     items.push({
       key: "reopen_case",
       label: "Reopen case…",

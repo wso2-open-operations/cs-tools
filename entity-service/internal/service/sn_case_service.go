@@ -3092,6 +3092,20 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "markFixIssued is only supported for the Postgres data source"}
 	}
 
+	// AdminReopen/ReopenReason are Postgres-only for the same reason
+	// MarkFixIssued is just above: the admin-reopen bypass (see
+	// UpdateCaseRequest.AdminReopen's own doc comment) is a caseService-only
+	// state-transition-table override with a write-only Postgres audit
+	// column (reopen_reason) backing it -- there is no ServiceNow-native
+	// equivalent for either. Rejected explicitly rather than silently
+	// accepted and dropped: under plain DATA_SOURCE=servicenow this method
+	// IS the active CaseService, so a caller's AdminReopen would otherwise
+	// reach ServiceNow as an ordinary state update with the admin's
+	// reopenReason discarded and no error at all.
+	if req.AdminReopen != nil || req.ReopenReason != nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen and reopenReason are only supported for the Postgres data source"}
+	}
+
 	hasResolutionFields := req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil
 
 	// exclusiveCount covers the role-gated fields with complex side effects

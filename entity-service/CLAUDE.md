@@ -4816,8 +4816,13 @@ is otherwise terminal for every caller, same as a plain state value with no entr
 forwarded verbatim from a client's own request body, see `sanitizeAdminReopenAttrs` in that
 component's `state.go` -- once its own `PermAdmin` check passes and the case's current state is
 genuinely closed. `isValidCaseStateTransition`'s caller in `case_service.go` additionally requires
-`isInternalCaller`, defense in depth against any other caller of this same
-`domain.UpdateCaseRequest` forwarding a client-supplied value unchecked. The same flag also skips
+`isInternalCaller` AND that the caller's own client id is the configured CSM portal backend's
+(`CaseService.csmPortalClientID`, the same identity `mayListDeletedAttachments` already trusts for
+an equivalent admin-only override) -- `isInternalCaller` alone only separates WSO2 staff from an
+external/customer caller, not an admin from any other internal caller, so without the client-id
+check any internal user (direct M2M, or their own token resolved straight from `x-user-id-token`,
+neither of which goes through the portal's `PermAdmin` gate at all) could set `AdminReopen`
+themselves and reopen a closed case -- a real gap caught in review before merge. The same flag also skips
 the SLA-engine (`ApplyCaseStateEffects`) and `case.status_changed` publish side effects a
 reopen-from-closed must not trigger -- a closed case has no open clocks left to resume, and
 watchers must not get an email for this. `ReopenReason` (optional free text, only meaningful

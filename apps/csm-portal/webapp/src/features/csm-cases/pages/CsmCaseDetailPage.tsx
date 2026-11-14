@@ -922,6 +922,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setResolutionDialog(null);
     setNoPublicCommentConfirm(null);
     setSeverityOpen(false);
+    setReopenOpen(false);
     setChangeCaseTypeOpen(false);
     setLogTimeOpen(false);
     // Not just cosmetic: the edit dialog renders on editTimeCard alone, so a
@@ -1824,10 +1825,18 @@ export default function CsmCaseDetailPage(): JSX.Element {
       const payload: BeCaseUpdatePayload = reason
         ? { state: target, reopenReason: reason }
         : { state: target };
+      // Compared against caseViewTokenRef in the callbacks below, not caseId
+      // itself -- see onRequestUpdate's identical guard for why a plain
+      // caseId comparison can't distinguish this view's request from a
+      // still-pending one left over from an earlier visit to the same case
+      // (a response landing after navigating away must not show A's result
+      // or close B's dialog).
+      const submittedViewToken = caseViewTokenRef.current;
       patchCase.mutate(
         payload,
         {
           onSuccess: () => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
             setReopenOpen(false);
             setFeedback({
               message: `Case reopened to ${stateLabel(target)}.`,
@@ -1835,7 +1844,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
               sticky: true,
             });
           },
-          onError: (err) => showError("Could not reopen the case.", err),
+          onError: (err) => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            showError("Could not reopen the case.", err);
+          },
         },
       );
     },
