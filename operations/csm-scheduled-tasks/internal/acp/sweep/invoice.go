@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/closure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
 )
 
 // dueInvoice holds the invoice-specific fields the invoice-based notice
@@ -99,7 +100,7 @@ End Date: %[5]s
 Since projects need to be due on the due date of each invoice, kindly take the remedial actions to avoid any disruptions of subscription support. We appreciate your understanding and your prompt attention to this matter.
 
 Best Regards,
-WSO2 Team`
+%[7]s Team`
 
 // internalInvoiceSuspensionBodyTemplate is the day-0 invoice-based internal
 // notice body, confirmed verbatim against actual_0_days_invoice_email.html
@@ -124,7 +125,7 @@ End Date: %[5]s
 Since the project is suspended, kindly take the remedial actions to reinstate the subscription support. We appreciate your prompt attention to this matter.
 
 Best Regards,
-WSO2 Team`
+%[7]s Team`
 
 // invoiceLine is one invoice as the internal notice lists it.
 type invoiceLine struct {
@@ -169,7 +170,7 @@ func internalInvoiceNoticeBody(window closure.NoticeWindow, proj project, accoun
 	}
 	return fmt.Sprintf(template,
 		accountOwnerName, proj.Name, proj.ProjectKey, formatDate(proj.StartDate), formatDate(proj.EndDate),
-		strings.Join(fields, "\n\n"))
+		strings.Join(fields, "\n\n"), notify.CompanyName())
 }
 
 // customerInvoicePaymentReminderBodyTemplate is the 15/7-day customer-facing
@@ -178,36 +179,36 @@ func internalInvoiceNoticeBody(window closure.NoticeWindow, proj project, accoun
 // template, no day-count-specific wording, mirroring how
 // customerUpcomingSuspensionBodyTemplate already covers both 15 and 7 for
 // subscription-based.
-const customerInvoicePaymentReminderBodyTemplate = `This is a gentle reminder that payment for your WSO2 subscription associated with the project %[1]s which is due on %[2]s if not settled. To ensure uninterrupted access to your support services, we kindly request that the invoice be settled on or before the due date.
+const customerInvoicePaymentReminderBodyTemplate = `This is a gentle reminder that payment for your %[3]s subscription associated with the project %[1]s which is due on %[2]s if not settled. To ensure uninterrupted access to your support services, we kindly request that the invoice be settled on or before the due date.
 
-We understand that delays can occasionally occur, and we are here to assist you in resolving any issues related to this payment. If you have any questions or require assistance, please do not hesitate to reach out to your WSO2 Account Manager. If the payment has already been made, we sincerely apologize for any inconvenience. Kindly notify us by sending the payment details, including the payment date to billing@wso2.com so we can update our records.
+We understand that delays can occasionally occur, and we are here to assist you in resolving any issues related to this payment. If you have any questions or require assistance, please do not hesitate to reach out to your %[3]s Account Manager. If the payment has already been made, we sincerely apologize for any inconvenience. Kindly notify us by sending the payment details, including the payment date to billing@wso2.com so we can update our records.
 
-Your cooperation is greatly appreciated in ensuring the continued, uninterrupted WSO2 services. We greatly appreciate your prompt attention to this matter and your continued partnership with WSO2.
+Your cooperation is greatly appreciated in ensuring the continued, uninterrupted %[3]s services. We greatly appreciate your prompt attention to this matter and your continued partnership with %[3]s.
 
 Best Regards,
-WSO2 Team`
+%[3]s Team`
 
 // customerInvoiceSuspendedBodyTemplate is the day-0 customer-facing invoice
 // body, confirmed verbatim against actual_0_days_invoice_email_customer.html
 // — past tense, references SuspendDate (the actual grace-period-adjusted
 // suspend date), not the raw invoice due date.
-const customerInvoiceSuspendedBodyTemplate = `Your WSO2 subscription for %[1]s(%[2]s) is currently past due. As a result, your project was suspended on %[3]s and support portal has been temporarily paused. This also means your license to access product updates and the WSO2 support portal has been temporarily paused.
+const customerInvoiceSuspendedBodyTemplate = `Your %[4]s subscription for %[1]s(%[2]s) is currently past due. As a result, your project was suspended on %[3]s and support portal has been temporarily paused. This also means your license to access product updates and the %[4]s support portal has been temporarily paused.
 
 To restore your services, please complete the outstanding payment and send your confirmation to billing@wso2.com with the relevant payment information to ensure a swift resolution.
 If you have already settled this invoice, please provide the transaction details so we can reactivate your account immediately.
 
-We appreciate your prompt attention to this matter. Our goal is to ensure the continuity of your WSO2 services, and we remain committed to assisting you.
+We appreciate your prompt attention to this matter. Our goal is to ensure the continuity of your %[4]s services, and we remain committed to assisting you.
 
 Best Regards,
-WSO2 Team`
+%[4]s Team`
 
 // customerInvoiceNoticeBody builds the invoice-based customer-facing notice
 // body.
 func customerInvoiceNoticeBody(window closure.NoticeWindow, proj project, invoice dueInvoice) string {
 	if window.IsTerminal() {
-		return fmt.Sprintf(customerInvoiceSuspendedBodyTemplate, proj.Name, proj.ProjectKey, formatDateUS(&invoice.SuspendDate))
+		return fmt.Sprintf(customerInvoiceSuspendedBodyTemplate, proj.Name, proj.ProjectKey, formatDateUS(&invoice.SuspendDate), notify.CompanyName())
 	}
-	return fmt.Sprintf(customerInvoicePaymentReminderBodyTemplate, proj.Name, formatDateUS(&invoice.DueDate))
+	return fmt.Sprintf(customerInvoicePaymentReminderBodyTemplate, proj.Name, formatDateUS(&invoice.DueDate), notify.CompanyName())
 }
 
 // lineBreaks matches every kind of line break an upstream value might carry.

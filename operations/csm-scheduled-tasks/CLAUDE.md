@@ -1031,15 +1031,50 @@ that's too noisy for a given task in practice, the fix is a notification-frequen
 on top later, not a retry cap.
 
 The email itself (`internal/notify/templates/alert.html`, rendered by `notify.RenderAlertEmail`) is
-a plain HTML template in the same table-based, WSO2-branded style
-`integrations/csm-notification-service`'s own templates use (`escapeHTML`/`escapeMultiline` mirror
-that service's own functions of the same name) — task name, period, attempt count, next retry time,
-and the failure's error message.
+a plain HTML template in the same table-based, configurable-branding style (see "Logo and company
+name" below) `integrations/csm-notification-service`'s own templates use (`escapeHTML`/
+`escapeMultiline` mirror that service's own functions of the same name) — task name, period,
+attempt count, next retry time, and the failure's error message.
 
 The engine itself still never sends a success email on any task's behalf — `stale_cases_report`'s
 and `open_cases_report`'s own reports (see "Stale cases report"/"Open cases report" above) are each
 sent from inside that task's own handler, not through this alerting path at all. See "Per-task
 report emails" below for why that's not a generic engine feature.
+
+## Logo and company name
+
+Every email this component sends — `internal/notify`'s eight report/alert templates and
+`internal/acp/notify`'s five ACP closure templates alike — carries a configurable logo and company
+name, mirroring `integrations/csm-notification-service`'s own equivalent config.
+`EMAIL_LOGO_DARK_URL`/`EMAIL_TEMPLATE_COMPANY_NAME` are the same env var names that service uses,
+reusable verbatim across a deployment; `EMAIL_LOGO_LIGHT_URL` is this component's own name for its
+equivalent of that service's `EMAIL_LOGO_WHITE_URL`. Unset keeps every built-in default (`WSO2`,
+the existing logo URLs) exactly as it was before this config existed.
+
+- **`EMAIL_LOGO_LIGHT_URL`** overrides `internal/notify.SetLogoURL` — all eight of that package's
+  templates share one orange header, so they all need the same light-colored logo.
+  **`EMAIL_LOGO_DARK_URL`** overrides `internal/acp/notify.SetLogoURL` — all five of that package's
+  templates share one light background, so they need a dark-colored logo instead. The two are
+  deliberately separate env vars, not one shared value, since the two packages' templates need
+  opposite logo colors.
+- **`EMAIL_TEMPLATE_COMPANY_NAME`** overrides both packages' `SetCompanyName` with the same value —
+  it is the same real-world company name regardless of which package sends the email. Replaces the
+  literal word "WSO2" in: the copyright line and the "WSO2 Case Id"/"WSO2 Case ID"/"WSO2 ID"/"WSO2
+  Product" report column headers (`internal/notify`); the footer disclaimer ("sent by WSO2's
+  support system") and logo alt text, across all five ACP templates (`internal/acp/notify`); and
+  the plain-text ACP suspension/invoice notice bodies' own "WSO2 Team" signoffs and "WSO2
+  subscription"/"WSO2 Account Manager"/"WSO2 services" body copy (`internal/acp/sweep`'s
+  `sweep.go`/`invoice.go`, which call `notify.CompanyName()` — note this is `internal/acp/notify`'s
+  `CompanyName`, not `internal/notify`'s own same-named function; the two packages are independent
+  and only share the config value, never package state).
+- **Deliberately NOT routed through this config**: `internal/notify.humanizeState`'s own "wso2" ->
+  "WSO2" case-state mapping (e.g. "Waiting On WSO2") stays hardcoded — see that function's own doc
+  comment for why (an internal-only report audience, no branding reason to vary it).
+  `time_card_report.html` (the one genuinely customer-facing email in this component) and the rota
+  reminder emails carry no logo or company name at all, by design — see "Monthly time card report"
+  and "Rota reminders" above.
+- Wired once, unconditionally, in `cmd/server/main.go`, right after `loadDotEnv`/the logger setup —
+  before anything else in `main` constructs an email client or renders a template.
 
 ## Environment variables
 
