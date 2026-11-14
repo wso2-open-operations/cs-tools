@@ -141,7 +141,7 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 		ProjectName:  p.ProjectName,
 		ProjectKey:   p.ProjectKey,
 		ProjectLink:  d.links.ProjectLink(p.ProjectID),
-		AccountOwner: firstNonBlank(p.AccountOwnerName, p.AccountOwnerEmail),
+		AccountOwner: notifications.StaffNameIf(firstNonBlank(p.AccountOwnerName, p.AccountOwnerEmail), notifications.IsWSO2Email(p.AccountOwnerEmail)),
 		StartDate:    p.StartDate,
 		EndDate:      p.EndDate,
 		IntendedFor:  intendedFor,

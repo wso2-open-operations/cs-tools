@@ -1102,6 +1102,9 @@ included, so it says nothing reliable about who someone is. No name in an email 
   Where it is used: the acknowledger on the case-acknowledged chat cards, the assignee on the case-assigned
   email and the incident-assigned chat card, the author of an internal note, a comment author whose
   `authorEmail` is a WSO2 address (`IsWSO2Email`, the way this service already tells staff from a customer where
-  an event carries no user type), and the team lead on SLA breach chat cards.
+  an event carries no user type; an internal-type user must have a `@wso2.com` address), the account owner on the
+  project-reactivated email when their address is a WSO2 one, and the team lead on SLA breach chat cards.
+  The case-created reporter and the change request requester/actor carry no email or user type in their events,
+  so those are stripped but get no icon.
 - **New alert that names a person:** strip comes for free (it is on the whole payload); add `StaffName` only where
   the person is staff by definition.
