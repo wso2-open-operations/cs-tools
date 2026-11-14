@@ -1308,3 +1308,5 @@ no server to leave running.
 go vet ./...              # vet
 go test -race ./...       # race-detector tests
 ```
+
+**Logo size is set by height, not width.** Every logo `<img>` in `internal/notify/templates` has a `height` attribute and `style="height:30px; width:auto"` (30 is the old 120px width divided by the built-in logo's 1277 x 317 ratio), so a configured logo shows at the same height the built-in one has and keeps its own proportions. The built-in logo looks as before. `TestEveryLogoIsSizedByHeight` enforces it for a new template.
