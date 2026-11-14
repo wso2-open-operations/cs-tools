@@ -235,13 +235,25 @@ schedules assume `TZ=UTC` like every other here.
   a shift and its on-call variant (`<CODE>_OC`), which share hours: Morning (with its on-call
   person) and Evening. The email lists its window's people.
 - **Weekend: one summary email plus one invitation email per team per day.** The summary goes
-  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike, in the layout the
-  CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
-  ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
-  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
-  window longer than 10 hours that has 2+ people every day asking them to split it into morning
-  and evening shifts), the zone
-  legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
+  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike: "Hello Team,",
+  one sentence with the dates and two short points (check your hours, tell your team lead about a
+  swap; no "confirm your contact details": the email shows none), then **one plain table per day** ("Saturday, 14 November"):
+  Rotation | CRE Team | SRE Team, **a row per window** in rota order, so two rows, LK and Americas
+  (`dayRows`): the rotation with that day's hours on its own clock under it ("06:00 AM – 09:00 PM
+  IST"; the Americas rotations in PDT/PST), the CRE people one per line (the on-call person in
+  their window's row as "Jay (on-call)"), and the SRE people whose turns fall in it.
+  A turn on other hours than its window's row gets a row of its own; the SRE column is left out
+  when there are no SRE turns. Then a **Rotation Definitions** table, one row per CRE window
+  (a shift and its on-call variant share it): Rotation with its member count ("2 members + 1
+  on-call") | Local time | UTC window | Role ("General support", "General support + On-call";
+  no zone prefix, the local time names it). A general-support window longer than 10 hours with
+  2+ people every day gets "Please sync internally and ensure coverage throughout the window."
+  under its role. SRE rotations are not defined there. (Folding the definitions into the day
+  rows was tried and rejected: the separate table read better.) The email is up to 900px wide.
+  Under the definitions, the zone legend (with each
+  zone's UTC offset) and one daylight saving note per window; then a Notes list only when something
+  is not yet marked (the invitation line was dropped by request); then the Handover paragraphs,
+  the schedule link and "Regards, CSM Team Schedule" (`notify.RenderWeekendRota`).
   The Americas Weekend's hours, and the Americas On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
   invitations use the same hours. Then each window (LK
@@ -252,12 +264,14 @@ schedules assume `TZ=UTC` like every other here.
   `rotareminder.SREWeekendSupport`, set in `main.go` when `ROTA_REMINDER_FAMILY` is CRE): a
   second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
   ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days. They
-  appear in an "SRE Weekend Support" block after the day teams ("Name (SRE Weekend, L1)", the
-  turn's `tier`), get one Rotation Definitions row per rotation (IST hours, "SRE support (L1 →
-  L2)" from the tiers seen), and are added to the summary's To. That is all: they never count
+  are in each day's SRE Team column, each turn in the CRE window whose hours it overlaps most
+  (SRE Weekend with LK, SRE Night with Americas; the nearest start when none overlaps): "Kim (L1)"
+  (name and the turn's `tier`), one per line, with the rotation's name up to its bracket and its
+  IST hours under them ("SRE Night, 09:00 PM – 06:00 AM IST"). No disclaimer (dropped as noise,
+  by request). They are added to the summary's To. That is all: they never count
   toward the weekend minimums, get no invitation or cancellation, and are not in the weekend
   record; IaaS and PaaS turns are not listed. The SRE read happens only when the summary is
-  being sent, and a failed read is logged and the summary goes without the block.
+  being sent, and a failed read is logged and the summary goes without the SRE column.
 - **Settings saved on the Rota Access tab win.** Every run first reads
   `GET /team-schedule/reminder-settings/{family}` (entity-service, migration 0242; the
   "CRE rota reminders" card, editable by a CSM admin or the CRE rota admin). When something
@@ -350,8 +364,8 @@ schedules assume `TZ=UTC` like every other here.
   window -- its date and hours on the rotation's own clock (`clockOf`: IST, except a rotation in
   `ROTA_REMINDER_WINDOWS`, e.g. the Americas Weekend in PDT/PST) -- a Name | Rotation table, the
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
-  (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
-  Definitions table, the zone note and the handover paragraphs. Rotation names come from config
+  (`notify.RenderWeekendRota`, described above): "Hello Team,", the two points, a table per day (LK and Americas rows),
+  the rotation definitions, the zone note, the notes and the handover paragraphs. Still plain: greys only, no logo or branding. Rotation names come from config
   (`CODE=Name`). Names are escaped. Every subject starts `[<family>]`
   (`[CRE] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
