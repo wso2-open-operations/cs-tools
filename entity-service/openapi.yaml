@@ -14200,6 +14200,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /features:
+    get:
+      summary: The shared per-page feature state for the CSM portal.
+      description: >
+        Every saved row, including enabled ones, and whether an admin has saved
+        once. Until then an empty list means the portal still reads its config
+        file. Any internal caller. A page with no row was never saved: a section
+        is available and a page follows its section. Responses are
+        Cache-Control no-store.
+      operationId: listFeatureOverrides
+      responses:
+        "200":
+          description: The saved rows and the saved-once mark.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureOverrideList'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Save one page's feature state.
+      description: >
+        Upserts one row. state is enabled or preview. A row is never deleted:
+        setting a page back to available writes enabled. markSaved is sent on the
+        last write of an admin's first save, so a save that stops partway does not
+        hide the config file. The admin role is checked by the CSM portal backend;
+        this service only accepts the call from that backend for a signed-in
+        person (CSM_PORTAL_BACKEND_CLIENT_ID). Responses are Cache-Control
+        no-store.
+      operationId: putFeatureOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveFeatureOverrideRequest'
+      responses:
+        "200":
+          description: The stored row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureOverride'
+        "400":
+          description: Invalid navNodeId or state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not called through the CSM portal for a signed-in person.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /standard-change-templates/search:
     post:
       summary: Search the standard change catalogue.
@@ -36104,6 +36187,48 @@ components:
           format: date-time
         updatedBy:
           type: string
+    FeatureOverride:
+      type: object
+      required: [navNodeId, state, updatedOn, updatedBy]
+      properties:
+        navNodeId:
+          type: string
+          description: The portal nav-node id, such as operations or operations.incidents.
+        state:
+          type: string
+          enum: [enabled, preview]
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          description: The admin who saved it.
+    FeatureOverrideList:
+      type: object
+      required: [overrides, savedOnce]
+      properties:
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureOverride'
+        savedOnce:
+          type: boolean
+          description: True once an admin has finished a first save. Until then the portal reads its config file.
+    SaveFeatureOverrideRequest:
+      type: object
+      required: [navNodeId, state]
+      additionalProperties: false
+      properties:
+        navNodeId:
+          type: string
+          maxLength: 200
+          pattern: '^[a-z0-9][a-z0-9._-]*$'
+        state:
+          type: string
+          enum: [enabled, preview]
+        markSaved:
+          type: boolean
+          description: Set on the last write of a first save.
     PortalBannerList:
       type: object
       required: [banners]
