@@ -55,7 +55,9 @@ import {
   formatCommentDate,
   INLINE_COMMENT_HTML_PURIFY,
   isNoveraOrBotSender,
+  splitStaffMark,
 } from "@features/support/utils/support";
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import DOMPurify from "dompurify";
 import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
@@ -279,7 +281,8 @@ export default function CommentBubble({
         >
           {displayName && (
             <Typography variant="body2" color="text.primary" fontWeight={500}>
-              {displayName}
+              {splitStaffMark(displayName).name}
+              {splitStaffMark(displayName).isStaff && <StaffNameIcon />}
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary">

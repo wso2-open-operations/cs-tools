@@ -60,6 +60,24 @@ function renderBubble(
 }
 
 describe("CommentBubble", () => {
+  it("shows a support engineer's icon in place of the circled W after the name", () => {
+    renderBubble({
+      comment: { ...mockComment, createdByFullName: "Jane Doe \u24E6" },
+    });
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+    expect(screen.queryByText(/\u24E6/u)).not.toBeInTheDocument();
+    // The avatar initials come from the name alone.
+    expect(screen.getByText("JD")).toBeInTheDocument();
+  });
+
+  it("shows no icon for a name without the mark", () => {
+    renderBubble({
+      comment: { ...mockComment, createdByFullName: "Jane Doe" },
+    });
+    expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
+  });
+
   it("hides Novera's <thinking> reasoning in the linked chat transcript", () => {
     renderBubble({
       comment: {
