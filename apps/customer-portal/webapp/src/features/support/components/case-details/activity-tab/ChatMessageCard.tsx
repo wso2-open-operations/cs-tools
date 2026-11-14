@@ -252,6 +252,9 @@ export default function ChatMessageCard({
           "& li": {
             mb: 0.5,
           },
+          // Lexical exports a nested list as a wrapper <li class="editor-list-item-nested"> holding only the sub-list;
+          // its marker would be a stray empty bullet (CSM portal does the same).
+          "& li.editor-list-item-nested": { listStyleType: "none" },
           "& p": {
             margin: "0 0 0.25em 0",
             whiteSpace: "pre-wrap",

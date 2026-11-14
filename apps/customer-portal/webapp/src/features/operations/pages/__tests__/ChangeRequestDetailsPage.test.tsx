@@ -995,4 +995,18 @@ describe("ChangeRequestDetailsPage", () => {
       expect(button("Approve")).not.toBeInTheDocument();
     });
   });
+
+  it("hides the marker of the nested-list wrapper li in the description but keeps normal bullets", () => {
+    mocks.changeRequest.value = makeChangeRequest({
+      description:
+        '<ul><li value="1">Parent</li><li value="2" class="editor-list-item-nested"><ul><li value="1">Child</li></ul></li></ul>',
+    });
+    const { container } = renderPage();
+    const wrapper = container.querySelector("li.editor-list-item-nested");
+    const normal = container.querySelector("li:not(.editor-list-item-nested)");
+    expect(wrapper).not.toBeNull();
+    expect(normal).not.toBeNull();
+    expect(getComputedStyle(wrapper as Element).listStyleType).toBe("none");
+    expect(getComputedStyle(normal as Element).listStyleType).not.toBe("none");
+  });
 });
