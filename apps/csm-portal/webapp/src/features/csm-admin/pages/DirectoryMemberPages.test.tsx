@@ -100,7 +100,8 @@ describe("role/group/team member pages send the correct filter key", () => {
   it("RoleMembersPage filters users/search by roleIds", async () => {
     renderAt("/admin/roles/agent", "/admin/roles/:id", <RoleMembersPage />);
     await waitFor(() => expect(authFetchMock).toHaveBeenCalled());
-    const [, requestInit] = authFetchMock.mock.calls[0];
+    const [url, requestInit] = authFetchMock.mock.calls[0];
+    expect(url).toMatch(/\/admin\/users\/search$/);
     expect(JSON.parse(requestInit.body as string).filters).toEqual({ roleIds: ["agent"] });
   });
 
