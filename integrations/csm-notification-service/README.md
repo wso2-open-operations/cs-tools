@@ -309,7 +309,7 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `EMAIL_FROM_ADDRESS` | Yes unless `EMAIL_SENDING_ENABLED=false` | none | Fixed From address; startup exits if missing while sending is on. | `no-reply@example.com` |
 | `EMAIL_REPLY_TO` | No | built-in support address if unset; none if set to empty | Reply-To for onboarding emails. Comma-separated. | `support@example.com` |
 | `EMAIL_LOGO_DARK_URL` | No | built-in logo if unset | Dark-coloured logo, shown on the light header of most emails. Must be a publicly fetchable `https` URL (mail clients do not load `data:` images). | `https://example.com/logo.png` |
-| `EMAIL_LOGO_WHITE_URL` | No | built-in white logo if unset | White-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-white.png` |
+| `EMAIL_LOGO_LIGHT_URL` | No | built-in light logo if unset | Light-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-light.png` |
 | `EMAIL_FOOTER_ICON_URL` | No | built-in icon if unset | Small decorative icon next to the footer copyright line in the onboarding emails. | `https://example.com/footer-icon.png` |
 | `EMAIL_TEMPLATE_COMPANY_NAME` | No | `WSO2` | Company name in the footer disclaimer, the signoff, the `... LLC` copyright line, the onboarding emails' titles/headings/body copy, and the `[... Support]` email subject prefix. | `Acme` |
 | `EMAIL_SENDING_ENABLED` | No | `true` | Killswitch for case.* email. `false` logs instead of sending, regardless of debug mode. Does not affect Chat or calls. | `false` |
