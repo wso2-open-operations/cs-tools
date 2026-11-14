@@ -50,6 +50,7 @@ import {
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseCommentsInfinite";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import { useCustomerPermissions } from "@hooks/useCustomerPermissions";
 import { usePostComment } from "@features/support/api/usePostComment";
 import type { CaseDetails } from "@features/support/types/cases";
 import type { CaseComment } from "@features/support/types/cases";
@@ -116,6 +117,7 @@ export default function ServiceRequestDetailContent({
 }: ServiceRequestDetailContentProps): JSX.Element {
   const theme = useTheme();
   const { data: userDetails } = useGetUserDetails();
+  const { isInternalUser } = useCustomerPermissions();
   const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
   const [commentText, setCommentText] = useState("");
   const [commentResetTrigger, setCommentResetTrigger] = useState(0);
@@ -792,7 +794,9 @@ export default function ServiceRequestDetailContent({
 
           {(() => {
             const displayableActions = CASE_STATUS_ACTIONS.filter((action) =>
-              getAvailableCaseActions(statusLabel).includes(action.label),
+              getAvailableCaseActions(statusLabel, isInternalUser).includes(
+                action.label,
+              ),
             ).filter((action) => action.label !== "Open Related Case");
             const isClosed = statusLabel?.toLowerCase() === CASE_STATUS.CLOSED;
             if (isClosed || displayableActions.length === 0) return null;
