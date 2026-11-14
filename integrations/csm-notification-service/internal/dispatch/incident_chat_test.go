@@ -27,7 +27,7 @@ import (
 
 const incidentCreatedWithTeam = `{"type":"incident.created","entityId":"inc-1","payload":{"title":"ContainerRecentlyOOMKilled","shortDescription":"ContainerRecentlyOOMKilled","callTo":"+15551234567","number":"INC0088718","priority":"CRITICAL","team":"Artemis SRE Group","category":"SERVICE_INTERRUPTION","state":"NEW","service":"wso2-cloud","environment":"central"}}`
 
-const incidentAssignedWithTeam = `{"type":"incident.assigned","entityId":"inc-1","payload":{"assigneeId":"u-1","assigneeName":"Shan Anjana","number":"INC0088718","team":"Artemis SRE Group","updatedBy":"shana@wso2.com"}}`
+const incidentAssignedWithTeam = `{"type":"incident.assigned","entityId":"inc-1","payload":{"assigneeId":"u-1","assigneeName":"Jane Doe","number":"INC0088718","team":"Artemis SRE Group","updatedBy":"jane.doe@example.com"}}`
 
 func artemisSpace(audience string) bool {
 	return audience == notifications.IncidentAudience("Artemis SRE Group")
@@ -113,7 +113,7 @@ func TestDispatcher_Handle_IncidentAssigned_RepliesInTheGroupSpace(t *testing.T)
 	if len(chat.incidentAssignedCalls) != 1 {
 		t.Fatalf("replies = %d, want 1", len(chat.incidentAssignedCalls))
 	}
-	want := notifications.IncidentAssignedAlert{IncidentID: "inc-1", Number: "INC0088718", AssigneeName: "Shan Anjana", UpdatedBy: "shana@wso2.com",
+	want := notifications.IncidentAssignedAlert{IncidentID: "inc-1", Number: "INC0088718", AssigneeName: "Jane Doe \U0001F3A7", UpdatedBy: "jane.doe@example.com",
 		IncidentLink: "https://csm.example/operations/incidents/inc-1"}
 	if got := chat.incidentAssignedCalls[0]; got.alert != want || got.audience != notifications.IncidentAudience("Artemis SRE Group") {
 		t.Errorf("reply = %+v", got)

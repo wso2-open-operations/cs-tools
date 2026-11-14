@@ -1122,6 +1122,9 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	if err := json.Unmarshal(record.Value, &env); err != nil {
 		return fmt.Errorf("dispatch: decode envelope: %w", err)
 	}
+	// No name in an email or a chat card carries the circled W the data appends
+	// to many users' names (see events.StripStaffMark).
+	env.Payload = events.StripStaffMark(env.Payload)
 	// Known even when env.Type turns out to be unrecognized or env.Payload
 	// fails events.Validate below — see recordRefFor's own doc comment.
 	ref := recordRefFor(env)
@@ -1543,13 +1546,13 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// as the case reference — this audience is always wso2.com
 			// staff, who recognize the internal reference, not ServiceNow's
 			// own case number.
-			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+			return notifications.RenderInternalNoteEmail(notifications.StaffName(p.Name), displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
 		if isAnnouncementCaseType(p.CaseType) {
 			// An announcement's author is not shown to its project contacts.
 			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
-		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		return notifications.RenderCommentAddedEmail(notifications.StaffNameIf(p.Name, notifications.IsWSO2Email(p.AuthorEmail)), displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1844,7 +1847,7 @@ func (d *Dispatcher) handleCaseAssigned(ctx context.Context, record eventbus.Rec
 	}
 	subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, title)
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
-		return notifications.RenderCaseAssignedEmail(p.AssigneeName, p.AssigneeEmail, caseRef, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
+		return notifications.RenderCaseAssignedEmail(notifications.StaffName(p.AssigneeName), p.AssigneeEmail, caseRef, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1882,10 +1885,10 @@ func (d *Dispatcher) handleCaseAcknowledged(ctx context.Context, record eventbus
 			// No severity line — see SendSecurityReportAnalysisAcknowledgedAlert's
 			// own doc comment for why this type gets its own card instead of
 			// severityLabelAndColor's "Unknown" fallback below.
-			chatErr = d.googleChat.SendSecurityReportAnalysisAcknowledgedAlert(ctx, chataudience.IncidentMonitor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
+			chatErr = d.googleChat.SendSecurityReportAnalysisAcknowledgedAlert(ctx, chataudience.IncidentMonitor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, notifications.StaffName(p.AcknowledgerName))
 		} else {
 			severityLabel, severityColor := severityLabelAndColor(p.Severity)
-			chatErr = d.googleChat.SendCaseAcknowledgedAlert(ctx, chataudience.IncidentMonitor, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
+			chatErr = d.googleChat.SendCaseAcknowledgedAlert(ctx, chataudience.IncidentMonitor, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, notifications.StaffName(p.AcknowledgerName))
 		}
 		if chatErr != nil {
 			d.forget(chatKey)
@@ -2656,7 +2659,7 @@ func (d *Dispatcher) handleIncidentAssigned(ctx context.Context, record eventbus
 	alert := notifications.IncidentAssignedAlert{
 		IncidentID:   incidentID,
 		Number:       p.Number,
-		AssigneeName: p.AssigneeName,
+		AssigneeName: notifications.StaffName(p.AssigneeName),
 		UpdatedBy:    p.UpdatedBy,
 		IncidentLink: d.links.IncidentLink(incidentID),
 	}

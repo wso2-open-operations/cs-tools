@@ -1648,7 +1648,7 @@ func TestDispatcher_Handle_CaseAcknowledged(t *testing.T) {
 	}
 	got := chat.caseAcknowledgedCalls[0]
 	if got.audience != chataudience.IncidentMonitor || got.severityLabel != "Critical (P1)" || got.caseNumber != "CS0001001" ||
-		got.wso2CaseID != "WSO2-1000" || got.acknowledgerName != "Jane Doe" {
+		got.wso2CaseID != "WSO2-1000" || got.acknowledgerName != "Jane Doe \U0001F3A7" {
 		t.Errorf("unexpected SendCaseAcknowledgedAlert args: %+v", got)
 	}
 }
@@ -1696,7 +1696,7 @@ func TestDispatcher_Handle_CaseAcknowledged_SecurityReportAnalysisOmitsSeverity(
 		t.Fatalf("expected 1 SendSecurityReportAnalysisAcknowledgedAlert call, got %d", len(chat.securityReportAnalysisAcknowledgedCalls))
 	}
 	got := chat.securityReportAnalysisAcknowledgedCalls[0]
-	if got.audience != chataudience.IncidentMonitor || got.caseNumber != "CS0001001" || got.wso2CaseID != "WSO2-1000" || got.acknowledgerName != "Jane Doe" {
+	if got.audience != chataudience.IncidentMonitor || got.caseNumber != "CS0001001" || got.wso2CaseID != "WSO2-1000" || got.acknowledgerName != "Jane Doe \U0001F3A7" {
 		t.Errorf("unexpected SendSecurityReportAnalysisAcknowledgedAlert args: %+v", got)
 	}
 }

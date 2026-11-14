@@ -762,3 +762,12 @@ reporting metric rather than something that needs an immediate notification.
 - As the catalog grows (section 5), each new notification should be
   reviewed against the same information-handling principle in section 4
   before it ships, rather than after.
+
+
+## Names in alerts
+
+- The circled W that entity-service's data appends to many users' names is stripped from every event payload
+  before it is handled, and from the SLA engine's entity-service responses.
+- A support engineer's name is followed by a headphone emoji in: the case-acknowledged chat cards, the
+  case-assigned email, the incident-assigned chat card, an internal-note email, a comment email whose author's
+  `authorEmail` is a WSO2 address, and the SLA breach chat card's team lead.

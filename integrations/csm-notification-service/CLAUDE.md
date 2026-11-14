@@ -1085,3 +1085,23 @@ govulncheck ./...         # checks dependencies against Go's official vulnerabil
 - **TwiML injection** — `MakeCall`'s spoken message is caller-supplied text, not trusted markup. `sayTwiML` (`twilio.go`) builds the `<Say>` document by `encoding/xml`-marshaling a typed struct (`twimlResponse`/`twimlSay`), never raw string concatenation — a message containing TwiML-shaped text (e.g. `</Say><Redirect>...`) must render as literal spoken text, not inject a different verb. `Voice`/`Language` go through the same struct as `xml:"...,attr"` fields, so they get correct attribute escaping too, even though today they're only ever operator-supplied config, not request input. Keep using `encoding/xml` struct marshaling (not string concatenation) for any future TwiML-building code in this package
 - **Security fixes in PRs** — describe security-related changes in neutral functional terms only, not called out as security fixes in the title/description
 - **Run `govulncheck ./...` on dependency changes** — alongside `gosec` (which only analyzes this repo's own code), run this whenever `go.mod`/`go.sum` changes (a new dependency, or a version bump) to catch known vulnerabilities in the dependency tree itself. It must report 0 vulnerabilities reachable from our code before opening a PR; a vulnerability present in a dependency but not reachable through anything we call is worth noting in the PR but isn't a blocker — see `internal/eventbus`'s `klauspost/compress` bump for a real precedent (GO-2026-5841, upgraded proactively even though unreachable, since the fix was free)
+
+## The circled W on names, and the support engineer icon
+
+entity-service's data appends a circled W (U+24E6, or U+24CC) to the display name of many users, customers
+included, so it says nothing reliable about who someone is. No name in an email or a chat card carries it:
+
+- **`events.StripStaffMark`** removes it from the end of every string in an event payload. `Dispatcher.Handle`
+  runs it on `env.Payload` before any handler decodes it, because names arrive in dozens of fields.
+  `slaengine.Client` runs the same function over every response body it reads from entity-service, so the
+  assignee and team lead names in SLA breach alerts are clean too. A circled W anywhere but the end of a
+  string is left alone.
+- **`notifications.StaffName` / `StaffNameIf`** put a headphone emoji after the name of a person known to be
+  staff, because an email or a chat card cannot show the portals' icon. In an email it goes out as a numeric
+  character reference through `escapeHTML`, so it survives the email service's send path (see the "?" bug above).
+  Where it is used: the acknowledger on the case-acknowledged chat cards, the assignee on the case-assigned
+  email and the incident-assigned chat card, the author of an internal note, a comment author whose
+  `authorEmail` is a WSO2 address (`IsWSO2Email`, the way this service already tells staff from a customer where
+  an event carries no user type), and the team lead on SLA breach chat cards.
+- **New alert that names a person:** strip comes for free (it is on the whole payload); add `StaffName` only where
+  the person is staff by definition.

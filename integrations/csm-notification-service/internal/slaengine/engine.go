@@ -1344,7 +1344,7 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		if sendAudience == chataudience.IncidentMonitor {
 			sendAudience = chataudience.SLADefault
 		}
-		if err := e.chat.SendSLABreachAlert(ctx, sendAudience, clockType, tierLabel(tier), caseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType, meta.Product, meta.Team, state.TeamLeadName, meta.Priority, meta.State, openedAt, caseLink); err != nil {
+		if err := e.chat.SendSLABreachAlert(ctx, sendAudience, clockType, tierLabel(tier), caseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType, meta.Product, meta.Team, notifications.StaffName(state.TeamLeadName), meta.Priority, meta.State, openedAt, caseLink); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to send sla breach alert to chat space, not retrying", "caseId", caseID, "clockType", clockType, "tier", tier, "chatSpace", sendAudience, "err", err)
 		}
 	}
