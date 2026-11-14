@@ -190,6 +190,40 @@ func timeCardUpdateTargetsStateTransition(body []byte) bool {
 	return req.State != nil
 }
 
+// timeCardUpdateIsBillableOnly reports whether body is, as entity-service
+// itself decodes it, a request carrying isBillable and no other field -- the
+// shape it treats as an override of an approved card's billable flag. It
+// decodes into a struct mirroring entity-service's UpdateTimeCardRequest
+// field set so both sides agree exactly on case-insensitive keys, ignored
+// unknown keys and null values (null decodes as absent); pointer and slice
+// types make nil mean "absent", and an empty approverIds array is non-nil, as
+// downstream. Keep this field list in step with that request type. A body
+// that does not decode is reported as false so upstream validation behaves as
+// before.
+func timeCardUpdateIsBillableOnly(body []byte) bool {
+	var req struct {
+		State                    *string  `json:"state"`
+		LeadComment              *string  `json:"leadComment"`
+		Date                     *string  `json:"date"`
+		ApproverIDs              []string `json:"approverIds"`
+		IsBillable               *bool    `json:"isBillable"`
+		IssueComplexity          *string  `json:"issueComplexity"`
+		WorkLogComment           *string  `json:"workLogComment"`
+		TimeAnalyzing            *int     `json:"timeAnalyzing"`
+		TimeSettingUp            *int     `json:"timeSettingUp"`
+		TimeReproducingDebugging *int     `json:"timeReproducingDebugging"`
+		TimeProvidingSolution    *int     `json:"timeProvidingSolution"`
+		TimePatching             *int     `json:"timePatching"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	return req.IsBillable != nil && req.State == nil && req.LeadComment == nil && req.Date == nil &&
+		req.ApproverIDs == nil && req.IssueComplexity == nil && req.WorkLogComment == nil &&
+		req.TimeAnalyzing == nil && req.TimeSettingUp == nil && req.TimeReproducingDebugging == nil &&
+		req.TimeProvidingSolution == nil && req.TimePatching == nil
+}
+
 // UpdateTimeCard handles PATCH /time-cards/{id}.
 func (h *TimeCardHandler) UpdateTimeCard(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -210,6 +244,13 @@ func (h *TimeCardHandler) UpdateTimeCard(w http.ResponseWriter, r *http.Request)
 	}
 
 	if timeCardUpdateTargetsStateTransition(body) && !(h.access != nil && h.access.Permits(PermApproveTimeCard, user.Roles)) {
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
+		return
+	}
+
+	// An isBillable-only body can override an approved card, and upstream does
+	// not check the caller's role for that, so it is admin-only here.
+	if timeCardUpdateIsBillableOnly(body) && !(h.access != nil && h.access.Permits(PermOverrideApprovedTimeCardBillable, user.Roles)) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}

@@ -14,8 +14,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { JSX, ReactNode } from "react";
-import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from "@wso2/oxygen-ui";
+import { useState, type JSX, type ReactNode } from "react";
+import {
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControlLabel,
+  Switch,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { BackendApiError } from "@api/backend/client";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useUpdateTimeCardBillable } from "@features/csm-timecards/api/useTimeCards";
+import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 import RelativeDate from "@components/RelativeDate";
 import TimeCardStatusChip from "@features/csm-timecards/components/TimeCardStatusChip";
 import { ACTIVITY_BUCKETS, billableLabel } from "@features/csm-timecards/constants/timeCardConstants";
@@ -115,14 +129,50 @@ function Breakdown({ breakdown }: { breakdown?: CsmTimeCard["breakdown"] }): JSX
  * (the Approvals-tab equivalent), this doesn't also fetch and render the
  * linked case — the panel this opens from is already embedded in that same
  * case's own detail page, so re-showing it here would be redundant. Available
- * on every card regardless of state or ownership: it's read-only, so there's
- * no authorization concern the way there is for Edit/Review.
+ * on every card regardless of state or ownership. The one write it offers is
+ * changing an APPROVED card's billable flag, shown only when the backend-
+ * resolved time-card role (`useTimecardRole`, from `GET /users/me`) marks the
+ * user an admin; the backend still enforces it and a 403 is surfaced below.
  */
 export default function TimeCardDetailsDialog({
   card,
   onClose,
 }: TimeCardDetailsDialogProps): JSX.Element {
   const decision = decisionSummary(card);
+  const { isAdmin } = useTimecardRole();
+  const { showError } = useErrorBanner();
+  const updateBillable = useUpdateTimeCardBillable();
+  // The `card` prop is a snapshot taken when the dialog opened, so the saved
+  // value is tracked locally to reflect a successful change without waiting
+  // for the parent to re-pick the refreshed card.
+  const [savedBillable, setSavedBillable] = useState(card.billable);
+  const [draftBillable, setDraftBillable] = useState(card.billable);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const canEditBillable = isAdmin && card.state === "approved";
+  const dirty = draftBillable !== savedBillable;
+
+  const saveBillable = (): void => {
+    setSaveError(null);
+    updateBillable.mutate(
+      { cardId: card.id, billable: draftBillable },
+      {
+        onSuccess: (updated) => {
+          setSavedBillable(updated.billable);
+          setDraftBillable(updated.billable);
+        },
+        onError: (err) => {
+          // The backend 403s a non-admin and 4xx-rejects an invalid change
+          // with its own message — surface it rather than failing silently.
+          const msg =
+            err instanceof BackendApiError && err.status < 500 && err.message
+              ? err.message
+              : "Could not update the billable status. Please try again.";
+          setSaveError(msg);
+          showError(msg, err);
+        },
+      },
+    );
+  };
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
@@ -134,7 +184,7 @@ export default function TimeCardDetailsDialog({
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
             <Field label="Engineer" value={card.userName} />
             <Field label="Project" value={card.projectName} />
-            <Field label="Billable" value={billableLabel(card.billable)} />
+            <Field label="Billable" value={billableLabel(savedBillable)} />
             <Field
               label="Logged"
               value={
@@ -156,6 +206,37 @@ export default function TimeCardDetailsDialog({
               <Field label="Issue complexity" value={card.issueComplexity} />
             )}
           </Box>
+
+          {canEditBillable && (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={draftBillable}
+                      disabled={updateBillable.isPending}
+                      onChange={(e) => setDraftBillable(e.target.checked)}
+                    />
+                  }
+                  label={draftBillable ? "Billable" : "Non-billable"}
+                  sx={{ ml: 0 }}
+                />
+                <Button
+                  size="small"
+                  variant="contained"
+                  disabled={!dirty || updateBillable.isPending}
+                  onClick={saveBillable}
+                >
+                  {updateBillable.isPending ? "Saving..." : "Save billable status"}
+                </Button>
+              </Box>
+              {saveError && (
+                <Typography variant="caption" color="error" role="alert">
+                  {saveError}
+                </Typography>
+              )}
+            </Box>
+          )}
 
           <WorkLogComment html={card.workLogComment} />
 
