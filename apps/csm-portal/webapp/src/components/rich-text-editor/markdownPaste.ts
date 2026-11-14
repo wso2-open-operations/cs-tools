@@ -18,6 +18,7 @@ import { markdownToHtml } from "@utils/renderMarkdown";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import {
   collapseEmptyParagraphElements,
+  htmlToPastePlainText,
   sanitizeUrl,
   unwrapNestedPreCodeElements,
 } from "@components/rich-text-editor/richTextEditor";
@@ -43,15 +44,28 @@ export function mergeAdjacentParagraphs(dom: Document): void {
   const body = dom.body;
   let child = body.firstElementChild;
   while (child) {
-    const next: Element | null = child.nextElementSibling;
-    if (next && isMergeableParagraph(child) && isMergeableParagraph(next)) {
+    // Only whitespace-only text and comments may lie between two paragraphs that are joined: any
+    // other text (`<p>A</p>middle<p>B</p>`) sits between them, so joining would move it after both.
+    const gap: Node[] = [];
+    let after: Node | null = child.nextSibling;
+    while (
+      after &&
+      (after.nodeType === Node.COMMENT_NODE ||
+        (after.nodeType === Node.TEXT_NODE && (after.textContent ?? "").trim() === ""))
+    ) {
+      gap.push(after);
+      after = after.nextSibling;
+    }
+    if (after && after.nodeType === Node.ELEMENT_NODE && isMergeableParagraph(child) && isMergeableParagraph(after as Element)) {
+      const next = after as Element;
+      for (const node of gap) node.parentNode?.removeChild(node);
       child.appendChild(dom.createElement("br"));
       child.appendChild(dom.createElement("br"));
       while (next.firstChild) child.appendChild(next.firstChild);
       next.remove();
       continue; // look at the same paragraph against its new neighbour
     }
-    child = next;
+    child = child.nextElementSibling;
   }
 }
 
@@ -124,7 +138,8 @@ export function flattenTablesToParagraphs(dom: Document): void {
       .map((row) =>
         Array.from(row.children)
           .filter((cell) => cell.tagName === "TD" || cell.tagName === "TH")
-          .map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim())
+          // Block/<br> structure becomes whitespace first (`textContent` would glue `a<br>b` into `ab`).
+          .map((cell) => htmlToPastePlainText(cell.innerHTML).replace(/\s+/g, " ").trim())
           .join(" | "),
       )
       .filter((text) => text.replace(/[\s|]/g, "") !== "")

@@ -98,7 +98,10 @@ export function $splitSelectedLinesIntoParagraphs(
   for (const paragraph of paragraphs) {
     const children = paragraph.getChildren();
     if (!children.some($isLineBreakNode)) {
-      kept++;
+      // No `<br>` to split on (an imported `<p><br></p>` is an empty paragraph, not a line break),
+      // but it is a line like any other: a blank one is dropped from a list conversion too.
+      if (children.every((child) => $isTextNode(child) && child.getTextContent().trim() === "")) blanks.push(paragraph);
+      else kept++;
       continue;
     }
 
@@ -184,7 +187,7 @@ export function $splitSelectedLinesIntoParagraphs(
  * reply. Each trailing break becomes an empty paragraph (`<p>a</p><p><br></p>`),
  * which shows as a blank line in the editor and in every renderer.
  */
-function $trailingBreaksToParagraphs(before: ParagraphNode): void {
+export function $trailingBreaksToParagraphs(before: ParagraphNode): void {
   let last = before.getLastChild();
   let anchor: ParagraphNode = before;
   while ($isLineBreakNode(last)) {

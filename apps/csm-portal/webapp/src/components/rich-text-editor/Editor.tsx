@@ -47,6 +47,7 @@ import {
   htmlHasTextOrTable,
   convertWordListsToHtmlLists,
   preserveEditorWhitespace,
+  preserveTrailingLineBreaks,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/richTextEditor";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
@@ -144,6 +145,8 @@ const InitialValuePlugin = ({ initialHtml }: { initialHtml?: string }) => {
       const dom = parser.parseFromString(initialHtml, "text/html");
       // Our own export keeps tabs and runs of spaces raw; loading must not collapse them.
       preserveEditorWhitespace(dom);
+      // ...and a break that ends a line (`<p>Hi<br></p>`) must not be dropped as the importer's "last child".
+      preserveTrailingLineBreaks(dom);
       const nodes = $generateNodesFromDOM(editor, dom);
       root.clear();
       root.append(...nodes);

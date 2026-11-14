@@ -440,3 +440,81 @@ for (const [state, setup] of rootStates) {
     expect(c.html()).toBe(LIST('<li value="1">one</li><li value="2">two</li>'));
   });
 }
+
+// Draft restore: `$generateNodesFromDOM` ignores a `<br>` that is the last child of a block, so
+// `<p>Hi<br></p>` (Enter at the end of a line) came back as `<p>Hi</p>` and typing joined the lines.
+describe("draft restore keeps editor-authored trailing line breaks", () => {
+  for (const cfg of CONFIGS) {
+    for (const html of ["<p>Hi<br></p>", "<p>Hi<br><br></p>", "<p>a<br>b<br></p>"]) {
+      it(`[${cfg}] ${html} exports unchanged`, async () => {
+        const c = mount(cfg, html);
+        await settle();
+        expect(c.html()).toBe(html);
+      });
+    }
+    it(`[${cfg}] content with no trailing break gains none`, async () => {
+      const c = mount(cfg, "<p>Hi</p><p><br></p><p>a<br>b</p>");
+      await settle();
+      expect(c.html()).toBe("<p>Hi</p><p><br></p><p>a<br>b</p>");
+    });
+  }
+  it("typing after restoring `Hi` + Enter lands on the new line (reply box)", async () => {
+    const typed = mount("reply", "<p>Hi</p>");
+    typed.end();
+    typed.enter();
+    await settle();
+    const saved = typed.html();
+    expect(saved).toBe("<p>Hi<br></p>");
+    cleanup();
+    const c = mount("reply", saved);
+    await settle();
+    c.end();
+    c.type("x");
+    await settle();
+    expect(c.html()).toBe("<p>Hi<br>x</p>");
+  });
+});
+
+// An existing empty paragraph (HTML import of `<p><br></p>` has no LineBreakNode) inside the
+// selection was counted as kept content, so Bullet/Numbered List left an empty item for it.
+describe("reply box: list conversion drops empty paragraphs of the selection, like blank <br> lines", () => {
+  const ITEMS = (...texts: string[]) =>
+    `<ul class="editor-list-ul">${texts.map((t, i) => `<li value="${i + 1}">${t}</li>`).join("")}</ul>`;
+  reply("`<p>a</p><p><br></p><p>b</p>` + select all + Bullet List is two items", async (c) => {
+    c.selectAll();
+    await c.click("Bullet List");
+    await settle();
+    expect(c.html()).toBe(ITEMS("a", "b"));
+  }, "<p>a</p><p><br></p><p>b</p>");
+  reply("several empty paragraphs between lines are all dropped (Numbered List)", async (c) => {
+    c.selectAll();
+    await c.click("Numbered List");
+    await settle();
+    expect(c.html()).toBe('<ol class="editor-list-ol"><li value="1">a</li><li value="2">b</li></ol>');
+  }, "<p>a</p><p><br></p><p><br></p><p>b</p>");
+  reply("an empty paragraph mixed with a `<br>` blank line is dropped too", async (c) => {
+    c.selectAll();
+    await c.click("Bullet List");
+    await settle();
+    expect(c.html()).toBe(ITEMS("a", "b", "c"));
+  }, "<p>a</p><p><br></p><p>b<br><br>c</p>");
+  reply("every selected line blank: one empty item remains", async (c) => {
+    c.selectAll();
+    await c.click("Bullet List");
+    await settle();
+    expect((c.html().match(/<li/g) ?? []).length).toBe(1);
+  }, "<p><br></p><p><br></p>");
+  it("normal editor (flag off): the empty paragraph becomes an empty item as before", async () => {
+    const c = mount("normal", "<p>a</p><p><br></p><p>b</p>");
+    c.selectAll();
+    await c.click("Bullet List");
+    await settle();
+    expect((c.html().match(/<li/g) ?? []).length).toBe(3);
+  });
+  reply("a heading conversion keeps the empty paragraph (blank lines are dropped for lists only)", async (c) => {
+    c.selectAll();
+    await c.block("h2");
+    await settle();
+    expect(c.html()).toBe("<h2>a</h2><h2><br></h2><h2>b</h2>");
+  }, "<p>a</p><p><br></p><p>b</p>");
+});

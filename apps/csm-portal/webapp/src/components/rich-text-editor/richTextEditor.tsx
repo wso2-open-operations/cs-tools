@@ -124,7 +124,8 @@ export function htmlToPastePlainText(html: string): string {
       out += "\n";
       return;
     }
-    if ((tag === "TD" || tag === "TH") && out !== "" && !out.endsWith("\n")) {
+    if ((tag === "TD" || tag === "TH") && el.previousElementSibling) {
+      // A separator belongs to the cell's place in its row, so an empty cell still keeps its tab.
       trimLineEnd();
       out += "\t";
     }
@@ -134,7 +135,8 @@ export function htmlToPastePlainText(html: string): string {
     if (block) endLine();
   };
   walk(body, false);
-  return out.replace(/^\n+/, "").trimEnd();
+  // Trailing newlines and spaces only: a tab at the end is an empty last cell of a table row.
+  return out.replace(/^\n+/, "").replace(/(?:\n[ \t]*)+$/, "").replace(/ +$/, "");
 }
 
 /** Elements that are content on their own, with no text (a picture, a table, a rule). */
@@ -892,4 +894,39 @@ export function preserveEditorWhitespace(dom: Document): boolean {
     span.appendChild(node);
   }
   return targets.length > 0;
+}
+
+/** Blocks whose last `<br>` the editor itself wrote (Enter at the end of a line). */
+const TRAILING_BREAK_BLOCKS = new Set(["P", "LI", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "TD", "TH"]);
+
+/**
+ * Makes loading the editor's OWN exported HTML lossless for a trailing line break. The editor
+ * exports Enter at the end of a line as `<p>Hi<br></p>`, but Lexical's importer ignores a `<br>`
+ * that is the last child of a block (browsers draw no line for it), so a restored draft came back
+ * as `<p>Hi</p>` and typing joined the lines; `<p>Hi<br><br></p>` kept only one. A `<br>` that
+ * ends a block, and is not its only child, is followed by an empty text node in this DOM only, so
+ * the importer sees it as an ordinary break. Blocks with no such break, and `<p><br></p>` (an
+ * empty paragraph), are untouched, so no break is ever added. Used for the initial `value` only.
+ * Mutates `dom`; returns whether anything changed.
+ */
+export function preserveTrailingLineBreaks(dom: Document): boolean {
+  const body = dom.body;
+  if (!body) return false;
+  const isGap = (node: Node | null) =>
+    node !== null && node.nodeType === Node.TEXT_NODE && /^[ \t\r\n]*$/.test(node.textContent ?? "");
+  let changed = false;
+  for (const br of Array.from(body.querySelectorAll("br"))) {
+    const parent = br.parentElement;
+    if (!parent || !TRAILING_BREAK_BLOCKS.has(parent.tagName)) continue;
+    let after = br.nextSibling;
+    while (isGap(after)) after = after!.nextSibling;
+    if (after !== null) continue;
+    let before = br.previousSibling;
+    while (isGap(before)) before = before!.previousSibling;
+    if (before === null) continue; // the only child: an empty paragraph, not a break
+    while (isGap(br.nextSibling)) br.nextSibling!.remove();
+    parent.appendChild(dom.createTextNode(""));
+    changed = true;
+  }
+  return changed;
 }

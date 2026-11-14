@@ -331,6 +331,17 @@ describe("htmlToPastePlainText", () => {
     expect(htmlToPastePlainText("<p>hard\n   wrapped   text</p>")).toBe("hard wrapped text");
   });
 
+  it("keeps the tab of an empty cell: leading, middle and trailing, in every row", () => {
+    const t = (cells: string) => htmlToPastePlainText(`<table><tr>${cells}</tr></table>`);
+    expect(t("<td></td><td>B</td>")).toBe("\tB");
+    expect(t("<td>A</td><td></td><td>C</td>")).toBe("A\t\tC");
+    expect(t("<td>A</td><td></td>")).toBe("A\t");
+    expect(t("<td></td><td></td><td>C</td>")).toBe("\t\tC");
+    expect(
+      htmlToPastePlainText("<table><tr><td>A</td><td></td></tr><tr><td></td><td>D</td></tr></table>"),
+    ).toBe("A\t\n\tD");
+  });
+
   it("keeps a <pre>'s own newlines and ignores <style>", () => {
     expect(htmlToPastePlainText("<style>p{}</style><pre>a\n  b</pre>")).toBe("a\n  b");
   });

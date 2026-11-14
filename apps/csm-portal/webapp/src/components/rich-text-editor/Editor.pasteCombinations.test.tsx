@@ -403,6 +403,16 @@ describe("plain-text paste: whitespace, newlines and carets", () => {
       expect(m.html()).toContain("<br>  - c<br>\tZ</pre>");
       expect(m.html().match(/<pre/g)?.length).toBe(1);
     });
+    it("an HTML-only table with empty edge cells keeps its tabs (code block, and Remove Formatting)", async () => {
+      const clip = { "text/html": "<table><tr><td></td><td>B</td><td></td></tr><tr><td>C</td><td></td><td></td></tr></table>" };
+      const code = mount(cfg, { value: "<pre><code>c</code></pre>", caret: "code" });
+      await pasteAnd(code, clip);
+      expect(code.html()).toContain("</code>\tB\t<br>C\t\t</pre>");
+      cleanup();
+      const plain = mount(cfg, { value: "<p>x</p>", caret: "paragraph" });
+      await pasteAnd(plain, clip, "remove");
+      expect(plain.html()).toContain("x\tB\t");
+    });
     it("in a table cell: the first line joins the cell paragraph, never a <br>", async () => {
       const m = mount(cfg, {
         value: "<table><tbody><tr><td><p>x</p></td></tr></tbody></table>",
@@ -753,6 +763,14 @@ describe("pasted HTML structure", () => {
     const r = mount("reply");
     await pasteAnd(r, clip, "remove");
     expect(r.html()).toBe("<p>Hi<br><br>Line two</p>");
+  });
+
+  it("[reply] Keep Formatting does not reorder text that sits between two paragraphs", async () => {
+    const k = mount("reply");
+    await pasteAnd(k, { "text/html": "<p>A</p>middle<p>B</p>", "text/plain": "A\nmiddle\nB" }, "keep");
+    const out = k.html();
+    expect(out.indexOf("A")).toBeLessThan(out.indexOf("middle"));
+    expect(out.indexOf("middle")).toBeLessThan(out.indexOf("B"));
   });
 
   it("[normal] two Keep-Formatting paragraphs stay two <p>", async () => {

@@ -411,7 +411,7 @@ describe("Paste as Markdown in other caret contexts", () => {
 
   it("end of a line after <br>s keeps the earlier lines", async () => {
     const { html } = await run("afterBr", "Hi **team**\n\nline", "markdown");
-    expect(simple(html)).toBe("<p>one<br>twoHi <strong>team</strong><br><br>line</p>");
+    expect(simple(html)).toBe("<p>one<br>two<br>Hi <strong>team</strong><br><br>line</p>");
   });
 
   it("replacing a range selection removes it", async () => {
@@ -746,10 +746,15 @@ describe("a list pasted into a list item becomes siblings of that item, at its d
   const NESTED = "<ul><li>one<ul><li>nested<ul><li>deep</li></ul></li></ul></li><li>two</li></ul>";
 
   /** Caret at the end of the text node whose text is `text`. */
-  async function pasteIntoItem(text: string, clip: Record<string, string>, button: string): Promise<string> {
+  async function pasteIntoItem(
+    text: string,
+    clip: Record<string, string>,
+    button: string,
+    { value = NESTED, offset = text.length }: { value?: string; offset?: number } = {},
+  ): Promise<string> {
     cleanup();
     const onChange = vi.fn();
-    render(<Editor autoFocus showToolbar={false} onChange={onChange} value={NESTED} {...REPLY} />);
+    render(<Editor autoFocus showToolbar={false} onChange={onChange} value={value} {...REPLY} />);
     act(() => {
       getLexical().update(
         () => {
@@ -763,7 +768,7 @@ describe("a list pasted into a list item becomes siblings of that item, at its d
             }
             return null;
           };
-          find($getRoot())!.select(text.length, text.length);
+          find($getRoot())!.select(offset, offset);
         },
         { discrete: true },
       );
@@ -820,5 +825,72 @@ describe("a list pasted into a list item becomes siblings of that item, at its d
     expect(simple(onChange.mock.calls.at(-1)?.[0] as string)).toBe(
       "<ul><li>one</li><li><ul><li>abc</li><li>x</li><li>y</li><li>def</li></ul></li></ul>",
     );
+  });
+
+  // The caret inside a link (an inline element of the item) used to be rejected, so the paste
+  // split every ancestor list up to the root instead of staying at the item's depth.
+  const LINKED =
+    '<ul><li>one <a href="https://e.com/1">link1</a><ul><li>nested <a href="https://e.com/2">link2</a><ul><li>deep <a href="https://e.com/3">link3</a></li></ul></li></ul></li><li>two</li></ul>';
+  const A = (n: number, text: string) => `<a href="https://e.com/${n}">${text}</a>`;
+
+  it.each([
+    ["Markdown", MD, "Paste as Markdown"],
+    ["Keep Formatting", HTML, "Keep Formatting"],
+  ] as const)("%s with the caret at the end of a link: level 1, 2 and 3 keep the item's depth", async (_n, clip, button) => {
+    expect(await pasteIntoItem("link1", clip, button, { value: LINKED })).toBe(
+      `<ul><li>one ${A(1, "link1")}</li><li><ul><li>nested ${A(2, "link2")}</li><li><ul><li>deep ${A(3, "link3")}</li></ul></li></ul></li>${PASTED}<li>two</li></ul>`,
+    );
+    expect(await pasteIntoItem("link2", clip, button, { value: LINKED })).toBe(
+      `<ul><li>one ${A(1, "link1")}</li><li><ul><li>nested ${A(2, "link2")}</li><li><ul><li>deep ${A(3, "link3")}</li></ul></li>${PASTED}</ul></li><li>two</li></ul>`,
+    );
+    expect(await pasteIntoItem("link3", clip, button, { value: LINKED })).toBe(
+      `<ul><li>one ${A(1, "link1")}</li><li><ul><li>nested ${A(2, "link2")}</li><li><ul><li>deep ${A(3, "link3")}</li>${PASTED}</ul></li></ul></li><li>two</li></ul>`,
+    );
+  });
+
+  it.each([
+    ["Markdown", MD, "Paste as Markdown"],
+    ["Keep Formatting", HTML, "Keep Formatting"],
+  ] as const)("%s with the caret in the middle of a link: the link is split and kept on both halves", async (_n, clip, button) => {
+    expect(await pasteIntoItem("link2", clip, button, { value: LINKED, offset: 2 })).toBe(
+      `<ul><li>one ${A(1, "link1")}</li><li><ul><li>nested ${A(2, "li")}</li><li><ul><li>deep ${A(3, "link3")}</li></ul></li>${PASTED}<li>${A(2, "nk2")}</li></ul></li><li>two</li></ul>`,
+    );
+  });
+});
+
+// ---- blank lines typed before a pasted block are kept -------------------------------------------------
+
+describe("text typed with Enter, then a block pasted: the typed blank lines survive", () => {
+  /** Types `x` and `enters` Enters (real keydowns, so the nodes are the typed ones), then pastes. */
+  async function typedThenPaste(enters: number, md: string): Promise<string> {
+    cleanup();
+    const onChange = vi.fn();
+    render(<Editor autoFocus showToolbar={false} onChange={onChange} value="<p>x</p>" {...REPLY} />);
+    act(() => { getLexical().update(() => { ($getRoot().getFirstChild() as ElementNode).selectEnd(); }, { discrete: true }); });
+    for (let i = 0; i < enters; i += 1) {
+      act(() => {
+        getEditable().dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true }),
+        );
+      });
+    }
+    await tick();
+    paste({ "text/plain": md });
+    await tick();
+    fireEvent.click(screen.getByRole("button", { name: "Paste as Markdown" }));
+    await tick();
+    return simple(onChange.mock.calls.at(-1)?.[0] as string);
+  }
+
+  it("one Enter: the caret line is replaced by the list, no empty paragraph", async () => {
+    expect(await typedThenPaste(1, "- a\n- b")).toBe("<p>x</p><ul><li>a</li><li>b</li></ul>");
+  });
+
+  it("two Enters: the blank line is kept as one empty paragraph (the toolbar-conversion convention)", async () => {
+    expect(await typedThenPaste(2, "- a\n- b")).toBe("<p>x</p><p><br></p><ul><li>a</li><li>b</li></ul>");
+  });
+
+  it("three Enters: two blank lines are two empty paragraphs", async () => {
+    expect(await typedThenPaste(3, "- a\n- b")).toBe("<p>x</p><p><br></p><p><br></p><ul><li>a</li><li>b</li></ul>");
   });
 });

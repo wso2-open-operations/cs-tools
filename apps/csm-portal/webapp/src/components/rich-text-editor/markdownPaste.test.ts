@@ -115,6 +115,14 @@ describe("flattenTablesToParagraphs (a paste into a table cell)", () => {
     expect(html(dom)).toBe("<p>before</p><p>H1 | H2</p><p>1 | 2 3</p>");
   });
 
+  it("keeps the words of a cell apart: <br>, paragraphs and list items inside a cell are spaces, not glued", () => {
+    const dom = parse(
+      "<table><tr><td>first<br>second</td><td><p>one</p><p>two</p></td><td><ul><li>x</li><li>y</li></ul></td><td>a<div>b</div></td></tr></table>",
+    );
+    flattenTablesToParagraphs(dom);
+    expect(html(dom)).toBe("<p>first second | one two | x y | a b</p>");
+  });
+
   it("flattens a nested table into its outer row's text", () => {
     const dom = parse("<table><tr><td>a</td><td><table><tr><td>b</td></tr></table></td></tr></table>");
     flattenTablesToParagraphs(dom);
@@ -142,6 +150,17 @@ describe("mergeAdjacentParagraphs only merges plain, non-empty paragraphs", () =
 
   it("keeps an empty paragraph as its own block", () => {
     expect(merged("<p>a</p><p><br></p><p>b</p>")).toBe("<p>a</p><p><br></p><p>b</p>");
+  });
+
+  it("does not merge across text that sits between the paragraphs (order is kept)", () => {
+    expect(merged("<p>A</p>middle<p>B</p>")).toBe("<p>A</p>middle<p>B</p>");
+    expect(merged("<p>A</p>middle<p>B</p><p>C</p>")).toBe("<p>A</p>middle<p>B<br><br>C</p>");
+    expect(merged("<p>A</p><p>B</p>tail<p>C</p>")).toBe("<p>A<br><br>B</p>tail<p>C</p>");
+  });
+
+  it("merges across whitespace-only text and comments", () => {
+    expect(merged("<p>A</p>\n  <p>B</p>")).toBe("<p>A<br><br>B</p>");
+    expect(merged("<p>A</p><!-- x --> <p>B</p>")).toBe("<p>A<br><br>B</p>");
   });
 });
 
