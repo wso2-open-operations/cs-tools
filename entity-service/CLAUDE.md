@@ -4809,6 +4809,26 @@ applies upstream.
   `apierror.ValidationError.Code` convention change requests use -- see "Error types"), alongside a
   message naming both the current and requested state.
 
+**Admin reopen of a closed case (`UpdateCaseRequest.AdminReopen`/`ReopenReason`)** is the one
+caller-specific bypass of both tables above: neither table has an entry for `CaseStateClosed` (it
+is otherwise terminal for every caller, same as a plain state value with no entry at all), so
+`apps/csm-portal/backend`'s `CaseHandler.PatchCase` sets `AdminReopen: true` itself -- never
+forwarded verbatim from a client's own request body, see `sanitizeAdminReopenAttrs` in that
+component's `state.go` -- once its own `PermAdmin` check passes and the case's current state is
+genuinely closed. `isValidCaseStateTransition`'s caller in `case_service.go` additionally requires
+`isInternalCaller` AND that the caller's own client id is the configured CSM portal backend's
+(`CaseService.csmPortalClientID`, the same identity `mayListDeletedAttachments` already trusts for
+an equivalent admin-only override) -- `isInternalCaller` alone only separates WSO2 staff from an
+external/customer caller, not an admin from any other internal caller, so without the client-id
+check any internal user (direct M2M, or their own token resolved straight from `x-user-id-token`,
+neither of which goes through the portal's `PermAdmin` gate at all) could set `AdminReopen`
+themselves and reopen a closed case -- a real gap caught in review before merge. The same flag also skips
+the SLA-engine (`ApplyCaseStateEffects`) and `case.status_changed` publish side effects a
+reopen-from-closed must not trigger -- a closed case has no open clocks left to resume, and
+watchers must not get an email for this. `ReopenReason` (optional free text, only meaningful
+alongside `AdminReopen`) is persisted to `"case".reopen_reason` (migration 0292) but deliberately
+never selected back by any read query -- write-only by design, not shown in any UI or API response.
+
 ## PATCH /cases/{id}: assignee, acknowledge, parent, and the combinable field bundle
 
 Found live: assigning a case ("Assign to me") and acknowledging one both

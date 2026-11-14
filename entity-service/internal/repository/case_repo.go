@@ -2455,6 +2455,16 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // labels by UpdateCase below (state/work_state upper-cased, severity mapped
 // through caseSeverityToEnum) -- case_state_enum's "CLOSED" is what $2 = ”
 // compares a non-empty state against here, not the domain value "closed".
+// reopen_reason ($9) is only ever non-nil when CaseService.UpdateCase has
+// already confirmed this is a genuine admin reopen (UpdateCaseRequest.
+// AdminReopen); the CASE WHEN here is the actual gate for when it gets
+// written, keyed off the row's own pre-statement state (same "state"
+// right-hand-side reference as closed_by_user_id above) rather than a
+// separate flag, since a transition OUT of closed can only happen through
+// that same admin-reopen path in the first place (every other caller's
+// state-transition table has no entry for closed at all). This column is
+// write-only -- see migration 0292's own comment -- so it is never in this
+// query's RETURNING list.
 // work_state is only meaningful while state is work_in_progress: an explicit
 // workState wins, otherwise a state change to awaiting_info pauses it and a
 // change to any other non-work_in_progress state clears it to NULL, in the
@@ -2486,7 +2496,8 @@ const updateCaseQuery = `
 		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::case_state_enum THEN $8::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
 		    resolution_code   = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,
 		    cause             = CASE WHEN $6 <> '' THEN $6::case_cause_enum ELSE cause END,
-		    close_notes       = COALESCE($7, close_notes)
+		    close_notes       = COALESCE($7, close_notes),
+		    reopen_reason     = CASE WHEN $2 <> '' AND $2 <> 'CLOSED' AND state = 'CLOSED'::case_state_enum THEN $9 ELSE reopen_reason END
 		WHERE id = $1
 		RETURNING id, severity, issue_type, state, work_state, closed_on, resolved_on
 	),
@@ -2877,7 +2888,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 		// race on — skip the transaction/lock overhead entirely.
 		if req.Severity == nil {
 			c, prevState, err := r.updateLockingPreviousState(ctx, req, func(q rowQuerier) (domain.Case, error) {
-				return scanUpdatedCaseWithResolvedOn(q.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
+				return scanUpdatedCaseWithResolvedOn(q.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason))
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return domain.Case{}, nil, nil, &apierror.NotFoundError{Msg: "case not found"}
@@ -2898,7 +2909,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 				return err
 			}
 			var txErr error
-			c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
+			c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason))
 			if txErr != nil {
 				return txErr
 			}
@@ -5339,7 +5350,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 // same transaction. An unassigned work item has no engineer to conflict with
 // and proceeds.
 func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, workItemType, state, severity, workState, resolutionCode, cause string, actorID *string) (domain.Case, *domain.CaseSeverity, error) {
-	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID}, "case"
+	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason}, "case"
 	if workItemType != "CASE" {
 		var ok bool
 		query, args, label, ok = caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)

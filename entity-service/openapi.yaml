@@ -24675,6 +24675,21 @@ components:
         closeNotes:
           type: string
           description: Close notes. Only allowed when state is closed or solution_proposed.
+        adminReopen:
+          type: boolean
+          enum: [true]
+          description: >-
+            Moves a closed case to any other state, bypassing the normal state-transition
+            rule (closed is otherwise terminal for every caller). Only honored for an
+            internal (WSO2 staff) caller, and only when the case's current state is
+            actually closed. Only `true` is meaningful; omit rather than sending `false`.
+            Only allowed alongside `state`.
+        reopenReason:
+          type: string
+          description: >-
+            Optional free-text note on why the case was reopened. Only allowed alongside
+            `adminReopen: true`. Write-only — never returned by this or any other
+            endpoint, and not shown in any UI.
         bestCaseFixEta:
           type: string
           format: date

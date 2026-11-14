@@ -452,6 +452,25 @@ caller holding `PermWrite` (the onboarding fields, including the four dates, are
 `PermManageOnboarding`). A nil `access` (no guard wired) fails closed, same as every other
 in-handler permission check in this codebase.
 
+## PATCH /cases/{id}: reopening a closed case requires PermAdmin
+
+Closed is terminal for every other caller — `state.go`'s `nextStates(caseStateClosed)` returns
+`[]string{}`, matching entity-service's own `case_state_transitions.go` (neither table has an entry
+for closed). `CaseHandler.PatchCase` carves out one exception: when the current state (fetched via
+`GetCase`, same lookup the existing transition check already does) is closed and the requested
+`state` is anything else, it requires `PermAdmin` via `h.access` instead of running the ordinary
+`isValidStateTransition` check, which would always reject it. A caller without `PermAdmin` (or no
+access guard wired) gets 403, same as `ProjectHandler.UpdateProject`'s admin-only fields above.
+
+On success, `sanitizeAdminReopenAttrs` (`state.go`) rewrites the forwarded body itself rather than
+passing the client's own JSON through: it strips whatever the client sent for `adminReopen`
+unconditionally and re-adds it as the literal `true` only for this one, already-permission-checked
+transition — entity-service's `UpdateCaseRequest.AdminReopen` never sees a client-supplied value,
+regardless of what a raw API caller sends. `reopenReason` (optional, free text) rides along only in
+that same case and is otherwise stripped too; entity-service stores it write-only (never returned
+by any response, never shown in the UI — see its own `CLAUDE.md`, "Case state-transition legality").
+Reopening this way also skips the usual SLA recompute and `case.status_changed` email, by design.
+
 ## Stored attachments in Azure Blob Storage (`internal/handler/stored_attachments.go`, `stored_attachments_blob.go`)
 
 Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no file bytes (a security report's files are uploaded first as drafts of the project, `type: "work_item"` with `projectId`, and `POST /cases` names them in `attachmentIds`; entity-service refuses a security report with none, and this service forwards the create body untouched, so the ids reach it as sent). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,

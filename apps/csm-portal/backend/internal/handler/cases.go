@@ -1315,8 +1315,18 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		MostLikelyFixEta   *string `json:"mostLikelyFixEta"`
 		WorstCaseFixEta    *string `json:"worstCaseFixEta"`
 	}
-	patchErr := json.Unmarshal(body, &patch)
-	if patchErr == nil && (patch.State != nil || patch.WorkState != nil) {
+	// Fails closed, not just silently forwarded as-is: a body this handler's
+	// own narrow peek can't decode (e.g. a field present here with the wrong
+	// JSON type) must never reach sanitizeAdminReopenAttrs with adminReopen
+	// still trusted off whatever the client sent -- skipping validation
+	// here would also skip stripping it. json.Valid above only proves the
+	// body is syntactically valid JSON, not that it decodes into this shape.
+	if err := json.Unmarshal(body, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	isAdminReopen := false
+	if patch.State != nil || patch.WorkState != nil {
 		current, err := h.entity.GetCase(r.Context(), caseID)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "entity GetCase failed during state validation", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -1331,7 +1341,19 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
-		if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
+		// Closed is terminal for the normal state machine (nextStates(closed)
+		// is empty) -- the one exception is a portal admin, who may move a
+		// closed case to any other state. Checked here, not left to
+		// entity-service's own AdminReopen bypass alone, since that bypass
+		// trusts whatever this handler decides and forwards.
+		if patch.State != nil && currentCase.State == caseStateClosed && *patch.State != caseStateClosed {
+			if !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
+				slog.WarnContext(r.Context(), "access denied: non-admin attempted to reopen a closed case", "userID", user.UserID, "caseID", caseID)
+				writeError(w, http.StatusForbidden, ErrMsgForbidden)
+				return
+			}
+			isAdminReopen = true
+		} else if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
 			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
 			return
 		}
@@ -1343,6 +1365,16 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		// holds PermWrite (route-level; cs_engineer or admin), and every such
 		// caller may close any case, assigned to them or not.
 	}
+
+	// adminReopen/reopenReason are never trusted verbatim from the client --
+	// see sanitizeAdminReopenAttrs's own doc comment.
+	sanitized, err := sanitizeAdminReopenAttrs(body, isAdminReopen)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to sanitize adminReopen attributes", "userID", user.UserID, "caseID", caseID, "err", err)
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+	body = sanitized
 
 	result, err := h.entity.PatchCase(r.Context(), caseID, body)
 	if err != nil {
@@ -1367,7 +1399,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	// cancellation, which fires as soon as the handler returns — a bare
 	// context.Background() would drop those values and the note would reach the
 	// entity service unattributed.
-	if patchErr == nil && patch.AutocloseHoldUntil != nil {
+	if patch.AutocloseHoldUntil != nil {
 		holdUntil := *patch.AutocloseHoldUntil
 		detached := context.WithoutCancel(r.Context())
 		go func() {
@@ -1389,7 +1421,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	// write must not delay the response or fail the request if it errors, and
 	// context.WithoutCancel keeps the request-scoped values the entity client
 	// needs while detaching from the request's own cancellation.
-	if patchErr == nil && (patch.BestCaseFixEta != nil || patch.MostLikelyFixEta != nil || patch.WorstCaseFixEta != nil) {
+	if patch.BestCaseFixEta != nil || patch.MostLikelyFixEta != nil || patch.WorstCaseFixEta != nil {
 		fieldsPatched := fixEtaFieldsPatched{
 			best:       patch.BestCaseFixEta != nil,
 			mostLikely: patch.MostLikelyFixEta != nil,
