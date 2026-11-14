@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 )
 
 type fakeUserSearcher struct {
@@ -114,4 +115,47 @@ type blockingSearcher struct{}
 func (blockingSearcher) SearchUsersByEmail(ctx context.Context, _ []string) ([]entity.UserRoleInfo, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+// countingStaffLookup answers "not internal" and counts how often it was asked,
+// like a lookup that is failing.
+type countingStaffLookup struct{ asked int }
+
+func (c *countingStaffLookup) IsInternal(context.Context, string) bool {
+	c.asked++
+	return false
+}
+
+// An event for recipients in two groups (customer and CSM portals) asks whether
+// the person is staff once, not once per group's render: a slow or failing
+// lookup would otherwise make every group wait for it again.
+func TestDispatcher_Handle_StaffLookupIsAskedOncePerEventNotOncePerGroup(t *testing.T) {
+	links := &mockLinkResolver{
+		linkFor: func(email string) string {
+			if email == "customer@example.com" {
+				return "https://customer.example/projects/PROJ-1/support/cases/CASE-1"
+			}
+			return "https://csm.example/cases/CASE-1"
+		},
+	}
+	events := map[string]string{
+		"case.comment_added": `{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Jane Doe","authorEmail":"jane.doe@example.com","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["customer@example.com","staff@example.com"]}}`,
+		"case.created":       `{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Jane Doe","reporterEmail":"jane.doe@example.com","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["customer@example.com","staff@example.com"]}}`,
+	}
+	for name, raw := range events {
+		t.Run(name, func(t *testing.T) {
+			mock := &mockEmailSender{}
+			lookup := &countingStaffLookup{}
+			d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil).WithStaffLookup(lookup)
+			if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(raw)}); err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+			if len(mock.calls) != 2 {
+				t.Fatalf("emails = %d, want 2 (one per group)", len(mock.calls))
+			}
+			if lookup.asked != 1 {
+				t.Errorf("staff lookup asked %d times, want 1 for the event", lookup.asked)
+			}
+		})
+	}
 }

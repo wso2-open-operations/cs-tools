@@ -1378,10 +1378,13 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	} else {
 		caseRef := displayCaseRef(p.CaseNumber, p.CaseID)
 		subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, p.CaseTitle)
+		// Looked up once per event, not inside the render callback, which runs once
+		// per recipient group (see handleCommentAdded's identical reasoning).
+		reporterName := notifications.StaffNameIf(p.ReporterName, d.isStaff(ctx, p.ReporterEmail))
 		var emailErr error
 		_, emailErr = d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 			return notifications.RenderCaseCreatedEmail(notifications.CaseCreatedEmailData{
-				ReporterName:              notifications.StaffNameIf(p.ReporterName, d.isStaff(ctx, p.ReporterEmail)),
+				ReporterName:              reporterName,
 				ProjectName:               p.ProjectName,
 				CaseNumber:                caseRef,
 				CaseTitle:                 p.CaseTitle,
@@ -1556,6 +1559,13 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 	// has no reason to pay for this fetch too.
 	fullComment := d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID)
 	caseComment := d.lazyInlineImages(ctx, fullComment, inlineimages.Scope{WorkItemID: p.CaseID})
+	// Looked up once per event, here, not inside the render callback below: that
+	// runs once per recipient group, and a slow or failing lookup must not make
+	// every group wait for it again.
+	commentAuthor := p.Name
+	if !p.IsInternalNote && !isAnnouncementCaseType(p.CaseType) {
+		commentAuthor = notifications.StaffNameIf(p.Name, d.isStaff(ctx, p.AuthorEmail))
+	}
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 		if p.IsInternalNote {
 			// See events.CommentAddedPayload.IsInternalNote's own doc
@@ -1569,7 +1579,7 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// An announcement's author is not shown to its project contacts.
 			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
-		return notifications.RenderCommentAddedEmail(notifications.StaffNameIf(p.Name, d.isStaff(ctx, p.AuthorEmail)), displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		return notifications.RenderCommentAddedEmail(commentAuthor, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
