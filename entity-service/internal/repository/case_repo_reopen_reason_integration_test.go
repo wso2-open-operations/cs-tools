@@ -113,3 +113,47 @@ func TestReopenReasonIntegration_AdminReopenPersistsReason(t *testing.T) {
 		t.Errorf("reopen_reason = %v after a reopen with no reason given, want nil", got)
 	}
 }
+
+// TestReopenReasonIntegration_AdminReopenClearsStaleResolvedOn is the
+// regression guard for a CodeRabbit-caught gap in updateCaseQuery's
+// resolved_on CASE expression: before its fourth branch was added, reopening
+// a closed case into anything other than the literal "reopened"/
+// "solution_proposed" values (e.g. work_in_progress) left the PRIOR
+// resolution's resolved_on untouched, which a later re-close's own
+// COALESCE(resolved_on, NOW()) would then reuse instead of recording the new
+// resolution.
+func TestReopenReasonIntegration_AdminReopenClearsStaleResolvedOn(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedReopenReasonFixture(t, pool)
+	ctx := repository.WithSystemIdentity(context.Background())
+	if _, err := pool.Exec(ctx, `UPDATE "case" SET resolved_on = NOW() WHERE id = $1`, reopenReasonCaseID); err != nil {
+		t.Fatalf("seed resolved_on: %v", err)
+	}
+	repo := repository.NewCaseRepository(repository.NewScoped(pool))
+
+	workInProgress := domain.CaseStateWorkInProgress
+	if _, _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: reopenReasonCaseID, State: &workInProgress}, nil); err != nil {
+		t.Fatalf("UpdateCase(state=work_in_progress): %v", err)
+	}
+	var resolvedOn *time.Time
+	if err := pool.QueryRow(ctx, `SELECT resolved_on FROM "case" WHERE id = $1`, reopenReasonCaseID).Scan(&resolvedOn); err != nil {
+		t.Fatalf("read resolved_on: %v", err)
+	}
+	if resolvedOn != nil {
+		t.Errorf("resolved_on = %v after reopening into work_in_progress, want nil", resolvedOn)
+	}
+
+	// Re-closing afterward must record a FRESH resolved_on, not silently stay
+	// nil forever -- confirms the fourth branch didn't just move the bug
+	// rather than fix it.
+	closed := domain.CaseStateClosed
+	if _, _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: reopenReasonCaseID, State: &closed}, nil); err != nil {
+		t.Fatalf("UpdateCase(state=closed): %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT resolved_on FROM "case" WHERE id = $1`, reopenReasonCaseID).Scan(&resolvedOn); err != nil {
+		t.Fatalf("read resolved_on after re-close: %v", err)
+	}
+	if resolvedOn == nil {
+		t.Error("resolved_on is nil after re-closing, want a fresh timestamp")
+	}
+}
