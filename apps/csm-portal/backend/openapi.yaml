@@ -1756,7 +1756,7 @@ paths:
         their token roles grant at least one portal role (see UserResponse.roles) -- in that
         case the response is 200. A caller whose token grants cs_engineer gets a user row
         created on the spot, sourced from the token itself (firstName/lastName/phoneNumber --
-        the given_name/family_name/phone_number claims; lastName has " Ⓦ" appended) -- the
+        the given_name/family_name/phone_number claims) -- the
         response then carries that row's id. Any other caller holding a portal role but no
         user row gets a 200 sourced from the token alone (email, firstName, lastName, roles),
         with id/timeZone/team null.

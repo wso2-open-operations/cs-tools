@@ -822,8 +822,8 @@ func TestProvisionOwner_TrimsNamesAndCreatesUser(t *testing.T) {
 	if gotReq.FirstName != "Jane" {
 		t.Errorf("FirstName = %q, want trimmed %q", gotReq.FirstName, "Jane")
 	}
-	if gotReq.LastName != "Doe"+ownerAutoProvisionSuffix {
-		t.Errorf("LastName = %q, want trimmed %q", gotReq.LastName, "Doe"+ownerAutoProvisionSuffix)
+	if gotReq.LastName != "Doe" {
+		t.Errorf("LastName = %q, want trimmed %q", gotReq.LastName, "Doe")
 	}
 }
 

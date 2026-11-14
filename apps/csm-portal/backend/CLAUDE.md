@@ -82,8 +82,8 @@ untouched — this only fires for the email-only case, so it never overrides a c
 Phone is handled the same way `provisionCsEngineerUser` handles it: entity-service's `POST /users` has
 no phone field, so a SCIM-sourced phone number is set with a second, best-effort `PATCH /users/{id}`
 call once the create has returned the new user's id — a failed phone patch does not undo the create.
-Unlike `provisionCsEngineerUser`, the created `lastName` here is **not** marked with `" Ⓦ"` — that
-marker is specific to the on-demand `cs_engineer` auto-provisioning path, not the admin Add User flow.
+The created `lastName` is the name as given; neither this path nor `provisionCsEngineerUser` appends
+any marker to a name.
 
 **Constraint: an internal-type user must have a `@wso2.com` email.** Found live: the Add User form sent
 no `roles` at all, so every user it created resolved to `user_type = NOT_AVAILABLE` (the trigger's
@@ -358,12 +358,13 @@ these a new field this feature added, same posture `ensureUserProvisioned` alrea
 for name, extended here to phone too since the token carries it). No SCIM call is made at
 all: unlike the admin Add User flow below, which has no token for the person it's creating
 and so has to look them up in SCIM by email, this caller IS the person being provisioned,
-so their own token already has everything needed. The created `lastName` has `" Ⓦ"`
-appended (`withCsEngineerLastNameMarker`), so a row created this way is identifiable later
-as distinct from one entered by hand or via the admin Add User flow. Unlike
+so their own token already has everything needed. The created `lastName` is the token's
+name, with no marker appended (the circled W this path used to add is gone; rows created before the
+change keep theirs). Unlike
 `ensureUserProvisioned`, this path does not fall back to the email's local part when both
-name claims are blank — it creates the user with whatever the token has (possibly just the
-marker alone as `lastName`).
+name claims are blank — it creates the user with whatever the token has; with no name at all,
+entity-service refuses the create ("firstName or lastName is required"), the failure is logged and
+`GetMe` answers from the token alone.
 
 `POST /users` has no `phone` field (see "Creating a user" above), so a non-blank token
 phone is set with a second call, `PATCH /users/{id}` (`entityUserClient.UpdateUser`), once
