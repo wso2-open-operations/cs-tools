@@ -179,13 +179,14 @@ func (s *crNoticeService) approvalNotice(ctx context.Context, change repository.
 	}
 
 	notice := events.CRApprovalRequestedPayload{
-		ChangeRequestID: change.EntityID,
-		Number:          details.Number,
-		State:           state,
-		Audience:        branch.audience,
-		RequesterName:   details.RequesterName,
-		ProjectName:     details.ProjectName,
-		ProjectID:       details.ProjectID,
+		ChangeRequestID:     change.EntityID,
+		Number:              details.Number,
+		State:               state,
+		Audience:            branch.audience,
+		RequesterName:       details.RequesterName,
+		RequesterIsInternal: details.RequesterIsInternal,
+		ProjectName:         details.ProjectName,
+		ProjectID:           details.ProjectID,
 	}
 
 	var recipients []string
@@ -247,6 +248,7 @@ func (s *crNoticeService) planDateNotice(ctx context.Context, change repository.
 		ShortDescription: details.ShortDescription,
 		Description:      details.Description,
 		ActorName:        details.ActorName,
+		ActorIsInternal:  details.ActorIsInternal,
 	}
 
 	var recipients []string

@@ -232,6 +232,9 @@ type OnboardingConfig struct {
 // destination, a phone number, in the event payload itself, and doesn't go
 // through links at all.
 type Dispatcher struct {
+	// staff tells whether an email address belongs to an internal user, for the
+	// support engineer icon (see WithStaffLookup). nil: no icon where unsure.
+	staff      StaffLookup
 	email      emailSender
 	googleChat googleChatSender
 	call       callSender
@@ -539,6 +542,20 @@ func (d *Dispatcher) WithFullContentFetcher(f fullContentFetcher) *Dispatcher {
 func (d *Dispatcher) WithInlineImages(r inlineImageResolver) *Dispatcher {
 	d.images = r
 	return d
+}
+
+// WithStaffLookup sets how an email address is told to be an internal user's,
+// for the support engineer icon beside a name. Without it no icon is shown
+// where the event carries no certainty.
+func (d *Dispatcher) WithStaffLookup(l StaffLookup) *Dispatcher {
+	d.staff = l
+	return d
+}
+
+// isStaff reports whether email belongs to an internal user; false when no
+// lookup is configured or it fails.
+func (d *Dispatcher) isStaff(ctx context.Context, email string) bool {
+	return d.staff != nil && d.staff.IsInternal(ctx, email)
 }
 
 // withInlineImages returns html with its image references resolved, or html
@@ -1364,7 +1381,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 		var emailErr error
 		_, emailErr = d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 			return notifications.RenderCaseCreatedEmail(notifications.CaseCreatedEmailData{
-				ReporterName:              p.ReporterName,
+				ReporterName:              notifications.StaffNameIf(p.ReporterName, d.isStaff(ctx, p.ReporterEmail)),
 				ProjectName:               p.ProjectName,
 				CaseNumber:                caseRef,
 				CaseTitle:                 p.CaseTitle,
@@ -1552,7 +1569,7 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// An announcement's author is not shown to its project contacts.
 			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
-		return notifications.RenderCommentAddedEmail(notifications.StaffNameIf(p.Name, notifications.IsWSO2Email(p.AuthorEmail)), displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		return notifications.RenderCommentAddedEmail(notifications.StaffNameIf(p.Name, d.isStaff(ctx, p.AuthorEmail)), displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1795,7 +1812,7 @@ func (d *Dispatcher) handleCRApprovalRequested(ctx context.Context, record event
 		Audience:      p.Audience,
 		Team:          p.Team,
 		GroupName:     p.GroupName,
-		RequesterName: p.RequesterName,
+		RequesterName: notifications.StaffNameIf(p.RequesterName, p.RequesterIsInternal),
 		ProjectName:   p.ProjectName,
 		Link:          d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
 		IntendedFor:   intendedFor,
@@ -2753,7 +2770,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 	body, images := notifications.RenderCRPlanDateNoticeEmail(notifications.CRPlanDateEmailData{
 		Kind:             p.Kind,
 		Number:           p.Number,
-		ActorName:        p.ActorName,
+		ActorName:        notifications.StaffNameIf(p.ActorName, p.ActorIsInternal),
 		ProjectName:      p.ProjectName,
 		ShortDescription: p.ShortDescription,
 		Description:      d.withInlineImages(ctx, p.Description, inlineimages.Scope{WorkItemID: p.ChangeRequestID}),

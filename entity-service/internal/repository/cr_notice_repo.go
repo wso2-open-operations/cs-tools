@@ -49,6 +49,9 @@ type CRNoticeDetails struct {
 	Description      string
 	ActorName        string
 	ActorIsWSO2      bool
+	// RequesterIsInternal and ActorIsInternal are true for an INTERNAL-type user.
+	RequesterIsInternal bool
+	ActorIsInternal     bool
 }
 
 // CRNoticeRepository reads what the change-request notices need: the outbox
@@ -185,7 +188,9 @@ func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDe
 		           NULLIF(TRIM(COALESCE(a.name, '')), ''),
 		           ''
 		       ),
-		       lower(COALESCE(a.email, wi.updated_by, '')) LIKE '%@wso2.com'
+		       lower(COALESCE(a.email, wi.updated_by, '')) LIKE '%@wso2.com',
+		       COALESCE(u.user_type::text, '') = 'INTERNAL',
+		       COALESCE(a.user_type::text, '') = 'INTERNAL'
 		FROM change_request cr
 		JOIN work_item wi   ON wi.id = cr.id
 		-- requested_by_user_id, not work_item.opened_by_user_id: the change
@@ -205,6 +210,7 @@ func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDe
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&d.Number, &d.GitReference, &d.RequesterName, &d.ProjectID, &d.ProjectName,
 		&d.ShortDescription, &d.Description, &d.ActorName, &d.ActorIsWSO2,
+		&d.RequesterIsInternal, &d.ActorIsInternal,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CRNoticeDetails{}, nil

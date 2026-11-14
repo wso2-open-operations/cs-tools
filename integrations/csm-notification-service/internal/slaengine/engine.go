@@ -1472,7 +1472,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	send("assignee", assigneeEmails, "", func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
-		return notifications.RenderSLABreachAssigneeEmail(state.AssigneeName, d)
+		return notifications.RenderSLABreachAssigneeEmail(notifications.StaffName(state.AssigneeName), d)
 	})
 	// TeamEmail is always the case's real CRE team, never swapped for the
 	// onboarding team (see entity-service's own GetClockState doc comment)
@@ -1487,7 +1487,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	send("team", teamEmails, meta.Team, func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
-		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
+		return notifications.RenderSLABreachTeamEmail(notifications.StaffName(state.TeamLeadName), d)
 	})
 
 	// A separate, third email to the fixed Americas team — only during the
@@ -1505,7 +1505,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		send("americas", americasEmails, slaBreachAmericasTeamKey, func(intendedFor string) string {
 			d := data
 			d.IntendedFor = intendedFor
-			return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
+			return notifications.RenderSLABreachTeamEmail(notifications.StaffName(state.TeamLeadName), d)
 		})
 	}
 }

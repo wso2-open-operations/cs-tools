@@ -429,6 +429,10 @@ func main() {
 	if inlineImages != nil {
 		dispatcher = dispatcher.WithInlineImages(inlineImages)
 	}
+	// Whether a person is an internal user (WSO2 staff), by the user type
+	// entity-service holds, for the support engineer icon beside a name. A failed
+	// lookup shows no icon.
+	dispatcher = dispatcher.WithStaffLookup(dispatch.NewStaffLookup(customerEntityClient, 10*time.Minute))
 	// escalationClient is a *escalation.Client, not the escalationDetector
 	// interface itself -- passing it through WithFrustrationDetection
 	// unconditionally when nil would store a non-nil interface wrapping a

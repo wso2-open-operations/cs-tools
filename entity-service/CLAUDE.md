@@ -12317,3 +12317,8 @@ otherwise, so absent means "not known to be internal", never "known external".
 - **New list that shows people:** add the flag the same way; do not infer staff from the name.
 - **No marker on creation:** a user created on the fly (the owner auto-provisioned from a synced
   account) no longer gets a circled W appended to the last name. Rows created earlier keep theirs.
+
+**Event payloads carry the user type where a consumer shows a name.** `case.created` carries `reporterEmail` (the
+notification service looks up the type), and the change request notices carry `requesterIsInternal` /
+`actorIsInternal`, set in `CRNoticeRepository.Details` from the `user_type` of the requester and actor rows it already
+joins. csm-notification-service decodes strictly: deploy it before entity-service starts sending these.

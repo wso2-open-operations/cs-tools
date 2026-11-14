@@ -769,5 +769,10 @@ reporting metric rather than something that needs an immediate notification.
 - The circled W that entity-service's data appends to many users' names is stripped from every event payload
   before it is handled, and from the SLA engine's entity-service responses.
 - A support engineer's name is followed by a headphone emoji in: the case-acknowledged chat cards, the
-  case-assigned email, the incident-assigned chat card, an internal-note email, a comment email whose author's
-  `authorEmail` is a WSO2 address, and the SLA breach chat card's team lead.
+  case-assigned email, the incident-assigned chat card, an internal-note email, the SLA breach emails and chat
+  card (assignee, team lead) and the project-reactivated email (account owner), where the person is staff by
+  definition; and, by the user type entity-service holds, a comment email's author, the case-created reporter and
+  the change request requester and actor. If the type lookup fails there is no icon.
+- New payload fields (all optional): `reporterEmail` (case.created), `requesterIsInternal` (change request approval
+  notice), `actorIsInternal` (change request date notice). **Deploy this service before entity-service**: it decodes
+  strictly and rejects a field it does not know.

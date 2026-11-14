@@ -18,9 +18,12 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 )
 
@@ -42,21 +45,25 @@ func TestDispatcher_Handle_CaseAcknowledged_StripsTheCircledWAndAddsTheIcon(t *t
 	}
 }
 
-// A comment email shows the support engineer icon beside a WSO2 author, never
-// beside a customer, and neither name carries the circled W.
-func TestDispatcher_Handle_CommentAdded_IconOnlyForWSO2Authors(t *testing.T) {
+// A comment email shows the support engineer icon beside an internal author,
+// by user type, never beside a customer (even one with a WSO2 address), and
+// never when the type lookup fails. Neither name carries the circled W.
+func TestDispatcher_Handle_CommentAdded_IconOnlyForInternalAuthors(t *testing.T) {
 	cases := []struct {
-		name, authorEmail string
-		wantIcon          bool
+		name     string
+		lookup   *fakeUserSearcher
+		wantIcon bool
 	}{
-		{"support engineer", "engineer@wso2.com", true},
-		{"customer", "customer@example.com", false},
+		{"internal author", &fakeUserSearcher{users: []entity.UserRoleInfo{{Email: "author@example.test", UserType: "internal"}}}, true},
+		{"customer author", &fakeUserSearcher{users: []entity.UserRoleInfo{{Email: "author@example.test", UserType: "external"}}}, false},
+		{"lookup fails", &fakeUserSearcher{err: errors.New("entity-service down")}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			mock := &mockEmailSender{}
 			d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
-			record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Jane Doe ⓦ","authorEmail":"` + c.authorEmail + `","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["test-recipient@example.com"]}}`)}
+			d.WithStaffLookup(NewStaffLookup(c.lookup, time.Minute))
+			record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Jane Doe \u24e6","authorEmail":"author@example.test","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["test-recipient@example.com"]}}`)}
 			if err := d.Handle(context.Background(), record); err != nil {
 				t.Fatalf("Handle() error = %v", err)
 			}
@@ -74,5 +81,28 @@ func TestDispatcher_Handle_CommentAdded_IconOnlyForWSO2Authors(t *testing.T) {
 				t.Error("the email lost the author's name")
 			}
 		})
+	}
+}
+
+// The assignee is a support engineer, and every email about the assignment
+// shows the icon in place of the circled W, whoever receives it.
+func TestDispatcher_Handle_CaseAssigned_EveryEmailShowsTheIconNotTheCircledW(t *testing.T) {
+	mock := &mockEmailSender{}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.assigned","entityId":"CASE-1","payload":{"assigneeName":"Jane Doe ⓦ","assigneeEmail":"jane.doe@example.com","projectId":"PROJ-1","caseId":"CASE-1","recipients":["customer@example.com","staff@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) == 0 {
+		t.Fatal("no email sent")
+	}
+	for i, call := range mock.calls {
+		if strings.Contains(call.htmlBody, "&#9446;") || strings.Contains(call.htmlBody, "&#9420;") {
+			t.Errorf("email %d still carries the circled W", i)
+		}
+		if !strings.Contains(call.htmlBody, "&#127911;") {
+			t.Errorf("email %d has no support engineer icon", i)
+		}
 	}
 }

@@ -77,7 +77,10 @@ type CRPlanDateNoticePayload struct {
 	GroupName string `json:"groupName,omitempty"`
 	// ActorName is whoever changed the date, rendered LAST NAME FIRST because
 	// that is the order the ServiceNow templates interpolate the two pills in.
-	ActorName        string `json:"actorName,omitempty"`
+	ActorName string `json:"actorName,omitempty"`
+	// ActorIsInternal is true when the actor is an INTERNAL-type user (WSO2
+	// staff): the email shows a support engineer icon beside the name.
+	ActorIsInternal  bool   `json:"actorIsInternal,omitempty"`
 	ProjectID        string `json:"projectId,omitempty"`
 	ProjectName      string `json:"projectName,omitempty"`
 	ShortDescription string `json:"shortDescription,omitempty"`
@@ -110,6 +113,9 @@ type CRApprovalRequestedPayload struct {
 	// RequesterName is the change request's requester, shown in the email body
 	// ("<name> requested approval for ...").
 	RequesterName string `json:"requesterName,omitempty"`
+	// RequesterIsInternal is true when the requester is an INTERNAL-type user
+	// (WSO2 staff): the email shows a support engineer icon beside the name.
+	RequesterIsInternal bool `json:"requesterIsInternal,omitempty"`
 	// ProjectName is the customer project's name, shown in the body.
 	ProjectName string `json:"projectName,omitempty"`
 	// ProjectID is the project the change request belongs to. Carried for the

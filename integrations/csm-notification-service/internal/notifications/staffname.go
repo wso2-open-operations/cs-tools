@@ -40,9 +40,3 @@ func StaffNameIf(name string, staff bool) string {
 	}
 	return name
 }
-
-// IsWSO2Email reports whether email belongs to a WSO2 address, which is how
-// this service tells staff from a customer where an event carries no user type.
-func IsWSO2Email(email string) bool {
-	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(email)), "@wso2.com")
-}
