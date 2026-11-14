@@ -24,7 +24,8 @@
  * - an ATX heading (`#` to `######`, a space, then text)
  * - two or more consecutive list lines (`- `, `* `, `+ `, `1. `, `1) `; blank
  *   lines between items are fine, a prose line breaks the run)
- * - a blockquote line (`> text`)
+ * - a blockquote: two or more consecutive `> text` lines, or one followed by another
+ *   Markdown signal (a lone `> app@1.0.0 build` from npm, or `>30 days`, is not one)
  * - a GFM table (a header row with pipes, then a `|---|---|` row)
  * - `**bold**` (not glued to a word, so `2**3**4` is not bold) or `__bold text__`
  *   (a space inside, so a Python `__init__` is not bold)
@@ -47,7 +48,8 @@ const HEADING = /^ {0,3}#{1,6}[ \t]+\S/;
 const LIST_LINE = /^ {0,6}(?:[-*+]|\d{1,3}[.)])[ \t]+\S/;
 const BLOCKQUOTE = /^ {0,3}>[ \t]?\S/;
 const TABLE_SEPARATOR = /^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/;
-const STAR_BOLD = /(?<![\w*])\*\*(?=[^\s*])[^*\n]{1,200}?(?<=[^\s*])\*\*(?![\w*])/;
+// Not glued to a word or a slash: `**/node_modules/**` and `src/**/test/**` are globs, not bold.
+const STAR_BOLD = /(?<![\w*/])\*\*(?=[^\s*/])[^*\n]{1,200}?(?<=[^\s*/])\*\*(?![\w*/])/;
 // Words (no whitespace, no underscore) separated by blanks: unambiguous, so no backtracking blow-up.
 const UNDERSCORE_BOLD = /(?<![\w_])__[^\s_]{1,100}(?:[ \t]+[^\s_]{1,100}){1,20}__(?![\w_])/;
 const LINK = /\[[^\][\n]{1,200}\]\((?:https?:\/\/|mailto:|\.{1,2}\/|\/|#)[^)\s]{0,500}\)/;
@@ -61,12 +63,23 @@ export function looksLikeMarkdown(input: string): boolean {
   }
 
   let listRun = 0;
+  let quoteRun = 0;
   let previous = "";
+  let quoteSeen = false;
+  let listSeen = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.slice(0, MAX_SCANNED_LINE);
-    if (FENCE.test(line) || HEADING.test(line) || BLOCKQUOTE.test(line)) return true;
+    if (FENCE.test(line) || HEADING.test(line)) return true;
+    if (BLOCKQUOTE.test(line)) {
+      if (++quoteRun >= 2 || listSeen) return true;
+      quoteSeen = true;
+    } else {
+      quoteRun = 0;
+    }
     if (previous.includes("|") && TABLE_SEPARATOR.test(line)) return true;
     if (LIST_LINE.test(line)) {
+      if (quoteSeen) return true; // a quote line plus a list line
+      listSeen = true;
       if (++listRun >= 2) return true;
     } else if (line.trim() !== "") {
       listRun = 0;

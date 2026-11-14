@@ -29,6 +29,11 @@ describe("isFlatClipboardHtml", () => {
     expect(isFlatClipboardHtml(html)).toBe(true);
   });
 
+  it("keeps a VS Code snippet with ordinary styles and a plain Word paragraph without lists flat", () => {
+    expect(isFlatClipboardHtml('<div style="white-space:pre;font-weight:normal">a</div>')).toBe(true);
+    expect(isFlatClipboardHtml("<p class=MsoNormal>just text</p>")).toBe(true);
+  });
+
   it("treats pre/code as flat", () => {
     expect(isFlatClipboardHtml("<pre><code>a **b**</code></pre>")).toBe(true);
   });
@@ -43,6 +48,9 @@ describe("isFlatClipboardHtml", () => {
     ["bold", "<p><b>x</b></p>"],
     ["italic", "<p><em>x</em></p>"],
     ["an image", '<img src="https://x.com/a.png">'],
+    ["a Word list paragraph", '<p class=MsoListParagraph style="text-indent:-.25in;mso-list:l0 level1 lfo1">First</p>'],
+    ["a Word numbered list with the mso-list style only", '<p style="mso-list:l0 level1 lfo2">1.&nbsp;One</p>'],
+    ["any other mso- style", '<p style="mso-margin-top-alt:auto">x</p>'],
   ])("treats %s as rendered (not flat)", (_name, html) => {
     expect(isFlatClipboardHtml(html)).toBe(false);
   });

@@ -37,6 +37,11 @@ export function rememberInlineImageSize(previewUrl: string, bytes: number): void
   previewSizes.set(previewUrl, bytes);
 }
 
+/** The remembered size of the file behind a preview URL (0 when unknown, e.g. a stored `/<uuid>` image). */
+export function inlineImageSize(src: string): number {
+  return previewSizes.get(src) ?? 0;
+}
+
 /** Why an image was not taken: too many images, or too many bytes in all. */
 export type InlineImageRefusal = "count" | "total";
 

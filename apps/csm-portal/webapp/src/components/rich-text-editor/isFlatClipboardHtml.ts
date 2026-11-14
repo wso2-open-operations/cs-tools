@@ -23,10 +23,13 @@ const STRUCTURED_HTML = "li, ol, ul, table, h1, h2, h3, h4, h5, h6, a[href], str
  * paste the `text/plain` is the real source (possibly Markdown). HTML with lists,
  * tables, headings, links, bold/italic, quotes or images is rendered content
  * (Word, Gmail, a web page, a chat's rendered answer), whose `text/plain` is only
- * its rendered text, so it keeps the Keep/Remove Formatting prompt. Empty HTML is flat.
+ * its rendered text, so it keeps the Keep/Remove Formatting prompt; so does Word's
+ * list markup (`MsoListParagraph`, `mso-` styles). Empty HTML is flat.
  */
 export function isFlatClipboardHtml(html: string): boolean {
   if (!html.trim()) return true;
   const dom = new DOMParser().parseFromString(html, "text/html");
-  return dom.body.querySelector(STRUCTURED_HTML) === null;
+  if (dom.body.querySelector(STRUCTURED_HTML) !== null) return false;
+  // Word lists are paragraphs (`class=MsoListParagraph`, `mso-list:` styles), not `li`.
+  return dom.body.querySelector('[class*="MsoList"], [style*="mso-"]') === null;
 }

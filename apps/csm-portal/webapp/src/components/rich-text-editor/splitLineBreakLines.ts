@@ -16,6 +16,9 @@
 
 import {
   $createParagraphNode,
+  $getRoot,
+  $getSelection,
+  $isRangeSelection,
   $isLineBreakNode,
   $isElementNode,
   $isParagraphNode,
@@ -159,6 +162,7 @@ export function $splitSelectedLinesIntoParagraphs(
     for (const { point, index, offset } of rehome) {
       point.set(targets[index].getKey(), offset, "element");
     }
+    if (firstSelected > 0) $trailingBreaksToParagraphs(targets[0]);
     segments.forEach((segment, i) => {
       const selectedLine = segment.firstLine === segment.lastLine && segment.firstLine >= firstSelected && segment.firstLine <= lastSelected;
       if (!selectedLine) return;
@@ -171,6 +175,27 @@ export function $splitSelectedLinesIntoParagraphs(
   }
 
   if (options.dropBlankLines) $dropBlankParagraphs(blanks, kept > 0, start, end);
+}
+
+/**
+ * The context paragraph before a split-out line ends in the blank lines the user
+ * typed (`a<br>` + `<br>b`), but a trailing `<br>` is no line in HTML (the editor
+ * shows it, a browser does not), so the blank line would vanish from the sent
+ * reply. Each trailing break becomes an empty paragraph (`<p>a</p><p><br></p>`),
+ * which shows as a blank line in the editor and in every renderer.
+ */
+function $trailingBreaksToParagraphs(before: ParagraphNode): void {
+  let last = before.getLastChild();
+  let anchor: ParagraphNode = before;
+  while ($isLineBreakNode(last)) {
+    last.remove();
+    const blank = $createParagraphNode()
+      .setFormat(before.getFormatType())
+      .setIndent(before.getIndent());
+    anchor.insertAfter(blank);
+    anchor = blank;
+    last = before.getLastChild();
+  }
 }
 
 /**
@@ -211,5 +236,35 @@ function $dropBlankParagraphs(
   }
   for (const node of removed) {
     if ($isElementNode(node)) node.remove();
+  }
+}
+
+/**
+ * Puts a collapsed caret that sits on the root itself (a truly empty editor in
+ * Chrome) inside a block, so a block conversion converts a paragraph instead of
+ * leaving the caret on the root, where the next typed text lands in a new
+ * paragraph above the converted block. An empty root gets a paragraph. Any other
+ * selection is left alone. Run it inside `editor.update`.
+ */
+export function $caretOnRootIntoBlock(): void {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
+  const root = $getRoot();
+  if (selection.anchor.type !== "element" || !selection.anchor.getNode().is(root)) return;
+  const offset = selection.anchor.offset;
+  const target = root.getChildAtIndex(offset);
+  if (target && $isElementNode(target)) {
+    target.selectStart();
+    return;
+  }
+  const previous = root.getChildAtIndex(offset - 1);
+  if (previous && $isElementNode(previous)) {
+    previous.selectEnd();
+    return;
+  }
+  if (root.getChildrenSize() === 0) {
+    const paragraph = $createParagraphNode();
+    root.append(paragraph);
+    paragraph.select();
   }
 }

@@ -15,7 +15,9 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { markdownToPasteDom, mergeAdjacentParagraphs } from "./markdownPaste";
+import { flattenTablesToParagraphs, imagesToLinks, isAppImageSrc, markdownToPasteDom, mergeAdjacentParagraphs } from "./markdownPaste";
+
+const parse = (h: string) => new DOMParser().parseFromString(h, "text/html");
 
 const html = (dom: Document) => dom.body.innerHTML;
 
@@ -79,5 +81,81 @@ describe("mergeAdjacentParagraphs", () => {
     const dom = parse("<p>a</p><ul><li>x</li></ul><p>b</p><p>c</p>");
     mergeAdjacentParagraphs(dom);
     expect(html(dom)).toBe("<p>a</p><ul><li>x</li></ul><p>b<br><br>c</p>");
+  });
+});
+
+describe("imagesToLinks (Keep Formatting HTML)", () => {
+  it("links a remote image by its alt, or its address without one", () => {
+    const dom = parse('<p><img src="https://x.com/a.png" alt="a"> <img src="https://x.com/b.png"></p>');
+    imagesToLinks(dom);
+    expect(html(dom)).toBe('<p><a href="https://x.com/a.png">a</a> <a href="https://x.com/b.png">https://x.com/b.png</a></p>');
+  });
+
+  it("shows only the alt for an image inside a link, a data: source and an unsafe source", () => {
+    const dom = parse(
+      '<p><a href="https://x.com"><img src="https://i.com/b.png" alt="badge"></a><img src="data:image/png;base64,AA" alt="d"><img src="javascript:1" alt="j"></p>',
+    );
+    imagesToLinks(dom);
+    expect(html(dom)).toBe('<p><a href="https://x.com">badge</a>dj</p>');
+  });
+
+  it("removes every image when the clipboard also carries the picture file", () => {
+    const dom = parse('<p>a<img src="https://x.com/a.png" alt="a">b</p>');
+    imagesToLinks(dom, { dropAll: true });
+    expect(html(dom)).toBe("<p>ab</p>");
+  });
+});
+
+describe("flattenTablesToParagraphs (a paste into a table cell)", () => {
+  it("makes one paragraph per row with the cells joined by ' | ', skipping empty rows", () => {
+    const dom = parse(
+      "<p>before</p><table><thead><tr><th>H1</th><th>H2</th></tr></thead><tbody><tr><td> 1 </td><td>2\n3</td></tr><tr><td></td><td></td></tr></tbody></table>",
+    );
+    flattenTablesToParagraphs(dom);
+    expect(html(dom)).toBe("<p>before</p><p>H1 | H2</p><p>1 | 2 3</p>");
+  });
+
+  it("flattens a nested table into its outer row's text", () => {
+    const dom = parse("<table><tr><td>a</td><td><table><tr><td>b</td></tr></table></td></tr></table>");
+    flattenTablesToParagraphs(dom);
+    expect(dom.querySelector("table")).toBeNull();
+    expect(dom.body.textContent).toContain("a | b");
+  });
+});
+
+describe("mergeAdjacentParagraphs only merges plain, non-empty paragraphs", () => {
+  const merged = (h: string) => {
+    const dom = parse(h);
+    mergeAdjacentParagraphs(dom);
+    return html(dom);
+  };
+
+  it("merges plain neighbours", () => {
+    expect(merged("<p>a</p><p>b</p><p>c</p>")).toBe("<p>a<br><br>b<br><br>c</p>");
+  });
+
+  it("leaves a paragraph with style, class or align (and Word Mso classes) as its own block", () => {
+    expect(merged('<p>a</p><p style="text-align:center">b</p><p>c</p>')).toBe('<p>a</p><p style="text-align:center">b</p><p>c</p>');
+    expect(merged('<p class="MsoNormal">a</p><p class="MsoNormal">b</p>')).toBe('<p class="MsoNormal">a</p><p class="MsoNormal">b</p>');
+    expect(merged('<p align="right">a</p><p>b</p>')).toBe('<p align="right">a</p><p>b</p>');
+  });
+
+  it("keeps an empty paragraph as its own block", () => {
+    expect(merged("<p>a</p><p><br></p><p>b</p>")).toBe("<p>a</p><p><br></p><p>b</p>");
+  });
+});
+
+describe("isAppImageSrc", () => {
+  it("accepts blob: previews and stored /<uuid> images, and data: images only from an in-app clipboard", () => {
+    expect(isAppImageSrc("blob:https://csm.example.com/abc", false)).toBe(true);
+    expect(isAppImageSrc("/0b9f3c1e-aaaa-4bbb-8ccc-1234567890ab", false)).toBe(true);
+    expect(isAppImageSrc("data:image/png;base64,AAAA", false)).toBe(false);
+    expect(isAppImageSrc("data:image/png;base64,AAAA", true)).toBe(true);
+  });
+
+  it("rejects remote, relative and scripted sources", () => {
+    for (const src of ["https://x.com/a.png", "/img/a.png", "//evil.com/0b9f3c1e-aaaa-4bbb-8ccc-1234567890ab", "javascript:1", "blob:javascript:1", ""]) {
+      expect(isAppImageSrc(src, true), src).toBe(false);
+    }
   });
 });

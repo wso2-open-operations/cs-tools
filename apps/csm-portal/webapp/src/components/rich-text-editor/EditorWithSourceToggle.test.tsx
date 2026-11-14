@@ -219,3 +219,24 @@ describe("EditorWithSourceToggle without keepStyledHtmlAsSource — behaviour is
     expect(sourceBox()).toBeNull();
   });
 });
+
+describe("EditorWithSourceToggle — whitespace survives the source -> rich switch", () => {
+  const TYPED = "<p>A\tB<br>    indented<br>\ttabbed</p><p>two  spaces</p>";
+
+  it("keeps tabs, runs of spaces and leading indentation when switching back to the rich editor", async () => {
+    const onChange = vi.fn();
+    render(<EditorWithSourceToggle value={TYPED} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("switch")); // to source
+    fireEvent.click(screen.getByRole("switch")); // and back: the editor re-reads the value
+    await waitFor(() => expect(richEditor()).not.toBeNull());
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toBe(TYPED);
+  });
+
+  it("still collapses the newlines and indentation of laid-out HTML source", async () => {
+    const onChange = vi.fn();
+    render(<EditorWithSourceToggle value={"<ul>\n  <li>\n    one\n  </li>\n  <li>two</li>\n</ul>\n<p>\n    hello\n    world\n</p>"} onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toBe(`<ul class="editor-list-ul"><li value="1">one</li><li value="2">two</li></ul><p>hello world</p>`);
+  });
+});
