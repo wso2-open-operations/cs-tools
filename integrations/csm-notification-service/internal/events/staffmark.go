@@ -23,13 +23,20 @@ import "regexp"
 // when it ends a JSON string value: raw UTF-8, or a \uXXXX escape. A circled W
 // anywhere else in a string is left alone.
 var staffMarkInString = regexp.MustCompile(
-	`(?:\s|\\u0020)*(?:[\x{24CC}\x{24E6}]|\\u24[eE]6|\\u24[cC][cC])(?:\s|\\u0020)*"`,
+	`\\\\|(?:\s|\\u0020)*(?:[\x{24CC}\x{24E6}]|\\u24[eE]6|\\u24[cC][cC])(?:\s|\\u0020)*"`,
 )
 
 // StripStaffMark removes the circled W from the end of every string in a JSON
 // payload, so no name in an email or a chat card carries it. It runs on the
 // raw payload before any handler decodes it, because names reach the handlers
-// in dozens of fields.
+// in dozens of fields. An escaped backslash (two backslashes) is consumed as a
+// pair and kept, so a string such as "literal \\u24e6" is never cut into
+// invalid JSON.
 func StripStaffMark(payload []byte) []byte {
-	return staffMarkInString.ReplaceAll(payload, []byte(`"`))
+	return staffMarkInString.ReplaceAllFunc(payload, func(m []byte) []byte {
+		if string(m) == `\\` {
+			return m
+		}
+		return []byte(`"`)
+	})
 }

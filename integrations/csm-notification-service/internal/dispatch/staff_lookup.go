@@ -39,6 +39,10 @@ type userTypeSearcher interface {
 	SearchUsersByEmail(ctx context.Context, emails []string) ([]entity.UserRoleInfo, error)
 }
 
+// staffLookupTimeout bounds one lookup: the icon is a courtesy, and an alert
+// must never wait on it. When it runs out the answer is "not internal".
+const staffLookupTimeout = 2 * time.Second
+
 type staffEntry struct {
 	internal bool
 	expires  time.Time
@@ -73,7 +77,9 @@ func (l *cachedStaffLookup) IsInternal(ctx context.Context, email string) bool {
 	}
 	l.mu.Unlock()
 
-	users, err := l.search.SearchUsersByEmail(ctx, []string{key})
+	lookupCtx, cancel := context.WithTimeout(ctx, staffLookupTimeout)
+	defer cancel()
+	users, err := l.search.SearchUsersByEmail(lookupCtx, []string{key})
 	if err != nil {
 		slog.WarnContext(ctx, "dispatch: could not look up a user's type for the support engineer icon", "err", err)
 		return false

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import AssigneeName from "@components/AssigneeName";
+import { stripStaffMark } from "@utils/staffName";
 import type { JSX } from "react";
 import { Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from "@wso2/oxygen-ui";
 import type { BeCallRequestView } from "@api/backend/types";
@@ -133,7 +133,7 @@ export default function CallRequestDetailModal({
               {cr.actualDurationMin !== undefined && (
                 <Field label="Actual duration" value={`${cr.actualDurationMin} min`} />
               )}
-              {cr.assignee && <Field label="Assignee" value={<AssigneeName name={cr.assignee} />} />}
+              {cr.assignee && <Field label="Assignee" value={stripStaffMark(cr.assignee)} />}
             </Box>
           )}
 

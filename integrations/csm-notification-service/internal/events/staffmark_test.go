@@ -30,6 +30,8 @@ func TestStripStaffMark(t *testing.T) {
 		{"escaped, no space", `{"name":"Doe\u24e6"}`, `{"name":"Doe"}`},
 		{"every string in the payload", "{\"a\":\"A \u24E6\",\"b\":\"B \u24E6\"}", `{"a":"A","b":"B"}`},
 		{"not at the end of a string", "{\"name\":\"Jane \u24E6 Doe\"}", "{\"name\":\"Jane \u24E6 Doe\"}"},
+		{"an escaped backslash before u24e6 is not a mark", `{"name":"literal \\u24e6"}`, `{"name":"literal \\u24e6"}`},
+		{"a real mark after an escaped backslash", `{"name":"a\\ \u24e6"}`, `{"name":"a\\"}`},
 		{"no mark", `{"name":"Jane Doe"}`, `{"name":"Jane Doe"}`},
 	}
 	for _, c := range cases {

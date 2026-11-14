@@ -118,7 +118,7 @@ export default function RecentChanges({
       userId: a.userId,
       when: new Date(a.createdOn),
       actor: a.actorEmail.split("@")[0],
-      who: nameOf(a.userId) ?? "someone",
+      who: stripStaffMark(nameOf(a.userId) ?? "someone"),
       named: nameOf(a.userId) !== undefined,
       subject: a.subject,
     });

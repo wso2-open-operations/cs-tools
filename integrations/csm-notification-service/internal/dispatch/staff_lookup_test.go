@@ -94,3 +94,24 @@ func TestStaffLookup_NoLookupConfiguredShowsNoIcon(t *testing.T) {
 		t.Error("no lookup configured must mean no icon")
 	}
 }
+
+// A lookup that hangs is cut off after its own short deadline: no icon, and the
+// alert is not held up.
+func TestStaffLookup_ASlowLookupIsCutOffAndShowsNoIcon(t *testing.T) {
+	l := NewStaffLookup(blockingSearcher{}, time.Minute)
+	start := time.Now()
+	if l.IsInternal(context.Background(), "a@wso2.com") {
+		t.Error("a lookup that never answered must not show the icon")
+	}
+	if time.Since(start) > staffLookupTimeout+time.Second {
+		t.Errorf("the lookup waited %v, want about %v at most", time.Since(start), staffLookupTimeout)
+	}
+}
+
+// blockingSearcher answers only when its context ends.
+type blockingSearcher struct{}
+
+func (blockingSearcher) SearchUsersByEmail(ctx context.Context, _ []string) ([]entity.UserRoleInfo, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}

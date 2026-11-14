@@ -350,6 +350,8 @@ export type CaseActivity = {
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   createdByFullName?: string | null;
+  // True when the author is WSO2 staff (a support engineer).
+  createdByIsInternal?: boolean;
   type: string;
   commentType?: string;
   fileName?: string;

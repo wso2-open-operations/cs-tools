@@ -19,7 +19,6 @@ import type { AssignedEngineerDisplayProps } from "@features/support/types/suppo
 import { Avatar, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import {
-  formatValue,
   getAssignedEngineerLabel,
   getInitials,
 } from "@features/support/utils/support";
@@ -52,7 +51,7 @@ export default function AssignedEngineerDisplay({
           {initials}
         </Avatar>
         <Typography variant="body2" color="text.primary">
-          {formatValue(assignedEngineer)}
+          {getAssignedEngineerLabel(assignedEngineer) || "--"}
           {getAssignedEngineerLabel(assignedEngineer) && <StaffNameIcon />}
         </Typography>
       </Stack>

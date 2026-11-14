@@ -71,4 +71,11 @@ describe("AssignedEngineerDisplay", () => {
     renderAssignedEngineer(null);
     expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
   });
+
+  it("strips the circled W from an assigned engineer given as a plain string", () => {
+    renderAssignedEngineer("Jane Doe \u24E6");
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText(/\u24E6/u)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+  });
 });
