@@ -221,7 +221,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: Forbidden (including moving a closed case to any other state without the admin role).
           content:
             application/json:
               schema:
@@ -20614,6 +20614,14 @@ components:
         closeNotes:
           type: string
           description: Free-text closure notes — only allowed when state is closed or solution_proposed.
+        reopenReason:
+          type: string
+          description: >
+            Optional free-text note on why a closed case is being reopened. Only meaningful
+            alongside `state` when the case's current state is closed and the caller holds the
+            admin role — every other caller gets 403 for that transition regardless of this
+            field. Write-only: never returned by this or any other endpoint, and not shown
+            anywhere in the portal.
         parentId:
           type: string
           format: uuid

@@ -2069,6 +2069,16 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.ActorEmail != nil && req.MarkFixIssued == nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "actorEmail is only allowed when markFixIssued is also provided"}
 	}
+	// AdminReopen/ReopenReason ride along with a state change only, same
+	// restriction as resolutionCode/cause/closeNotes just above -- see
+	// UpdateCaseRequest.AdminReopen's own doc comment for what they do and
+	// who is trusted to set them.
+	if req.AdminReopen != nil && req.State == nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "adminReopen is only allowed when state is also provided"}
+	}
+	if req.ReopenReason != nil && (req.AdminReopen == nil || !*req.AdminReopen) {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "reopenReason is only allowed when adminReopen is true"}
+	}
 	if req.WatchList != nil {
 		return s.updateCaseWatchList(ctx, req)
 	}
@@ -2159,6 +2169,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, err
 	}
 
+	// adminReopen is set inside the state-transition guard just below and
+	// reused further down to skip the SLA-engine and status-changed-event
+	// side effects a reopen-from-closed must not trigger (no clock to
+	// resume, no "status changed" email) -- declared here so both reads are
+	// in scope regardless of which branch below set it.
+	var adminReopen bool
+
 	// State-transition guard: until this was added, entity-service only
 	// validated that a requested state was a real enum value (validCaseState,
 	// above), never that moving to it from the case's current state was a
@@ -2197,7 +2214,17 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		_, byAutoclosure := autoclosureActorFromContext(ctx)
 		autoclosureClose := byAutoclosure && *req.State == domain.CaseStateClosed &&
 			(*before.State == domain.CaseStateAwaitingInfo || *before.State == domain.CaseStateSolutionProposed)
-		if *before.State != *req.State && !autoclosureClose && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
+		// adminReopen is the one other transition allowed past the table --
+		// req.AdminReopen, set only by apps/csm-portal/backend after its own
+		// PermAdmin check (see UpdateCaseRequest.AdminReopen), moving a
+		// closed case to any other state. isInternalCaller is required here
+		// too, defense in depth against any other caller of this same
+		// domain.UpdateCaseRequest forwarding a client-supplied AdminReopen
+		// verbatim. It only ever applies to a case that is actually closed --
+		// it grants no bypass for any other transition.
+		adminReopen = isInternalCaller && req.AdminReopen != nil && *req.AdminReopen &&
+			*before.State == domain.CaseStateClosed && *req.State != domain.CaseStateClosed
+		if *before.State != *req.State && !autoclosureClose && !adminReopen && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{
 				Msg:  fmt.Sprintf("state cannot move from %q to %q", string(*before.State), string(*req.State)),
 				Code: "case_invalid_state_transition",
@@ -2394,7 +2421,12 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// effect harmlessly. This is a real, live-observed gap this fixes: the
 	// Postgres/dual-write path never paused/resumed/completed workaround or
 	// resolution clocks on any state transition at all before now.
-	if s.slaEngine != nil && req.State != nil && c.State != nil {
+	//
+	// !adminReopen: a closed case has no open clocks left to pause/resume --
+	// they were all force-completed when it closed -- so there is nothing
+	// for this to do on an admin reopen, by design (see
+	// UpdateCaseRequest.AdminReopen's own doc comment).
+	if s.slaEngine != nil && req.State != nil && c.State != nil && !adminReopen {
 		s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, *c.State)
 	}
 
@@ -2419,7 +2451,11 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// notify about it, so a future data-source change doesn't silently stop
 	// notifications from firing. State/Severity are mutually exclusive on
 	// this request (fieldCount above), so at most one of these two fires.
-	if req.State != nil && before != nil && derefState(before.State) != *req.State {
+	//
+	// !adminReopen: an admin reopen must not send a "status changed" email
+	// to the case's watchers -- see UpdateCaseRequest.AdminReopen's own doc
+	// comment.
+	if req.State != nil && before != nil && derefState(before.State) != *req.State && !adminReopen {
 		if label, ok := caseStateDisplayLabel[*req.State]; ok {
 			before.WatchList = s.filterActiveWatchListUsers(ctx, *before, before.WatchList)
 			publishStatusChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, req.ID, label, *before)

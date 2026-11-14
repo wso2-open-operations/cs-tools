@@ -3947,6 +3947,23 @@ type UpdateCaseRequest struct {
 	// to be a real email address; a configured display label (e.g. a team or
 	// system name) is an intended use, not a misuse.
 	ActorEmail *string `json:"actorEmail,omitempty"`
+	// AdminReopen moves a closed case to any other state, bypassing the
+	// normal state-transition table (closed has no entry in either table in
+	// case_state_transitions.go -- it is otherwise terminal for every
+	// caller). Only honored for an internal caller (isInternalCaller in
+	// UpdateCase) and only when the case's current state is actually closed;
+	// it has no effect otherwise. apps/csm-portal/backend is the only
+	// intended source of this field -- it sets it itself, after its own
+	// PermAdmin check, and never forwards whatever a client sent for this
+	// key verbatim. Only true is meaningful; omit it rather than sending
+	// false.
+	AdminReopen *bool `json:"adminReopen,omitempty"`
+	// ReopenReason is an optional free-text note on why the case was
+	// reopened, stored only when AdminReopen moves it out of closed. It is
+	// write-only: never echoed in UpdateCaseResponse/UpdatedCase, never
+	// returned by any other read of the case, and never shown in any UI.
+	// Ignored unless AdminReopen is also true.
+	ReopenReason *string `json:"reopenReason,omitempty"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
