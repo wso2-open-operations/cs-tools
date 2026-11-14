@@ -124,6 +124,8 @@ type CaseHandler struct {
 	// engineering, when non-nil, files GitHub issues from a case instead of
 	// the entity service — see WithEngineeringClient.
 	engineering engineeringGitIssueClient
+	// logCollection is nil unless WithLogCollection was called.
+	logCollection *logCollection
 	// access backs the security-report type check in SearchCases -- see
 	// WithAccessGuard. nil fails that check closed (denied), never open:
 	// unlike UsersHandler's own optional use of this field (a display-only
@@ -403,6 +405,7 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(result, &created); err == nil && created.ID != "" {
 		w.Header().Set("Location", "/cases/"+created.ID)
 	}
+	h.startLogCollection(r.Context(), user, body, result)
 	writeJSON(w, http.StatusCreated, result)
 }
 

@@ -165,6 +165,20 @@ func main() {
 		caseHandler.WithEngineeringClient(engineeringEntityClient)
 		slog.Info("GitHub issues are created through the engineering entity service")
 	}
+	// Optional: a Component Log Request starts the log collection pipeline.
+	logCollectionCfg, logCollectionEnabled, err := loadLogCollectionConfig(os.Getenv)
+	if err != nil {
+		slog.Error("invalid log collection configuration", "err", err)
+		os.Exit(1)
+	}
+	if logCollectionEnabled {
+		if engineeringEntityClient == nil {
+			slog.Error("invalid log collection configuration", "err", "LOG_COLLECTION_CATALOG_ITEM_ID needs ENGINEERING_ENTITY_BASE_URL")
+			os.Exit(1)
+		}
+		caseHandler.WithLogCollection(engineeringEntityClient, logCollectionCfg)
+		slog.Info("Component Log Requests start the log collection pipeline", "repo", logCollectionCfg.Owner+"/"+logCollectionCfg.Repo)
+	}
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
@@ -1151,6 +1165,8 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		srvErr = err
 	}
+	// Let log collection starts still retrying finish within the shutdown window.
+	caseHandler.WaitForLogCollection(shutdownCtx)
 	if srvErr != nil {
 		slog.Error("graceful shutdown failed", "err", srvErr)
 		os.Exit(1)

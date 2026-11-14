@@ -162,3 +162,101 @@ func TestNewEngineeringEntityClient_ConstructsWithZeroValueConfig(t *testing.T) 
 		t.Fatal("NewEngineeringEntityClient returned nil for zero-value EngineeringEntityConfig")
 	}
 }
+
+func TestDispatchRepositoryEvent_ValidatesArgumentsBeforeCallingUpstream(t *testing.T) {
+	called := false
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newEngineeringTokenServer(t)
+	defer tokenSrv.Close()
+
+	c := newTestEngineeringClient(t, tokenSrv, apiSrv)
+
+	t.Run("rejects missing repo coordinates", func(t *testing.T) {
+		if err := c.DispatchRepositoryEvent(context.Background(), "example-org", "example-org", "", "request_logs", nil); err == nil {
+			t.Fatal("expected error for missing repoName, got nil")
+		}
+	})
+
+	t.Run("rejects empty event type", func(t *testing.T) {
+		if err := c.DispatchRepositoryEvent(context.Background(), "example-org", "example-org", "pipelines", "", nil); err == nil {
+			t.Fatal("expected error for empty eventType, got nil")
+		}
+	})
+
+	if called {
+		t.Error("upstream should not have been called for invalid arguments")
+	}
+}
+
+func TestDispatchRepositoryEvent_SendsExpectedRequest(t *testing.T) {
+	var capturedMethod, capturedPath, capturedAuth string
+	var capturedBody struct {
+		EventType     string         `json:"eventType"`
+		ClientPayload map[string]any `json:"clientPayload"`
+	}
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedAuth = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newEngineeringTokenServer(t)
+	defer tokenSrv.Close()
+
+	c := newTestEngineeringClient(t, tokenSrv, apiSrv)
+
+	payload := map[string]any{"request_id": "CS0001", "options": map[string]any{"namespace": "dp-a"}}
+	if err := c.DispatchRepositoryEvent(context.Background(), "example-org", "example-org", "pipelines", "request_logs", payload); err != nil {
+		t.Fatalf("DispatchRepositoryEvent returned error: %v", err)
+	}
+
+	if capturedMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	wantPath := "/orgs/example-org/repos/example-org/pipelines/dispatches"
+	if capturedPath != wantPath {
+		t.Errorf("path = %q, want %q", capturedPath, wantPath)
+	}
+	if capturedAuth != "Bearer test-token" {
+		t.Errorf("Authorization header = %q, want %q", capturedAuth, "Bearer test-token")
+	}
+	if capturedBody.EventType != "request_logs" {
+		t.Errorf("eventType = %q, want request_logs", capturedBody.EventType)
+	}
+	if capturedBody.ClientPayload["request_id"] != "CS0001" {
+		t.Errorf("clientPayload.request_id = %v, want CS0001", capturedBody.ClientPayload["request_id"])
+	}
+	opts, _ := capturedBody.ClientPayload["options"].(map[string]any)
+	if opts["namespace"] != "dp-a" {
+		t.Errorf("clientPayload.options = %v, want namespace dp-a", capturedBody.ClientPayload["options"])
+	}
+}
+
+func TestDispatchRepositoryEvent_MapsUpstreamError(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "Insufficient permissions to trigger repository dispatch in example-org/pipelines."})
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newEngineeringTokenServer(t)
+	defer tokenSrv.Close()
+
+	c := newTestEngineeringClient(t, tokenSrv, apiSrv)
+
+	err := c.DispatchRepositoryEvent(context.Background(), "example-org", "example-org", "pipelines", "request_logs", nil)
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *apierror.Error, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusForbidden {
+		t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusForbidden)
+	}
+}
