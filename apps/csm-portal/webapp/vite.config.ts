@@ -143,6 +143,7 @@ const vitestConfig = defineVitestConfig({
     globals: true,
     environment: "jsdom",
     css: true,
+    setupFiles: ["./src/vitest.setup.ts"],
     // Vitest's default glob (**/*.spec.ts) collides with the Playwright specs
     // under tests/e2e/ (own runner, own tsconfig) -- exclude that tree plus
     // Vitest's own defaults (which get overridden, not merged, once `exclude`

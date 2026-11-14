@@ -1647,11 +1647,14 @@ type StoredAttachmentService interface {
 	// started the upload can confirm it. Repeating a confirm that already
 	// succeeded answers the same.
 	ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error)
-	// DeleteAttachment soft-deletes an attachment: the row is marked DELETED and
-	// the portal backend removes the file. Only the person who uploaded it may
-	// do so (a ForbiddenError otherwise), and not once the work item is closed (a
-	// ConflictError). Repeating a delete that already succeeded answers the same.
-	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
+	// DeleteAttachment soft-deletes an attachment (marked DELETED, with who and when)
+	// and returns its file to set aside. Only the person who uploaded it may do so
+	// (a ForbiddenError otherwise), and not once the work item is closed (a
+	// ConflictError). Repeating a delete answers the same, with no file.
+	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) (domain.DeletedStoredAttachment, error)
+	// Limits returns the attachment sizes in force, for the portals to show and check
+	// against. It reads configuration only.
+	Limits() domain.AttachmentLimits
 
 	// The three calls below each return an internal storage key for the backend
 	// that asked.
@@ -1684,6 +1687,16 @@ type AttachmentUploadCleanupService interface {
 	// storage. Internal callers only. An id that is no longer an orphan is
 	// skipped, so repeating a call is safe.
 	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
+}
+
+// AttachmentRetentionService removes the files of work items that have been closed
+// for a long time.
+type AttachmentRetentionService interface {
+	// ExpireClosedWorkItemFiles removes from storage the files of work item
+	// attachments whose work item has been closed for req.ClosedForDays, and marks
+	// each row EXPIRED. At most a bounded number per call. Internal callers only
+	// (a ForbiddenError otherwise).
+	ExpireClosedWorkItemFiles(ctx context.Context, req domain.ExpireAttachmentsRequest) (domain.ExpireAttachmentsResult, error)
 }
 
 // ReportDraftLinker attaches the files a record's creator uploaded BEFORE the record

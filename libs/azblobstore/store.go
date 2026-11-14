@@ -77,6 +77,9 @@ type Config struct {
 // Store reads and writes blobs in one container. It is safe for concurrent use.
 type Store struct {
 	container *container.Client
+	// signer makes the direct-transfer links (see links.go). It is nil unless the
+	// store signs in with an account key, which a link must be signed with.
+	signer *blob.SharedKeyCredential
 }
 
 // New builds a Store. It does not contact Azure; use EnsureContainer or the
@@ -87,13 +90,15 @@ func New(cfg Config) (*Store, error) {
 	}
 
 	var (
-		c   *container.Client
-		err error
+		c      *container.Client
+		signer *blob.SharedKeyCredential
+		err    error
 	)
 	entra := cfg.TenantID != "" || cfg.ClientID != "" || cfg.ClientSecret != ""
 	switch {
 	case cfg.ConnectionString != "":
 		c, err = container.NewClientFromConnectionString(cfg.ConnectionString, cfg.Container, nil)
+		signer = keyFromConnectionString(cfg.ConnectionString)
 	case entra:
 		if cfg.TenantID == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.AccountName == "" {
 			return nil, errors.New("azblobstore: signing in as an Entra app needs a tenant id, client id, client secret and account name")
@@ -110,13 +115,14 @@ func New(cfg Config) (*Store, error) {
 			return nil, fmt.Errorf("azblobstore: invalid account key: %w", credErr)
 		}
 		c, err = container.NewClientWithSharedKeyCredential(containerURL(cfg), cred, nil)
+		signer = cred
 	default:
 		return nil, errors.New("azblobstore: set a connection string, an account name and key, or an Entra app (tenant id, client id, client secret) and account name")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("azblobstore: create client: %w", err)
 	}
-	return &Store{container: c}, nil
+	return &Store{container: c, signer: signer}, nil
 }
 
 // containerURL is the container's address: the endpoint override or the
@@ -265,9 +271,11 @@ func (s *Store) Commit(ctx context.Context, key string, blockCount int, contentT
 type Info struct {
 	Size        int64
 	ContentType string
+	// ETag changes whenever the blob does; Copy can be pinned to it.
+	ETag string
 }
 
-// Stat returns the size and type of the committed blob at key, or ErrNotFound.
+// Stat returns the size, type and ETag of the committed blob at key, or ErrNotFound.
 func (s *Store) Stat(ctx context.Context, key string) (Info, error) {
 	if err := validateKey(key); err != nil {
 		return Info{}, err
@@ -285,6 +293,9 @@ func (s *Store) Stat(ctx context.Context, key string) (Info, error) {
 	}
 	if resp.ContentType != nil {
 		info.ContentType = *resp.ContentType
+	}
+	if resp.ETag != nil {
+		info.ETag = string(*resp.ETag)
 	}
 	return info, nil
 }
@@ -361,6 +372,26 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("azblobstore: delete %s: %w", key, err)
 	}
 	return nil
+}
+
+// Discard removes the blob at key and any blocks put for it but never committed.
+// Delete cannot remove those blocks, and Azure keeps them for about a week. A key
+// with nothing at it is not an error.
+func (s *Store) Discard(ctx context.Context, key string) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+	staged, err := s.UncommittedBlocks(ctx, key)
+	if err != nil {
+		return err
+	}
+	if len(staged) > 0 {
+		// Committing an empty list drops the uncommitted blocks; Delete then removes the empty blob.
+		if _, err := s.container.NewBlockBlobClient(key).CommitBlockList(ctx, nil, nil); err != nil {
+			return fmt.Errorf("azblobstore: discard %s: %w", key, err)
+		}
+	}
+	return s.Delete(ctx, key)
 }
 
 // isNotFound reports a missing blob. A missing container is not that: it means

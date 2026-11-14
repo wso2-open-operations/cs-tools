@@ -18,7 +18,6 @@
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from "lexical";
 import { $isImageNode } from "@components/rich-text-editor/ImageNode";
 import { INLINE_IMAGE_MAX_COUNT } from "@constants/common";
-import { inlineImagesTotalMaxBytes } from "@config/attachmentLimitsConfig";
 import { INSERT_IMAGE_COMMAND } from "@features/support/utils/richTextEditor";
 
 /**
@@ -69,14 +68,18 @@ export function usedImageBytes(editor: LexicalEditor): number {
 }
 
 /** How many more bytes of images the draft can take before it reaches the total limit. */
-export function remainingImageBytes(editor: LexicalEditor): number {
-  return Math.max(0, inlineImagesTotalMaxBytes() - usedImageBytes(editor));
+export function remainingImageBytes(editor: LexicalEditor, totalMaxBytes: number): number {
+  return Math.max(0, totalMaxBytes - usedImageBytes(editor));
 }
 
 /** Why an image of `size` bytes cannot be added to the draft, or null if it can. */
-export function imageRefusal(editor: LexicalEditor, size: number): "count" | "size" | null {
+export function imageRefusal(
+  editor: LexicalEditor,
+  size: number,
+  totalMaxBytes: number,
+): "count" | "size" | null {
   if (remainingImageSlots(editor) <= 0) return "count";
-  if (size > remainingImageBytes(editor)) return "size";
+  if (size > remainingImageBytes(editor, totalMaxBytes)) return "size";
   return null;
 }
 

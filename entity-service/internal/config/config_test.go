@@ -1437,8 +1437,8 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	}
 
 	clear()
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
-		t.Errorf("defaults = %v, want 10 / 1 MiB", g)
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
+		t.Errorf("defaults = %v, want 16 / 1 MiB", g)
 	}
 
 	// The megabyte settings: a whole number or a decimal.
@@ -1469,7 +1469,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "1048576")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
 	}
 
@@ -1478,7 +1478,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "100.5")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "26")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("above the ceiling = %v, want the defaults", g)
 	}
 	t.Setenv("ATTACHMENT_MAX_MB", "100")
@@ -1489,7 +1489,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_BYTES", "209715200")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "52428800")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("bytes above the ceiling = %v, want the defaults", g)
 	}
 
@@ -1497,7 +1497,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "-5")
-	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+	if g := got(); g != [2]int64{16 << 20, 1 << 20} {
 		t.Errorf("bad values did not fall back to the defaults: %v", g)
 	}
 }
@@ -1531,6 +1531,138 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	if got := Load().LongOpenCasesReportProjectTypes; len(got) != 5 {
 		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
 	}
+}
+
+// TestConfig_Validate_AzureStorageAllOrNothing verifies the attachment storage
+// settings come together: a container with no account (or an account with no
+// container) would start cleanly and then fail every file transfer.
+func TestConfig_Validate_AzureStorageAllOrNothing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		set     func(*Config)
+		wantErr bool
+		wantOn  bool
+	}{
+		"none":                  {func(*Config) {}, false, false},
+		"account and container": {func(c *Config) { c.AzureStorageAccount, c.AzureStorageContainer = "acct", "files" }, false, true},
+		"connection string and container": {func(c *Config) {
+			c.AzureStorageConnectionString, c.AzureStorageContainer = "UseDevelopmentStorage=true", "files"
+		}, false, true},
+		"container only":         {func(c *Config) { c.AzureStorageContainer = "files" }, true, false},
+		"account only":           {func(c *Config) { c.AzureStorageAccount = "acct" }, true, false},
+		"secret with no account": {func(c *Config) { c.AzureClientSecret = "s" }, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := baseValidConfig()
+			tc.set(&c)
+			if err := c.Validate(); (err != nil) != tc.wantErr {
+				t.Errorf("Validate() = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got := c.HasAttachmentStorage(); got != tc.wantOn {
+				t.Errorf("HasAttachmentStorage() = %v, want %v", got, tc.wantOn)
+			}
+		})
+	}
+}
+
+// TestLoad_AttachmentDirectTransfers: off unless asked for, and the size above
+// which a file goes direct is 16 MiB unless set.
+func TestLoad_AttachmentDirectTransfers(t *testing.T) {
+	cfg := Load()
+	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 16<<20 {
+		t.Errorf("defaults = %v, %d; want off and 16 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", " TRUE ")
+	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "12")
+	cfg = Load()
+	if !cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 12<<20 {
+		t.Errorf("set = %v, %d; want on and 12 MiB", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "yes")
+	t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "not a number")
+	cfg = Load()
+	if cfg.AttachmentDirectTransfers || cfg.AttachmentDirectMinBytes != 16<<20 {
+		t.Errorf("bad values = %v, %d; want off and the 16 MiB default", cfg.AttachmentDirectTransfers, cfg.AttachmentDirectMinBytes)
+	}
+}
+
+// TestLoad_AttachmentDirectAboveFollowsLowerPortalCap: unset, the direct-transfer
+// size is the lower of 16 MiB and the portal cap; an explicit value is kept.
+func TestLoad_AttachmentDirectAboveFollowsLowerPortalCap(t *testing.T) {
+	t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "8")
+	if got := Load().AttachmentDirectMinBytes; got != 8<<20 {
+		t.Errorf("default with an 8 MiB portal cap = %d, want 8 MiB", got)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "12")
+	if got := Load().AttachmentDirectMinBytes; got != 12<<20 {
+		t.Errorf("explicit = %d, want 12 MiB", got)
+	}
+}
+
+// TestLoad_AttachmentDirectMax: a file sent straight to Azure may be up to 1 GiB
+// by default, which is also the ceiling.
+func TestLoad_AttachmentDirectMax(t *testing.T) {
+	if got := Load().AttachmentDirectMaxBytes; got != 1<<30 {
+		t.Errorf("default = %d, want 1 GiB", got)
+	}
+	t.Setenv("ATTACHMENT_DIRECT_MAX_MB", "512")
+	if got := Load().AttachmentDirectMaxBytes; got != 512<<20 {
+		t.Errorf("512 = %d", got)
+	}
+	for _, bad := range []string{"2048", "0", "-5", "lots"} {
+		t.Setenv("ATTACHMENT_DIRECT_MAX_MB", bad)
+		if got := Load().AttachmentDirectMaxBytes; got != 1<<30 {
+			t.Errorf("%q = %d, want the 1 GiB default", bad, got)
+		}
+	}
+}
+
+// TestLoad_AttachmentSettingNames: the four attachment settings have clear
+// names; the older names still work, and the new name wins when both are set.
+func TestLoad_AttachmentSettingNames(t *testing.T) {
+	// Start each case from a clean slate, so a value inherited from the
+	// environment cannot change what it checks.
+	clearAttachmentEnv := func(t *testing.T) {
+		for _, k := range []string{
+			"ATTACHMENT_VIA_PORTAL_MAX_MB", "ATTACHMENT_DIRECT_UPLOAD_ENABLED", "ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "ATTACHMENT_DIRECT_UPLOAD_MAX_MB",
+			"ATTACHMENT_MAX_MB", "ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "ATTACHMENT_DIRECT_MIN_MB", "ATTACHMENT_DIRECT_MAX_MB",
+			"ATTACHMENT_MAX_BYTES", "ATTACHMENT_DIRECT_MIN_BYTES", "ATTACHMENT_DIRECT_MAX_BYTES",
+		} {
+			t.Setenv(k, "")
+		}
+	}
+	t.Run("new names", func(t *testing.T) {
+		clearAttachmentEnv(t)
+		t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "20")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "true")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB", "16")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_MAX_MB", "512")
+		c := Load()
+		if c.AttachmentMaxBytes != 20<<20 || !c.AttachmentDirectTransfers || c.AttachmentDirectMinBytes != 16<<20 || c.AttachmentDirectMaxBytes != 512<<20 {
+			t.Errorf("new names = %d, %v, %d, %d", c.AttachmentMaxBytes, c.AttachmentDirectTransfers, c.AttachmentDirectMinBytes, c.AttachmentDirectMaxBytes)
+		}
+	})
+	t.Run("older names still work", func(t *testing.T) {
+		clearAttachmentEnv(t)
+		t.Setenv("ATTACHMENT_MAX_MB", "30")
+		t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "true")
+		t.Setenv("ATTACHMENT_DIRECT_MIN_MB", "12")
+		t.Setenv("ATTACHMENT_DIRECT_MAX_MB", "256")
+		c := Load()
+		if c.AttachmentMaxBytes != 30<<20 || !c.AttachmentDirectTransfers || c.AttachmentDirectMinBytes != 12<<20 || c.AttachmentDirectMaxBytes != 256<<20 {
+			t.Errorf("older names = %d, %v, %d, %d", c.AttachmentMaxBytes, c.AttachmentDirectTransfers, c.AttachmentDirectMinBytes, c.AttachmentDirectMaxBytes)
+		}
+	})
+	t.Run("the new name wins over the older one", func(t *testing.T) {
+		clearAttachmentEnv(t)
+		t.Setenv("ATTACHMENT_MAX_MB", "30")
+		t.Setenv("ATTACHMENT_VIA_PORTAL_MAX_MB", "40")
+		t.Setenv("ATTACHMENT_DIRECT_TRANSFERS_ENABLED", "true")
+		t.Setenv("ATTACHMENT_DIRECT_UPLOAD_ENABLED", "false")
+		c := Load()
+		if c.AttachmentMaxBytes != 40<<20 || c.AttachmentDirectTransfers {
+			t.Errorf("both set = %d, %v; want the new names to win", c.AttachmentMaxBytes, c.AttachmentDirectTransfers)
+		}
+	})
 }
 
 // TestConfig_Validate_PublicHolidaySourcesAllOrNothing checks that the holiday

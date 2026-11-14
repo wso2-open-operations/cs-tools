@@ -65,8 +65,16 @@ type fakeStoredRepo struct {
 		id, from, to string
 		sys          bool
 	}
-	deleted      map[string]string // id -> deleted_by
-	deleteCtx    []bool            // whether each MarkDeleted ran as the system
+	deleted map[string]string // id -> deleted_by
+	// closedFiles is what ListClosedWorkItemFiles returns; closedBefore, closedLimit and
+	// closedSys record its last call. expired holds the ids MarkExpired was given.
+	closedFiles  []domain.StoredAttachmentRow
+	closedBefore time.Time
+	closedLimit  int
+	closedSys    bool
+	expired      []string
+	expireErr    error
+	deleteCtx    []bool // whether each MarkDeleted ran as the system
 	deleteOK     bool
 	completed    map[string]string // id -> storage key
 	completeCtx  []bool            // whether each MarkComplete ran as the system
@@ -74,6 +82,12 @@ type fakeStoredRepo struct {
 	failed       map[string]string // id -> detail
 	abandoned    []domain.AbandonedUpload
 	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
+	// pendingStaged is how many staged uploads the caller already has; pendingAsked is what the insert was limited by.
+	pendingStaged int
+	pendingAsked  struct {
+		email string
+		since time.Time
+	}
 	abandonedSys bool
 	linkWant     []string          // ids LinkInlineImages will report as linked
 	linkedTo     map[string]string // image id -> comment it is already linked to
@@ -139,12 +153,21 @@ func (f *fakeStoredRepo) InsertPending(_ context.Context, _ domain.StoredAttachm
 	if f.insertErr != nil {
 		return domain.StoredAttachmentRow{}, f.insertErr
 	}
+	if in.Staged && in.MaxPendingStaged > 0 {
+		f.pendingAsked = struct {
+			email string
+			since time.Time
+		}{in.CreatedBy, in.PendingSince}
+		if f.pendingStaged >= in.MaxPendingStaged {
+			return domain.StoredAttachmentRow{}, repository.ErrTooManyPendingUploads
+		}
+	}
 	f.inserted = append(f.inserted, in)
 	size := in.SizeBytes
 	ct := in.ContentType
 	row := domain.StoredAttachmentRow{
 		ID: saAttID, Number: "WIA0000042", Name: in.Name, ContentType: &ct, SizeBytes: &size,
-		Status: "PENDING", CreatedBy: in.CreatedBy, ParentID: in.ParentID,
+		Status: "PENDING", CreatedBy: in.CreatedBy, ParentID: in.ParentID, Staged: in.Staged,
 	}
 	f.rows[row.ID] = row
 	return row, nil
@@ -179,6 +202,21 @@ func (f *fakeStoredRepo) MarkDeleted(ctx context.Context, _ domain.StoredAttachm
 		return false, nil
 	}
 	f.deleted[id] = by
+	return true, nil
+}
+
+func (f *fakeStoredRepo) ListClosedWorkItemFiles(ctx context.Context, closedBefore time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	f.closedSys = ok && scope.Unrestricted
+	f.closedBefore, f.closedLimit = closedBefore, limit
+	return f.closedFiles, nil
+}
+
+func (f *fakeStoredRepo) MarkExpired(_ context.Context, id string) (bool, error) {
+	if f.expireErr != nil {
+		return false, f.expireErr
+	}
+	f.expired = append(f.expired, id)
 	return true, nil
 }
 
@@ -458,7 +496,7 @@ func deleteReq() domain.DeleteStoredAttachmentRequest {
 func TestDeleteAttachment_SomeoneElseCannotDeleteIt(t *testing.T) {
 	repo := newFakeStoredRepo()
 	storedRow(repo)
-	err := newStoredSvc(repo).DeleteAttachment(saCtx(t, "someone.else@example.com"), deleteReq())
+	_, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, "someone.else@example.com"), deleteReq())
 	var ferr *apierror.ForbiddenError
 	if !errors.As(err, &ferr) {
 		t.Fatalf("err = %v, want ForbiddenError", err)
@@ -486,7 +524,7 @@ func TestDeleteAttachment_AnAdminThroughTheCSMPortalMayDeleteSomeoneElses(t *tes
 	repo := newFakeStoredRepo()
 	storedRow(repo)
 	svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
-	if err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq()); err != nil {
+	if _, err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq()); err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if len(repo.deleted) != 1 {
@@ -500,7 +538,7 @@ func TestDeleteAttachment_TheAdminFlagFromAnyOtherCallerIsRefused(t *testing.T) 
 			repo := newFakeStoredRepo()
 			storedRow(repo)
 			svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
-			err := svc.DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", clientID), adminDeleteReq())
+			_, err := svc.DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", clientID), adminDeleteReq())
 			var ferr *apierror.ForbiddenError
 			if !errors.As(err, &ferr) {
 				t.Fatalf("err = %v, want ForbiddenError", err)
@@ -515,7 +553,7 @@ func TestDeleteAttachment_TheAdminFlagFromAnyOtherCallerIsRefused(t *testing.T) 
 func TestDeleteAttachment_TheAdminFlagDoesNothingWhenNoClientIsConfigured(t *testing.T) {
 	repo := newFakeStoredRepo()
 	storedRow(repo)
-	err := newStoredSvc(repo).DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", ""), adminDeleteReq())
+	_, err := newStoredSvc(repo).DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", ""), adminDeleteReq())
 	var ferr *apierror.ForbiddenError
 	if !errors.As(err, &ferr) {
 		t.Fatalf("err = %v, want ForbiddenError", err)
@@ -527,7 +565,7 @@ func TestDeleteAttachment_AnAdminStillCannotDeleteFromAClosedWorkItem(t *testing
 	storedRow(repo)
 	repo.parent.Closed = true
 	svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
-	err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq())
+	_, err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq())
 	var cerr *apierror.ConflictError
 	if !errors.As(err, &cerr) {
 		t.Fatalf("err = %v, want ConflictError", err)
@@ -537,7 +575,7 @@ func TestDeleteAttachment_AnAdminStillCannotDeleteFromAClosedWorkItem(t *testing
 func TestDeleteAttachment_TheEmailMatchIgnoresCase(t *testing.T) {
 	repo := newFakeStoredRepo()
 	storedRow(repo)
-	if err := newStoredSvc(repo).DeleteAttachment(saCtx(t, "EXT@Example.com"), deleteReq()); err != nil {
+	if _, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, "EXT@Example.com"), deleteReq()); err != nil {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -546,7 +584,7 @@ func TestDeleteAttachment_NotAllowedOnceTheWorkItemIsClosed(t *testing.T) {
 	repo := newFakeStoredRepo()
 	storedRow(repo)
 	repo.parent.Closed = true
-	err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+	_, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq())
 	var cerr *apierror.ConflictError
 	if !errors.As(err, &cerr) {
 		t.Fatalf("err = %v, want ConflictError", err)
@@ -557,10 +595,25 @@ func TestDeleteAttachment_NotAllowedOnceTheWorkItemIsClosed(t *testing.T) {
 }
 
 func TestDeleteAttachment_AHiddenOrUnknownAttachmentIsNotFound(t *testing.T) {
-	err := newStoredSvc(newFakeStoredRepo()).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+	_, err := newStoredSvc(newFakeStoredRepo()).DeleteAttachment(saCtx(t, saEmail), deleteReq())
 	var nerr *apierror.NotFoundError
 	if !errors.As(err, &nerr) {
 		t.Fatalf("err = %v, want NotFoundError", err)
+	}
+}
+
+// An attachment whose file expired is already gone, so a delete of it changes nothing.
+func TestDeleteAttachment_AnExpiredAttachmentIsAlreadyGone(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	row := repo.rows[saAttID]
+	row.Status = "EXPIRED"
+	repo.rows[saAttID] = row
+	if _, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+		t.Fatalf("err = %v, want success", err)
+	}
+	if len(repo.deleteCtx) != 0 {
+		t.Error("a delete of an expired attachment touched something")
 	}
 }
 
@@ -570,7 +623,7 @@ func TestDeleteAttachment_RepeatingASuccessfulDeleteChangesNothing(t *testing.T)
 	row := repo.rows[saAttID]
 	row.Status = "DELETED"
 	repo.rows[saAttID] = row
-	if err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+	if _, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
 		t.Fatalf("err = %v, want success", err)
 	}
 	if len(repo.deleteCtx) != 0 {
@@ -585,7 +638,7 @@ func TestDeleteAttachment_OnlyAStoredAttachmentCanBeDeleted(t *testing.T) {
 		row := repo.rows[saAttID]
 		row.Status = status
 		repo.rows[saAttID] = row
-		err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+		_, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq())
 		var cerr *apierror.ConflictError
 		if !errors.As(err, &cerr) {
 			t.Errorf("%s: err = %v, want ConflictError", status, err)
@@ -600,13 +653,13 @@ func TestDeleteAttachment_Validation(t *testing.T) {
 		"comment image":    {Kind: domain.StoredAttachmentComment, ID: saAttID},
 		"id is not a uuid": {Kind: domain.StoredAttachmentWorkItem, ID: "nope"},
 	} {
-		err := svc.DeleteAttachment(saCtx(t, saEmail), req)
+		_, err := svc.DeleteAttachment(saCtx(t, saEmail), req)
 		var verr *apierror.ValidationError
 		if !errors.As(err, &verr) {
 			t.Errorf("%s: err = %v, want ValidationError", name, err)
 		}
 	}
-	if err := svc.DeleteAttachment(context.Background(), deleteReq()); err == nil {
+	if _, err := svc.DeleteAttachment(context.Background(), deleteReq()); err == nil {
 		t.Error("a delete without the caller's token was accepted")
 	}
 }
@@ -1058,5 +1111,35 @@ func TestLinkReportDrafts(t *testing.T) {
 	repo.reportLinkWant = nil
 	if err := svc.LinkReportDrafts(context.Background(), saParentID, saProjectID, saEmail, []string{saReportA}); err == nil {
 		t.Error("linking none of the named files must be reported")
+	}
+}
+
+// A draft attachment hangs from its project, so a delete finds its parent the
+// way an upload does; a work item lookup by the project's id would be "not found".
+func TestDeleteAttachment_ADraftIsFoundThroughItsProject(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	row := repo.rows[saAttID]
+	row.Draft = true
+	repo.rows[saAttID] = row
+	repo.parentErr = &apierror.NotFoundError{Msg: "parent record not found"}
+	if _, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+		t.Fatalf("err = %v, want the draft to be deleted", err)
+	}
+	if repo.deleted[saAttID] == "" {
+		t.Error("the draft was not marked DELETED")
+	}
+}
+
+// What a delete leaves to do is the file's place and name, for the file service to archive.
+func TestDeleteAttachment_ReturnsTheFileToSetAside(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	got, err := newStoredSvc(repo).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Number != "WIA0000042" || got.Name != "report.pdf" || got.StorageKey != saKey {
+		t.Errorf("deleted = %+v", got)
 	}
 }

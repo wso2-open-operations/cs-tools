@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -80,6 +81,14 @@ var newInlineImageTypes = map[string]string{
 type StoredAttachmentLimits struct {
 	// MaxBytes caps one file.
 	MaxBytes int64
+	// DirectTransfers is true when links can be signed, so a new upload of an
+	// ordinary file (not an inline image) above DirectMinBytes goes straight to
+	// Azure. It is recorded on the upload when it starts.
+	DirectTransfers bool
+	DirectMinBytes  int64
+	// DirectMaxBytes is the cap of such an upload. It does not pass through this
+	// service, so it may be above MaxBytes.
+	DirectMaxBytes int64
 	// InlineTotalMaxBytes caps the images of ONE comment or description together
 	// (0 means DefaultInlineImagesTotalMaxBytes). One image can be at most this
 	// big too.
@@ -257,10 +266,11 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	} else if !strings.Contains(req.ContentType, "/") || len(req.ContentType) > 255 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "contentType must look like type/subtype"}
 	}
-	limit := s.limitFor(req.Kind)
 	if req.SizeBytes <= 0 {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than 0"}
 	}
+	staged := s.startsStaged(req.Kind, req.SizeBytes)
+	limit := s.limitForUpload(req.Kind, staged)
 	if req.SizeBytes > limit {
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "the file is larger than the " + formatByteLimit(limit) + " limit"}
 	}
@@ -293,8 +303,12 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	}
 	row, err := s.repo.InsertPending(ctx, req.Kind, domain.StoredAttachmentInsert{
 		ParentID: parentID, Name: req.Name, ContentType: req.ContentType,
-		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft,
+		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft, Staged: staged,
+		MaxPendingStaged: maxPendingStagedUploads, PendingSince: s.now().Add(-pendingStagedUploadWindow),
 	})
+	if errors.Is(err, repository.ErrTooManyPendingUploads) {
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.TooManyRequestsError{Msg: "Too many large uploads are waiting to finish. Finish or cancel some, or wait a few hours, and try again."}
+	}
 	if err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
@@ -310,8 +324,17 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		Number:       row.Number,
 		ExpiresAt:    s.now().Add(abandonedUploadAge),
 		MaxBytes:     limit,
+		DirectUpload: staged,
 	}, nil
 }
+
+const (
+	// maxPendingStagedUploads is how many unfinished direct uploads one caller may have.
+	maxPendingStagedUploads = 10
+	// pendingStagedUploadWindow is how far back an unfinished upload counts, so a
+	// caller who gave up on some is not blocked until the cleanup runs.
+	pendingStagedUploadWindow = 6 * time.Hour
+)
 
 // ConfirmUpload implements StoredAttachmentService.
 func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error) {
@@ -723,66 +746,65 @@ func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID
 // tables is internal-only, so the soft delete runs as the system after the checks
 // below. Only the person who uploaded an attachment may delete it, or a portal
 // admin through the CSM portal backend (req.AsAdmin), and never once the work
-// item is closed. Only the row is marked here; the portal
-// backend removes the file afterwards.
-func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
+// item is closed. Only the row is marked here; the file service archives the file.
+func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) (domain.DeletedStoredAttachment, error) {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if req.Kind == domain.StoredAttachmentComment {
-		return &apierror.ValidationError{Msg: "an image in a comment cannot be deleted on its own"}
+		return domain.DeletedStoredAttachment{}, &apierror.ValidationError{Msg: "an image in a comment cannot be deleted on its own"}
 	}
 	if !validate.IsUUID(req.ID) {
-		return &apierror.ValidationError{Msg: "id must be a valid UUID"}
+		return domain.DeletedStoredAttachment{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
 	}
 	email, err := s.resolveActorEmail(ctx)
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 
 	// As the caller: an attachment they cannot see is not found.
 	rows, err := s.repo.GetByIDs(ctx, req.Kind, []string{req.ID})
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if len(rows) != 1 {
-		return &apierror.NotFoundError{Msg: "attachment not found"}
+		return domain.DeletedStoredAttachment{}, &apierror.NotFoundError{Msg: "attachment not found"}
 	}
 	row := rows[0]
 	adminOverride := false
 	if !strings.EqualFold(row.CreatedBy, email) {
 		if !s.mayDeleteAsAdmin(ctx, req) {
-			return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+			return domain.DeletedStoredAttachment{}, &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
 		}
 		adminOverride = true
 	}
 
 	switch row.Status {
-	case "DELETED":
+	case "DELETED", "EXPIRED":
 		// A delete that is repeated (a retry after a timeout) answers the same.
-		return nil
+		return domain.DeletedStoredAttachment{}, nil
 	case "COMPLETE":
 	default:
-		return &apierror.ConflictError{Msg: "this attachment is not stored, so it cannot be deleted"}
+		return domain.DeletedStoredAttachment{}, &apierror.ConflictError{Msg: "this attachment is not stored, so it cannot be deleted"}
 	}
 
-	parent, err := s.repo.GetParent(ctx, req.Kind, row.ParentID)
+	// Same lookup as an upload, so a draft (hung from its project) is found too.
+	parent, err := s.parentOf(ctx, req.Kind, row)
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if parent.Closed {
-		return &apierror.ConflictError{Msg: closedParentDeleteMessage}
+		return domain.DeletedStoredAttachment{}, &apierror.ConflictError{Msg: closedParentDeleteMessage}
 	}
 
-	// The file is not here to remove: the portal backend removes it from storage
-	// after this succeeds.
+	// Only the row is marked here; the file service sets the file aside.
 	ok, err := s.repo.MarkDeleted(repository.WithSystemIdentity(ctx), req.Kind, row.ID, email)
 	if err != nil {
-		return err
+		return domain.DeletedStoredAttachment{}, err
 	}
 	if !ok {
 		// Another request deleted it first: the outcome the caller wanted.
-		return nil
+		return domain.DeletedStoredAttachment{}, nil
 	}
 	path := ""
 	if row.StorageKey != nil {
@@ -792,7 +814,7 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		"audit", true, "action", "delete", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
 		"attachmentId", row.ID, "path", path, "adminOverride", adminOverride)
-	return nil
+	return domain.DeletedStoredAttachment{Number: row.Number, Name: row.Name, StorageKey: path}, nil
 }
 
 // mayDeleteAsAdmin is whether this delete may skip the "only the uploader" rule:
@@ -815,6 +837,9 @@ func formatByteLimit(n int64) string {
 	return fmt.Sprintf("%d KB", n>>10)
 }
 
+// alreadyConfirmedMessage is the conflict for an upload that is already COMPLETE.
+const alreadyConfirmedMessage = "this upload was already confirmed"
+
 // closedParentMessage is shown when a file is added to a closed work item.
 const closedParentMessage = "This case is closed, so new attachments can't be added."
 
@@ -826,6 +851,33 @@ func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int
 		return s.limits.inlineTotalMax()
 	}
 	return s.limits.MaxBytes
+}
+
+// startsStaged reports whether a new upload is sent straight to Azure. An inline
+// image never is.
+func (s *storedAttachmentService) startsStaged(kind domain.StoredAttachmentKind, sizeBytes int64) bool {
+	return s.limits.DirectTransfers && kind != domain.StoredAttachmentComment && sizeBytes > s.limits.DirectMinBytes
+}
+
+// limitForUpload is the cap of an upload: the larger direct cap for a staged
+// upload, else the ordinary one.
+func (s *storedAttachmentService) limitForUpload(kind domain.StoredAttachmentKind, staged bool) int64 {
+	if staged && s.limits.DirectMaxBytes > s.limitFor(kind) {
+		return s.limits.DirectMaxBytes
+	}
+	return s.limitFor(kind)
+}
+
+// Limits implements StoredAttachmentService.
+func (s *storedAttachmentService) Limits() domain.AttachmentLimits {
+	limits := domain.AttachmentLimits{
+		MaxFileBytes:              s.limitForUpload(domain.StoredAttachmentWorkItem, s.limits.DirectTransfers),
+		MaxInlineImagesTotalBytes: s.limits.inlineTotalMax(),
+	}
+	if s.limits.DirectTransfers {
+		limits.DirectTransferThresholdBytes = s.limits.DirectMinBytes
+	}
+	return limits
 }
 
 // failQuietly marks a row FAILED as the system. A failure to do so is logged

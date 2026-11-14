@@ -1476,6 +1476,142 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /attachments/limits:
+    get:
+      summary: Get the attachment size limits.
+      description: >-
+        The largest file and the largest total of inline images entity-service accepts, so
+        the portal shows the numbers that are enforced. The answer is not secret and may be
+        cached for five minutes (`Cache-Control: private, max-age=300`).
+      operationId: getAttachmentLimits
+      responses:
+        "200":
+          description: The limits, in bytes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  maxFileBytes:
+                    type: integer
+                    format: int64
+                  maxInlineImagesTotalBytes:
+                    type: integer
+                    format: int64
+                  directTransferThresholdBytes:
+                    type: integer
+                    format: int64
+                    description: Size above which a file goes straight to Azure; 0 when direct transfers are off.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /attachments/{id}/upload-links:
+    post:
+      summary: Get signed links to send a large file straight to Azure Blob Storage.
+      description: >-
+        For a file the upload start marked directUpload: one write-only link per chunk. PUT
+        chunk i (chunkBytes long, the last one shorter) to links[i], then confirm the upload as
+        usual; confirm checks the real size. The links are credentials that expire at
+        expiresAt (a request that started before then finishes), and the answer is never
+        cacheable. If a link cannot be used, a file within the ordinary size limit may be sent through the chunk route instead; a larger one cannot, so ask for new links or report the failure.
+      operationId: createAttachmentUploadLinks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: One link per chunk.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  links:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                  chunkBytes:
+                    type: integer
+                    format: int64
+                  expiresAt:
+                    type: string
+                    format: date-time
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /attachments/upload/{id}/confirm:
     post:
       summary: Finish an upload once every chunk has been sent.
@@ -1700,6 +1836,93 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /attachments/{id}/download-links:
+    post:
+      summary: Create a signed link to download a large file straight from Azure Blob Storage.
+      description: >-
+        A read-only link that answers as a download of the file's own name. It expires at
+        expiresAt (a download that started before then finishes; a resumed one asks for a new
+        link), and the answer is never cacheable. If the link cannot be used, download through
+        the content route instead.
+      operationId: createAttachmentDownloadLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                  name:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "410":
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: TooManyRequests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /attachments/download/{id}/content:
     get:
       summary: Download an attachment.
@@ -6354,6 +6577,9 @@ components:
         number: {type: string}
         expiresAt: {type: string, format: date-time}
         maxBytes: {type: integer, format: int64}
+        directUpload:
+          type: boolean
+          description: True when the file may be sent straight to Azure through POST /attachments/{id}/upload-links; false means send it in chunks through this backend.
     StoredAttachmentConfirmRequest:
       type: object
       required: [type]

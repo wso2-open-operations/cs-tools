@@ -88,7 +88,7 @@ func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domai
 	switch row.Status {
 	case "PENDING":
 	case "COMPLETE":
-		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: "this upload was already confirmed"}
+		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: alreadyConfirmedMessage}
 	default:
 		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: "this upload was rejected; start a new upload"}
 	}
@@ -113,8 +113,11 @@ func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domai
 		Name:         row.Name,
 		ContentType:  contentType,
 		SizeBytes:    sizeOrZero(row.SizeBytes),
-		MaxBytes:     s.limitFor(req.Kind),
+		MaxBytes:     s.limitForUpload(req.Kind, row.Staged),
 		StorageKey:   storageKeyFor(req.Kind, row, parent),
+
+		Staged:             row.Staged,
+		ChunkRouteMaxBytes: s.limitFor(req.Kind),
 	}, nil
 }
 
@@ -138,7 +141,8 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "sizeBytes is required"}
 	}
 	size := *req.SizeBytes
-	if limit := s.limitFor(req.Kind); size > limit {
+	// The cap is the one that applied when the upload started.
+	if limit := s.limitForUpload(req.Kind, row.Staged); size > limit {
 		msg := "the file is larger than the " + formatByteLimit(limit) + " limit"
 		s.failQuietly(ctx, req.Kind, row.ID, msg)
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ValidationError{Msg: msg}
@@ -166,7 +170,7 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 		return domain.ConfirmAttachmentUploadResponse{}, err
 	}
 	if !ok {
-		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: "this upload was already confirmed"}
+		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: alreadyConfirmedMessage}
 	}
 	slog.InfoContext(ctx, "attachment upload confirmed",
 		"audit", true, "action", "confirm", "callerId", auditCaller(ctx),
@@ -216,6 +220,9 @@ func (s *storedAttachmentService) LocateAttachment(ctx context.Context, req doma
 	switch {
 	case row.Status == "DELETED":
 		loc.Reason = domain.AttachmentUnavailableDeleted
+		return loc, nil
+	case row.Status == "EXPIRED":
+		loc.Reason = domain.AttachmentUnavailableExpired
 		return loc, nil
 	case row.Status == "FAILED":
 		loc.Reason = domain.AttachmentUnavailableFailed

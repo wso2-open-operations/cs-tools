@@ -483,6 +483,12 @@ func main() {
 	const housekeepingTaskName = "housekeeping_cleanup"
 	housekeepingTo, housekeepingCc := recipientsFor(recipientOverrides, housekeepingTaskName)
 
+	const attachmentRetentionTaskName = "attachment_retention_expire"
+	attachmentRetentionTo, attachmentRetentionCc := recipientsFor(recipientOverrides, attachmentRetentionTaskName)
+
+	const attachmentCleanupTaskName = "attachment_upload_cleanup"
+	attachmentCleanupTo, attachmentCleanupCc := recipientsFor(recipientOverrides, attachmentCleanupTaskName)
+
 	const availabilityTaskName = "availability_recalculation"
 	availabilityTo, availabilityCc := recipientsFor(recipientOverrides, availabilityTaskName)
 
@@ -692,6 +698,23 @@ func main() {
 	const holidayReminderTaskName = "holiday_availability_reminder"
 	holidayReminderTo, holidayReminderCc := recipientsFor(recipientOverrides, holidayReminderTaskName)
 
+	// Attachment retention: removes the files of work items that have been closed for
+	// ATTACHMENT_RETENTION_DAYS. It deletes customers' files, so it is OFF unless
+	// ATTACHMENT_RETENTION_ENABLED=true and it starts as a dry run: review the count in
+	// the log, then set ATTACHMENT_RETENTION_DRY_RUN=false. This component's client id
+	// must be in entity-service's M2M_CLIENT_IDS.
+	attachmentRetentionEnabled := envBool("ATTACHMENT_RETENTION_ENABLED", false)
+	attachmentRetentionCfg := housekeeping.AttachmentRetentionConfig{
+		ClosedForDays: envInt("ATTACHMENT_RETENTION_DAYS", 90),
+		BatchSize:     envInt("ATTACHMENT_RETENTION_BATCH_SIZE", 100),
+		DryRun:        envBool("ATTACHMENT_RETENTION_DRY_RUN", true),
+	}
+	// entity-service refuses fewer than 30 days; failing here is clearer than alerting every night.
+	if attachmentRetentionEnabled && attachmentRetentionCfg.ClosedForDays < 30 {
+		slog.Error("ATTACHMENT_RETENTION_DAYS must be at least 30; refusing to start", "value", attachmentRetentionCfg.ClosedForDays)
+		os.Exit(1)
+	}
+
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
 		// entity-service's scheduled_task_run table that succeeded or were
@@ -708,6 +731,16 @@ func main() {
 			Handler:  housekeeping.CleanupResolvedRuns(ledgerClient, envDays("HOUSEKEEPING_RETENTION_DAYS", 30)),
 			To:       housekeepingTo,
 			Cc:       housekeepingCc,
+		},
+		// Asks entity-service to clean up abandoned attachment uploads and unlinked
+		// comment images and report drafts (see internal/housekeeping).
+		// Daily at 03:30, after housekeeping_cleanup.
+		{
+			Name:     attachmentCleanupTaskName,
+			Schedule: scheduleFor(scheduleOverrides, attachmentCleanupTaskName, "30 3 * * *"),
+			Handler:  housekeeping.CleanupAttachmentUploads(ledgerClient),
+			To:       attachmentCleanupTo,
+			Cc:       attachmentCleanupCc,
 		},
 		// Emails staleCasesTo/Cc the long-open cases report (cases open more
 		// than staleCaseOlderThanDays, in two tables) fetched from
@@ -946,6 +979,24 @@ func main() {
 		// which send them seconds after the change rather than on this tick.
 	}
 	tasks = append(tasks, regressionTasks...)
+
+	// Removes the files of work items closed for a long time (see above). Daily at
+	// 04:00, after the upload cleanup.
+	if attachmentRetentionEnabled {
+		// A tryout runs against the real entity-service outside the ledger, so it is
+		// always a dry run and can never remove a customer's file.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == attachmentRetentionTaskName && !attachmentRetentionCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is attachment_retention_expire: running as a dry run, nothing will be removed; set ATTACHMENT_RETENTION_DRY_RUN=true explicitly to silence this")
+			attachmentRetentionCfg.DryRun = true
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     attachmentRetentionTaskName,
+			Schedule: scheduleFor(scheduleOverrides, attachmentRetentionTaskName, "0 4 * * *"),
+			Handler:  housekeeping.ExpireClosedAttachments(ledgerClient, attachmentRetentionCfg),
+			To:       attachmentRetentionTo,
+			Cc:       attachmentRetentionCc,
+		})
+	}
 
 	// Registered only when enabled, rather than registered-and-inert, so the
 	// ledger shows no run at all for a task that is switched off -- an inert

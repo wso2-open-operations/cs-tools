@@ -4,9 +4,9 @@ The small slice of Azure Blob Storage the portal backends use for attachments.
 Files are written as numbered blocks and become visible in one commit, and are
 read back whole or by byte range.
 
-Used by `apps/customer-portal/backend-v2` and `apps/csm-portal/backend`.
-Entity-service does not use it: it decides who may touch which key, and never
-talks to Azure.
+Used by entity-service only. It is the one service that talks to Azure Blob
+Storage: it decides who may touch which key, and the portal backends and the
+notification service send and read files through it.
 
 ## How an upload uses it
 
@@ -67,10 +67,57 @@ Keys are validated: empty, absolute, `.`/`..` folders and backslashes are
 refused with `ErrInvalidKey`. That is a second line of defence. The access
 check belongs to entity-service.
 
+## Direct links for large files
+
+A store that signs in with an account key (or a connection string that carries
+one) can make short-lived links, so a client sends or reads the bytes itself
+instead of passing them through the service:
+
+```go
+if store.CanSignLinks() {
+    // One PUT URL per block index; the client sends block i to links[i].
+    links, expires, err := store.UploadLinks(key, blocks, 5*time.Minute)
+    // ... then, after the client has sent every block:
+    err = store.Commit(ctx, key, blocks, contentType)
+
+    // A GET URL that answers as a download of fileName.
+    link, expires, err := store.DownloadLink(key, fileName, contentType, 5*time.Minute)
+}
+
+// Inside Azure, no byte passes through the caller (needs the same account key):
+err = store.Copy(ctx, stagingKey, finalKey, etagOfTheCheckedFile)
+```
+
+A link is signed for one blob, for writing only (upload) or reading only
+(download). Azure checks it when a request starts, so a request that started
+before the expiry finishes after it. Choose the shortest lifetime that covers the
+start of the last chunk (entity-service uses 5 minutes up to 50 MiB, up to 20
+minutes for a file of 1 GiB, the largest it allows).
+
+A link cannot limit how much is sent, and the write permission is for the whole
+blob: until it expires, the holder can put a different file on that blob, even
+after the upload was confirmed. So never sign an upload link for the key readers
+use. Sign it for a staging key (entity-service adds `.upload`), commit and check
+the blocks there, then `Copy` the result to the final key and delete the staging
+blob: a link that is still valid can then only write a file nothing reads. `Copy`
+works inside Azure (Copy Blob, read through a short-lived link of its own), so no
+byte passes through the caller, and it waits for a copy Azure has not finished.
+Pass the `ETag` that `Stat` gave for the file you checked: the copy is refused with
+`ErrSourceChanged` if the staging file was replaced after the check.
+For an upload that was abandoned, use `Discard` on both keys: it drops blocks that
+were put and never committed, which `Delete` cannot reach (Azure keeps them for
+about a week).
+
+Signing as an Entra app (with a user delegation key) is not supported yet: such a
+store returns `ErrLinksUnavailable` (`Copy` too). The storage account also needs
+CORS for the browsers that use the links.
+
 ## Limits to know
 
 - `PutBlock` reads the whole chunk into memory before sending it, so memory use
   is one chunk per request. `MaxBlockSize` is 100 MiB; the portals send 8 MiB.
+  A client sending through a link has no such limit from this package; entity-service
+  holds the whole file to the cap of its upload (up to 1 GiB for a direct one).
 - A blob has at most `MaxBlocks` (50,000) blocks.
 - Every block id in a blob must be the same length; the package handles this.
 
@@ -88,24 +135,26 @@ AZBLOBSTORE_TEST_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 go test ./...
 `AZBLOBSTORE_TEST_ACCOUNT` and `AZBLOBSTORE_TEST_KEY` override Azurite's
 well-known development account to run the same tests against a real one.
 
-## Using it from a backend
+## Using it from entity-service
 
-The module is imported by version, not by path, so Choreo can build a backend
+The module is imported by version, not by path, so Choreo can build the service
 from its own folder:
 
 ```
 require github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0
 ```
 
-For local work across the repo, use an uncommitted `go.work` that lists the
-backend and this module. Never commit `go.work`.
+The links (`CanSignLinks`, `UploadLinks`, `DownloadLink`) are in the next version,
+`v0.2.0`: move the pin to it once that tag exists (see "Releasing a new version").
+
+For local work across the repo, use an uncommitted `go.work` that lists
+entity-service and this module. Never commit `go.work`.
 
 ## Releasing a new version
 
-A backend gets the library from a version tag, not from the folder, so a change
-here reaches the backends only after the steps below. Both backends
-(`apps/csm-portal/backend` and `apps/customer-portal/backend-v2`) use this
-module and must be moved to the same version.
+A service gets the library from a version tag, not from the folder, so a change
+here reaches it only after the steps below. Entity-service is the only user
+of this module and must be moved to the new version.
 
 1. **Change and test the library** under `libs/azblobstore` (`go test ./...`;
    the Azurite integration tests need Azurite running).
@@ -120,16 +169,15 @@ module and must be moved to the same version.
    that keeps old callers working, and a major version for a breaking change
    (a major version of 2 or more also changes the module path to
    `.../libs/azblobstore/v2`).
-4. **Move both backends to it.** In each backend folder:
+4. **Move entity-service to it.** In `entity-service`:
    ```
    go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z
    go mod tidy
    ```
-   Commit the `go.mod` and `go.sum` of both, and check that each backend builds
-   and its tests pass.
+   Commit its `go.mod` and `go.sum`, and check that it builds and its tests pass.
 5. **Never move or delete a published tag.** If a version is wrong, publish the
    next patch version. The first build after a new tag may be slower, while the
    Go module proxy fetches it.
 
-A backend change that needs new library code cannot be merged before the tag
-exists, or its build fails. Merge and tag the library first, then the backends.
+A change to entity-service that needs new library code cannot be merged before the tag
+exists, or its build fails. Merge and tag the library first, then entity-service.

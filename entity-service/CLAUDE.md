@@ -65,7 +65,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `ATTACHMENT_VIA_PORTAL_MAX_MB` | no | 16 | Largest file sent through the portal backend, in megabytes (named `ATTACHMENT_MAX_MB` before, which still works) (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
@@ -1993,20 +1993,38 @@ point, so a notification-side hiccup must not be reported to the caller as a
 failed
 create.
 
-## Attachment files held by the portal backends (Azure Blob Storage)
+## Attachment files (Azure Blob Storage, held here)
 
 Work item, comment-image and deployment attachment files (`work_item_attachment`,
 `comment_attachment`, `deployment_attachment`; `case_attachment` is an older table: nothing writes it and
-nothing lists it any more, existing rows are only moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
-`apps/csm-portal/backend`) in Azure Blob Storage, through `libs/azblobstore`. **This service never
-touches a file**: it has no file store and needs no storage setting. It keeps the access checks (the
-caller's own row-level security), the three attachment tables, the size and type rules, and the
-storage key layout (`filestore.Key`, the same layout the migrated files use).
+nothing lists it any more, existing rows are only moved with their ticket) live in Azure Blob Storage, and
+**this service is the only one that talks to it** (`libs/azblobstore`, `service.StoredAttachmentFileService`
+in `stored_attachment_files.go`). The portal backends (`apps/customer-portal/backend-v2`,
+`apps/csm-portal/backend`) forward a browser's bytes to the routes below and stream the answer back, and
+`integrations/csm-notification-service` reads an email's images the same way; none of them holds a storage
+setting or a storage key. This service also keeps the access checks (the caller's own row-level security),
+the three attachment tables, the size and type rules, and the storage key layout (`filestore.Key`, the same
+layout the migrated files use).
+
+**Storage settings** (all optional together; `Config.Validate` refuses a partial set): `AZURE_STORAGE_ACCOUNT`
+and `AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)** `AZURE_TENANT_ID` +
+`AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET` with the role "Storage Blob Data Contributor" on the one container, or
+`AZURE_STORAGE_KEY`, or `AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional `AZURE_STORAGE_ENDPOINT` (Azurite) and
+`AZURE_STORAGE_CREATE_CONTAINER=true` (development only: creating a container needs account-level rights). Unset,
+the file routes answer 503 and everything else works. An unreachable container at startup is **logged, not
+fatal** (this service serves the whole platform; each transfer reports its own failure). The secret lives in the
+secret store, never in the repo or a log. `ATTACHMENT_MAX_CONCURRENT_TRANSFERS` (default 32) bounds the chunks
+and downloads in flight; one over the limit is refused with a 429 and retried by the portal, so a burst of
+large uploads cannot take every connection from the rest of the API.
 
 Routes, registered only when `db != nil` (otherwise 404): `POST /attachments/upload`,
-`POST /attachments/upload/{id}/authorize`, `POST /attachments/upload/{id}/confirm`,
-`POST /attachments/locate`, `GET /attachments/inline/{id}/location`, `POST /attachments/delete`,
-`POST /attachments/uploads/cleanup` and `POST /attachments/uploads/cleanup/acknowledge`. Code:
+`PUT /attachments/upload/{id}/chunks/{index}`, `GET /attachments/upload/{id}/chunks`,
+`POST /attachments/upload/{id}/confirm`, `GET /attachments/download/{id}/content`,
+`GET /attachments/inline/{id}/content`, `POST /attachments/delete`,
+`POST /attachments/uploads/cleanup` and `POST /attachments/uploads/cleanup/acknowledge`. The three that carry a
+file have their own longer request limits (`attachmentRequestTimeout` in `internal/server`: a chunk 10 minutes, a
+download 30, an inline image 5; every other route keeps `REQUEST_TIMEOUT`), and the handler extends the server's
+read and write deadlines for them too. Code:
 `internal/filestore` (the key layout), `service.StoredAttachmentService` (`stored_attachment_service.go`,
 `stored_attachment_backend.go`), `repository.StoredAttachmentRepository`, `handler.StoredAttachmentHandler`.
 
@@ -2020,13 +2038,14 @@ the ServiceNow attachment calls in `snCaseService`, the legacy routes (`POST /at
 `attachments` array of `POST /cases` were all removed. Every request decoder rejects an unknown field, so
 a client that still sends `attachments` on create-case gets a 400; a case is created without files and
 they are uploaded afterwards. With `DATA_SOURCE=servicenow` the search is answered by PostgreSQL through
-the service's own fallback. A comment image is authorized through `GET /attachments/inline/{id}/location`,
-not through the removed parent-case route. The case activity feed follows `DATA_SOURCE` like every other
-case route.
+the service's own fallback. A comment image is read through `GET /attachments/inline/{id}/content`, not
+through the removed parent-case route. The case activity feed follows `DATA_SOURCE` like every other case
+route. The routes that used to hand a backend a storage key (`authorize`, `locate`, `inline/{id}/location`,
+`inline/{id}/relocated`) were removed when this service took over the files.
 
-**The storage key is internal.** `authorize`, `locate` and `inline/{id}/location` return a
-`storageKey`. It is for the portal backend that asked and **must never be sent to a browser**: a
-backend must strip it from anything it forwards. Every response is `Cache-Control: no-store`.
+**The storage key never leaves this process.** No route returns one, so there is nothing for a backend to
+strip. A file's response says nothing about where it is stored, and a storage error is logged here and answered
+as a fixed message (`storeError`).
 
 **Access is the caller's own.** The repository holds a `*Scoped`, so reads and the INSERT run
 under the attachment tables' RLS (migration 100026): an external caller needs to be a
@@ -2046,25 +2065,34 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    and `expiresAt`. `expiresAt` is when an unconfirmed upload may be cleaned up
    (`abandonedUploadAge`, 24h). Charged one unit of the per-caller allowance (60 per minute, in
    memory and per pod).
-2. The backend receives the file from the browser in chunks and, **for every chunk**, calls
-   `POST /attachments/upload/{id}/authorize` (`{type}`). It checks, as the caller, that the upload is
-   theirs, still `PENDING` and its work item still open, and returns `storageKey`, the declared
-   `sizeBytes`/`contentType`, `maxBytes` and `name`. So access removed part-way stops the upload, and
-   the backend never takes a path from the browser. Not charged against the allowance (a 100 MiB file
-   is a handful of calls).
-3. After the last chunk the backend commits the file, then calls
-   `POST /attachments/upload/{id}/confirm` with `{type, sizeBytes, contentType?}`. This service cannot
-   look at the file, so it trusts what the (internal) backend reports but **checks it against the
-   declaration and the limits**: `sizeBytes` is required (400 without it, and that does not fail the
-   upload), must equal the declared size and not exceed the limit, and for a comment image
-   `contentType` (the type the backend found by reading the bytes) must be PNG, JPEG or WebP. A refusal
-   records the row `FAILED` and **the backend must then delete the file it committed**. The row is
-   marked `COMPLETE` with the key from `storageKeyFor`. A repeated confirm answers the same.
-4. Read: `POST /attachments/locate` (`{type, id}`) checks the caller may see the attachment and returns
-   its `storageKey`, or `available: false` with a reason (`NOT_STORED`, `FAILED`, `DELETED`); an
-   attachment the caller cannot see is 404. Charged one unit of the per-caller allowance.
-   `GET /attachments/inline/{id}/location` is the same for an inline image (comment row first, then a
-   migrated work-item image; `410 attachment_removed`). Not charged.
+2. The browser sends the file to its portal backend in 8 MiB chunks, and the backend forwards **each chunk**
+   to `PUT /attachments/upload/{id}/chunks/{index}?type=` (the body is the bytes, with a Content-Length).
+   This service checks, as the caller, that the upload is theirs, still `PENDING` and its work item still
+   open, that the index and size stay within the largest file allowed, then stages the block in Azure under
+   the key it computed itself (`storageKeyFor`; no path ever comes from the browser). So access removed
+   part-way stops the upload. A chunk may be sent again (a retry overwrites the same block), in any order,
+   and a few at a time; `GET /attachments/upload/{id}/chunks` lists the stored ones so an interrupted upload
+   resumes. Not charged against the per-caller allowance (a 100 MiB file is a handful of calls) but it does
+   take one of the bounded transfer slots.
+3. After the last chunk `POST /attachments/upload/{id}/confirm` with `{type, chunks}`. This service commits the
+   blocks into the file, **reads the real size itself** and runs the final checks: the size must equal the
+   declared size and not exceed the limit, and for a comment image the declared type (a PNG, JPEG or WebP) must
+   hold. A refusal records the row `FAILED` **and this service removes the file** (`refusalIsFinal`: a
+   validation, forbidden, not-found or gone refusal, or the work item having been closed). A failure that may
+   pass (a concurrent confirm, a rate limit, a storage hiccup) keeps the file so the confirm can be retried.
+   The row is marked `COMPLETE` with the key. A repeated confirm answers the same; a missing chunk is a 409.
+4. Read: `GET /attachments/download/{id}/content?type=` checks the caller may see the attachment and streams
+   it as an opaque download (`Content-Disposition: attachment`, `nosniff`, a sandboxing CSP, a single `Range`
+   honoured; a range past the end is a 416 with the size). An attachment the caller cannot see is 404, a
+   deleted one 410 `attachment_removed`. Charged one unit of the per-caller allowance.
+   `GET /attachments/inline/{id}/content` is the same for a comment image (comment row first, then a
+   migrated work-item image), shown only as PNG, JPEG, GIF or WebP and otherwise octet-stream; not charged.
+   **A description image still in the project's drafts folder is moved on the first read after its case
+   exists** (`relocateInlineImage`: copy, commit, check the size, record the new key through
+   `InlineImageRelocated`, then remove the old file; any failure leaves the old file and the image is read
+   from where it is). **`?workItemId=` is for internal callers with no access rules of their own** (the
+   notification service building an email about one case): the image is returned only when it is linked to
+   that record, never when it is another record's or a draft; otherwise it is a 404, and the file is not read.
 5. Delete: `POST /attachments/delete` marks the row `DELETED` (soft delete; `deleted_on`/`deleted_by`,
    migration 0249). Only the person who uploaded it may delete (403 otherwise), **or a portal admin through
    the CSM portal backend**: the backend sets `asAdmin: true` in the body when the caller's token roles give
@@ -2073,10 +2101,72 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    against a second `AUTH_ADMIN_ROLES` list here; from any other caller the flag is ignored and the 403 stands;
    the audit line carries `adminOverride`). Never once the work item
    is closed (409), even for an admin, an image embedded in a comment is not deleted on its own (400), and a repeated
-   delete answers 204. It **does not remove the file**: the backend removes it afterwards, so it
-   should `locate` first to get the key. A `DELETED` attachment has no file to download, and the case
+   delete answers 204. It marks the row first, then **moves the file to `csm/archive/<number>_<name>`**
+   (`filestore.ArchiveKey`, best effort: the copy needs an account key, and a file that cannot be copied stays
+   where it is). **Nothing removes the archive yet**: add an Azure lifecycle rule on that prefix (delete 30 days
+   after last modification, which is the delete time) or a scheduled job. A draft attachment can be deleted too
+   (the parent is found with `parentOf`, like an upload). A `DELETED` attachment has no file to download, and the case
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
    `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
+
+**Attachment limits for the portals.** `GET /attachments/limits` (any authenticated caller, `Cache-Control: private, max-age=300`)
+answers `{maxFileBytes, maxInlineImagesTotalBytes, directTransferThresholdBytes}`: the largest attachment (the direct-upload maximum while direct uploads are on and above
+`ATTACHMENT_VIA_PORTAL_MAX_MB`, else that limit), the inline-image total, and the size above which a file goes direct (`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`, 0 while direct transfers are off; the webapps use it to pick the download path). The portal webapps read it through their backends instead of
+keeping a copy in their own `window.config`; the checks at upload start and confirm stay the authority.
+
+**Direct transfers (large files, off by default).** The settings are `ATTACHMENT_DIRECT_UPLOAD_ENABLED`, `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` and
+`ATTACHMENT_DIRECT_UPLOAD_MAX_MB`; the older names (`ATTACHMENT_DIRECT_TRANSFERS_ENABLED`, `ATTACHMENT_DIRECT_MIN_MB`, `ATTACHMENT_DIRECT_MAX_MB`) still work
+with a logged warning, and the new name wins when both are set. At startup a warning (`warnAttachmentSizeSettings`) names a
+size gap (`ATTACHMENT_VIA_PORTAL_MAX_MB` below `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB`: a file in between is refused) or an
+`ATTACHMENT_DIRECT_UPLOAD_MAX_MB` that does not raise the limit (not above the portal limit). With `ATTACHMENT_DIRECT_UPLOAD_ENABLED=true` a file above
+`ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` (default 16) can go between the browser and Azure through short-lived signed links, so
+its bytes pass through neither a portal backend nor this service (`WithDirectTransfers`, `LinkStore`,
+`azblobstore.UploadLinks` / `DownloadLink`). Smaller files and every inline image keep the path above, where each
+chunk and read is checked. Links are signed with the account key, so this needs `AZURE_STORAGE_KEY` or a
+connection string with a key; signing as an Entra app (a user delegation key) is not supported yet. Without a key it
+stays off and logs why (`directTransferOptions`). The storage account needs CORS for the portal origins.
+
+- `POST /attachments/upload` answers `directUpload: true` when the declared size is above the threshold.
+  `POST /attachments/{id}/upload-links?type=` then makes the checks of a chunk once (the caller's own `PENDING`
+  upload, its work item open, the size within the largest file allowed) and returns one write-only link per chunk
+  (`links[i]` for chunk `i`, `chunkBytes` long, the last shorter), valid for a time that grows with the size
+  (`directLinkTTL`: 5 minutes up to 50 MiB, 7 up to 100, then 10, 15 and 20 up to 250, 500 and 1024 MiB). The browser
+  PUTs each chunk to its link and calls the ordinary confirm, which commits the staged blocks and **reads the real
+  size**: a link cannot cap how much is sent, so an oversize file is refused there and removed. Both paths stage the
+  same block ids, so a browser that cannot reach Azure falls back to the chunk route for the same upload.
+- **Staged is decided when the upload starts.** `InitiateUpload` sets `staged` on the upload row (migration 0283) for
+  an ordinary file above `ATTACHMENT_DIRECT_UPLOAD_ABOVE_MB` while links can be signed (`startsStaged`), answers
+  `directUpload` from it, and every later step reads the row, never the current config. So the key and the size cap
+  of an upload in progress stay the same if the flag is switched, rolled back or differs between replicas.
+- **The links never write the file readers use.** A write link is for a whole blob and stays valid after the confirm, so
+  a staged upload is put together under a staging key, `<key>.upload` (`uploadKey`): the links, `PutChunk` and
+  `ListChunks` all use it. Confirm commits and checks the blocks there, `Copy`s the file to its own key inside Azure
+  (`azblobstore.Copy`, pinned to the ETag of the file that was checked, so one replaced since is refused with a 400 and
+  removed), checks the copy has the size that was checked, records it, and deletes the staging file; a refusal deletes
+  both. A leftover link can then only write a file nothing reads. A smaller upload has no links and is put at its
+  own key as before. The upload cleanup removes an abandoned upload's
+  staging chunks and anything at its own key (`azblobstore.Discard`, which also drops chunks that were never committed:
+  `Delete` cannot reach them) before it marks the row FAILED; if they cannot be removed the row stays PENDING and is
+  tried again on a later run.
+- **Pending staged uploads are limited.** A link cannot cap how much is sent, so each caller may have at most 10
+  staged uploads started and not finished (`maxPendingStagedUploads`, counted over the last 6 hours,
+  `pendingStagedUploadWindow`): the next one at the start is refused with a 429. Other uploads are not counted.
+- `POST /attachments/{id}/download-links?type=` makes the checks of a download (`LocateAttachment`, charged one unit
+  of the per-caller allowance) and returns a read-only link valid for the same size-based time (`directLinkTTL`), signed to answer
+  as `attachment` of the file's name with `application/octet-stream`. A resumed download asks for a new link.
+  With direct transfers off it answers 404 ("not available"), which the backends pass on without logging an error and
+  the webapps answer by streaming the file.
+- **Size limit.** A staged upload may be up to `ATTACHMENT_DIRECT_UPLOAD_MAX_MB` (default and at most 1024 MB) instead of
+  `ATTACHMENT_VIA_PORTAL_MAX_MB` (`limitForUpload`); the confirm holds the file to it and the answer of the upload start reports
+  it as `maxBytes`. **The chunk route stays at `ATTACHMENT_VIA_PORTAL_MAX_MB`** (`ChunkRouteMaxBytes`): a file above it is refused
+  there with a message, so the portal backends and the gateway never carry more than they are built for. The browser's
+  fallback to the chunk route therefore works for a file up to `ATTACHMENT_VIA_PORTAL_MAX_MB` only; a larger one must go direct.
+- **Expiry.** A link that expires part-way is not a failure: `POST .../upload-links` can be called again for a PENDING
+  upload and returns fresh links, and the browser carries on with the chunks it has not sent (the staged blocks stay).
+- Links are credentials: the answers carry `Cache-Control: no-store` and nothing logs a link.
+- **What is lost against the proxy:** access removed after the links are issued does not stop that upload or
+  download, and the `nosniff` / CSP headers of the proxy are not sent by Azure (the signed `attachment` disposition
+  and octet-stream type are what keep a download from being rendered).
 
 **Inline comment images** are uploaded against the work item before the comment exists, so a new image
 is a `comment_attachment` row with `comment_id` NULL and `work_item_id` set (migration 0150), visible
@@ -2122,14 +2212,17 @@ is written, and that insert must not fail (an orphaned ServiceNow case is the wo
 whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
 A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
 **An abandoned draft is cleaned up.** A PENDING one is marked FAILED by the ordinary cleanup after 24 hours. A
-COMPLETE one whose case was never created is handed over by `POST /attachments/uploads/cleanup` in `orphans`
-(`type: "work_item"`, with its storage key; `ListUnlinkedReportDrafts`, served by
-`idx_work_item_attachment_unlinked_drafts`) once it is 25 hours old, and marked DELETED only when the caller
-acknowledges it, exactly like a comment image. The 1 hour past 24 is deliberate: `POST /cases` refuses a draft
-older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a `notBefore`), so a draft is never linked to a
-case after its file was handed over for deletion. A form left open more than a day gets a 400 and the file must be
-attached again. Still not built: the job in the portal backends that deletes the files and acknowledges them (it is
-missing for comment images too).
+COMPLETE one whose case was never created (`ListUnlinkedReportDrafts`, served by
+`idx_work_item_attachment_unlinked_drafts`) is removed by `POST /attachments/uploads/cleanup` once it is 25 hours old:
+**this service deletes the file from Azure itself and marks the row DELETED in the same run** (`removeFile`; the same
+for an unlinked comment image). A file that cannot be removed now keeps its row COMPLETE and goes to the back of the
+queue (`RecordCleanupAttempt`), so the next run tries it again; a file already gone counts as removed. Only with no
+storage configured does the response hand such a file over in `orphans` (`type`, with its storage key) to be removed
+and acknowledged by the caller, as before (`POST /attachments/uploads/cleanup/acknowledge`). The 1 hour past 24 is
+deliberate: `POST /cases` refuses a draft older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a
+`notBefore`), so a draft is never linked to a case after its file was removed. A form left open more than a day gets a
+400 and the file must be attached again. The route is internal-only and meant to be called on a schedule; **nothing
+calls it yet** (a daily `csm-scheduled-tasks` task is all that is missing, and it needs no storage access).
 
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
@@ -2172,6 +2265,17 @@ first would lose the key if the response were lost; this way nothing is lost and
 Acknowledge only marks an id that is still an orphan (re-read from the unlinked list), so it cannot be
 used to delete an arbitrary image; others are counted as `skipped`. An unlinked image with no file is
 marked `DELETED` straight away. A draft description image (no work item, `project_id` set) is abandoned after 24 hours like an unlinked comment image; a LINKED one (`description_image = true`) is never listed (`ListUnlinkedImages` filters `description_image = false`).
+
+**Retention.** `POST /attachments/retention/expire` (internal callers only, meant for a scheduled job) removes the
+files of work item attachments whose work item has been closed for `closedForDays` (at least 30, so a typo cannot
+remove recent files): it deletes the file from Azure, then marks the row `EXPIRED` with `expired_on` (migrations 0284 and 0285),
+at most `limit` (default 100, max 500) per call, with a `dryRun` that only lists the numbers. A file that cannot be
+removed keeps its row `COMPLETE` and is tried again next run. "Closed" is the work item's own `state = 'CLOSED'` and
+`closed_on` (`caseLikeOwnStateColumn`, `caseLikeOwnClosedOnColumn`), so it covers the five case-like types (case,
+engagement, service request, security report analysis, announcement); other work item types are not covered yet.
+An `EXPIRED` row is hidden from customers' lists like a deleted one, shown to internal callers with status `expired`,
+and a download answers 410 `attachment_expired`. Comment images are not touched. This is the permanent removal; it is
+separate from a person's delete, which moves the file to the archive folder.
 
 **Audit.** Each upload start, link, delete and cleanup writes an `audit: true` line with the
 `callerId` (the user's UUID, else the client id of a machine caller), the `correlationId`, the kind and

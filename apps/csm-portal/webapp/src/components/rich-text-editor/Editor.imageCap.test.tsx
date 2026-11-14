@@ -16,11 +16,16 @@
 
 
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeAll } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 import Editor from "./Editor";
 import { MAX_COMMENT_IMAGES } from "./richTextConstants";
+
+// The server's inline-image limit: 25 MB here (the built-in default is 1 MB).
+vi.mock("@api/useGetAttachmentLimits", () => ({
+  useAttachmentLimits: () => ({ maxFileBytes: 10 * 1024 * 1024, maxInlineImagesBytes: 25 * 1024 * 1024 }),
+}));
 
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }),
@@ -94,13 +99,6 @@ function setup(withUploader = true) {
 }
 
 describe("Editor image cap (upload on paste)", () => {
-  beforeEach(() => {
-    // A deployment sets 25 MB (the built-in default is 1 MB).
-    (window as unknown as { config: Record<string, unknown> }).config = {
-      ...(window as unknown as { config?: Record<string, unknown> }).config,
-      CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
-    };
-  });
   it("accepts images up to the cap, then refuses the next without uploading it", async () => {
     const { onImageUpload, onPasteError } = setup();
     for (let i = 0; i < MAX_COMMENT_IMAGES; i += 1) await pasteImages([png()]);

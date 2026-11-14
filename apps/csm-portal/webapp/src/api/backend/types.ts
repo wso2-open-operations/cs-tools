@@ -3087,6 +3087,16 @@ export interface BeCreateChangeRequestResponse {
 // BeSearchResponseBase.
 // ---------------------------------------------------------------------------
 
+/** `GET /attachments/limits`: the sizes entity-service enforces. */
+export interface BeAttachmentLimits {
+  /** Largest single attachment, in bytes. */
+  maxFileBytes: number;
+  /** Most inline-image bytes in one comment or description, and the largest single image. */
+  maxInlineImagesTotalBytes: number;
+  /** Files above this many bytes are downloaded straight from storage; 0 when direct transfers are off. */
+  directTransferThresholdBytes: number;
+}
+
 export interface BeGroup {
   id: string;
   name: string;

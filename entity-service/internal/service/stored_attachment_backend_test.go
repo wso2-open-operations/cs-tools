@@ -382,6 +382,7 @@ func TestBackend_LocateAttachmentGivesAReasonNotAKeyWhenThereIsNoFile(t *testing
 		reason string
 	}{
 		"deleted":            {completeRow("DELETED", stringPtr(workItemKey)), domain.AttachmentUnavailableDeleted},
+		"expired":            {completeRow("EXPIRED", stringPtr(workItemKey)), domain.AttachmentUnavailableExpired},
 		"failed":             {completeRow("FAILED", nil), domain.AttachmentUnavailableFailed},
 		"never confirmed":    {completeRow("PENDING", nil), domain.AttachmentUnavailableNotStored},
 		"complete, no key":   {completeRow("COMPLETE", nil), domain.AttachmentUnavailableNotStored},
@@ -511,7 +512,7 @@ func TestBackend_DeleteMarksTheRowAndLeavesTheFileToTheBackend(t *testing.T) {
 	repo := newFakeStoredRepo()
 	repo.rows[saAttID] = completeRow("COMPLETE", stringPtr(workItemKey))
 
-	err := newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	_, err := newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
 	if err != nil {
 		t.Fatalf("DeleteAttachment: %v", err)
 	}
@@ -526,11 +527,11 @@ func TestBackend_DeleteMarksTheRowAndLeavesTheFileToTheBackend(t *testing.T) {
 func TestBackend_DeleteKeepsItsRules(t *testing.T) {
 	repo := newFakeStoredRepo()
 	repo.rows[saAttID] = completeRow("COMPLETE", stringPtr(workItemKey))
-	err := newBackendSvc(repo).DeleteAttachment(saCtx(t, "other@example.com"), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	_, err := newBackendSvc(repo).DeleteAttachment(saCtx(t, "other@example.com"), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
 	wantErr[*apierror.ForbiddenError](t, err, "someone else's attachment")
 
 	repo.parent.Closed = true
-	err = newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	_, err = newBackendSvc(repo).DeleteAttachment(saCtx(t, saEmail), domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
 	wantErr[*apierror.ConflictError](t, err, "a closed work item")
 	if len(repo.deleted) != 0 {
 		t.Error("an attachment was deleted from a closed work item")
@@ -829,4 +830,111 @@ func TestBackend_AcknowledgeMarksAReportDraftDeletedAsAWorkItemFile(t *testing.T
 	if repo.deleted[reportDraftA] != "report-draft-cleanup" || repo.deleted[orphanA] != "inline-image-cleanup" {
 		t.Errorf("deleted = %v, want each marked by its own cleanup", repo.deleted)
 	}
+}
+
+// withBlob gives a cleanup service a file store, so it removes unlinked files itself.
+func withBlob(repo *fakeStoredRepo, blob *fakeBlob) *attachmentUploadCleanupService {
+	return WithFileStore(backendCleanup(repo), blob).(*attachmentUploadCleanupService)
+}
+
+func TestBackend_CleanupWithAStoreRemovesUnlinkedFilesItself(t *testing.T) {
+	repo := orphanRepo()
+	k := "csm/projects/p/workitems/drafts/attachments/r_1.pdf"
+	repo.unlinkedReports = []domain.StoredAttachmentRow{{ID: reportDraftA, StorageKey: &k}}
+	blob := newFakeBlob()
+	for _, key := range []string{"csm/projects/p/workitems/w/inline_attachments/a_1.png", "csm/projects/p/workitems/w/inline_attachments/a_2.png", k} {
+		blob.committed[key] = []byte("x")
+	}
+
+	res, err := withBlob(repo, blob).CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if len(res.Orphans) != 0 {
+		t.Errorf("orphans = %+v, want none: the files were removed here", res.Orphans)
+	}
+	// Two stored comment images and one keyless one, and the report draft.
+	if res.ImagesRemoved != 3 || res.ImagesFailed != 0 || res.ReportDraftsRemoved != 1 || res.ReportDraftsFailed != 0 {
+		t.Errorf("result = %+v", res)
+	}
+	if len(blob.committed) != 0 || len(blob.deleted) != 3 {
+		t.Errorf("files left %v, deleted %v: every stored file must be removed", blob.committed, blob.deleted)
+	}
+	if repo.deleted[orphanA] != "inline-image-cleanup" || repo.deleted[orphanB] != "inline-image-cleanup" || repo.deleted[reportDraftA] != "report-draft-cleanup" {
+		t.Errorf("rows marked deleted = %v", repo.deleted)
+	}
+}
+
+func TestBackend_CleanupKeepsARowWhoseFileCouldNotBeRemoved(t *testing.T) {
+	repo := orphanRepo()
+	blob := &failingBlob{fakeBlob: newFakeBlob()}
+	res, err := withBlob2(repo, blob).CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if res.ImagesFailed != 2 || res.ImagesRemoved != 1 {
+		t.Errorf("result = %+v, want the two files that could not be removed counted failed (the keyless row has no file)", res)
+	}
+	if repo.deleted[orphanA] != "" || repo.deleted[orphanB] != "" {
+		t.Errorf("rows with a surviving file were marked deleted: %v", repo.deleted)
+	}
+	if len(repo.deferred) != 2 {
+		t.Errorf("deferred = %v, want both sent to the back of the queue", repo.deferred)
+	}
+}
+
+// failingBlob cannot remove anything.
+type failingBlob struct{ *fakeBlob }
+
+func (failingBlob) Delete(context.Context, string) error { return errors.New("storage down") }
+
+func withBlob2(repo *fakeStoredRepo, blob FileStore) *attachmentUploadCleanupService {
+	return WithFileStore(backendCleanup(repo), blob).(*attachmentUploadCleanupService)
+}
+
+func TestBackend_CleanupTreatsAFileAlreadyGoneAsRemoved(t *testing.T) {
+	repo := orphanRepo()
+	res, err := withBlob(repo, newFakeBlob()).CleanupUploads(context.Background()) // nothing in storage
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if res.ImagesFailed != 0 || repo.deleted[orphanA] == "" {
+		t.Errorf("result = %+v, deleted = %v: a file that is already gone is done", res, repo.deleted)
+	}
+}
+
+// An abandoned upload's chunks (under its staging key) and anything at its own key
+// are removed with the row marked FAILED; chunks that cannot be removed keep the
+// row PENDING for the next run.
+func TestBackend_CleanupRemovesAnAbandonedUploadsFiles(t *testing.T) {
+	newAbandoned := func() *fakeStoredRepo {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 20*mib)
+		repo.abandoned = []domain.AbandonedUpload{{Kind: domain.StoredAttachmentWorkItem, ID: saAttID}}
+		return repo
+	}
+	t.Run("removed", func(t *testing.T) {
+		repo, blob := newAbandoned(), newFakeBlob()
+		res, err := withBlob(repo, blob).CleanupUploads(context.Background())
+		if err != nil || res.Cleaned != 1 || res.Failed != 0 {
+			t.Fatalf("result = %+v, %v", res, err)
+		}
+		if len(blob.discarded) != 2 || blob.discarded[0] != workItemKey+stagingSuffix || blob.discarded[1] != workItemKey {
+			t.Errorf("discarded = %v, want the staging key then the file's own key", blob.discarded)
+		}
+		if repo.failed[saAttID] == "" {
+			t.Error("the abandoned row was not marked FAILED")
+		}
+	})
+	t.Run("a failure keeps the row for the next run", func(t *testing.T) {
+		repo, blob := newAbandoned(), newFakeBlob()
+		blob.discardErr = errors.New("storage down")
+		res, err := withBlob(repo, blob).CleanupUploads(context.Background())
+		if err != nil || res.Cleaned != 0 || res.Failed != 1 {
+			t.Fatalf("result = %+v, %v", res, err)
+		}
+		if repo.failed[saAttID] != "" || len(repo.deferred) != 1 {
+			t.Errorf("failed = %v, deferred = %v: the row must stay PENDING and go to the back of the queue", repo.failed, repo.deferred)
+		}
+	})
 }

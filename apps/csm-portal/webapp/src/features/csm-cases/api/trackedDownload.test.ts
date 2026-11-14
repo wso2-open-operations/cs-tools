@@ -29,7 +29,7 @@ import {
 import { downloadWithProgress } from "@features/csm-cases/api/trackedDownload";
 
 const api = {} as BackendApi;
-const args = { type: "work_item" as const, id: "att-1", name: "a.bin", size: 10 };
+const args = { type: "work_item" as const, id: "att-1", name: "a.bin", size: 10, directTransferThresholdBytes: 0 };
 
 describe("downloadWithProgress", () => {
   // Braces matter: a function returned from beforeEach is run as a cleanup after the test.
