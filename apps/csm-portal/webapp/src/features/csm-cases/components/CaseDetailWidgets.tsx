@@ -1340,6 +1340,7 @@ export function AttachmentsWidget({
                       name={a.uploadedBy}
                       email={a.uploadedByUser?.email || a.uploadedByEmail}
                       userId={a.uploadedByUser?.id}
+                isInternal={a.uploadedByUser?.isInternal}
                     />{" "}
                     · <RelativeTime iso={a.uploadedAt} />
                   </Typography>
@@ -1434,6 +1435,7 @@ export function AttachmentsWidget({
                       name={a.uploadedBy}
                       email={a.uploadedByUser?.email || a.uploadedByEmail}
                       userId={a.uploadedByUser?.id}
+                isInternal={a.uploadedByUser?.isInternal}
                     />{" "}
                     · <RelativeTime iso={a.uploadedAt} /> · deleted by{" "}
                     <UserRefLink

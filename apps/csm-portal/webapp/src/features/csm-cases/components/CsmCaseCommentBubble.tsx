@@ -466,6 +466,7 @@ export default function CsmCaseCommentBubble({
               name={comment.authorName}
               email={comment.authorUser?.email || comment.authorEmail}
               userId={comment.authorUser?.id}
+              isInternal={comment.authorUser?.isInternal}
             />
           </Typography>
           {!comment.synthetic && comment.authorRole !== "wso2_engineer" && (

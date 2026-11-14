@@ -7675,6 +7675,9 @@ components:
           type: string
         createdByFullName:
           type: string
+        createdByIsInternal:
+          type: boolean
+          description: True when the author is WSO2 staff (a support engineer).
         commentType:
           type: string
         fileName:

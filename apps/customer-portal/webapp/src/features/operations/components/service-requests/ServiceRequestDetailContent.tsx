@@ -594,7 +594,7 @@ export default function ServiceRequestDetailContent({
                           sx={{ display: "block" }}
                         >
                           {splitStaffMark(authorLabel).name}
-                          {splitStaffMark(authorLabel).isStaff && (
+                          {comment.createdByIsInternal && (
                             <StaffNameIcon size={14} />
                           )}{" "}
                           •{" "}

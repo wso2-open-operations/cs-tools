@@ -228,9 +228,7 @@ export default function AnnouncementActivityPanel({
                 >
                   <Typography variant="body2" color="text.primary" fontWeight={500}>
                     {splitStaffMark(commentAuthorDisplayName(comment)).name}
-                    {splitStaffMark(commentAuthorDisplayName(comment)).isStaff && (
-                      <StaffNameIcon />
-                    )}
+                    {comment.createdByIsInternal && <StaffNameIcon />}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {formatCommentDate(comment.createdOn)}

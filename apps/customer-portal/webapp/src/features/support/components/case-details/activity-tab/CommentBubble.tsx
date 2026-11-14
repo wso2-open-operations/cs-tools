@@ -282,7 +282,7 @@ export default function CommentBubble({
           {displayName && (
             <Typography variant="body2" color="text.primary" fontWeight={500}>
               {splitStaffMark(displayName).name}
-              {splitStaffMark(displayName).isStaff && <StaffNameIcon />}
+              {comment.createdByIsInternal && <StaffNameIcon />}
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary">

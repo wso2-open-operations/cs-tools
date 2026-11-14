@@ -329,6 +329,8 @@ export type CaseComment = AuditMetadata & {
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   createdByFullName?: string | null;
+  // True when the author is WSO2 staff (a support engineer).
+  createdByIsInternal?: boolean;
   isEscalated: boolean;
   hasInlineAttachments?: boolean;
   inlineAttachments?: CaseCommentInlineAttachment[];

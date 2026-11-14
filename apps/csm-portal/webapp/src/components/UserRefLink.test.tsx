@@ -53,6 +53,32 @@ beforeEach(() => {
 });
 
 describe("UserRefLink", () => {
+  it("never shows the circled W after a name", () => {
+    renderWithProviders(
+      <UserRefLink name={"Jane Doe \u24E6"} userId={JANE_UUID} />,
+    );
+    expect(screen.getByRole("link", { name: "Jane Doe" })).toBeInTheDocument();
+    expect(screen.queryByText(/\u24E6/u)).not.toBeInTheDocument();
+  });
+
+  it("shows the support engineer icon only for an internal user", () => {
+    const { unmount } = renderWithProviders(
+      <UserRefLink name="Jane Doe" userId={JANE_UUID} isInternal />,
+    );
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+    unmount();
+    renderWithProviders(
+      <UserRefLink name={"John Roe \u24E6"} userId={JOHN_UUID} />,
+    );
+    expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
+  });
+
+  it("shows the icon beside a name with no link to follow", () => {
+    renderWithProviders(<UserRefLink name="Jane Doe" isInternal />);
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+  });
+
   it("clears a hover underline after the hover behavior is disabled", () => {
     const view = renderWithProviders(
       <UserRefLink name="Jane Doe" userId={JANE_UUID} underlineOnHover />,

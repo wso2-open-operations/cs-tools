@@ -737,6 +737,10 @@ type CaseActivity struct {
 	SizeBytes          int               `json:"sizeBytes,omitempty"`
 	DownloadURL        string            `json:"downloadUrl,omitempty"`
 	Changes            []CaseFieldChange `json:"changes,omitempty"`
+
+	// AuthorInternal is true when the author is WSO2 staff (a support
+	// engineer): the webapp shows a support engineer icon beside the name.
+	AuthorInternal bool `json:"createdByIsInternal,omitempty"`
 }
 
 // SearchCaseActivitiesResponse is the portal's response for
@@ -825,6 +829,7 @@ func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseAc
 			SizeBytes:          a.SizeBytes,
 			DownloadURL:        a.DownloadURL,
 			Changes:            changes,
+			AuthorInternal:     a.CreatedBy != nil && a.CreatedBy.IsInternal,
 		})
 	}
 	return SearchCaseActivitiesResponse{

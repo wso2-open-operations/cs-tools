@@ -43,9 +43,7 @@ import {
   formatDateTime,
   formatFileSize,
   getAttachmentFileCategory,
-  splitStaffMark,
 } from "@features/support/utils/support";
-import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import ImageFullscreenModal from "@case-details-activity/ImageFullscreenModal";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 
@@ -308,10 +306,7 @@ export default function AttachmentListItem({
             •
           </Typography>
           <Typography variant="caption" color="text.secondary" component="span">
-            Uploaded by {splitStaffMark(attachment.createdBy).name}
-            {splitStaffMark(attachment.createdBy).isStaff && (
-              <StaffNameIcon size={14} />
-            )}
+            Uploaded by {attachment.createdBy}
           </Typography>
           <Typography variant="caption" color="text.secondary" component="span">
             •

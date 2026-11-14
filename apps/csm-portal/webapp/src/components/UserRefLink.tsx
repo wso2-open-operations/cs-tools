@@ -17,6 +17,8 @@
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import { useResolvedUserId } from "@features/csm-users/api/useResolvedUserId";
+import StaffNameIcon from "@components/StaffNameIcon";
+import { stripStaffMark } from "@utils/staffName";
 
 interface UserRefLinkProps {
   /** Display name shown as the link text (or plain text when there's no id
@@ -48,6 +50,9 @@ interface UserRefLinkProps {
    * usages this link is the only clickability signal on the name.
    */
   underlineOnHover?: boolean;
+  /** True for an internal user (a support engineer): an icon follows the
+   * name. The circled W the data may carry on a name is never shown. */
+  isInternal?: boolean;
 }
 
 /**
@@ -64,32 +69,44 @@ export default function UserRefLink({
   userId,
   className,
   underlineOnHover = true,
+  isInternal = false,
 }: UserRefLinkProps): JSX.Element {
   const resolvedId = useResolvedUserId(email, userId);
 
+  const shownName = stripStaffMark(name);
+  const icon = isInternal ? <StaffNameIcon /> : null;
+
   if (!resolvedId) {
-    return <span className={className}>{name}</span>;
+    return (
+      <span className={className}>
+        {shownName}
+        {icon}
+      </span>
+    );
   }
 
   return (
-    <RouterLink
-      to={`/people/${encodeURIComponent(resolvedId)}`}
-      className={className}
-      style={{
-        color: "inherit",
-        textDecoration: "none",
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => {
-        if (!underlineOnHover) return;
-        (e.currentTarget as HTMLAnchorElement).style.textDecoration =
-          "underline";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLAnchorElement).style.textDecoration = "none";
-      }}
-    >
-      {name}
-    </RouterLink>
+    <>
+      <RouterLink
+        to={`/people/${encodeURIComponent(resolvedId)}`}
+        className={className}
+        style={{
+          color: "inherit",
+          textDecoration: "none",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          if (!underlineOnHover) return;
+          (e.currentTarget as HTMLAnchorElement).style.textDecoration =
+            "underline";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLAnchorElement).style.textDecoration = "none";
+        }}
+      >
+        {shownName}
+      </RouterLink>
+      {icon}
+    </>
   );
 }

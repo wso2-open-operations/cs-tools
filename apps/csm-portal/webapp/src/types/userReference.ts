@@ -29,4 +29,7 @@ export interface UserReference {
   id: string | null;
   email: string;
   name: string;
+  /** True when the person is an internal user (WSO2 staff, such as a support
+   * engineer). Absent means "not known to be internal". */
+  isInternal?: boolean;
 }

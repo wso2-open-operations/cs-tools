@@ -1149,3 +1149,11 @@ The portal deliberately does **not** write to Salesforce itself for this. entity
   `middleware.TokenValidator` instead (see "The AI chat agent"). It is still JWT-authenticated —
   do not add a second exception without the same browser-level justification.
 - **Run gosec on every change** — `gosec -fmt=text ./...` must report 0 issues before opening a PR.
+
+## `createdByIsInternal` on case activities
+
+`dto.CaseActivity.AuthorInternal` (`createdByIsInternal`, omitted when false) is true when entity-service
+marks the activity's author `isInternal` (WSO2 staff such as a support engineer). The webapp shows a
+support engineer icon beside the name from this flag; it never infers staff from the name, because the
+circled W the data appends to many names is on customers' names too. The webapp strips that mark from
+every name it shows.
