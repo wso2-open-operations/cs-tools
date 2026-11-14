@@ -2465,6 +2465,16 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // state-transition table has no entry for closed at all). This column is
 // write-only -- see migration 0292's own comment -- so it is never in this
 // query's RETURNING list.
+// resolved_on's own fourth branch (admin reopen into anything but
+// CLOSED/SOLUTION_PROPOSED, both already handled by the branches above it)
+// clears a stale resolved_on left over from the PRIOR closure --
+// CodeRabbit-caught gap: without it, reopening into e.g. work_in_progress
+// fell through to the trailing ELSE and kept the old timestamp, which a
+// later re-close's own COALESCE(resolved_on, NOW()) branch would then
+// reuse instead of recording the new resolution. Same admin-reopen
+// detection condition as reopen_reason just below, for the same reason --
+// keyed off real state values, not a separate flag, since only the
+// admin-reopen path can ever produce a transition OUT of closed at all.
 // work_state is only meaningful while state is work_in_progress: an explicit
 // workState wins, otherwise a state change to awaiting_info pauses it and a
 // change to any other non-work_in_progress state clears it to NULL, in the
@@ -2492,6 +2502,7 @@ const updateCaseQuery = `
 		    resolved_on       = CASE WHEN $2 = 'SOLUTION_PROPOSED' AND COALESCE(state::TEXT, '') NOT IN ('WAITING_ON_WSO2', 'SOLUTION_PROPOSED') THEN NOW()
 		                          WHEN $2 = 'CLOSED' THEN COALESCE(resolved_on, NOW())
 		                          WHEN $2 = 'REOPENED' THEN NULL
+		                          WHEN $2 <> '' AND $2 <> 'CLOSED' AND state = 'CLOSED'::case_state_enum THEN NULL
 		                          ELSE resolved_on END,
 		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::case_state_enum THEN $8::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
 		    resolution_code   = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,

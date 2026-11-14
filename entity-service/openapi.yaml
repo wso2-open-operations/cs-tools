@@ -24681,15 +24681,19 @@ components:
           description: >-
             Moves a closed case to any other state, bypassing the normal state-transition
             rule (closed is otherwise terminal for every caller). Only honored for an
-            internal (WSO2 staff) caller, and only when the case's current state is
-            actually closed. Only `true` is meaningful; omit rather than sending `false`.
-            Only allowed alongside `state`.
+            internal (WSO2 staff) caller calling through the CSM portal backend, and only
+            when the case's current state is actually closed and the case's own type is
+            `case` — rejected with a 400 for every other case-like type (engagement,
+            service_request, security_report_analysis, announcement), since the reopen
+            reason has nowhere to be stored for those. Only `true` is meaningful; omit
+            rather than sending `false`. Only allowed alongside `state`.
         reopenReason:
           type: string
           description: >-
             Optional free-text note on why the case was reopened. Only allowed alongside
-            `adminReopen: true`. Write-only — never returned by this or any other
-            endpoint, and not shown in any UI.
+            `adminReopen: true` (and, like `adminReopen`, only for a case of type `case`).
+            Write-only — never returned by this or any other endpoint, and not shown in
+            any UI.
         bestCaseFixEta:
           type: string
           format: date
