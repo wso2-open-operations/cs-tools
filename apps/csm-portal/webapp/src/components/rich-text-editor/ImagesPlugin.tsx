@@ -23,9 +23,16 @@ import {
   $isRangeSelection,
   $createParagraphNode,
   $isRootOrShadowRoot,
+  $createLineBreakNode,
+  $isLineBreakNode,
+  $isParagraphNode,
+  type LexicalEditor,
+  type LexicalNode,
 } from "lexical";
 import { useEffect } from "react";
-import { $createImageNode } from "@components/rich-text-editor/ImageNode";
+import { $isListItemNode } from "@lexical/list";
+import { $caretOnRootIntoBlock } from "@components/rich-text-editor/splitLineBreakLines";
+import { $createImageNode, editorHasInlineImages } from "@components/rich-text-editor/ImageNode";
 import {
   INSERT_IMAGE_COMMAND,
   deriveAltFromFilename,
@@ -44,6 +51,26 @@ function getPayloadAltText(payload: string | InsertImagePayload): string {
   return (
     payload.altText || deriveAltFromFilename(payload.src) || "Uploaded Image"
   );
+}
+
+/** Reply box only: the caret is after content on its line (not at a line start). */
+function $startsMidLine(editor: LexicalEditor): boolean {
+  if (!editorHasInlineImages(editor)) return false;
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) return false;
+  const { anchor } = selection;
+  let previous: LexicalNode | null;
+  if (anchor.type === "text") {
+    const node = anchor.getNode();
+    if (!$isParagraphNode(node.getParent()) && !$isListItemNode(node.getParent())) return false;
+    if (anchor.offset > 0) return true;
+    previous = node.getPreviousSibling();
+  } else {
+    const block = anchor.getNode();
+    if (!$isParagraphNode(block) && !$isListItemNode(block)) return false;
+    previous = block.getChildAtIndex(anchor.offset - 1);
+  }
+  return previous !== null && !$isLineBreakNode(previous);
 }
 
 export default function ImagesPlugin(): null {
@@ -74,7 +101,15 @@ export default function ImagesPlugin(): null {
           }
         }
 
-        $insertNodes([imageNode]);
+        // A caret on the root (a click into an empty editor) would put the image in a
+        // NEW paragraph and leave the existing empty one behind as a trailing blank
+        // line; insert into that paragraph instead.
+        $caretOnRootIntoBlock();
+        // Reply box: images are inline, so one dropped in after text would sit beside it;
+        // start it on its own line, as a block image always did.
+        const nodes: LexicalNode[] = [imageNode];
+        if ($startsMidLine(editor)) nodes.unshift($createLineBreakNode());
+        $insertNodes(nodes);
 
         // After inserting a DecoratorNode the cursor is "at" the image and
         // not in a text-editable position. Ensure a paragraph exists after

@@ -182,6 +182,15 @@ describe("writeDivider", () => {
 });
 
 describe("htmlToPdfPlainText", () => {
+  it("prints no bullet for a nested list's wrapper item (editor-list-item-nested)", () => {
+    const text = htmlToPdfPlainText(
+      '<ul><li>a</li><li class="editor-list-item-nested" style="list-style-type: none"><ul><li>b</li></ul></li><li>c</li></ul>',
+    );
+    expect(text).not.toContain("• •");
+    expect(text.match(/•/g)).toHaveLength(3);
+    expect(text.replace(/\s+/g, " ").trim()).toBe("• a • b • c");
+  });
+
   it("puts each paragraph on its own line, instead of running them together", () => {
     // Reported live: real multi-paragraph rich-text content rendered in the
     // PDF as one run-on wall of text ("First paragraph.Second paragraph.") —

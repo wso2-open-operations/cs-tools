@@ -41,7 +41,13 @@ import {
   collapseEmptyParagraphElements,
   stripWhitespaceStyleFromHtml,
   stripLexicalTableStylingFromHtml,
-  htmlToPlainText,
+  markNestedListItemsInHtml,
+  htmlToPastePlainText,
+  hasMeaningfulHtmlContent,
+  htmlHasTextOrTable,
+  convertWordListsToHtmlLists,
+  preserveEditorWhitespace,
+  preserveTrailingLineBreaks,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/richTextEditor";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
@@ -50,9 +56,21 @@ import {
   inlineImageRefusal,
   inlineImagesInEditor,
   rememberInlineImageSize,
+  inlineImageSize,
   type ImagePasteRefusal,
   type InlineImageRoom,
 } from "@components/rich-text-editor/inlineImageLimits";
+import { looksLikeMarkdown } from "@components/rich-text-editor/looksLikeMarkdown";
+import { isFlatClipboardHtml } from "@components/rich-text-editor/isFlatClipboardHtml";
+import {
+  flattenTablesToParagraphs,
+  imagesToLinks,
+  isAppImageSrc,
+  markdownToPasteDom,
+  mergeAdjacentParagraphs,
+} from "@components/rich-text-editor/markdownPaste";
+import { $insertPastedNodes } from "@components/rich-text-editor/insertPastedNodes";
+import { $caretOnRootIntoBlock } from "@components/rich-text-editor/splitLineBreakLines";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -62,19 +80,19 @@ import Toolbar, {
 import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
-import { ImageNode } from "@components/rich-text-editor/ImageNode";
+import { ImageNode, INLINE_IMAGES_THEME_KEY, markInlineImageEditor } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
 import { LinkNode } from "@lexical/link";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
-import { CodeNode } from "@lexical/code";
+import { CodeNode, $isCodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
 import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
-import { $getRoot } from "lexical";
+import { $createParagraphNode, $getNodeByKey, $getRoot, $setSelection, $isTextNode, type RangeSelection } from "lexical";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import {
   KEY_ENTER_COMMAND,
@@ -82,12 +100,21 @@ import {
   $getSelection,
   $isRangeSelection,
   INSERT_PARAGRAPH_COMMAND,
+  INSERT_LINE_BREAK_COMMAND,
+  $isParagraphNode,
+  $isElementNode,
   PASTE_COMMAND,
   PASTE_TAG,
   $createTabNode,
+  KEY_TAB_COMMAND,
+  KEY_DOWN_COMMAND,
+  INDENT_CONTENT_COMMAND,
+  OUTDENT_CONTENT_COMMAND,
+  COMMAND_PRIORITY_LOW,
 } from "lexical";
 import { $isListItemNode } from "@lexical/list";
-import { $findMatchingParent } from "@lexical/utils";
+import { $findMatchingParent, CAN_USE_BEFORE_INPUT, IS_APPLE_WEBKIT, IS_IOS, IS_SAFARI } from "@lexical/utils";
+import { $isTableCellNode } from "@lexical/table";
 
 /**
  * Internal component to handle editable state changes.
@@ -116,6 +143,10 @@ const InitialValuePlugin = ({ initialHtml }: { initialHtml?: string }) => {
       const root = $getRoot();
       const parser = new DOMParser();
       const dom = parser.parseFromString(initialHtml, "text/html");
+      // Our own export keeps tabs and runs of spaces raw; loading must not collapse them.
+      preserveEditorWhitespace(dom);
+      // ...and a break that ends a line (`<p>Hi<br></p>`) must not be dropped as the importer's "last child".
+      preserveTrailingLineBreaks(dom);
       const nodes = $generateNodesFromDOM(editor, dom);
       root.clear();
       root.append(...nodes);
@@ -142,7 +173,7 @@ const OnChangeHTMLPlugin = ({
         editorState.read(() => {
           const html = $generateHtmlFromNodes(editor);
           onChange?.(
-            stripLexicalTableStylingFromHtml(stripWhitespaceStyleFromHtml(html)),
+            markNestedListItemsInHtml(stripLexicalTableStylingFromHtml(stripWhitespaceStyleFromHtml(html))),
           );
         });
       }}
@@ -153,7 +184,10 @@ const OnChangeHTMLPlugin = ({
 /**
  * Plugin to handle Enter key for submit.
  *
- * When enterToSubmit=false (default): Ctrl+Enter / Cmd+Enter submits; plain Enter stays in editor.
+ * When enterToSubmit=false (default): Ctrl+Enter / Cmd+Enter submits; plain Enter stays in editor
+ *   (Lexical's default: a new paragraph, or `EnterLineBreakPlugin`'s `<br>` when
+ *   `enterInsertsLineBreak` is on -- that plugin never handles a Ctrl/Cmd+Enter, so the
+ *   two do not conflict).
  * When enterToSubmit=true: plain Enter submits; Shift+Enter in a list inserts a new list item;
  *   Shift+Enter outside a list passes through for a soft line break; Ctrl/Cmd+Enter is ignored.
  */
@@ -214,6 +248,222 @@ const EnterSubmitPlugin = ({
 };
 
 /**
+ * The current range selection; with none (the editor lost its selection before a
+ * dialog action ran) the end of the root, adding an empty paragraph to an empty
+ * root, so a held paste is never dropped silently.
+ */
+function $getOrCreateRangeSelection(): RangeSelection {
+  const selection = $getSelection();
+  if ($isRangeSelection(selection)) return selection;
+  const root = $getRoot();
+  const last = root.getLastChild();
+  if (last && $isElementNode(last)) return last.selectEnd();
+  const paragraph = $createParagraphNode();
+  root.append(paragraph);
+  return paragraph.select();
+}
+
+/**
+ * True when the whole selection sits in plain paragraphs -- the only place the
+ * `enterInsertsLineBreak` mode applies (Enter and plain-text paste). Lists,
+ * headings, quotes, code and table cells keep Lexical's own behaviour. Call it
+ * inside a command handler or an update.
+ */
+function $selectionInPlainParagraphs(): boolean {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection)) return false;
+  return [selection.anchor, selection.focus].every((point) => {
+    const block = $findMatchingParent(
+      point.getNode(),
+      (n) => $isElementNode(n) && !n.isInline(),
+    );
+    return block !== null && $isParagraphNode(block) && $findMatchingParent(block, $isTableCellNode) === null;
+  });
+}
+
+/**
+ * `enterInsertsLineBreak` mode (GitHub-style new lines): plain Enter inserts a
+ * `<br>` inside the current paragraph instead of starting a new one, so two
+ * Enters make one blank line. The exported HTML then looks the same in every
+ * renderer (a paragraph gap is 6px here, ~0.25em in the customer portal, ~1em
+ * in other HTML renderers; a `<br>` is a line everywhere).
+ *
+ * Only a selection that sits entirely in plain paragraphs is handled (see
+ * {@link $selectionInPlainParagraphs}). List items (Enter = new item, Enter on
+ * an empty item exits the list), headings, quotes, code blocks and table cells
+ * keep Lexical's own Enter behaviour (cells keep it so Lexical's table-edge
+ * paragraph handling still works). Shift+Enter already inserts a `<br>`;
+ * Ctrl/Cmd+Enter is left to `EnterSubmitPlugin`. Registered at
+ * COMMAND_PRIORITY_HIGH, above `@lexical/rich-text`'s default handler, and
+ * independent of whether a submit handler is set.
+ *
+ * The keydown path skips an IME composition (`isComposing`). On Safari/iOS
+ * Lexical itself leaves Enter to `beforeinput`, which dispatches
+ * INSERT_PARAGRAPH_COMMAND -- also what a soft keyboard's Enter reaches -- so
+ * that is handled too. By then Lexical has cleared the composition, so the
+ * `isComposing` check there is only a safeguard.
+ */
+const EnterLineBreakPlugin = () => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const unregKey = editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      (event: KeyboardEvent | null) => {
+        if (event === null) return false;
+        if (event.isComposing || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+          return false;
+        }
+        // Mirrors @lexical/rich-text: these browsers send Enter as a
+        // `beforeinput` instead, which the INSERT_PARAGRAPH_COMMAND handler covers.
+        if ((IS_IOS || IS_SAFARI || IS_APPLE_WEBKIT) && CAN_USE_BEFORE_INPUT) return false;
+        $caretOnRootIntoBlock();
+        if (!$selectionInPlainParagraphs()) return false;
+        event.preventDefault();
+        editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+
+    const unregParagraph = editor.registerCommand(
+      INSERT_PARAGRAPH_COMMAND,
+      () => {
+        if (editor.isComposing()) return false;
+        $caretOnRootIntoBlock();
+        if (!$selectionInPlainParagraphs()) return false;
+        editor.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+
+    return () => {
+      unregKey();
+      unregParagraph();
+    };
+  }, [editor]);
+
+  return null;
+};
+
+/** Records that this editor uses inline images (see `markInlineImageEditor`), before any content renders. */
+const InlineImagesPlugin = () => {
+  const [editor] = useLexicalComposerContext();
+  useState(() => markInlineImageEditor(editor));
+  return null;
+};
+
+/**
+ * The normal editor's Enter with the caret on the root itself (what a click into an
+ * empty editor leaves): the new paragraph is added but the caret stayed before it, so
+ * the next typed text landed on the FIRST line. Put the caret in a paragraph first,
+ * so it behaves like Enter in an empty paragraph. Everything else
+ * is left to Lexical's own Enter (the reply box has `EnterLineBreakPlugin`).
+ */
+const EnterEmptyRootPlugin = ({
+  onSubmit,
+  enterToSubmit,
+}: {
+  onSubmit?: () => void;
+  enterToSubmit: boolean;
+}) => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    // Enter that `EnterSubmitPlugin` is about to turn into a submit must not touch the
+    // document first (it would add a paragraph and fire onChange before the submit).
+    const willSubmit = (event: KeyboardEvent | null) =>
+      !!onSubmit &&
+      event !== null &&
+      (enterToSubmit ? !event.ctrlKey && !event.metaKey && !event.shiftKey : event.ctrlKey || event.metaKey);
+    const unregKey = editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      (event: KeyboardEvent | null) => {
+        if (!willSubmit(event)) $caretOnRootIntoBlock();
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+    const unregParagraph = editor.registerCommand(
+      INSERT_PARAGRAPH_COMMAND,
+      () => {
+        $caretOnRootIntoBlock();
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+    return () => {
+      unregKey();
+      unregParagraph();
+    };
+  }, [editor, onSubmit, enterToSubmit]);
+
+  return null;
+};
+
+/**
+ * Tab / Shift+Tab inside a list item nest / un-nest it, like the Indent and Outdent
+ * buttons, without ever trapping keyboard focus (WCAG 2.1.2):
+ * - Tab passes through (focus moves on) when the item cannot be nested: it is the first
+ *   item of its list. So repeated Tab nests once, then moves focus.
+ * - Shift+Tab passes through on a top-level item, which has nothing to un-nest.
+ * - Escape is an escape hatch: the next Tab / Shift+Tab after it is never handled. Any
+ *   other key or a click clears it.
+ * Outside a list Tab keeps the browser default; a code block keeps its own handling.
+ */
+const ListTabPlugin = () => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    let escaped = false;
+    const clear = () => {
+      escaped = false;
+    };
+    const unregKeyDown = editor.registerCommand(
+      KEY_DOWN_COMMAND,
+      (event: KeyboardEvent) => {
+        if (event.key === "Escape") escaped = true;
+        else if (!["Tab", "Shift", "Control", "Alt", "Meta"].includes(event.key)) escaped = false;
+        return false;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+    const unregRoot = editor.registerRootListener((root, previous) => {
+      previous?.removeEventListener("click", clear);
+      root?.addEventListener("click", clear);
+    });
+    const unregTab = editor.registerCommand(
+      KEY_TAB_COMMAND,
+      (event: KeyboardEvent) => {
+        if (escaped) {
+          escaped = false;
+          return false;
+        }
+        if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return false;
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection)) return false;
+        if ($findMatchingParent(selection.anchor.getNode(), $isCodeNode) !== null) return false;
+        const item = $findMatchingParent(selection.anchor.getNode(), $isListItemNode);
+        if (!item) return false;
+        if (event.shiftKey ? item.getIndent() === 0 : item.getPreviousSibling() === null) return false;
+        event.preventDefault();
+        editor.dispatchCommand(event.shiftKey ? OUTDENT_CONTENT_COMMAND : INDENT_CONTENT_COMMAND, undefined);
+        return true;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+    return () => {
+      unregKeyDown();
+      unregRoot();
+      unregTab();
+    };
+  }, [editor]);
+
+  return null;
+};
+
+/**
  * Internal component to handle resetting the editor.
  */
 const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
@@ -262,6 +512,12 @@ const ClipboardImagePlugin = ({
 
       // Upload mode only: how many more images this draft may take.
       let room: InlineImageRoom | null = null;
+
+      // Excel, LibreOffice Calc and the like put a picture of the copied cells beside the table
+      // HTML: the picture only renders the same content, so the HTML is pasted and the picture
+      // is not (PasteNormalizationPlugin). A picture alone, or beside HTML that has an <img> of
+      // its own (a copied web picture, a chat message with a screenshot), is still inserted.
+      if (clipboardImageRendersHtml(event.clipboardData)) return;
 
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/")) {
@@ -357,6 +613,19 @@ const ClipboardImagePlugin = ({
  *   (clipboard has `text/plain` but no `text/html`) is unaffected and always
  *   goes straight to the plain-text path with no prompt.
  */
+/**
+ * True when the clipboard's image file is just a rendering of its HTML: the HTML has a table or
+ * real text and no `<img>` of its own (Excel/Calc put a png of the range beside the table).
+ */
+function clipboardImageRendersHtml(clipboardData: DataTransfer | null): boolean {
+  if (!clipboardData) return false;
+  const hasImageFile = Array.from(clipboardData.items ?? []).some((item) => item.type.startsWith("image/"));
+  if (!hasImageFile) return false;
+  const html = clipboardData.getData("text/html");
+  if (!html.trim() || !htmlHasTextOrTable(html)) return false;
+  return new DOMParser().parseFromString(html, "text/html").body.querySelector("img") === null;
+}
+
 /** True when `html` holds at least one `<img>` and no text at all. */
 function isImageOnlyHtml(html: string): boolean {
   if (!html.trim()) return false;
@@ -364,14 +633,69 @@ function isImageOnlyHtml(html: string): boolean {
   return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
 }
 
-const PasteNormalizationPlugin = (): JSX.Element | null => {
+/**
+ * Puts a selection captured when a paste was held back into the editor. The dialog
+ * takes focus, and the editor may re-resolve its selection from the DOM when focus
+ * returns (in Chrome that put the caret at the end of the line), so the held paste is
+ * inserted where the caret WAS. Does nothing when the nodes are gone (the caller then
+ * falls back to the current selection). Call it inside an update.
+ */
+function $restoreSelection(saved: RangeSelection | null): void {
+  if (!saved) return;
+  const selection = saved.clone();
+  for (const point of [selection.anchor, selection.focus]) {
+    const node = $getNodeByKey(point.key);
+    if (!node) return;
+    const size = $isTextNode(node) ? node.getTextContentSize() : $isElementNode(node) ? node.getChildrenSize() : 0;
+    point.set(point.key, Math.min(point.offset, size), point.type);
+  }
+  $setSelection(selection);
+}
+
+/** True when the selection starts or ends inside a code block (never prompted on paste). */
+function $selectionInCodeBlock(): boolean {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection)) return false;
+  return [selection.anchor, selection.focus].some(
+    (point) => $findMatchingParent(point.getNode(), $isCodeNode) !== null,
+  );
+}
+
+const PasteNormalizationPlugin = ({
+  lineBreaks = false,
+  markdownPaste = false,
+  limitImages = false,
+  onPasteError,
+}: {
+  /** Upload mode: images kept from an in-app copy count against the inline image limits. */
+  limitImages?: boolean;
+  onPasteError?: (reason: ImagePasteRefusal) => void;
+  /**
+   * `markdownPaste` mode: pasted text that looks like Markdown gets a "Paste as
+   * Markdown" / "Remove Formatting" prompt instead of its normal path.
+   */
+  markdownPaste?: boolean;
+  /** `enterInsertsLineBreak` mode: plain-text newlines become `<br>`s, not paragraphs. */
+  lineBreaks?: boolean;
+}): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
   const [pendingPaste, setPendingPaste] = useState<{
     html: string;
     text: string;
+    variant: "html" | "markdown";
+    /** The clipboard also carried the picture file (stored by ClipboardImagePlugin). */
+    hasImageFile: boolean;
+    /** The clipboard came from an editor of this app (`application/x-lexical-editor`). */
+    fromApp: boolean;
   } | null>(null);
+  /** The selection when the paste was held, restored before the dialog's choice is applied. */
+  const heldSelection = useRef<RangeSelection | null>(null);
 
   useEffect(() => {
+    const holdSelection = () => {
+      const selection = $getSelection();
+      heldSelection.current = $isRangeSelection(selection) ? selection.clone() : null;
+    };
     return editor.registerCommand(
       PASTE_COMMAND,
       (event) => {
@@ -381,6 +705,7 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
         const html = clipboardData.getData("text/html");
         const text = clipboardData.getData("text/plain");
+        const fromApp = Boolean(clipboardData.getData("application/x-lexical-editor"));
 
         // A picture copied from a web page carries the image itself AND an
         // `<img src="https://...">` as its HTML. The image is stored by
@@ -388,22 +713,67 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
         // HTML as well would add a second, hot-linked copy of the same picture.
         // Only when the HTML is nothing but images: Word/Docs content with
         // text keeps going through the format prompt.
-        const hasImageFile = Array.from(clipboardData.items ?? []).some((item) =>
-          item.type.startsWith("image/"),
-        );
+        // Excel's picture of the range is skipped by ClipboardImagePlugin, so it is not "stored".
+        const hasImageFile =
+          !clipboardImageRendersHtml(clipboardData) &&
+          Array.from(clipboardData.items ?? []).some((item) => item.type.startsWith("image/"));
         if (hasImageFile && isImageOnlyHtml(html)) {
           event.preventDefault();
           return true;
         }
 
-        if (html.trim()) {
+        // Markdown source (VS Code, a chat's copy button) arrives as text/plain,
+        // with no HTML or only a flat code-view one. Rendered HTML (a Word list, a
+        // Gmail quote) has rendered text/plain that can look like Markdown, so it keeps
+        // the Keep/Remove prompt. Never offered inside a code block.
+        if (
+          markdownPaste &&
+          text &&
+          looksLikeMarkdown(text) &&
+          isFlatClipboardHtml(html) &&
+          !$selectionInCodeBlock()
+        ) {
           event.preventDefault();
-          setPendingPaste({ html, text });
+          holdSelection();
+          setPendingPaste({ html, text, variant: "markdown", hasImageFile, fromApp });
+          return true;
+        }
+
+        // Into a code block any paste goes in as code lines (blank lines and indentation kept),
+        // never as paragraphs inside the <pre>, and with no prompt (also for Markdown-looking text).
+        if ($selectionInCodeBlock()) {
+          const codeText = text || (hasMeaningfulHtmlContent(html) ? htmlToPastePlainText(html) : "");
+          const selection = $getSelection();
+          if (codeText && $isRangeSelection(selection)) {
+            event.preventDefault();
+            editor.update(
+              () => {
+                const current = $getSelection();
+                if ($isRangeSelection(current)) current.insertRawText(codeText.replace(/\r\n?/g, "\n"));
+              },
+              { tag: PASTE_TAG },
+            );
+            return true;
+          }
+        }
+
+        // HTML with nothing in it (a lone <meta>, empty blocks) has nothing to keep: its
+        // text/plain is pasted through the plain path below, with no prompt.
+        const htmlHasContent = hasMeaningfulHtmlContent(html);
+
+        if (htmlHasContent) {
+          event.preventDefault();
+          holdSelection();
+          setPendingPaste({ html, text, variant: "html", hasImageFile, fromApp });
           return true;
         }
 
         if (text) {
-          const tokens = tokenizePlainTextPaste(text);
+          // An empty editor's caret sits on the root: put it in a paragraph first (both editors).
+          $caretOnRootIntoBlock();
+          const tokens = tokenizePlainTextPaste(text, {
+            lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
+          });
           if (tokens.length === 0) return false;
 
           event.preventDefault();
@@ -415,6 +785,8 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
                 if (token.type === "paragraph") {
                   currentSelection.insertParagraph();
+                } else if (token.type === "linebreak") {
+                  currentSelection.insertLineBreak();
                 } else if (token.type === "tab") {
                   currentSelection.insertNodes([$createTabNode()]);
                 } else {
@@ -431,26 +803,61 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
       },
       COMMAND_PRIORITY_HIGH,
     );
-  }, [editor]);
+  }, [editor, lineBreaks, markdownPaste]);
 
   /** "Keep Formatting" -- exactly the normalized-HTML insertion path above. */
   const applyKeepFormatting = useCallback(() => {
     if (!pendingPaste) return;
-    const dom = new DOMParser().parseFromString(pendingPaste.html, "text/html");
-    unwrapNestedPreCodeElements(dom);
-    collapseEmptyParagraphElements(dom);
+    // "Paste as Markdown": the pasted text converted, not the clipboard's HTML.
+    const markdown = pendingPaste.variant === "markdown";
+    const dom = markdown
+      ? markdownToPasteDom(pendingPaste.text)
+      : new DOMParser().parseFromString(pendingPaste.html, "text/html");
+    if (!markdown) {
+      convertWordListsToHtmlLists(dom);
+      unwrapNestedPreCodeElements(dom);
+      collapseEmptyParagraphElements(dom);
+      // Never hot-link or embed a foreign image: a link, or nothing when the picture file is stored
+      // on its own. An image of this app (copied out of an editor: a `blob:` preview, a stored
+      // `/<uuid>`, an older draft's `data:`) stays an image, within the inline image limits.
+      let room = limitImages ? inlineImagesInEditor(editor) : null;
+      const result: { refused: ImagePasteRefusal | null } = { refused: null };
+      imagesToLinks(dom, {
+        dropAll: pendingPaste.hasImageFile,
+        decide: (img) => {
+          const src = img.getAttribute("src") ?? "";
+          if (!isAppImageSrc(src, pendingPaste.fromApp)) return undefined;
+          if (!room) return "keep";
+          const bytes = inlineImageSize(src);
+          const refusal = inlineImageRefusal(room, bytes);
+          if (refusal) {
+            result.refused ??= refusal;
+            return "text";
+          }
+          room = { count: room.count + 1, bytes: room.bytes + bytes };
+          return "keep";
+        },
+      });
+      if (result.refused) onPasteError?.(result.refused);
+    }
+    const saved = heldSelection.current;
+    heldSelection.current = null;
 
     editor.update(
       () => {
-        const selection = $getSelection();
-        if (!$isRangeSelection(selection)) return;
-        const nodes = $generateNodesFromDOM(editor, dom);
-        selection.insertNodes(nodes);
+        $restoreSelection(saved);
+        $caretOnRootIntoBlock();
+        const selection = $getOrCreateRangeSelection();
+        // Keep a pasted blank line the same markup as a typed one.
+        if (lineBreaks && $selectionInPlainParagraphs()) mergeAdjacentParagraphs(dom);
+        // A table cannot hold a table: rows of text instead.
+        if ($findMatchingParent(selection.anchor.getNode(), $isTableCellNode)) flattenTablesToParagraphs(dom);
+        $insertPastedNodes(selection, $generateNodesFromDOM(editor, dom));
       },
       { tag: PASTE_TAG },
     );
     setPendingPaste(null);
-  }, [editor, pendingPaste]);
+  }, [editor, pendingPaste, lineBreaks, limitImages, onPasteError]);
 
   /**
    * "Remove Formatting" -- discards all structure and treats the paste
@@ -461,17 +868,26 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
    */
   const applyRemoveFormatting = useCallback(() => {
     if (!pendingPaste) return;
-    const plainText = pendingPaste.text || htmlToPlainText(pendingPaste.html);
-    const tokens = tokenizePlainTextPaste(plainText);
+    const plainText = pendingPaste.text || htmlToPastePlainText(pendingPaste.html);
+    const saved = heldSelection.current;
+    heldSelection.current = null;
 
     editor.update(
       () => {
+        $restoreSelection(saved);
+        $caretOnRootIntoBlock();
+        $getOrCreateRangeSelection();
+        const tokens = tokenizePlainTextPaste(plainText, {
+          lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
+        });
         for (const token of tokens) {
           const currentSelection = $getSelection();
           if (!$isRangeSelection(currentSelection)) continue;
 
           if (token.type === "paragraph") {
             currentSelection.insertParagraph();
+          } else if (token.type === "linebreak") {
+            currentSelection.insertLineBreak();
           } else if (token.type === "tab") {
             currentSelection.insertNodes([$createTabNode()]);
           } else {
@@ -482,9 +898,12 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
       { tag: PASTE_TAG },
     );
     setPendingPaste(null);
-  }, [editor, pendingPaste]);
+  }, [editor, pendingPaste, lineBreaks]);
 
-  const cancelPendingPaste = useCallback(() => setPendingPaste(null), []);
+  const cancelPendingPaste = useCallback(() => {
+    heldSelection.current = null;
+    setPendingPaste(null);
+  }, []);
 
   if (!pendingPaste) return null;
 
@@ -493,6 +912,7 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
       onKeepFormatting={applyKeepFormatting}
       onRemoveFormatting={applyRemoveFormatting}
       onClose={cancelPendingPaste}
+      variant={pendingPaste.variant}
     />
   );
 };
@@ -554,6 +974,8 @@ const Editor = ({
   toolbarVariant = "full",
   onSubmitKeyDown,
   enterToSubmit = false,
+  enterInsertsLineBreak = false,
+  markdownPaste = false,
   placeholder = "Enter description...",
   id,
   showKeyboardHint = false,
@@ -584,6 +1006,18 @@ const Editor = ({
   toolbarVariant?: ToolbarVariant;
   onSubmitKeyDown?: () => void;
   enterToSubmit?: boolean;
+  /**
+   * GitHub-style new lines: plain Enter inserts a `<br>` in the current paragraph
+   * (two Enters = one blank line) instead of starting a paragraph; toolbar block
+   * conversions and plain-text paste follow suit. Off by default; ignored with
+   * `enterToSubmit`. See `EnterLineBreakPlugin`.
+   */
+  enterInsertsLineBreak?: boolean;
+  /**
+   * Pasted text that looks like Markdown prompts "Paste as Markdown" / "Remove
+   * Formatting" (see `looksLikeMarkdown`). Off by default.
+   */
+  markdownPaste?: boolean;
   placeholder?: string;
   id?: string;
   showKeyboardHint?: boolean;
@@ -611,6 +1045,7 @@ const Editor = ({
   ariaRequired?: boolean;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
+  const lineBreakMode = enterInsertsLineBreak && !enterToSubmit;
   const logger = useLogger();
   // Without an `onPasteError` handler a refused pasted image is said right
   // below the editor, for a few seconds.
@@ -629,12 +1064,13 @@ const Editor = ({
   const memoizedEditorConfig = useMemo(
     () => ({
       ...DEFAULT_EDITOR_CONFIG,
+      theme: { ...DEFAULT_EDITOR_CONFIG.theme, [INLINE_IMAGES_THEME_KEY]: lineBreakMode },
       onError: (error: Error) => {
         logger.error("Error occurred in rich text editor", error);
       },
       editable: !disabled,
     }),
-    [logger, disabled],
+    [logger, disabled, lineBreakMode],
   );
 
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -698,6 +1134,7 @@ const Editor = ({
           },
         }}
       >
+        {lineBreakMode && <InlineImagesPlugin />}
         <EditableStatePlugin disabled={disabled} />
         {showToolbar && (
           <>
@@ -712,6 +1149,7 @@ const Editor = ({
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
               enterToSubmit={enterToSubmit}
+              enterInsertsLineBreak={lineBreakMode}
               imageUploader={onImageUpload}
             />
             <Divider sx={{ my: 1 }} />
@@ -858,12 +1296,19 @@ const Editor = ({
           <TablePlugin />
           <ImagesPlugin />
           <ClipboardImagePlugin onPasteError={onImageRefused} onImageUpload={onImageUpload} />
-          <PasteNormalizationPlugin />
+          <PasteNormalizationPlugin
+            lineBreaks={lineBreakMode}
+            markdownPaste={markdownPaste}
+            limitImages={Boolean(onImageUpload)}
+            onPasteError={onImageRefused}
+          />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
+          {lineBreakMode ? <EnterLineBreakPlugin /> : <EnterEmptyRootPlugin onSubmit={disabled ? undefined : onSubmitKeyDown} enterToSubmit={enterToSubmit} />}
+          <ListTabPlugin />
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>
         {imageNotice && (

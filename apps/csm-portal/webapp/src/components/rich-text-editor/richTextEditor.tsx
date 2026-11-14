@@ -78,6 +78,94 @@ export function htmlToPlainText(html: string): string {
   return (body?.textContent ?? "").trim();
 }
 
+const PLAIN_TEXT_BLOCK_TAGS = new Set([
+  "P", "DIV", "LI", "UL", "OL", "TR", "TABLE", "THEAD", "TBODY", "TFOOT", "H1", "H2", "H3", "H4", "H5", "H6",
+  "BLOCKQUOTE", "PRE", "SECTION", "ARTICLE", "HEADER", "FOOTER", "ASIDE", "NAV", "FIGURE", "FIGCAPTION",
+  "DL", "DT", "DD", "HR", "ADDRESS", "MAIN", "FORM", "FIELDSET",
+]);
+
+/**
+ * Plain text of clipboard HTML for "Remove Formatting" when the clipboard has no `text/plain` of
+ * its own. Unlike {@link htmlToPlainText} (`textContent`, which glues `<p>one</p><p>two</p>` into
+ * `onetwo`) it puts a newline between block elements and for every `<br>`, one list item or table
+ * row per line, table cells separated by a tab, and collapses the source's own layout whitespace
+ * (outside `<pre>`), so the plain-text tokenizer then applies its normal rules.
+ */
+export function htmlToPastePlainText(html: string): string {
+  if (!html || typeof html !== "string") return "";
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  if (!body) return "";
+  let out = "";
+  const trimLineEnd = () => {
+    out = out.replace(/ +$/, "");
+  };
+  const endLine = () => {
+    trimLineEnd();
+    if (out !== "" && !out.endsWith("\n")) out += "\n";
+  };
+  const walk = (node: Node, inPre: boolean): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      if (inPre) {
+        out += text;
+        return;
+      }
+      let collapsed = text.replace(/[ \t\r\n\f]+/g, " ");
+      if (collapsed.startsWith(" ") && (out === "" || /[\n\t ]$/.test(out))) collapsed = collapsed.slice(1);
+      out += collapsed;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as Element;
+    const tag = el.tagName;
+    if (tag === "STYLE" || tag === "SCRIPT" || tag === "HEAD" || tag === "TEMPLATE") return;
+    if (tag === "BR") {
+      trimLineEnd();
+      out += "\n";
+      return;
+    }
+    if ((tag === "TD" || tag === "TH") && el.previousElementSibling) {
+      // A separator belongs to the cell's place in its row, so an empty cell still keeps its tab.
+      trimLineEnd();
+      out += "\t";
+    }
+    const block = PLAIN_TEXT_BLOCK_TAGS.has(tag);
+    if (block) endLine();
+    for (const child of Array.from(el.childNodes)) walk(child, inPre || tag === "PRE");
+    if (block) endLine();
+  };
+  walk(body, false);
+  // Trailing newlines and spaces only: a tab at the end is an empty last cell of a table row.
+  return out.replace(/^\n+/, "").replace(/(?:\n[ \t]*)+$/, "").replace(/ +$/, "");
+}
+
+/** Elements that are content on their own, with no text (a picture, a table, a rule). */
+const CONTENT_ELEMENTS = "img, table, hr, svg, video, audio, canvas, iframe, object, embed, input";
+
+/**
+ * Whether clipboard HTML has anything to paste: some text, or a picture/table/rule. A payload that
+ * is only a `<meta>`, comments or empty/`<br>`-only blocks (what some apps put beside the real
+ * `text/plain`) has none, and offering "Keep Formatting" for it would insert nothing.
+ */
+export function hasMeaningfulHtmlContent(html: string): boolean {
+  if (!html.trim()) return false;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  if (!body) return false;
+  if (body.querySelector(CONTENT_ELEMENTS)) return true;
+  for (const el of Array.from(body.querySelectorAll("style, script, template"))) el.remove();
+  return (body.textContent ?? "").trim() !== "";
+}
+
+/** Whether clipboard HTML has real text or a table (what a picture beside it merely renders). */
+export function htmlHasTextOrTable(html: string): boolean {
+  if (!html.trim()) return false;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  if (!body) return false;
+  if (body.querySelector("table")) return true;
+  for (const el of Array.from(body.querySelectorAll("style, script, template"))) el.remove();
+  return (body.textContent ?? "").trim() !== "";
+}
+
 /**
  * Escapes HTML entities in a string.
  *
@@ -185,7 +273,8 @@ export const INSERT_IMAGE_COMMAND: LexicalCommand<
 export type PlainTextPasteToken =
   | { type: "text"; value: string }
   | { type: "tab" }
-  | { type: "paragraph" };
+  | { type: "paragraph" }
+  | { type: "linebreak" };
 
 /**
  * Tokenizes plain-text clipboard content (used whenever the clipboard has
@@ -205,7 +294,11 @@ export type PlainTextPasteToken =
  * A lone newline inside real content still starts a new paragraph, same as
  * before -- only the redundant, content-free break is removed.
  */
-export function tokenizePlainTextPaste(text: string): PlainTextPasteToken[] {
+export function tokenizePlainTextPaste(
+  text: string,
+  options: { lineBreaks?: boolean } = {},
+): PlainTextPasteToken[] {
+  if (options.lineBreaks) return tokenizePlainTextPasteAsLineBreaks(text);
   const parts = text.split(/(\r?\n|\t)/);
   if (parts[parts.length - 1] === "") {
     parts.pop();
@@ -234,6 +327,24 @@ export function tokenizePlainTextPaste(text: string): PlainTextPasteToken[] {
     // it carries no content of its own and is otherwise skipped.
   }
 
+  return tokens;
+}
+
+/**
+ * The `lineBreaks` mode of {@link tokenizePlainTextPaste}, for editors whose
+ * Enter key inserts a `<br>` instead of a paragraph (`enterInsertsLineBreak`):
+ * every newline becomes a "linebreak" token, so a pasted blank line stays one
+ * blank line (two consecutive breaks) and a lone newline stays a single break.
+ * Three or more consecutive newlines collapse to one blank line.
+ */
+function tokenizePlainTextPasteAsLineBreaks(text: string): PlainTextPasteToken[] {
+  const normalized = text.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n");
+  const tokens: PlainTextPasteToken[] = [];
+  for (const part of normalized.split(/(\n|\t)/)) {
+    if (part === "\n") tokens.push({ type: "linebreak" });
+    else if (part === "\t") tokens.push({ type: "tab" });
+    else if (part !== "") tokens.push({ type: "text", value: part });
+  }
   return tokens;
 }
 
@@ -347,8 +458,35 @@ export function collapseEmptyParagraphElements(dom: Document): boolean {
     }
   }
 
+  // Google Docs puts a bare `<br>` between a list and the next paragraph (and Word/Docs between
+  // other blocks): it is the blank line, which would become a `<p><br></p>`. Only a `<br>` whose
+  // neighbours are both blocks goes; one inside a paragraph or list item has text beside it.
+  const isBlockElement = (node: Node | null): boolean =>
+    node !== null && node.nodeType === Node.ELEMENT_NODE && BLOCK_NEIGHBOURS.has((node as Element).tagName);
+  const sibling = (node: Node, next: boolean): Node | null => {
+    let n: Node | null = next ? node.nextSibling : node.previousSibling;
+    while (
+      n &&
+      (n.nodeType === Node.COMMENT_NODE ||
+        (n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").replace(/\u00a0/g, " ").trim() === ""))
+    ) {
+      n = next ? n.nextSibling : n.previousSibling;
+    }
+    return n;
+  };
+  for (const br of Array.from(body.querySelectorAll("br"))) {
+    if (isBlockElement(sibling(br, false)) && isBlockElement(sibling(br, true))) {
+      br.remove();
+      changed = true;
+    }
+  }
+
   return changed;
 }
+
+const BLOCK_NEIGHBOURS = new Set([
+  "P", "DIV", "UL", "OL", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "PRE", "TABLE",
+]);
 
 /**
  * Removes the `white-space: pre-wrap` inline style that Lexical's default
@@ -394,6 +532,25 @@ export function stripWhitespaceStyleAndUnwrapSpans(dom: Document): boolean {
   }
 
   return changed;
+}
+
+/**
+ * Lexical exports a nested list as a wrapper item holding only the sub-list:
+ * `<li class="editor-list-item-nested"><ul>...</ul></li>`. Only the editor's own CSS hides that
+ * wrapper's marker, so every other renderer drew an empty bullet before each nested list. The
+ * exported HTML therefore carries `list-style-type: none` on the wrapper itself.
+ */
+export function markNestedListItemsInHtml(html: string): string {
+  if (!html.includes("editor-list-item-nested")) return html;
+  const dom = new DOMParser().parseFromString(html, "text/html");
+  let changed = false;
+  for (const li of Array.from(dom.body.querySelectorAll<HTMLElement>("li.editor-list-item-nested"))) {
+    const style = li.getAttribute("style") ?? "";
+    if (/list-style(-type)?\s*:/i.test(style)) continue;
+    li.setAttribute("style", style ? `${style.replace(/;?\s*$/, ";")} list-style-type: none` : "list-style-type: none");
+    changed = true;
+  }
+  return changed ? dom.body.innerHTML : html;
 }
 
 /**
@@ -510,4 +667,266 @@ export function stripLexicalTableStylingFromHtml(html: string): string {
   }
 
   return changed ? body.innerHTML : html;
+}
+
+/** The `mso-list` declaration of a Word list paragraph: `l0 level2 lfo1` (list id, level, instance). */
+function parseMsoList(el: Element): { id: string; level: number } | null {
+  const style = el.getAttribute("style") ?? "";
+  const match = /mso-list\s*:\s*([^;]*)/i.exec(style);
+  const isListClass = /\bMsoListParagraph/i.test(el.getAttribute("class") ?? "");
+  // The List Paragraph style alone is not a list item (Word applies it to plain text too): it
+  // counts only when a list glyph is actually there.
+  if (!match) return isListClass && hasWordListGlyph(el) ? { id: "", level: 1 } : null;
+  const value = match[1].trim();
+  if (/^(ignore|none)\b/i.test(value)) return null;
+  const id = /^(l\d+)/i.exec(value)?.[1];
+  if (!id && !isListClass) return null;
+  const level = Number(/\blevel(\d+)/i.exec(value)?.[1] ?? 1);
+  return { id: id ?? "", level: level >= 1 ? level : 1 };
+}
+
+/** A leading bullet or number glyph in text, followed by spacing: `·  x`, `o\u00a0x`, `1.  x`, `1.1. x`. */
+const LEADING_GLYPH = /^[\s\u00a0]*([·•§▪■◦○●-]|o|\(?[0-9a-zA-Z]{1,5}(?:\.[0-9a-zA-Z]{1,5})*[.)])[\s\u00a0]+(?=\S)/;
+
+function firstTextNode(el: Element): Text | null {
+  const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if ((n.textContent ?? "").trim() !== "") return n as Text;
+  }
+  return null;
+}
+
+/** Whether a paragraph carries a list glyph: an `mso-list:Ignore` span, the `supportLists` comment, or a leading glyph. */
+function hasWordListGlyph(p: Element): boolean {
+  for (const n of Array.from(p.childNodes)) {
+    if (n.nodeType === Node.COMMENT_NODE && /if\s+!supportLists/i.test(n.nodeValue ?? "")) return true;
+  }
+  const ignored = Array.from(p.querySelectorAll("[style]")).some((el) => /mso-list\s*:\s*ignore/i.test(el.getAttribute("style") ?? ""));
+  if (ignored) return true;
+  const text = firstTextNode(p);
+  return text !== null && LEADING_GLYPH.test(text.textContent ?? "");
+}
+
+/**
+ * Takes the bullet/number glyph out of a Word list paragraph and returns its text. Word writes it
+ * as `<span style="mso-list:Ignore">·<span>&nbsp;&nbsp;</span></span>`, wrapped in
+ * `<!--[if !supportLists]-->…<!--[endif]-->` (or the `<![if …]>` form, a comment once parsed).
+ */
+function takeWordListGlyph(p: Element): string {
+  let glyph = "";
+  const nodes = Array.from(p.childNodes);
+  for (let i = 0; i < nodes.length; i += 1) {
+    if (nodes[i].nodeType === Node.COMMENT_NODE && /if\s+!supportLists/i.test(nodes[i].nodeValue ?? "")) {
+      let j = i + 1;
+      while (j < nodes.length && !(nodes[j].nodeType === Node.COMMENT_NODE && /endif/i.test(nodes[j].nodeValue ?? ""))) j += 1;
+      if (j < nodes.length) {
+        for (let k = i; k <= j; k += 1) {
+          if (nodes[k].nodeType !== Node.COMMENT_NODE) glyph += nodes[k].textContent ?? "";
+          nodes[k].parentNode?.removeChild(nodes[k]);
+        }
+        return glyph;
+      }
+    }
+  }
+  const ignored = Array.from(p.querySelectorAll<HTMLElement>("[style]")).find((el) =>
+    /mso-list\s*:\s*ignore/i.test(el.getAttribute("style") ?? ""),
+  );
+  if (ignored) {
+    glyph = ignored.textContent ?? "";
+    ignored.remove();
+  }
+  if (glyph === "") {
+    // The marker span was lost: the glyph is literal leading text.
+    const text = firstTextNode(p);
+    const match = text ? LEADING_GLYPH.exec(text.textContent ?? "") : null;
+    if (text && match) {
+      glyph = match[1];
+      text.textContent = (text.textContent ?? "").slice(match[0].length);
+    }
+  }
+  return glyph;
+}
+
+/**
+ * Turns Word's list paragraphs into real lists before conversion. Word (and Outlook) paste a list
+ * as `<p class=MsoListParagraph style="mso-list:l0 level2 lfo1">` with the bullet/number as text
+ * in a hidden-by-Word span, so without this each item became a paragraph starting with `·` and the
+ * nesting was lost. Adjacent list paragraphs become `<ul>`/`<ol>` nested by `levelN`; a
+ * list is ordered when its glyph is a number/letter/roman numeral followed by `.` or `)` (`1.`,
+ * `a)`, `(iv)`) and unordered for any other (`·`, `o`, `§`, `•`, `-`). The glyph is removed, and a
+ * numbered list that starts above 1 keeps its start. Mutates `dom`; returns whether anything changed.
+ */
+const GLYPH_SEGMENT = "(?:[0-9]+|[a-zA-Z]{1,5})";
+const ORDERED_GLYPH = new RegExp(
+  `^(?:\\(?${GLYPH_SEGMENT}(?:\\.${GLYPH_SEGMENT})*[.)]|${GLYPH_SEGMENT}(?:\\.${GLYPH_SEGMENT})+)$`,
+);
+
+/** A number/letter/roman outline glyph (`1.`, `a)`, `(iv)`, `1.1.`, `2.3.1`, `A.1.`) is ordered; one symbol is a bullet; anything else is unknown. */
+function glyphKind(glyph: string): "ordered" | "bullet" | "unknown" {
+  if (ORDERED_GLYPH.test(glyph)) return "ordered";
+  if (glyph.length === 1 && (glyph === "o" || !/[0-9a-zA-Z]/.test(glyph))) return "bullet";
+  return "unknown";
+}
+
+export function convertWordListsToHtmlLists(dom: Document): boolean {
+  const body = dom.body;
+  if (!body) return false;
+  const candidates = Array.from(body.querySelectorAll("p")).filter((p) => parseMsoList(p) !== null);
+  if (candidates.length === 0) return false;
+  const candidateSet = new Set<Element>(candidates);
+
+  const isGap = (n: Node): boolean =>
+    n.nodeType === Node.COMMENT_NODE || (n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() === "");
+  const placed = new Set<Element>();
+  let changed = false;
+
+  for (const first of candidates) {
+    if (placed.has(first)) continue;
+    // The run: this paragraph and the list paragraphs that follow it as siblings.
+    const run: Element[] = [first];
+    for (let n: Node | null = first.nextSibling; n; n = n.nextSibling) {
+      if (isGap(n)) continue;
+      if (n.nodeType === Node.ELEMENT_NODE && candidateSet.has(n as Element)) run.push(n as Element);
+      else break;
+    }
+
+    type Level = { level: number; list: HTMLElement; ordered: boolean; id: string };
+    const stack: Level[] = [];
+    const roots: HTMLElement[] = [];
+    for (const p of run) {
+      placed.add(p);
+      const info = parseMsoList(p)!;
+      const glyph = takeWordListGlyph(p).replace(/[\s\u00a0]+/g, " ").trim();
+      const kind = glyphKind(glyph);
+      while (stack.length > 0 && stack[stack.length - 1].level > info.level) stack.pop();
+      // An ambiguous glyph follows its list (same level) or its parent (the enclosing list): it stays ordered under an ordered one.
+      const context = stack[stack.length - 1];
+      const ordered = kind === "ordered" || (kind === "unknown" && context?.ordered === true);
+      const newList = (): HTMLElement => {
+        const list = dom.createElement(ordered ? "ol" : "ul");
+        const number = /^\(?(\d+)[.)]$/.exec(glyph)?.[1];
+        if (ordered && number && Number(number) > 1) list.setAttribute("start", number);
+        return list;
+      };
+
+      let top = stack[stack.length - 1];
+      if (top && top.level === info.level && (top.ordered !== ordered || top.id !== info.id)) {
+        stack.pop();
+        top = stack[stack.length - 1];
+        const list = newList();
+        if (top) top.list.lastElementChild?.appendChild(list);
+        else roots.push(list);
+        stack.push({ level: info.level, list, ordered, id: info.id });
+      } else if (!top || top.level < info.level) {
+        const list = newList();
+        const parentItem = top?.list.lastElementChild;
+        if (parentItem) parentItem.appendChild(list);
+        else roots.push(list);
+        stack.push({ level: info.level, list, ordered, id: info.id });
+      }
+      const li = dom.createElement("li");
+      for (const o of Array.from(p.getElementsByTagName("*"))) if (o.tagName.toLowerCase() === "o:p") o.remove();
+      while (p.firstChild) li.appendChild(p.firstChild);
+      stack[stack.length - 1].list.appendChild(li);
+    }
+
+    first.before(...roots);
+    for (const p of run) p.remove();
+    changed = true;
+  }
+  return changed;
+}
+
+const WHITESPACE_BLOCK_TAGS = new Set([
+  "P", "DIV", "UL", "OL", "LI", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "PRE", "TABLE", "TR", "TD", "TH",
+  "THEAD", "TBODY", "HR",
+]);
+
+/** Parents whose text nodes are inline content of a line (not structural whitespace between tags). */
+const INLINE_CONTENT_PARENTS = new Set([
+  "P", "LI", "DIV", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "DEL", "CODE", "A", "SUB", "SUP", "FONT",
+  "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "TD", "TH", "MARK", "SMALL",
+]);
+
+/**
+ * Makes loading the editor's OWN exported HTML lossless for horizontal whitespace. The editor
+ * exports runs of spaces, a leading indent and tabs raw (the per-run `white-space: pre-wrap` is
+ * stripped on export; the renderers' container declares it), but HTML parsing rules collapse them
+ * when the HTML is loaded back (draft restore, the HTML-source toggle). A text node (outside a
+ * `<pre>`, which Lexical already keeps) that has a tab, a run of two spaces, or a space at its start
+ * or end of a line, and no newline, is wrapped in a `pre-wrap` span, which Lexical's importer reads as
+ * "keep as typed" (tabs become tab nodes). The span exists only in this DOM, never in the editor
+ * or its exported HTML. Text with a newline keeps collapsing: that is laid-out HTML source (see
+ * CLAUDE.md "Comment bodies"), not typed spaces. Used for the initial `value` only; pasted foreign
+ * HTML does not go through it. Mutates `dom`; returns whether anything changed.
+ */
+export function preserveEditorWhitespace(dom: Document): boolean {
+  const body = dom.body;
+  if (!body) return false;
+  const walker = dom.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  const targets: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n.textContent ?? "";
+    if (text === "" || /[\r\n]/.test(text)) continue;
+    // A single edge space matters only at the edge of a line (its neighbour is a <br> or nothing);
+    // beside inline content Lexical keeps it anyway.
+    const lineStart = !n.previousSibling || n.previousSibling.nodeName === "BR";
+    const lineEnd = !n.nextSibling || n.nextSibling.nodeName === "BR";
+    if (!(/\t| {2}/.test(text) || (lineStart && text.startsWith(" ")) || (lineEnd && text.endsWith(" ")))) continue;
+    const parent = n.parentElement;
+    if (!parent || !INLINE_CONTENT_PARENTS.has(parent.tagName) || parent.closest("pre")) continue;
+    // Whitespace-only text counts only between inline content: next to a block element (or inside a
+    // parent that holds blocks) it is the gap of minified or laid-out HTML, not typed spaces, and
+    // wrapping it would load as a blank line.
+    if (text.trim() === "") {
+      if (!/\t| {2}/.test(text)) continue;
+      const isBlock = (node: Node | null): boolean =>
+        node !== null && node.nodeType === Node.ELEMENT_NODE && WHITESPACE_BLOCK_TAGS.has((node as Element).tagName);
+      if (isBlock(n.previousSibling) || isBlock(n.nextSibling)) continue;
+      if (Array.from(parent.children).some((c) => WHITESPACE_BLOCK_TAGS.has(c.tagName))) continue;
+    }
+    targets.push(n as Text);
+  }
+  for (const node of targets) {
+    const span = dom.createElement("span");
+    span.style.whiteSpace = "pre-wrap";
+    node.replaceWith(span);
+    span.appendChild(node);
+  }
+  return targets.length > 0;
+}
+
+/** Blocks whose last `<br>` the editor itself wrote (Enter at the end of a line). */
+const TRAILING_BREAK_BLOCKS = new Set(["P", "LI", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "TD", "TH"]);
+
+/**
+ * Makes loading the editor's OWN exported HTML lossless for a trailing line break. The editor
+ * exports Enter at the end of a line as `<p>Hi<br></p>`, but Lexical's importer ignores a `<br>`
+ * that is the last child of a block (browsers draw no line for it), so a restored draft came back
+ * as `<p>Hi</p>` and typing joined the lines; `<p>Hi<br><br></p>` kept only one. A `<br>` that
+ * ends a block, and is not its only child, is followed by an empty text node in this DOM only, so
+ * the importer sees it as an ordinary break. Blocks with no such break, and `<p><br></p>` (an
+ * empty paragraph), are untouched, so no break is ever added. Used for the initial `value` only.
+ * Mutates `dom`; returns whether anything changed.
+ */
+export function preserveTrailingLineBreaks(dom: Document): boolean {
+  const body = dom.body;
+  if (!body) return false;
+  const isGap = (node: Node | null) =>
+    node !== null && node.nodeType === Node.TEXT_NODE && /^[ \t\r\n]*$/.test(node.textContent ?? "");
+  let changed = false;
+  for (const br of Array.from(body.querySelectorAll("br"))) {
+    const parent = br.parentElement;
+    if (!parent || !TRAILING_BREAK_BLOCKS.has(parent.tagName)) continue;
+    let after = br.nextSibling;
+    while (isGap(after)) after = after!.nextSibling;
+    if (after !== null) continue;
+    let before = br.previousSibling;
+    while (isGap(before)) before = before!.previousSibling;
+    if (before === null) continue; // the only child: an empty paragraph, not a break
+    while (isGap(br.nextSibling)) br.nextSibling!.remove();
+    parent.appendChild(dom.createTextNode(""));
+    changed = true;
+  }
+  return changed;
 }

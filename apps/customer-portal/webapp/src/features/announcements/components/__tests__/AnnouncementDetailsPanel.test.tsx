@@ -224,4 +224,30 @@ describe("AnnouncementDetailsPanel", () => {
     );
     expect(screen.getByText("Back")).toBeInTheDocument();
   });
+
+  it("hides the marker of the nested-list wrapper li in the description but keeps normal bullets", () => {
+    const { container } = render(
+      <AnnouncementDetailsPanel
+        data={{
+          title: "Notice",
+          number: "ANN-102",
+          description:
+            '<ul><li value="1">Parent</li><li value="2" class="editor-list-item-nested"><ul><li value="1">Child</li></ul></li></ul>',
+          status: { id: "1", label: "Open" },
+          createdOn: "2024-01-15T10:00:00Z",
+        } as never}
+        isLoading={false}
+        isError={false}
+        caseId="case-1"
+        projectId="proj-1"
+        onBack={() => {}}
+      />,
+    );
+      const wrapper = container.querySelector("li.editor-list-item-nested");
+      const normal = container.querySelector("li:not(.editor-list-item-nested)");
+      expect(wrapper).not.toBeNull();
+      expect(normal).not.toBeNull();
+      expect(getComputedStyle(wrapper as Element).listStyleType).toBe("none");
+      expect(getComputedStyle(normal as Element).listStyleType).not.toBe("none");
+  });
 });

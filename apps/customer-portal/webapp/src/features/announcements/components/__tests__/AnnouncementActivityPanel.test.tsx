@@ -166,4 +166,22 @@ describe("AnnouncementActivityPanel", () => {
     render(<AnnouncementActivityPanel projectId="p1" caseId="a1" />);
     expect(screen.getByText(/Scheduled downtime on Friday/)).toBeInTheDocument();
   });
+
+  describe("nested list wrapper", () => {
+    const NESTED =
+      '<ul><li value="1">Parent</li><li value="2" class="editor-list-item-nested"><ul><li value="1">Child</li></ul></li></ul>';
+
+    it("hides the marker of the nested-list wrapper li but keeps normal bullets", () => {
+      givenComments([comment("c1", NESTED, "2026-10-12T10:16:00Z")]);
+      const { container } = render(
+        <AnnouncementActivityPanel projectId="p1" caseId="a1" description="<p>other</p>" />,
+      );
+      const wrapper = container.querySelector("li.editor-list-item-nested");
+      const normal = container.querySelector("li:not(.editor-list-item-nested)");
+      expect(wrapper).not.toBeNull();
+      expect(normal).not.toBeNull();
+      expect(getComputedStyle(wrapper as Element).listStyleType).toBe("none");
+      expect(getComputedStyle(normal as Element).listStyleType).not.toBe("none");
+    });
+  });
 });

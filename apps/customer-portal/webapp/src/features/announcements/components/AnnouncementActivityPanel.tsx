@@ -245,6 +245,9 @@ export default function AnnouncementActivityPanel({
                     overflowX: "auto",
                     "& p": { mb: 0.5 },
                     "& p:last-child": { mb: 0 },
+                    // Lexical exports a nested list as a wrapper <li class="editor-list-item-nested"> holding only the sub-list;
+                    // its marker would be a stray empty bullet (CSM portal does the same).
+                    "& li.editor-list-item-nested": { listStyleType: "none" },
                     "& img": {
                       maxWidth: "100%",
                       height: "auto",
