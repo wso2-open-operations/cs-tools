@@ -102,6 +102,70 @@ func unfolded(content []byte) string {
 	return strings.ReplaceAll(string(content), "\r\n ", "")
 }
 
+// cellOf is one cell of the weekend summary's tables.
+func cellOf(s string) string {
+	return `<td valign="top" style="padding:8px 10px; border:1px solid #d9d9d9;">` + s + "</td>"
+}
+
+// smallText is the grey small print under a cell's main text.
+func smallText(s string) string {
+	return `<br/><span style="color:#555555; font-size:12px;">` + s + "</span>"
+}
+
+// nameHours is a rotation's name with that day's hours under it.
+func nameHours(rotation, hours string) string {
+	return rotation + smallText(hours)
+}
+
+// head is the first cell of a window's row in a day's table: its rotation
+// with that day's hours under it.
+func head(rotation, hours string) string {
+	return cellOf(nameHours(rotation, hours))
+}
+
+// windowRow is one window's row of a day's table: rotation and hours, its
+// team one per line, then the support cell when sre is given.
+func windowRow(rotation, hours string, team []string, sre ...string) string {
+	r := "<tr>" + head(rotation, hours) + cellOf(strings.Join(team, "<br/>"))
+	if len(sre) > 0 {
+		r += cellOf(strings.Join(sre, "<br/><br/>"))
+	}
+	return r + "</tr>"
+}
+
+// definition is one row of the weekend summary's rotation definitions.
+func definition(rotation, members, local, utc, role, note string) string {
+	if note != "" {
+		role += smallText(note)
+	}
+	return "<tr>" + cellOf(rotation+smallText(members)) + cellOf(local) + cellOf(utc) + cellOf(role) + "</tr>"
+}
+
+// sreGroup is one support rotation inside a row's support cell.
+func sreGroup(rotation, hours string, names ...string) string {
+	return strings.Join(names, "<br/>") + smallText(rotation+", "+hours)
+}
+
+// syncNote is the note under a long general-support window shared by several.
+const syncNote = "Please sync internally and ensure coverage throughout the window."
+
+// The UTC windows of 24-25 October 2026 (Los Angeles still on PDT).
+const (
+	lkUTC       = "00:30 &#8211; 15:30"
+	americasUTC = "15:00 &#8211; 01:00"
+)
+
+// rows is consecutive rows of a day's table.
+func rows(r ...string) string {
+	return strings.Join(r, "\n")
+}
+
+// Hours as the weekend summary writes them.
+const (
+	lkHours       = "06:00 AM &#8211; 09:00 PM IST"
+	americasHours = "08:00 AM &#8211; 06:00 PM PDT"
+)
+
 // emailWith is the sent email whose subject holds s.
 func emailWith(t *testing.T, sent []sentEmail, s string) sentEmail {
 	t.Helper()
@@ -138,25 +202,43 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
 	if summary.subject != "[CRE] Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026" ||
 		strings.Join(summary.to, ",") != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com" ||
-		len(summary.attachments) != 0 ||
-		!strings.Contains(summary.body, "A calendar invitation for your team&#39;s rotation follows in a separate email") {
+		len(summary.attachments) != 0 {
 		t.Errorf("summary = %+v", summary)
 	}
 	for _, want := range []string{
-		"<p>Hello team,</p>",
+		"<p>Hello Team,</p>",
 		"allocated for weekend support the coming weekend (2026-10-24 and 2026-10-25)",
-		"<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (Americas On-call)</p>",
-		"<b>Sunday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)</p>",
-		"<tr><td>LK Weekend<br/><span style=\"color:#666666; font-size:12px;\">3 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>IST General support<br/><span style=\"color:#666666; font-size:12px;\">The 15-hour window is shared: the 3 members can divide the 15 hours into morning and evening shifts, so support is covered from start to end.</span></td></tr>",
-		"<tr><td>Americas Weekend<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>PDT General support</td></tr>",
-		"<tr><td>Americas On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
+		"<li style=\"margin-bottom:4px;\">Find your name below and check your rotation&#39;s hours.</li>\n" +
+			"<li style=\"margin-bottom:4px;\">If you need to swap a rotation or cannot fulfil it, inform your team lead immediately.</li>\n</ul>",
+		"<b>Saturday, 24 October</b>",
+		"<b>Sunday, 25 October</b>",
+		">Rotation</th>",
+		">CRE Team</th></tr>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy", "Jay (on-call)"})) + "\n</table>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy"})) + "\n</table>",
+		"<b>Rotation Definitions</b>",
+		rows(definition("LK Weekend", "3 members", lkHours, lkUTC, "General support", syncNote),
+			definition("Americas Weekend", "1 member + 1 on-call", americasHours, americasUTC, "General support + On-call", "")) + "\n</table>",
 		"IST = Asia/Colombo (UTC+5:30) &#8226; PDT = America/Los_Angeles (UTC&#8722;7)<br/>Local times are fixed. The Americas Weekend Rotation UTC window moves by one hour on 01 Nov 2026, when daylight saving ends.",
 		"<b>Handover</b>",
+		"<p>Regards,<br/>CSM Team Schedule</p>",
 		"This is an auto-generated email.",
 	} {
 		if !strings.Contains(summary.body, want) {
 			t.Errorf("summary does not hold %q:\n%s", want, summary.body)
 		}
+	}
+	// No support team, no column for it; no Notes when nothing is unmarked.
+	for _, unwanted := range []string{"SRE Team", "<b>Notes</b>", "Calendar invitations", "UTC 00:30", "IST General support"} {
+		if strings.Contains(summary.body, unwanted) {
+			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
+		}
+	}
+	// The Americas window is one row, so its daylight saving note is one line.
+	if n := strings.Count(summary.body, "moves by one hour"); n != 1 {
+		t.Errorf("%d daylight saving notes:\n%s", n, summary.body)
 	}
 
 	cases := []struct{ subject, uid, to, start string }{
@@ -493,7 +575,8 @@ func TestWeekendNotice_AmericasHoursFollowLosAngeles(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 7 and Sunday, 8 November 2026")
-	if !strings.Contains(summary.body, "<td>08:00 AM &#8211; 06:00 PM PDT</td><td>16:00 &#8211; 02:00</td><td>PDT General support</td>") ||
+	if !strings.Contains(summary.body, head("Americas Weekend", americasHours)) ||
+		!strings.Contains(summary.body, cellOf(americasHours)+cellOf("16:00 &#8211; 02:00")) ||
 		strings.Contains(summary.body, "daylight saving") {
 		t.Errorf("summary:\n%s", summary.body)
 	}
@@ -582,10 +665,7 @@ func TestWeekendReminder_InvitesTurnedOffForOneRotationKeepsWhatWasSent(t *testi
 	if len(mail.sent) != 3 {
 		t.Fatalf("sent %d emails, want the summary and the two LK invitations:\n%s", len(mail.sent), strings.Join(subjects, "\n"))
 	}
-	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
-	if !strings.Contains(summary.body, "follows in a separate email") {
-		t.Errorf("the summary no longer mentions the LK invitations:\n%s", summary.body)
-	}
+	emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
 	kept := false
 	for _, inv := range store.recorded[0].invites {
 		if inv.UID == americasSat && inv.Sequence == 1 && len(inv.Attendees) == 2 {
@@ -645,7 +725,7 @@ func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
 	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	if len(mail.sent) != 1 || strings.Contains(mail.sent[0].body, "follows in a separate email") {
+	if len(mail.sent) != 1 || strings.Contains(mail.sent[0].body, "Calendar invitations follow in a separate email.") {
 		t.Fatalf("sent %d emails; summary:\n%s", len(mail.sent), mail.sent[0].body)
 	}
 }
@@ -766,12 +846,14 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 		t.Errorf("summary to %s", got)
 	}
 	for _, want := range []string{
-		"<b>SRE Weekend Support</b>",
-		"<b>Saturday:</b> Kim (SRE Weekend, L1)<br/>Lee (SRE Weekend, L2)<br/>Max (SRE Night, L1)</p>",
-		"<b>Sunday:</b> Kim (SRE Weekend, L1)<br/>Oli (SRE Weekend, L2)<br/>Max (SRE Night, L1)</p>",
-		"<td>SRE Weekend (TZ1 + TZ2)<br/><span style=\"color:#666666; font-size:12px;\">2 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>SRE support (L1 &#8594; L2)</td>",
-		"<td>SRE Night (TZ3)<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>09:00 PM &#8211; 06:00 AM IST</td><td>15:30 &#8211; 00:30</td><td>SRE support (L1)</td>",
-		"The SRE turns are listed for information; they get no calendar invitation from this email.",
+		">Rotation</th>",
+		">CRE Team</th>",
+		">SRE Team</th></tr>",
+		// Each SRE turn sits in the CRE window its hours overlap most.
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup("SRE Weekend", lkHours, "Kim (L1)", "Lee (L2)")),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy", "Jay (on-call)"}, sreGroup("SRE Night", "09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
+		rows(windowRow("LK Weekend", lkHours, []string{"Ann", "Ben", "Cid"}, sreGroup("SRE Weekend", lkHours, "Kim (L1)", "Oli (L2)")),
+			windowRow("Americas Weekend", americasHours, []string{"Ivy"}, sreGroup("SRE Night", "09:00 PM &#8211; 06:00 AM IST", "Max (L1)"))) + "\n</table>",
 	} {
 		if !strings.Contains(summary.body, want) {
 			t.Errorf("summary lacks %q:\n%s", want, summary.body)
@@ -788,9 +870,12 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 			t.Errorf("an SRE person got %q", m.subject)
 		}
 	}
-	// The CRE days are listed as before: the SRE turns are not in them.
-	if !strings.Contains(summary.body, "<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (Americas On-call)</p>") {
-		t.Errorf("the Saturday Team changed:\n%s", summary.body)
+	// The definitions are the CRE windows only, and there is no SRE label row
+	// or disclaimer.
+	for _, unwanted := range []string{"SRE Weekend (TZ1", "SRE Night (TZ3)", "SRE Weekend Support", "for information", "no calendar invitation"} {
+		if strings.Contains(summary.body, unwanted) {
+			t.Errorf("summary holds %q:\n%s", unwanted, summary.body)
+		}
 	}
 }
 
@@ -844,14 +929,14 @@ func TestWeekendNotice_AmericasRotationsReadPDTWhateverTheSavedZone(t *testing.T
 	}
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
 	for _, want := range []string{
-		"<tr><td>Americas Weekend<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>PDT General support</td></tr>",
-		"<tr><td>Americas On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
+		head("Americas Weekend", americasHours) + cellOf("Ivy<br/>Jay (on-call)"),
+		definition("Americas Weekend", "1 member + 1 on-call", americasHours, americasUTC, "General support + On-call", ""),
 	} {
 		if !strings.Contains(summary.body, want) {
 			t.Errorf("summary does not hold %q:\n%s", want, summary.body)
 		}
 	}
-	if strings.Contains(summary.body, "PM IST</td><td>15:00") {
+	if strings.Contains(summary.body, "08:30 PM") {
 		t.Errorf("an Americas rotation still reads in IST:\n%s", summary.body)
 	}
 }
@@ -878,8 +963,14 @@ func TestWeekendNotice_AmericasHoursPerDayAcrossTheClockChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 31 October and Sunday, 1 November 2026")
-	if want := "Saturday: 08:00 AM &#8211; 06:00 PM PDT; Sunday: 07:00 AM &#8211; 05:00 PM PDT"; !strings.Contains(summary.body, want) {
-		t.Errorf("summary does not hold %q:\n%s", want, summary.body)
+	for _, want := range []string{
+		nameHours("Americas Weekend", americasHours),
+		nameHours("Americas Weekend", "07:00 AM &#8211; 05:00 PM PDT"),
+		"Saturday: 08:00 AM &#8211; 06:00 PM PDT; Sunday: 07:00 AM &#8211; 05:00 PM PDT",
+	} {
+		if !strings.Contains(summary.body, want) {
+			t.Errorf("summary does not hold %q:\n%s", want, summary.body)
+		}
 	}
 }
 
