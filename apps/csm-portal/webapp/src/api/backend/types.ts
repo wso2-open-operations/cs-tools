@@ -841,6 +841,14 @@ export type BeCaseUpdatePayload =
       resolutionCode?: BeCaseResolutionCode;
       cause?: BeCaseCause;
       closeNotes?: string;
+      /**
+       * Optional free-text note on why a closed case is being reopened.
+       * Only meaningful when the case's current state is `closed` and the
+       * caller holds the admin role — every other caller gets a 403 for that
+       * transition regardless of this field. Write-only: never returned by
+       * this or any other endpoint, and never shown anywhere in the portal.
+       */
+      reopenReason?: string;
     })
   | (Omit<BeCaseUpdateNever, "severity"> & { severity: BeCaseSeverity })
   /**

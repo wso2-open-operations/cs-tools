@@ -18,6 +18,7 @@ package handler
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -92,6 +93,38 @@ func isValidStateTransition(from, to string) bool {
 		}
 	}
 	return false
+}
+
+// sanitizeAdminReopenAttrs strips whatever the caller sent for "adminReopen"
+// from a PATCH /cases/{id} body before it is forwarded to entity-service,
+// and re-adds it as the literal true only when reopen is true -- the only
+// value entity-service ever sees for this key is CaseHandler.PatchCase's
+// own, already-permission-checked decision (current state is closed, the
+// caller holds PermAdmin), never a client's own claim. "reopenReason" rides
+// along only in that same case -- entity-service stores it write-only and it
+// is dropped here otherwise, since it has no meaning without a genuine
+// admin reopen. Matching is case-insensitive (mirroring encoding/json's own
+// key-matching rules, same reasoning as projectUpdateAdminOnlyField in
+// projects.go) -- a plain `delete(m, "adminReopen")` would leave an
+// "ADMINREOPEN" key untouched, which entity-service's own decoder would
+// still bind to AdminReopen.
+func sanitizeAdminReopenAttrs(body []byte, reopen bool) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	for key := range m {
+		if strings.EqualFold(key, "adminReopen") {
+			delete(m, key)
+		}
+		if !reopen && strings.EqualFold(key, "reopenReason") {
+			delete(m, key)
+		}
+	}
+	if reopen {
+		m["adminReopen"] = json.RawMessage("true")
+	}
+	return json.Marshal(m)
 }
 
 // closedOnLayouts are the timestamp shapes the "closedOn" field has been seen
