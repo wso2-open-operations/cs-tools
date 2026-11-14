@@ -570,7 +570,7 @@ function getAssignedEngineerDisplayValue(obj: {
   label?: string;
   name?: string | null;
 }): string {
-  return obj.label ?? obj.name ?? "";
+  return splitStaffMark(obj.label ?? obj.name ?? "").name;
 }
 
 /**
@@ -582,7 +582,7 @@ function getAssignedEngineerDisplayValue(obj: {
 export function getAssignedEngineerLabel(value: AssignedEngineerValue): string {
   if (value == null || value === "") return "";
   if (typeof value === "object") return getAssignedEngineerDisplayValue(value);
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" ? splitStaffMark(value).name : "";
 }
 
 /**
@@ -606,6 +606,26 @@ export function formatValue(
   return String(value);
 }
 
+// The data appends a circled W (U+24E6, or the capital U+24CC) to the name of
+// a support engineer.
+const STAFF_NAME_MARK = /\s*[\u24CC\u24E6]\s*$/u;
+
+/**
+ * Splits the support engineer's mark off a name.
+ *
+ * @param name - A person's name as the API returns it.
+ * @returns {{ name: string; isStaff: boolean }} The name without the mark, and
+ * whether the mark was there.
+ */
+export function splitStaffMark(name: string | null | undefined): {
+  name: string;
+  isStaff: boolean;
+} {
+  const raw = name ?? "";
+  const isStaff = STAFF_NAME_MARK.test(raw);
+  return { name: isStaff ? raw.replace(STAFF_NAME_MARK, "") : raw, isStaff };
+}
+
 /**
  * Derives initials from a name string or assigned engineer object (e.g. "John Doe" -> "JD").
  *
@@ -624,8 +644,8 @@ export function getInitials(
       ? getAssignedEngineerDisplayValue(name)
       : name;
   if (!label || typeof label !== "string") return "--";
-  const initials = label
-    .trim()
+  const initials = splitStaffMark(label)
+    .name.trim()
     .split(/\s+/)
     .filter(Boolean)
     .map((n) => n[0])

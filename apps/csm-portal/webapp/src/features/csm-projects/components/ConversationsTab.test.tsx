@@ -40,6 +40,7 @@ vi.mock("@features/csm-projects/api/useSearchConversations", () => ({
 // keeps these tests focused on the tab's own rendering/navigation.
 vi.mock("@features/csm-users/api/useResolvedUserId", () => ({
   useResolvedUserId: () => undefined,
+  useResolvedUser: () => ({ id: undefined, isInternal: false }),
 }));
 
 // The eye-icon preview drawer fetches messages via a real hook — irrelevant

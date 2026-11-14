@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Button,
@@ -131,7 +132,7 @@ function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident):
     case "assignmentGroup":
       return <>{incident.assignmentGroup?.name || "—"}</>;
     case "assignedTo":
-      return <>{incident.assignedTo?.name || "Unassigned"}</>;
+      return <AssigneeName name={incident.assignedTo?.name} fallback="Unassigned" />;
     case "parent":
       return <>{incident.parent?.name || "—"}</>;
     case "createdBy":

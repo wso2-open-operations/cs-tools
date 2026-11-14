@@ -12296,3 +12296,29 @@ and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for
 `NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
 clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
 `/cases/search` only: aggregate, announcement-registry and every other search ignore it.
+
+
+## `UserReference.isInternal`: marking WSO2 staff on authors
+
+Comment authors, attachment uploaders and case activity actors carry `isInternal: true` in their
+`UserReference` when the person is an INTERNAL-type user (`"user".user_type`). It is omitted
+otherwise, so absent means "not known to be internal", never "known external".
+
+- **Why not the name:** the data appends a circled W (U+24E6, sometimes U+24CC) to the display name of
+  many users, but it is on the `name` column of a mix of types (internal, external, not-available and
+  system users alike) and is missing from most internal users, so it says nothing reliable. The type
+  does. Consumers strip the mark from names and show an icon from this flag.
+- **Where it is set:** `SearchCaseComments` and the generic comment search select
+  `user_type = 'INTERNAL'` from the author's joined row (`userByEmailJoin` now also returns
+  `user_type`); case attachments (`SearchCaseAttachments`, `SearchWorkItemAttachments`) and case
+  activities go through `markInternalUploaders` / `markInternalActors` (`user_email_lookup.go`), one
+  `LOWER(email) = ANY(...)` query for the page, best effort (a failed lookup logs a warning and leaves
+  the flag unset rather than failing the list).
+- **New list that shows people:** add the flag the same way; do not infer staff from the name.
+- **No marker on creation:** a user created on the fly (the owner auto-provisioned from a synced
+  account) no longer gets a circled W appended to the last name. Rows created earlier keep theirs.
+
+**Event payloads carry the user type where a consumer shows a name.** `case.created` carries `reporterEmail` (the
+notification service looks up the type), and the change request notices carry `requesterIsInternal` /
+`actorIsInternal`, set in `CRNoticeRepository.Details` from the `user_type` of the requester and actor rows it already
+joins. csm-notification-service decodes strictly: deploy it before entity-service starts sending these.

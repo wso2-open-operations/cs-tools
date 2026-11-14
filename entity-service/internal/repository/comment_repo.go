@@ -47,6 +47,9 @@ type CommentRow struct {
 	// Only SearchComments populates this; CreateComment's RETURNing has no
 	// join to resolve it from and leaves it "".
 	CreatedByName string
+	// CreatedByInternal is true when the author resolved to an INTERNAL-type
+	// user. Like CreatedByName, only SearchComments populates it.
+	CreatedByInternal bool
 	// DeletedAt/DeletedBy are non-nil once SoftDeleteComment has run. Content
 	// is left untouched in the database either way -- see SoftDeleteComment's
 	// own doc comment; it is the service layer's job to decide what a given
@@ -184,7 +187,7 @@ func scanComment(row interface{ Scan(...any) error }) (CommentRow, error) {
 // scanComment's plain commentColumns shape.
 func scanCommentWithName(row interface{ Scan(...any) error }) (CommentRow, error) {
 	var c CommentRow
-	err := row.Scan(&c.ID, &c.WorkItemID, &c.Content, &c.Type, &c.CreatedBy, &c.CreatedOn, &c.DeletedAt, &c.DeletedBy, &c.LastEditedAt, &c.CreatedByName)
+	err := row.Scan(&c.ID, &c.WorkItemID, &c.Content, &c.Type, &c.CreatedBy, &c.CreatedOn, &c.DeletedAt, &c.DeletedBy, &c.LastEditedAt, &c.CreatedByName, &c.CreatedByInternal)
 	return c, err
 }
 
@@ -286,7 +289,8 @@ func (r *commentRepo) SearchComments(ctx context.Context, referenceID string, re
 	dataQuery := fmt.Sprintf(`
 		SELECT c.id, c.work_item_id, c.content, c.type, c.created_by, c.created_on,
 			c.deleted_at, c.deleted_by, c.last_edited_at,
-			COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), '') AS resolved_name
+			COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), '') AS resolved_name,
+			COALESCE(u.user_type::text, '') = 'INTERNAL' AS created_by_internal
 		%s
 		%s
 		%s

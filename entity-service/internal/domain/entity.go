@@ -3088,6 +3088,11 @@ type UserReference struct {
 	ID    *string `json:"id"`
 	Email string  `json:"email"`
 	Name  string  `json:"name"`
+	// IsInternal is true when the person is an INTERNAL-type user (WSO2 staff,
+	// such as a support engineer). It is set only where a response needs it
+	// (comment authors, attachment uploaders) and omitted otherwise, so an
+	// absent value means "not known to be internal", never "known external".
+	IsInternal bool `json:"isInternal,omitempty"`
 }
 
 // NewUserReference builds a UserReference for an actor. Pass the user's id when

@@ -78,7 +78,9 @@ import {
   getAvailableCaseActions,
   toPresentContinuousActionLabel,
   toPresentTenseActionLabel,
+  splitStaffMark,
 } from "@features/support/utils/support";
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import { CASE_STATUS_ACTIONS, CommentType } from "@features/support/constants/supportConstants";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
@@ -591,7 +593,11 @@ export default function ServiceRequestDetailContent({
                           color="text.secondary"
                           sx={{ display: "block" }}
                         >
-                          {authorLabel} •{" "}
+                          {splitStaffMark(authorLabel).name}
+                          {comment.createdByIsInternal && (
+                            <StaffNameIcon size={14} />
+                          )}{" "}
+                          •{" "}
                           {formatRelativeTime(comment.createdOn ?? "")}
                         </Typography>
                         {isPlainTextComment(comment.content ?? "") ? (
@@ -755,6 +761,7 @@ export default function ServiceRequestDetailContent({
                     color="text.primary"
                   >
                     {assignedLabel ?? "--"}
+                    {assignedLabel && <StaffNameIcon size={14} />}
                   </Typography>
                 </Box>
               </Box>

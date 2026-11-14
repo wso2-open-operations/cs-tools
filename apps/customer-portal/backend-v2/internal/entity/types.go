@@ -645,6 +645,9 @@ type UserReference struct {
 	ID    *string `json:"id"`
 	Email string  `json:"email"`
 	Name  string  `json:"name"`
+	// IsInternal is true when entity-service knows the person as an INTERNAL
+	// user (WSO2 staff). Absent means "not known to be internal".
+	IsInternal bool `json:"isInternal,omitempty"`
 }
 
 type UserRef struct {

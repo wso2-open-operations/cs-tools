@@ -47,6 +47,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 	"io"
 	"net/http"
 	"net/url"
@@ -123,6 +124,9 @@ func (c *EntityClient) do(ctx context.Context, method, path string, body []byte)
 	if err != nil {
 		return nil, fmt.Errorf("slaengine: read response body: %w", err)
 	}
+	// The assignee and team lead names in these responses must not carry the
+	// circled W the data appends to many names (see events.StripStaffMark).
+	respBody = events.StripStaffMark(respBody)
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(respBody)}

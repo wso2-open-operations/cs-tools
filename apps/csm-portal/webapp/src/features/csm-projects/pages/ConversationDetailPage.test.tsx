@@ -35,6 +35,7 @@ vi.mock("@features/csm-cases/components/CsmCaseCommentBubble", () => ({
 
 vi.mock("@features/csm-users/api/useResolvedUserId", () => ({
   useResolvedUserId: () => undefined,
+  useResolvedUser: () => ({ id: undefined, isInternal: false }),
 }));
 
 function conversation(overrides: Partial<BeConversationView> = {}): BeConversationView {

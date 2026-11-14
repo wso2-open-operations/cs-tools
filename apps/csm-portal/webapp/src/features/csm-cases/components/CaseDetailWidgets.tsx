@@ -1340,6 +1340,7 @@ export function AttachmentsWidget({
                       name={a.uploadedBy}
                       email={a.uploadedByUser?.email || a.uploadedByEmail}
                       userId={a.uploadedByUser?.id}
+                isInternal={a.uploadedByUser?.isInternal}
                     />{" "}
                     · <RelativeTime iso={a.uploadedAt} />
                   </Typography>
@@ -1434,6 +1435,7 @@ export function AttachmentsWidget({
                       name={a.uploadedBy}
                       email={a.uploadedByUser?.email || a.uploadedByEmail}
                       userId={a.uploadedByUser?.id}
+                isInternal={a.uploadedByUser?.isInternal}
                     />{" "}
                     · <RelativeTime iso={a.uploadedAt} /> · deleted by{" "}
                     <UserRefLink
@@ -1553,7 +1555,13 @@ export function AuditTimelineWidget({
                 <Box sx={{ flex: 1, minWidth: 0, pb: 0.25 }}>
                   <Typography variant="body2">{e.description}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {e.actor} · <RelativeTime iso={e.createdAt} />
+                    <UserRefLink
+                      name={e.actor}
+                      email={e.actorUser?.email}
+                      userId={e.actorUser?.id}
+                      isInternal={e.actorUser?.isInternal}
+                    />{" "}
+                    · <RelativeTime iso={e.createdAt} />
                   </Typography>
                 </Box>
               </Box>

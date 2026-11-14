@@ -220,8 +220,8 @@ func TestGetMe(t *testing.T) {
 		if resp.FirstName == nil || *resp.FirstName != "Jane" {
 			t.Errorf("firstName = %v, want Jane (from the token)", resp.FirstName)
 		}
-		if resp.LastName == nil || *resp.LastName != "Doe Ⓦ" {
-			t.Errorf("lastName = %v, want %q", resp.LastName, "Doe Ⓦ")
+		if resp.LastName == nil || *resp.LastName != "Doe" {
+			t.Errorf("lastName = %v, want %q", resp.LastName, "Doe")
 		}
 		if resp.PhoneNumber == nil || *resp.PhoneNumber != "+1-555-0100" {
 			t.Errorf("phoneNumber = %v, want %q (from the token)", resp.PhoneNumber, "+1-555-0100")
@@ -242,8 +242,8 @@ func TestGetMe(t *testing.T) {
 		if err := json.Unmarshal(createBody, &created); err != nil {
 			t.Fatalf("decode CreateUser body: %v", err)
 		}
-		if created.FirstName != "Jane" || created.LastName != "Doe Ⓦ" || created.Email != "agent@example.com" {
-			t.Errorf("CreateUser body = %+v, want firstName Jane, lastName \"Doe Ⓦ\", email agent@example.com", created)
+		if created.FirstName != "Jane" || created.LastName != "Doe" || created.Email != "agent@example.com" {
+			t.Errorf("CreateUser body = %+v, want firstName Jane, lastName \"Doe\", email agent@example.com", created)
 		}
 		if len(created.Roles) != 1 || created.Roles[0] != "internal" {
 			t.Errorf("CreateUser roles = %v, want [internal]", created.Roles)

@@ -37,13 +37,20 @@ const MAX_EMAILS_PER_SEARCH = 50;
 // milliseconds of latency before the first names become links.
 const FLUSH_DELAY_MS = 10;
 
-/** Resolves a batch of emails to `email (lowercased) -> user id` pairs. */
+/** What one email resolved to: the user's id, and whether they are an
+ * internal user (WSO2 staff). */
+export interface ResolvedUser {
+  id: string;
+  isInternal: boolean;
+}
+
+/** Resolves a batch of emails to `email (lowercased) -> user` pairs. */
 export type EmailBatchFetcher = (
   emails: string[],
-) => Promise<Map<string, string>>;
+) => Promise<Map<string, ResolvedUser>>;
 
 interface PendingEntry {
-  resolve: (id: string | null) => void;
+  resolve: (user: ResolvedUser | null) => void;
   reject: (err: unknown) => void;
 }
 
@@ -69,14 +76,14 @@ async function flush(): Promise<void> {
 
   const emails = Array.from(batch.keys());
   try {
-    const resolved = new Map<string, string>();
+    const resolved = new Map<string, ResolvedUser>();
     for (const group of chunk(emails, MAX_EMAILS_PER_SEARCH)) {
       const found = await fetcher(group);
-      for (const [email, id] of found) resolved.set(email, id);
+      for (const [email, user] of found) resolved.set(email, user);
     }
     for (const [email, entries] of batch) {
-      const id = resolved.get(email) ?? null;
-      entries.forEach((e) => e.resolve(id));
+      const user = resolved.get(email) ?? null;
+      entries.forEach((e) => e.resolve(user));
     }
   } catch (err) {
     // A failed lookup must never surface as an error to the caller — it
@@ -100,7 +107,7 @@ async function flush(): Promise<void> {
 export function requestUserIdByEmail(
   email: string,
   fetcher: EmailBatchFetcher,
-): Promise<string | null> {
+): Promise<ResolvedUser | null> {
   return new Promise((resolve, reject) => {
     const key = email.trim().toLowerCase();
     const entries = pending.get(key) ?? [];

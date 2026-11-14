@@ -154,12 +154,6 @@ func (o OwnerProvisioning) enabled() bool {
 	return o.SCIM != nil && o.Users != nil
 }
 
-// ownerAutoProvisionSuffix is appended to the last name of every user
-// created through OwnerProvisioning, so an auto-provisioned row reads
-// visibly differently in the UI from one the ServiceNow sys_user sync
-// loaded.
-const ownerAutoProvisionSuffix = " Ⓦ"
-
 // ownerAutoProvisionRole is the one role granted to a user OwnerProvisioning
 // creates. These are WSO2 staff reached through the internal-org SCIM
 // directory, so "internal" is correct immediately rather than waiting on a
@@ -542,7 +536,7 @@ func (s *salesforceEventService) provisionOwner(ctx context.Context, sfID, role,
 
 	created, err := s.support.Owners.Users.CreateUser(ctx, domain.CreateUserRequest{
 		FirstName: firstName,
-		LastName:  lastName + ownerAutoProvisionSuffix,
+		LastName:  lastName,
 		Email:     email,
 		Roles:     []domain.UserRole{ownerAutoProvisionRole},
 	}, domain.SalesforceSyncActor)

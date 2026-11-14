@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import { Box, Button, Chip, Divider, Drawer, IconButton, Typography } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
@@ -108,7 +109,7 @@ export default function ChangeRequestPreviewDrawer({
               <Field label="Project">{changeRequest.project?.name || "—"}</Field>
               <Field label="Case">{changeRequest.case?.name || "—"}</Field>
               <Field label="Assigned engineer">
-                {changeRequest.assignedEngineer?.name || "Unassigned"}
+                <AssigneeName name={changeRequest.assignedEngineer?.name} fallback="Unassigned" />
               </Field>
               <Field label="Assigned team">{changeRequest.assignedTeam?.name || "—"}</Field>
               <Field label="Planned start">

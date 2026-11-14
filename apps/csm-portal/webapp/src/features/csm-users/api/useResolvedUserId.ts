@@ -17,7 +17,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import type { BeUserSearchByEmailResponse } from "@api/backend/types";
-import { requestUserIdByEmail } from "@features/csm-users/api/userEmailResolutionLoader";
+import {
+  requestUserIdByEmail,
+  type ResolvedUser,
+} from "@features/csm-users/api/userEmailResolutionLoader";
 import { isPlausibleEmail } from "@features/csm-users/utils/isPlausibleEmail";
 
 /**
@@ -28,14 +31,19 @@ import { isPlausibleEmail } from "@features/csm-users/utils/isPlausibleEmail";
 async function fetchUserIdsByEmail(
   api: ReturnType<typeof useBackendApi>,
   emails: string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, ResolvedUser>> {
   const res = await api.post<
     { filters: { emails: string[] } },
     BeUserSearchByEmailResponse
   >("/users/search", { filters: { emails } });
-  const map = new Map<string, string>();
+  const map = new Map<string, ResolvedUser>();
   for (const u of res.users ?? []) {
-    if (u.id && u.email) map.set(u.email.trim().toLowerCase(), u.id);
+    if (u.id && u.email) {
+      map.set(u.email.trim().toLowerCase(), {
+        id: u.id,
+        isInternal: u.userType === "internal",
+      });
+    }
   }
   return map;
 }
@@ -60,11 +68,25 @@ export function useResolvedUserId(
   email: string | undefined,
   knownId?: string | null,
 ): string | undefined {
+  return useResolvedUser(email, knownId).id;
+}
+
+/**
+ * {@link useResolvedUserId} plus whether the person is an internal user. With
+ * `alsoNeedInternal` the lookup also runs for a reference whose id is already
+ * known, because the id alone does not say who is staff.
+ */
+export function useResolvedUser(
+  email: string | undefined,
+  knownId?: string | null,
+  alsoNeedInternal = false,
+): { id: string | undefined; isInternal: boolean | undefined } {
   const api = useBackendApi();
   const normalizedEmail = email?.trim().toLowerCase();
-  const shouldResolve = !knownId && isPlausibleEmail(normalizedEmail);
+  const shouldResolve =
+    (!knownId || alsoNeedInternal) && isPlausibleEmail(normalizedEmail);
 
-  const { data } = useQuery<string | null>({
+  const { data } = useQuery<ResolvedUser | null>({
     queryKey: ["csm-user-id-by-email", normalizedEmail ?? ""],
     queryFn: () =>
       requestUserIdByEmail(normalizedEmail as string, (batch) =>
@@ -84,6 +106,8 @@ export function useResolvedUserId(
     retry: 1,
   });
 
-  if (knownId) return knownId;
-  return data ?? undefined;
+  return {
+    id: knownId || data?.id || undefined,
+    isInternal: data?.isInternal,
+  };
 }

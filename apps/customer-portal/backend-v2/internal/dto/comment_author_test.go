@@ -173,3 +173,22 @@ func TestMapCommentCreate_UsesTheAuthorName(t *testing.T) {
 		t.Errorf("createdBy = %q, want the author name", out.CreatedBy)
 	}
 }
+
+func TestMapSearchCaseActivities_FlagsInternalAuthors(t *testing.T) {
+	out := MapSearchCaseActivities(entity.SearchCaseActivitiesResponse{
+		Activity: []entity.CaseActivity{
+			{ID: "a1", Type: "comment", CreatedBy: &entity.UserReference{Email: "staff@example.test", Name: "Jane Doe", IsInternal: true}},
+			{ID: "a2", Type: "comment", CreatedBy: &entity.UserReference{Email: "customer@example.test", Name: "John Roe"}},
+			{ID: "a3", Type: "comment"},
+		},
+	})
+	if len(out.Activities) != 3 {
+		t.Fatalf("activities = %d, want 3", len(out.Activities))
+	}
+	if !out.Activities[0].AuthorInternal {
+		t.Error("an internal author was not flagged")
+	}
+	if out.Activities[1].AuthorInternal || out.Activities[2].AuthorInternal {
+		t.Error("a customer or an author-less entry was flagged as internal")
+	}
+}

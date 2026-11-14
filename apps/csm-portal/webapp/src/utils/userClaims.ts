@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { stripStaffMark } from "@utils/staffName";
+
 // Shape of the OIDC ID token claims the UI relies on. The IdP SDK exposes the
 // decoded claims as `any`; this interface narrows it for type-safe access.
 export interface IdTokenClaims {
@@ -73,7 +75,7 @@ export function resolveUserInfo(user: unknown): ResolvedUserInfo {
 }
 
 export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const parts = stripStaffMark(name).trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();

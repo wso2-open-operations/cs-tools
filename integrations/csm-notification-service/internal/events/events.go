@@ -232,9 +232,12 @@ func (t Type) IsKnown() bool {
 // construction.
 type CaseCreatedPayload struct {
 	ReporterName string `json:"reporterName"`
-	ProjectName  string `json:"projectName"`
-	ProjectID    string `json:"projectId"`
-	CaseID       string `json:"caseId"`
+	// ReporterEmail is only used to look up whether the reporter is an internal
+	// user, for the support engineer icon beside the name.
+	ReporterEmail string `json:"reporterEmail,omitempty"`
+	ProjectName   string `json:"projectName"`
+	ProjectID     string `json:"projectId"`
+	CaseID        string `json:"caseId"`
 	// CaseNumber is the case's human-readable reference (e.g. "CS0023001")
 	// — purely for display in the email body/subject; CaseID (the UUID)
 	// remains what's used for link construction and the caseId/entityId
@@ -834,7 +837,10 @@ type CRPlanDateNoticePayload struct {
 	GroupName string `json:"groupName,omitempty"`
 	// ActorName is whoever changed the date, already rendered LAST NAME FIRST
 	// by the flow, matching the ServiceNow templates' pill order.
-	ActorName        string   `json:"actorName,omitempty"`
+	ActorName string `json:"actorName,omitempty"`
+	// ActorIsInternal is true when the actor is WSO2 staff: the email shows the
+	// support engineer icon beside the name.
+	ActorIsInternal  bool     `json:"actorIsInternal,omitempty"`
 	ProjectID        string   `json:"projectId,omitempty"`
 	ProjectName      string   `json:"projectName,omitempty"`
 	ShortDescription string   `json:"shortDescription,omitempty"`
@@ -862,7 +868,10 @@ type CRApprovalRequestedPayload struct {
 	// customer notice.
 	GroupName     string `json:"groupName,omitempty"`
 	RequesterName string `json:"requesterName,omitempty"`
-	ProjectName   string `json:"projectName,omitempty"`
+	// RequesterIsInternal is true when the requester is WSO2 staff: the email
+	// shows the support engineer icon beside the name.
+	RequesterIsInternal bool   `json:"requesterIsInternal,omitempty"`
+	ProjectName         string `json:"projectName,omitempty"`
 	// ProjectID is the project the change request belongs to, needed to build a
 	// customer-portal link: that portal nests its change-request page under the
 	// project. Absent on an internal notice, which links into the CSM portal.

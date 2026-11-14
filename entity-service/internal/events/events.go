@@ -433,10 +433,13 @@ type CaseTypeChangedPayload struct {
 // equivalent on the wire (see the notification service's decodeStrict).
 type CaseCreatedPayload struct {
 	ReporterName string `json:"reporterName"`
-	ProjectName  string `json:"projectName"`
-	ProjectID    string `json:"projectId"`
-	CaseID       string `json:"caseId"`
-	CaseNumber   string `json:"caseNumber,omitempty"`
+	// ReporterEmail lets the consumer look up whether the reporter is an internal
+	// user (WSO2 staff), for the support engineer icon beside the name.
+	ReporterEmail string `json:"reporterEmail,omitempty"`
+	ProjectName   string `json:"projectName"`
+	ProjectID     string `json:"projectId"`
+	CaseID        string `json:"caseId"`
+	CaseNumber    string `json:"caseNumber,omitempty"`
 	// WSO2CaseID — see CommentAddedPayload's own doc comment.
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`

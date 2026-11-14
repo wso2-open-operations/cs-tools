@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import type { OutstandingCasesListProps } from "@features/support/types/supportComponents";
 import {
   Box,
@@ -251,6 +252,7 @@ export default function OutstandingCasesList({
                         }}
                       >
                         Assigned to {label}
+                        <StaffNameIcon size={12} />
                       </Typography>
                     </Tooltip>
                   ) : null;

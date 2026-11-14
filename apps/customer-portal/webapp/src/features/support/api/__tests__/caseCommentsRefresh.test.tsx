@@ -24,6 +24,7 @@ import {
   MAX_INCREMENTAL_REFRESH_PAGES,
   countLoadedComments,
   dedupeCommentPages,
+  mapActivityToComment,
   refreshCaseComments,
 } from "../caseCommentsRefresh";
 import useGetCaseCommentsInfinite from "../useGetCaseCommentsInfinite";
@@ -317,5 +318,30 @@ describe("useGetCaseCommentsInfinite next page after a refresh", () => {
 
     const ids = result.current.data!.pages.flatMap((p) => p.comments.map((c) => c.id));
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("mapActivityToComment", () => {
+  it("keeps the flag that marks an internal author, so the comment shows the support engineer icon", () => {
+    const comment = mapActivityToComment({
+      id: "a1",
+      content: "hi",
+      createdOn: "2026-02-12 11:15:42",
+      createdBy: "Jane Doe",
+      createdByIsInternal: true,
+      type: "comment",
+    });
+    expect(comment.createdByIsInternal).toBe(true);
+  });
+
+  it("leaves the flag unset for an author who is not internal", () => {
+    const comment = mapActivityToComment({
+      id: "a2",
+      content: "hi",
+      createdOn: "2026-02-12 11:15:42",
+      createdBy: "John Roe",
+      type: "comment",
+    });
+    expect(comment.createdByIsInternal).toBeUndefined();
   });
 });

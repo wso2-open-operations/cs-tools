@@ -232,6 +232,9 @@ type OnboardingConfig struct {
 // destination, a phone number, in the event payload itself, and doesn't go
 // through links at all.
 type Dispatcher struct {
+	// staff tells whether an email address belongs to an internal user, for the
+	// support engineer icon (see WithStaffLookup). nil: no icon where unsure.
+	staff      StaffLookup
 	email      emailSender
 	googleChat googleChatSender
 	call       callSender
@@ -539,6 +542,20 @@ func (d *Dispatcher) WithFullContentFetcher(f fullContentFetcher) *Dispatcher {
 func (d *Dispatcher) WithInlineImages(r inlineImageResolver) *Dispatcher {
 	d.images = r
 	return d
+}
+
+// WithStaffLookup sets how an email address is told to be an internal user's,
+// for the support engineer icon beside a name. Without it no icon is shown
+// where the event carries no certainty.
+func (d *Dispatcher) WithStaffLookup(l StaffLookup) *Dispatcher {
+	d.staff = l
+	return d
+}
+
+// isStaff reports whether email belongs to an internal user; false when no
+// lookup is configured or it fails.
+func (d *Dispatcher) isStaff(ctx context.Context, email string) bool {
+	return d.staff != nil && d.staff.IsInternal(ctx, email)
 }
 
 // withInlineImages returns html with its image references resolved, or html
@@ -1122,6 +1139,9 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	if err := json.Unmarshal(record.Value, &env); err != nil {
 		return fmt.Errorf("dispatch: decode envelope: %w", err)
 	}
+	// No name in an email or a chat card carries the circled W the data appends
+	// to many users' names (see events.StripStaffMark).
+	env.Payload = events.StripStaffMark(env.Payload)
 	// Known even when env.Type turns out to be unrecognized or env.Payload
 	// fails events.Validate below — see recordRefFor's own doc comment.
 	ref := recordRefFor(env)
@@ -1358,10 +1378,13 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	} else {
 		caseRef := displayCaseRef(p.CaseNumber, p.CaseID)
 		subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, p.CaseTitle)
+		// Looked up once per event, not inside the render callback, which runs once
+		// per recipient group (see handleCommentAdded's identical reasoning).
+		reporterName := notifications.StaffNameIf(p.ReporterName, d.isStaff(ctx, p.ReporterEmail))
 		var emailErr error
 		_, emailErr = d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 			return notifications.RenderCaseCreatedEmail(notifications.CaseCreatedEmailData{
-				ReporterName:              p.ReporterName,
+				ReporterName:              reporterName,
 				ProjectName:               p.ProjectName,
 				CaseNumber:                caseRef,
 				CaseTitle:                 p.CaseTitle,
@@ -1536,6 +1559,13 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 	// has no reason to pay for this fetch too.
 	fullComment := d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID)
 	caseComment := d.lazyInlineImages(ctx, fullComment, inlineimages.Scope{WorkItemID: p.CaseID})
+	// Looked up once per event, here, not inside the render callback below: that
+	// runs once per recipient group, and a slow or failing lookup must not make
+	// every group wait for it again.
+	commentAuthor := p.Name
+	if !p.IsInternalNote && !isAnnouncementCaseType(p.CaseType) {
+		commentAuthor = notifications.StaffNameIf(p.Name, d.isStaff(ctx, p.AuthorEmail))
+	}
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 		if p.IsInternalNote {
 			// See events.CommentAddedPayload.IsInternalNote's own doc
@@ -1543,13 +1573,13 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// as the case reference — this audience is always wso2.com
 			// staff, who recognize the internal reference, not ServiceNow's
 			// own case number.
-			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+			return notifications.RenderInternalNoteEmail(notifications.StaffName(p.Name), displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
 		if isAnnouncementCaseType(p.CaseType) {
 			// An announcement's author is not shown to its project contacts.
 			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
-		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		return notifications.RenderCommentAddedEmail(commentAuthor, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1792,7 +1822,7 @@ func (d *Dispatcher) handleCRApprovalRequested(ctx context.Context, record event
 		Audience:      p.Audience,
 		Team:          p.Team,
 		GroupName:     p.GroupName,
-		RequesterName: p.RequesterName,
+		RequesterName: notifications.StaffNameIf(p.RequesterName, p.RequesterIsInternal),
 		ProjectName:   p.ProjectName,
 		Link:          d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
 		IntendedFor:   intendedFor,
@@ -1844,7 +1874,7 @@ func (d *Dispatcher) handleCaseAssigned(ctx context.Context, record eventbus.Rec
 	}
 	subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, title)
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
-		return notifications.RenderCaseAssignedEmail(p.AssigneeName, p.AssigneeEmail, caseRef, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
+		return notifications.RenderCaseAssignedEmail(notifications.StaffName(p.AssigneeName), p.AssigneeEmail, caseRef, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1882,10 +1912,10 @@ func (d *Dispatcher) handleCaseAcknowledged(ctx context.Context, record eventbus
 			// No severity line — see SendSecurityReportAnalysisAcknowledgedAlert's
 			// own doc comment for why this type gets its own card instead of
 			// severityLabelAndColor's "Unknown" fallback below.
-			chatErr = d.googleChat.SendSecurityReportAnalysisAcknowledgedAlert(ctx, chataudience.IncidentMonitor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
+			chatErr = d.googleChat.SendSecurityReportAnalysisAcknowledgedAlert(ctx, chataudience.IncidentMonitor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, notifications.StaffName(p.AcknowledgerName))
 		} else {
 			severityLabel, severityColor := severityLabelAndColor(p.Severity)
-			chatErr = d.googleChat.SendCaseAcknowledgedAlert(ctx, chataudience.IncidentMonitor, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, p.AcknowledgerName)
+			chatErr = d.googleChat.SendCaseAcknowledgedAlert(ctx, chataudience.IncidentMonitor, severityLabel, severityColor, displayCaseRef(p.CaseNumber, p.CaseID), p.WSO2CaseID, caseLink, notifications.StaffName(p.AcknowledgerName))
 		}
 		if chatErr != nil {
 			d.forget(chatKey)
@@ -2656,7 +2686,7 @@ func (d *Dispatcher) handleIncidentAssigned(ctx context.Context, record eventbus
 	alert := notifications.IncidentAssignedAlert{
 		IncidentID:   incidentID,
 		Number:       p.Number,
-		AssigneeName: p.AssigneeName,
+		AssigneeName: notifications.StaffName(p.AssigneeName),
 		UpdatedBy:    p.UpdatedBy,
 		IncidentLink: d.links.IncidentLink(incidentID),
 	}
@@ -2750,7 +2780,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 	body, images := notifications.RenderCRPlanDateNoticeEmail(notifications.CRPlanDateEmailData{
 		Kind:             p.Kind,
 		Number:           p.Number,
-		ActorName:        p.ActorName,
+		ActorName:        notifications.StaffNameIf(p.ActorName, p.ActorIsInternal),
 		ProjectName:      p.ProjectName,
 		ShortDescription: p.ShortDescription,
 		Description:      d.withInlineImages(ctx, p.Description, inlineimages.Scope{WorkItemID: p.ChangeRequestID}),

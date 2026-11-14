@@ -43,6 +43,7 @@ export function mapActivityToComment(activity: CaseActivitiesResponse["activitie
     createdByFirstName: activity.createdByFirstName,
     createdByLastName: activity.createdByLastName,
     createdByFullName: activity.createdByFullName,
+    createdByIsInternal: activity.createdByIsInternal,
     type: activity.type,
     fileName: activity.fileName,
     contentType: activity.contentType,

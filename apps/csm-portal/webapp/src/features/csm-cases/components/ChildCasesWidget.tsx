@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Card,
@@ -168,7 +169,7 @@ export function ChildCasesWidget({ caseId }: ChildCasesWidgetProps): JSX.Element
                       </TableCell>
                       <TableCell sx={{ maxWidth: 0, width: "25%" }}>
                         <Typography variant="body2" noWrap title={c.assigneeName ?? "—"}>
-                          {c.assigneeName ?? "—"}
+                          <AssigneeName name={c.assigneeName} />
                         </Typography>
                       </TableCell>
                     </TableRow>

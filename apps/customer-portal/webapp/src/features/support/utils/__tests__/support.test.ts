@@ -18,6 +18,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   downloadSizeOf,
   getAvailableCaseActions,
+  getInitials,
+  splitStaffMark,
   collapseCodeBlockWhitespace,
   collapseCommentSourceWhitespace,
   collapseHtmlSourceWhitespace,
@@ -754,5 +756,23 @@ describe("getAvailableCaseActions", () => {
     for (const status of ["Open", "Work in Progress", "Reopened", "Solution Proposed", "Closed"]) {
       expect(getAvailableCaseActions(status, true)).toEqual(getAvailableCaseActions(status));
     }
+  });
+});
+
+describe("splitStaffMark", () => {
+  it("strips the circled W after a name and reports it", () => {
+    expect(splitStaffMark("Jane Doe \u24E6")).toEqual({ name: "Jane Doe", isStaff: true });
+    expect(splitStaffMark("Jane Doe\u24E6")).toEqual({ name: "Jane Doe", isStaff: true });
+    expect(splitStaffMark("Jane Doe \u24CC")).toEqual({ name: "Jane Doe", isStaff: true });
+  });
+
+  it("leaves other names alone", () => {
+    expect(splitStaffMark("Jane Doe")).toEqual({ name: "Jane Doe", isStaff: false });
+    expect(splitStaffMark("Will Smith")).toEqual({ name: "Will Smith", isStaff: false });
+    expect(splitStaffMark(null)).toEqual({ name: "", isStaff: false });
+  });
+
+  it("keeps the mark out of initials", () => {
+    expect(getInitials("Jane Doe \u24E6")).toBe("JD");
   });
 });

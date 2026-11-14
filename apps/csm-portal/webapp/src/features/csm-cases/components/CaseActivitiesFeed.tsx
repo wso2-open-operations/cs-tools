@@ -741,6 +741,7 @@ export default function CaseActivitiesFeed({
                           e.attachment.uploadedByEmail
                         }
                         userId={e.attachment.uploadedByUser?.id}
+                        isInternal={e.attachment.uploadedByUser?.isInternal}
                       />
                     </Typography>
                     <Chip size="small" variant="outlined" label="Attachment" />
@@ -902,6 +903,7 @@ export function AttachmentsList({
                 name={a.uploadedBy}
                 email={a.uploadedByUser?.email || a.uploadedByEmail}
                 userId={a.uploadedByUser?.id}
+                isInternal={a.uploadedByUser?.isInternal}
               />{" "}
               · <RelativeTime iso={a.uploadedAt} />
             </Typography>

@@ -295,31 +295,13 @@ func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	writeJSONValue(w, http.StatusOK, resp)
 }
 
-// csEngineerLastNameMarker is appended to the token-sourced last name when
-// auto-provisioning a cs_engineer caller's "user" row via
-// provisionCsEngineerUser, flagging a row created this way rather than
-// through the admin Add User flow or a human-entered profile.
-const csEngineerLastNameMarker = "Ⓦ"
-
-// withCsEngineerLastNameMarker appends csEngineerLastNameMarker to lastName,
-// space-separated -- or returns the bare marker if lastName is empty (the
-// token carried no family_name claim).
-func withCsEngineerLastNameMarker(lastName string) string {
-	lastName = strings.TrimSpace(lastName)
-	if lastName == "" {
-		return csEngineerLastNameMarker
-	}
-	return lastName + " " + csEngineerLastNameMarker
-}
-
 // provisionCsEngineerUser creates a "user" row, on the spot, for a caller who
 // holds the cs_engineer role via their token (GetMe's 404 branch already
 // confirmed this) but has no entity-service user row yet. Sources
 // firstName/lastName/phone straight off the caller's own validated token
 // (middleware.UserInfo -- given_name/family_name/phone_number claims), the
 // same token-only posture ensureUserProvisioned (cases.go) already takes, and
-// marks the created name by appending csEngineerLastNameMarker to the last
-// name, so a row created this way is identifiable later. No SCIM call is
+// uses the name as it is. No SCIM call is
 // made here at all -- unlike the admin Add User flow (CreateUser below),
 // which has no token for the person it's creating and so has to look them up
 // in SCIM by email instead, this caller IS the person being provisioned, so
@@ -330,7 +312,7 @@ func withCsEngineerLastNameMarker(lastName string) string {
 // answer rather than failing the request outright.
 func (h *UsersHandler) provisionCsEngineerUser(ctx context.Context, user *middleware.UserInfo, resp *userMeResponse) bool {
 	firstName := strings.TrimSpace(user.FirstName)
-	lastName := withCsEngineerLastNameMarker(user.LastName)
+	lastName := strings.TrimSpace(user.LastName)
 
 	body, err := json.Marshal(struct {
 		FirstName string   `json:"firstName"`

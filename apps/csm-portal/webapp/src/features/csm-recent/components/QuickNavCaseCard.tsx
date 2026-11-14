@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import { Chip, Form, Stack, Typography } from "@wso2/oxygen-ui";
 import { Calendar, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
@@ -107,7 +108,7 @@ export default function QuickNavCaseCard({
           <Stack direction="row" spacing={0.5} alignItems="center">
             <User size={13} />
             <Typography variant="caption" color="text.secondary">
-              Assigned to {hit.assigneeName}
+              Assigned to <AssigneeName name={hit.assigneeName} />
             </Typography>
           </Stack>
         )}

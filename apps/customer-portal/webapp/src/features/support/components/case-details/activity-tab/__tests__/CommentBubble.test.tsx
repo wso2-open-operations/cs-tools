@@ -60,6 +60,43 @@ function renderBubble(
 }
 
 describe("CommentBubble", () => {
+  it("shows the support engineer icon for an internal author, without the circled W", () => {
+    renderBubble({
+      comment: {
+        ...mockComment,
+        createdByFullName: "Jane Doe \u24E6",
+        createdByIsInternal: true,
+      },
+    });
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+    expect(screen.queryByText(/\u24E6/u)).not.toBeInTheDocument();
+    // The avatar initials come from the name alone.
+    expect(screen.getByText("JD")).toBeInTheDocument();
+  });
+
+  it("strips the circled W but shows no icon for an author who is not internal", () => {
+    renderBubble({
+      comment: { ...mockComment, createdByFullName: "John Roe \u24E6" },
+    });
+    expect(screen.getByText("John Roe")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
+  });
+
+  it("shows the icon for an internal author whose name has no circled W", () => {
+    renderBubble({
+      comment: { ...mockComment, createdByFullName: "Jane Doe", createdByIsInternal: true },
+    });
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+  });
+
+  it("shows no icon for a name without the mark", () => {
+    renderBubble({
+      comment: { ...mockComment, createdByFullName: "Jane Doe" },
+    });
+    expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
+  });
+
   it("hides Novera's <thinking> reasoning in the linked chat transcript", () => {
     renderBubble({
       comment: {

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import {
   Box,
   Chip,
@@ -289,6 +290,7 @@ export default function ServiceRequestsList({
                       sx={{ lineHeight: 1 }}
                     >
                       {assignedLabel}
+                      <StaffNameIcon size={14} />
                     </Typography>
                   </Box>
                 )}

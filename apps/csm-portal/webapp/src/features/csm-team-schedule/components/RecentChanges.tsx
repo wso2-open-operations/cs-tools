@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { stripStaffMark } from "@utils/staffName";
 import { useMemo, useState, type JSX } from "react";
 import type { ScheduleActivity } from "../types";
 import ScheduleSkeleton from "./ScheduleSkeleton";
@@ -117,7 +118,7 @@ export default function RecentChanges({
       userId: a.userId,
       when: new Date(a.createdOn),
       actor: a.actorEmail.split("@")[0],
-      who: nameOf(a.userId) ?? "someone",
+      who: stripStaffMark(nameOf(a.userId) ?? "someone"),
       named: nameOf(a.userId) !== undefined,
       subject: a.subject,
     });
@@ -239,7 +240,7 @@ export default function RecentChanges({
               <span className="rc-body">
                 <b>{e.who}</b> · {e.days}: {e.what}
               </span>
-              <span className="rc-by">by {e.actor}</span>
+              <span className="rc-by">by {stripStaffMark(e.actor)}</span>
             </li>
           ))}
         </ol>

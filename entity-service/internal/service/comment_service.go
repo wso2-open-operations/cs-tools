@@ -143,6 +143,9 @@ func commentRowToDomain(row repository.CommentRow) domain.Comment {
 		// case activity timeline -- there is no id to attach either way.
 		CreatedBy: domain.NewUserReference("", row.CreatedBy, commentAuthorName(row)),
 	}
+	if c.CreatedBy != nil {
+		c.CreatedBy.IsInternal = row.CreatedByInternal
+	}
 	if row.Type != nil {
 		if t, ok := commentEnumToType[*row.Type]; ok {
 			c.Type = t

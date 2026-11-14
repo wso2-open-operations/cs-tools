@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import { Box, Button, Chip, Divider, Drawer, IconButton, Typography } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
@@ -108,7 +109,7 @@ export default function IncidentPreviewDrawer({
               <Field label="Caller">{incident.caller?.name || "—"}</Field>
               <Field label="Category">{incident.category || "—"}</Field>
               <Field label="Assignment group">{incident.assignmentGroup?.name || "—"}</Field>
-              <Field label="Assigned to">{incident.assignedTo?.name || "Unassigned"}</Field>
+              <Field label="Assigned to"><AssigneeName name={incident.assignedTo?.name} fallback="Unassigned" /></Field>
               <Field label="Opened">
                 {incident.openedOn ? <RelativeTime iso={incident.openedOn} /> : "—"}
               </Field>

@@ -44,7 +44,9 @@ import {
   stripCodeWrapper,
   stripCustomerCommentAddedLabel,
   trimLeadingBr,
+  splitStaffMark,
 } from "@features/support/utils/support";
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import ApiErrorState from "@components/error/ApiErrorState";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { useDarkMode } from "@utils/useDarkMode";
@@ -225,7 +227,8 @@ export default function AnnouncementActivityPanel({
                   sx={{ gap: 1 }}
                 >
                   <Typography variant="body2" color="text.primary" fontWeight={500}>
-                    {commentAuthorDisplayName(comment)}
+                    {splitStaffMark(commentAuthorDisplayName(comment)).name}
+                    {comment.createdByIsInternal && <StaffNameIcon />}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {formatCommentDate(comment.createdOn)}
