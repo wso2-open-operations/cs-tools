@@ -761,6 +761,7 @@ export default function ServiceRequestDetailContent({
                     color="text.primary"
                   >
                     {assignedLabel ?? "--"}
+                    {assignedLabel && <StaffNameIcon size={14} />}
                   </Typography>
                 </Box>
               </Box>

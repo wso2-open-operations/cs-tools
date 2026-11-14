@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Button,
@@ -239,7 +240,7 @@ export default function ProblemsTab(): JSX.Element {
                       )}
                     </TableCell>
                     <TableCell>{problem.assignmentGroup?.name || "—"}</TableCell>
-                    <TableCell>{problem.assignedTo?.name || "—"}</TableCell>
+                    <TableCell><AssigneeName name={problem.assignedTo?.name} /></TableCell>
                   </TableRow>
                   );
                 })

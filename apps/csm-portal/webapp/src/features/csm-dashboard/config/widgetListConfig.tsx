@@ -16,6 +16,7 @@
 
 /* eslint-disable react-refresh/only-export-components -- this is a config module of per-resourceType render helpers (like widgetResourceConfig.ts), not a component module; none of the individual XxxWidgetList functions are exported (fast-refresh DX only) */
 
+import AssigneeName from "@components/AssigneeName";
 import { Box, Chip, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { Eye } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
@@ -555,7 +556,7 @@ function ProblemWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.E
                 </Typography>
               ),
               <Typography key="assignedTo" variant="body2" noWrap>
-                {problem.assignedTo?.name || "—"}
+                <AssigneeName name={problem.assignedTo?.name} />
               </Typography>,
             ],
           };
@@ -615,7 +616,7 @@ function IncidentTaskWidgetList({ items, isLoading }: WidgetListRendererProps): 
               {task.assignmentGroup?.name || "—"}
             </Typography>,
             <Typography key="assignedTo" variant="body2" noWrap>
-              {task.assignedTo?.name || "—"}
+              <AssigneeName name={task.assignedTo?.name} />
             </Typography>,
           ],
         };
@@ -965,7 +966,7 @@ function TaskWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
               </Typography>
             ),
             <Typography key="assignedTo" variant="body2" noWrap>
-              {task.assignedTo?.name || "—"}
+              <AssigneeName name={task.assignedTo?.name} />
             </Typography>,
             <Typography key="updated" variant="caption" color="text.secondary" noWrap>
               {formatDate(task.updatedOn)}

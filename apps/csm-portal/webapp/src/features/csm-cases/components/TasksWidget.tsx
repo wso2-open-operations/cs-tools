@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Button,
@@ -192,7 +193,7 @@ export function TasksWidget({ caseId }: TasksWidgetProps): JSX.Element {
                       <TableCell>
                         {task.dueDate ? (formatAbsoluteForUser(task.dueDate) ?? "—") : "—"}
                       </TableCell>
-                      <TableCell>{task.assignedTo?.name ?? "—"}</TableCell>
+                      <TableCell><AssigneeName name={task.assignedTo?.name} /></TableCell>
                       <TableCell>
                         <RelativeTime iso={task.updatedOn} />
                       </TableCell>

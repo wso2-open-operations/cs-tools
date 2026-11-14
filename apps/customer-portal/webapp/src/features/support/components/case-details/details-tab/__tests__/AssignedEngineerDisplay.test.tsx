@@ -58,4 +58,17 @@ describe("AssignedEngineerDisplay", () => {
     const dashes = screen.getAllByText("--");
     expect(dashes.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("shows the engineer without the circled W, with the support engineer icon", () => {
+    renderAssignedEngineer({ id: "eng-1", name: "Jane Doe \u24E6" });
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText(/\u24E6/u)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+    expect(screen.getByText("JD")).toBeInTheDocument();
+  });
+
+  it("shows no icon when nobody is assigned", () => {
+    renderAssignedEngineer(null);
+    expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
+  });
 });

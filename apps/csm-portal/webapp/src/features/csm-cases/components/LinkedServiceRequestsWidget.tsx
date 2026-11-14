@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
+import { stripStaffMark } from "@utils/staffName";
 import {
   Box,
   Button,
@@ -219,8 +221,8 @@ export function LinkedServiceRequestsWidget({
                       {enriching ? (
                         <Skeleton variant="text" width={72} />
                       ) : (
-                        <Typography variant="body2" noWrap title={assigneeLabel}>
-                          {assigneeLabel}
+                        <Typography variant="body2" noWrap title={stripStaffMark(assigneeLabel)}>
+                          <AssigneeName name={enriched?.assigneeName} />
                         </Typography>
                       )}
                     </TableCell>

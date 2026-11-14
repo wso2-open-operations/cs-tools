@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Avatar,
   Box,
@@ -309,7 +310,7 @@ export function TaskDetailDialog({
                   </Box>
                 ) : (
                   <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                    <Typography variant="body2">{task.assignedTo?.name ?? "—"}</Typography>
+                    <Typography variant="body2"><AssigneeName name={task.assignedTo?.name} /></Typography>
                     <IconButton
                       size="small"
                       onClick={() => setEditingAssignee(true)}

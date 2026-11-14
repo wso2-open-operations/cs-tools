@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Checkbox,
@@ -171,7 +172,7 @@ function renderOptionalCell(id: CaseOptionalColumnId, c: CsmCaseRow): JSX.Elemen
     case "assignee":
       return (
         <Typography variant="body2" noWrap title={c.assignee || undefined}>
-          {c.assignee}
+          <AssigneeName name={c.assignee} />
         </Typography>
       );
     case "createdBy":

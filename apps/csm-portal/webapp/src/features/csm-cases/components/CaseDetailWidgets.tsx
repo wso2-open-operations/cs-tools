@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { stripStaffMark } from "@utils/staffName";
 import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import {
   Box,
@@ -1555,7 +1556,7 @@ export function AuditTimelineWidget({
                 <Box sx={{ flex: 1, minWidth: 0, pb: 0.25 }}>
                   <Typography variant="body2">{e.description}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {e.actor} · <RelativeTime iso={e.createdAt} />
+                    {stripStaffMark(e.actor)} · <RelativeTime iso={e.createdAt} />
                   </Typography>
                 </Box>
               </Box>

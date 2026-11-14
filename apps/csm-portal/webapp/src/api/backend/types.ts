@@ -4419,7 +4419,7 @@ export interface BeDeleteTimeCardResponse {
  * both and are all this lookup reads.
  */
 export interface BeUserSearchByEmailResponse {
-  users?: Array<{ id: string; email: string }>;
+  users?: Array<{ id: string; email: string; userType?: string }>;
 }
 
 // ---------------------------------------------------------------------------

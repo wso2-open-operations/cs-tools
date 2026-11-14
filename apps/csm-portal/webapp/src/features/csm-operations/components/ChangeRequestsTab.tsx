@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Button,
@@ -132,7 +133,7 @@ function renderOptionalCell(
     case "product":
       return <>{cr.product?.name || "—"}</>;
     case "assignedEngineer":
-      return <>{cr.assignedEngineer?.name || "—"}</>;
+      return <AssigneeName name={cr.assignedEngineer?.name} />;
     case "assignedTeam":
       return <>{cr.assignedTeam?.name || "—"}</>;
     case "type":

@@ -102,13 +102,39 @@ describe("UserRefLink", () => {
 
   it("renders a link to /people/<id> when an id is already known", async () => {
     renderWithProviders(
-      <UserRefLink name="Jane Doe" email="jane.doe@example.com" userId={JANE_UUID} />,
+      <UserRefLink
+        name="Jane Doe"
+        email="jane.doe@example.com"
+        userId={JANE_UUID}
+        isInternal={false}
+      />,
     );
     const link = screen.getByRole("link", { name: "Jane Doe" });
     expect(link).toHaveAttribute("href", `/people/${JANE_UUID}`);
-    // A known id short-circuits — no resolution lookup is ever made.
+    // A known id with a known flag short-circuits — no lookup is ever made.
     await new Promise((r) => setTimeout(r, 20));
     expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("looks the flag up by email when the id is known but the flag is not, and shows the icon for an internal user", async () => {
+    postMock.mockResolvedValue({
+      users: [{ id: JANE_UUID, email: "jane.doe@example.com", userType: "internal" }],
+    });
+    renderWithProviders(
+      <UserRefLink name="Jane Doe" email="jane.doe@example.com" userId={JANE_UUID} />,
+    );
+    expect(await screen.findByRole("img", { name: "Support engineer" })).toBeInTheDocument();
+  });
+
+  it("shows no icon when the lookup says the user is not internal", async () => {
+    postMock.mockResolvedValue({
+      users: [{ id: JOHN_UUID, email: "john.roe@example.com", userType: "external" }],
+    });
+    renderWithProviders(
+      <UserRefLink name="John Roe" email="john.roe@example.com" userId={JOHN_UUID} />,
+    );
+    await waitFor(() => expect(postMock).toHaveBeenCalled());
+    expect(screen.queryByRole("img", { name: "Support engineer" })).not.toBeInTheDocument();
   });
 
   it("resolves an id from email and renders a link once resolution completes, when id is null", async () => {

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import { Box, Button, Chip, Divider, Drawer, IconButton, Typography } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
@@ -93,7 +94,7 @@ export default function ProblemPreviewDrawer({
           <Box sx={{ flex: 1, overflowY: "auto", p: 2.5 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
               <Field label="Assignment group">{problem.assignmentGroup?.name || "—"}</Field>
-              <Field label="Assigned to">{problem.assignedTo?.name || "Unassigned"}</Field>
+              <Field label="Assigned to"><AssigneeName name={problem.assignedTo?.name} fallback="Unassigned" /></Field>
             </Box>
           </Box>
 

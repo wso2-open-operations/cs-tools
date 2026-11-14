@@ -570,7 +570,7 @@ function getAssignedEngineerDisplayValue(obj: {
   label?: string;
   name?: string | null;
 }): string {
-  return obj.label ?? obj.name ?? "";
+  return splitStaffMark(obj.label ?? obj.name ?? "").name;
 }
 
 /**
@@ -582,7 +582,7 @@ function getAssignedEngineerDisplayValue(obj: {
 export function getAssignedEngineerLabel(value: AssignedEngineerValue): string {
   if (value == null || value === "") return "";
   if (typeof value === "object") return getAssignedEngineerDisplayValue(value);
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" ? splitStaffMark(value).name : "";
 }
 
 /**

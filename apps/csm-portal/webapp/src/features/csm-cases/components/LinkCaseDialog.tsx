@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import {
   Box,
   Button,
@@ -233,7 +234,7 @@ export default function LinkCaseDialog({
                   <StateChip state={selected.state} />
                   {selected.assigneeName && (
                     <Typography variant="caption" color="text.secondary" noWrap>
-                      {selected.assigneeName}
+                      <AssigneeName name={selected.assigneeName} />
                     </Typography>
                   )}
                 </Box>

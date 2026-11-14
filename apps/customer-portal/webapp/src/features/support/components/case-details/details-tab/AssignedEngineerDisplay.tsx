@@ -14,10 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import type { AssignedEngineerDisplayProps } from "@features/support/types/supportComponents";
 import { Avatar, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { formatValue, getInitials } from "@features/support/utils/support";
+import {
+  formatValue,
+  getAssignedEngineerLabel,
+  getInitials,
+} from "@features/support/utils/support";
 
 /**
  * Displays the assigned engineer with Avatar (initials) and name.
@@ -48,6 +53,7 @@ export default function AssignedEngineerDisplay({
         </Avatar>
         <Typography variant="body2" color="text.primary">
           {formatValue(assignedEngineer)}
+          {getAssignedEngineerLabel(assignedEngineer) && <StaffNameIcon />}
         </Typography>
       </Stack>
     </Stack>

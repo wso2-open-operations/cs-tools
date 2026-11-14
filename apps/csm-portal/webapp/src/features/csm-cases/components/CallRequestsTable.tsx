@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import AssigneeName from "@components/AssigneeName";
 import { Box, Chip, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import {
   Ban,
@@ -362,7 +363,7 @@ export function CallRequestsTable({
                     title={cr.assignee}
                     sx={{ display: "block", mt: 0.5 }}
                   >
-                    Assignee: {cr.assignee}
+                    Assignee: <AssigneeName name={cr.assignee} />
                   </Typography>
                 )}
               </Box>

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import StaffNameIcon from "@components/staff-name/StaffNameIcon";
 import {
   Box,
   Table,
@@ -32,6 +33,7 @@ import { type JSX } from "react";
 import {
   getStatusColor,
   mapSeverityToDisplay,
+  splitStaffMark,
 } from "@features/support/utils/support";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
@@ -151,8 +153,8 @@ const CasesList = ({
                     const assignedEngineerValue = row.assignedEngineer;
                     const assignedEngineerName =
                       typeof assignedEngineerValue === "string"
-                        ? assignedEngineerValue.trim()
-                        : assignedEngineerValue?.label?.trim() || "";
+                        ? splitStaffMark(assignedEngineerValue).name.trim()
+                        : splitStaffMark(assignedEngineerValue?.label).name.trim() || "";
                     const assignedEngineerDisplay =
                       assignedEngineerName || "--";
                     const createdByDisplay = row.createdBy?.trim() || "--";
@@ -286,6 +288,7 @@ const CasesList = ({
                         <TableCell align="center">
                           <Typography variant="body2" color="text.primary">
                             {assignedEngineerDisplay}
+                            {assignedEngineerName && <StaffNameIcon size={14} />}
                           </Typography>
                         </TableCell>
                       </>
