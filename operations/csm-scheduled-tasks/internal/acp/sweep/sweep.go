@@ -401,7 +401,7 @@ End Date: %[5]s
 Since projects needs contract renewal, kindly take the remedial actions to avoid any disruptions of subscription support. We appreciate your understanding and your prompt attention to this matter.
 
 Best Regards,
-WSO2 Team`
+%[6]s Team`
 
 // internalSuspensionBodyTemplate is the day-0 internal notice body — past
 // tense ("has been suspended"), asking for reinstatement rather than
@@ -423,14 +423,14 @@ End Date: %[5]s
 Since the project is suspended, kindly take the remedial actions to reinstate the subscription support. We appreciate your prompt attention to this matter.
 
 Best Regards,
-WSO2 Team`
+%[6]s Team`
 
 func internalNoticeBody(window closure.NoticeWindow, proj project, accountOwnerName string) string {
 	template := internalReminderBodyTemplate
 	if window.IsTerminal() {
 		template = internalSuspensionBodyTemplate
 	}
-	return fmt.Sprintf(template, accountOwnerName, proj.Name, proj.ProjectKey, formatDate(proj.StartDate), formatDate(proj.EndDate))
+	return fmt.Sprintf(template, accountOwnerName, proj.Name, proj.ProjectKey, formatDate(proj.StartDate), formatDate(proj.EndDate), notify.CompanyName())
 }
 
 // customerUpcomingSuspensionBodyTemplate is the 15/7-day customer-facing
@@ -440,26 +440,26 @@ func internalNoticeBody(window closure.NoticeWindow, proj project, accountOwnerN
 // real examples exactly.
 const customerUpcomingSuspensionBodyTemplate = `We regret to inform you that the project %[1]s will be suspended on %[2]s due to non-renewal of the contracts upon the end of the previous subscription period.
 
-Please ensure to take necessary actions on or before %[2]s to avoid service disruption. If you have any questions or need assistance, please contact your Account Manager or the WSO2 Customer Success Team.
+Please ensure to take necessary actions on or before %[2]s to avoid service disruption. If you have any questions or need assistance, please contact your Account Manager or the %[3]s Customer Success Team.
 
 Best Regards,
-WSO2 Team`
+%[3]s Team`
 
 // customerAlreadySuspendedBodyTemplate is the day-0 customer-facing body —
 // past tense, once the project has actually been suspended.
 const customerAlreadySuspendedBodyTemplate = `We trust this message finds you well. This project %[1]s was suspended %[2]s due to non-renewal of the contracts upon the end of the previous subscription period.
 
-To avoid future suspensions, please ensure that all necessary actions are completed in a timely manner. If you have any questions or need assistance, please contact your Account Manager or the WSO2 Customer Success Team.
+To avoid future suspensions, please ensure that all necessary actions are completed in a timely manner. If you have any questions or need assistance, please contact your Account Manager or the %[3]s Customer Success Team.
 
 Best Regards,
-WSO2 Team`
+%[3]s Team`
 
 func customerNoticeBody(window closure.NoticeWindow, proj project) string {
 	template := customerUpcomingSuspensionBodyTemplate
 	if window.IsTerminal() {
 		template = customerAlreadySuspendedBodyTemplate
 	}
-	return fmt.Sprintf(template, proj.Name, formatDateUS(proj.EndDate))
+	return fmt.Sprintf(template, proj.Name, formatDateUS(proj.EndDate), notify.CompanyName())
 }
 
 // noBusinessContactBodyTemplate is the fixed body for the urgent
