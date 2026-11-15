@@ -25,7 +25,7 @@ import (
 // address back after a test that changes them.
 func restoreSupportAddress(t *testing.T) {
 	t.Helper()
-	tmpls := footerIconTemplates()
+	tmpls := onboardingTemplates()
 	orig := make([]string, len(tmpls))
 	for i, p := range tmpls {
 		orig[i] = *p

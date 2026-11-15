@@ -53,8 +53,10 @@ func TestSetLogoURLs_EmptyKeepsDefaults(t *testing.T) {
 	}
 }
 
-func TestSetFooterIconURL_ReplacesEveryBakedIcon(t *testing.T) {
-	tmpls := footerIconTemplates()
+// The onboarding footer shows the full dark-coloured logo, so the configured
+// dark logo reaches it, and the old pulse icon is gone.
+func TestOnboardingFooterShowsTheConfiguredDarkLogo(t *testing.T) {
+	tmpls := logoTemplates()
 	orig := make([]string, len(tmpls))
 	for i, p := range tmpls {
 		orig[i] = *p
@@ -65,19 +67,27 @@ func TestSetFooterIconURL_ReplacesEveryBakedIcon(t *testing.T) {
 		}
 	})
 
-	SetFooterIconURL("https://example.test/icon.png")
-
-	if !strings.Contains(projectContactRegisteredTemplate, "https://example.test/icon.png") ||
-		strings.Contains(projectContactRegisteredTemplate, wso2FooterIconURL) {
-		t.Errorf("footer icon not replaced")
+	for name, tmpl := range map[string]string{
+		"new": projectContactInvitedNewTemplate, "existing": projectContactInvitedExistingTemplate,
+		"reminder": projectContactInvitedReminderTemplate, "registered": projectContactRegisteredTemplate,
+	} {
+		if strings.Contains(tmpl, "Pulse") {
+			t.Errorf("%s onboarding email still carries the pulse icon", name)
+		}
+		if !strings.Contains(tmpl, "All rights reserved.</td>") || !strings.Contains(tmpl, wso2LogoURL) {
+			t.Errorf("%s onboarding email's footer does not carry the dark logo beside the copyright line", name)
+		}
 	}
-}
 
-func TestSetFooterIconURL_EmptyKeepsDefault(t *testing.T) {
-	before := projectContactRegisteredTemplate
-	SetFooterIconURL("  ")
-	if projectContactRegisteredTemplate != before {
-		t.Errorf("empty value must keep the default footer icon")
+	SetLogoURLs("https://example.test/dark.png", "")
+	for name, tmpl := range map[string]string{
+		"new": projectContactInvitedNewTemplate, "existing": projectContactInvitedExistingTemplate,
+		"reminder": projectContactInvitedReminderTemplate, "registered": projectContactRegisteredTemplate,
+	} {
+		footer := tmpl[strings.LastIndex(tmpl, `<tr><td class="px" style="padding:28px`):]
+		if !strings.Contains(footer, "https://example.test/dark.png") || strings.Contains(footer, wso2LogoURL) {
+			t.Errorf("%s onboarding email's footer logo did not follow the configured dark logo", name)
+		}
 	}
 }
 
