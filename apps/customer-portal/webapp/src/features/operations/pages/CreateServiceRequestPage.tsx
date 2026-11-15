@@ -568,8 +568,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
     e.preventDefault();
     if (isNavigatingAfterCreate || inlineImages.isUploadingImages) return;
 
+    // The deployment and product the form shows, which may come from the
+    // Deployments tab's link without the user touching either field.
     const deploymentMatch = resolveDeploymentMatch(
-      deployment,
+      effectiveDeployment,
       projectDeployments,
       undefined,
     );
@@ -577,9 +579,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
     const variables = variablesData?.variables ?? [];
     const contextValues = {
       projectDisplay: projectDetails?.name ?? "",
-      deploymentDisplay: deployment,
+      deploymentDisplay: effectiveDeployment,
       productDisplay:
-        sortedProductOptions.find((p) => p.id === product)?.label ?? "",
+        sortedProductOptions.find((p) => p.id === effectiveProduct)?.label ??
+        "",
     };
     const firstEmpty = getFirstEmptyRequiredField(
       variables,
@@ -883,9 +886,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
               selectedRequestTypeLabel={selectedCatalogItemLabel}
               contextValues={{
                 projectDisplay: projectDisplay,
-                deploymentDisplay: deployment,
+                deploymentDisplay: effectiveDeployment,
                 productDisplay:
-                  sortedProductOptions.find((p) => p.id === product)?.label ?? "",
+                  sortedProductOptions.find((p) => p.id === effectiveProduct)
+                    ?.label ?? "",
               }}
               attachments={attachments}
               onAttachmentClick={handleAttachmentClick}
