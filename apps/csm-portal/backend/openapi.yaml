@@ -22181,6 +22181,13 @@ components:
         name:
           type: string
           example: Jane Doe
+        isInternal:
+          type: boolean
+          description: >-
+            True when the person resolved to an INTERNAL-type user (WSO2
+            staff). Set on comment authors; omitted elsewhere, so absent means
+            "not known to be internal", never "known external".
+          example: true
 
     ChangeRequestCustomerContact:
       type: object

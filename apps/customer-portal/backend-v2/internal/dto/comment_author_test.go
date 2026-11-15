@@ -173,3 +173,26 @@ func TestMapCommentCreate_UsesTheAuthorName(t *testing.T) {
 		t.Errorf("createdBy = %q, want the author name", out.CreatedBy)
 	}
 }
+
+// TestMapSearchCaseActivities_FlagsInternalAuthors: the activity feed carries
+// entity-service's own INTERNAL-type verdict on the author as a plain boolean,
+// so the webapp can badge a support engineer without a per-comment lookup; a
+// customer, and an entry with no author at all, never get it.
+func TestMapSearchCaseActivities_FlagsInternalAuthors(t *testing.T) {
+	out := MapSearchCaseActivities(entity.SearchCaseActivitiesResponse{
+		Activity: []entity.CaseActivity{
+			{ID: "a1", Type: "comment", CreatedBy: &entity.UserReference{Email: "staff@example.com", Name: "Jane Doe", IsInternal: true}},
+			{ID: "a2", Type: "comment", CreatedBy: &entity.UserReference{Email: "customer@example.com", Name: "John Roe"}},
+			{ID: "a3", Type: "comment"},
+		},
+	})
+	if len(out.Activities) != 3 {
+		t.Fatalf("activities = %d, want 3", len(out.Activities))
+	}
+	if !out.Activities[0].CreatedByIsInternal {
+		t.Error("an internal author was not flagged")
+	}
+	if out.Activities[1].CreatedByIsInternal || out.Activities[2].CreatedByIsInternal {
+		t.Error("a customer or an author-less entry was flagged as internal")
+	}
+}

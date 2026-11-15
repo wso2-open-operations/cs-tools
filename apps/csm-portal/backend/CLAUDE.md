@@ -540,6 +540,17 @@ This is the server-side half of a two-part fix — `apps/csm-portal/webapp`'s ow
 mitigation (added first, still in place) only ever hid the image *after* the bytes had already
 reached the browser; this is what stops them being sent at all to a caller who shouldn't see them.
 
+## A comment author's `isInternal` passes through untouched
+
+`POST /cases/{id}/comments/search` (and the incident / change-request comment
+searches) are raw `[]byte` passthroughs, so the `createdBy.isInternal` flag
+entity-service now sets on a comment author (true when the author's email
+resolves to an INTERNAL-type user; see that repo's own `CLAUDE.md`) reaches the
+webapp with no code change here — only `openapi.yaml`'s `UserReference` schema
+documents it. The webapp's comment bubble badges a staff author from it; it is
+deliberately not derived in this backend from the token or an extra user
+lookup.
+
 ## Change request tags go through the case tag routes
 
 `GET /change-requests/{id}` is a raw pass-through, so the `tags` array the

@@ -243,6 +243,10 @@ export interface BeUserReference {
    * identifier such as an automation account (e.g. "system"). */
   email: string;
   name: string;
+  /** True when the person resolved to an INTERNAL-type user (WSO2 staff).
+   * Only set on comment authors; absent means "not known to be internal",
+   * never "known external". */
+  isInternal?: boolean;
 }
 
 /** A referenced entity carrying its display name (project, deployment, ...). */

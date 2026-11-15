@@ -1182,13 +1182,15 @@ func (r *incidentRepo) SearchIncidentActivities(ctx context.Context, req domain.
 				c.id, 'comment' AS kind, c.content, c.created_on AS created_on,
 				c.email, c.first_name, c.last_name, c.name, c.type::text AS comment_type,
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
+				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value,
+				c.created_by_internal
 			FROM (
 				SELECT
 					cm.id, cm.content, cm.created_on, cm.created_by AS email,
 					u1.first_name, u1.last_name,
 					COALESCE(u1.name, NULLIF(TRIM(CONCAT_WS(' ', u1.first_name, u1.last_name)), '')) AS name,
-					cm.type
+					cm.type,
+					COALESCE(u1.user_type::text, '') = 'INTERNAL' AS created_by_internal
 				FROM comment cm
 				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1
@@ -1203,13 +1205,15 @@ func (r *incidentRepo) SearchIncidentActivities(ctx context.Context, req domain.
 				fc.email, fc.first_name, fc.last_name, fc.name,
 				NULL::text AS comment_type,
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
-				fc.field_name, fc.old_value, fc.new_value
+				fc.field_name, fc.old_value, fc.new_value,
+				fc.created_by_internal
 			FROM (
 				SELECT
 					wa.id, wa.created_on, wa.user_email AS email,
 					u3.first_name, u3.last_name,
 					COALESCE(u3.name, NULLIF(TRIM(CONCAT_WS(' ', u3.first_name, u3.last_name)), '')) AS name,
-					wa.field_name, wa.old_value, wa.new_value
+					wa.field_name, wa.old_value, wa.new_value,
+					COALESCE(u3.user_type::text, '') = 'INTERNAL' AS created_by_internal
 				FROM work_item_activity wa
 				` + userByEmailJoin("u3", "wa.user_email") + `
 				WHERE wa.work_item_id = $1
@@ -1217,7 +1221,7 @@ func (r *incidentRepo) SearchIncidentActivities(ctx context.Context, req domain.
 	}
 	dataQuery += `
 		)
-		SELECT id, kind, content, created_on, email, first_name, last_name, name, comment_type, file_name, content_type, size_bytes, field_name, old_value, new_value
+		SELECT id, kind, content, created_on, email, first_name, last_name, name, comment_type, file_name, content_type, size_bytes, field_name, old_value, new_value, created_by_internal
 		FROM activity
 		ORDER BY created_on DESC, id
 		LIMIT $2 OFFSET $3`
