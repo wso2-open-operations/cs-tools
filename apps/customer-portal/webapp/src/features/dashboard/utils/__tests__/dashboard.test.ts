@@ -33,8 +33,15 @@ describe("isS0SeverityLabel", () => {
     expect(isS0SeverityLabel("0 - catastrophic")).toBe(true);
   });
 
+  it("returns true for the bare S0 code", () => {
+    expect(isS0SeverityLabel("S0")).toBe(true);
+    expect(isS0SeverityLabel(" s0 ")).toBe(true);
+  });
+
   it("returns false for other severities", () => {
     expect(isS0SeverityLabel("1 - Critical")).toBe(false);
+    expect(isS0SeverityLabel("S1")).toBe(false);
+    expect(isS0SeverityLabel("S4(Query)")).toBe(false);
     expect(isS0SeverityLabel("")).toBe(false);
   });
 });
