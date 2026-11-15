@@ -626,14 +626,19 @@ export function getInitials(
       : name;
   const label = typeof rawLabel === "string" ? stripStaffNameMarker(rawLabel) : rawLabel;
   if (!label || typeof label !== "string") return "--";
+  // Only ever the first two words -- first name, last name -- never
+  // whatever comes after. More defensive than stripStaffNameMarker alone:
+  // it keeps the avatar clean against any OTHER trailing marker/icon this
+  // codebase doesn't yet know to recognize too, since a third (or later)
+  // word is never looked at at all.
   const initials = label
     .trim()
     .split(/\s+/)
     .filter(Boolean)
+    .slice(0, 2)
     .map((n) => n[0])
     .join("")
-    .toUpperCase()
-    .slice(0, 3);
+    .toUpperCase();
   return initials || "--";
 }
 
