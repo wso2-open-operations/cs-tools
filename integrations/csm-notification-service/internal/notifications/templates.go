@@ -85,13 +85,17 @@ var projectReactivatedTemplateRaw string
 // isn't reachable from outside WSO2's network.
 const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
 
-// wso2LogoWhiteURL is the same logo for the dark header band of the
-// onboarding emails, written straight into those templates' HTML.
-const wso2LogoWhiteURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
+// wso2LogoLightURL is the same logo for the dark header band of the
+// onboarding emails, written straight into those templates' HTML. The
+// identifier says "Light" (the logo's own color, for the EMAIL_LOGO_LIGHT_URL
+// override below) even though the actual CDN asset's own filename says
+// "White" — that's WSO2's own naming for the file, not a convention this
+// service controls.
+const wso2LogoLightURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-White.png"
 
 // wso2FooterIconURL is the small decorative icon next to the copyright line
 // in the onboarding emails' footer, written straight into those templates'
-// HTML the same way wso2LogoWhiteURL is.
+// HTML the same way wso2LogoLightURL is.
 const wso2FooterIconURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/WSO2-Pulse-Orange.png"
 
 // bakeLogo substitutes wso2LogoURL into raw's <!-- [LOGO_SRC] --> placeholder.
@@ -133,18 +137,18 @@ func logoTemplates() []*string {
 }
 
 // SetLogoURLs replaces the logo every email carries: logo for the emails with
-// a light header (the default above), logoWhite for the dark header band of
+// a light header (the default above), logoLight for the dark header band of
 // the onboarding emails. An empty value keeps the default. It rewrites the
 // already-baked templates, so call it once at startup, before any email is
 // rendered.
-func SetLogoURLs(logo, logoWhite string) {
-	logo, logoWhite = strings.TrimSpace(logo), strings.TrimSpace(logoWhite)
+func SetLogoURLs(logo, logoLight string) {
+	logo, logoLight = strings.TrimSpace(logo), strings.TrimSpace(logoLight)
 	for _, t := range logoTemplates() {
 		if logo != "" {
 			*t = strings.ReplaceAll(*t, wso2LogoURL, html.EscapeString(logo))
 		}
-		if logoWhite != "" {
-			*t = strings.ReplaceAll(*t, wso2LogoWhiteURL, html.EscapeString(logoWhite))
+		if logoLight != "" {
+			*t = strings.ReplaceAll(*t, wso2LogoLightURL, html.EscapeString(logoLight))
 		}
 	}
 }

@@ -105,6 +105,7 @@ import CaseActionBar, {
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
 import ResolutionDialog from "@features/csm-cases/components/ResolutionDialog";
 import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityDialog";
+import ReopenCaseDialog from "@features/csm-cases/components/ReopenCaseDialog";
 import ChangeCaseTypeDialog, {
   type CaseTypeTransferSubmission,
 } from "@features/csm-cases/components/ChangeCaseTypeDialog";
@@ -224,6 +225,7 @@ import type {
   CsmCaseDetail,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
+import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
@@ -860,6 +862,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     targetState: BeCaseState;
   } | null>(null);
   const [severityOpen, setSeverityOpen] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [changeCaseTypeOpen, setChangeCaseTypeOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
   // The card being edited, if any — mutually exclusive with logTimeOpen
@@ -919,6 +922,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     setResolutionDialog(null);
     setNoPublicCommentConfirm(null);
     setSeverityOpen(false);
+    setReopenOpen(false);
     setChangeCaseTypeOpen(false);
     setLogTimeOpen(false);
     // Not just cosmetic: the edit dialog renders on editTimeCard alone, so a
@@ -1462,6 +1466,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Reopen case opens the reopen dialog; the PATCH happens in
+      // onReopenCase once a target state is confirmed. Only ever offered by
+      // CaseActionBar when isAdmin is true and the case is closed.
+      if (action.secondary === "reopen_case") {
+        setReopenOpen(true);
+        return;
+      }
+
       // Change case type opens the transfer dialog; the PATCH(es) happen in
       // onChangeCaseType once a target type is confirmed.
       if (action.secondary === "change_case_type") {
@@ -1799,6 +1811,43 @@ export default function CsmCaseDetailPage(): JSX.Element {
             });
           },
           onError: (err) => showError("Could not change the severity.", err),
+        },
+      );
+    },
+    [patchCase, showError],
+  );
+
+  // Reopens a closed case (admin-only, see ReopenCaseDialog/CaseActionBar's
+  // own doc comments). reason is sent only when non-empty -- the field is
+  // optional, and an empty string is not a meaningful reason to persist.
+  const onReopenCase = useCallback(
+    (target: CaseState, reason: string) => {
+      const payload: BeCaseUpdatePayload = reason
+        ? { state: target, reopenReason: reason }
+        : { state: target };
+      // Compared against caseViewTokenRef in the callbacks below, not caseId
+      // itself -- see onRequestUpdate's identical guard for why a plain
+      // caseId comparison can't distinguish this view's request from a
+      // still-pending one left over from an earlier visit to the same case
+      // (a response landing after navigating away must not show A's result
+      // or close B's dialog).
+      const submittedViewToken = caseViewTokenRef.current;
+      patchCase.mutate(
+        payload,
+        {
+          onSuccess: () => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            setReopenOpen(false);
+            setFeedback({
+              message: `Case reopened to ${stateLabel(target)}.`,
+              severity: "success",
+              sticky: true,
+            });
+          },
+          onError: (err) => {
+            if (caseViewTokenRef.current !== submittedViewToken) return;
+            showError("Could not reopen the case.", err);
+          },
         },
       );
     },
@@ -2697,6 +2746,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               onAcknowledge={onAcknowledge}
               isAcknowledging={isAcknowledging}
               commentsLoading={isCommentsLoading}
+              isAdmin={isAdmin}
             />
           </Box>
         )}
@@ -3440,6 +3490,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isChanging={patchCase.isPending}
           onClose={() => setSeverityOpen(false)}
           onChange={onChangeSeverity}
+        />
+      )}
+
+      {reopenOpen && (
+        <ReopenCaseDialog
+          isReopening={patchCase.isPending}
+          onClose={() => setReopenOpen(false)}
+          onReopen={onReopenCase}
         />
       )}
 

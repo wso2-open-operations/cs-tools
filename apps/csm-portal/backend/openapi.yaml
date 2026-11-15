@@ -221,7 +221,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: Forbidden (including moving a closed case to any other state without the admin role).
           content:
             application/json:
               schema:
@@ -20614,6 +20614,21 @@ components:
         closeNotes:
           type: string
           description: Free-text closure notes — only allowed when state is closed or solution_proposed.
+        reopenReason:
+          type: string
+          description: >
+            Optional free-text note on why a closed case is being reopened. Only meaningful
+            alongside `state` when the case's current state is closed and the caller holds the
+            admin role — every other caller gets 403 for that transition regardless of this
+            field. An admin reopen (moving a closed case to any other state) is also only
+            supported for a plain case (type `case`): the entity service rejects it with a 400
+            for every other case-like type (engagement, service_request,
+            security_report_analysis, announcement), whether or not `reopenReason` is supplied
+            — this applies only to a genuine admin reopen of a closed case; an ordinary PATCH
+            with no state change ignores a stray `reopenReason` instead (the portal strips it
+            before forwarding when the request isn't actually reopening a closed case). Write-
+            only: never returned by this or any other endpoint, and not shown anywhere in the
+            portal.
         parentId:
           type: string
           format: uuid
@@ -23523,6 +23538,10 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
         creTeam:
           nullable: true
           allOf:
@@ -23596,6 +23615,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PersonRef'
+        customerSuccessManager:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/PersonRef'

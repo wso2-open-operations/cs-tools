@@ -585,21 +585,25 @@ type CaseRepository interface {
 	// over).
 	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
-	// four named stakeholders' email addresses -- technical_owner_id,
+	// named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
-	// renewal_account_manager_id (migration 0012), whichever are set and
-	// have an email on file, deduplicated. customer_success_manager_id is
-	// deliberately excluded: unlike the other four, the CSM is not meant to
-	// receive these default case notifications. A project with no linked
+	// renewal_account_manager_id, customer_success_manager_id (all
+	// migration 0012) -- plus projectID's own onboarding_owner_id
+	// (migration 0104), but the latter only while the project's
+	// onboarding_status is IN_PROGRESS: an onboarding owner is only a
+	// default recipient during the onboarding window itself, not before it
+	// starts or after it finishes. Whichever of these are set and have an
+	// email on file are included, deduplicated. A project with no linked
 	// account, or a project id that does not exist, returns an empty slice
 	// rather than an error: this is a default watch list, not a
 	// requirement. Used to compute a case.* event's email
-	// Recipients fresh at publish time: these four are deliberately never
+	// Recipients fresh at publish time: these are deliberately never
 	// persisted into work_item_watcher (see SetCaseWatchList's own callers'
-	// doc comments) specifically so a later stakeholder reassignment is
-	// reflected on the very next notification, not stuck on whoever held the
-	// role when the case was created or last had its watch list edited. A
-	// stakeholder with no email on file is silently excluded, same as
+	// doc comments) specifically so a later stakeholder reassignment (or
+	// the project moving into or out of onboarding) is reflected on the
+	// very next notification, not stuck on whoever held the role when the
+	// case was created or last had its watch list edited. A stakeholder
+	// with no email on file is silently excluded, same as
 	// watchListUserEmails does for an explicit watcher.
 	AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error)
 	// AccountSRETeam returns the SRE team (account.sre_team_id) of the account owning projectID, "" for none or no such project.
@@ -2451,6 +2455,26 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // labels by UpdateCase below (state/work_state upper-cased, severity mapped
 // through caseSeverityToEnum) -- case_state_enum's "CLOSED" is what $2 = ”
 // compares a non-empty state against here, not the domain value "closed".
+// reopen_reason ($9) is only ever non-nil when CaseService.UpdateCase has
+// already confirmed this is a genuine admin reopen (UpdateCaseRequest.
+// AdminReopen); the CASE WHEN here is the actual gate for when it gets
+// written, keyed off the row's own pre-statement state (same "state"
+// right-hand-side reference as closed_by_user_id above) rather than a
+// separate flag, since a transition OUT of closed can only happen through
+// that same admin-reopen path in the first place (every other caller's
+// state-transition table has no entry for closed at all). This column is
+// write-only -- see migration 0292's own comment -- so it is never in this
+// query's RETURNING list.
+// resolved_on's own fourth branch (admin reopen into anything but
+// CLOSED/SOLUTION_PROPOSED, both already handled by the branches above it)
+// clears a stale resolved_on left over from the PRIOR closure --
+// CodeRabbit-caught gap: without it, reopening into e.g. work_in_progress
+// fell through to the trailing ELSE and kept the old timestamp, which a
+// later re-close's own COALESCE(resolved_on, NOW()) branch would then
+// reuse instead of recording the new resolution. Same admin-reopen
+// detection condition as reopen_reason just below, for the same reason --
+// keyed off real state values, not a separate flag, since only the
+// admin-reopen path can ever produce a transition OUT of closed at all.
 // work_state is only meaningful while state is work_in_progress: an explicit
 // workState wins, otherwise a state change to awaiting_info pauses it and a
 // change to any other non-work_in_progress state clears it to NULL, in the
@@ -2478,11 +2502,13 @@ const updateCaseQuery = `
 		    resolved_on       = CASE WHEN $2 = 'SOLUTION_PROPOSED' AND COALESCE(state::TEXT, '') NOT IN ('WAITING_ON_WSO2', 'SOLUTION_PROPOSED') THEN NOW()
 		                          WHEN $2 = 'CLOSED' THEN COALESCE(resolved_on, NOW())
 		                          WHEN $2 = 'REOPENED' THEN NULL
+		                          WHEN $2 <> '' AND $2 <> 'CLOSED' AND state = 'CLOSED'::case_state_enum THEN NULL
 		                          ELSE resolved_on END,
 		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::case_state_enum THEN $8::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
 		    resolution_code   = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,
 		    cause             = CASE WHEN $6 <> '' THEN $6::case_cause_enum ELSE cause END,
-		    close_notes       = COALESCE($7, close_notes)
+		    close_notes       = COALESCE($7, close_notes),
+		    reopen_reason     = CASE WHEN $2 <> '' AND $2 <> 'CLOSED' AND state = 'CLOSED'::case_state_enum THEN $9 ELSE reopen_reason END
 		WHERE id = $1
 		RETURNING id, severity, issue_type, state, work_state, closed_on, resolved_on
 	),
@@ -2873,7 +2899,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 		// race on — skip the transaction/lock overhead entirely.
 		if req.Severity == nil {
 			c, prevState, err := r.updateLockingPreviousState(ctx, req, func(q rowQuerier) (domain.Case, error) {
-				return scanUpdatedCaseWithResolvedOn(q.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
+				return scanUpdatedCaseWithResolvedOn(q.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason))
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return domain.Case{}, nil, nil, &apierror.NotFoundError{Msg: "case not found"}
@@ -2894,7 +2920,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 				return err
 			}
 			var txErr error
-			c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
+			c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason))
 			if txErr != nil {
 				return txErr
 			}
@@ -4116,13 +4142,11 @@ type rowsQuerier interface {
 //     that floor was removed), but the product decision here is to still
 //     *display* them on this read, read-only, so a caller can see every
 //     stakeholder associated with the case without being able to remove
-//     one. This is a strictly larger set than AccountDefaultWatcherEmails'
-//     own four -- that function deliberately excludes
-//     customer_success_manager_id from the default email audience (see its
-//     own doc comment), which is a decision about who gets emailed by
-//     default, not about who the account's named stakeholders are; this
-//     display is the latter, so the CSM is included here even though they
-//     are not unioned into a case.* email's Recipients.
+//     one. AccountDefaultWatcherEmails' own set now includes these same
+//     five (see its own doc comment) plus, conditionally, the project's
+//     onboarding owner during active onboarding -- a project-level role,
+//     not an account stakeholder, so it is not synthesized into this
+//     display at all.
 //   - A user who is both a real persisted watcher AND one of those five
 //     stakeholders appears exactly once, as the locked (stakeholder) copy --
 //     the inner DISTINCT ON picks locked=true first on a duplicate id. The
@@ -4302,17 +4326,20 @@ func (r *caseRepo) AccountSRETeam(ctx context.Context, projectID string) (string
 
 // AccountDefaultWatcherEmails implements CaseRepository.
 func (r *caseRepo) AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error) {
-	var towEmail, stowEmail, amEmail, ramEmail *string
+	var towEmail, stowEmail, amEmail, ramEmail, csmEmail, onboardingOwnerEmail *string
 	err := r.db.QueryRow(ctx, `
-		SELECT tow.email, stow.email, am.email, ram.email
+		SELECT tow.email, stow.email, am.email, ram.email, csm.email,
+			CASE WHEN p.onboarding_status = 'IN_PROGRESS' THEN oo.email END
 		FROM project p
 		JOIN account a ON a.id = p.account_id
 		LEFT JOIN "user" tow ON tow.id = a.technical_owner_id
 		LEFT JOIN "user" stow ON stow.id = a.secondary_technical_owner_id
 		LEFT JOIN "user" am ON am.id = a.account_manager_id
 		LEFT JOIN "user" ram ON ram.id = a.renewal_account_manager_id
+		LEFT JOIN "user" csm ON csm.id = a.customer_success_manager_id
+		LEFT JOIN "user" oo ON oo.id = p.onboarding_owner_id
 		WHERE p.id = $1`, projectID,
-	).Scan(&towEmail, &stowEmail, &amEmail, &ramEmail)
+	).Scan(&towEmail, &stowEmail, &amEmail, &ramEmail, &csmEmail, &onboardingOwnerEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -4320,9 +4347,9 @@ func (r *caseRepo) AccountDefaultWatcherEmails(ctx context.Context, projectID st
 		return nil, fmt.Errorf("account default watcher emails: %w", err)
 	}
 
-	emails := make([]string, 0, 4)
-	seen := make(map[string]struct{}, 4)
-	for _, email := range []*string{towEmail, stowEmail, amEmail, ramEmail} {
+	emails := make([]string, 0, 6)
+	seen := make(map[string]struct{}, 6)
+	for _, email := range []*string{towEmail, stowEmail, amEmail, ramEmail, csmEmail, onboardingOwnerEmail} {
 		if email == nil || *email == "" {
 			continue
 		}
@@ -5334,7 +5361,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 // same transaction. An unassigned work item has no engineer to conflict with
 // and proceeds.
 func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, workItemType, state, severity, workState, resolutionCode, cause string, actorID *string) (domain.Case, *domain.CaseSeverity, error) {
-	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID}, "case"
+	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID, req.ReopenReason}, "case"
 	if workItemType != "CASE" {
 		var ok bool
 		query, args, label, ok = caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)

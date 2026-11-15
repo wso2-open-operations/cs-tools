@@ -827,14 +827,15 @@ type CaseService interface {
 	// case there simply falls back to the account's default watchers, same
 	// as an empty real result.
 	ProjectContactEmailsByRole(ctx context.Context, projectID, role string) ([]string, error)
-	// AccountDefaultWatcherEmails returns the account owning projectID's four
+	// AccountDefaultWatcherEmails returns the account owning projectID's
 	// named stakeholders' email addresses (technical owner, secondary
-	// technical owner, account manager, renewal account manager) -- see
-	// CaseRepository.AccountDefaultWatcherEmails' own doc comment for why
-	// these are resolved fresh at publish time rather than read from a
-	// persisted watch list. A project with no linked account, or no Postgres
-	// access at all (a pure ServiceNow data source with no pgFallback
-	// configured), returns an empty slice and no error.
+	// technical owner, account manager, renewal account manager, customer
+	// success manager) plus, conditionally, projectID's own onboarding
+	// owner -- see CaseRepository.AccountDefaultWatcherEmails' own doc
+	// comment for why these are resolved fresh at publish time rather than
+	// read from a persisted watch list. A project with no linked account,
+	// or no Postgres access at all (a pure ServiceNow data source with no
+	// pgFallback configured), returns an empty slice and no error.
 	AccountDefaultWatcherEmails(ctx context.Context, projectID string) ([]string, error)
 	// AccountSRETeam returns the SRE team of the account owning projectID; "" with no error when there is none or no Postgres access.
 	AccountSRETeam(ctx context.Context, projectID string) (id, name string, err error)

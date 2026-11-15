@@ -374,34 +374,6 @@ export default function CommentBubble({
               >
                 {formatFileSize(comment.sizeBytes)}
               </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                component="span"
-              >
-                •
-              </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                component="span"
-              >
-                Uploaded by {comment.createdBy}
-              </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                component="span"
-              >
-                •
-              </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                component="span"
-              >
-                {formatCommentDate(comment.createdOn)}
-              </Typography>
             </Stack>
             {isPreviewableImage && !previewRequested && (
               <Box>

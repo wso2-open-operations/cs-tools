@@ -2739,6 +2739,190 @@ func TestCaseService_UpdateCase_ReappliesStateSLAEffectsAfterSeverityRevision(t 
 	}
 }
 
+// TestCaseService_UpdateCase_AdminReopen_MovesClosedCaseAndSkipsSideEffects
+// covers UpdateCaseRequest.AdminReopen's one bypass of the state-transition
+// table: a closed case has no legal next state for any caller
+// (case_state_transitions.go), so without AdminReopen this same request
+// would be rejected (see the companion rejection test below). It also
+// proves the two side effects an admin reopen must not trigger: no SLA
+// recompute (closed has no open clocks left to resume) and no
+// case.status_changed email to watchers.
+func TestCaseService_UpdateCase_AdminReopen_MovesClosedCaseAndSkipsSideEffects(t *testing.T) {
+	closed := domain.CaseStateClosed
+	newState := domain.CaseStateWorkInProgress
+	reason := "customer reported the same issue recurring"
+	var gotReopenReason *string
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{
+				ID: testDeploymentUUID, State: &closed,
+				WatchList: []domain.WatchListUser{{Email: "watcher@example.com"}},
+			}, nil
+		},
+		updateCase: func(_ context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
+			gotReopenReason = req.ReopenReason
+			return domain.Case{ID: req.ID, State: req.State}, nil, nil
+		},
+	}
+	slaEngine := &fakeSLAEngineService{}
+	publisher := &mockEventPublisher{}
+	svc := WithDeletedAttachmentsForCSMPortal(
+		NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, publisher, alwaysUnrestrictedAccess{}, nil, nil, nil, slaEngine, ""),
+		"csm-portal-backend",
+	)
+	// AdminReopen only takes effect for a caller whose own client id is the
+	// configured CSM portal backend's -- see the adminReopen gate's own doc
+	// comment in case_service.go.
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{ClientID: "csm-portal-backend"})
+
+	adminReopen := true
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{
+		ID: testDeploymentUUID, State: &newState, AdminReopen: &adminReopen, ReopenReason: &reason,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotReopenReason == nil || *gotReopenReason != reason {
+		t.Errorf("expected ReopenReason %q to reach the repository, got %v", reason, gotReopenReason)
+	}
+	if len(slaEngine.stateCalls) != 0 {
+		t.Errorf("expected no ApplyCaseStateEffects call on an admin reopen, got %v", slaEngine.stateCalls)
+	}
+	if len(publisher.calls) != 0 {
+		t.Errorf("expected no case.status_changed publish on an admin reopen, got %d", len(publisher.calls))
+	}
+}
+
+// TestCaseService_UpdateCase_AdminReopen_RejectedWithoutFlag proves
+// AdminReopen is not a standing exception for closed cases -- the identical
+// request without it still hits the ordinary "closed is terminal" rule.
+func TestCaseService_UpdateCase_AdminReopen_RejectedWithoutFlag(t *testing.T) {
+	closed := domain.CaseStateClosed
+	newState := domain.CaseStateWorkInProgress
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{ID: testDeploymentUUID, State: &closed}, nil
+		},
+	}
+	svc := NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, nil, nil, &fakeSLAEngineService{}, "")
+
+	_, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &newState})
+	var valErr *apierror.ValidationError
+	if !errors.As(err, &valErr) || valErr.Code != "case_invalid_state_transition" {
+		t.Fatalf("expected case_invalid_state_transition, got %v", err)
+	}
+}
+
+// TestCaseService_UpdateCase_AdminReopen_RejectedForExternalCaller is
+// defense in depth: AdminReopen only takes effect for an internal
+// (isInternalCaller) caller, regardless of what forwarded it, so an external
+// caller can never reopen a closed case even if AdminReopen reaches this
+// layer somehow.
+func TestCaseService_UpdateCase_AdminReopen_RejectedForExternalCaller(t *testing.T) {
+	closed := domain.CaseStateClosed
+	newState := domain.CaseStateWorkInProgress
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{ID: testDeploymentUUID, State: &closed}, nil
+		},
+	}
+	external := stubAccessServiceWithScope{scope: AccessScope{Unrestricted: false, HasInternalAccess: false}}
+	svc := NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, external, nil, nil, nil, &fakeSLAEngineService{}, "")
+
+	adminReopen := true
+	_, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &newState, AdminReopen: &adminReopen})
+	var valErr *apierror.ValidationError
+	if !errors.As(err, &valErr) || valErr.Code != "case_invalid_state_transition" {
+		t.Fatalf("expected case_invalid_state_transition, got %v", err)
+	}
+}
+
+// TestCaseService_UpdateCase_AdminReopen_RejectedForInternalCallerNotThePortal
+// is the regression guard for a CodeRabbit-caught privilege-escalation gap:
+// isInternalCaller alone only distinguishes WSO2 staff from an external
+// caller -- it says nothing about whether that staff member is an admin.
+// Before this fix, any internal caller (direct M2M, or an internal staff
+// member's own token resolved straight from x-user-id-token, neither of
+// which goes through apps/csm-portal/backend's PermAdmin gate at all) could
+// set AdminReopen itself and reopen a closed case. The bypass must only
+// ever take effect for the one caller identity that IS the configured CSM
+// portal backend -- mirroring mayListDeletedAttachments' own, pre-existing
+// use of the identical csmPortalClientID check for an equivalent
+// admin-trusted-via-the-portal override.
+func TestCaseService_UpdateCase_AdminReopen_RejectedForInternalCallerNotThePortal(t *testing.T) {
+	closed := domain.CaseStateClosed
+	newState := domain.CaseStateWorkInProgress
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{ID: testDeploymentUUID, State: &closed}, nil
+		},
+	}
+	svc := WithDeletedAttachmentsForCSMPortal(
+		NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, nil, nil, &fakeSLAEngineService{}, ""),
+		"csm-portal-backend",
+	)
+
+	adminReopen := true
+	for name, ctx := range map[string]context.Context{
+		"no client id at all": context.Background(),
+		"a different internal M2M caller": auth.WithIdentity(context.Background(), auth.Identity{ClientID: "csm-integration-service"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &newState, AdminReopen: &adminReopen})
+			var valErr *apierror.ValidationError
+			if !errors.As(err, &valErr) || valErr.Code != "case_invalid_state_transition" {
+				t.Fatalf("expected case_invalid_state_transition, got %v", err)
+			}
+		})
+	}
+}
+
+// TestCaseService_UpdateCase_AdminReopen_RejectedForNonCaseType is the
+// regression guard for a CodeRabbit-caught gap: the admin-reopen bypass
+// used to apply uniformly to every case-like type, but reopen_reason only
+// exists on the "case" extension table (updateCaseQuery) -- an admin
+// reopening a closed engagement/service_request/security_report_analysis
+// would otherwise get a 200 with their reason silently discarded. Rejected
+// explicitly instead, with a clear error naming why.
+func TestCaseService_UpdateCase_AdminReopen_RejectedForNonCaseType(t *testing.T) {
+	closed := domain.CaseStateClosed
+	newState := domain.CaseStateWorkInProgress
+	engagementType := "engagement"
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{ID: testDeploymentUUID, State: &closed, Type: &engagementType}, nil
+		},
+	}
+	svc := WithDeletedAttachmentsForCSMPortal(
+		NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, nil, nil, &fakeSLAEngineService{}, ""),
+		"csm-portal-backend",
+	)
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{ClientID: "csm-portal-backend"})
+
+	adminReopen := true
+	_, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &newState, AdminReopen: &adminReopen})
+	var valErr *apierror.ValidationError
+	if !errors.As(err, &valErr) || valErr.Msg != "adminReopen is only supported for cases" {
+		t.Fatalf("expected the cases-only validation error, got %v", err)
+	}
+}
+
+// TestCaseService_UpdateCase_AdminReopen_ValidatesFieldCombination proves
+// AdminReopen/ReopenReason follow the same "only alongside a state change"
+// restriction as resolutionCode/cause/closeNotes.
+func TestCaseService_UpdateCase_AdminReopen_ValidatesFieldCombination(t *testing.T) {
+	adminReopen := true
+	reason := "because"
+	svc := NewCaseServiceWithSNWriteback(&stubCaseRepo{}, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, nil, nil, &fakeSLAEngineService{}, "")
+
+	if _, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, AdminReopen: &adminReopen}); err == nil {
+		t.Error("expected an error when adminReopen is set without state")
+	}
+	if _, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, ReopenReason: &reason}); err == nil {
+		t.Error("expected an error when reopenReason is set without adminReopen")
+	}
+}
+
 // TestCaseService_UpdateCase_RecordsSNWritebackFailureOnMirrorError covers
 // the failure path: Postgres already committed by the time Dispatch runs, so
 // a failed mirror write must not surface as an UpdateCase error — it's

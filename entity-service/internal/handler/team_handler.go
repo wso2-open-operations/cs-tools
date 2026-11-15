@@ -76,6 +76,20 @@ func (h *TeamHandler) ListChatWebhooks(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// ListGroupEmails handles GET /teams/group-emails -- a plain GET with no
+// query params or pagination, same posture as ListChatWebhooks: internal
+// callers only (TeamService.ListGroupEmails enforces this), and the result
+// set is bounded by how many teams exist.
+func (h *TeamHandler) ListGroupEmails(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.ListGroupEmails(r.Context())
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // GetTeam handles GET /teams/{id} -- internal callers only
 // (TeamService.GetTeam enforces this). A single generic team resource
 // (id/name/type/chatWebhookUrl) rather than a dedicated

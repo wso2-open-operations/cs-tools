@@ -342,6 +342,10 @@ export function useCustomerPermissions() {
     const isPartnerUser = roles.includes("partner_user");
     const isExternalUser =
       isCustomerAdmin || isCustomerUser || isPartnerAdmin || isPartnerUser;
+    // WSO2 staff: the persona the settings page labels "Internal User". Unlike
+    // `!isExternalUser`, this is false until the roles have loaded, so UI that
+    // is for staff only stays hidden meanwhile.
+    const isInternalUser = roles.includes("internal") || isAgent;
 
     // isReadOnly only ever narrows a write action -- a read never needs the
     // write-role check, matching the backend's identical gate in rbac.go.
@@ -365,6 +369,7 @@ export function useCustomerPermissions() {
       isPartnerAdmin,
       isPartnerUser,
       isExternalUser,
+      isInternalUser,
       isReadOnly,
       can,
       hasRole,

@@ -267,8 +267,33 @@ interface SecondaryItem {
  *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
  *   - Escalate to lead → withdrawn, no backend flow planned yet
  */
-function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
+function buildSecondaryItems(
+  caseDetail: CsmCaseDetail,
+  isAdmin: boolean,
+): SecondaryItem[] {
   const items: SecondaryItem[] = [];
+
+  // Reopen a closed case. Admin-only (backend's own gate: CaseHandler.PatchCase
+  // requires PermAdmin for this specific transition) and only offered once
+  // the case is actually closed — every lifecycle button above is already
+  // empty for a closed case regardless of caller, since `nextStates` stays
+  // terminal for everyone (see case_state_transitions.go); this is the one
+  // deliberate exception to that rule. Scoped to plain cases only (undefined
+  // caseType reads as "case" too, same as a legacy row with none set) --
+  // entity-service's own reopen_reason column only exists on the "case"
+  // extension table, so the backend rejects this for every other type.
+  if (
+    caseDetail.state === "closed" &&
+    isAdmin &&
+    (caseDetail.caseType === "case" || caseDetail.caseType === undefined)
+  ) {
+    items.push({
+      key: "reopen_case",
+      label: "Reopen case…",
+      icon: <Undo2 size={16} />,
+      divider: true,
+    });
+  }
 
   // Pause / resume the work sub-state. Offered only for an in-progress case
   // assigned to the current user — pausing/resuming is the assignee's own
@@ -498,6 +523,10 @@ interface CaseActionBarProps {
    * case that actually has one, just not loaded yet.
    */
   commentsLoading?: boolean;
+  /** True when the signed-in user holds the admin role — gates the
+   * admin-only "Reopen case…" secondary action on a closed case. Defaults to
+   * false, so a caller that omits this prop never sees the control. */
+  isAdmin?: boolean;
 }
 
 /**
@@ -543,6 +572,7 @@ export default function CaseActionBar({
   onAcknowledge,
   isAcknowledging = false,
   commentsLoading = false,
+  isAdmin = false,
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [stateMenuAnchor, setStateMenuAnchor] = useState<HTMLElement | null>(null);
@@ -556,7 +586,7 @@ export default function CaseActionBar({
     .sort((a, b) => orderRank(a) - orderRank(b))
     .map((target) => buttonFor(target, caseDetail));
   const primary = lifecycle;
-  const secondary = buildSecondaryItems(caseDetail);
+  const secondary = buildSecondaryItems(caseDetail, isAdmin);
 
   const runPrimary = (p: PrimaryButton): void => {
     if (blockedReason(p)) return;

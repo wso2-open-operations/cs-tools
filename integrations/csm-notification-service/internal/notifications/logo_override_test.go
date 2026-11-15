@@ -40,8 +40,8 @@ func TestSetLogoURLs_ReplacesEveryBakedLogo(t *testing.T) {
 		t.Errorf("light logo not replaced")
 	}
 	if !strings.Contains(projectContactRegisteredTemplate, "https://example.test/dark.png") ||
-		strings.Contains(projectContactRegisteredTemplate, wso2LogoWhiteURL) {
-		t.Errorf("white logo not replaced")
+		strings.Contains(projectContactRegisteredTemplate, wso2LogoLightURL) {
+		t.Errorf("light logo not replaced")
 	}
 }
 

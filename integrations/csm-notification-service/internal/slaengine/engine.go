@@ -22,8 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -294,6 +296,13 @@ type Engine struct {
 	// arriving while one is still running -- see that method's own doc
 	// comment.
 	recalculating atomic.Bool
+	// teamGroupEmailsMu guards teamGroupEmails -- refreshed periodically by
+	// cmd/server/main.go from a background goroutine (the same ticker that
+	// refreshes GoogleChatClient's own team-sourced Chat spaces) while
+	// sendBreachEmails reads it from request-handling goroutines, same
+	// concurrency shape as GoogleChatClient.teamAudienceSpaces.
+	teamGroupEmailsMu sync.RWMutex
+	teamGroupEmails   map[string]string
 }
 
 // clock returns e.now(), or time.Now() when no clock is set.
@@ -319,6 +328,39 @@ func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *rec
 		emailDebugMode:         emailDebugMode,
 		emailDebugRecipients:   emailDebugRecipients,
 	}
+}
+
+// slaBreachAmericasTeamKey is entity-service's team.key for the Americas
+// overnight-coverage team email (see sendBreachEmails' own doc comment) — a
+// fixed value, not a per-deployment config, by explicit request: unlike
+// chataudience.Americas (the separate, configurable Chat-audience name this
+// engine's Chat card can route to), there's exactly one real team this
+// email goes to, so there's nothing for an env var to usefully vary.
+const slaBreachAmericasTeamKey = "americas_cre_team"
+
+// SetTeamGroupEmails atomically replaces the team.key -> group_email lookup
+// table sendBreachEmails reads for the Americas overnight-coverage email
+// (entity.CustomerEntityClient.GetTeamGroupEmails's result, GET
+// /teams/group-emails) — same "refreshed periodically, read concurrently"
+// shape as notifications.GoogleChatClient.SetTeamAudienceSpaces. A nil or
+// empty map clears every entry; the caller passes the full current set each
+// call, not a diff.
+func (e *Engine) SetTeamGroupEmails(emails map[string]string) {
+	e.teamGroupEmailsMu.Lock()
+	e.teamGroupEmails = emails
+	e.teamGroupEmailsMu.Unlock()
+}
+
+// teamGroupEmail looks up key in the current team group-email table, ""/false
+// when unset or not (yet) configured.
+func (e *Engine) teamGroupEmail(key string) (string, bool) {
+	if key == "" {
+		return "", false
+	}
+	e.teamGroupEmailsMu.RLock()
+	defer e.teamGroupEmailsMu.RUnlock()
+	email, ok := e.teamGroupEmails[key]
+	return email, ok && email != ""
 }
 
 // avoidWeekend rolls due forward to the next Monday, same time-of-day, if
@@ -1307,21 +1349,34 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		}
 	}
 
-	e.sendBreachEmails(ctx, meta, caseID, clockType, tier, caseNumber, openedAt, caseLink, state)
+	// isAmericas reuses the same resolved audiences Resolve just computed
+	// above rather than re-deriving "is it the overnight coverage window"
+	// from e.clock() a second time -- see sendBreachEmails' own doc comment
+	// for what this gates.
+	isAmericas := slices.Contains(audiences, chataudience.Americas)
+	e.sendBreachEmails(ctx, meta, caseID, clockType, tier, caseNumber, openedAt, caseLink, state, isAmericas)
 }
 
 // sendBreachEmails sends the same tier crossing sendBreachAlert just posted
-// to Chat as two separate emails — one to the case's assigned engineer, one
-// to the case's team email group(s) — on top of (not instead of) the Chat
-// alert. A no-op when e.email is nil (no SLA breach email reaction
-// configured for this deployment). Either recipient is skipped silently
-// (logged at INFO, not WARN/ERROR) when entity-service couldn't resolve any
-// address for it (state.AssigneeEmail/TeamEmail+OnboardingTeamEmail all
-// empty) — a case with no assignee, or a team with no configured
-// group_email, is a normal state, not a misconfiguration this engine can
-// fix; production has no real address to send to in that case regardless.
-// The "team" email's own "to" list can carry two addresses, not one — see
-// its call site's own doc comment just below for why.
+// to Chat as two or three separate emails — one to the case's assigned
+// engineer, one to the case's team email group(s), and, when isAmericas is
+// true, one more to the fixed slaBreachAmericasTeamKey team (see that
+// constant's own doc comment) — on top of (not instead of) the Chat alert. A
+// no-op when e.email is nil (no SLA breach email reaction configured for
+// this deployment). Any recipient is skipped silently (logged at INFO, not
+// WARN/ERROR) when there's no address to send to for it (state.AssigneeEmail/
+// TeamEmail+OnboardingTeamEmail all empty, or slaBreachAmericasTeamKey not
+// yet resolved in teamGroupEmails) — a case with no assignee, or a team with
+// no configured group_email, is a normal state, not a misconfiguration this
+// engine can fix; production has no real address to send to in that case
+// regardless. The "team" email's own "to" list can carry two addresses, not
+// one — see its call site's own doc comment just below for why. isAmericas
+// is the SAME Resolve-computed decision sendBreachAlert's own Chat card used
+// to decide whether this breach posts to the chataudience.Americas Chat
+// audience (team.key's "Americas" Chat-audience *name* and
+// slaBreachAmericasTeamKey's team.key *value* are two independent
+// configuration points, happening to share a real-world team today but not
+// tied to each other).
 //
 // Unlike sendBreachAlert's own per-audience Chat sends, there is no
 // separate Redis claim guarding this against a duplicate send: the one
@@ -1340,7 +1395,7 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 // recipientRole ("assignee"/"team") is logged on every outcome so a skip or
 // failure is attributable to one recipient or the other, not just this
 // case/clockType/tier.
-func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, clockType string, tier int, caseNumber, openedAt, caseLink string, state clockState) {
+func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, clockType string, tier int, caseNumber, openedAt, caseLink string, state clockState, isAmericas bool) {
 	if e.email == nil {
 		return
 	}
@@ -1434,6 +1489,25 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		d.IntendedFor = intendedFor
 		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
 	})
+
+	// A separate, third email to the fixed Americas team — only during the
+	// overnight coverage window (isAmericas). A case whose own team IS the
+	// Americas team is deliberately left out of reals (not just skipped)
+	// rather than sent an identical second copy; unresolved in
+	// teamGroupEmails still goes through send so, under EMAIL_DEBUG_MODE, a
+	// missing configuration is as visible as the assignee/team recipients'
+	// own unresolved cases are.
+	if isAmericas {
+		var americasEmails []string
+		if americasEmail, ok := e.teamGroupEmail(slaBreachAmericasTeamKey); ok && !slices.Contains(teamEmails, americasEmail) {
+			americasEmails = []string{americasEmail}
+		}
+		send("americas", americasEmails, slaBreachAmericasTeamKey, func(intendedFor string) string {
+			d := data
+			d.IntendedFor = intendedFor
+			return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
+		})
+	}
 }
 
 // nonEmptyUnique returns values with blanks dropped and duplicates removed,

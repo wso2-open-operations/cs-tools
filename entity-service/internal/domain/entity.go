@@ -858,15 +858,22 @@ type SalesforceAccountUpsert struct {
 	// (primaryPartnerAccountId), nil when there is none.
 	PrimaryPartnerSfID *string
 
-	// The fields below come from the Sales Entity SE-1 change. Until it is
-	// deployed they are always nil, so the upsert writes them as
-	// COALESCE(new, stored): a nil keeps the value the ServiceNow sync loaded.
+	// The fields below are plain assignments in the upsert: nil clears the
+	// column. For the three person references, nil is written only when
+	// Salesforce sent no email; when an email was sent but no user could be
+	// resolved, the matching Keep flag is set and the stored value stays.
 	CustomerSuccessManagerID  *string
 	SecondaryTechnicalOwnerID *string
 	RenewalAccountManagerID   *string
-	AccountVertical           *string
-	LostReasonCategory        *string
-	DeactivationDate          *time.Time
+	// KeepCustomerSuccessManager, KeepSecondaryTechnicalOwner and
+	// KeepRenewalAccountManager keep the stored column instead of writing the
+	// (nil) id above.
+	KeepCustomerSuccessManager  bool
+	KeepSecondaryTechnicalOwner bool
+	KeepRenewalAccountManager   bool
+	AccountVertical             *string
+	LostReasonCategory          *string
+	DeactivationDate            *time.Time
 }
 
 // Salesforce Project_Contact__c states, as stored in Salesforce State__c and
@@ -3940,6 +3947,28 @@ type UpdateCaseRequest struct {
 	// to be a real email address; a configured display label (e.g. a team or
 	// system name) is an intended use, not a misuse.
 	ActorEmail *string `json:"actorEmail,omitempty"`
+	// AdminReopen moves a closed case to any other state, bypassing the
+	// normal state-transition table (closed has no entry in either table in
+	// case_state_transitions.go -- it is otherwise terminal for every
+	// caller). Only honored when the case's current state is actually
+	// closed, the caller is internal (isInternalCaller in UpdateCase), AND
+	// the caller's own client id is the configured CSM portal backend's
+	// (CaseService.csmPortalClientID) -- isInternalCaller alone only
+	// distinguishes WSO2 staff from an external/customer caller, not an
+	// admin from any other internal user, so the client-id check is what
+	// actually ties this bypass to apps/csm-portal/backend's own, separate
+	// PermAdmin check, which is the only place the real "is this caller an
+	// admin" decision is made. apps/csm-portal/backend is the only intended
+	// source of this field -- it sets it itself, after its own PermAdmin
+	// check, and never forwards whatever a client sent for this key
+	// verbatim. Only true is meaningful; omit it rather than sending false.
+	AdminReopen *bool `json:"adminReopen,omitempty"`
+	// ReopenReason is an optional free-text note on why the case was
+	// reopened, stored only when AdminReopen moves it out of closed. It is
+	// write-only: never echoed in UpdateCaseResponse/UpdatedCase, never
+	// returned by any other read of the case, and never shown in any UI.
+	// Ignored unless AdminReopen is also true.
+	ReopenReason *string `json:"reopenReason,omitempty"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -4035,11 +4064,11 @@ type WatchListUser struct {
 	// read from a real work_item_watcher row: one of the case's project's
 	// account's five named stakeholders (technical owner, secondary
 	// technical owner, account manager, renewal account manager, and
-	// customer success manager -- a strictly larger set than
-	// AccountDefaultWatcherEmails' own four, which deliberately excludes the
-	// CSM from the default email audience; that is a decision about who
-	// gets emailed, not about who the account's stakeholders are). These
-	// five are never auto-persisted into work_item_watcher (see
+	// customer success manager -- the same five AccountDefaultWatcherEmails
+	// resolves into a case.* email's Recipients, plus, conditionally, the
+	// project's own onboarding owner during active onboarding, which is a
+	// project-level role and so is not one of this display's stakeholders).
+	// These five are never auto-persisted into work_item_watcher (see
 	// addRequestedWatchers' own doc comment) -- fetchCaseWatchers now adds
 	// them to every read, always, specifically so a caller can see every
 	// stakeholder associated with the case -- and this IS an enforcement
@@ -6206,6 +6235,25 @@ type TeamChatWebhook struct {
 // that team's Chat space.
 type ListTeamChatWebhooksResponse struct {
 	Teams []TeamChatWebhook `json:"teams"`
+}
+
+// TeamGroupEmail is one team's own configured notification mailbox
+// (team.group_email, migration 0117), keyed by team.key (migration 0152)
+// rather than name -- a caller like csm-notification-service looks this up
+// by a specific team's stable handle (e.g. "americas_cre_team"), not by its
+// possibly-changing display name.
+type TeamGroupEmail struct {
+	Key        string `json:"key"`
+	GroupEmail string `json:"groupEmail"`
+}
+
+// ListTeamGroupEmailsResponse is the response for GET /teams/group-emails --
+// internal-caller-only (see TeamService.ListGroupEmails), same posture as
+// GET /teams/chat-webhooks even though a group email is less sensitive than
+// a webhook URL: this is still routing data for an internal notification
+// feature, not something meant for general consumption.
+type ListTeamGroupEmailsResponse struct {
+	Teams []TeamGroupEmail `json:"teams"`
 }
 
 // TeamDetail is the response for GET /teams/{id} -- the same id/name/type

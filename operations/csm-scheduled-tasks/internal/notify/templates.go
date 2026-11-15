@@ -58,6 +58,112 @@ var alertTemplate = bakeLogo(alertTemplateRaw)
 var openCasesReportTemplate = bakeLogo(openCasesReportTemplateRaw)
 var unresolvedProductsReportTemplate = bakeLogo(unresolvedProductsReportTemplateRaw)
 
+// logoTemplates lists every template baked via bakeLogo -- SetLogoURL
+// rewrites each of these, so a new template that carries a logo must be
+// added here or it won't pick up an override.
+func logoTemplates() []*string {
+	return []*string{
+		&alertTemplate, &openCasesReportTemplate, &unresolvedProductsReportTemplate,
+		&staleCasesReportTemplate, &migrationCaseReportTemplate, &productRegressionReportTemplate,
+		&queryHoursTemplate, &worklogsReportTemplate,
+	}
+}
+
+// SetLogoURL replaces wso2LogoURL in every already-baked template with url.
+// An empty value keeps the built-in. Mirrors
+// integrations/csm-notification-service's own notifications.SetLogoURLs --
+// call once at startup, before any email is rendered.
+func SetLogoURL(url string) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return
+	}
+	escaped := html.EscapeString(url)
+	for _, t := range logoTemplates() {
+		*t = strings.ReplaceAll(*t, wso2LogoURL, escaped)
+	}
+}
+
+// defaultCompanyName is the name baked into every template by default.
+const defaultCompanyName = "WSO2"
+
+// companyName is the name every rendered email currently carries, returned
+// by CompanyName (e.g. for the product regression report's own Go-formatted
+// group header, which isn't a baked HTML template -- humanizeState's
+// separate "wso2" mapping deliberately does NOT read this, see its own doc
+// comment). companyNameHTML is the same name HTML-escaped, the baseline
+// the next SetCompanyName call rewrites from -- tracking it (rather than
+// always diffing from defaultCompanyName) is what makes repeated calls
+// correctly reversible. Both are written only by SetCompanyName, so call it
+// once at startup, before any email is rendered.
+var (
+	companyName     = defaultCompanyName
+	companyNameHTML = defaultCompanyName
+)
+
+// CompanyName returns the name configured by SetCompanyName (or
+// defaultCompanyName if it was never called, or called with an empty value).
+func CompanyName() string {
+	return companyName
+}
+
+// companyNamePhrases lists every fixed phrase (not a bare "WSO2") that
+// carries the company name in a template body -- never a bare "WSO2", since
+// that also appears in the Apache license header every raw template file
+// carries as a leading HTML comment. The logo alt text is a generic "Logo"
+// in the source templates, not "WSO2", so it is never a target either.
+func companyNamePhrases(from, to string) [][2]string {
+	return [][2]string{
+		{
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", from),
+			fmt.Sprintf("&copy; <!-- [YEAR] --> %s LLC. All Rights Reserved.", to),
+		},
+		{
+			fmt.Sprintf("%s Case Id", from),
+			fmt.Sprintf("%s Case Id", to),
+		},
+		{
+			fmt.Sprintf("%s Case ID", from),
+			fmt.Sprintf("%s Case ID", to),
+		},
+		{
+			fmt.Sprintf("%s ID</th>", from),
+			fmt.Sprintf("%s ID</th>", to),
+		},
+		{
+			fmt.Sprintf("%s Product</th>", from),
+			fmt.Sprintf("%s Product</th>", to),
+		},
+	}
+}
+
+// SetCompanyName replaces the company name in the fixed phrases a template
+// body carries (the copyright line, and the "WSO2 Case Id"/"WSO2 Case
+// ID"/"WSO2 ID"/"WSO2 Product" report column headers) and updates
+// CompanyName's return value (read by the product regression report's own
+// group header -- NOT by humanizeState, see its own doc comment for why) --
+// not the bare word "WSO2" wherever it appears, which would also corrupt
+// the Apache license header every raw template carries as a leading HTML
+// comment. An empty value keeps the current name. Unlike SetLogoURL, this
+// rewrites from the
+// *current* name, not a hardcoded default, so repeated calls are correctly
+// reversible. Call once at startup, before any email is rendered.
+func SetCompanyName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	escaped := html.EscapeString(name)
+	phrases := companyNamePhrases(companyNameHTML, escaped)
+	for _, t := range logoTemplates() {
+		for _, phrase := range phrases {
+			*t = strings.ReplaceAll(*t, phrase[0], phrase[1])
+		}
+	}
+	companyName = name
+	companyNameHTML = escaped
+}
+
 // escapeHTML mirrors integrations/csm-notification-service's own
 // internal/notifications.escapeHTML exactly: HTML-escapes s and
 // additionally converts every non-ASCII rune to a numeric HTML character
@@ -452,6 +558,13 @@ func orDash(s string) string {
 // special-cased to the all-caps brand form ("WSO2") rather than the
 // title-case default ("Wso2") every other word gets — the only state value
 // (CaseStateWaitingOnWSO2 = "waiting_on_wso2") that contains it.
+// Deliberately NOT routed through CompanyName/SetCompanyName: this label
+// only ever appears in stale_cases_report/open_cases_report, both sent only
+// to whatever address list a task's own SUB_CRON_RECIPIENTS names -- an
+// internal, operator-configured audience by both design and code (neither
+// report has any customer-contact derivation at all, unlike the genuinely
+// customer-facing time_card_report) -- so there's no branding reason to
+// make it configurable.
 func humanizeState(state string) string {
 	words := strings.Split(state, "_")
 	for i, w := range words {
