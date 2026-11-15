@@ -35,3 +35,21 @@ export function stripStaffNameMarker(name: string | null | undefined): string {
   if (!name) return "";
   return name.replace(STAFF_NAME_MARKER, "").trim();
 }
+
+/**
+ * Strips each of `firstName`/`lastName` individually, then joins the
+ * non-empty ones with a space. Deliberately NOT `stripStaffNameMarker(
+ * \`${firstName} ${lastName}\`)` — stripping only once, after joining,
+ * misses the marker whenever it's actually a trailing word of `firstName`
+ * (e.g. firstName "Jane Ⓦ", lastName "Doe" joins to "Jane Ⓦ Doe", with the
+ * marker now in the middle of the combined string, past where the
+ * trailing-anchored regex looks).
+ */
+export function joinStaffName(
+  firstName: string | null | undefined,
+  lastName: string | null | undefined,
+): string {
+  return [stripStaffNameMarker(firstName), stripStaffNameMarker(lastName)]
+    .filter(Boolean)
+    .join(" ");
+}

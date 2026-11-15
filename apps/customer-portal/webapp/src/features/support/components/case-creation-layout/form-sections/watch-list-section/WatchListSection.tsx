@@ -25,7 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, type JSX } from "react";
 import type { ProjectContact } from "@features/settings/types/users";
-import { stripStaffNameMarker } from "@utils/staffNameMarker";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 type ContactOption = {
   label: string;
@@ -55,7 +55,7 @@ export function WatchListSection({
     () =>
       contacts
         .map((c) => ({
-          label: stripStaffNameMarker(`${c.firstName} ${c.lastName}`) || c.email,
+          label: joinStaffName(c.firstName, c.lastName) || c.email,
           value: c.email,
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
