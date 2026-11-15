@@ -180,6 +180,7 @@ export default function CommentBubble({
   const technicalTeamBadge = (
     <Box
       component="span"
+      role="img"
       aria-label="Technical Team"
       sx={{
         display: "inline-flex",

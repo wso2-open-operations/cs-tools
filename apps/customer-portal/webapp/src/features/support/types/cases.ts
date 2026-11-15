@@ -352,6 +352,9 @@ export type CaseActivity = {
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   createdByFullName?: string | null;
+  /** True when the backend resolved the actor to an internal-type user
+   * (WSO2 staff); carried onto the mapped comment for its avatar badge. */
+  createdByIsInternal?: boolean;
   type: string;
   commentType?: string;
   fileName?: string;
