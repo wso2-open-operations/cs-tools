@@ -26,6 +26,7 @@ import {
   CircularProgress,
   IconButton,
   Skeleton,
+  Tooltip,
   Typography,
   alpha,
 } from "@wso2/oxygen-ui";
@@ -54,7 +55,34 @@ import DeleteProductModal from "@features/project-details/components/deployments
 import type {
   DeploymentProductItemRowProps,
   DeploymentProductListProps,
+  ServiceRequestProductSelection,
 } from "@features/project-details/types/projectDetailsComponents";
+import {
+  SERVICE_REQUEST_DEPLOYMENT_NOT_ALLOWED_MESSAGE,
+  SERVICE_REQUEST_PRODUCT_NOT_ALLOWED_MESSAGE,
+} from "@features/project-details/constants/projectDetailsConstants";
+import { isServiceRequestProduct } from "@features/support/utils/caseCreation";
+
+/**
+ * Why a product cannot be picked for a service request, by the same rules the
+ * service request form lists products with, or null when it can.
+ *
+ * @param item - The deployment product.
+ * @param selection - The deployment's service request rules.
+ * @returns The reason, or null.
+ */
+function serviceRequestBlockedReason(
+  item: DeploymentProductItem,
+  selection: ServiceRequestProductSelection,
+): string | null {
+  if (!selection.deploymentAllowed) {
+    return SERVICE_REQUEST_DEPLOYMENT_NOT_ALLOWED_MESSAGE;
+  }
+  if (!isServiceRequestProduct(item, selection.productCategories)) {
+    return SERVICE_REQUEST_PRODUCT_NOT_ALLOWED_MESSAGE;
+  }
+  return null;
+}
 
 function ProductsSkeleton(): JSX.Element {
   return (
@@ -147,6 +175,7 @@ export default function DeploymentProductList({
   projectId,
   selectedProduct,
   onToggleProductSelect,
+  serviceRequestSelection,
 }: DeploymentProductListProps): JSX.Element {
   const queryClient = useQueryClient();
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
@@ -270,6 +299,12 @@ export default function DeploymentProductList({
                 onToggleSelect={() =>
                   onToggleProductSelect(deploymentId, item.id)
                 }
+                showSelection={!!serviceRequestSelection}
+                selectionBlockedReason={
+                  serviceRequestSelection
+                    ? serviceRequestBlockedReason(item, serviceRequestSelection)
+                    : null
+                }
                 onEdit={() => setEditingProduct(item)}
                 onDelete={() => handleDeleteClick(item)}
                 isDeleting={deletingProductId === item.id}
@@ -323,6 +358,8 @@ function ProductItemRow({
   item,
   isSelected,
   onToggleSelect,
+  showSelection,
+  selectionBlockedReason,
   onEdit,
   onDelete,
   isDeleting,
@@ -387,36 +424,44 @@ function ProductItemRow({
             minWidth: 0,
           }}
         >
-          <Box
-            component="button"
-            type="button"
-            role="checkbox"
-            aria-checked={isSelected}
-            aria-label={`Select ${name} for service request`}
-            onClick={(e) => {
-              e.preventDefault();
-              onToggleSelect();
-            }}
-            sx={{
-              width: 16,
-              height: 16,
-              flexShrink: 0,
-              mt: 0.25,
-              border: "1px solid",
-              borderColor: "divider",
-              bgcolor: isSelected ? "primary.main" : "background.paper",
-              color: isSelected ? "primary.contrastText" : "transparent",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              p: 0,
-            }}
-          >
-            {isSelected ? (
-              <Check size={12} strokeWidth={3} aria-hidden />
-            ) : null}
-          </Box>
+          {showSelection && (
+            <Tooltip title={selectionBlockedReason ?? ""}>
+              {/* A disabled button fires no events, so the tooltip needs this wrapper. */}
+              <Box component="span" sx={{ display: "inline-flex", flexShrink: 0, mt: 0.25 }}>
+                <Box
+                  component="button"
+                  type="button"
+                  role="checkbox"
+                  aria-checked={isSelected}
+                  aria-label={`Select ${name} for service request`}
+                  disabled={!!selectionBlockedReason}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onToggleSelect();
+                  }}
+                  sx={{
+                    width: 16,
+                    height: 16,
+                    flexShrink: 0,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: isSelected ? "primary.main" : "background.paper",
+                    color: isSelected ? "primary.contrastText" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    p: 0,
+                    "&:disabled": { cursor: "not-allowed", opacity: 0.4 },
+                  }}
+                >
+                  {isSelected ? (
+                    <Check size={12} strokeWidth={3} aria-hidden />
+                  ) : null}
+                </Box>
+              </Box>
+            </Tooltip>
+          )}
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Box
               sx={{
