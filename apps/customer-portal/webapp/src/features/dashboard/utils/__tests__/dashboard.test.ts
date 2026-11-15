@@ -53,6 +53,13 @@ describe("getSeverityLegendColor", () => {
   it("returns a hex color for known severity", () => {
     expect(getSeverityLegendColor("2 - High")).toMatch(/^#/);
   });
+
+  it("colours bare severity codes like the labels they stand for", () => {
+    expect(getSeverityLegendColor("S2")).toBe(getSeverityLegendColor("High (P2)"));
+    expect(getSeverityLegendColor("S0")).toBe(getSeverityLegendColor("Catastrophic (P0)"));
+    expect(getSeverityLegendColor("S4(Query)")).toBe(getSeverityLegendColor("Low (P4)"));
+    expect(getSeverityLegendColor("S2")).not.toBe(getSeverityLegendColor("unknown"));
+  });
 });
 
 describe("computeCrCardIsCardLoading", () => {
