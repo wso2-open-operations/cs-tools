@@ -18,7 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
-import { stripStaffNameMarker } from "@utils/staffNameMarker";
+import { joinStaffName, stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /**
  * Minimal user-directory entry: just what UI affordances like the cases
@@ -41,7 +41,11 @@ interface RawDirectoryUser {
 function toDirectoryUser(u: RawDirectoryUser): DirectoryUser {
   const name =
     stripStaffNameMarker(u.name) ||
-    stripStaffNameMarker(`${u.firstName ?? ""} ${u.lastName ?? ""}`);
+    joinStaffName(u.firstName, u.lastName) ||
+    // A name that's nothing but the marker (see staffNameMarker.ts) strips to
+    // "" -- falling back to email keeps this user selectable in the assignee
+    // filter below, which drops any entry with no name at all.
+    (u.email ?? "");
   return { name, email: u.email ?? "" };
 }
 

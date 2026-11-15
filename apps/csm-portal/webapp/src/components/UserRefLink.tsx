@@ -70,8 +70,10 @@ export default function UserRefLink({
   // Some internal users' stored name carries a trailing circled-W marker
   // (see staffNameMarker.ts) -- stripped here, once, so every caller of this
   // component (comments, activity feed, assignee displays, user lists, ...)
-  // only ever shows the person's actual name.
-  const displayName = stripStaffNameMarker(name);
+  // only ever shows the person's actual name. A name that's nothing but the
+  // marker strips to "" -- email, then a generic label, keep the link from
+  // rendering with no visible text and no accessible name.
+  const displayName = stripStaffNameMarker(name) || email || "Unknown user";
 
   if (!resolvedId) {
     return <span className={className}>{displayName}</span>;

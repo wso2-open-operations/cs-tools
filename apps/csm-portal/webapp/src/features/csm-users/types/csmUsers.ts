@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { stripStaffNameMarker } from "@utils/staffNameMarker";
+import { joinStaffName, stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /**
  * Whether the user is staff or a customer/partner contact. The value set
@@ -293,7 +293,7 @@ export function normalizeUser(u: User | SnUser): NormalizedUser {
   return {
     id: u.id,
     userName: u.userName,
-    name: stripStaffNameMarker(`${u.firstName ?? ""} ${u.lastName ?? ""}`),
+    name: joinStaffName(u.firstName, u.lastName),
     email: u.email,
     timezone: u.timezone ?? null,
     userType: u.userType,

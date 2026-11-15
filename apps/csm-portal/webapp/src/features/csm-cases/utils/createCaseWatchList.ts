@@ -15,7 +15,7 @@
 // under the License.
 
 import type { BeProjectContact, BeUser } from "@api/backend/types";
-import { stripStaffNameMarker } from "@utils/staffNameMarker";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 const REGISTERED_STATE = "REGISTERED";
 
@@ -90,9 +90,7 @@ export function eligibleContactWatchers(
 export function internalUserWatcher(user: BeUser): WatcherCandidate | null {
   const email = (user.email ?? "").trim();
   if (!email) return null;
-  const name = stripStaffNameMarker(
-    [user.firstName, user.lastName].filter(Boolean).join(" "),
-  );
+  const name = joinStaffName(user.firstName, user.lastName);
   return { email, name, kind: "internal" };
 }
 

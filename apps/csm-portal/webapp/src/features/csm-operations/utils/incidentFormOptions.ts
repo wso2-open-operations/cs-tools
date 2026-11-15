@@ -24,7 +24,7 @@ import type {
   BeItService,
   BeUser,
 } from "@api/backend/types";
-import { stripStaffNameMarker } from "@utils/staffNameMarker";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 // Shared between CreateIncidentPage and EditIncidentDialog so their dropdown
 // option sets can't drift apart.
@@ -116,9 +116,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * surface as such, not to paper over with an identifier. A name/username that
  * itself is a UUID (provisioning leaves that behind) is treated as missing. */
 export function userLabel(u: BeUser): string {
-  const name = stripStaffNameMarker(
-    [u.firstName, u.lastName].filter(Boolean).join(" "),
-  );
+  const name = joinStaffName(u.firstName, u.lastName);
   if (name && !UUID_RE.test(name)) return name;
   if (u.email) return u.email;
   if (u.userName && !UUID_RE.test(u.userName)) return u.userName;
