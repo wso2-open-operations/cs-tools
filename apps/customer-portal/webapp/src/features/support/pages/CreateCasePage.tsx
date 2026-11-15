@@ -1635,17 +1635,7 @@ export default function CreateCasePage(): JSX.Element {
   );
 
   return (
-    // The layout's bottom padding sits at the visible area's edge, not after a
-    // long form, so the page keeps its own space between the submit button and
-    // the footer.
-    <Box
-      sx={{
-        width: "100%",
-        pt: 0,
-        pb: { xs: 2, sm: 2.5, md: 3 },
-        position: "relative",
-      }}
-    >
+    <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
       {/* header section */}
       <CaseCreationHeader
         onBack={handleBack}
