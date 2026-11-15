@@ -35,17 +35,63 @@ import (
 // any other web image.
 const wso2LogoURL = "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Logo-Black.png"
 
+// logoURL is the logo every notice's Sprintf call reads -- defaults to
+// wso2LogoURL, overridable by SetLogoURL. Unlike internal/notify's own
+// bakeLogo/SetLogoURL (which rewrite an already-rendered template string),
+// these five templates are only ever filled in at send time via
+// fmt.Sprintf, so a plain package variable read at that moment is enough;
+// there's no baked state to search-and-replace.
+var logoURL = wso2LogoURL
+
+// SetLogoURL overrides the logo URL every notice in this package sends.
+// An empty value keeps wso2LogoURL (the built-in default). Call once at
+// startup, before any notice is sent.
+func SetLogoURL(url string) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return
+	}
+	logoURL = url
+}
+
+// defaultCompanyName is the name every notice carries by default.
+const defaultCompanyName = "WSO2"
+
+// companyName is the name every notice's Sprintf call reads (the logo alt
+// text and the "sent by ...'s support system" footer disclaimer) --
+// overridable by SetCompanyName. Read fresh at send time, same reasoning as
+// logoURL above.
+var companyName = defaultCompanyName
+
+// CompanyName returns the name configured by SetCompanyName (or
+// defaultCompanyName if it was never called, or called with an empty value).
+func CompanyName() string {
+	return companyName
+}
+
+// SetCompanyName overrides the company name every notice in this package
+// carries (logo alt text, footer disclaimer). An empty value keeps the
+// current name. Call once at startup, before any notice is sent.
+func SetCompanyName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	companyName = name
+}
+
 // emailHTMLTemplate is the branded shell the customer-facing notice is
 // wrapped in — peach page background, logo header, orange accent border
 // around the message body, and the standard disclaimer footer — matching
 // real customer-facing examples. The internal notice uses a different,
-// distinct template (internalEmailHTMLTemplate) — see Send. Two
-// placeholders: the logo URL, then the notice body already converted to
-// simple HTML by plainTextToHTML.
+// distinct template (internalEmailHTMLTemplate) — see Send. Four
+// placeholders: the logo URL, the company name (logo alt text), the notice
+// body already converted to simple HTML by plainTextToHTML, and the
+// company name again (footer disclaimer).
 const emailHTMLTemplate = `<div style="background-color:#fdece2;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:4px;overflow:hidden;">
     <div style="padding:24px 32px 16px 32px;">
-      <img src="%s" alt="WSO2" height="28" style="display:block;">
+      <img src="%s" alt="%s" height="28" style="display:block;">
     </div>
     <div style="padding:8px 32px 24px 32px;">
       <div style="border-left:4px solid #ff7300;padding:4px 0 4px 16px;color:#333333;font-size:14px;line-height:1.6;">
@@ -53,7 +99,7 @@ const emailHTMLTemplate = `<div style="background-color:#fdece2;padding:32px 16p
       </div>
     </div>
     <div style="padding:16px 32px;border-top:1px solid #eeeeee;color:#888888;font-size:11px;">
-      This automated message was sent by WSO2's support system. Please do not reply to this email.
+      This automated message was sent by %s's support system. Please do not reply to this email.
     </div>
   </div>
 </div>`
@@ -66,11 +112,12 @@ const emailHTMLTemplate = `<div style="background-color:#fdece2;padding:32px 16p
 // day-0 notice): the greeting and intro sentence render in blue and larger
 // than the body text, the five project/account fields sit in their own
 // bordered detail box, and the closing sentence plus sign-off are plain
-// black text. Five placeholders in order: greeting (HTML), intro sentence
+// black text. Eight placeholders in order: greeting (HTML), intro sentence
 // (HTML), the detail box's inner HTML (pre-built field rows), closing
-// sentence (HTML), sign-off (HTML). Built by renderInternalEmailHTML,
-// which is the only thing that knows this template expects exactly that
-// shape.
+// sentence (HTML), sign-off (HTML), the company name (footer disclaimer),
+// the logo URL, and the company name again (logo alt text). Built by
+// renderInternalEmailHTML, which is the only thing that knows this template
+// expects exactly that shape.
 const internalEmailHTMLTemplate = `<div style="background-color:#f2f2f2;padding:24px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="background-color:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:24px 32px;box-sizing:border-box;">
     <p style="color:#1a56db;font-size:16px;line-height:1.6;margin:0 0 16px 0;">%s</p>
@@ -83,8 +130,8 @@ const internalEmailHTMLTemplate = `<div style="background-color:#f2f2f2;padding:
   </div>
   <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="width:100%%;margin-top:8px;">
     <tr>
-      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by WSO2's support system. Please do not reply to this email.</td>
-      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="WSO2" height="16" style="display:block;"></td>
+      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by %s's support system. Please do not reply to this email.</td>
+      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="%s" height="16" style="display:block;"></td>
     </tr>
   </table>
 </div>`
@@ -102,10 +149,11 @@ const internalEmailHTMLTemplate = `<div style="background-color:#f2f2f2;padding:
 // has no Salesforce ID). A project with several due invoices gets one such
 // box per invoice, stacked, as in the real legacy email
 // (actual_invoice_email.png). A table rather than the reference's
-// display:flex, since flex isn't reliable across email clients. Seven
+// display:flex, since flex isn't reliable across email clients. Nine
 // placeholders in order: greeting, intro, project fields' inner HTML, the
 // invoice boxes' HTML (invoiceBoxHTML, one per invoice), closing, sign-off,
-// wso2LogoURL. Built by renderInternalInvoiceEmailHTML.
+// the company name (footer disclaimer), the logo URL, and the company name
+// again (logo alt text). Built by renderInternalInvoiceEmailHTML.
 const internalInvoiceEmailHTMLTemplate = `<div style="background-color:#f2f2f2;padding:24px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="background-color:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:24px 32px;box-sizing:border-box;">
     <p style="color:#1a56db;font-size:16px;line-height:1.6;margin:0 0 16px 0;">%s</p>
@@ -119,8 +167,8 @@ const internalInvoiceEmailHTMLTemplate = `<div style="background-color:#f2f2f2;p
   </div>
   <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="width:100%%;margin-top:8px;">
     <tr>
-      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by WSO2's support system. Please do not reply to this email.</td>
-      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="WSO2" height="16" style="display:block;"></td>
+      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by %s's support system. Please do not reply to this email.</td>
+      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="%s" height="16" style="display:block;"></td>
     </tr>
   </table>
 </div>`
@@ -139,9 +187,10 @@ const wso2BusinessContactDocURL = "https://docs.google.com/document/d/1xv-n6XK7E
 // sweep.go's noBusinessContactBodyTemplate verbatim) with the project name
 // bolded and two warning clauses in bold red italic, a real hyperlink to
 // the business contact doc, and the same nested field-detail box style
-// used elsewhere. Five placeholders in order: intro (HTML), project name
-// (HTML-escaped, for the bolded mention), doc URL, fields' inner HTML,
-// wso2LogoURL.
+// used elsewhere. Seven placeholders in order: intro (HTML), project name
+// (HTML-escaped, for the bolded mention), doc URL, fields' inner HTML, the
+// company name (footer disclaimer), the logo URL, and the company name
+// again (logo alt text).
 const noBusinessContactEmailHTMLTemplate = `<div style="background-color:#f2f2f2;padding:24px 16px;font-family:Arial,Helvetica,sans-serif;">
   <p style="color:#c62828;font-size:20px;font-weight:bold;margin:0 0 16px 0;">Internal - Customer Project without Business Contacts</p>
   <div style="background-color:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:24px 32px;box-sizing:border-box;">
@@ -154,8 +203,8 @@ const noBusinessContactEmailHTMLTemplate = `<div style="background-color:#f2f2f2
   </div>
   <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="width:100%%;margin-top:8px;">
     <tr>
-      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by WSO2's support system. Please do not reply to this email.</td>
-      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="WSO2" height="16" style="display:block;"></td>
+      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by %s's support system. Please do not reply to this email.</td>
+      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="%s" height="16" style="display:block;"></td>
     </tr>
   </table>
 </div>`
@@ -171,8 +220,8 @@ const internalEmailFallbackTemplate = `<div style="background-color:#f2f2f2;padd
   </div>
   <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="width:100%%;margin-top:8px;">
     <tr>
-      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by WSO2's support system. Please do not reply to this email.</td>
-      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="WSO2" height="16" style="display:block;"></td>
+      <td style="padding:0 0 0 32px;color:#888888;font-size:11px;text-align:left;vertical-align:middle;">This automated message was sent by %s's support system. Please do not reply to this email.</td>
+      <td style="padding:0 32px 0 8px;text-align:right;vertical-align:middle;white-space:nowrap;"><img src="%s" alt="%s" height="16" style="display:block;"></td>
     </tr>
   </table>
 </div>`
@@ -336,7 +385,7 @@ func (n *EmailNotifier) filterRecipients(emails []string) []string {
 // border, footer disclaimer — matching real customer-facing notice
 // examples. Used by Send only when notice.Recipients.Customers is non-empty.
 func renderEmailHTML(body string) string {
-	return fmt.Sprintf(emailHTMLTemplate, wso2LogoURL, plainTextToHTML(body))
+	return fmt.Sprintf(emailHTMLTemplate, logoURL, CompanyName(), plainTextToHTML(body), CompanyName())
 }
 
 // internalBodyParagraphCount is the exact number of blank-line-separated
@@ -396,7 +445,7 @@ func renderInternalEmailHTML(body, projectSfID string, invoiceSfIDs []string) st
 	case n == noBusinessContactBodyParagraphCount:
 		return renderNoBusinessContactEmailHTML(paragraphs, projectSfID)
 	default:
-		return fmt.Sprintf(internalEmailFallbackTemplate, plainTextToHTML(body), wso2LogoURL)
+		return fmt.Sprintf(internalEmailFallbackTemplate, plainTextToHTML(body), CompanyName(), logoURL, CompanyName())
 	}
 }
 
@@ -416,7 +465,7 @@ func renderInternalSubscriptionEmailHTML(paragraphs []string, projectSfID string
 	closing := plainTextToHTML(paragraphs[7])
 	signoff := plainTextToHTML(paragraphs[8])
 
-	return fmt.Sprintf(internalEmailHTMLTemplate, greeting, intro, fields.String(), closing, signoff, wso2LogoURL)
+	return fmt.Sprintf(internalEmailHTMLTemplate, greeting, intro, fields.String(), closing, signoff, CompanyName(), logoURL, CompanyName())
 }
 
 // renderInternalInvoiceEmailHTML builds the invoice-based internal notice's
@@ -451,7 +500,7 @@ func renderInternalInvoiceEmailHTML(paragraphs []string, projectSfID string, inv
 	closing := plainTextToHTML(paragraphs[len(paragraphs)-2])
 	signoff := plainTextToHTML(paragraphs[len(paragraphs)-1])
 
-	return fmt.Sprintf(internalInvoiceEmailHTMLTemplate, greeting, intro, projectFields.String(), boxes.String(), closing, signoff, wso2LogoURL)
+	return fmt.Sprintf(internalInvoiceEmailHTMLTemplate, greeting, intro, projectFields.String(), boxes.String(), closing, signoff, CompanyName(), logoURL, CompanyName())
 }
 
 // invoiceBoxHTML is one invoice's nested box: its fields on the left half and
@@ -505,7 +554,7 @@ func renderNoBusinessContactEmailHTML(paragraphs []string, projectSfID string) s
 		fields.WriteString(fieldRowHTML(line))
 	}
 
-	return fmt.Sprintf(noBusinessContactEmailHTMLTemplate, intro, html.EscapeString(projectName), wso2BusinessContactDocURL, fields.String(), wso2LogoURL)
+	return fmt.Sprintf(noBusinessContactEmailHTMLTemplate, intro, html.EscapeString(projectName), wso2BusinessContactDocURL, fields.String(), CompanyName(), logoURL, CompanyName())
 }
 
 // fieldRowHTML renders one "Label: value" paragraph (e.g. "Project Key:

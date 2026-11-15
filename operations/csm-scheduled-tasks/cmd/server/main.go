@@ -41,6 +41,7 @@ import (
 	"github.com/adhocore/gronx"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
+	acpnotify "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
@@ -77,6 +78,25 @@ import (
 func main() {
 	loadDotEnv(".env")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	// Optional logo/company-name overrides for every email this component
+	// sends, across both notify packages (internal/notify's eight report/
+	// alert templates, internal/acp/notify's five ACP closure templates).
+	// EMAIL_LOGO_DARK_URL and EMAIL_TEMPLATE_COMPANY_NAME are the same names
+	// integrations/csm-notification-service uses, reusable verbatim across
+	// components; EMAIL_LOGO_LIGHT_URL is this component's own name for its
+	// equivalent of that service's EMAIL_LOGO_WHITE_URL. Unset keeps every
+	// built-in default. The two logo vars are deliberately separate, not
+	// shared, because each package's templates share one fixed header color
+	// that needs the opposite logo color to stay visible: internal/notify's
+	// eight templates all share an orange header (needs a light-colored
+	// logo), internal/acp/notify's five all share a light background (needs
+	// a dark-colored logo).
+	notify.SetLogoURL(os.Getenv("EMAIL_LOGO_LIGHT_URL"))
+	acpnotify.SetLogoURL(os.Getenv("EMAIL_LOGO_DARK_URL"))
+	companyName := os.Getenv("EMAIL_TEMPLATE_COMPANY_NAME")
+	notify.SetCompanyName(companyName)
+	acpnotify.SetCompanyName(companyName)
 
 	// An on-demand run (--run-now=<task>, see runnow.go) is parsed first, before
 	// anything is built: a bad argument must stop here, never fall through to the

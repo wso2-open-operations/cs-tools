@@ -447,6 +447,11 @@ export default function CsmAccountDetailPage(): JSX.Element {
           <MetaCell label="Renewal Account Manager">
             <Typography variant="body2">{a.renewalAccountManager?.name ?? "—"}</Typography>
           </MetaCell>
+          {a.customerSuccessManager?.name && (
+            <MetaCell label="Customer Success Manager">
+              <Typography variant="body2">{a.customerSuccessManager.name}</Typography>
+            </MetaCell>
+          )}
           <MetaCell label="Technical Owner">
             <Typography variant="body2">{a.technicalOwner?.name ?? "—"}</Typography>
           </MetaCell>

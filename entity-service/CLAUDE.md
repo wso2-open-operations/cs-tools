@@ -69,7 +69,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
-| `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
+| `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; a value Salesforce sends empty clears its column; see "Salesforce Account ingest" for the full column set |
 | `CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Opportunity` envelopes (`sf_opportunity` plus its `sf_opportunity_product` line items, see "Salesforce Opportunity ingest" below) and `Linked_Opportunity__c`, `Invoice__c` and standalone `OpportunityLineItem` envelopes (`sf_opportunity_link`, `sf_invoice`, `sf_opportunity_product`); off, they are acknowledged and ignored. Keep it off while csm-sync-service still copies these tables from ServiceNow: the two writers use different row ids and `sf_id` is not unique, so both on means duplicate rows |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project__c` envelopes (see "Salesforce Project ingest" below); off, they are acknowledged and ignored. Update-only unless the insert switch is on too |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` | no | `false` | With the project flag on, lets the Project ingest and `EnsureProject` insert projects CSM does not have. Keep it off while csm-sync-service still inserts `project` rows (different id schemes and a UNIQUE `key`: its insert would fail forever); turn it on at cutover |
@@ -524,17 +524,20 @@ the list.
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
   `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
   `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
-- `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
+  Also plain assignment: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
-  `deactivation_date`. Sales Entity sends these only after its "customer fields"
-  change (SE-1 in `docs/customer-onboarding/SALESFORCE_SYNC_PLAN.md`); until then they
-  keep the ServiceNow sync's value. Switch them to plain assignment once SE-1 ships.
+  `deactivation_date`. A NULL cleared in Salesforce clears the column. For the
+  three person columns only, an empty email clears but an email CSM cannot resolve
+  to a user (no match, provisioning off or failed) keeps the stored value
+  (`Keep*` flags on `SalesforceAccountUpsert`, `$33`-`$35`); the event still succeeds.
 - Never written: `number` on an existing row (a new row gets the Salesforce Id,
   decision D9), `cre_team_id`, `sre_team_id`, `support_tier`, `support_timezone`,
   `suspension_process_state`, the two AI flags, `drive_location`.
 - Person references resolve by email against `"user"` (`LookupUserIDByEmail`); an
-  email with no user writes NULL and logs a WARN with the role and email.
+  email with no user logs a WARN with the role and email, and writes NULL
+  (`account_manager_id`, `technical_owner_id`) or keeps the stored value (the three
+  person columns above).
 - A value longer than its VARCHAR column (`accountColumnLimits`) or a date that does
   not parse (`2006-01-02`) is written as NULL with a WARN, so one bad field cannot
   fail the event.
@@ -1487,9 +1490,9 @@ revisited.
 
   **`Recipients` depends on `req.Type`.** For `case`/`engagement`/
   `service_request`/`security_report_analysis` it's the case's own resolved
-  watch list emails, unioned with the account's four default-watcher
+  watch list emails, unioned with the account's default-watcher
   stakeholders resolved fresh via `CaseRepository.AccountDefaultWatcherEmails`
-  — see "Case watch list" below for why those four are resolved at publish
+  — see "Case watch list" below for why those are resolved at publish
   time rather than read from the persisted watch list. For `announcement`,
   `publishCaseCreatedEvent` instead resolves the audience via
   `CaseService.ProjectContactEmailsByRole` — every `project_contact`
@@ -4584,13 +4587,27 @@ changed.
   `validateWatchListProjectMembership` for a submitted id (nothing exempt
   to submit any more).
 
+  **`customer_success_manager_id` and the project's `onboarding_owner_id`
+  were later added to `AccountDefaultWatcherEmails`, by explicit product
+  request, reversing the original exclusion above.** The CSM is now unioned
+  into a `case.*` email's `Recipients` the same way the other four
+  stakeholders are. The project's own onboarding owner (`project.
+  onboarding_owner_id`, migration 0104) is unioned in too, but only while
+  `project.onboarding_status` is `IN_PROGRESS` — an onboarding owner is a
+  default recipient during the onboarding window itself, not before it
+  starts or after it finishes, so the query gates that one column on the
+  other (`CASE WHEN p.onboarding_status = 'IN_PROGRESS' THEN oo.email END`)
+  rather than always including it. Resolved fresh at publish time like every
+  other stakeholder here, so a project moving into or out of onboarding (or
+  the CSM/onboarding owner being reassigned) is reflected on the very next
+  notification, not stuck on whoever held the role earlier.
+
   **Superseded below: `fetchCaseWatchers` now also synthesizes the
   account's named stakeholders directly into every read, not just into the
   email audience.** The paragraph above (and `AccountDefaultWatcherEmails`)
   is still exactly how `Recipients` is resolved for a `case.*` email — that
-  hasn't changed, `customer_success_manager_id` included: the CSM still
-  isn't unioned into a case.* email's `Recipients`. What changed, by later
-  explicit product request, is the *display* side: a case's "Watchers" list
+  hasn't changed. What changed, by later explicit product request, is the
+  *display* side: a case's "Watchers" list
   in both portals previously showed only real `work_item_watcher` rows, so
   the stakeholders being emailed by default were invisible on that list
   entirely — a customer or engineer looking at "who's watching this case"
@@ -4606,18 +4623,16 @@ changed.
     subject to that check at all, which is also what keeps an engineer's
     own Follow/Unfollow self-subscribe working regardless of
     `project_contact` membership.
-  - `stakeholders` resolves **five** account roles — the same four
-    `AccountDefaultWatcherEmails` resolves, plus
-    `customer_success_manager_id` — and synthesizes one row per resolved
-    stakeholder, every time, with `locked = true`. This is a strictly
-    larger set than the email audience by deliberate product decision: the
-    CSM is a real stakeholder worth *showing* on the case, even though
-    `AccountDefaultWatcherEmails` still deliberately excludes them from the
-    default email audience (see that function's own doc comment — a
-    decision about who gets emailed, not about who the account's
-    stakeholders are). None of these five are auto-persisted into
-    `work_item_watcher` (see above) and still aren't; this is a read-time
-    join, not a write.
+  - `stakeholders` resolves **five** account roles — the same five
+    `AccountDefaultWatcherEmails` resolves (technical owner, secondary
+    technical owner, account manager, renewal account manager, customer
+    success manager) — and synthesizes one row per resolved stakeholder,
+    every time, with `locked = true`. `AccountDefaultWatcherEmails` also
+    unions in the project's own onboarding owner, conditionally, which is
+    a project-level role rather than one of the account's named
+    stakeholders and so is not one of this display's five. None of these
+    five are auto-persisted into `work_item_watcher` (see above) and still
+    aren't; this is a read-time join, not a write.
   - A user who is both a real persisted watcher and one of the five
     stakeholders appears exactly once, as the locked (stakeholder) copy —
     `DISTINCT ON (id)` ordered `locked DESC` after `UNION ALL`-ing the two
@@ -4793,6 +4808,26 @@ applies upstream.
 - The refusal carries a machine-readable `case_invalid_state_transition` error code (the same
   `apierror.ValidationError.Code` convention change requests use -- see "Error types"), alongside a
   message naming both the current and requested state.
+
+**Admin reopen of a closed case (`UpdateCaseRequest.AdminReopen`/`ReopenReason`)** is the one
+caller-specific bypass of both tables above: neither table has an entry for `CaseStateClosed` (it
+is otherwise terminal for every caller, same as a plain state value with no entry at all), so
+`apps/csm-portal/backend`'s `CaseHandler.PatchCase` sets `AdminReopen: true` itself -- never
+forwarded verbatim from a client's own request body, see `sanitizeAdminReopenAttrs` in that
+component's `state.go` -- once its own `PermAdmin` check passes and the case's current state is
+genuinely closed. `isValidCaseStateTransition`'s caller in `case_service.go` additionally requires
+`isInternalCaller` AND that the caller's own client id is the configured CSM portal backend's
+(`CaseService.csmPortalClientID`, the same identity `mayListDeletedAttachments` already trusts for
+an equivalent admin-only override) -- `isInternalCaller` alone only separates WSO2 staff from an
+external/customer caller, not an admin from any other internal caller, so without the client-id
+check any internal user (direct M2M, or their own token resolved straight from `x-user-id-token`,
+neither of which goes through the portal's `PermAdmin` gate at all) could set `AdminReopen`
+themselves and reopen a closed case -- a real gap caught in review before merge. The same flag also skips
+the SLA-engine (`ApplyCaseStateEffects`) and `case.status_changed` publish side effects a
+reopen-from-closed must not trigger -- a closed case has no open clocks left to resume, and
+watchers must not get an email for this. `ReopenReason` (optional free text, only meaningful
+alongside `AdminReopen`) is persisted to `"case".reopen_reason` (migration 0292) but deliberately
+never selected back by any read query -- write-only by design, not shown in any UI or API response.
 
 ## PATCH /cases/{id}: assignee, acknowledge, parent, and the combinable field bundle
 
@@ -9101,6 +9136,24 @@ never something a portal caller should reach. Standing audiences that aren't
 teams at all ("Incident Monitor", "Onboarding", "Americas", "Evaluation") stay
 config-driven on that service's own side — this table only ever holds a real
 team's own space.
+
+**`GET /teams/group-emails`** (`team_repo.go` `ListGroupEmails`, `team.group_email`,
+migration `0117`) mirrors `GET /teams/chat-webhooks` exactly, for a team's own
+notification mailbox instead of its Chat webhook: `{teams: [{key, groupEmail}]}`
+for every team that has one set, a team with none left out. **Keyed by
+`team.key` (migration `0152`), not `name`** — unlike the Chat-webhook route,
+this one exists so a caller can look up one *specific* team's email by its
+stable handle (e.g. `csm-notification-service`'s SLA breach engine looking up
+`"americas_cre_team"` to also email that team during its overnight coverage
+window — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine"), and a
+team's `name` is a display string with no such stability guarantee the way
+`key` is designed to have. **Internal-caller-only**
+(`TeamService.ListGroupEmails` → `RequireInternalCaller`), same reasoning as
+`GET /teams/chat-webhooks` even though a plain email address is less
+sensitive than a webhook URL — this is still routing data for an internal
+notification feature, not general-purpose team data (`POST /teams/search`
+deliberately never includes `group_email` either, same as it excludes
+`chat_webhook_url`).
 
 **`GET`/`PATCH /teams/{id}`** (`team_repo.go`'s `GetTeamDetail`/
 `SetChatWebhookURL`, the latter against the same `team.chat_webhook_url`

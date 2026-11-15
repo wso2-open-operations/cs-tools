@@ -118,8 +118,13 @@ section.
 ### Renewal reset
 
 After the cascades, a track whose own closure state is still Open and whose date
-is **more than 90 days away again** (a renewal, or a paid invoice) has its saved
-`event_type` set back to `open`, so the next term's reminders start over. It never
+has **moved out past its recorded window** (more days remain than the recorded
+window's day count: 90, 60, 30, 15 or 7, and 0 for a recorded day-0 or suspend
+record) has its saved `event_type` set back to `open`, so the next term's
+reminders start over. That covers a renewal, an extended end date or due date, a
+paid invoice, and a hand-reopened project whose date is in the future again. A
+date at the recorded window's day count or below is left alone (no rewrite on
+every run). The next run then sends the window that is due. It never
 changes a closure state: reopening a suspended project is not done here
 (section 8).
 
