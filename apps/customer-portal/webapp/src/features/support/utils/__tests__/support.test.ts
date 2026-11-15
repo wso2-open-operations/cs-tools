@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   downloadSizeOf,
   getAvailableCaseActions,
+  getStatusColor,
   collapseCodeBlockWhitespace,
   collapseCommentSourceWhitespace,
   collapseHtmlSourceWhitespace,
@@ -754,5 +755,12 @@ describe("getAvailableCaseActions", () => {
     for (const status of ["Open", "Work in Progress", "Reopened", "Solution Proposed", "Closed"]) {
       expect(getAvailableCaseActions(status, true)).toEqual(getAvailableCaseActions(status));
     }
+  });
+});
+
+describe("getStatusColor", () => {
+  it("gives In Progress the same orange as the dashboard's cases table", () => {
+    expect(getStatusColor("In Progress")).toBe("warning.main");
+    expect(getStatusColor("Work In Progress")).toBe("warning.main");
   });
 });
