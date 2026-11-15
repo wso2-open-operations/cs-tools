@@ -48,6 +48,7 @@ import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import {
   filterDeploymentsForCaseCreation,
   isProjectRestricted,
+  shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/permission";
 
 /**
@@ -100,6 +101,17 @@ export default function ProjectDeployments({
       projectFeatures,
     ).map((d) => d.id),
   );
+  // Everything the rules depend on, so a selection made under other rules (the
+  // project's features changed since) no longer counts as selected.
+  const serviceRequestRulesKey = canPickForServiceRequest
+    ? [
+        shouldRestrictToPrimaryProductionDeployments(
+          projectTypeLabel,
+          projectFeatures,
+        ),
+        ...(projectFeatures?.srProductCategories ?? []),
+      ].join("|")
+    : null;
   const serviceRequestSelectionFor = (
     deploymentId: string,
   ): ServiceRequestProductSelection | undefined =>
@@ -113,8 +125,14 @@ export default function ProjectDeployments({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [selectedProduct, setSelectedProduct] =
-    useState<SelectedDeploymentProduct | null>(null);
+  const [productSelection, setProductSelection] = useState<{
+    product: SelectedDeploymentProduct;
+    rulesKey: string;
+  } | null>(null);
+  const selectedProduct =
+    productSelection && productSelection.rulesKey === serviceRequestRulesKey
+      ? productSelection.product
+      : null;
 
   const isPageLoaded =
     (deploymentsQuery.data?.pages?.length ?? 0) > currentPageIndex;
@@ -144,17 +162,22 @@ export default function ProjectDeployments({
 
   const handleToggleProductSelect = useCallback(
     (deploymentId: string, productItemId: string) => {
-      setSelectedProduct((prev) => {
+      if (serviceRequestRulesKey === null) return;
+      setProductSelection((prev) => {
         if (
-          prev?.deploymentId === deploymentId &&
-          prev.productItemId === productItemId
+          prev?.rulesKey === serviceRequestRulesKey &&
+          prev.product.deploymentId === deploymentId &&
+          prev.product.productItemId === productItemId
         ) {
           return null;
         }
-        return { deploymentId, productItemId };
+        return {
+          product: { deploymentId, productItemId },
+          rulesKey: serviceRequestRulesKey,
+        };
       });
     },
-    [],
+    [serviceRequestRulesKey],
   );
 
   const handleCreateServiceRequest = useCallback(() => {
