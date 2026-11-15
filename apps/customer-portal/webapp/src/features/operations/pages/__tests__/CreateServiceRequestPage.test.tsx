@@ -31,6 +31,7 @@ const testState = vi.hoisted(() => ({
   projectTypeLabel: undefined as string | undefined,
   srProductCategories: undefined as string[] | undefined,
   deployments: [] as Record<string, unknown>[],
+  deploymentProducts: [] as Record<string, unknown>[],
   searchParams: new URLSearchParams(),
 }));
 
@@ -43,6 +44,7 @@ afterEach(() => {
   testState.projectTypeLabel = undefined;
   testState.srProductCategories = undefined;
   testState.deployments = [];
+  testState.deploymentProducts = [];
   testState.searchParams = new URLSearchParams();
   productsSearchAllSpy.mockClear();
   productsSearchInfiniteSpy.mockClear();
@@ -155,7 +157,7 @@ vi.mock("@features/project-details/api/usePostDeploymentProductsSearch", () => (
   ) => {
     productsSearchAllSpy(id, opts);
     return {
-      data: [],
+      data: testState.deploymentProducts,
       isLoading: false,
       isError: false,
     };
@@ -270,5 +272,63 @@ describe("CreateServiceRequestPage", () => {
       "d1",
       expect.objectContaining({ enabled: false }),
     );
+  });
+
+  describe("product picked on the Deployments tab", () => {
+    const primaryProduction = {
+      id: "d1",
+      name: "Prod",
+      description: null,
+      url: null,
+      project: { id: "proj-1", label: "Demo" },
+      type: { id: "t1", label: "Primary Production" },
+    };
+    const leftOutProductId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const allowedProductId = "11111111-2222-4333-8444-555555555555";
+
+    function renderWithPrefill(productId: string) {
+      testState.projectTypeLabel = "Managed Cloud Subscription";
+      testState.srProductCategories = ["ms", "pc"];
+      testState.deployments = [primaryProduction];
+      testState.deploymentProducts = [
+        {
+          id: leftOutProductId,
+          product: { id: "p1", label: "WSO2 Integrator: MI" },
+          version: { id: "v1", label: "4.0.0" },
+          category: undefined,
+        },
+        {
+          id: allowedProductId,
+          product: { id: "p2", label: "WSO2 API Manager" },
+          version: { id: "v2", label: "4.3.0" },
+          category: "ms",
+        },
+      ];
+      testState.searchParams = new URLSearchParams({
+        deploymentId: "d1",
+        productId,
+      });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <CreateServiceRequestPage />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    }
+
+    it("never shows the id of a product the project's rules leave out", () => {
+      renderWithPrefill(leftOutProductId);
+
+      expect(screen.queryByText(leftOutProductId)).not.toBeInTheDocument();
+      expect(screen.getByText("Select Product Version...")).toBeInTheDocument();
+    });
+
+    it("shows the name and version of a product the form lists", () => {
+      renderWithPrefill(allowedProductId);
+
+      expect(screen.queryByText(allowedProductId)).not.toBeInTheDocument();
+      expect(screen.getByText(/WSO2 API Manager.*4\.3\.0/)).toBeInTheDocument();
+    });
   });
 });
