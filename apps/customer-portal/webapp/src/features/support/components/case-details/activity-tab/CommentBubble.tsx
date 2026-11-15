@@ -27,6 +27,7 @@ import {
   Tooltip,
   Typography,
   alpha,
+  colors,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
@@ -37,8 +38,7 @@ import {
   FileArchive,
   FileText,
   Image,
-  Shield,
-  UserRound,
+  Headset,
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
@@ -191,25 +191,12 @@ export default function CommentBubble({
         height: 18,
         borderRadius: "50%",
         bgcolor: "common.white",
-        color: theme.palette.info?.main ?? "#0288d1",
+        color: colors.blue[700],
         boxShadow: 1,
         flexShrink: 0,
       }}
     >
-      <Shield size={14} fill="currentColor" strokeWidth={1.5} />
-      <Box
-        component="span"
-        sx={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "common.white",
-        }}
-      >
-        <UserRound size={9} strokeWidth={2} />
-      </Box>
+      <Headset size={14} strokeWidth={2.5} />
     </Box>
   );
   const isAttachmentEntry = comment.type?.toLowerCase() === "attachment";
