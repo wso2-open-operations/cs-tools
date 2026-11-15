@@ -176,6 +176,39 @@ func SetFooterIconURL(icon string) {
 	}
 }
 
+// defaultSupportAddress is the support email address baked into the onboarding
+// emails' "contact us" line, and the Reply-To those emails default to.
+const defaultSupportAddress = "support@wso2.com"
+
+// supportAddress is the address the onboarding emails currently carry.
+var supportAddress = defaultSupportAddress
+
+// SupportAddress is the support email address the onboarding emails carry: the
+// built-in default unless SetSupportAddress replaced it.
+func SupportAddress() string { return supportAddress }
+
+// SetSupportAddress replaces the support email address in the onboarding emails'
+// "contact us" line (the visible text and the mailto link). An empty value keeps
+// the default; a value that is not a single plain address (no spaces, quotes or
+// angle brackets, exactly one "@") is refused with an error and the default is
+// kept. It rewrites the already-baked templates, so call it once at startup,
+// before any email is rendered.
+func SetSupportAddress(addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return nil
+	}
+	if strings.ContainsAny(addr, " \t\r\n\"'<>,;") || strings.Count(addr, "@") != 1 ||
+		strings.HasPrefix(addr, "@") || strings.HasSuffix(addr, "@") {
+		return fmt.Errorf("support address %q is not a single plain email address", addr)
+	}
+	for _, t := range footerIconTemplates() {
+		*t = strings.ReplaceAll(*t, supportAddress, html.EscapeString(addr))
+	}
+	supportAddress = addr
+	return nil
+}
+
 // defaultCompanyName is the name baked into every template by default.
 const defaultCompanyName = "WSO2"
 
