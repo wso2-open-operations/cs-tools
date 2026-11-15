@@ -280,6 +280,31 @@ func TestCommentRowToDomain_PrefersResolvedName(t *testing.T) {
 	}
 }
 
+// TestCommentRowToDomain_CarriesIsInternal: SearchComments resolves whether the
+// author is an INTERNAL-type user alongside their name; the flag must reach the
+// wire so a portal can mark staff authors without a per-comment user lookup.
+func TestCommentRowToDomain_CarriesIsInternal(t *testing.T) {
+	for _, internal := range []bool{true, false} {
+		row := repository.CommentRow{
+			ID:                "c-3",
+			WorkItemID:        "wi-1",
+			Content:           "hello",
+			CreatedBy:         "jane@example.com",
+			CreatedByName:     "Jane Doe",
+			CreatedByInternal: internal,
+		}
+
+		got := commentRowToDomain(row)
+
+		if got.CreatedBy == nil {
+			t.Fatal("CreatedBy is nil, want a reference")
+		}
+		if got.CreatedBy.IsInternal != internal {
+			t.Errorf("CreatedBy.IsInternal = %v, want %v", got.CreatedBy.IsInternal, internal)
+		}
+	}
+}
+
 // TestCommentRowToDomain_NoMatchingUserLeavesNameEmpty covers the other half:
 // an automation/integration account (e.g. "github_pipeline") has no "user"
 // row to resolve against, so SearchComments' LEFT JOIN leaves

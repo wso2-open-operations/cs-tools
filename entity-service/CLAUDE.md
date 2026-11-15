@@ -4208,6 +4208,17 @@ already use — no route path, request, or response shape changed.
   string with no name field on its wire contract at all — deliberately left
   as-is; the webapp only reads a comment's display name from `SearchComments`
   once the list is (re)fetched, never from the create response.
+- **A comment author's `UserReference` also carries `isInternal`** — true when
+  the same `userByEmailJoin` row has `user_type = INTERNAL` (the join exposes
+  `u2.user_type` for this), set by both `SearchCaseComments` (`case_repo.go`)
+  and `SearchComments` (`comment_repo.go`, via `CommentRow.CreatedByInternal`),
+  `omitempty` so every other `UserReference` is unchanged. Added so a portal
+  can mark a support engineer's comment avatar without a per-comment user
+  lookup: the webapp's own `authorRole` is NOT that signal — its mapper
+  defaults every non-bot, non-system case comment to `"wso2_engineer"`, so a
+  badge keyed on it marked customers as staff too (reported live). An
+  automation/system author resolves to no `"user"` row (or a `SYSTEM` type)
+  and gets no flag.
 - **Adding a comment to a case stamps its `updated_on`/`updated_by`.** A comment
   is activity on a case — ServiceNow advances `sys_updated_on` for any journal
   entry — and the lists' Updated column, the `updatedOn` search filter (relative

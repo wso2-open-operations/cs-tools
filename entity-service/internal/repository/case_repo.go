@@ -2359,7 +2359,8 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	// available when it happens to match a known user's email.
 	dataQuery := fmt.Sprintf(`
 		SELECT cc.id, cc.work_item_id, cc.type, cc.content, cc.created_by, cc.created_on,
-		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
+		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')),
+		       COALESCE(u.user_type::text, '') = 'INTERNAL'
 		FROM comment cc
 		`+userByEmailJoin("u", "cc.created_by")+`
 		WHERE cc.work_item_id = $1%s
@@ -2392,9 +2393,10 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 			var c domain.CaseComment
 			var typeRaw, authorEmail string
 			var authorID, authorName *string
+			var authorInternal bool
 			if err := rows.Scan(
 				&c.ID, &c.CaseID, &typeRaw, &c.Content, &authorEmail, &c.CreatedOn,
-				&authorID, &authorName,
+				&authorID, &authorName, &authorInternal,
 			); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
@@ -2408,6 +2410,9 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 				c.CreatedBy = domain.NewUserReference(*authorID, authorEmail, name)
 			} else {
 				c.CreatedBy = domain.NewUserReference("", authorEmail, "")
+			}
+			if c.CreatedBy != nil {
+				c.CreatedBy.IsInternal = authorInternal
 			}
 			result = append(result, c)
 		}
