@@ -87,7 +87,9 @@ type fakeScheduleRepo struct {
 	gotKindReq     domain.CreateScheduleAbsenceKindRequest
 	leadFamilies   []string // families of the teams the caller leads
 	gotKindAllowed []string
-	markers        []domain.ScheduleEditMarker
+	// gotKindAllowShared is the allowShared DeleteAbsenceKind was called with.
+	gotKindAllowShared bool
+	markers            []domain.ScheduleEditMarker
 	// gotImport is the write an import handed the repository, nil until one does.
 	gotImport *repository.RotaImportWrite
 }
@@ -179,8 +181,9 @@ func (f *fakeScheduleRepo) CreateAbsenceKind(_ context.Context, code string, req
 	return domain.ScheduleAbsenceKind{Code: code, ShortCode: req.ShortCode, Label: req.Label, Bucket: req.Bucket, ColourToken: req.ColourToken}, f.err
 }
 
-func (f *fakeScheduleRepo) DeleteAbsenceKind(_ context.Context, code, actor string, allowed []string) error {
+func (f *fakeScheduleRepo) DeleteAbsenceKind(_ context.Context, code, actor string, allowed []string, allowShared bool) error {
 	f.called, f.gotKindCode, f.gotActorEml, f.gotKindAllowed = true, code, actor, allowed
+	f.gotKindAllowShared = allowShared
 	return f.err
 }
 

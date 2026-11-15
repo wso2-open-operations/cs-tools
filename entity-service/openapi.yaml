@@ -10323,10 +10323,13 @@ paths:
     delete:
       summary: Delete a tag a lead added.
       description: >
-        Any team lead may. Only a tag added from the portal can be deleted, never
-        one of the catalogue's own, and only once no leave or allocation uses it
-        -- a tag still in use is refused with how many entries use it, since
-        retiring it quietly would leave those entries with no label or colour.
+        Only a tag added from the portal can be deleted, never one of the
+        catalogue's own, and only once no leave or allocation uses it -- a tag
+        still in use is refused with how many entries use it, since retiring it
+        quietly would leave those entries with no label or colour. Who may: a
+        portal admin, any custom tag; a rota admin, their own family's tags and
+        the shared ones (no family); a lead who is neither, the families of the
+        rota teams they lead. A refusal names which case applies.
       operationId: deleteScheduleAbsenceKind
       parameters:
         - name: code
@@ -10344,7 +10347,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: The caller leads no team, or the tag is a built-in one.
+          description: >
+            The caller leads no rota team and is no rota or portal admin, the tag
+            is a built-in one, the tag is another family's, or the tag is shared
+            and the caller is no rota or portal admin.
           content:
             application/json:
               schema:
