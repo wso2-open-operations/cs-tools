@@ -44,6 +44,7 @@ import {
 } from "@features/settings/utils/phone";
 import { getRoleLabel } from "@features/settings/utils/settings";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 const PASSWORD_RESET_URL = "https://wso2.com/user/password";
 
@@ -237,17 +238,20 @@ export default function UserProfileModal({
     }
   }, [onClose, patchUserMe.isPending]);
 
-  const name =
-    userDetails?.firstName || userDetails?.lastName
-      ? `${userDetails.firstName ?? ""} ${userDetails.lastName ?? ""}`.trim()
-      : "--";
+  const cleanedName = joinStaffName(userDetails?.firstName, userDetails?.lastName);
+  const name = cleanedName || "--";
   const email = userDetails?.email ?? "--";
   const role = getRoleLabel(userDetails?.roles);
 
   const initials = (() => {
-    const first = userDetails?.firstName?.charAt(0) ?? "";
-    const last = userDetails?.lastName?.charAt(0) ?? "";
-    return (first + last).toUpperCase() || "?";
+    // First two words of the cleaned, combined name -- not one initial per
+    // field -- so a multi-word firstName (e.g. "Jane Mary") still only
+    // contributes its own first two words, consistent with every other
+    // initials helper in this app.
+    const words = cleanedName.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return "?";
+    if (words.length === 1) return words[0].charAt(0).toUpperCase();
+    return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
   })();
 
   const timeZoneValue = useMemo(() => {

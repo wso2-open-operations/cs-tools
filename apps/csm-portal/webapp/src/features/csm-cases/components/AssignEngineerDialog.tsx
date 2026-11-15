@@ -36,6 +36,7 @@ import {
   INTERNAL_USER_ROLES,
   type NormalizedUser,
 } from "@features/csm-users/types/csmUsers";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 interface AssignEngineerDialogProps {
   /** Current assignee display name, or "Unassigned". */
@@ -53,7 +54,7 @@ interface AssignEngineerDialogProps {
 }
 
 function initialsOf(name: string): string {
-  return name
+  return stripStaffNameMarker(name)
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -62,7 +63,7 @@ function initialsOf(name: string): string {
 }
 
 function fullName(u: NormalizedUser): string {
-  return u.name.trim() || u.userName;
+  return stripStaffNameMarker(u.name.trim() || u.userName);
 }
 
 /**
@@ -131,7 +132,7 @@ export default function AssignEngineerDialog({
           <Typography variant="body2" color="text.secondary">
             Currently assigned to{" "}
             <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
-              {currentAssignee || "Unassigned"}
+              {stripStaffNameMarker(currentAssignee) || "Unassigned"}
             </Box>
             .
           </Typography>

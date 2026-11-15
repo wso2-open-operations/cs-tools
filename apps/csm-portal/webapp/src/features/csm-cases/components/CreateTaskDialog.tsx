@@ -40,6 +40,7 @@ import {
   type NormalizedUser,
 } from "@features/csm-users/types/csmUsers";
 import type { BeCreateCaseTaskPayload } from "@api/backend/types";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import {
   formatDateTimeLocal,
   isPastDateTime,
@@ -57,7 +58,7 @@ export interface CreateTaskDialogProps {
 }
 
 function initialsOf(name: string): string {
-  return name
+  return stripStaffNameMarker(name)
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -66,7 +67,7 @@ function initialsOf(name: string): string {
 }
 
 function fullName(u: NormalizedUser): string {
-  return u.name.trim() || u.userName;
+  return stripStaffNameMarker(u.name.trim() || u.userName);
 }
 
 /**

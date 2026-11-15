@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { joinStaffName } from "@utils/staffNameMarker";
 
 interface UserByIdRecord {
   id: string;
@@ -47,7 +48,7 @@ export function useUsersByIds(ids: string[]): UseQueryResult<Map<string, string>
       const res = await api.post<{ ids: string[] }, UsersByIdsResponse>("/users/by-ids", { ids });
       const map = new Map<string, string>();
       for (const u of res.users ?? []) {
-        const fullName = [u.firstName, u.lastName].filter(Boolean).join(" ");
+        const fullName = joinStaffName(u.firstName, u.lastName);
         map.set(u.id, fullName || u.userName || u.email);
       }
       return map;

@@ -41,6 +41,7 @@ import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/common";
 import { paginatedSelectMenuListProps } from "@utils/common";
 import { ALL_CASES_FILTER_DEFINITIONS } from "@features/support/constants/supportConstants";
 import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
+import { joinStaffName } from "@utils/staffNameMarker";
 import {
   deriveFilterLabels,
   mapSeverityToDisplay,
@@ -161,7 +162,7 @@ export default function ListFilters({
               deduped.push(contact);
             }
             return deduped.map((contact) => ({
-              label: `${contact.firstName} ${contact.lastName}`.trim() || contact.email,
+              label: joinStaffName(contact.firstName, contact.lastName) || contact.email,
               // Trimmed: the surviving row after dedup above isn't
               // necessarily the "clean" one if a messy-email duplicate was
               // seen first, and the backend's createdBy filter matches
