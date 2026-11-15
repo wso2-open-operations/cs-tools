@@ -197,6 +197,10 @@ type perUser struct {
 	// cmn_schedule_span of type 'exclude', or a customer engagement
 	// allocation at full utilization.
 	excluded bool
+	// rotaExcluded is set when the absence behind excluded is an EXCLUDED
+	// one (excluded from the rota), not an allocation. A rotation turn
+	// keeps an allocated person on the daily, never a rota-excluded one.
+	rotaExcluded bool
 }
 
 func (s *worklogReportService) BuildReport(ctx context.Context, req domain.WorklogReportRequest) (domain.WorklogReport, error) {
@@ -261,6 +265,24 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	for _, id := range rostered {
 		isRostered[id] = true
 	}
+	// AN ALLOCATION DOES NOT HIDE A ROTATION TURN. The roster shows both
+	// on the same day (docs/team-schedule.md, "Two tags in one day"), and
+	// an engineer allocated to a customer still works their 6-9 morning,
+	// 6-9 evening or weekend turn and logs time against it. The daily used
+	// to drop every allocated person outright, so that rota time appeared
+	// in no daily at all. A daily now keeps an allocated person who holds
+	// a rotation turn that day; the weekly is untouched (it already counts
+	// time logged on absent days).
+	onTurn := map[string]bool{}
+	if daily {
+		turns, err := s.repo.RotationTurnUserIDs(ctx, from, to)
+		if err != nil {
+			return domain.WorklogReport{}, err
+		}
+		for _, id := range turns {
+			onTurn[id] = true
+		}
+	}
 
 	users := make(map[string]*perUser, len(roster))
 	for _, r := range roster {
@@ -302,6 +324,9 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		// part of this report".
 		if l.Bucket != "LEAVE" {
 			u.excluded = true
+			if l.Bucket != "ALLOCATION" {
+				u.rotaExcluded = true
+			}
 			continue
 		}
 		if u.leaveCode == "" {
@@ -445,21 +470,29 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		// entries and could only have been drawn from the rota.
 		//
 		// The union degrades safely: where no rota rows exist for a range,
-		// a report still lists everyone who logged time or took leave
-		// rather than coming back empty.
-		if daily && u.excluded {
+		// a report still lists everyone who logged time rather than coming
+		// back empty. (A weekend daily no longer lets in leave alone; see
+		// below.)
+		//
+		// An allocation or exclusion drops the person from the daily,
+		// except an allocated person on a rotation turn that day (onTurn).
+		if daily && u.excluded && (u.rotaExcluded || !onTurn[u.roster.UserID]) {
 			continue
 		}
 		// A weekday daily applies no rota gate at all -- the roster IS
 		// the membership, which is why rotaGated is false for it and
-		// this whole branch is skipped. For the weekly, and for a
-		// weekend daily, a person still appears if they logged time or
-		// were away even without a rota row: the union degrades safely
-		// where no rota rows exist for a range, rather than returning
-		// an empty report.
+		// this whole branch is skipped. A weekend daily lists the weekend
+		// crew, plus anyone off it who logged time (approved, pending or
+		// rejected), so the union degrades safely where no rota rows exist
+		// rather than returning an empty report.
+		//
+		// Leave alone does NOT qualify. It used to, which put people on
+		// long leave (maternity, say) who were never on the weekend rota
+		// into every weekend daily, as absent members of their team. A
+		// crew member on leave is still listed, through isRostered.
 		if rotaGated && !isRostered[u.roster.UserID] && u.approvedMin == 0 && u.pendingMin == 0 &&
 			len(u.approvedKeys) == 0 && len(u.pendingKeys) == 0 &&
-			u.disapproved == 0 && u.leaveCode == "" {
+			u.disapproved == 0 {
 			continue
 		}
 

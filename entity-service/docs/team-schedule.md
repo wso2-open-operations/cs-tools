@@ -161,7 +161,10 @@ A lead edits their own team's rows in the Month roster's cell picker:
   zone column on an SRE day, and stacked in the cell otherwise. Leave still
   takes the whole day, because someone on leave is not on the rota. In a cell
   holding both, **Clear** clears the turn, and the allocation has its own
-  **Remove**.
+  **Remove**. The daily CS Worklogs report follows the same rule: a
+  remove-from-timesheet allocation takes a person off the daily, except on a
+  day they hold a rotation turn (`is_rotation`), so time logged on the turn
+  shows. An exclusion from the rota still takes them off.
 - **Remove a whole span in one click.** Clicking any day of a leave or
   allocation shows the whole span with a **Remove** button, which deletes
   every day of it, including a span with no end date. The write is
