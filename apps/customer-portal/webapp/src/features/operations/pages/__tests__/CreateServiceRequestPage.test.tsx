@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,24 +30,29 @@ const queryClient = new QueryClient({
 const testState = vi.hoisted(() => ({
   projectTypeLabel: undefined as string | undefined,
   srProductCategories: undefined as string[] | undefined,
+  hasDeploymentAccess: false,
   deployments: [] as Record<string, unknown>[],
   deploymentProducts: [] as Record<string, unknown>[],
   searchParams: new URLSearchParams(),
 }));
 
-const { productsSearchAllSpy, productsSearchInfiniteSpy } = vi.hoisted(() => ({
-  productsSearchAllSpy: vi.fn(),
-  productsSearchInfiniteSpy: vi.fn(),
-}));
+const { productsSearchAllSpy, productsSearchInfiniteSpy, showErrorSpy } =
+  vi.hoisted(() => ({
+    productsSearchAllSpy: vi.fn(),
+    productsSearchInfiniteSpy: vi.fn(),
+    showErrorSpy: vi.fn(),
+  }));
 
 afterEach(() => {
   testState.projectTypeLabel = undefined;
   testState.srProductCategories = undefined;
+  testState.hasDeploymentAccess = false;
   testState.deployments = [];
   testState.deploymentProducts = [];
   testState.searchParams = new URLSearchParams();
   productsSearchAllSpy.mockClear();
   productsSearchInfiniteSpy.mockClear();
+  showErrorSpy.mockClear();
 });
 
 vi.mock("react-router", async (importOriginal) => {
@@ -104,7 +109,7 @@ vi.mock("@api/useStoredAttachments", () => ({
 }));
 
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
-  useErrorBanner: () => ({ showError: vi.fn() }),
+  useErrorBanner: () => ({ showError: showErrorSpy }),
 }));
 
 vi.mock("@context/linear-loader/LoaderContext", () => ({
@@ -119,6 +124,8 @@ vi.mock("@api/useGetProjectFeatures", () => ({
   default: () => ({
     data: {
       hasServiceRequestReadAccess: true,
+      hasDeploymentReadAccess: testState.hasDeploymentAccess,
+      hasDeploymentWriteAccess: testState.hasDeploymentAccess,
       acceptedSeverityValues: [],
       srProductCategories: testState.srProductCategories,
     },
@@ -286,9 +293,12 @@ describe("CreateServiceRequestPage", () => {
     const leftOutProductId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
     const allowedProductId = "11111111-2222-4333-8444-555555555555";
 
-    function renderWithPrefill(productId: string) {
+    function renderWithPrefill(productId: string): HTMLElement {
       testState.projectTypeLabel = "Managed Cloud Subscription";
       testState.srProductCategories = ["ms", "pc"];
+      // With deployment access the user picks the deployment; nothing
+      // auto-selects it, so only the link can fill it in.
+      testState.hasDeploymentAccess = true;
       testState.deployments = [primaryProduction];
       testState.deploymentProducts = [
         {
@@ -308,13 +318,14 @@ describe("CreateServiceRequestPage", () => {
         deploymentId: "d1",
         productId,
       });
-      render(
+      const { container } = render(
         <QueryClientProvider client={queryClient}>
           <MemoryRouter>
             <CreateServiceRequestPage />
           </MemoryRouter>
         </QueryClientProvider>,
       );
+      return container;
     }
 
     it("never shows the id of a product the project's rules leave out", () => {
@@ -329,6 +340,22 @@ describe("CreateServiceRequestPage", () => {
 
       expect(screen.queryByText(allowedProductId)).not.toBeInTheDocument();
       expect(screen.getByText(/WSO2 API Manager.*4\.3\.0/)).toBeInTheDocument();
+    });
+
+    it("submits with the linked deployment and product without asking for them again", () => {
+      const container = renderWithPrefill(allowedProductId);
+
+      const form = container.querySelector("form");
+      expect(form).not.toBeNull();
+      fireEvent.submit(form!);
+
+      // The first check left is the request type, which the user still has to pick.
+      expect(showErrorSpy).toHaveBeenCalledWith(
+        "Please select a request type (catalog item).",
+      );
+      expect(showErrorSpy).not.toHaveBeenCalledWith(
+        "Please select a deployment type.",
+      );
     });
   });
 });
