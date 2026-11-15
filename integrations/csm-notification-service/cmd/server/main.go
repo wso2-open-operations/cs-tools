@@ -55,8 +55,6 @@ func main() {
 
 	// Optional logo overrides for every email; unset keeps the built-in URLs.
 	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_LIGHT_URL"))
-	// Optional footer-icon override for the onboarding emails; unset keeps the built-in icon.
-	notifications.SetFooterIconURL(os.Getenv("EMAIL_FOOTER_ICON_URL"))
 	// Optional support address for the onboarding emails' "contact us" line (and
 	// their default Reply-To); unset keeps the built-in address.
 	if err := notifications.SetSupportAddress(os.Getenv("EMAIL_SUPPORT_ADDRESS")); err != nil {
