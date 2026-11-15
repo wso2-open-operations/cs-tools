@@ -1109,10 +1109,11 @@ export function getSeverityColor(label?: string): string {
 }
 
 /**
- * Returns the color (hex) for a given case status label using colors.yellow[500] style.
+ * Returns the color for a given case status label: a hex color, or a theme
+ * palette path for callers to pass through {@link resolveColorFromTheme}.
  *
  * @param {string} label - The case status label.
- * @returns {string} Hex color string (e.g. colors.blue[500]).
+ * @returns {string} Hex color string (e.g. colors.blue[500]) or palette path.
  */
 export function getStatusColor(label?: string): string {
   switch (label) {
@@ -1120,7 +1121,8 @@ export function getStatusColor(label?: string): string {
       return colors.lightBlue[500];
     case CaseStatus.WORK_IN_PROGRESS:
     case LEGACY_WORK_IN_PROGRESS_LABEL:
-      return colors.green[500];
+      // The same orange the dashboard's cases table gives In Progress.
+      return "warning.main";
     case CaseStatus.AWAITING_INFO:
       return colors.orange[900];
     case CaseStatus.WAITING_ON_WSO2:
