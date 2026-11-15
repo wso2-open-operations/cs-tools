@@ -18,6 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /**
  * Minimal user-directory entry: just what UI affordances like the cases
@@ -39,8 +40,8 @@ interface RawDirectoryUser {
 
 function toDirectoryUser(u: RawDirectoryUser): DirectoryUser {
   const name =
-    u.name?.trim() ||
-    `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim();
+    stripStaffNameMarker(u.name) ||
+    stripStaffNameMarker(`${u.firstName ?? ""} ${u.lastName ?? ""}`);
   return { name, email: u.email ?? "" };
 }
 

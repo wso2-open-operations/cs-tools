@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
+
 /**
  * Whether the user is staff or a customer/partner contact. The value set
  * differs by backing data source: one emits `internal`, `customer` or
@@ -276,7 +278,7 @@ export function normalizeUser(u: User | SnUser): NormalizedUser {
     return {
       id: u.id,
       userName: u.userName,
-      name: u.name?.trim() || "",
+      name: stripStaffNameMarker(u.name),
       email: u.email,
       timezone: u.timeZone ?? null,
       userType: u.userType,
@@ -291,7 +293,7 @@ export function normalizeUser(u: User | SnUser): NormalizedUser {
   return {
     id: u.id,
     userName: u.userName,
-    name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim(),
+    name: stripStaffNameMarker(`${u.firstName ?? ""} ${u.lastName ?? ""}`),
     email: u.email,
     timezone: u.timezone ?? null,
     userType: u.userType,

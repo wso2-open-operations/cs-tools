@@ -17,6 +17,7 @@
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import { useResolvedUserId } from "@features/csm-users/api/useResolvedUserId";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 interface UserRefLinkProps {
   /** Display name shown as the link text (or plain text when there's no id
@@ -66,9 +67,14 @@ export default function UserRefLink({
   underlineOnHover = true,
 }: UserRefLinkProps): JSX.Element {
   const resolvedId = useResolvedUserId(email, userId);
+  // Some internal users' stored name carries a trailing circled-W marker
+  // (see staffNameMarker.ts) -- stripped here, once, so every caller of this
+  // component (comments, activity feed, assignee displays, user lists, ...)
+  // only ever shows the person's actual name.
+  const displayName = stripStaffNameMarker(name);
 
   if (!resolvedId) {
-    return <span className={className}>{name}</span>;
+    return <span className={className}>{displayName}</span>;
   }
 
   return (
@@ -89,7 +95,7 @@ export default function UserRefLink({
         (e.currentTarget as HTMLAnchorElement).style.textDecoration = "none";
       }}
     >
-      {name}
+      {displayName}
     </RouterLink>
   );
 }

@@ -35,6 +35,7 @@ import { Link as RouterLink, useLocation, useParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import { useGetUserById } from "@features/csm-users/api/useGetUserById";
 import { useSearchRoles } from "@features/csm-admin/api/useSearchRoles";
 import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityChip";
@@ -626,7 +627,9 @@ export default function UserProfilePage(): JSX.Element {
 
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-          <Typography variant="h5">{user.name || user.userName || "—"}</Typography>
+          <Typography variant="h5">
+            {stripStaffNameMarker(user.name) || user.userName || "—"}
+          </Typography>
           <Chip
             size="small"
             label={internal ? "Internal" : "Customer"}

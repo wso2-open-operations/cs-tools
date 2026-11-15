@@ -25,6 +25,7 @@ import { monthPieces } from "../utils/rota";
 import { teamDisplayName } from "../utils/teamDisplayName";
 import RotaReminderSettings from "./RotaReminderSettings";
 import ScheduleSkeleton from "./ScheduleSkeleton";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const FAMILIES: RotaFamily[] = ["CRE", "SRE", "SME"];
 
@@ -265,7 +266,9 @@ function PersonSearch({
   const found = useSearchInternalUsersByName(q, q.length >= 2);
   const people = (found.data ?? []).filter((u) => u.id && !exclude.includes(u.id));
   const nameOf = (u: { firstName?: string; lastName?: string; email?: string }) =>
-    [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "";
+    stripStaffNameMarker([u.firstName, u.lastName].filter(Boolean).join(" ")) ||
+    u.email ||
+    "";
 
   return (
     <div className="ra-search">
