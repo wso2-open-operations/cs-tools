@@ -117,23 +117,31 @@ func dev(r domain.WorklogReport, id string) (domain.WorklogDeveloper, bool) {
 	return domain.WorklogDeveloper{}, false
 }
 
-func TestWorklogWeeklyDropsWeekendCards(t *testing.T) {
+func TestWorklogWeeklyCountsWeekendCards(t *testing.T) {
+	// Weekend time counts on the weekly, whoever logged it: nobody here is
+	// on a weekend rota (the fake has no crew). Worked Days stays weekdays.
+	// u2 is on leave every weekday and logs only on the Sunday, and is
+	// still listed with that time.
 	repo := &fakeWorklogRepo{
-		roster: []repository.WorklogRosterRow{person("u1", "alpha")},
+		roster: []repository.WorklogRosterRow{person("u1", "alpha"), person("u2", "alpha")},
+		leave:  []repository.WorklogLeaveRow{absence("u2", "AL/CL", "LEAVE", "2026-10-26", "2026-10-30")},
 		times: []repository.WorklogTimeRow{
 			card("u1", "A-1", "2026-10-27", "SUBMITTED", "S4", 60),
 			card("u1", "A-2", "2026-10-31", "SUBMITTED", "S4", 120), // Saturday
 			card("u1", "A-3", "2026-11-01", "APPROVED", "S4", 180),  // Sunday
+			card("u2", "A-4", "2026-11-01", "SUBMITTED", "S4", 90),  // Sunday
 		},
 	}
 	r := build(t, repo, domain.WorklogReportCadenceWeekly, "2026-10-26", "2026-11-01")
 	d, _ := dev(r, "u1")
-	if d.TotalHours != 1 || d.PendingIssues != 1 || d.ApprovedIssues != 0 {
-		t.Errorf("hours=%v pendingIssues=%d approvedIssues=%d; want only the Tuesday card (1h, 1 issue)",
-			d.TotalHours, d.PendingIssues, d.ApprovedIssues)
+	if d.TotalHours != 6 || d.PendingIssues != 2 || d.ApprovedIssues != 1 || d.WorkedDays != 5 || d.AvgTimePerDay != 1.2 {
+		t.Errorf("u1 = %+v; want 6h (weekend included), 2 pending + 1 approved issues, 5 worked days, 1.2 h/day", d)
 	}
-	if r.Totals.TotalHours != 1 || r.Totals.Issues != 1 {
-		t.Errorf("totals hours=%v issues=%d, want 1 and 1", r.Totals.TotalHours, r.Totals.Issues)
+	if d, ok := dev(r, "u2"); !ok || d.TotalHours != 1.5 || d.WorkedDays != 0 || d.AvgTimePerDay != 0 {
+		t.Errorf("u2 = %+v ok=%v; want listed with 1.5h, 0 worked days, 0 h/day", d, ok)
+	}
+	if r.Totals.TotalHours != 7.5 || r.Totals.Issues != 4 {
+		t.Errorf("totals hours=%v issues=%d, want 7.5 and 4", r.Totals.TotalHours, r.Totals.Issues)
 	}
 }
 

@@ -501,14 +501,13 @@ func TestWorklogWeeklyReportDerivedQuantities(t *testing.T) {
 		t.Errorf("dara@ worked days = %v, hours = %v; want 5 and 0", d.WorkedDays, d.TotalHours)
 	}
 	// lumbini logged 390 minutes on the Sunday plus 90 and 200 in the
-	// week. The weekly attributes time per date and a weekend date has no
-	// team, so the Sunday's 390 vanish: 290 minutes, 4.83 hours, over five
-	// worked days.
-	if d := byEmail["farid@example.com"]; d.TotalHours != 4.83 {
-		t.Errorf("lumbini total hours = %v, want 4.83 (the Sunday card is not counted)", d.TotalHours)
+	// week. Weekend time counts on the weekly, but Worked Days stays
+	// weekdays: 680 minutes, 11.33 hours, over five worked days.
+	if d := byEmail["farid@example.com"]; d.TotalHours != 11.33 {
+		t.Errorf("lumbini total hours = %v, want 11.33 (the Sunday card counts)", d.TotalHours)
 	}
-	if d := byEmail["farid@example.com"]; d.AvgTimePerDay != 0.97 {
-		t.Errorf("lumbini avg hrs/day = %v, want 0.97 (4.83 over 5 days)", d.AvgTimePerDay)
+	if d := byEmail["farid@example.com"]; d.AvgTimePerDay != 2.27 {
+		t.Errorf("lumbini avg hrs/day = %v, want 2.27 (11.33 over 5 weekdays)", d.AvgTimePerDay)
 	}
 	// mihaly logged 60 minutes and lost the Wednesday to leave, so the
 	// average is over four days, not five.
@@ -531,17 +530,18 @@ func TestWorklogWeeklyReportDerivedQuantities(t *testing.T) {
 		t.Errorf("average people per day = %v, want 5.67 (34 member-days over a span of 6)",
 			got.Totals.AveragePeoplePerDay)
 	}
-	// 830 minutes in all: the weekday entries only (1100) less asha@'s 270,
-	// who is a lead. The Sunday's ten issues are weekend cards, dropped.
-	if got.Totals.TotalHours != 13.83 {
-		t.Errorf("weekly total hours = %.2f, want 13.83", got.Totals.TotalHours)
+	// 1790 minutes in all: the weekday entries (1100) less asha@'s 270,
+	// who is a lead, is 830; the Sunday adds chen@'s 130, elif@'s 440 and
+	// farid@'s 390 (asha@'s 85 and the head's 600 stay out).
+	if got.Totals.TotalHours != 29.83 {
+		t.Errorf("weekly total hours = %.2f, want 29.83", got.Totals.TotalHours)
 	}
-	if got.Totals.AvgHoursPerPerson != 1.98 {
-		t.Errorf("weekly avg hrs/person = %.2f, want 1.98", got.Totals.AvgHoursPerPerson)
+	if got.Totals.AvgHoursPerPerson != 4.26 {
+		t.Errorf("weekly avg hrs/person = %.2f, want 4.26 (29.83 over 7)", got.Totals.AvgHoursPerPerson)
 	}
-	// Six issues across the week; asha@'s two are gone with her.
-	if got.Totals.Issues != 6 {
-		t.Errorf("weekly issues = %d, want 8", got.Totals.Issues)
+	// Six weekday issues and eight Sunday ones; asha@'s are gone with her.
+	if got.Totals.Issues != 14 {
+		t.Errorf("weekly issues = %d, want 14", got.Totals.Issues)
 	}
 
 	// --- Leads are not on the roster -------------------------------------
@@ -891,8 +891,15 @@ func TestWorklogTypeCountsAreCaseDaysNotCases(t *testing.T) {
 		return n
 	}
 
-	// The first day, on a weekday: the weekly drops weekend cards, so the
-	// fixture's own Sunday card for this case is not counted at all.
+	// The weekly counts weekend cards, so the fixture's own Sunday cards
+	// would mix into these counts. This test is about one case on two
+	// days, so they go.
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM time_card WHERE created_by = 'seed' AND work_date = DATE '2026-10-18'`); err != nil {
+		t.Fatalf("clear the Sunday cards: %v", err)
+	}
+
+	// The first day, on a weekday.
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
 		   case_id, user_id, work_date, state, analyzing_minutes)
@@ -1282,11 +1289,12 @@ func TestWorklogConfirmedEngagementAllocationBlanksDays(t *testing.T) {
 			byEmail[d.Email] = d
 		}
 	}
-	// elif@ logged 180 minutes on Tue the 13th and 240 on Wed the 14th.
-	// The allocation takes Mon-Tue out of Worked Days, but time logged on
-	// an absent day is counted: all 420 minutes stay.
-	if d := byEmail["elif@example.com"]; d.WorkedDays != 3 || d.TotalHours != 7 {
-		t.Errorf("elif@ worked days = %v, hours = %v; want 3 and 7.00", d.WorkedDays, d.TotalHours)
+	// elif@ logged 180 minutes on Tue the 13th, 240 on Wed the 14th and
+	// 440 on Sun the 18th. The allocation takes Mon-Tue out of Worked
+	// Days, but time logged on an absent day or at the weekend is counted:
+	// all 860 minutes stay.
+	if d := byEmail["elif@example.com"]; d.WorkedDays != 3 || d.TotalHours != 14.33 {
+		t.Errorf("elif@ worked days = %v, hours = %v; want 3 and 14.33", d.WorkedDays, d.TotalHours)
 	}
 	for _, e := range []string{"chen@example.com", "dara@example.com", "farid@example.com"} {
 		if d := byEmail[e]; d.WorkedDays != 5 {

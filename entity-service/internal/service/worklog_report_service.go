@@ -86,11 +86,12 @@ import (
 // gap only because one day cannot hold a second day.
 
 // worklogDropWeekendCards makes the weekly ignore cards dated on a Saturday
-// or Sunday, because the previous system gives weekend dates no team. It is
-// a single switch: set it to false to count weekend time. Absence (leave,
-// exclusion, allocation) is NOT such a switch -- absent-day time is always
-// counted on the weekly.
-const worklogDropWeekendCards = true
+// or Sunday, as the previous system did (it gives weekend dates no team).
+// It is off: time logged at the weekend is real work, by the weekend crew or
+// anyone else, and the weekly counts it under the person's team. Worked Days
+// still counts weekdays only, so weekend hours raise Avg time/day. Absence
+// (leave, exclusion, allocation) never drops time on the weekly either.
+const worklogDropWeekendCards = false
 
 // Only two states reach the report at all. addTimeReportDetails maps
 // 'Approved' to the approved bucket and 'Submitted' to the pending one,
@@ -378,16 +379,16 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			continue
 		}
 
-		// WEEKLY ATTRIBUTES TIME PER DATE, WITH ONE DELIBERATE DEPARTURE.
+		// WEEKLY COUNTS EVERY LOGGED CARD, TWO DELIBERATE DEPARTURES.
 		// The previous system gives weekend dates an empty team list, and
 		// also empties days covered by leave (a half day included), an
 		// exclusion or a confirmed allocation, so cards on those days
-		// vanished from its report. We keep the weekend rule
-		// (worklogDropWeekendCards) but NOT the absence rule: time an
-		// engineer actually logged on a day marked absent is counted, as
-		// it was real work. This is a product decision, not parity. The
-		// daily report is a single date and applies its own presence
-		// rules further down; it is unchanged by this.
+		// vanished from its report. We keep neither rule: time an engineer
+		// actually logged at the weekend or on a day marked absent is
+		// counted, as it was real work (worklogDropWeekendCards is off).
+		// These are product decisions, not parity. The daily report is a
+		// single date and applies its own presence rules further down; it
+		// is unchanged by this.
 		if !daily && worklogDropWeekendCards && isWeekend(t.WorkDate) {
 			continue
 		}
