@@ -34,7 +34,7 @@ import {
   useTheme,
   colors,
 } from "@wso2/oxygen-ui";
-import { Bot, Lock, MoreVertical, Pencil, Shield, Trash2, UserRound } from "@wso2/oxygen-ui-icons-react";
+import { Bot, Headset, Lock, MoreVertical, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
@@ -165,20 +165,7 @@ export default function CsmCaseCommentBubble({
         flexShrink: 0,
       }}
     >
-      <Shield size={14} fill="currentColor" strokeWidth={1.5} />
-      <Box
-        component="span"
-        sx={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "common.white",
-        }}
-      >
-        <UserRound size={9} strokeWidth={2} />
-      </Box>
+      <Headset size={14} strokeWidth={2.5} />
     </Box>
   );
   // A chatbot (Novera) message body is Markdown, and so is the description of
