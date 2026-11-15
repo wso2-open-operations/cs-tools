@@ -38,6 +38,14 @@ export const PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY = "Not Available";
 export const PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE =
   PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY;
 
+/** Why a product of a deployment other than primary production cannot be picked for a service request. */
+export const SERVICE_REQUEST_DEPLOYMENT_NOT_ALLOWED_MESSAGE =
+  "Service requests can only be raised for the primary production deployment of this project.";
+
+/** Why a product the project's subscription leaves out cannot be picked for a service request. */
+export const SERVICE_REQUEST_PRODUCT_NOT_ALLOWED_MESSAGE =
+  "Service requests can't be raised for this product under this project's subscription.";
+
 export const PROJECT_DETAILS_INVALID_PROJECT_ID_MESSAGE =
   "Invalid Project ID. Please check the URL.";
 
