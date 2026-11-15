@@ -309,8 +309,8 @@ func TestWorklogDailyHalfDayStillPresentAndAllocationExcludes(t *testing.T) {
 		},
 	}
 	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
-	if d, ok := dev(r, "u1"); !ok || d.TotalHours != 1 || d.Leave != "HD-AM" {
-		t.Errorf("u1 = %+v ok=%v, want listed with 1h and the half-day code", d, ok)
+	if d, ok := dev(r, "u1"); !ok || d.TotalHours != 1 || d.Leave != "HD" {
+		t.Errorf("u1 = %+v ok=%v, want listed with 1h and Leave HD", d, ok)
 	}
 	if _, ok := dev(r, "u2"); ok {
 		t.Error("u2 is on a confirmed allocation and must not appear on the daily")
@@ -651,8 +651,8 @@ func TestWorklogWeekendDailyListsCrewNotLeaveAlone(t *testing.T) {
 	if _, ok := dev(r, "crewIdle"); !ok {
 		t.Error("crewIdle is on the weekend rota and must be listed, logged time or not")
 	}
-	if d, ok := dev(r, "crewLeave"); !ok || d.Leave != "AL" {
-		t.Errorf("crewLeave = %+v ok=%v, want listed and marked AL", d, ok)
+	if d, ok := dev(r, "crewLeave"); !ok || d.Leave != "FD" {
+		t.Errorf("crewLeave = %+v ok=%v, want listed and marked FD", d, ok)
 	}
 	if _, ok := dev(r, "offLeave"); ok {
 		t.Error("offLeave is on leave and not on the weekend rota; leave alone must not list them")

@@ -32703,7 +32703,7 @@ components:
                     email: { type: string }
                     name: { type: string }
                     workedDays: { type: number, format: double }
-                    leave: { type: string }
+                    leave: { type: string, enum: [FD, HD], description: "Daily only: FD for a full-day leave, HD for a half day; omitted when not on leave." }
                     approvedIssues: { type: integer }
                     approvedHours: { type: number, format: double }
                     pendingIssues: { type: integer }

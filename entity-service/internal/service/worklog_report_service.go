@@ -541,7 +541,7 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			DisapprovedEntries: u.disapproved,
 		}
 		if daily {
-			dev.Leave = u.leaveCode
+			dev.Leave = worklogLeaveLabel(u.leaveCode, u.leaveHalf)
 		} else {
 			dev.WorkedDays = workedDays
 			dev.AvgTimePerDay = safeDiv(totalHrs, workedDays)
@@ -976,6 +976,23 @@ func dateOnly(t time.Time) time.Time {
 
 func minutesToHours(m int) float64 {
 	return round2(float64(m) / 60)
+}
+
+// worklogLeaveLabel is what the daily's Leave column shows: FD for a
+// full-day leave of any kind (annual, sick, maternity, a public holiday,
+// ...), HD for a half day, and nothing when the person is not on leave.
+// The kind itself is left out on purpose: the column says how much of the
+// day was away, and a leave kind such as maternity or sick is not for a
+// mail sent to every team.
+func worklogLeaveLabel(code string, half bool) string {
+	switch {
+	case code == "":
+		return ""
+	case half:
+		return "HD"
+	default:
+		return "FD"
+	}
 }
 
 // safeDiv never returns NaN or Infinity. The delivered weekly mail does
