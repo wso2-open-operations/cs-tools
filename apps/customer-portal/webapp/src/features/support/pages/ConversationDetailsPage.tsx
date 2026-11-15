@@ -99,6 +99,7 @@ import {
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
 import LoadingDotsBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/LoadingDotsBubble";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const CODE_WRAPPER_PATTERN = /\[\\?\/?code\]/i;
 const LEADING_CUSTOMER_COMMENT_LABEL_PATTERN =
@@ -166,7 +167,7 @@ function ConversationMsgBubble({
   const initials = isBot ? null : getInitials(message.createdBy || "?");
   const displayName = isBot
     ? NOVERA_DISPLAY_NAME
-    : message.createdBy || "Unknown";
+    : stripStaffNameMarker(message.createdBy) || "Unknown";
 
   const timestamp =
     message.timestamp instanceof Date

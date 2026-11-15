@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
+
 // Shape of the OIDC ID token claims the UI relies on. The IdP SDK exposes the
 // decoded claims as `any`; this interface narrows it for type-safe access.
 export interface IdTokenClaims {
@@ -73,8 +75,14 @@ export function resolveUserInfo(user: unknown): ResolvedUserInfo {
 }
 
 export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Only ever reads the first two words -- first name, last name -- never
+  // whatever comes after. This is deliberately more defensive than just
+  // stripping the known staff-name marker (stripStaffNameMarker above):
+  // it also keeps the avatar clean against any OTHER trailing marker/icon
+  // this codebase doesn't yet know to recognize, since a third (or later)
+  // word is never looked at at all, not just the ones currently matched.
+  const parts = stripStaffNameMarker(name).split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
 }

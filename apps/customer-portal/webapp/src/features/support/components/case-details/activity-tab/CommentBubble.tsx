@@ -68,13 +68,14 @@ import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { stripThinkingBlocks } from "@features/support/utils/chat";
 import { NOVERA_DISPLAY_NAME } from "@features/support/constants/chatConstants";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 function commentAuthorDisplayName(comment: CaseComment): string {
   if (comment.createdByFullName?.trim()) {
-    return comment.createdByFullName.trim();
+    return stripStaffNameMarker(comment.createdByFullName);
   }
   if (comment.createdBy?.trim()) {
-    return comment.createdBy.trim();
+    return stripStaffNameMarker(comment.createdBy);
   }
   // An empty createdBy is how the API represents a Novera/bot message (see
   // isNoveraOrBotSender) -- never show that as "Unknown".

@@ -87,6 +87,7 @@ import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUpl
 import DOMPurify from "dompurify";
 import { CASE_STATUS } from "@features/project-details/constants/projectDetailsConstants";
 import { parseBackendTimestamp } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 export interface ServiceRequestDetailContentProps {
   data: CaseDetails | undefined;
@@ -225,14 +226,15 @@ export default function ServiceRequestDetailContent({
         type: "comment",
         label: "Comment Added",
         date: c.createdOn ?? "",
-        actor: c.createdBy?.trim() || SYSTEM_AUTHOR_LABEL,
+        actor: stripStaffNameMarker(c.createdBy) || SYSTEM_AUTHOR_LABEL,
         desc: "",
       });
     });
 
     if (data?.closedOn) {
-      const closedByLabel =
-        data?.closedBy?.label ?? data?.closedBy?.name ?? "System";
+      const closedByLabel = stripStaffNameMarker(
+        data?.closedBy?.label ?? data?.closedBy?.name,
+      ) || "System";
       entries.push({
         type: "status_changed",
         label: "Status Changed",
@@ -548,7 +550,7 @@ export default function ServiceRequestDetailContent({
                 <>
                 {commentsToShow.map((comment: CaseComment) => {
                   const authorLabel =
-                    comment.createdBy?.trim() || SYSTEM_AUTHOR_LABEL;
+                    stripStaffNameMarker(comment.createdBy) || SYSTEM_AUTHOR_LABEL;
                   const isCurrentUser =
                     !!comment.createdBy?.trim() &&
                     comment.createdBy.toLowerCase() === currentUserEmail;

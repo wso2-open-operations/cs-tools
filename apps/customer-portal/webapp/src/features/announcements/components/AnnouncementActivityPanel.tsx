@@ -48,6 +48,7 @@ import {
 import ApiErrorState from "@components/error/ApiErrorState";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { useDarkMode } from "@utils/useDarkMode";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import {
   ANNOUNCEMENT_COMMENTS_ERROR_MESSAGE,
   ANNOUNCEMENT_COMMENTS_LOADING_LABEL,
@@ -72,9 +73,9 @@ type AnnouncementActivityPanelProps = {
 
 function commentAuthorDisplayName(comment: CaseComment): string {
   if (comment.createdByFullName?.trim()) {
-    return comment.createdByFullName.trim();
+    return stripStaffNameMarker(comment.createdByFullName);
   }
-  return comment.createdBy?.trim() || SYSTEM_AUTHOR_LABEL;
+  return stripStaffNameMarker(comment.createdBy) || SYSTEM_AUTHOR_LABEL;
 }
 
 function sanitizeCommentContent(content: string, isDarkMode: boolean): string {

@@ -59,6 +59,7 @@ import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDispl
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import CaseEscalationLevelsCard from "@case-details-details/CaseEscalationLevelsCard";
 import ApiErrorState from "@components/error/ApiErrorState";
+import { joinStaffName } from "@utils/staffNameMarker";
 import {
   formatValue,
   formatUtcToLocalNoTimezone,
@@ -109,7 +110,7 @@ export default function CaseDetailsDetailsPanel({
       (contactsData ?? [])
         .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
         .map((c) => ({
-          label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+          label: joinStaffName(c.firstName, c.lastName) || c.email,
           value: c.email,
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
