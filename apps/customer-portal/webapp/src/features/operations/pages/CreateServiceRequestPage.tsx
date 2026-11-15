@@ -91,6 +91,7 @@ import { CaseType } from "@features/support/constants/supportConstants";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useLogger } from "@hooks/useLogger";
 import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import {
   uploadServiceRequestAttachments,
   ATTACHMENT_UPLOAD_WAIT_MS,
@@ -392,7 +393,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const contactOptions = useMemo(
     () =>
       (contactsData ?? []).filter(isRegisteredContact).map((c) => ({
-        label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+        label: stripStaffNameMarker(`${c.firstName} ${c.lastName}`) || c.email,
         value: c.email,
       })),
     [contactsData],

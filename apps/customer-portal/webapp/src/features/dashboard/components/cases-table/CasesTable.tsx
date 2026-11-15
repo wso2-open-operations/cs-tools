@@ -56,6 +56,7 @@ import type {
   CaseSearchResponse,
 } from "@features/support/types/cases";
 import { SortOrder } from "@/types/common";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import type {
   CasesTableFilterValues,
   CasesTableProps,
@@ -142,7 +143,7 @@ const CasesTable = ({
         }));
       } else if (isCreatedByFilter) {
         options = contactsList.map((contact) => ({
-          label: `${contact.firstName} ${contact.lastName}`.trim() || contact.email,
+          label: stripStaffNameMarker(`${contact.firstName} ${contact.lastName}`) || contact.email,
           value: contact.email,
         }));
       } else {

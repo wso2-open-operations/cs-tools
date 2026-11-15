@@ -44,6 +44,7 @@ import {
 } from "@features/settings/utils/phone";
 import { getRoleLabel } from "@features/settings/utils/settings";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 const PASSWORD_RESET_URL = "https://wso2.com/user/password";
 
@@ -239,14 +240,16 @@ export default function UserProfileModal({
 
   const name =
     userDetails?.firstName || userDetails?.lastName
-      ? `${userDetails.firstName ?? ""} ${userDetails.lastName ?? ""}`.trim()
+      ? stripStaffNameMarker(
+          `${userDetails.firstName ?? ""} ${userDetails.lastName ?? ""}`,
+        ) || "--"
       : "--";
   const email = userDetails?.email ?? "--";
   const role = getRoleLabel(userDetails?.roles);
 
   const initials = (() => {
-    const first = userDetails?.firstName?.charAt(0) ?? "";
-    const last = userDetails?.lastName?.charAt(0) ?? "";
+    const first = stripStaffNameMarker(userDetails?.firstName).charAt(0) ?? "";
+    const last = stripStaffNameMarker(userDetails?.lastName).charAt(0) ?? "";
     return (first + last).toUpperCase() || "?";
   })();
 

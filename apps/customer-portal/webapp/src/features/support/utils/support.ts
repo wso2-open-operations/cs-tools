@@ -43,6 +43,7 @@ import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
 import type { CaseComment } from "@features/support/types/cases";
 import type { InlineAttachment } from "@features/support/types/supportInlineAttachment";
 import type { MetadataItem } from "@/types/common";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 import { alpha, colors, type Theme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { createElement, type ComponentType, type ReactNode } from "react";
@@ -570,7 +571,7 @@ function getAssignedEngineerDisplayValue(obj: {
   label?: string;
   name?: string | null;
 }): string {
-  return obj.label ?? obj.name ?? "";
+  return stripStaffNameMarker(obj.label ?? obj.name ?? "");
 }
 
 /**
@@ -582,7 +583,7 @@ function getAssignedEngineerDisplayValue(obj: {
 export function getAssignedEngineerLabel(value: AssignedEngineerValue): string {
   if (value == null || value === "") return "";
   if (typeof value === "object") return getAssignedEngineerDisplayValue(value);
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" ? stripStaffNameMarker(value) : "";
 }
 
 /**
@@ -619,10 +620,11 @@ export function getInitials(
     | null
     | undefined,
 ): string {
-  const label =
+  const rawLabel =
     typeof name === "object" && name
       ? getAssignedEngineerDisplayValue(name)
       : name;
+  const label = typeof rawLabel === "string" ? stripStaffNameMarker(rawLabel) : rawLabel;
   if (!label || typeof label !== "string") return "--";
   const initials = label
     .trim()

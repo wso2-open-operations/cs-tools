@@ -24,6 +24,7 @@ import {
 } from "@features/settings/constants/settingsConstants";
 import type { SettingsRoleBadge } from "@features/settings/types/settings";
 import type { ProjectContact } from "@features/settings/types/users";
+import { stripStaffNameMarker } from "@utils/staffNameMarker";
 
 /**
  * Returns all applicable role badges for a contact.
@@ -195,9 +196,11 @@ export function getInitials(
   lastName?: string,
   email?: string,
 ): string {
-  if (firstName || lastName) {
-    const first = (firstName ?? "").charAt(0).toUpperCase();
-    const last = (lastName ?? "").charAt(0).toUpperCase();
+  const cleanFirst = stripStaffNameMarker(firstName);
+  const cleanLast = stripStaffNameMarker(lastName);
+  if (cleanFirst || cleanLast) {
+    const first = cleanFirst.charAt(0).toUpperCase();
+    const last = cleanLast.charAt(0).toUpperCase();
     if (first || last) return `${first}${last}`.trim() || NULL_PLACEHOLDER;
   }
   if (email) {
