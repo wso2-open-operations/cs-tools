@@ -25545,6 +25545,13 @@ components:
             non-user identifier such as an automation account.
         name:
           type: string
+        isInternal:
+          type: boolean
+          description: >-
+            True when the person resolved to an INTERNAL-type user (WSO2
+            staff). Set on comment authors and on case/incident activity-feed
+            actors; omitted elsewhere, so absent means "not known to be
+            internal", never "known external".
     AssignedEngineerRef:
       type: object
       nullable: true

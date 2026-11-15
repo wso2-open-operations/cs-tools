@@ -189,6 +189,16 @@ export const SEVERITY_ALT_TO_LEGEND_KEY: Record<string, SeverityLegendKey> = {
   "4 - low": SeverityLegendKey.Low,
 };
 
+// Bare severity codes mapped to legend keys. Cases stored in Postgres carry
+// "S0"-"S4" as their severity label, which the display mapping shows as is.
+export const SEVERITY_CODE_TO_LEGEND_KEY: Record<string, SeverityLegendKey> = {
+  s0: SeverityLegendKey.Catastrophic,
+  s1: SeverityLegendKey.Critical,
+  s2: SeverityLegendKey.High,
+  s3: SeverityLegendKey.Medium,
+  s4: SeverityLegendKey.Low,
+};
+
 // Maps S0-S4 / legend key to friendly label for chips (Critical, High, etc.).
 export const SEVERITY_FRIENDLY_LABEL: Record<SeverityLegendKey, string> = {
   [SeverityLegendKey.Catastrophic]: "Catastrophic",

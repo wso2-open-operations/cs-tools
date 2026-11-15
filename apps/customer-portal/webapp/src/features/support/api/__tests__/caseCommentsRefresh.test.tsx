@@ -24,6 +24,7 @@ import {
   MAX_INCREMENTAL_REFRESH_PAGES,
   countLoadedComments,
   dedupeCommentPages,
+  mapActivityToComment,
   refreshCaseComments,
 } from "../caseCommentsRefresh";
 import useGetCaseCommentsInfinite from "../useGetCaseCommentsInfinite";
@@ -228,6 +229,20 @@ describe("refreshCaseComments", () => {
     await Promise.all([first, refreshCaseComments(queryClient, mockAuthFetch, "case-1", logger)]);
     expect(cachedIds(queryClient).slice(0, 2)).toEqual(["c27", "c26"]);
   });
+});
+
+describe("mapActivityToComment", () => {
+  it.each([true, false, undefined])(
+    "carries the author's internal flag onto the comment the bubble renders (flag=%s)",
+    (flag) => {
+      const mapped = mapActivityToComment({
+        ...comment(1),
+        createdByFullName: "Jane Doe",
+        createdByIsInternal: flag,
+      });
+      expect(mapped.createdByIsInternal).toBe(flag);
+    },
+  );
 });
 
 describe("comment page helpers", () => {

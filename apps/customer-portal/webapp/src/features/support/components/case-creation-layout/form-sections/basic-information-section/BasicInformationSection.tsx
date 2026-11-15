@@ -340,7 +340,12 @@ export function BasicInformationSection({
                 }}
                 displayEmpty
                 renderValue={(value) => {
-                  if (value === "") {
+                  // With an option list the value is an id. One that is not
+                  // listed reads as no selection, never as the bare id.
+                  const listedOption = useProductOptionList
+                    ? productOptionList!.find((o) => o.id === value)
+                    : undefined;
+                  if (value === "" || (useProductOptionList && !listedOption)) {
                     if (isProductDropdownDisabled) {
                       return hideDeploymentField
                         ? EMPTY_DROPDOWN_PLACEHOLDER
@@ -352,9 +357,8 @@ export function BasicInformationSection({
                     const productLabel = isCloudSupportProject(projectTypeLabel) ? "Product" : "Product Version";
                     return `Select ${productLabel}...`;
                   }
-                  if (useProductOptionList && hasProductRows) {
-                    const opt = productOptionList!.find((o) => o.id === value);
-                    return opt?.label ?? value;
+                  if (listedOption) {
+                    return listedOption.label;
                   }
                   if (showNoProductsHint) {
                     return EMPTY_DROPDOWN_PLACEHOLDER;

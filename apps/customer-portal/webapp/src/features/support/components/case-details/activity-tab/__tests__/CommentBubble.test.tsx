@@ -86,6 +86,45 @@ describe("CommentBubble", () => {
     expect(screen.getByText(/why does <thinking> show up\?/)).toBeInTheDocument();
   });
 
+  describe("support engineer badge", () => {
+    it("badges the avatar of an author the backend flagged as internal", () => {
+      renderBubble({
+        comment: { ...mockComment, id: "staff-1", createdByFullName: "Jane Doe", createdByIsInternal: true },
+      });
+      expect(screen.getByLabelText("Technical Team")).toBeInTheDocument();
+    });
+
+    it("shows the badge beside the name when the avatar is hidden", () => {
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <ThemeProvider theme={createTheme()}>
+            <CommentBubble
+              comment={{ ...mockComment, id: "staff-2", createdByFullName: "Jane Doe", createdByIsInternal: true }}
+              isCurrentUser={false}
+              primaryBg="rgba(250,123,63,0.1)"
+              hideAvatar
+            />
+          </ThemeProvider>
+        </QueryClientProvider>,
+      );
+      expect(screen.getByLabelText("Technical Team")).toBeInTheDocument();
+    });
+
+    it.each([false, undefined])("leaves a customer or unresolved author without a badge (flag=%s)", (flag) => {
+      renderBubble({
+        comment: { ...mockComment, id: "customer-1", createdByFullName: "John Roe", createdByIsInternal: flag },
+      });
+      expect(screen.queryByLabelText("Technical Team")).not.toBeInTheDocument();
+    });
+
+    it("never badges Novera, even if the backend flagged the author", () => {
+      renderBubble({
+        comment: { ...mockComment, id: "novera-2", createdBy: "Novera", createdByIsInternal: true },
+      });
+      expect(screen.queryByLabelText("Technical Team")).not.toBeInTheDocument();
+    });
+  });
+
   describe("laid-out HTML source", () => {
     const laidOut =
       "<p>Wrapped by hand\r\n   at a fixed width.</p>\r\n<ul>\r\n  <li>First point\r\n    continues here.</li>\r\n</ul>";

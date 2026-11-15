@@ -27,6 +27,8 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
+import { logoDarkModeUrl, logoLightModeUrl } from "@config/appearanceConfig";
+import { useDarkMode } from "@utils/useDarkMode";
 import {
   Activity,
   ArrowDown,
@@ -280,6 +282,10 @@ export default function CaseActivitiesFeed({
   const [openSnLink, setOpenSnLink] = useState<{ type: SnLinkType; id: string } | null>(
     null,
   );
+  // Lifecycle rows carry the deployment's own logo (the same two keys the
+  // header reads), picked per colour scheme like Brand.tsx does.
+  const isDarkMode = useDarkMode();
+  const lifecycleLogoSrc = isDarkMode ? logoDarkModeUrl() : logoLightModeUrl();
 
   const entries: FeedEntry[] = useMemo(() => {
     const out: FeedEntry[] = [];
@@ -526,11 +532,14 @@ export default function CaseActivitiesFeed({
                   }}
                 >
                   <Avatar
+                    src={lifecycleLogoSrc}
+                    alt=""
                     sx={{
                       width: 32,
                       height: 32,
                       bgcolor: isBreach ? "error.main" : "action.selected",
                       color: isBreach ? "error.contrastText" : "text.secondary",
+                      "& .MuiAvatar-img": { objectFit: "contain", p: 0.5 },
                     }}
                   >
                     {AUDIT_ICON[e.entry.kind]}

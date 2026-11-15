@@ -2359,7 +2359,8 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	// available when it happens to match a known user's email.
 	dataQuery := fmt.Sprintf(`
 		SELECT cc.id, cc.work_item_id, cc.type, cc.content, cc.created_by, cc.created_on,
-		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
+		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')),
+		       COALESCE(u.user_type::text, '') = 'INTERNAL'
 		FROM comment cc
 		`+userByEmailJoin("u", "cc.created_by")+`
 		WHERE cc.work_item_id = $1%s
@@ -2392,9 +2393,10 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 			var c domain.CaseComment
 			var typeRaw, authorEmail string
 			var authorID, authorName *string
+			var authorInternal bool
 			if err := rows.Scan(
 				&c.ID, &c.CaseID, &typeRaw, &c.Content, &authorEmail, &c.CreatedOn,
-				&authorID, &authorName,
+				&authorID, &authorName, &authorInternal,
 			); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
@@ -2408,6 +2410,9 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 				c.CreatedBy = domain.NewUserReference(*authorID, authorEmail, name)
 			} else {
 				c.CreatedBy = domain.NewUserReference("", authorEmail, "")
+			}
+			if c.CreatedBy != nil {
+				c.CreatedBy.IsInternal = authorInternal
 			}
 			result = append(result, c)
 		}
@@ -5120,8 +5125,9 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 		fileName, contentType            *string
 		sizeBytes                        *int64
 		fieldName, oldValue, newValue    *string
+		createdByInternal                bool
 	)
-	if err := row.Scan(&id, &kind, &content, &createdOn, &email, &firstName, &lastName, &name, &commentTypeRaw, &fileName, &contentType, &sizeBytes, &fieldName, &oldValue, &newValue); err != nil {
+	if err := row.Scan(&id, &kind, &content, &createdOn, &email, &firstName, &lastName, &name, &commentTypeRaw, &fileName, &contentType, &sizeBytes, &fieldName, &oldValue, &newValue, &createdByInternal); err != nil {
 		return domain.CaseActivity{}, err
 	}
 	a := domain.CaseActivity{
@@ -5136,6 +5142,9 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 	// other read in this service does: "user".name first, falling back to
 	// first_name+last_name only if name is unset.
 	a.CreatedBy = domain.NewUserReference("", stringOrEmpty(email), stringOrEmpty(name))
+	if a.CreatedBy != nil {
+		a.CreatedBy.IsInternal = createdByInternal
+	}
 	switch kind {
 	case "comment":
 		a.Type = domain.ActivityTypeComment
@@ -5251,13 +5260,15 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				c.id, 'comment' AS kind, c.content, c.created_on AS created_on,
 				c.email, c.first_name, c.last_name, c.name, c.type::text AS comment_type,
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
+				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value,
+				c.created_by_internal
 			FROM (
 				SELECT
 					cm.id, cm.content, cm.created_on, cm.created_by AS email,
 					u1.first_name, u1.last_name,
 					COALESCE(u1.name, NULLIF(TRIM(CONCAT_WS(' ', u1.first_name, u1.last_name)), '')) AS name,
-					cm.type
+					cm.type,
+					COALESCE(u1.user_type::text, '') = 'INTERNAL' AS created_by_internal
 				FROM comment cm
 				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1` + commentWorkNoteDataFilter + `
@@ -5271,11 +5282,12 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				COALESCE(u4.name, NULLIF(TRIM(CONCAT_WS(' ', u4.first_name, u4.last_name)), '')) AS name,
 				NULL::text AS comment_type,
 				COALESCE(wa.name, '')::text, COALESCE(wa.content_type, '')::text, COALESCE(wa.size_bytes, 0)::bigint,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
+				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value,
+				COALESCE(u4.user_type::text, '') = 'INTERNAL' AS created_by_internal
 			FROM work_item_attachment wa
 			JOIN work_item wi ON wi.id = wa.work_item_id
 			LEFT JOIN LATERAL (
-				SELECT u.email, u.first_name, u.last_name, u.name
+				SELECT u.email, u.first_name, u.last_name, u.name, u.user_type
 				FROM "user" u
 				WHERE LOWER(u.email) = LOWER(wa.created_by)
 				ORDER BY u.id
@@ -5292,13 +5304,15 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				fc.email, fc.first_name, fc.last_name, fc.name,
 				NULL::text AS comment_type,
 				NULL::text AS file_name, NULL::text AS content_type, NULL::bigint AS size_bytes,
-				fc.field_name, fc.old_value, fc.new_value
+				fc.field_name, fc.old_value, fc.new_value,
+				fc.created_by_internal
 			FROM (
 				SELECT
 					wa.id, wa.created_on, wa.user_email AS email,
 					u3.first_name, u3.last_name,
 					COALESCE(u3.name, NULLIF(TRIM(CONCAT_WS(' ', u3.first_name, u3.last_name)), '')) AS name,
-					wa.field_name, wa.old_value, wa.new_value
+					wa.field_name, wa.old_value, wa.new_value,
+					COALESCE(u3.user_type::text, '') = 'INTERNAL' AS created_by_internal
 				FROM work_item_activity wa
 				` + userByEmailJoin("u3", "wa.user_email") + `
 				WHERE wa.work_item_id = $1
@@ -5306,7 +5320,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	}
 	dataQuery += `
 		)
-		SELECT id, kind, content, created_on, email, first_name, last_name, name, comment_type, file_name, content_type, size_bytes, field_name, old_value, new_value
+		SELECT id, kind, content, created_on, email, first_name, last_name, name, comment_type, file_name, content_type, size_bytes, field_name, old_value, new_value, created_by_internal
 		FROM activity
 		ORDER BY created_on DESC, id
 		LIMIT $2 OFFSET $3`
