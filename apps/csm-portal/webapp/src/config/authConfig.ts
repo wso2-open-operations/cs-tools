@@ -67,6 +67,12 @@ declare global {
        */
       CSM_PORTAL_APP_NAME?: string;
       /**
+       * Optional. Company named in the sidebar footer's copyright line.
+       * Defaults to "WSO2 LLC" when unset — see `appearanceConfig.ts`'s
+       * `companyName`.
+       */
+      CSM_PORTAL_COMPANY_NAME?: string;
+      /**
        * Optional. Header and tab-icon logo for the light colour scheme — a
        * path under `public/` or an absolute URL. Also used for dark mode when
        * `CSM_PORTAL_LOGO_DARK_MODE_URL` is unset. Defaults to "/logo-dark.svg"
