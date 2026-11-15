@@ -76,7 +76,11 @@ export function isS0SeverityLabel(label?: string | null): boolean {
     case S0_SEVERITY_LABELS[2].toLowerCase():
       return true;
     default:
-      return false;
+      // A bare code ("S0"), read the way the severity legend reads it.
+      return (
+        SEVERITY_CODE_TO_LEGEND_KEY[trimmed.replace(/\s*\(.*$/, "")] ===
+        SeverityLegendKey.Catastrophic
+      );
   }
 }
 
