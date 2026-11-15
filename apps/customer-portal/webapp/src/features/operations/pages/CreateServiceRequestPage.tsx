@@ -63,11 +63,9 @@ import { resolveDisplayTimeZone } from "@utils/dateTime";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import {
-  filterDeploymentProductsByCategory,
   getBaseDeploymentOptions,
   getBaseProductOptions,
-  getDeploymentProductDisplayLabel,
-  isUnknownPlaceholderProductLabel,
+  isServiceRequestProduct,
   resolveDeploymentMatch,
   resolveProductId,
 } from "@features/support/utils/caseCreation";
@@ -289,7 +287,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
   }, [searchParams, projectDeployments]);
 
   const effectiveDeployment = deployment || prefill.deploymentLabel || "";
-  const effectiveProduct = product || prefill.productId || "";
 
   const baseDeploymentOptions = getBaseDeploymentOptions(projectDeployments);
   const selectedDeploymentMatch = useMemo(
@@ -351,17 +348,23 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const allDeploymentProducts = useMemo(
     () =>
-      filterDeploymentProductsByCategory(
-        (deploymentProductsData ?? []).filter((item) => {
-          const label = getDeploymentProductDisplayLabel(item);
-          return (
-            Boolean(label.trim()) && !isUnknownPlaceholderProductLabel(label)
-          );
-        }),
-        srProductCategories,
+      (deploymentProductsData ?? []).filter((item) =>
+        isServiceRequestProduct(item, srProductCategories),
       ),
     [deploymentProductsData, srProductCategories],
   );
+
+  // The product picked on the Deployments tab arrives by id. It is used only
+  // while its own deployment is selected and the form lists it, so the field
+  // never shows a bare id: not for a product the project's rules leave out,
+  // and not after the user picks another deployment.
+  const prefillDeploymentId = searchParams.get("deploymentId")?.trim() ?? "";
+  const isPrefilledProductListed =
+    !!prefill.productId &&
+    selectedDeploymentId === prefillDeploymentId &&
+    allDeploymentProducts.some((item) => item.id === prefill.productId);
+  const effectiveProduct =
+    product || (isPrefilledProductListed ? prefill.productId : "");
   const baseProductOptions = getBaseProductOptions(allDeploymentProducts);
   const sortedProductOptions = useMemo(
     () =>
@@ -444,6 +447,30 @@ export default function CreateServiceRequestPage(): JSX.Element {
       void deploymentsQuery.fetchNextPage();
     }
   }, [isPrimaryProductionOnly, projectDeployments.length, deploymentsQuery]);
+
+  // Without a category restriction products load ten at a time, so the product
+  // picked on the Deployments tab may sit on a later page. Keep paging until it
+  // shows up or the pages run out; until then the field stays empty.
+  useEffect(() => {
+    if (!prefill.productId || product) return;
+    if (selectedDeploymentId !== prefillDeploymentId) return;
+    if (deploymentProductsData.some((item) => item.id === prefill.productId)) {
+      return;
+    }
+    if (
+      deploymentProductsQuery.hasNextPage &&
+      !deploymentProductsQuery.isFetchingNextPage
+    ) {
+      void deploymentProductsQuery.fetchNextPage();
+    }
+  }, [
+    prefill.productId,
+    product,
+    selectedDeploymentId,
+    prefillDeploymentId,
+    deploymentProductsData,
+    deploymentProductsQuery,
+  ]);
 
   // For Cloud Support / Cloud Evaluation Support: auto-pick the first primary
   // production deployment so the hidden field still resolves to a valid value.
