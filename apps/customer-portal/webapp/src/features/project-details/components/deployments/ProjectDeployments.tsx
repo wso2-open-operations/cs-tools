@@ -32,7 +32,10 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { SelectedDeploymentProduct } from "@features/project-details/types/deployments";
-import type { ProjectDeploymentsProps } from "@features/project-details/types/projectDetailsComponents";
+import type {
+  ProjectDeploymentsProps,
+  ServiceRequestProductSelection,
+} from "@features/project-details/types/projectDetailsComponents";
 import {
   buildServiceRequestCreateSearchParams,
   clampDeploymentsPage,
@@ -41,7 +44,11 @@ import { Plus, Server } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import useGetProjectDetails from "@api/useGetProjectDetails";
-import { isProjectRestricted } from "@utils/permission";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
+import {
+  filterDeploymentsForCaseCreation,
+  isProjectRestricted,
+} from "@utils/permission";
 
 /**
  * Displays deployment environments for a project.
@@ -77,6 +84,31 @@ export default function ProjectDeployments({
   const currentPageIndex = Math.max(0, clampedPage - 1);
   const currentDeployments =
     deploymentsQuery.data?.pages?.[currentPageIndex]?.deployments ?? [];
+
+  // Products are picked for a service request by the rules the service request
+  // form lists them with: the deployments it offers, and the product categories
+  // the project's subscription allows. Nothing can be picked until the project
+  // and its features have loaded.
+  const { data: projectFeatures } = useGetProjectFeatures(projectId);
+  const canPickForServiceRequest =
+    showServiceRequest && !isRestricted && !!projectDetails && !!projectFeatures;
+  const projectTypeLabel = projectDetails?.type?.label;
+  const serviceRequestDeploymentIds = new Set(
+    filterDeploymentsForCaseCreation(
+      currentDeployments,
+      projectTypeLabel,
+      projectFeatures,
+    ).map((d) => d.id),
+  );
+  const serviceRequestSelectionFor = (
+    deploymentId: string,
+  ): ServiceRequestProductSelection | undefined =>
+    canPickForServiceRequest
+      ? {
+          deploymentAllowed: serviceRequestDeploymentIds.has(deploymentId),
+          productCategories: projectFeatures?.srProductCategories ?? undefined,
+        }
+      : undefined;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -295,6 +327,9 @@ export default function ProjectDeployments({
                     deployment={deployment}
                     selectedProduct={selectedProduct}
                     onToggleProductSelect={handleToggleProductSelect}
+                    serviceRequestSelection={serviceRequestSelectionFor(
+                      deployment.id,
+                    )}
                   />
                 </Grid>
               ))}
