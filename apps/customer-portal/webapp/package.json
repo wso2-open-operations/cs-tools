@@ -28,7 +28,7 @@
     "@tanstack/react-query": "5.90.20",
     "@tanstack/react-query-devtools": "5.91.2",
     "@types/markdown-it": "^14.1.2",
-    "@wso2/oxygen-ui": "0.6.0",
+    "@wso2/oxygen-ui": "0.25.0",
     "@wso2/oxygen-ui-charts-react": "0.6.0",
     "@wso2/oxygen-ui-icons-react": "0.6.0",
     "date-fns": "^4.4.0",
