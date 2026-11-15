@@ -4210,9 +4210,12 @@ already use — no route path, request, or response shape changed.
   once the list is (re)fetched, never from the create response.
 - **A comment author's `UserReference` also carries `isInternal`** — true when
   the same `userByEmailJoin` row has `user_type = INTERNAL` (the join exposes
-  `u2.user_type` for this), set by both `SearchCaseComments` (`case_repo.go`)
-  and `SearchComments` (`comment_repo.go`, via `CommentRow.CreatedByInternal`),
-  `omitempty` so every other `UserReference` is unchanged. Added so a portal
+  `u2.user_type` for this), set by `SearchCaseComments` (`case_repo.go`),
+  `SearchComments` (`comment_repo.go`, via `CommentRow.CreatedByInternal`) and
+  the case/incident activity feeds (`SearchCaseActivities`/
+  `SearchIncidentActivities`, every UNION branch carries `created_by_internal`
+  since they share `scanCaseActivity` — the customer portal reads its comments
+  from that feed), `omitempty` so every other `UserReference` is unchanged. Added so a portal
   can mark a support engineer's comment avatar without a per-comment user
   lookup: the webapp's own `authorRole` is NOT that signal — its mapper
   defaults every non-bot, non-system case comment to `"wso2_engineer"`, so a

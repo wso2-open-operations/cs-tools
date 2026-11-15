@@ -54,7 +54,7 @@ func TestCaseActivityFieldChangeLabel(t *testing.T) {
 // database connection, exercising the exact Scan destination order
 // scanCaseActivity itself uses (id, kind, content, created_on, email,
 // first_name, last_name, name, comment_type, file_name, content_type,
-// size_bytes, field_name, old_value, new_value).
+// size_bytes, field_name, old_value, new_value, created_by_internal).
 type fakeCaseActivityRow struct {
 	id, kind, content                string
 	createdOn                        time.Time
@@ -63,6 +63,7 @@ type fakeCaseActivityRow struct {
 	fileName, contentType            *string
 	sizeBytes                        *int64
 	fieldName, oldValue, newValue    *string
+	createdByInternal                bool
 }
 
 func (f fakeCaseActivityRow) Scan(dest ...any) error {
@@ -81,6 +82,7 @@ func (f fakeCaseActivityRow) Scan(dest ...any) error {
 	*dest[12].(**string) = f.fieldName
 	*dest[13].(**string) = f.oldValue
 	*dest[14].(**string) = f.newValue
+	*dest[15].(*bool) = f.createdByInternal
 	return nil
 }
 
@@ -91,7 +93,7 @@ func TestScanCaseActivity(t *testing.T) {
 		row := fakeCaseActivityRow{
 			id: "a1", kind: "comment", content: "hello",
 			createdOn: now, email: strPtr("jane@example.com"), name: strPtr("Jane Doe"),
-			commentType: strPtr("COMMENT"),
+			commentType: strPtr("COMMENT"), createdByInternal: true,
 		}
 		got, err := scanCaseActivity(row)
 		if err != nil {
@@ -99,6 +101,9 @@ func TestScanCaseActivity(t *testing.T) {
 		}
 		if got.Type != domain.ActivityTypeComment {
 			t.Errorf("Type = %v, want %v", got.Type, domain.ActivityTypeComment)
+		}
+		if got.CreatedBy == nil || !got.CreatedBy.IsInternal {
+			t.Errorf("CreatedBy.IsInternal = %v, want true for an INTERNAL-type author", got.CreatedBy)
 		}
 		if got.CommentType == nil || *got.CommentType != domain.CommentTypeComment {
 			t.Errorf("CommentType = %v, want %v", got.CommentType, domain.CommentTypeComment)
@@ -123,6 +128,9 @@ func TestScanCaseActivity(t *testing.T) {
 		}
 		if got.FileName != "report.pdf" || got.ContentType != "application/pdf" || got.SizeBytes != 1024 {
 			t.Errorf("attachment fields = %+v", got)
+		}
+		if got.CreatedBy == nil || got.CreatedBy.IsInternal {
+			t.Errorf("CreatedBy.IsInternal = %v, want false when the author is not INTERNAL-type", got.CreatedBy)
 		}
 	})
 
