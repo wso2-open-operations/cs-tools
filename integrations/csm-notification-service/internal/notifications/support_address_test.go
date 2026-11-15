@@ -30,12 +30,12 @@ func restoreSupportAddress(t *testing.T) {
 	for i, p := range tmpls {
 		orig[i] = *p
 	}
-	addr := supportAddress
+	addr, mailto := supportAddress, supportMailto
 	t.Cleanup(func() {
 		for i, p := range tmpls {
 			*p = orig[i]
 		}
-		supportAddress = addr
+		supportAddress, supportMailto = addr, mailto
 	})
 }
 
@@ -101,7 +101,7 @@ func TestSetSupportAddress_EmptyKeepsTheDefault(t *testing.T) {
 }
 
 func TestSetSupportAddress_RefusesAnythingButOnePlainAddress(t *testing.T) {
-	for _, bad := range []string{"not-an-address", "a@b@example.com", "@example.com", "help@", "help me@example.com", "help@example.com, other@example.com", "<help@example.com>", `help"@example.com`} {
+	for _, bad := range []string{"not-an-address", "a@b@example.com", "@example.com", "help@", "help me@example.com", "help@example.com, other@example.com", "<help@example.com>", `help"@example.com`, "help..desk@example.com", ".help@example.com", "help.@example.com", "Jane Doe <jane.doe@example.com>"} {
 		t.Run(bad, func(t *testing.T) {
 			restoreSupportAddress(t)
 			before := onboardingBodies()["new"]
@@ -112,5 +112,57 @@ func TestSetSupportAddress_RefusesAnythingButOnePlainAddress(t *testing.T) {
 				t.Errorf("a refused value must leave the default in place")
 			}
 		})
+	}
+}
+
+// The error is logged at startup, so it must not repeat the rejected value,
+// which could be a name and an address.
+func TestSetSupportAddress_TheErrorNamesNoValue(t *testing.T) {
+	restoreSupportAddress(t)
+	err := SetSupportAddress("Jane Doe <jane.doe@example.com>")
+	if err == nil {
+		t.Fatal("a display name with an address was accepted")
+	}
+	for _, leak := range []string{"Jane", "jane.doe", "example.com"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("the error repeats part of the rejected value (%q): %v", leak, err)
+		}
+	}
+}
+
+// The mailto destination is percent-encoded for a URI separately from the
+// visible text: a "?" in the part before the "@" would otherwise start the
+// link's query instead of staying in the recipient.
+func TestSetSupportAddress_TheLinkIsEncodedAndTheTextIsNot(t *testing.T) {
+	restoreSupportAddress(t)
+	if err := SetSupportAddress("unlikely?address@example.com"); err != nil {
+		t.Fatalf("SetSupportAddress: %v", err)
+	}
+	for name, body := range onboardingBodies() {
+		if !strings.Contains(body, "mailto:unlikely%3Faddress@example.com") {
+			t.Errorf("%s email: the mailto link is not percent-encoded", name)
+		}
+		if !strings.Contains(body, ">unlikely?address@example.com<") {
+			t.Errorf("%s email: the visible text is not the plain address", name)
+		}
+		if strings.Contains(body, "mailto:unlikely?address") {
+			t.Errorf("%s email: the link still has a bare \"?\"", name)
+		}
+	}
+}
+
+// A new address that contains the old one is not mangled by the replacement.
+func TestSetSupportAddress_ANewAddressContainingTheOldOneIsKeptWhole(t *testing.T) {
+	restoreSupportAddress(t)
+	if err := SetSupportAddress("x-support@wso2.com"); err != nil {
+		t.Fatalf("SetSupportAddress: %v", err)
+	}
+	for name, body := range onboardingBodies() {
+		if !strings.Contains(body, "mailto:x-support@wso2.com") || !strings.Contains(body, ">x-support@wso2.com<") {
+			t.Errorf("%s email: the address was mangled", name)
+		}
+		if strings.Contains(body, "x-x-support") {
+			t.Errorf("%s email: the address was replaced twice", name)
+		}
 	}
 }
