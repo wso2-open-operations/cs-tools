@@ -57,6 +57,11 @@ func main() {
 	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_LIGHT_URL"))
 	// Optional footer-icon override for the onboarding emails; unset keeps the built-in icon.
 	notifications.SetFooterIconURL(os.Getenv("EMAIL_FOOTER_ICON_URL"))
+	// Optional support address for the onboarding emails' "contact us" line (and
+	// their default Reply-To); unset keeps the built-in address.
+	if err := notifications.SetSupportAddress(os.Getenv("EMAIL_SUPPORT_ADDRESS")); err != nil {
+		slog.Warn("EMAIL_SUPPORT_ADDRESS ignored; keeping the built-in address", "err", err)
+	}
 	// Optional company-name override for the templates' footer disclaimer/signoff
 	// and the dispatch package's email subjects; unset keeps "WSO2".
 	notifications.SetTemplateCompanyName(os.Getenv("EMAIL_TEMPLATE_COMPANY_NAME"))
@@ -1561,13 +1566,13 @@ func envBool(key string, def bool) bool {
 	}
 }
 
-// emailReplyTo reads EMAIL_REPLY_TO: unset means support@wso2.com, set but
+// emailReplyTo reads EMAIL_REPLY_TO: unset means the support address, set but
 // empty means no Reply-To.
 func emailReplyTo() string {
 	if v, ok := os.LookupEnv("EMAIL_REPLY_TO"); ok {
 		return v
 	}
-	return "support@wso2.com"
+	return notifications.SupportAddress()
 }
 
 func envOrDefault(key, def string) string {
