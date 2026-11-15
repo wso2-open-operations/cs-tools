@@ -329,6 +329,10 @@ export type CaseComment = AuditMetadata & {
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   createdByFullName?: string | null;
+  /** True when the backend resolved the author to an internal-type user
+   * (WSO2 staff). Absent means "not known to be internal", never "known
+   * external". */
+  createdByIsInternal?: boolean;
   isEscalated: boolean;
   hasInlineAttachments?: boolean;
   inlineAttachments?: CaseCommentInlineAttachment[];

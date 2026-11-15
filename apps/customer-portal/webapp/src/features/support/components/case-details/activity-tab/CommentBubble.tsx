@@ -17,6 +17,7 @@
 import type { CommentBubbleProps } from "@features/support/types/supportComponents";
 import {
   Avatar,
+  Badge,
   Box,
   Button,
   IconButton,
@@ -36,6 +37,8 @@ import {
   FileArchive,
   FileText,
   Image,
+  Shield,
+  UserRound,
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
@@ -171,6 +174,43 @@ export default function CommentBubble({
   }, [isCurrentUser, comment, userDetails]);
 
   const isNovera = isNoveraComment;
+  // The backend resolves the author's own user type and sends it as a plain
+  // flag; nothing here looks the author up or infers it from the name.
+  const isTechnicalTeam = !isNovera && !!comment.createdByIsInternal;
+  const technicalTeamBadge = (
+    <Box
+      component="span"
+      aria-label="Technical Team"
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        width: 18,
+        height: 18,
+        borderRadius: "50%",
+        bgcolor: "common.white",
+        color: theme.palette.info?.main ?? "#0288d1",
+        boxShadow: 1,
+        flexShrink: 0,
+      }}
+    >
+      <Shield size={14} fill="currentColor" strokeWidth={1.5} />
+      <Box
+        component="span"
+        sx={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "common.white",
+        }}
+      >
+        <UserRound size={9} strokeWidth={2} />
+      </Box>
+    </Box>
+  );
   const isAttachmentEntry = comment.type?.toLowerCase() === "attachment";
   const attachmentCategory = getAttachmentFileCategory(
     comment.fileName ?? "",
@@ -242,22 +282,30 @@ export default function CommentBubble({
           <Bot size={16} color="white" />
         </Box>
       ) : !hideAvatar ? (
-        <Avatar
-          sx={{
-            width: 32,
-            height: 32,
-            fontSize: "0.75rem",
-            flexShrink: 0,
-            bgcolor: isCurrentUser
-              ? primaryBg
-              : alpha(theme.palette.info?.light ?? "#0288d1", 0.2),
-            color: isCurrentUser
-              ? theme.palette.primary.main
-              : (theme.palette.info?.main ?? "#0288d1"),
-          }}
+        <Badge
+          overlap="circular"
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          invisible={!isTechnicalTeam}
+          badgeContent={isTechnicalTeam ? technicalTeamBadge : undefined}
+          sx={{ flexShrink: 0 }}
         >
-          {initials}
-        </Avatar>
+          <Avatar
+            sx={{
+              width: 32,
+              height: 32,
+              fontSize: "0.75rem",
+              flexShrink: 0,
+              bgcolor: isCurrentUser
+                ? primaryBg
+                : alpha(theme.palette.info?.light ?? "#0288d1", 0.2),
+              color: isCurrentUser
+                ? theme.palette.primary.main
+                : (theme.palette.info?.main ?? "#0288d1"),
+            }}
+          >
+            {initials}
+          </Avatar>
+        </Badge>
       ) : (
         <Box sx={{ width: 32, flexShrink: 0 }} />
       )}
@@ -283,6 +331,7 @@ export default function CommentBubble({
               {displayName}
             </Typography>
           )}
+          {hideAvatar && isTechnicalTeam && technicalTeamBadge}
           <Typography variant="caption" color="text.secondary">
             {formatCommentDate(comment.createdOn)}
           </Typography>
