@@ -149,6 +149,7 @@ export default function CsmCaseCommentBubble({
   const technicalTeamBadge = (
     <Box
       component="span"
+      role="img"
       aria-label="Technical Team"
       sx={{
         display: "inline-flex",
