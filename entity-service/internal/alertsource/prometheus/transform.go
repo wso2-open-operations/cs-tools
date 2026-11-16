@@ -18,7 +18,6 @@
 package prometheus
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,11 +41,8 @@ const grafanaAlertPrefix = "Grafana Alert: "
 
 // defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
 var defaults = map[string]string{
-	"METRIC_NAME": "PrometheusAlert",
-	"SERVICE":     "Managed Services",
 	"CATEGORY":    "Software",
 	"ENVIRONMENT": "Production",
-	"SEVERITY":    "Critical",
 }
 
 // severityMap maps Prometheus/Grafana's lowercase severity label to the canonical severity labels; an unmapped value passes through as-is.
@@ -64,21 +60,8 @@ var ErrInvalidStructure = errors.New("invalid prometheus alert payload structure
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.prometheus.alert.config"; unlike other fields, "severity" and "source" are looked up lowercase.
+// Config holds per-field overrides, which the registry leaves empty; unlike other fields, "severity" and "source" are looked up lowercase.
 type Config map[string]string
-
-// LoadConfig reads operator overrides from the PROMETHEUS_ALERT_CONFIG env var.
-func LoadConfig() (Config, error) {
-	raw := fieldvalue.AlertConfigRaw("PROMETHEUS_ALERT_CONFIG")
-	if strings.TrimSpace(raw) == "" {
-		return Config{}, nil
-	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, fmt.Errorf("invalid PROMETHEUS_ALERT_CONFIG: %w", err)
-	}
-	return cfg, nil
-}
 
 // Transform parses a raw inbound Alertmanager-shaped webhook and produces one canonical Alert per entry in its "alerts" array.
 func Transform(raw []byte, cfg Config) ([]Alert, error) {

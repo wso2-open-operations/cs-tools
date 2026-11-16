@@ -18,11 +18,8 @@
 package openobserve
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
-
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/fieldvalue"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/jsonnum"
 )
@@ -36,7 +33,6 @@ var defaults = map[string]string{
 	"IMPACT":      "3",
 	"CALLER_ID":   "openobserve",
 	"CATEGORY":    "service_interruption",
-	"SERVICE":     "managed_services",
 	"ENVIRONMENT": "production",
 }
 
@@ -67,23 +63,10 @@ type Alert struct {
 	CallerID         string `json:"caller_id"`
 }
 
-// Config holds operator overrides mirroring "edge.api.openobserve.alert.config"; any field left empty falls back to the default.
+// Config holds per-field overrides, which the registry leaves empty; any field left empty falls back to the default.
 type Config map[string]string
 
-// LoadConfig reads operator overrides from the OPENOBSERVE_ALERT_CONFIG env var.
-func LoadConfig() (Config, error) {
-	raw := fieldvalue.AlertConfigRaw("OPENOBSERVE_ALERT_CONFIG")
-	if strings.TrimSpace(raw) == "" {
-		return Config{}, nil
-	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, fmt.Errorf("invalid OPENOBSERVE_ALERT_CONFIG: %w", err)
-	}
-	return cfg, nil
-}
-
-// Transform parses a raw inbound OpenObserve webhook and produces the canonical Alert, cfg supplying operator overrides.
+// Transform parses a raw inbound OpenObserve webhook and produces the canonical Alert, cfg supplying any overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {

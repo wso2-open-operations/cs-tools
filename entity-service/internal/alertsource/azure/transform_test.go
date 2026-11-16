@@ -25,7 +25,7 @@ func TestTransform_SeverityOutsideSevNPassesThrough(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{"built-in default", Config{}, "Critical"},
+		{"left empty for the shared default", Config{}, ""},
 		{"operator override", Config{"severity": "Major"}, "Major"},
 	}
 	for _, c := range cases {
