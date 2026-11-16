@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -397,8 +398,9 @@ func main() {
 		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
 		// (project.reactivated), e.g. the customer lifecycle and billing lists;
 		// checked by acpReactivationCC, which stops startup on a bad entry.
-		// The email goes only to @wso2.com addresses: it is an internal notice.
-		WithACPReactivation(acpReactivationCC(), "@wso2.com")
+		// The email goes only to the internal domains (ACP_INTERNAL_EMAIL_DOMAINS,
+		// default @wso2.com): it is an internal notice.
+		WithACPReactivation(acpReactivationCC(), acpInternalEmailDomains())
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to
@@ -1939,6 +1941,37 @@ func acpReactivationCC() []string {
 		os.Exit(1)
 	}
 	return cc
+}
+
+// acpInternalEmailDomains reads ACP_INTERNAL_EMAIL_DOMAINS, the domains the
+// "Back to Open state" email may go to, and stops startup on an entry that
+// is not a domain: matched as a suffix, it could admit the wrong people.
+// Empty keeps the dispatcher's default (@wso2.com).
+func acpInternalEmailDomains() []string {
+	domains, err := parseACPInternalEmailDomains(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
+	if err != nil {
+		slog.Error("invalid ACP_INTERNAL_EMAIL_DOMAINS", "err", err)
+		os.Exit(1)
+	}
+	return domains
+}
+
+// emailDomainPattern is a bare domain name: dot-separated labels of letters,
+// digits and inner hyphens, at least two of them. A URL ("https://...") or a
+// port fails it, so it cannot become a suffix that matches nobody.
+var emailDomainPattern = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// parseACPInternalEmailDomains splits ACP_INTERNAL_EMAIL_DOMAINS on commas
+// (entries trimmed, empty ones dropped; the leading "@" is optional) and
+// refuses an entry that is not a domain name.
+func parseACPInternalEmailDomains(raw string) ([]string, error) {
+	domains := splitComma(raw)
+	for i, d := range domains {
+		if !emailDomainPattern.MatchString(strings.TrimPrefix(d, "@")) {
+			return nil, fmt.Errorf("entry %d is not a domain like @example.com", i+1)
+		}
+	}
+	return domains, nil
 }
 
 // parseACPReactivationCC splits ACP_REACTIVATION_CC on commas (entries
