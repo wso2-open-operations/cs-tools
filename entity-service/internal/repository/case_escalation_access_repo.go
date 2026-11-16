@@ -18,7 +18,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +28,8 @@ import (
 
 // CaseDeescalatorRole is the stored role whose holders may de-escalate any case.
 const CaseDeescalatorRole = "case_deescalator"
+
+const caseDeescalatorRoleDescription = "May de-escalate any case, besides the leads of the case's ABT team"
 
 // CaseEscalationAccessRepository reads and changes who holds the
 // case_deescalator role.
@@ -99,18 +100,23 @@ func (r *caseEscalationAccessRepository) inTx(ctx context.Context, actorEmail st
 	return tx.Commit(ctx)
 }
 
-// GrantDeescalator implements CaseEscalationAccessRepository. "Not already
-// held" is asked in the insert itself, since user_role has no unique key to
-// conflict on; the role row is looked up by name because the ServiceNow sync
-// may have created it under another id.
+// GrantDeescalator implements CaseEscalationAccessRepository. The role row is
+// created here the first time it is needed (no migration seeds it), by name:
+// ON CONFLICT (name) leaves an existing row alone, including one the
+// ServiceNow sync created under another id. "Not already held" is asked in
+// the insert itself, since user_role has no unique key to conflict on.
 func (r *caseEscalationAccessRepository) GrantDeescalator(ctx context.Context, userID, actorEmail string) (bool, error) {
 	var added bool
 	err := r.inTx(ctx, actorEmail, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO role (id, created_on, updated_on, created_by, updated_by, name, description)
+			VALUES (gen_random_uuid(), now(), now(), $1, $1, $2, $3)
+			ON CONFLICT (name) DO NOTHING`,
+			actorEmail, CaseDeescalatorRole, caseDeescalatorRoleDescription); err != nil {
+			return fmt.Errorf("create role %s: %w", CaseDeescalatorRole, err)
+		}
 		var roleID string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM role WHERE name = $1`, CaseDeescalatorRole).Scan(&roleID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("role %s is not seeded", CaseDeescalatorRole)
-			}
 			return fmt.Errorf("look up role %s: %w", CaseDeescalatorRole, err)
 		}
 		tag, err := tx.Exec(ctx, `

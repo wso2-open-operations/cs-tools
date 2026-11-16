@@ -548,7 +548,7 @@ set, or it will silently read as empty.
 
 De-escalating is allowed for the leads of the case's own ABT team (`team_member` role `lead` on
 `account.cre_team_id`, `teamLeads` on `GET /cases/{id}/escalations`) **and** for anyone an admin named: holders of
-the stored role `case_deescalator` (migration 0293), returned as `deescalators` (active internal users only) on the
+the stored role `case_deescalator` (no migration seeds it: the first admin grant creates the role row, by name), returned as `deescalators` (active internal users only) on the
 same response, so the portal decides from one read. A CSM admin manages the list through
 `GET /case-escalation-access/deescalators` and `PUT`/`DELETE /case-escalation-access/deescalators/{userId}`
 (`CaseEscalationAccessService`): all three need a user token that is a CSM admin (a token role from
