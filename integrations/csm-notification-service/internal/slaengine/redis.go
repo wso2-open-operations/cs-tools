@@ -127,6 +127,27 @@ type ClockMeta struct {
 	// this to decide whether a resume needs flat wall-clock math or
 	// business-day-aware recomputation.
 	Schedule string
+	// SLAID is entity-service's own "sla" row id this clock's current
+	// incarnation is backed by (domain.SLAClockState.ID/SLAStatus.ID) —
+	// refreshed every time SetClock runs, same as the other display
+	// fields, since it changes exactly when StartedAt does (a new
+	// incarnation always means a different row). Threaded back into
+	// GetClockState's own slaID parameter wherever this engine re-checks
+	// an ALREADY-tracked clock's live state (verifyTierStillDue,
+	// resumeShift, entityPauseStatus, cleanupStaleClocks) so the answer is
+	// about THIS specific row, not "whichever sla row for this target
+	// happens to be most recently started" — the real fix for a clock
+	// type that can have more than one policy's own row genuinely open at
+	// once (confirmed live, not just a theoretical case: RESPONSE and
+	// RESOLUTION both routinely carry more than one policy per case in
+	// real data). "" for a clock this engine registered/reconciled before
+	// this field existed, or whenever e.entity has no answer to offer —
+	// GetClockState then falls back to its own original, still-ambiguous
+	// "most recently started" lookup, exactly as if this field had never
+	// been added, so nothing regresses for a clock this hasn't caught up
+	// with yet; a Recalculate pass (Engine.RecalculateFromEntity) or this
+	// clock's own next severity revision (ReviseClocks) fills it in.
+	SLAID string
 }
 
 // Store wraps every Redis operation this engine needs — first Redis
@@ -214,6 +235,14 @@ func (s *Store) DueMembers(ctx context.Context, now time.Time) ([]string, error)
 // check has no notion of "that was a different clock"). See ClaimTier's
 // own doc comment for the matching half of this fix -- a stale tier claim
 // from the old incarnation needs the same treatment.
+//
+// slaId (ARGV[13]) is written unconditionally on every call, alongside the
+// other one-time display fields -- see ClockMeta.SLAID's own doc comment
+// for what it's for and why it's safe to refresh every time rather than
+// HSETNX-protected like state/paused/alertedTier: it always changes in
+// lockstep with startedAt (a new incarnation is, by definition, backed by
+// a different "sla" row), so there is no stale-replay risk to guard
+// against the way there is for those three.
 var setClockScript = redis.NewScript(`
 local previousStartedAt = redis.call('HGET', KEYS[1], 'startedAt')
 if previousStartedAt and previousStartedAt ~= ARGV[8] then
@@ -222,7 +251,7 @@ end
 redis.call('HSET', KEYS[1],
 	'caseNumber', ARGV[1], 'wso2CaseId', ARGV[2], 'caseTitle', ARGV[3],
 	'caseType', ARGV[4], 'product', ARGV[5], 'team', ARGV[6], 'priority', ARGV[7],
-	'startedAt', ARGV[8], 'schedule', ARGV[11], 'engagementType', ARGV[12])
+	'startedAt', ARGV[8], 'schedule', ARGV[11], 'engagementType', ARGV[12], 'slaId', ARGV[13])
 redis.call('HSETNX', KEYS[1], 'state', ARGV[9])
 redis.call('HSETNX', KEYS[1], 'paused', '0')
 redis.call('HSETNX', KEYS[1], 'alertedTier', '0')
@@ -253,6 +282,7 @@ func (s *Store) SetClock(ctx context.Context, caseID, clockType string, meta Clo
 		meta.CaseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType,
 		meta.Product, meta.Team, meta.Priority, meta.StartedAt.UnixNano(),
 		meta.State, int(clockTTL.Seconds()), meta.Schedule, meta.EngagementType,
+		meta.SLAID,
 	).Err()
 }
 
@@ -281,6 +311,7 @@ func (s *Store) GetClock(ctx context.Context, caseID, clockType string) (meta Cl
 		State:          res["state"],
 		Paused:         res["paused"] == "1",
 		Schedule:       res["schedule"],
+		SLAID:          res["slaId"],
 	}
 	if v, err := strconv.ParseInt(res["startedAt"], 10, 64); err == nil {
 		meta.StartedAt = time.Unix(0, v)

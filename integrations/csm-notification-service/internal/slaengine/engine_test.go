@@ -1187,14 +1187,34 @@ type fakeEntityClockStatus struct {
 	// registered in entity-service), so a test only needs to name the clock
 	// it specifically cares about.
 	states map[string]clockState
-	err    error
-	calls  []string // "<caseID>|<clockType>", in call order
+	// statesBySLAID, keyed by slaID alone, is checked FIRST when the caller
+	// passes a non-empty slaID -- models the real entity-service behavior a
+	// non-empty slaId query parameter narrows to (an exact row), as opposed
+	// to states' own "whichever row is most recently started" default,
+	// which real GetClockState falls back to only for an empty slaID. Lets
+	// a test simulate two policies backing the same (caseID, clockType) --
+	// one terminal, one still genuinely due -- and prove the right one is
+	// consulted when the caller knows which row it means.
+	statesBySLAID map[string]clockState
+	err           error
+	calls         []string // "<caseID>|<clockType>", in call order
+	// slaIDs records the slaID each GetClockState call was made with, in
+	// the same order as calls -- lets a test assert that the right call
+	// site passed meta.SLAID through (or passed "" where it deliberately
+	// should, e.g. refreshAndReconcileClock's own discovery lookup).
+	slaIDs []string
 }
 
-func (f *fakeEntityClockStatus) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+func (f *fakeEntityClockStatus) GetClockState(_ context.Context, caseID, clockType, slaID string) (clockState, error) {
 	f.calls = append(f.calls, caseID+"|"+clockType)
+	f.slaIDs = append(f.slaIDs, slaID)
 	if f.err != nil {
 		return clockState{}, f.err
+	}
+	if slaID != "" {
+		if state, ok := f.statesBySLAID[slaID]; ok {
+			return state, nil
+		}
 	}
 	return f.states[caseID+"|"+clockType], nil
 }
@@ -1209,7 +1229,7 @@ type flakyThenFoundEntityClockStatus struct {
 	found         clockState
 }
 
-func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseID, clockType, slaID string) (clockState, error) {
 	f.calls++
 	if f.calls <= f.notFoundCalls {
 		return clockState{Found: false}, nil
@@ -1220,7 +1240,7 @@ func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseI
 func TestGetClockStateWithRetry(t *testing.T) {
 	t.Run("found on the first attempt makes no extra calls", func(t *testing.T) {
 		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 0, found: clockState{Found: true, DurationSeconds: 900}}
-		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1232,7 +1252,7 @@ func TestGetClockStateWithRetry(t *testing.T) {
 	t.Run("not found once then found succeeds within the retry budget", func(t *testing.T) {
 		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 1, found: clockState{Found: true, DurationSeconds: 900}}
 		start := time.Now()
-		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1249,7 +1269,7 @@ func TestGetClockStateWithRetry(t *testing.T) {
 
 	t.Run("never found returns the last not-found answer after exhausting retries", func(t *testing.T) {
 		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 1000}
-		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1263,7 +1283,7 @@ func TestGetClockStateWithRetry(t *testing.T) {
 
 	t.Run("a lookup error is returned immediately, never retried", func(t *testing.T) {
 		entity := &fakeEntityClockStatus{err: errors.New("entity-service unreachable")}
-		_, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		_, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response", "")
 		if err == nil {
 			t.Fatal("expected an error")
 		}
@@ -1948,6 +1968,53 @@ func TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses(t
 	}
 }
 
+// TestTick_TwoPoliciesOnTheSameTarget_SLAIDPicksTheRightOne is the
+// regression guard for the CodeRabbit-flagged gap in the fix above:
+// GetClockState's own "most recently started row" default cannot tell two
+// policies that both have a genuinely open clock on the same (case,
+// clockType) target apart -- confirmed live, not theoretical (staging and
+// production both show RESPONSE/RESOLUTION cases with more than one
+// simultaneously-active policy). Without a row id, a terminal SIBLING
+// policy's row answering for the whole target would make the fix above
+// wrongly finalize a tier that belongs to a DIFFERENT, still genuinely due
+// policy. meta.SLAID (threaded through to GetClockState's own slaID
+// parameter) closes this: the live policy's own row is asked for by its
+// exact id, never entity-service's ambiguous default.
+func TestTick_TwoPoliciesOnTheSameTarget_SLAIDPicksTheRightOne(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+
+	const liveRowID = "live-policy-row"
+	redisStartedAt := time.Now().Add(-4 * time.Hour)
+	liveStartedOn := redisStartedAt // same incarnation as the wake entry
+
+	e.entity = &fakeEntityClockStatus{
+		// The ambiguous, slaID-less default answers with a DIFFERENT
+		// policy's row -- terminal, no breach -- simulating "most recently
+		// started" picking the wrong sibling.
+		states: map[string]clockState{
+			"case-1|response": {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &liveStartedOn},
+		},
+		// The EXACT row this wake entry's own clock is tracking, reachable
+		// only by its own id -- still genuinely live, same incarnation.
+		statesBySLAID: map[string]clockState{
+			liveRowID: {Found: true, IsActive: true, Stage: "IN_PROGRESS", HasBreached: false, StartedOn: &liveStartedOn, ID: liveRowID},
+		},
+	}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt, SLAID: liveRowID}
+	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) == 0 {
+		t.Error("chat calls = none, want at least one -- the live policy's own clock (asked for by its exact id) was genuinely due, a terminal SIBLING policy's row must not suppress it")
+	}
+}
+
 // TestTick_EntityServiceCheckFails_SendsAnywayFailOpen proves a transient
 // failure of the new verification call (entity-service briefly unreachable,
 // a network error) does not suppress a real alert -- silently losing a
@@ -2195,7 +2262,7 @@ func (f *fakeActiveClocksClient) GetActiveCSMSLAClocks(context.Context) ([]activ
 // entity-service again, don't trust a stale snapshot" behavior), so a test
 // that sets up f.clocks for one case/type also gets a matching
 // GetClockState answer for free.
-func (f *fakeActiveClocksClient) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+func (f *fakeActiveClocksClient) GetClockState(_ context.Context, caseID, clockType, slaID string) (clockState, error) {
 	if f.clockStateErr != nil {
 		return clockState{}, f.clockStateErr
 	}

@@ -149,7 +149,7 @@ type emailSender interface {
 // deliberate, additive safety net, not something every caller must now wire
 // up.
 type entityClockStatusClient interface {
-	GetClockState(ctx context.Context, caseID, clockType string) (clockState, error)
+	GetClockState(ctx context.Context, caseID, clockType, slaID string) (clockState, error)
 }
 
 // entityClockStateRetryAttempts/entityClockStateRetryDelay bound a short
@@ -182,12 +182,16 @@ const (
 // entityClockStateRetryAttempts's own doc comment for why. A transport/
 // lookup error is returned immediately, unretried here: that's each
 // caller's own existing, separate concern (already logged and handled by
-// treating the clock as absent/not-paused).
-func getClockStateWithRetry(ctx context.Context, entity entityClockStatusClient, caseID, clockType string) (clockState, error) {
+// treating the clock as absent/not-paused). slaID is forwarded to
+// GetClockState unchanged — see that method's own doc comment for what it
+// narrows the lookup to; both current callers (RegisterClocks,
+// entityPauseStatus) pass "" since neither is re-checking a specific row
+// they already track.
+func getClockStateWithRetry(ctx context.Context, entity entityClockStatusClient, caseID, clockType, slaID string) (clockState, error) {
 	var state clockState
 	var err error
 	for attempt := 1; attempt <= entityClockStateRetryAttempts; attempt++ {
-		state, err = entity.GetClockState(ctx, caseID, clockType)
+		state, err = entity.GetClockState(ctx, caseID, clockType, slaID)
 		if err != nil || state.Found {
 			return state, err
 		}
@@ -519,7 +523,7 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 	}
 
 	for _, clockType := range clockTypesInOrder {
-		state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType)
+		state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType, "")
 		if err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to read clock state from entity-service, not registering this clock type", "caseId", caseID, "clockType", clockType, "err", err)
 			continue
@@ -547,6 +551,7 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 			Priority:       priority,
 			StartedAt:      startedAt,
 			Schedule:       state.Schedule,
+			SLAID:          state.ID,
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
@@ -646,7 +651,19 @@ func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string
 	if e.entity == nil {
 		return false
 	}
-	state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType)
+	// meta.SLAID, when already known, narrows the lookup to the exact clock
+	// this engine is tracking rather than entity-service's own ambiguous
+	// "most recently started" default — same reasoning as
+	// verifyTierStillDue/resumeShift. A lookup failure here is swallowed the
+	// same way a genuine "not found" already is below: this is a best-effort
+	// refinement, not a prerequisite.
+	var slaID string
+	if e.store != nil {
+		if meta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+			slaID = meta.SLAID
+		}
+	}
+	state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType, slaID)
 	if err != nil {
 		slog.WarnContext(ctx, "slaengine: failed to read pause status from entity-service, treating clock as not paused", "caseId", caseID, "clockType", clockType, "err", err)
 		return false
@@ -716,7 +733,7 @@ func (e *Engine) resumeShift(ctx context.Context, caseID, clockType string) {
 	if !found {
 		return
 	}
-	state, err := e.entity.GetClockState(ctx, caseID, clockType)
+	state, err := e.entity.GetClockState(ctx, caseID, clockType, meta.SLAID)
 	if err != nil {
 		slog.WarnContext(ctx, "slaengine: failed to fetch pause duration from entity-service, wake schedule not shifted for this resume", "caseId", caseID, "clockType", clockType, "err", err)
 		return
@@ -1127,7 +1144,7 @@ func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType strin
 	if e.entity == nil {
 		return tierDue, clockState{}
 	}
-	state, err := e.entity.GetClockState(ctx, caseID, clockType)
+	state, err := e.entity.GetClockState(ctx, caseID, clockType, meta.SLAID)
 	switch {
 	case err != nil:
 		slog.WarnContext(ctx, "slaengine: failed to verify clock state before treating this tier as reached, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
@@ -1867,7 +1884,17 @@ func (e *Engine) cleanupStaleClocks(ctx context.Context, existing []string, fres
 			continue
 		}
 		if e.entity != nil {
-			state, err := e.entity.GetClockState(ctx, caseID, clockType)
+			// meta.SLAID, when already known, narrows this re-verification to
+			// the exact clock Redis is (about to stop) tracking, same
+			// reasoning as verifyTierStillDue -- without it, entity-service's
+			// ambiguous "most recently started" default could confirm an
+			// unrelated, still-open sibling clock as terminal and delete this
+			// one's live tracking out from under it.
+			var slaID string
+			if meta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+				slaID = meta.SLAID
+			}
+			state, err := e.entity.GetClockState(ctx, caseID, clockType, slaID)
 			if err != nil {
 				slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: verify candidate before delete failed, skipping it", "caseId", caseID, "clockType", clockType, "err", err)
 				continue
@@ -1920,7 +1947,14 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 	if e.entity == nil {
 		return false, true
 	}
-	state, err := e.entity.GetClockState(ctx, display.CaseID, display.ClockType)
+	// "" deliberately: this call is discovering entity-service's CURRENT
+	// policy resolution for this clock type (which may now be an entirely
+	// different "sla" row than whatever display/Redis previously tracked,
+	// e.g. after a severity revision), not re-verifying a row this engine
+	// already knows it means -- passing display's own (possibly stale)
+	// SLAID here would wrongly narrow the lookup to a row that may no
+	// longer be the current one at all.
+	state, err := e.entity.GetClockState(ctx, display.CaseID, display.ClockType, "")
 	if err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to refresh clock state before rebuilding", "caseId", display.CaseID, "clockType", display.ClockType, "err", err)
 		return false, false
@@ -1938,6 +1972,7 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 		return false, true
 	}
 	c := display
+	c.ID = state.ID
 	c.IsPaused = state.IsPaused
 	c.StartedOn = state.StartedOn
 	c.PausedOn = state.PausedOn
@@ -2135,6 +2170,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		State:          c.State,
 		StartedAt:      startedAt,
 		Schedule:       c.Schedule,
+		SLAID:          c.ID,
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
