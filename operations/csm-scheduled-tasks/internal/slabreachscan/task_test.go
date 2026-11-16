@@ -212,3 +212,83 @@ func TestParseList(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+func onboarding() Variant { return OnboardingVariant() }
+
+// TestOnboardingVariantFilters pins the onboarding report's own filter
+// set. Both differ from the CRE report's, which is the whole reason the
+// two are separate tasks rather than two sections of one.
+func TestOnboardingVariantFilters(t *testing.T) {
+	v := onboarding()
+	if len(v.Stages) != 1 || v.Stages[0] != "IN_PROGRESS" {
+		t.Fatalf("stages = %#v, want [IN_PROGRESS]", v.Stages)
+	}
+	if len(v.OnboardingStatuses) != 1 || v.OnboardingStatuses[0] != "IN_PROGRESS" {
+		t.Fatalf("onboarding statuses = %#v, want [IN_PROGRESS]", v.OnboardingStatuses)
+	}
+	if len(v.ExcludeOnboardingStatuses) != 0 {
+		t.Fatalf("the onboarding report uses is-one-of, not is-not-one-of, got %#v", v.ExcludeOnboardingStatuses)
+	}
+	if got := TaskName(v); got != "sla_breach_weekly_report_onboarding" {
+		t.Fatalf("task name = %q", got)
+	}
+	if v.Subject != "Weekly SLA Breach Report (Onboarding)" {
+		t.Fatalf("subject = %q", v.Subject)
+	}
+}
+
+// TestTheTwoVariantsAreNotComplements documents the real gap in the
+// source configuration: the CRE report excludes NOT_STARTED and the
+// onboarding report includes only IN_PROGRESS, so a NOT_STARTED case is
+// reported by neither. Reproduced deliberately -- if this test ever
+// fails because the sets were "tidied up", that is a behaviour change
+// away from ServiceNow and needs saying out loud.
+func TestTheTwoVariantsAreNotComplements(t *testing.T) {
+	excluded := cre().ExcludeOnboardingStatuses
+	included := onboarding().OnboardingStatuses
+	for _, status := range excluded {
+		if status == "NOT_STARTED" {
+			for _, inc := range included {
+				if inc == "NOT_STARTED" {
+					t.Fatal("NOT_STARTED is now in both sets; the source has it in neither")
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("the CRE report no longer excludes NOT_STARTED")
+}
+
+// TestOnboardingSendReportPassesItsOwnFilters: the variant's filters,
+// not the CRE report's, must reach entity-service.
+func TestOnboardingSendReportPassesItsOwnFilters(t *testing.T) {
+	fetch, send := &fakeFetcher{}, &fakeSender{}
+	if err := SendReport(fetch, send, onboarding(), defs(), someTo(), nil, "", true)(context.Background()); err != nil {
+		t.Fatalf("SendReport: %v", err)
+	}
+	if len(fetch.gotStage) != 1 || fetch.gotStage[0] != "IN_PROGRESS" {
+		t.Fatalf("stages = %v", fetch.gotStage)
+	}
+	if len(fetch.gotOnboarding) != 1 || fetch.gotOnboarding[0] != "IN_PROGRESS" {
+		t.Fatalf("onboarding statuses = %v", fetch.gotOnboarding)
+	}
+	if len(fetch.gotExclude) != 0 {
+		t.Fatalf("must send no is-not-one-of filter, got %v", fetch.gotExclude)
+	}
+	if send.subject != "Weekly SLA Breach Report (Onboarding)" {
+		t.Fatalf("subject = %q", send.subject)
+	}
+}
+
+// TestOnboardingStageOverrideIsIndependent: the two tasks must take
+// their stage overrides from different variables, or configuring one
+// silently changes the other.
+func TestOnboardingStageOverrideIsIndependent(t *testing.T) {
+	t.Setenv("SLA_BREACH_REPORT_ONBOARDING_STAGES", "BREACHED")
+	if got := ApplyStageOverride(onboarding()).Stages; len(got) != 1 || got[0] != "BREACHED" {
+		t.Fatalf("onboarding stages = %#v", got)
+	}
+	if got := ApplyStageOverride(cre()).Stages; len(got) != 2 || got[0] != "PAUSED" {
+		t.Fatalf("the CRE report must be unaffected, got %#v", got)
+	}
+}
