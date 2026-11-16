@@ -844,9 +844,17 @@ const createDeployedProductFromServiceNowQuery = `
 		$4, $5, TRUE,
 		$6, $7,
 		$8::uuid, $9::uuid, $10::uuid, $11::uuid,
-		$12::text::deployed_product_category_enum
+		COALESCE($12::text::deployed_product_category_enum, (` + projectTypeDefaultCategorySQL + `$8::uuid))
 	)
 	RETURNING id, created_on, created_by`
+
+// projectTypeDefaultCategorySQL, followed by the project id and a closing
+// parenthesis, is the default category of a project's type (migration 0291),
+// or NULL when the type has none or the project has no type. The create uses
+// it as the category when the request names none.
+const projectTypeDefaultCategorySQL = `SELECT pt.default_deployed_product_category
+		FROM project p JOIN project_type pt ON pt.id = p.project_type_id
+		WHERE p.id = `
 
 // CreateDeployedProductFromServiceNow implements DeployedProductRepository.
 // name/life_cycle_stage/life_cycle_stage_status/update_level_info are left
@@ -856,7 +864,8 @@ const createDeployedProductFromServiceNowQuery = `
 // sources rather than inventing values ServiceNow itself doesn't set on
 // create. product_category is the one exception: see
 // domain.CreateDeployedProductRequest.Category's own doc comment for why
-// it's written here despite having no SN-side equivalent.
+// it's written here despite having no SN-side equivalent. Without a category
+// in the request it is the project type's default.
 func (r *deployedProductRepo) CreateDeployedProductFromServiceNow(ctx context.Context, req domain.CreateDeployedProductRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployedProduct, error) {
 	var category *string
 	if req.Category != nil {
