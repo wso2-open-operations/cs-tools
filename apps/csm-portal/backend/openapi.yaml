@@ -1046,7 +1046,11 @@ paths:
       description: >
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
-        effect. Supported by the ServiceNow data source only.
+        effect. Escalating needs an escalation role (escalator, CS engineer or
+        admin). De-escalating is allowed for somebody an admin named (Settings
+        > User management > Escalation access), who needs no escalation role,
+        or for a lead of the case's ABT team, who does. Supported by the
+        ServiceNow data source only.
       operationId: postCasesIdEscalations
       parameters:
         - name: id

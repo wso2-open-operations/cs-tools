@@ -53,8 +53,8 @@ would 403 for them.
 **Escalation access** (Settings > User management > Escalation access, `CsmEscalationAccessPage`) is admin only,
 gated on `usePortalAccess().isAdmin` (the nav node's `requires: "isAdmin"` hides the tile, the page also renders the
 403 page): an admin adds or removes the people who may de-escalate any case besides each case's ABT team leads. The
-backend enforces the same (`PermAdmin`). `CsmCaseDetailPage` shows De-escalate when the caller is in the case's
-`teamLeads` or `deescalators` (`useGetCsmCaseEscalations`), and the mutation hook refreshes those histories.
+backend enforces the same (`PermAdmin`). `CsmCaseDetailPage` shows De-escalate to a named person (`deescalators`) whatever their roles, and to a team lead
+(`teamLeads`) only with an escalation role (`canEscalate`), matching the backend (`useGetCsmCaseEscalations`), and the mutation hook refreshes those histories.
 
 **Skills** (`features/csm-skills`, `/skills`) has two more deliberate exceptions, both by explicit product
 decision and both on top of a real backend gate: the **Skill Manager** tab (`CsmSkillsPage.tsx`) is shown only

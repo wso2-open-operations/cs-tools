@@ -493,7 +493,10 @@ func main() {
 	route("DELETE /comments/{id}", handler.PermUpdateDeleteComment, commentHandler.DeleteComment)
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
-	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
+	// PermView, not PermEscalate: somebody an admin named as allowed to
+	// de-escalate needs no escalation role. The handler checks PermEscalate
+	// itself for escalating and for a team lead's de-escalation.
+	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	// Stored attachments, forwarded to the entity service, which owns every
 	// access decision. This backend holds the Azure Blob Storage credentials and

@@ -744,10 +744,12 @@ total}` untouched.
 
 ## De-escalation: team leads and the admin-named list
 
-`CaseHandler.callerMayDeescalate` (`POST /cases/{id}/escalations`, action `DEESCALATE`) allows the caller when they
-are one of the case's ABT team leads (`teamLeads`) **or** one of the people an admin named (`deescalators`), both read
-from entity-service's `GET /cases/{id}/escalations`; matched by platform id, else case-insensitive email when an id is
-missing. It fails closed on any lookup error. The admin names them through `CaseEscalationAccessHandler`
+`POST /cases/{id}/escalations` is registered at `PermView`, not `PermEscalate`, and `CaseHandler.CreateCaseEscalation`
+checks `PermEscalate` itself (through the access guard; a nil guard fails closed): escalating needs it. De-escalating
+(`DEESCALATE`) is allowed for somebody an admin named (`deescalators`), who needs **no** escalation role, or for one of
+the case's ABT team leads (`teamLeads`), who still needs `PermEscalate`. Both lists come from entity-service's
+`GET /cases/{id}/escalations` (`deescalationStanding`); matched by platform id, else case-insensitive email when an id
+is missing. It fails closed on any lookup error. The admin names them through `CaseEscalationAccessHandler`
 (`GET /case-escalation-access/deescalators`, `PUT`/`DELETE .../{userId}`), all `PermAdmin`, forwarded to
 entity-service, which checks the admin role again from the caller's token and keeps its own refusal reason.
 
