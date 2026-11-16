@@ -43,6 +43,7 @@ import (
 	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/auditlog"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
@@ -277,6 +278,26 @@ func main() {
 		}
 	}
 
+	// The audit log upkeep's own client: the same deployment and credentials, one
+	// service-only endpoint. Off by default: entity-service needs migration 0295
+	// applied and the database role granted EXECUTE on the audit functions first,
+	// or every daily run fails.
+	auditLogMaintenanceEnabled := envBool("AUDIT_LOG_MAINTENANCE_ENABLED", false)
+	var auditLogClient *auditlog.Client
+	if auditLogMaintenanceEnabled {
+		auditLogClient, err = auditlog.NewClient(auditlog.Config{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service audit log client", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// The usage rollups' own client: the same deployment and credentials, two
 	// internal-only endpoints. Off by default for the reason documented on the
 	// task registration below.
@@ -485,6 +506,9 @@ func main() {
 
 	const availabilityTaskName = "availability_recalculation"
 	availabilityTo, availabilityCc := recipientsFor(recipientOverrides, availabilityTaskName)
+
+	const auditLogMaintenanceTaskName = "audit_log_maintenance"
+	auditLogMaintenanceTo, auditLogMaintenanceCc := recipientsFor(recipientOverrides, auditLogMaintenanceTaskName)
 
 	const usageRollupDailyTaskName = "usage_rollup_daily"
 	usageRollupDailyTo, usageRollupDailyCc := recipientsFor(recipientOverrides, usageRollupDailyTaskName)
@@ -996,6 +1020,21 @@ func main() {
 			Handler:  availability.RecalculateAvailability(availabilityClient),
 			To:       availabilityTo,
 			Cc:       availabilityCc,
+		})
+	}
+
+	// The audit log's daily upkeep: creates the coming monthly partitions, checks
+	// the log's health and puts back missing audit triggers, all inside entity-service.
+	// Daily at 01:00 UTC. It is safe to repeat, so a failed run is simply tried again.
+	// It fails, and so is mailed, when it found a health problem, repaired a trigger
+	// (its history had a gap) or could not repair one.
+	if auditLogMaintenanceEnabled {
+		tasks = append(tasks, registry.Task{
+			Name:     auditLogMaintenanceTaskName,
+			Schedule: scheduleFor(scheduleOverrides, auditLogMaintenanceTaskName, "0 1 * * *"),
+			Handler:  auditlog.Maintenance(auditLogClient),
+			To:       auditLogMaintenanceTo,
+			Cc:       auditLogMaintenanceCc,
 		})
 	}
 
