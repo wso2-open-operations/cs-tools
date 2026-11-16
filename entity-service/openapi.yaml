@@ -12949,6 +12949,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/mttr:
+    get:
+      summary: >-
+        Mean time to resolution (MTTR), by severity band and trailing
+        window. Read-only. Internal callers only.
+      description: >-
+        For each severity band (S1-S4, S1-S3, S1, S2, S3, S4 -- S0 is never
+        included), the average time in hours from a case's creation to the
+        LAST time it entered Solution Proposed (a rejected proposal bounces
+        a case back for more work before a later one sticks, so the last
+        entry, not the first, is when the case was actually resolved), over
+        cases whose last such entry falls within the trailing window.
+        `creTeamId` may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Not offered when this deployment's cases are
+        served from the other data source.
+      operationId: getMTTRReport
+      parameters:
+        - name: months
+          in: query
+          required: true
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: months is missing or not one of 1, 3, 6 or 12.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /banners:
     get:
       summary: Banners for the customer portal.
@@ -32628,6 +32694,50 @@ components:
         csTeam:
           type: string
           description: Name of the CS team that owns the case's account, or empty.
+    MTTRReport:
+      type: object
+      description: The MTTR report.
+      required: [generatedAt, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [1, 3, 6, 12]
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+    MTTRReportBand:
+      type: object
+      description: One severity band's MTTR over the requested window.
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
     WorklogReport:
       type: object
       description: >-

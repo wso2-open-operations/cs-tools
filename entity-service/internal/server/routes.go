@@ -382,6 +382,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var longOpenCaseReportHandler *handler.LongOpenCaseReportHandler
+	var mttrReportHandler *handler.MTTRReportHandler
 	var runbookHandler *handler.RunbookHandler
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
@@ -1732,6 +1733,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
 						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
 					}))
+			// MTTR report: average time from a case's creation to its last
+			// entry into Solution Proposed, by severity band (S1-S4, S1-S3,
+			// S1, S2, S3, S4) and trailing window (1/3/6/12 months), read
+			// from the Postgres case/work_item_activity tables only -- same
+			// reason as the long-open-cases report above.
+			mttrReportHandler = handler.NewMTTRReportHandler(
+				service.NewMTTRReportService(
+					repository.NewMTTRReportRepository(repository.NewScoped(db))))
 		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
@@ -2255,6 +2264,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the report names customers' cases and who is
 		// assigned to each; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/long-open-cases", internalOnly(accessSvc, longOpenCaseReportHandler.GetLongOpenCaseReport))
+	}
+	if mttrReportHandler != nil {
+		// internalOnly: an aggregate, but still an internal operational
+		// metric with no per-project/customer scoping concept -- same
+		// posture as the reports above.
+		mux.HandleFunc("GET /reports/mttr", internalOnly(accessSvc, mttrReportHandler.GetMTTRReport))
 	}
 	if productRegressionReportHandler != nil {
 		// internalOnly: the report names customers' cases and deployments; a
