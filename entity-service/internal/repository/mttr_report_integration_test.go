@@ -101,6 +101,10 @@ func TestMTTRReportIntegration(t *testing.T) {
 		exec(`INSERT INTO "case" (id, state, severity) VALUES ($1, 'CLOSED', $2::case_severity_enum)`, id, severity)
 		return id
 	}
+	// setState moves a seeded case to its current state (default CLOSED).
+	setState := func(id, state string) {
+		exec(`UPDATE "case" SET state = $2::case_state_enum WHERE id = $1`, id, state)
+	}
 	entered := func(workItemID, newValue string, at time.Time) {
 		exec(`INSERT INTO work_item_activity (id, created_on, created_by, work_item_id, field_name, old_value, new_value)
 			VALUES (gen_random_uuid(), $1, 't', $2, 'state', 'Work In Progress', $3)`, at, workItemID, newValue)
@@ -130,6 +134,16 @@ func TestMTTRReportIntegration(t *testing.T) {
 	// S0 (catastrophic), inside the window: reported as its own severity.
 	s0 := caseRow(mttrAccountID, ago(15), "S0")
 	entered(s0, "SOLUTION_PROPOSED", ago(10))
+	// S2 whose proposal was rejected: it went back to Work In Progress and
+	// has not been proposed again, so it is not resolved now and must not be
+	// counted although its Solution Proposed entry is inside the window.
+	s2Rejected := caseRow(mttrAccountID, ago(20), "S2")
+	entered(s2Rejected, "SOLUTION_PROPOSED", ago(8))
+	setState(s2Rejected, "WORK_IN_PROGRESS")
+	// S2 currently in Solution Proposed (not closed yet): counted.
+	s2Proposed := caseRow(mttrAccountID, ago(20), "S2")
+	entered(s2Proposed, "SOLUTION_PROPOSED", ago(15))
+	setState(s2Proposed, "SOLUTION_PROPOSED")
 	// S2 with no activity at all: must not be counted.
 	caseRow(mttrAccountID, ago(10), "S2")
 
@@ -153,8 +167,10 @@ func TestMTTRReportIntegration(t *testing.T) {
 	if got := bySev["S1"]; got.CaseCount != 2 || !closeTo(got.TotalResolutionSec, 10*86400+5*86400) {
 		t.Errorf("S1 = %+v, want count 2, total ~%d seconds", got, 10*86400+5*86400)
 	}
-	if got := bySev["S2"]; got.CaseCount != 1 || !closeTo(got.TotalResolutionSec, 5*86400) {
-		t.Errorf("S2 = %+v, want count 1, total ~%d seconds", got, 5*86400)
+	// Closed (5 days), currently proposed (5 days); the rejected one, back in
+	// Work In Progress, is left out.
+	if got := bySev["S2"]; got.CaseCount != 2 || !closeTo(got.TotalResolutionSec, 10*86400) {
+		t.Errorf("S2 = %+v, want count 2, total ~%d seconds", got, 10*86400)
 	}
 	if got := bySev["S3"]; got.CaseCount != 1 || !closeTo(got.TotalResolutionSec, 50*86400) {
 		t.Errorf("S3 (bounced in and out) = %+v, want count 1 (the LAST entry only), total ~%d seconds", got, 50*86400)

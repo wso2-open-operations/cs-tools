@@ -68,6 +68,13 @@ func NewMTTRReportRepository(db *Scoped) MTTRReportRepository {
 // (migration 0283): ON work_item_activity (LOWER(new_value), created_on)
 // WHERE field_name = 'state'.
 //
+// Only a case that is resolved NOW is counted: its current state is
+// Solution Proposed or Closed. A proposal the customer rejected sends the
+// case back (e.g. to Work In Progress) while its earlier Solution Proposed
+// entry stays in work_item_activity, so without this check such a case would
+// be counted as resolved at that earlier time although it is not resolved.
+// It is counted again once it is proposed again (or closed).
+//
 // Arguments: $1 window start (inclusive), $2 window end (exclusive), $3 the
 // CRE team ids to restrict to -- an empty array means no restriction.
 var mttrSeverityStatsSQL = `
@@ -86,6 +93,7 @@ SELECT c.severity::text,
   JOIN "case" c ON c.id = wi.id
   LEFT JOIN account a ON a.id = wi.account_id
  WHERE fsp.entered_on >= $1 AND fsp.entered_on < $2
+   AND c.state IN ('SOLUTION_PROPOSED', 'CLOSED')
    AND c.severity IN ('S0', 'S1', 'S2', 'S3', 'S4')
    AND (cardinality($3::uuid[]) = 0 OR a.cre_team_id = ANY($3::uuid[]))
  GROUP BY c.severity`

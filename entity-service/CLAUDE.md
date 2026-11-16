@@ -510,6 +510,12 @@ lately" -- filtering on `created_on` instead would exclude it and bias the avera
 recently-opened, already-fast cases. This also matches the ServiceNow report this feature
 mirrors, which filtered on the state-change date range, not the opened date.
 
+**Only cases that are resolved now.** A case counts only while its current state (`"case".state`) is
+Solution Proposed or Closed. A rejected proposal sends the case back (e.g. to Work In Progress) but its
+earlier Solution Proposed entry stays in `work_item_activity`, so without this check the case would count as
+resolved at that earlier time. It counts again once it is proposed again or closed. The check is on the
+`"case"` row the query already joins by primary key, after the window has narrowed the rows.
+
 **"Last entry", not "first entry", into Solution Proposed.** A case can be proposed a solution,
 have it rejected (bounced back for more work), and have a later proposal actually stick before
 the case closes. `work_item_activity` has no explicit "rejected" state -- it only logs state
