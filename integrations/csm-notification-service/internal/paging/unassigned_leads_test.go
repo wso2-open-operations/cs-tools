@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,14 +30,10 @@ var abtNames = []string{"atlas", "castor", "draco", "phoenix", "rigel", "sirius"
 
 // unassignedStub holds a lead and an engineer for each of the seven ABTs, the
 // Americas team's three leads, the Australia team's lead and the two heads.
-// Every lead and head has a number.
+// Phone numbers come from each test's WithPhoneBook.
 func unassignedStub() *stubScheduleReader {
 	var ms []teamMember
-	phone := 0
-	add := func(m teamMember) {
-		phone++
-		ms = append(ms, m)
-	}
+	add := func(m teamMember) { ms = append(ms, m) }
 	for _, team := range abtNames {
 		add(member(team, team+".lead@example.com", roleLead, ""))
 		add(member(team, team+".eng@example.com", "engineer", "T1"))
@@ -311,5 +308,72 @@ func TestUnassignedLeads_L1Email(t *testing.T) {
 	night := Trigger{Routing: RoutingContext{RuleID: RuleUnassignedNight}}
 	if cc := e.rungEmailLists(night, Level1, true); !slices.Equal(cc, []string{"americas-list@example.test"}) {
 		t.Errorf("night L1 Cc = %v, want only the Americas list", cc)
+	}
+}
+
+// A case on a team that is no ABT emails only the call's rung on both shifts:
+// that team's own lead is not on the rung, so it is not emailed either.
+func TestUnassignedLeads_L1EmailSkipsTheCaseTeamsLead(t *testing.T) {
+	ctx := context.Background()
+	stub := unassignedStub()
+	stub.members = append(stub.members, member("some-old-team", "old.lead@example.com", roleLead, ""))
+	e := &Engine{
+		resolver: NewTeamScheduleResolver(stub, shiftLeadsTeams(abtNames), nil),
+		cfg:      EngineConfig{Ladder: LadderConfig{Teams: shiftLeadsTeams(abtNames)}},
+	}
+	americas := []Recipient{
+		{Name: "A1", Email: "americas.lead1@example.com"},
+		{Name: "A2", Email: "americas.lead2@example.com"},
+	}
+	for _, tc := range []struct {
+		rule  string
+		night bool
+	}{{RuleUnassignedDay, false}, {RuleUnassignedNight, true}} {
+		trig := Trigger{Routing: RoutingContext{RuleID: tc.rule, AssignedCRETeam: "some-old-team"}}
+		to, greeting := e.rungEmailTo(ctx, trig, Level1, tc.night, americas)
+		if got := sorted(emails(to)); !slices.Equal(got, []string{"americas.lead1@example.com", "americas.lead2@example.com"}) {
+			t.Errorf("%s L1 email to %v, want only the call's rung (not the case team's lead)", tc.rule, got)
+		}
+		if tc.night && greeting != "Americas Team Leads" {
+			t.Errorf("night L1 greeting = %q, want \"Americas Team Leads\"", greeting)
+		}
+	}
+
+	// The rule table keeps emailing the case's own team lead.
+	r3 := Trigger{Routing: RoutingContext{RuleID: "R5", AssignedCRETeam: "some-old-team"}}
+	if to, _ := e.rungEmailTo(ctx, r3, Level1, true, americas); !slices.Contains(emails(to), "old.lead@example.com") {
+		t.Errorf("R5 night L1 email to %v, want the case team's lead too", emails(to))
+	}
+}
+
+// The Australia team is found by key in each shape it is linked by, and not
+// by a key that merely contains the word.
+func TestAustraliaTeamKey(t *testing.T) {
+	for key, want := range map[string]bool{
+		"australia": true, "australia_cre_team": true, "Australia CRE Team": true,
+		"australia-team": true, "australia_cre": true,
+		"australia_abt": false, "not_australia": false, "australiana": false, "": false,
+	} {
+		if got := australiaTeam.MatchString(strings.ToLower(strings.TrimSpace(key))); got != want {
+			t.Errorf("australiaTeam(%q) = %v, want %v", key, got, want)
+		}
+	}
+
+	// And the morning shift's leads include the lead of a team keyed that way.
+	for _, key := range []string{"australia_cre_team", "Australia CRE Team"} {
+		stub := unassignedStub()
+		for i := range stub.members {
+			if stub.members[i].TeamKey == "australia" {
+				stub.members[i].TeamKey = key
+			}
+		}
+		r := NewTeamScheduleResolver(stub, shiftLeadsTeams(abtNames), nil)
+		leads, err := r.shiftLeads(context.Background(), ShiftLKMorning)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(emails(leads), "australia.lead@example.com") {
+			t.Errorf("key %q: morning leads %v, want the Australia lead", key, emails(leads))
+		}
 	}
 }

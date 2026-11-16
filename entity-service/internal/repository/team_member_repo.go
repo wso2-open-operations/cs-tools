@@ -54,10 +54,11 @@ func NewTeamMemberRepository(db *pgxpool.Pool) TeamMemberRepository {
 // the whole lookup. An empty email is the caller's problem to notice, not a
 // reason to return nothing.
 //
-// The team type is compared lower-cased ($4 arrives lower-cased from the
-// service), as the Team Schedule itself compares it: the ServiceNow sync can
-// spell an ABT "CRE-ABT", and the Case Alerts lead pool asked for "cre-abt",
-// matched no team and called nobody below the CRE head.
+// The team type is compared lower-cased on both sides, as the Team Schedule
+// itself compares it: the ServiceNow sync can spell an ABT "CRE-ABT", and the
+// Case Alerts lead pool asked for "cre-abt", matched no team and called nobody
+// below the CRE head. Both sides are lowered here, so a caller that passes the
+// types as given still matches.
 const teamMemberQuery = `
 SELECT t.key, COALESCE(t.type, ''), m.role, COALESCE(m.alert_tier, ''), u.id::text, COALESCE(u.name, ''), COALESCE(u.email, '')
   FROM team_member m
@@ -66,7 +67,7 @@ SELECT t.key, COALESCE(t.type, ''), m.role, COALESCE(m.alert_tier, ''), u.id::te
  WHERE (cardinality($1::text[]) = 0 OR t.key = ANY($1))
    AND (cardinality($2::text[]) = 0 OR m.role = ANY($2))
    AND (cardinality($3::text[]) = 0 OR m.alert_tier = ANY($3))
-   AND (cardinality($4::text[]) = 0 OR lower(t.type) = ANY($4))
+   AND (cardinality($4::text[]) = 0 OR lower(t.type) = ANY(SELECT lower(x) FROM unnest($4::text[]) AS x))
    AND (cardinality($1::text[]) > 0 OR cardinality($4::text[]) > 0)
  ORDER BY t.key, m.role, COALESCE(m.alert_tier, ''), COALESCE(u.email, '')`
 

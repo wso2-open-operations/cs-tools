@@ -270,11 +270,15 @@ func (e *Engine) rungEmailTo(ctx context.Context, t Trigger, level Level, night 
 	var dayGreeting string
 	switch level {
 	case Level1:
-		if !night && IsUnassignedRule(t.Routing.RuleID) {
-			// A case on no ABT (teams.unassignedLeads: shift_leads): the call's
-			// rung is every ABT lead, so the email is too.
-			to := uniqueRecipients(rung)
-			return to, "Team Leads"
+		if IsUnassignedRule(t.Routing.RuleID) {
+			// A case on no ABT (teams.unassignedLeads: shift_leads): the email
+			// goes to the call's rung and nobody else, on both shifts. The
+			// case's own team, if it has one, is no ABT and not on the rung, so
+			// its lead is not looked up.
+			if !night {
+				return uniqueRecipients(rung), "Team Leads"
+			}
+			break
 		}
 		day = e.caseTeamLead(ctx, t)
 		dayGreeting = joinNames(day)

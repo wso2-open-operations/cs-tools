@@ -190,6 +190,11 @@ const (
 // people who lead the shift, and the heads hear of it only after them. The
 // leads are all of them (seven ABT leads by day), which is why plan.go calls a
 // rung of more than three leads once rather than three times.
+//
+// ExpectedCalls is indicative only, like every rule's (nothing selects by
+// it): 7 is the ABT leads as deployed and 3 the Americas leads. The real rung
+// is whoever the Team Schedule lists, one more on LK_MORNING (the Australia
+// team's lead), and changes as teams are added.
 func UnassignedRule(shift Shift) Rule {
 	levels := [5]LevelSource{SourceNone, SourceShiftLeads, SourceNone, SourceCREHead, SourceCSHead}
 	switch shift {

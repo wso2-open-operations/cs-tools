@@ -502,10 +502,16 @@ const (
 
 // unassignedLeadsMode defaults an unset or unknown value to "shift_leads":
 // a case nobody owns goes to the shift's leads before the heads unless a
-// deployment explicitly asks for the rule table.
+// deployment explicitly asks for the rule table. An unknown value is logged:
+// Alert Settings refuses one, but a typo in the file would otherwise change
+// who is called without a word.
 func unassignedLeadsMode(v string) string {
-	if strings.EqualFold(strings.TrimSpace(v), unassignedLeadsRules) {
+	switch t := strings.TrimSpace(v); {
+	case strings.EqualFold(t, unassignedLeadsRules):
 		return unassignedLeadsRules
+	case t != "" && !strings.EqualFold(t, unassignedLeadsShift):
+		slog.Warn("escalation: unknown cre.teams.unassignedLeads; using shift_leads",
+			"value", t, "allowed", unassignedLeadsRules+", "+unassignedLeadsShift)
 	}
 	return unassignedLeadsShift
 }
@@ -534,6 +540,10 @@ func (r TeamScheduleResolver) shiftLeads(ctx context.Context, shift Shift) ([]Re
 			// The ABT leads still go out: the Australia lead is one more
 			// person, not a reason to call nobody.
 			slog.WarnContext(ctx, "escalation: could not read the Australia team's lead for the morning shift", "err", err)
+		} else if len(aus) == 0 {
+			// A renamed or re-typed team would otherwise drop the lead quietly.
+			slog.WarnContext(ctx, "escalation: found no Australia team lead for the morning shift; calling the ABT leads only",
+				"teamType", "cre", "keyPattern", australiaTeam.String())
 		}
 		leads = append(leads, aus...)
 	}
