@@ -993,6 +993,21 @@ describe("CsmCaseDetailPage — tab lives in the URL", () => {
     );
   });
 
+  it("shows the escalation widget in its own Escalation tab, not in Details", () => {
+    renderPageAt("/cases/case-1?tab=details");
+    expect(screen.queryByTestId("escalation-widget-probe")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /escalation/i }));
+    expect(screen.getByTestId("location-search-probe")).toHaveTextContent("tab=escalation");
+    expect(screen.getByTestId("escalation-widget-probe")).toBeInTheDocument();
+  });
+
+  it("opens the Escalation tab from a ?tab=escalation link", () => {
+    renderPageAt("/cases/case-1?tab=escalation");
+    expect(screen.getByRole("tab", { name: /escalation/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("escalation-widget-probe")).toBeInTheDocument();
+  });
+
   it("falls back to Activities for ?tab=tasks, the hidden tab with no rendered <Tab>", () => {
     renderPageAt("/cases/case-1?tab=tasks");
 
@@ -1807,7 +1822,7 @@ describe("CsmCaseDetailPage — who may de-escalate", () => {
       ...(defaultCaseDetailImpl(id) as object),
       data: id ? { ...buildCase(id), escalationLevel: "2" } : undefined,
     }));
-    renderPageAt("/cases/case-1?tab=details");
+    renderPageAt("/cases/case-1?tab=escalation");
   }
   const canDeescalate = (): string | null =>
     screen.getByTestId("escalation-widget-probe").getAttribute("data-can-deescalate");
