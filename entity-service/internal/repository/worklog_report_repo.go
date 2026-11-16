@@ -177,6 +177,14 @@ type WorklogReportRepository interface {
 	// round-the-clock SME and IaaS rotas, and somebody assigned to one
 	// on a Saturday is on weekend duty by any reading.
 	WeekendCrewUserIDs(ctx context.Context, from, to time.Time) ([]string, error)
+	// RotationTurnUserIDs returns the users holding a rotation turn
+	// (team_schedule_assignment.is_rotation: the CRE 6-9 morning and
+	// evening, the weekend and weekend-night shifts, on-call) on any date in
+	// [from, to]. Regular hours are not turns. The daily report keeps such a
+	// person even when an allocation would otherwise take them out of it:
+	// the allocation does not hide the turn on the roster, and the time
+	// logged on it is rota work the report must show.
+	RotationTurnUserIDs(ctx context.Context, from, to time.Time) ([]string, error)
 	// TeamContacts returns, per team in scope, its group address and the
 	// email of every member holding role 'lead'. It is a separate read
 	// from Roster because Roster collapses to one row per person, which
@@ -487,6 +495,19 @@ SELECT DISTINCT a.user_id::text
  WHERE a.rota_date >= $1
    AND a.rota_date <= $2
    AND s.day_scope IN ('WEEKEND', 'ANY')`
+
+// is_rotation is the window's own flag, copied onto the assignment by
+// trigger (0153), so no join is needed.
+const worklogRotationTurnQuery = `
+SELECT DISTINCT a.user_id::text
+  FROM team_schedule_assignment a
+ WHERE a.is_rotation
+   AND a.rota_date >= $1
+   AND a.rota_date <= $2`
+
+func (r *worklogReportRepo) RotationTurnUserIDs(ctx context.Context, from, to time.Time) ([]string, error) {
+	return r.rotaUserIDs(ctx, worklogRotationTurnQuery, from, to)
+}
 
 func (r *worklogReportRepo) RosteredUserIDs(ctx context.Context, from, to time.Time) ([]string, error) {
 	return r.rotaUserIDs(ctx, worklogRosteredQuery, from, to)
