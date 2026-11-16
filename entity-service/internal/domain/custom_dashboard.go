@@ -164,3 +164,62 @@ type SharedCustomDashboard struct {
 	SharedOn      time.Time                     `json:"sharedOn"`
 	UpdatedOn     time.Time                     `json:"updatedOn"`
 }
+
+// Limits on a saved code dashboard. The name and source limits match the
+// CHECK constraints of migration 0295.
+const (
+	// MaxCodeDashboards is the cap per owner, counted apart from MaxCustomDashboards.
+	MaxCodeDashboards = 50
+	// MaxCodeDashboardSourceBytes is in bytes: the CSM backend's 60000
+	// characters of any UTF-8 fit.
+	MaxCodeDashboardSourceBytes = 262144
+)
+
+// CodeDashboard is an advanced dashboard a CSM portal user generated as code
+// and saved (migration 0295). Source is the dashboard's JavaScript as opaque
+// text: the CSM backend checks it and the portal runs it, this service never
+// parses or runs it. The owner is never on the wire; it is always the caller.
+type CodeDashboard struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Source    string    `json:"source"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
+}
+
+// CodeDashboardSummary is one entry of a list: everything but the source.
+type CodeDashboardSummary struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
+}
+
+// CodeDashboardList is the body of GET /users/me/code-dashboards.
+type CodeDashboardList struct {
+	Dashboards []CodeDashboardSummary `json:"dashboards"`
+}
+
+// SaveCodeDashboardRequest is the body of PUT /users/me/code-dashboards/{id}:
+// the dashboard is created, or replaced when the caller already has one with
+// that id. The id comes from the path.
+type SaveCodeDashboardRequest struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+// SharedCodeDashboard is one code dashboard shared with the caller, with its
+// source (the owner's current version), in the shape of SharedCustomDashboard.
+// A list of them uses SharedCustomDashboardSummary, and the owner's share,
+// team share and link answers use the custom dashboard types: none of them
+// carries a definition or a source.
+type SharedCodeDashboard struct {
+	ID            string                        `json:"id"`
+	Name          string                        `json:"name"`
+	Source        string                        `json:"source"`
+	Owner         *UserReference                `json:"owner"`
+	SharedViaTeam *CustomDashboardTeamShareTeam `json:"sharedViaTeam"`
+	SharedViaLink bool                          `json:"sharedViaLink"`
+	SharedOn      time.Time                     `json:"sharedOn"`
+	UpdatedOn     time.Time                     `json:"updatedOn"`
+}

@@ -2230,6 +2230,16 @@ func (s *snCaseService) CaseVolumeTrend(ctx context.Context, req domain.CaseVolu
 	return s.pgFallback.CaseVolumeTrend(ctx, req)
 }
 
+// CaseResolutionTime implements CaseService. Business durations live in
+// Postgres (the SLA engine's clocks and the migrated work items), so this
+// delegates whole, as CaseVolumeTrend does, and is unavailable without it.
+func (s *snCaseService) CaseResolutionTime(ctx context.Context, req domain.CaseResolutionTimeRequest) (domain.CaseResolutionTimeResponse, error) {
+	if s.pgFallback == nil {
+		return domain.CaseResolutionTimeResponse{}, &apierror.ServiceUnavailableError{Msg: "case resolution time is only supported for the Postgres data source"}
+	}
+	return s.pgFallback.CaseResolutionTime(ctx, req)
+}
+
 func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 

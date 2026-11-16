@@ -4389,6 +4389,37 @@ already use — no route path, request, or response shape changed.
   filtering, the same deliberate posture as `AccountContactRepository`/
   `ProjectContactRepository`'s own `callerEmail` parameter below.
 
+## POST /cases/resolution-time: case resolution time (MTTR)
+
+The mean business time to resolve cases, for AI dashboards ("MTTR of S1 cases"), scoped like
+`/cases/aggregate` (row-level security; no internal-only gate, since nothing is cached). Postgres only:
+`snCaseService` hands it to `pgFallback`, or answers `ServiceUnavailableError` without one.
+
+- **Which cases.** Those matching the case search filters (same `buildCaseSearchWhere`/joins and
+  scope as `AggregateCases`) that are `SOLUTION_PROPOSED` or `CLOSED` (own-type state) and whose
+  resolution time -- own-type `resolved_on`, else `closed_on` (migrated cases closed without one)
+  -- is in the window: `resolvedFrom`/`resolvedTo`, inclusive UTC days or relative dates, both
+  or neither (the 12 months ending today), at most 24 months. A non-resolved state is required
+  because `resolved_on` survives a move from solution proposed back to work in progress.
+- **Which duration.** The latest finished RESOLUTION clock's `sla.business_duration` (`ACHIEVED`,
+  which the SLA engine writes with pauses taken out; `COMPLETED`, which only migrated rows have;
+  a clock without a duration is passed over), else `work_item.business_duration` (only migrated
+  cases have it: nothing in this service writes it), else none. A case with none is counted
+  (`count`) but not averaged (`measured`), so a dashboard can say how many were left out.
+- **Groups.** `groupBy` takes `caseAggregateColumns`' fields less the state ones and
+  `productVersion`. The repository returns summed seconds per group (the cases with no value for
+  the field as a nil-keyed row, in the total only); the service averages, keeps `maxGroups`
+  (default 10) and merges the rest into `others` from their sums, not their averages.
+- **Read the duration inside the aggregates, not as a `LATERAL` join.** As a lateral join the
+  planner ran its clock lookup for every work item scanned, before the window and state
+  conditions (`EXPLAIN ANALYZE`: 59 loops for 6 resolved cases); inside `COUNT`/`SUM` it runs
+  only for the rows kept (twice each, on `idx_sla_work_item_id`). The window itself is a `CASE`
+  over five tables, so it scans `work_item`, as the volume trend's "closed" branch does: about
+  40-110 ms over 100k synthetic cases.
+- Tests: `case_resolution_time_test.go` (service), `case_resolution_time_integration_test.go`
+  (`CASE_STATS_TEST_DSN`; the customer test under `CASE_CREATE_RLS_TEST_DSN`, row-level security
+  in force).
+
 ## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
 
 Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
@@ -11995,6 +12026,32 @@ one). The rule is "kept while a person or a team share is left":
 - The integration tests pin each case: `custom_dashboard_team_share_repo_integration_test.go`
   (`DeletingTheOwnerKeepsOnlySharedDashboards`), `custom_dashboard_link_repo_integration_test.go`
   (`DeletingTheOwnerTurnsTheLinkOff`) and `custom_dashboard_orphan_integration_test.go` (0277).
+
+## Saved code dashboards (`/users/me/code-dashboards*`)
+
+The CSM portal's advanced dashboards are JavaScript the model wrote, saved in `code_dashboard` (migration
+0295), a table of its own because `custom_dashboard.definition` is the JSON format the backend validates.
+Same shape and rules as `/users/me/dashboards`: the owner is always the caller (x-user-id-token), another
+owner's id is 404, PUT creates or replaces by the draft's id, names are unique per owner ignoring case, at
+most 50 per owner (`MaxCodeDashboards`, counted apart from the JSON ones, under its own advisory lock key
+`code-dashboard-owner:`). `source` is opaque text up to 262144 bytes: never parsed or run here; the CSM
+backend checks it and the portal checks it again and runs it in its sandbox.
+
+- **Owner deleted:** `owner_user_id` is nullable, `ON DELETE SET NULL`, as `custom_dashboard` since 0255,
+  so a shared one can outlive its owner. An ownerless row can never be claimed by saving under its id.
+- **Share tables (migration 0296):** `code_dashboard_share`, `code_dashboard_team_share`,
+  `code_dashboard.link_enabled`/`link_id` and `code_dashboard_link_access`, the same shapes and owner-deleted
+  rules as the custom dashboard ones (0252, 0253, 0275, 0276, 0277; see the section above), under
+  `code_dashboard_*` function and trigger names. Tables of their own: the custom dashboard share tables
+  reference `custom_dashboard`, and 0296 does not touch them or their functions
+  (`code_dashboard_share_integration_test.go` checks both).
+- **Sharing routes** (`code_dashboard_share_{repo,service,handler}.go`, one of each for people, teams and the
+  link): `/users/me/code-dashboards/{id}/shares[/{userId}]`, `/team-shares[/{teamId}]` and `/link` (owner),
+  `/users/me/shared-code-dashboards[/{id}]` and `POST /users/me/shared-code-dashboards/link` (recipient). Same
+  rules, messages and answers as the custom dashboard routes (internal staff only, never the owner, 404 for
+  another's, the link id only in a body and never in a message); they reuse those response types, and a
+  shared one carries `source` instead of `definition`. A viewer runs the owner's code in the viewer's browser
+  (the portal's sandbox), with the viewer's own data.
 
 ## Adding a new entity
 

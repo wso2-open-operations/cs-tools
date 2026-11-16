@@ -134,6 +134,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
 	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
+	var codeDashboardHandler *handler.CodeDashboardHandler
+	var codeDashboardShareHandler *handler.CodeDashboardShareHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -147,6 +149,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
 			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
+		)
+		codeDashboardRepo := repository.NewCodeDashboardRepository(db)
+		codeDashboardHandler = handler.NewCodeDashboardHandler(
+			service.NewCodeDashboardService(codeDashboardRepo, userRepo),
+		)
+		codeDashboardShareHandler = handler.NewCodeDashboardShareHandler(
+			service.NewCodeDashboardShareService(repository.NewCodeDashboardShareRepository(db), codeDashboardRepo, userRepo),
 		)
 	}
 
@@ -2410,6 +2419,30 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
 	}
+	if codeDashboardHandler != nil {
+		// The caller's own saved code (advanced) dashboards (migration 0295).
+		mux.HandleFunc("GET /users/me/code-dashboards", codeDashboardHandler.List)
+		mux.HandleFunc("GET /users/me/code-dashboards/{id}", codeDashboardHandler.Get)
+		mux.HandleFunc("PUT /users/me/code-dashboards/{id}", codeDashboardHandler.Save)
+		mux.HandleFunc("DELETE /users/me/code-dashboards/{id}", codeDashboardHandler.Delete)
+	}
+	if codeDashboardShareHandler != nil {
+		// Sharing the caller's saved code dashboards with people, teams and
+		// by link (owner, migration 0296), and the code dashboards shared
+		// with the caller (recipient, view only), as for custom dashboards.
+		mux.HandleFunc("GET /users/me/code-dashboards/{id}/shares", codeDashboardShareHandler.ListShares)
+		mux.HandleFunc("PUT /users/me/code-dashboards/{id}/shares/{userId}", codeDashboardShareHandler.AddShare)
+		mux.HandleFunc("DELETE /users/me/code-dashboards/{id}/shares/{userId}", codeDashboardShareHandler.RemoveShare)
+		mux.HandleFunc("GET /users/me/code-dashboards/{id}/team-shares", codeDashboardShareHandler.ListTeamShares)
+		mux.HandleFunc("PUT /users/me/code-dashboards/{id}/team-shares/{teamId}", codeDashboardShareHandler.AddTeamShare)
+		mux.HandleFunc("DELETE /users/me/code-dashboards/{id}/team-shares/{teamId}", codeDashboardShareHandler.RemoveTeamShare)
+		mux.HandleFunc("GET /users/me/code-dashboards/{id}/link", codeDashboardShareHandler.GetLink)
+		mux.HandleFunc("PUT /users/me/code-dashboards/{id}/link", codeDashboardShareHandler.EnableLink)
+		mux.HandleFunc("DELETE /users/me/code-dashboards/{id}/link", codeDashboardShareHandler.DisableLink)
+		mux.HandleFunc("GET /users/me/shared-code-dashboards", codeDashboardShareHandler.ListSharedWithMe)
+		mux.HandleFunc("GET /users/me/shared-code-dashboards/{id}", codeDashboardShareHandler.GetSharedWithMe)
+		mux.HandleFunc("POST /users/me/shared-code-dashboards/link", codeDashboardShareHandler.OpenLink)
+	}
 	if customDashboardShareHandler != nil {
 		// Sharing the caller's saved dashboards (owner) and the ones shared
 		// with the caller (recipient, view only).
@@ -2569,6 +2602,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	mux.HandleFunc("POST /cases/aggregate", caseHandler.AggregateCases)
 	mux.HandleFunc("POST /cases/volume-trend", caseHandler.CaseVolumeTrend)
+	// Scoped like /cases/aggregate: the caller's own cases (row-level security).
+	mux.HandleFunc("POST /cases/resolution-time", caseHandler.CaseResolutionTime)
 	mux.HandleFunc("POST /cases/feedback/search", feedbackHandler.SearchFeedback)
 	mux.HandleFunc("POST /cases/feedback/aggregate", feedbackHandler.AggregateFeedback)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)

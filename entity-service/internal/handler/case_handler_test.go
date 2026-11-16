@@ -794,3 +794,72 @@ func TestCreateCaseComment_NeitherActorEmailNorToken_UnchangedBehavior(t *testin
 		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// resolutionTimeCaseService answers CaseResolutionTime with resp or err and
+// keeps the request it was given.
+type resolutionTimeCaseService struct {
+	service.CaseService
+	got  domain.CaseResolutionTimeRequest
+	resp domain.CaseResolutionTimeResponse
+	err  error
+}
+
+func (s *resolutionTimeCaseService) CaseResolutionTime(_ context.Context, req domain.CaseResolutionTimeRequest) (domain.CaseResolutionTimeResponse, error) {
+	s.got = req
+	return s.resp, s.err
+}
+
+// TestCaseResolutionTime_DecodesAndAnswers: the body reaches the service as
+// sent and the answer goes back as JSON, an unmeasured average as null.
+func TestCaseResolutionTime_DecodesAndAnswers(t *testing.T) {
+	hours := 12.5
+	stub := &resolutionTimeCaseService{resp: domain.CaseResolutionTimeResponse{
+		ResolvedFrom: "2026-07-01", ResolvedTo: "2026-09-30",
+		Total:  domain.CaseResolutionTimeBucket{Count: 3, Measured: 2, AverageHours: &hours},
+		Groups: []domain.CaseResolutionTimeBucket{{Key: "high", Label: "high", Count: 1}},
+	}}
+	h := NewCaseHandler(stub, nil)
+	req := httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(
+		`{"filters":{"filters":[{"field":"severity","op":"in","values":["critical"]}]},"resolvedFrom":"__startOfQuarter:-1__","resolvedTo":"__endOfQuarter:-1__","groupBy":"severity","maxGroups":5}`))
+	rec := httptest.NewRecorder()
+
+	h.CaseResolutionTime(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	got := stub.got
+	if got.ResolvedFrom != "__startOfQuarter:-1__" || got.ResolvedTo != "__endOfQuarter:-1__" || got.GroupBy != "severity" || got.MaxGroups != 5 ||
+		len(got.Filters.Filters) != 1 || got.Filters.Filters[0].Field != "severity" {
+		t.Errorf("request = %+v, want the body as sent", got)
+	}
+	want := `{"resolvedFrom":"2026-07-01","resolvedTo":"2026-09-30","total":{"count":3,"measured":2,"averageHours":12.5},"groups":[{"key":"high","label":"high","count":1,"measured":0,"averageHours":null}]}`
+	if strings.TrimSpace(rec.Body.String()) != want {
+		t.Errorf("body = %s, want %s", rec.Body.String(), want)
+	}
+}
+
+// TestCaseResolutionTime_Errors: an unknown body field is a 400 before the
+// service; the service's validation error is a 400 and its unavailability a
+// 503.
+func TestCaseResolutionTime_Errors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		err  error
+		want int
+	}{
+		{"unknown field", `{"days":30}`, nil, http.StatusBadRequest},
+		{"validation", `{}`, &apierror.ValidationError{Msg: "resolvedFrom and resolvedTo are both required"}, http.StatusBadRequest},
+		{"no Postgres", `{}`, &apierror.ServiceUnavailableError{Msg: "case resolution time is only supported for the Postgres data source"}, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &resolutionTimeCaseService{err: tc.err}
+			rec := httptest.NewRecorder()
+			NewCaseHandler(stub, nil).CaseResolutionTime(rec, httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(tc.body)))
+			if rec.Code != tc.want {
+				t.Errorf("status = %d, want %d: %s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}

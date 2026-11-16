@@ -52,6 +52,13 @@ A clock is breached when elapsed time reaches `duration` (`has_breached`, stage 
 `is_active = TRUE` — a clock that ran out but is not yet satisfied is not finished. `ACHIEVED` and `CANCELLED`
 set `is_active = FALSE`.
 
+## Read for resolution time
+
+A finished RESOLUTION clock's `business_duration` (`ACHIEVED`; `COMPLETED` on migrated rows) is a
+case's business time to resolution: the case resolution time (MTTR) averages it, falling back to
+`work_item.business_duration` for migrated cases (see `CaseService.CaseResolutionTime` in
+`CLAUDE.md`).
+
 ## Endpoints used by the notification service
 
 - `GET /sla-status` — every active clock (internal callers only; page size default 500, max 2000). Used for the

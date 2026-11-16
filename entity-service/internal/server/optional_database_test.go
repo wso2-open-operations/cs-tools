@@ -103,6 +103,14 @@ func TestPostgresOnlyRoutesAreUnregisteredWithoutADatabase(t *testing.T) {
 		{"add custom dashboard team share", http.MethodPut, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
 		{"remove custom dashboard team share", http.MethodDelete, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
 	}
+	for _, r := range codeDashboardRoutes {
+		tests = append(tests, struct {
+			name   string
+			method string
+			path   string
+			body   string
+		}{r.name, r.method, r.path, r.body})
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -122,6 +130,50 @@ func TestPostgresOnlyRoutesAreUnregisteredWithoutADatabase(t *testing.T) {
 			if rec.Code != http.StatusNotFound {
 				t.Errorf("%s %s = %d, want %d — the handler should not be registered without a database",
 					tt.method, tt.path, rec.Code, http.StatusNotFound)
+			}
+		})
+	}
+}
+
+// codeDashboardRoutes is every saved code dashboard route (migrations 0295,
+// 0296): Postgres-only, so absent without a database and present with one.
+var codeDashboardRoutes = []struct {
+	name, method, path, body string
+}{
+	{"list code dashboards", http.MethodGet, "/users/me/code-dashboards", ""},
+	{"get code dashboard", http.MethodGet, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001", ""},
+	{"save code dashboard", http.MethodPut, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001", `{}`},
+	{"delete code dashboard", http.MethodDelete, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001", ""},
+	{"list code dashboard shares", http.MethodGet, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/shares", ""},
+	{"add code dashboard share", http.MethodPut, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/shares/5e636a12-0000-4000-8000-0000000000aa", ""},
+	{"remove code dashboard share", http.MethodDelete, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/shares/5e636a12-0000-4000-8000-0000000000aa", ""},
+	{"list code dashboard team shares", http.MethodGet, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/team-shares", ""},
+	{"add code dashboard team share", http.MethodPut, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
+	{"remove code dashboard team share", http.MethodDelete, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
+	{"get code dashboard link", http.MethodGet, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/link", ""},
+	{"enable code dashboard link", http.MethodPut, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/link", ""},
+	{"disable code dashboard link", http.MethodDelete, "/users/me/code-dashboards/5e636a12-0000-4000-8000-000000000001/link", ""},
+	{"list code dashboards shared with me", http.MethodGet, "/users/me/shared-code-dashboards", ""},
+	{"get code dashboard shared with me", http.MethodGet, "/users/me/shared-code-dashboards/5e636a12-0000-4000-8000-000000000001", ""},
+	{"open code dashboard link", http.MethodPost, "/users/me/shared-code-dashboards/link", `{}`},
+}
+
+// TestCodeDashboardRoutesAreRegisteredWithADatabase is the other half: with a
+// pool (newPortalWriteRouter's, which never dials) every code dashboard route
+// reaches a handler. They do not succeed, but anything other than a 404 or 405
+// proves the route is there.
+func TestCodeDashboardRoutesAreRegisteredWithADatabase(t *testing.T) {
+	router := newPortalWriteRouter(t, false)
+	for _, tc := range codeDashboardRoutes {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			router.ServeHTTP(rec, req)
+			if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+				t.Errorf("%s %s = %d, want the route to be registered with a database", tc.method, tc.path, rec.Code)
 			}
 		})
 	}
