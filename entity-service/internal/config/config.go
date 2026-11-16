@@ -329,6 +329,10 @@ type Config struct {
 	// ACPReopenTestProjectSfID limits the reopen check to one Salesforce
 	// project (CSM_ACP_REOPEN_TEST_PROJECT_SF_ID). Empty: every project.
 	ACPReopenTestProjectSfID string
+	// ACPInternalEmailDomains are the domains the "Back to Open state"
+	// notice may go to (ACP_INTERNAL_EMAIL_DOMAINS, comma-separated, each
+	// starting with "@"). Empty: @wso2.com only.
+	ACPInternalEmailDomains []string
 	// ACPReactivationPollInterval is how often ProjectReactivationDrainer
 	// looks for queued "Back to Open state" notices
 	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
@@ -1087,6 +1091,7 @@ func Load() *Config {
 	cfg.ACPReopenEnabled = os.Getenv("CSM_ACP_REOPEN_ENABLED") == "true"
 	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
+	cfg.ACPInternalEmailDomains = splitComma(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
@@ -1277,6 +1282,13 @@ func (c *Config) Validate() error {
 	if c.QueryHourInternalEmailDomain != "" && !strings.HasPrefix(c.QueryHourInternalEmailDomain, "@") {
 		return fmt.Errorf("QUERY_HOUR_INTERNAL_EMAIL_DOMAIN must start with \"@\", got %q",
 			c.QueryHourInternalEmailDomain)
+	}
+	// Same reason for the ACP notice: a bare "wso2.com" would also admit
+	// someone@notwso2.com.
+	for _, d := range c.ACPInternalEmailDomains {
+		if !strings.HasPrefix(d, "@") || !strings.Contains(d[1:], ".") || strings.HasPrefix(d[1:], ".") || strings.ContainsAny(d[1:], "@ ") {
+			return fmt.Errorf("ACP_INTERNAL_EMAIL_DOMAINS entry %q must look like \"@example.com\"", d)
+		}
 	}
 	// A team id that is not a UUID can never match account.sre_team_id, so
 	// the team it was meant to automate would silently never be.

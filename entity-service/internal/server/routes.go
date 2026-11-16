@@ -626,6 +626,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Notify:          projectEventPublisher != nil,
 				DryRun:          cfg.ACPReopenDryRun,
 				TestProjectSfID: cfg.ACPReopenTestProjectSfID,
+				InternalDomains: cfg.ACPInternalEmailDomains,
 			}
 			// Dual-write: copy each reopen to the previous system, as PATCH
 			// /projects/{id} copies ACP's suspension.

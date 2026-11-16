@@ -88,10 +88,9 @@ type ACPReopen struct {
 	// every other mode.
 	Mirror func(ctx context.Context, projectID string, req domain.ProjectUpdateRequest)
 	// InternalDomains are the address domains the notice may go to
-	// (acpDefaultInternalDomains when empty): it is an internal notice, and
-	// the technical owner recorded in Salesforce is sometimes a customer's
-	// person. Each starts with "@", so "@wso2.com" cannot admit
-	// someone@notwso2.com.
+	// (ACP_INTERNAL_EMAIL_DOMAINS; "@wso2.com" when empty): it is an
+	// internal notice, and the technical owner recorded in Salesforce is
+	// sometimes a customer's person.
 	InternalDomains []string
 	// DryRun decides and logs what it would do, and writes nothing
 	// (CSM_ACP_REOPEN_DRY_RUN, default true).
@@ -611,11 +610,6 @@ func (a *ACPReopen) notice(ctx context.Context, p domain.ACPReopenProject, sp sa
 	return raw, nil
 }
 
-// acpDefaultInternalDomains are the internal address domains while the
-// company's mail moves from wso2.com to choreolabs.com: people may have
-// either address.
-var acpDefaultInternalDomains = []string{"@wso2.com", "@choreolabs.com"}
-
 func (a *ACPReopen) internalDomains() []string {
 	var out []string
 	for _, d := range a.InternalDomains {
@@ -624,7 +618,7 @@ func (a *ACPReopen) internalDomains() []string {
 		}
 	}
 	if len(out) == 0 {
-		return acpDefaultInternalDomains
+		return []string{wso2EmailDomain}
 	}
 	return out
 }
