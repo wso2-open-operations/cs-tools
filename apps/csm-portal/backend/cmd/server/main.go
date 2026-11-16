@@ -398,11 +398,12 @@ func main() {
 		ClientSecret: oauth2ClientSecret,
 		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
 	}
+	var playbooks plg.PlaybookLister
 	if aiClient != nil {
 		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
 		// The PLG playbooks' answer fields go with every generate request,
 		// read with PLG's own entity-service configuration (see plg.Mount).
-		playbooks, err := plg.NewPlaybookLister(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults)
+		playbooks, err = plg.NewPlaybookLister(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults)
 		if err != nil {
 			slog.Error("failed to configure the PLG playbook list", "err", err)
 			os.Exit(1)
@@ -427,8 +428,34 @@ func main() {
 	// A region filter's values are checked against the regions of the
 	// cases' accounts, and written as an account writes them.
 	dashboardGenerator = handler.WithDashboardRegions(dashboardGenerator, customerEntityClient)
-	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
-		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
+	// One limiter for both approaches: a user's model calls count together.
+	generateLimiter := handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay)
+	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).WithRateLimit(generateLimiter)
+	// The code approach (POST /dashboards/generate-code) is phase 2: off unless
+	// DASHBOARD_GENERATE_CODE_ENABLED is "true" (see loadGenerateCodeEnabled).
+	// Off, its handler is not built and its route not registered.
+	var dashboardGenerateCodeHandler *handler.DashboardGenerateCodeHandler
+	var dashboardResolvedFiltersHandler *handler.DashboardResolvedFiltersHandler
+	var codeDashboardHandler *handler.CodeDashboardHandler
+	var codeDashboardShareHandler *handler.CodeDashboardShareHandler
+	if loadGenerateCodeEnabled() {
+		codeDashboardGenerator := handler.NewSampleCodeDashboardGenerator()
+		if aiClient != nil {
+			// The same teams and PLG playbook answers as the generate requests.
+			codeDashboardGenerator = handler.WithCodePlaybooks(handler.NewServiceCodeDashboardGenerator(aiClient, dir.TeamResults()), playbooks)
+		}
+		dashboardGenerateCodeHandler = handler.NewDashboardGenerateCodeHandler(codeDashboardGenerator).WithRateLimit(generateLimiter)
+		// A code dashboard's names (products, versions, projects, accounts,
+		// teams, regions) are resolved when it runs, by the same lookups as
+		// above, and its PLG playbook codes checked against the same playbooks.
+		dashboardResolvedFiltersHandler = handler.NewDashboardResolvedFiltersHandler(customerEntityClient, customerEntityClient, customerEntityClient, dir.TeamResults()).
+			WithPlaybooks(playbooks).
+			WithRegions(customerEntityClient)
+		// Saved advanced dashboards (entity-service /users/me/code-dashboards).
+		codeDashboardHandler = handler.NewCodeDashboardHandler(customerEntityClient)
+		// Sharing them, with the same registry teams as the custom dashboards.
+		codeDashboardShareHandler = handler.NewCodeDashboardShareHandler(customerEntityClient, dir.TeamResults())
+	}
 	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
 	caseHandler = caseHandler.WithAccessGuard(accessGuard)
 	projectHandler = projectHandler.WithAccessGuard(accessGuard)
@@ -523,6 +550,7 @@ func main() {
 	route("POST /cases/search", handler.PermViewSharedEntity, caseHandler.SearchCases)
 	route("POST /cases/aggregate", handler.PermView, caseHandler.AggregateCases)
 	route("POST /cases/volume-trend", handler.PermView, caseHandler.VolumeTrend)
+	route("POST /cases/resolution-time", handler.PermView, caseHandler.CaseResolutionTime)
 	route("POST /cases/feedback/search", handler.PermView, caseHandler.SearchFeedback)
 	route("POST /cases/feedback/aggregate", handler.PermView, caseHandler.AggregateFeedback)
 	route("GET /dashboards", handler.PermView, dashboardHandler.GetDashboards)
@@ -538,6 +566,44 @@ func main() {
 	// A generated dashboard may hold PLG widgets; every PermWrite role also
 	// holds PermUsePlg (TestAccessGuard_DashboardWritersCanReadPlg).
 	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
+	// The code approach, same permission; registered only when
+	// DASHBOARD_GENERATE_CODE_ENABLED is on. resolved-filters is PermView: an
+	// advanced dashboard looks its filter names up while it runs, also for a
+	// view-only role it was shared with, and the lookups are the caller's own
+	// searches (it reads only).
+	if dashboardGenerateCodeHandler != nil {
+		route("POST /dashboards/generate-code", handler.PermWrite, dashboardGenerateCodeHandler.GenerateCodeDashboard)
+		route("POST /dashboards/resolved-filters", handler.PermView, dashboardResolvedFiltersHandler.ResolveFilters)
+	}
+	// Saved advanced dashboards, owner only; registered only when
+	// DASHBOARD_GENERATE_CODE_ENABLED is on. "code" is a literal segment, like
+	// "custom", so it never collides with the {dashboardId} wildcard.
+	if codeDashboardHandler != nil {
+		route("GET /dashboards/code", handler.PermWrite, codeDashboardHandler.ListCodeDashboards)
+		route("GET /dashboards/code/{id}", handler.PermWrite, codeDashboardHandler.GetCodeDashboard)
+		route("PUT /dashboards/code/{id}", handler.PermWrite, codeDashboardHandler.SaveCodeDashboard)
+		route("DELETE /dashboards/code/{id}", handler.PermWrite, codeDashboardHandler.DeleteCodeDashboard)
+	}
+	// Sharing saved advanced dashboards, as the custom dashboard sharing routes
+	// below: the owner's routes are PermWrite, and reading or opening the ones
+	// shared with the caller is PermView (the viewer runs the owner's code in
+	// the webapp's sandbox, with the viewer's own permissions). Registered only
+	// when DASHBOARD_GENERATE_CODE_ENABLED is on. "code" is a literal segment
+	// under /dashboards/shared too, so it outranks the {id} wildcard there.
+	if codeDashboardShareHandler != nil {
+		route("GET /dashboards/code/{id}/shares", handler.PermWrite, codeDashboardShareHandler.ListCodeDashboardShares)
+		route("PUT /dashboards/code/{id}/shares/{userId}", handler.PermWrite, codeDashboardShareHandler.AddCodeDashboardShare)
+		route("DELETE /dashboards/code/{id}/shares/{userId}", handler.PermWrite, codeDashboardShareHandler.RemoveCodeDashboardShare)
+		route("GET /dashboards/code/{id}/team-shares", handler.PermWrite, codeDashboardShareHandler.ListCodeDashboardTeamShares)
+		route("PUT /dashboards/code/{id}/team-shares/{teamKey}", handler.PermWrite, codeDashboardShareHandler.AddCodeDashboardTeamShare)
+		route("DELETE /dashboards/code/{id}/team-shares/{teamKey}", handler.PermWrite, codeDashboardShareHandler.RemoveCodeDashboardTeamShare)
+		route("GET /dashboards/code/{id}/link", handler.PermWrite, codeDashboardShareHandler.GetCodeDashboardLink)
+		route("PUT /dashboards/code/{id}/link", handler.PermWrite, codeDashboardShareHandler.EnableCodeDashboardLink)
+		route("DELETE /dashboards/code/{id}/link", handler.PermWrite, codeDashboardShareHandler.DisableCodeDashboardLink)
+		route("GET /dashboards/shared/code", handler.PermView, codeDashboardShareHandler.ListSharedCodeDashboards)
+		route("GET /dashboards/shared/code/{id}", handler.PermView, codeDashboardShareHandler.GetSharedCodeDashboard)
+		route("POST /dashboards/shared/code/link", handler.PermView, codeDashboardShareHandler.OpenCodeDashboardLink)
+	}
 	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
 	// Same permission as generating one. "custom" is a literal segment, so it
 	// never collides with the {dashboardId} wildcard.
@@ -1392,6 +1458,27 @@ func validateAnnouncementDataSourceCompatibility(dataSource string, excludedProj
 		slog.Error(err.Error())
 		os.Exit(1)
 	}
+}
+
+// generateCodeFlag is the env var gating POST /dashboards/generate-code, the
+// code approach to dashboard generation (phase 2). The AI integration service
+// and the webapp read the same name, so one value turns all three on.
+const generateCodeFlag = "DASHBOARD_GENERATE_CODE_ENABLED"
+
+// loadGenerateCodeEnabled resolves generateCodeFlag. Off by default: only
+// exactly "true" (whitespace trimmed) turns it on; "1", "TRUE" or "yes" leave
+// an unreleased feature off rather than on by accident.
+func loadGenerateCodeEnabled() bool {
+	enabled := generateCodeEnabled(os.Getenv(generateCodeFlag))
+	if enabled {
+		slog.Info(generateCodeFlag + " is on: POST /dashboards/generate-code is registered")
+	}
+	return enabled
+}
+
+// generateCodeEnabled is the pure parse behind loadGenerateCodeEnabled.
+func generateCodeEnabled(raw string) bool {
+	return strings.TrimSpace(raw) == "true"
 }
 
 // onboardingStatusFlag is the env var gating GET /projects/{id}/onboarding-steps.

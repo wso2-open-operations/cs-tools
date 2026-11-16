@@ -4465,6 +4465,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/resolution-time:
+    post:
+      summary: Case resolution time (MTTR), for an advanced dashboard.
+      description: >-
+        Plain forward-and-return proxy to the entity service's own POST
+        /cases/resolution-time: the cases matching the filters that are
+        solution proposed or closed and were resolved (else closed) in a
+        window of UTC days (the last 12 months by default, at most 24), and
+        the mean business time they took (each case's finished RESOLUTION
+        SLA clock, else a migrated case's business duration; a case with
+        neither is counted, not averaged), overall and optionally per group.
+        Scoped to the caller's cases.
+      operationId: postCasesResolutionTime
+      requestBody:
+        description: Case resolution time payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseResolutionTimePayload'
+        required: true
+      responses:
+        "200":
+          description: The resolved cases' count and mean business time.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseResolutionTimeResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: >-
+            ServiceUnavailable, also when the entity service reads cases from
+            a data source without business durations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases/volume-trend:
     post:
       summary: >-
@@ -5021,6 +5087,194 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/generate-code:
+    post:
+      summary: Generate a dashboard written as code from a chat message (phase 2).
+      description: >
+        **Off by default (phase 2):** registered only when the deployment sets
+        DASHBOARD_GENERATE_CODE_ENABLED to exactly "true"; otherwise a POST to
+        it answers 405 (the path still matches GET /dashboards/{dashboardId}).
+        The code approach's counterpart of POST /dashboards/generate: turns the
+        user's latest message on the code generate page into dashboard source
+        code (JavaScript defining `render(portal, root)`, which reads its data
+        through fixed portal APIs) plus a chat reply. The model (through
+        csm-ai-integration-service) writes the code from its own catalogue;
+        without that service configured, every valid request gets the same
+        sample source. Nothing is stored. CS engineers and admins only, and
+        counted against the same per-user generate limits as POST
+        /dashboards/generate. 400 when the prompt is missing, blank or over
+        2000 characters; 413 when `current` is over 60000 characters.
+        Generation failures map as on POST /dashboards/generate (422 the
+        request cannot be turned into a dashboard, with the reason; 502, 503
+        and 504 as there).
+      operationId: generateCodeDashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCodeDashboardRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateCodeDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: Over the caller's generate limit (per minute or per 24 hours).
+          headers:
+            Retry-After:
+              description: Seconds until the caller may generate again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "504":
+          description: GatewayTimeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/resolved-filters:
+    post:
+      summary: Resolve the names in a code dashboard's case filters (phase 2).
+      description: >
+        **Off by default (phase 2):** registered only when the deployment sets
+        DASHBOARD_GENERATE_CODE_ENABLED to exactly "true"; otherwise a POST to
+        it answers 405 (the path still matches GET /dashboards/{dashboardId}).
+        A code dashboard's case filters name products, product versions,
+        projects (key or name), customers (name or account number), CRE/SRE
+        teams (key or name) and regions as the user wrote them. The webapp sends such a
+        filter list here when the dashboard runs, and gets back the list the
+        case search takes: `product` values become the products' own names,
+        `productVersion` values the versions they mean, `project` / `account`
+        become `projectId` / `accountId` filters with the same op, and team
+        keys or names become the teams' group ids, and `region` values the
+        regions as the account records write them. A code dashboard's time
+        card call names teams too: its `teamIds` list (team keys or names)
+        comes back as the teams' group ids, and its PLG playbook task and
+        answer codes (`playbookTask`, `playbookAnswers`) are checked against
+        the PLG playbooks. The rules are those of POST
+        /dashboards/generate's own checks. Any other filter is returned
+        unchanged. Reads only; nothing is stored. Any role that can view:
+        an advanced dashboard shared with a view-only role resolves its
+        filters here when it runs. 400 when nothing is sent, `playbookAnswers` has no
+        `playbookTask` or is not 1 to 100 codes, `teamIds` is not 1 to 100 team
+        keys or names, the filters are not a filter list (at most 50), a named
+        filter has an op it does not take or no string values, or a
+        `productVersion` is not beside a product filter naming exactly one
+        product; 422 when a name matches no record, or several, or a region
+        no visible case's account has, with the reason (the same codes as
+        POST /dashboards/generate: `generate_product`, `generate_project`,
+        `generate_account`, `generate_team`, `generate_region`,
+        `generate_playbook`); 502 when a lookup fails.
+      operationId: resolveDashboardFilters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolvedDashboardFilters'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedDashboardFilters'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /dashboards/custom:
     get:
       summary: List the caller's saved custom dashboards.
@@ -5265,6 +5519,1077 @@ paths:
       responses:
         "204":
           description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code:
+    get:
+      summary: List the caller's saved advanced (code) dashboards.
+      description: >
+        **Off by default (phase 2):** registered only when the deployment sets
+        DASHBOARD_GENERATE_CODE_ENABLED to exactly "true", like POST
+        /dashboards/generate-code; otherwise it is not found.
+        The advanced dashboards the caller saved, ordered by name, without
+        their source. An empty list is `{"dashboards": []}`. Stored in
+        entity-service against the caller. CS engineers and admins only.
+      operationId: listCodeDashboards
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeDashboardList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code/{id}:
+    get:
+      summary: Get one of the caller's saved advanced (code) dashboards.
+      description: >
+        **Off by default (phase 2):** registered only when the deployment sets
+        DASHBOARD_GENERATE_CODE_ENABLED to exactly "true", like POST
+        /dashboards/generate-code; otherwise it is not found.
+        The dashboard with its source, which the webapp checks again and runs
+        in its sandbox. 404 when the caller has no advanced dashboard with this
+        id, including another user's. CS engineers and admins only.
+      operationId: getCodeDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeDashboard'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Save one of the caller's advanced (code) dashboards.
+      description: >
+        **Off by default (phase 2):** registered only when the deployment sets
+        DASHBOARD_GENERATE_CODE_ENABLED to exactly "true", like POST
+        /dashboards/generate-code; otherwise it is not found.
+        Saves the advanced page's dashboard under the name the user gave it:
+        creates it with this id, or replaces the caller's own one with this id
+        (200 either way). The name is trimmed (400 when blank or over 255
+        characters); the source is stored as sent (400 when blank, 413 when
+        over 60000 characters). It is not run or parsed here. Stored in
+        entity-service against the caller; 409 when the caller already has
+        another advanced dashboard with that name, 400 at 50 saved advanced
+        dashboards (the message says which), 404 when the id is another user's
+        dashboard. CS engineers and admins only.
+      operationId: saveCodeDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveCodeDashboardRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeDashboard'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Delete one of the caller's saved advanced (code) dashboards.
+      description: >
+        **Off by default (phase 2):** registered only when the deployment sets
+        DASHBOARD_GENERATE_CODE_ENABLED to exactly "true", like POST
+        /dashboards/generate-code; otherwise it is not found.
+        204 when deleted; 404 when the caller has no advanced dashboard with
+        this id, including another user's. CS engineers and admins only.
+      operationId: deleteCodeDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code/{id}/shares:
+    get:
+      summary: List who one of the caller's saved advanced dashboards is shared with.
+      description: >
+        The people the caller shared this dashboard with (view only), ordered
+        by name. Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only. Only when DASHBOARD_GENERATE_CODE_ENABLED is on.
+      operationId: listCodeDashboardShares
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code/{id}/shares/{userId}:
+    put:
+      summary: Share one of the caller's saved advanced dashboards with a user.
+      description: >
+        No request body. The user can view the dashboard in Shared Dashboards
+        (the owner's current version), not change it. Owner only. 400 when the
+        user is the caller or is not internal staff (the message says which);
+        404 when the dashboard is not the caller's or there is no such user.
+        Sharing again is a 200. The response is the dashboard's shares after
+        the change. CS engineers and admins only. Only when DASHBOARD_GENERATE_CODE_ENABLED is on.
+      operationId: addCodeDashboardShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop sharing one of the caller's saved advanced dashboards with a user.
+      description: >
+        Owner only. 404 when the dashboard is not the caller's or is not
+        shared with that user. CS engineers and admins only. Only when DASHBOARD_GENERATE_CODE_ENABLED is on.
+      operationId: removeCodeDashboardShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code/{id}/team-shares:
+    get:
+      summary: List the teams one of the caller's saved advanced dashboards is shared with.
+      description: >
+        The teams the caller shared this dashboard with (view only), ordered
+        by name, each by registry key, name and family. A team no longer in
+        the registry is listed with an empty key. Owner only: 404 when the
+        caller has no dashboard with this id, including another user's. CS
+        engineers and admins only.
+      operationId: listCodeDashboardTeamShares
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code/{id}/team-shares/{teamKey}:
+    put:
+      summary: Share one of the caller's saved advanced dashboards with a team.
+      description: >
+        No request body. Whoever is in the team when the dashboard is read
+        (internal staff, not its owner) can view it in Shared Dashboards: the
+        membership is live, so someone who joins later sees it and someone who
+        leaves stops seeing it. Only teams in the team registry with a group id
+        can be chosen; any other key is a 404 without an upstream call. Owner
+        only: 404 when the dashboard is not the caller's. Sharing again is a
+        200. The response is the dashboard's team shares after the change. CS
+        engineers and admins only.
+      operationId: addCodeDashboardTeamShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: teamKey
+          in: path
+          required: true
+          description: The team's registry key (CSM_TEAM_REGISTRY), e.g. rigel, castor, americas, apollo.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop sharing one of the caller's saved advanced dashboards with a team.
+      description: >
+        Owner only. 404 when the dashboard is not the caller's, is not shared
+        with that team, or the key is not a registry team. CS engineers and
+        admins only.
+      operationId: removeCodeDashboardTeamShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: teamKey
+          in: path
+          required: true
+          description: The team's registry key (CSM_TEAM_REGISTRY), e.g. rigel, castor, americas, apollo.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/code/{id}/link:
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved advanced dashboards.
+      description: >
+        Off for every dashboard until its owner turns it on. While on, the
+        response carries the link id (the webapp builds the link from it) and
+        how many people have opened the link; who they are is not listed.
+        Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only. Only when DASHBOARD_GENERATE_CODE_ENABLED is on.
+      operationId: getCodeDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Turn on the link to one of the caller's saved advanced dashboards.
+      description: >
+        No request body. Any internal user who opens the link
+        (POST /dashboards/shared/code/link) can then view the dashboard, view only,
+        under Shared Dashboards, while the link stays on. Turning on a link
+        that is already on keeps the same link. Owner only; CS engineers and
+        admins only.
+      operationId: enableCodeDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Turn off the link to one of the caller's saved advanced dashboards.
+      description: >
+        The link stops working, and everyone who had the dashboard only
+        through it loses it; turning it on again makes a new link. Turning off
+        a link that is off is not an error. Owner only; CS engineers and
+        admins only.
+      operationId: disableCodeDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/code:
+    get:
+      summary: List the advanced dashboards other users shared with the caller.
+      description: >
+        View only. Each entry names its owner (who shared it); ordered by name,
+        without definitions (for the Shared Dashboards switcher). An empty list
+        is `{"dashboards": []}`. The caller's own dashboards are not listed.
+        Every portal role that can view dashboards (a dashboard can be shared
+        with any internal user or team).
+      operationId: listSharedCodeDashboards
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedDashboardList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/code/link:
+    post:
+      summary: Open a saved advanced dashboard's link.
+      description: >
+        The link id is in the body, not the path, so it stays out of access
+        logs. From then on the dashboard is listed under GET /dashboards/shared/code
+        while the link stays on, unless the caller owns it (own true: open it
+        under My Dashboards): through the link (sharedViaLink true), or
+        through a person or team share while the caller has one, and through
+        the link again if that share goes. Opening it again changes nothing.
+        400 when linkId is not a UUID; 404 when the link is unknown or turned
+        off.
+        Every portal role that can view dashboards. Only when DASHBOARD_GENERATE_CODE_ENABLED is on.
+      operationId: openCodeDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenDashboardLinkRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/code/{id}:
+    get:
+      summary: Get one advanced dashboard shared with the caller.
+      description: >
+        View only: the owner's current source, as stored, with who shared it.
+        This backend never runs it; the webapp checks it and runs it in its
+        sandbox, where its data is read with the caller's own permissions. 404
+        when it is not shared with the caller, including the caller's own.
+        Every portal role that can view dashboards. Only when
+        DASHBOARD_GENERATE_CODE_ENABLED is on.
+      operationId: getSharedCodeDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedCodeDashboardResponse'
         "400":
           description: BadRequest
           content:
@@ -19486,6 +20811,87 @@ components:
             follow-up message can change it. Omitted for the first message.
           allOf:
             - $ref: '#/components/schemas/Dashboard'
+    GenerateCodeDashboardRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >
+            The user's latest chat message, checked as on
+            POST /dashboards/generate.
+        current:
+          type: string
+          description: >
+            The source of the dashboard being edited (the previous reply's
+            source), so a follow-up message can change it. Omitted for the
+            first message. At most 60000 characters.
+          maxLength: 60000
+    GenerateCodeDashboardResponse:
+      type: object
+      required:
+        - source
+        - reply
+      properties:
+        source:
+          type: string
+          description: >
+            The dashboard as JavaScript source defining
+            `async function render(portal, root)`. It holds no data; it asks
+            for data through the fixed portal APIs each time it runs.
+        reply:
+          type: string
+          description: The chat message to show for this turn.
+        name:
+          type: string
+          maxLength: 255
+          description: >
+            The name the model suggests saving the dashboard under (the Save
+            dialog starts from it), trimmed. Absent when it gave none, or one
+            over 255 characters.
+    ResolvedDashboardFilters:
+      type: object
+      description: >
+        At least one of the lists or a playbookTask. The reply holds only
+        what was sent.
+      properties:
+        filters:
+          type: array
+          maxItems: 50
+          description: >
+            A case search's filter list (`{field, op, values}`), as in
+            CaseSearchFilters.filters.
+          items:
+            type: object
+            additionalProperties: true
+        teamIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: >
+            A time card search's team list: team keys or names in the
+            request, the teams' group ids (a CRE team's CRE group id, an SRE
+            team's SRE group id) in the reply. Never `__current_team__`.
+          items:
+            type: string
+        playbookTask:
+          type: string
+          description: >
+            A code dashboard PLG call's playbook task code, checked against
+            the PLG playbooks' answer fields (as a generated dashboard's
+            is) and returned as sent.
+        playbookAnswers:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: >
+            That task's answer codes, checked and returned as sent. Needs
+            playbookTask.
+          items:
+            type: string
     GenerateDashboardResponse:
       type: object
       required:
@@ -19536,6 +20942,71 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CustomDashboardSummary'
+    CodeDashboardSummary:
+      type: object
+      required:
+        - id
+        - name
+        - createdOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CodeDashboardList:
+      type: object
+      required:
+        - dashboards
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeDashboardSummary'
+    CodeDashboard:
+      type: object
+      required:
+        - id
+        - name
+        - source
+        - createdOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        source:
+          type: string
+          description: The dashboard's JavaScript (its render(portal, root) function).
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    SaveCodeDashboardRequest:
+      type: object
+      required:
+        - name
+        - source
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          description: Trimmed; must not be blank. Unique per user among their advanced dashboards, ignoring case.
+        source:
+          type: string
+          maxLength: 60000
+          description: The advanced page's dashboard code, stored as sent; must not be blank.
     CustomDashboardResponse:
       type: object
       required:
@@ -19722,6 +21193,42 @@ components:
       properties:
         dashboard:
           $ref: '#/components/schemas/Dashboard'
+        owner:
+          allOf:
+            - $ref: '#/components/schemas/CustomDashboardPerson'
+          nullable: true
+          description: Who shared the dashboard (its owner); null once that user has been deleted.
+        sharedViaTeam:
+          $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
+        sharedOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    SharedCodeDashboardResponse:
+      type: object
+      required:
+        - id
+        - name
+        - source
+        - owner
+        - sharedViaTeam
+        - sharedViaLink
+        - sharedOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        source:
+          type: string
+          description: The dashboard's JavaScript (its render(portal, root) function), the owner's current version. Never run by this backend; the webapp checks it and runs it in its sandbox.
         owner:
           allOf:
             - $ref: '#/components/schemas/CustomDashboardPerson'
@@ -21255,14 +22762,85 @@ components:
           $ref: '#/components/schemas/CaseSearchFilters'
         groupBy:
           type: string
-          enum: [account, state, severity, type]
-          description: The field to aggregate case counts by.
+          enum: [account, state, severity, type, product, productVersion, project]
+          description: >-
+            The field to aggregate case counts by (entity-service's allow-list;
+            productVersion needs a product filter naming exactly one product).
         maxGroups:
           type: integer
           description: >-
             Caps the response to the top maxGroups buckets by count; the
             remainder is folded into AggregateResponse.othersCount. Optional;
             a default is applied when omitted.
+
+    CaseResolutionTimePayload:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/CaseSearchFilters'
+        resolvedFrom:
+          type: string
+          description: >-
+            First day a case may have been resolved (else closed) on
+            (inclusive, UTC): YYYY-MM-DD or a relative date placeholder.
+            Needs resolvedTo; with neither, the 12 months ending today.
+          example: "2026-07-01"
+        resolvedTo:
+          type: string
+          description: >-
+            Last day (inclusive, UTC), in the same forms. Needs resolvedFrom;
+            at most 24 months after it.
+          example: "2026-09-30"
+        groupBy:
+          type: string
+          enum: [severity, type, issueType, engagementType, account, product, project, region]
+          description: Splits the result by this case field. Optional.
+        maxGroups:
+          type: integer
+          description: >-
+            Keeps this many groups, those with the most resolved cases; the
+            rest are merged into others. Optional; defaults to 10.
+
+    CaseResolutionTimeBucket:
+      type: object
+      required: [count, measured, averageHours]
+      properties:
+        key:
+          type: string
+          description: The group's value, as the field's filter takes it (groups only).
+        label:
+          type: string
+          description: The group's name, else its key (groups only).
+        count:
+          type: integer
+          description: Cases resolved in the window.
+        measured:
+          type: integer
+          description: Of those, the cases with a business duration.
+        averageHours:
+          type: number
+          nullable: true
+          description: The measured cases' mean business duration in hours; null when none is measured.
+
+    CaseResolutionTimeResponse:
+      type: object
+      required: [resolvedFrom, resolvedTo, total]
+      properties:
+        resolvedFrom:
+          type: string
+          format: date
+        resolvedTo:
+          type: string
+          format: date
+        total:
+          $ref: '#/components/schemas/CaseResolutionTimeBucket'
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseResolutionTimeBucket'
+          description: With groupBy, the groups with the most resolved cases; a case with no value for the field is in total only.
+        others:
+          $ref: '#/components/schemas/CaseResolutionTimeBucket'
 
     CaseVolumeTrendPayload:
       type: object

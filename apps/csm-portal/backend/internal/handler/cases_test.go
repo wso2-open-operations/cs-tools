@@ -4581,3 +4581,82 @@ func TestSearchCaseAttachments_DeletedOnlyHonouredOnlyForAdmin(t *testing.T) {
 		})
 	}
 }
+
+func TestCaseResolutionTime(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.CaseResolutionTime(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.CaseResolutionTime(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+	})
+
+	t.Run("rejects invalid JSON body without calling upstream", func(t *testing.T) {
+		called := false
+		h := NewCaseHandler(&mockEntityCaseClient{caseResolutionTimeFn: func(context.Context, []byte) ([]byte, error) {
+			called = true
+			return nil, nil
+		}})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.CaseResolutionTime(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		if called {
+			t.Error("upstream called for an invalid body")
+		}
+	})
+
+	t.Run("forwards the body as is and returns the answer as is", func(t *testing.T) {
+		const reqPayload = `{"filters":{"filters":[{"field":"severity","op":"in","values":["critical"]}]},"resolvedFrom":"__startOfQuarter:-1__","resolvedTo":"__endOfQuarter:-1__","groupBy":"severity"}`
+		const answer = `{"resolvedFrom":"2026-07-01","resolvedTo":"2026-09-30","total":{"count":3,"measured":2,"averageHours":12.5},"groups":[{"key":"critical","label":"critical","count":3,"measured":2,"averageHours":12.5}]}`
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			caseResolutionTimeFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(answer), nil
+			},
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		NewCaseHandler(client).CaseResolutionTime(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		if strings.TrimSpace(w.Body.String()) != answer {
+			t.Errorf("body = %s, want the answer as it is", w.Body.String())
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to load case resolution time.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					caseResolutionTimeFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/resolution-time", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				NewCaseHandler(client).CaseResolutionTime(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}

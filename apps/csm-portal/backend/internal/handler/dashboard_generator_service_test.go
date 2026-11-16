@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -269,5 +271,71 @@ func TestServiceGenerator_ABadNoteFallsBackToAnEarlierCandidate(t *testing.T) {
 	}}, nil).Generate(context.Background(), "p", nil)
 	if err != nil || got.Dashboard.DisplayName != "Top Customers by Open Cases" {
 		t.Errorf("got %q, %v; want the first candidate", got.Dashboard.DisplayName, err)
+	}
+}
+
+// fakeAICodeClient answers GenerateCode with res / err and records the request.
+type fakeAICodeClient struct {
+	res csmai.CodeResult
+	err error
+	got csmai.CodeRequest
+}
+
+func (f *fakeAICodeClient) GenerateCode(_ context.Context, req csmai.CodeRequest) (csmai.CodeResult, error) {
+	f.got = req
+	return f.res, f.err
+}
+
+func TestServiceCodeGenerator_ReturnsTheSourceAndReply(t *testing.T) {
+	client := &fakeAICodeClient{res: csmai.CodeResult{Source: "async function render(portal, root) {}\n", Reply: "Done.", Name: "My Cases"}}
+	got, err := NewServiceCodeDashboardGenerator(client, nil).Generate(context.Background(), "My cases", "function render() {}")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got.Source != client.res.Source || got.Reply != "Done." || got.Name != "My Cases" {
+		t.Errorf("result = %+v", got)
+	}
+	if client.got.Prompt != "My cases" || client.got.Current != "function render() {}" {
+		t.Errorf("request = %+v", client.got)
+	}
+}
+
+// The code generator sends the same team list as the dashboard generator.
+func TestServiceCodeGenerator_SendsTheTeamsADashboardCanFilterBy(t *testing.T) {
+	client := &fakeAICodeClient{res: csmai.CodeResult{Source: "async function render(portal, root) {}\n"}}
+	if _, err := NewServiceCodeDashboardGenerator(client, testTeamResults(t)).Generate(context.Background(), "p", ""); err != nil {
+		t.Fatal(err)
+	}
+	want := promptTeams(testTeamResults(t))
+	if len(want) == 0 || !reflect.DeepEqual(client.got.Teams, want) {
+		t.Errorf("teams = %+v, want %+v", client.got.Teams, want)
+	}
+}
+
+func TestServiceCodeGenerator_Errors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  csmai.CodeResult
+		err  error
+		want func(error) bool
+	}{
+		{"declined", csmai.CodeResult{Declined: "  Revenue is\nnot in the case data.  "}, nil, func(err error) bool {
+			var d *generateDeclinedError
+			return errors.As(err, &d) && d.Reason == declineMessage("  Revenue is\nnot in the case data.  ")
+		}},
+		{"no source", csmai.CodeResult{Reply: "Done."}, nil, func(err error) bool { return errors.Is(err, errGenerateUnusable) }},
+		{"usage limit", csmai.CodeResult{}, &csmai.Error{StatusCode: http.StatusTooManyRequests, Code: csmai.CodeUsageLimit},
+			func(err error) bool { return errors.Is(err, errGenerateUsageLimit) }},
+		{"not configured", csmai.CodeResult{}, &csmai.Error{StatusCode: http.StatusServiceUnavailable, Code: csmai.CodeNotConfigured},
+			func(err error) bool { return errors.Is(err, ErrGenerateUnavailable) }},
+		{"code route off", csmai.CodeResult{}, &csmai.Error{StatusCode: http.StatusNotFound},
+			func(err error) bool { return errors.Is(err, errGenerateCall) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewServiceCodeDashboardGenerator(&fakeAICodeClient{res: tc.res, err: tc.err}, nil).Generate(context.Background(), "p", "")
+			if !tc.want(err) {
+				t.Errorf("err = %v", err)
+			}
+		})
 	}
 }

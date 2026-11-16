@@ -57,7 +57,13 @@ type searchedProject struct {
 // errDashboardProject, so a project left out by a name that matches nothing
 // never silently leaves out nothing.
 func WithDashboardProjects(inner DashboardGenerator, projects projectSearcher) DashboardGenerator {
-	return &namedResolvingGenerator{inner: inner, kind: namedKind{
+	return &namedResolvingGenerator{inner: inner, kind: projectKind(projects)}
+}
+
+// projectKind is the project lookup: WithDashboardProjects's after generation,
+// and the code approach's at run time (DashboardResolvedFiltersHandler).
+func projectKind(projects projectSearcher) namedKind {
+	return namedKind{
 		field: "project", idField: "projectId", noun: "project", plural: "projects",
 		unusable: errDashboardProject, lookup: errDashboardProjectLookup,
 		search: func(ctx context.Context, written string, offset int) ([]namedRecord, bool, error) {
@@ -85,5 +91,5 @@ func WithDashboardProjects(inner DashboardGenerator, projects projectSearcher) D
 			}
 			return records, res.HasMore, nil
 		},
-	}}
+	}
 }

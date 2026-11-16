@@ -56,7 +56,13 @@ type searchedAccount struct {
 // (namedResolver.resolveValue: an exact number wins, then an exact name); a
 // value naming no account, or several, is an errDashboardAccount.
 func WithDashboardAccounts(inner DashboardGenerator, accounts accountSearcher) DashboardGenerator {
-	return &namedResolvingGenerator{inner: inner, kind: namedKind{
+	return &namedResolvingGenerator{inner: inner, kind: accountKind(accounts)}
+}
+
+// accountKind is the account lookup: WithDashboardAccounts's after generation,
+// and the code approach's at run time (DashboardResolvedFiltersHandler).
+func accountKind(accounts accountSearcher) namedKind {
+	return namedKind{
 		field: "account", idField: "accountId", noun: "account", plural: "accounts",
 		unusable: errDashboardAccount, lookup: errDashboardAccountLookup,
 		search: func(ctx context.Context, written string, offset int) ([]namedRecord, bool, error) {
@@ -84,5 +90,5 @@ func WithDashboardAccounts(inner DashboardGenerator, accounts accountSearcher) D
 			}
 			return records, res.HasMore, nil
 		},
-	}}
+	}
 }
