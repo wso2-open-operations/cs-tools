@@ -12835,7 +12835,9 @@ paths:
         team, then SLA definition, then breach time. Stage and status
         values are matched case-insensitively with spaces and hyphens
         treated as underscores, so ServiceNow's own spelling ("In
-        progress", "In-Progress") matches the stored enum.
+        progress", "In-Progress") matches the stored enum; a value that
+        is not one of the enum's is rejected rather than silently
+        matching nothing.
       operationId: getSLABreachReport
       parameters:
         - name: definitions
@@ -12905,7 +12907,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/SLABreachReport'
         "400":
-          description: definitions is missing, or week is not a date.
+          description: >-
+            definitions is missing, week is not a date, or a stage or
+            onboarding status is not one of the enum's values.
           content:
             application/json:
               schema:

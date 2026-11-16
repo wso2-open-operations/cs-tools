@@ -150,3 +150,18 @@ func TestRenderSLABreachReportNamesTheWeek(t *testing.T) {
 		t.Fatal("week label must run to the day before the exclusive end")
 	}
 }
+
+// TestRenderSLABreachReportTeamHeadingSurvivesDarkMode: the heading cell
+// carries an inline light background, and the template's dark-mode block
+// forces light text onto every td. Without a dark-mode override for that
+// cell the team name renders light-on-light. The class and the rule have
+// to stay together, so both are asserted here.
+func TestRenderSLABreachReportTeamHeadingSurvivesDarkMode(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
+	if !strings.Contains(body, `<td class="teamHeading"`) {
+		t.Fatal("the team heading cell must carry the teamHeading class")
+	}
+	if !strings.Contains(body, ".reportTable .teamHeading { background-color: #33383d !important; }") {
+		t.Fatal("the dark-mode block must override the heading cell's inline background")
+	}
+}
