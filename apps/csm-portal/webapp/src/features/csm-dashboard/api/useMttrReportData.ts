@@ -35,7 +35,7 @@ function bandSortIndex(band: string): number {
 }
 
 /**
- * Resolves a `shape: "bar"`/`"pie"` `mttr` widget's severity-band data via a
+ * Resolves a `shape: "bar"` `mttr` widget's severity-band data via a
  * single `GET /reports/mttr` call — the `resourceType: "mttr"` counterpart
  * of `useCaseFeedbackTrendData` (see that hook's own doc comment for why a
  * `groupBy.bucket` widget needs a dedicated hook rather than a branch inside
@@ -68,6 +68,19 @@ export function useMttrReportData(
    * resolved by the caller the same way every other widget's filters are. */
   baseFilters: Record<string, unknown>,
   groupBy: BeDashboardGroupByConfig | undefined,
+  /** The dashboard's currently-selected team (the ABT header toggle), or an
+   * array for "All ABTs" -- same arguments `useWidgetGroupByData`/
+   * `useWidgetPieData` already take. An mttr widget's own data never
+   * depends on this (its `creTeamIds` is a fixed, generation-time filter,
+   * not this dynamic selection), but the shared fetch queue
+   * (`withWidgetFetchSlot`) keys solely on whatever string is passed as its
+   * `teamKey` and evicts every OTHER queued widget whenever that string
+   * changes from the previous call's (see `acquireWidgetFetchSlot`) --
+   * passing the same derived key every team-scoped widget on this page
+   * already passes is what keeps an mttr tile from spuriously dropping (or
+   * being dropped by) them. */
+  selectedTeamCreGroupId: string | string[] | undefined,
+  selectedTeamSreGroupId: string | string[] | undefined,
   enabled = true,
 ): WidgetPieData {
   const api = useBackendApi();
@@ -77,16 +90,18 @@ export function useMttrReportData(
     ? (baseFilters.creTeamIds.filter((v): v is string => typeof v === "string") as string[])
     : [];
   const active = !!groupBy?.bucket && !!months;
+  const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
 
   const query = useQuery({
     queryKey: [ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA, "mttr-report", widgetId, months, creTeamIds],
     queryFn: async (): Promise<BeMttrReport | null> => {
       if (!months) return null;
-      return withWidgetFetchSlot(async () => {
+      return withWidgetFetchSlot(async (signal) => {
         const params = new URLSearchParams({ months });
         for (const id of creTeamIds) params.append("creTeamId", id);
-        return api.get<BeMttrReport>(`/reports/mttr?${params.toString()}`);
-      }, "mttr");
+        const response = await api.getResponse(`/reports/mttr?${params.toString()}`, { signal });
+        return (await response.json()) as BeMttrReport;
+      }, teamKey);
     },
     enabled: enabled && active,
     // Same reasoning as `useCaseFeedbackTrendData`: this resourceType has no

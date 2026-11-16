@@ -19,10 +19,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
-const getMock = vi.fn();
+const getResponseMock = vi.fn();
 
 vi.mock("@api/backend/client", () => ({
-  useBackendApi: () => ({ get: getMock }),
+  useBackendApi: () => ({ getResponse: getResponseMock }),
 }));
 
 import { useMttrReportData } from "@features/csm-dashboard/api/useMttrReportData";
@@ -34,38 +34,53 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
+function jsonResponse(body: unknown): Response {
+  return { json: () => Promise.resolve(body) } as unknown as Response;
+}
+
 describe("useMttrReportData", () => {
   beforeEach(() => {
-    getMock.mockReset();
+    getResponseMock.mockReset();
   });
 
-  it("issues a single GET /reports/mttr request and maps bands into ordered, non-navigable avg-hours slices", async () => {
-    getMock.mockResolvedValue({
-      generatedAt: "2026-11-16T00:00:00Z",
-      windowMonths: 3,
-      windowStart: "2026-08-16T00:00:00Z",
-      windowEnd: "2026-11-16T00:00:00Z",
-      creTeamIds: [],
-      // Deliberately out of display order, to prove the hook sorts them.
-      bands: [
-        { band: "S4", caseCount: 10, avgResolutionHours: 40 },
-        { band: "S1", caseCount: 2, avgResolutionHours: 5 },
-        { band: "S1-S4", caseCount: 20, avgResolutionHours: 25 },
-        { band: "S1-S3", caseCount: 10, avgResolutionHours: 15 },
-        { band: "S2", caseCount: 3, avgResolutionHours: 10 },
-        { band: "S3", caseCount: 5, avgResolutionHours: 20 },
-      ],
-    });
+  it("issues a single GET /reports/mttr request, forwarding the slot's abort signal, and maps bands into ordered, non-navigable avg-hours slices", async () => {
+    getResponseMock.mockResolvedValue(
+      jsonResponse({
+        generatedAt: "2026-11-16T00:00:00Z",
+        windowMonths: 3,
+        windowStart: "2026-08-16T00:00:00Z",
+        windowEnd: "2026-11-16T00:00:00Z",
+        creTeamIds: [],
+        // Deliberately out of display order, to prove the hook sorts them.
+        bands: [
+          { band: "S4", caseCount: 10, avgResolutionHours: 40 },
+          { band: "S1", caseCount: 2, avgResolutionHours: 5 },
+          { band: "S1-S4", caseCount: 20, avgResolutionHours: 25 },
+          { band: "S1-S3", caseCount: 10, avgResolutionHours: 15 },
+          { band: "S2", caseCount: 3, avgResolutionHours: 10 },
+          { band: "S3", caseCount: 5, avgResolutionHours: 20 },
+        ],
+      }),
+    );
 
     const { result } = renderHook(
-      () => useMttrReportData("mttr_widget", { months: "3" }, { bucket: "severity" }),
+      () =>
+        useMttrReportData(
+          "mttr_widget",
+          { months: "3" },
+          { bucket: "severity" },
+          undefined,
+          undefined,
+        ),
       { wrapper },
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getMock).toHaveBeenCalledTimes(1);
-    expect(getMock).toHaveBeenCalledWith("/reports/mttr?months=3");
+    expect(getResponseMock).toHaveBeenCalledTimes(1);
+    expect(getResponseMock).toHaveBeenCalledWith("/reports/mttr?months=3", {
+      signal: expect.any(AbortSignal),
+    });
 
     expect(result.current.slices).toEqual([
       { label: "S1-S4", query: {}, navigable: false, value: 25 },
@@ -79,14 +94,16 @@ describe("useMttrReportData", () => {
   });
 
   it("appends a repeated creTeamId per team", async () => {
-    getMock.mockResolvedValue({
-      generatedAt: "2026-11-16T00:00:00Z",
-      windowMonths: 6,
-      windowStart: "2026-05-16T00:00:00Z",
-      windowEnd: "2026-11-16T00:00:00Z",
-      creTeamIds: ["11111111-1111-1111-1111-111111111111"],
-      bands: [],
-    });
+    getResponseMock.mockResolvedValue(
+      jsonResponse({
+        generatedAt: "2026-11-16T00:00:00Z",
+        windowMonths: 6,
+        windowStart: "2026-05-16T00:00:00Z",
+        windowEnd: "2026-11-16T00:00:00Z",
+        creTeamIds: ["11111111-1111-1111-1111-111111111111"],
+        bands: [],
+      }),
+    );
 
     renderHook(
       () =>
@@ -94,23 +111,27 @@ describe("useMttrReportData", () => {
           "mttr_widget",
           { months: "6", creTeamIds: ["11111111-1111-1111-1111-111111111111"] },
           { bucket: "severity" },
+          undefined,
+          undefined,
         ),
       { wrapper },
     );
 
-    await waitFor(() => expect(getMock).toHaveBeenCalled());
-    expect(getMock).toHaveBeenCalledWith(
+    await waitFor(() => expect(getResponseMock).toHaveBeenCalled());
+    expect(getResponseMock).toHaveBeenCalledWith(
       "/reports/mttr?months=6&creTeamId=11111111-1111-1111-1111-111111111111",
+      { signal: expect.any(AbortSignal) },
     );
   });
 
   it("fires no request without groupBy.bucket or months", async () => {
-    const { result } = renderHook(() => useMttrReportData("mttr_widget", {}, undefined), {
-      wrapper,
-    });
+    const { result } = renderHook(
+      () => useMttrReportData("mttr_widget", {}, undefined, undefined, undefined),
+      { wrapper },
+    );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(getMock).not.toHaveBeenCalled();
+    expect(getResponseMock).not.toHaveBeenCalled();
     expect(result.current.slices).toEqual([]);
     expect(result.current.total).toBe(0);
   });

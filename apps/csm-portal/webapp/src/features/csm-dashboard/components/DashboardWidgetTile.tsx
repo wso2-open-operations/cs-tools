@@ -572,9 +572,11 @@ function DashboardWidgetTile({
   const mttrData = useMttrReportData(
     widgetId,
     filters,
-    (shape === "bar" || shape === "pie") && resourceType === "mttr" && groupBy?.bucket
+    shape === "bar" && resourceType === "mttr" && groupBy?.bucket
       ? groupBy
       : undefined,
+    selectedTeamCreGroupId,
+    selectedTeamSreGroupId,
     isVisible,
   );
   const pieData = groupBy?.bucket
