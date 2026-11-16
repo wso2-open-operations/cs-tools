@@ -63,7 +63,7 @@ func TestMTTRReportCombinesBandsAndResolvesWindow(t *testing.T) {
 
 	got, err := svc.BuildReport(context.Background(), domain.MTTRReportRequest{
 		WindowMonths: 3,
-		CreTeamIDs:   []string{" team-a ", "", "team-b"},
+		CreTeamIDs:   []string{" 11111111-1111-1111-1111-111111111111 ", "", "22222222-2222-2222-2222-222222222222"},
 		Now:          now,
 	})
 	if err != nil {
@@ -79,7 +79,8 @@ func TestMTTRReportCombinesBandsAndResolvesWindow(t *testing.T) {
 	if !repo.gotStart.Equal(wantStart) || !repo.gotEnd.Equal(now) {
 		t.Errorf("repo window passed = [%s, %s), want [%s, %s)", repo.gotStart, repo.gotEnd, wantStart, now)
 	}
-	if !equalStrings(repo.gotTeamIDs, []string{"team-a", "team-b"}) || !equalStrings(got.CreTeamIDs, []string{"team-a", "team-b"}) {
+	wantTeamIDs := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
+	if !equalStrings(repo.gotTeamIDs, wantTeamIDs) || !equalStrings(got.CreTeamIDs, wantTeamIDs) {
 		t.Errorf("team ids passed = %v, echoed = %v, want the trimmed, non-blank values", repo.gotTeamIDs, got.CreTeamIDs)
 	}
 
@@ -118,6 +119,26 @@ func TestMTTRReportRejectsUnsupportedWindow(t *testing.T) {
 	}
 	if repo.calls != 0 {
 		t.Errorf("repository called %d times for invalid requests, want 0", repo.calls)
+	}
+}
+
+// TestMTTRReportRejectsMalformedCreTeamID: entity-service is a direct,
+// internal-only HTTP route -- not only reachable through the portal
+// backend's own creTeamId UUID check -- so a malformed id must be rejected
+// here too, before it ever reaches SQL expecting a uuid[].
+func TestMTTRReportRejectsMalformedCreTeamID(t *testing.T) {
+	repo := &fakeMTTRReportRepo{}
+	svc := service.NewMTTRReportService(repo)
+	_, err := svc.BuildReport(context.Background(), domain.MTTRReportRequest{
+		WindowMonths: 3,
+		CreTeamIDs:   []string{"not-a-uuid"},
+	})
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) {
+		t.Errorf("err = %v, want a validation error", err)
+	}
+	if repo.calls != 0 {
+		t.Errorf("repository called %d times for a malformed creTeamId, want 0", repo.calls)
 	}
 }
 

@@ -74,6 +74,9 @@ func (s *mttrReportService) BuildReport(ctx context.Context, req domain.MTTRRepo
 	windowStart := windowEnd.AddDate(0, -req.WindowMonths, 0)
 
 	creTeamIDs := nonBlank(req.CreTeamIDs)
+	if err := validateUUIDs("creTeamIds", creTeamIDs); err != nil {
+		return domain.MTTRReport{}, err
+	}
 
 	// The route is internal-only; the read runs under the system identity
 	// so row-level security does not hide cases outside the caller's own
