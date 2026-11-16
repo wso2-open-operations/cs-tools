@@ -75,13 +75,21 @@ func CREVariant() Variant {
 // OnboardingVariant is "Weekly SLA Breach Report (Onboarding)": the
 // cases the Onboarding team handles.
 //
-// Stage {IN_PROGRESS} and onboarding status IS one of {IN_PROGRESS},
-// exactly as the source report's filter is configured -- note both
-// differ from CREVariant's, and note this is an "is one of" where the
-// CRE report uses "is not one of". The two are NOT complements: the CRE
-// report also excludes NOT_STARTED, which this one does not include, so
-// a NOT_STARTED case appears in neither report. That is how the source
-// is configured; it is reproduced, not corrected.
+// Stage {IN_PROGRESS}, and onboarding status IS one of {IN_PROGRESS,
+// NOT_STARTED} -- an "is one of" where the CRE report uses "is not one
+// of" over the same pair, so the two reports partition the week's
+// breaches between them.
+//
+// NOT_STARTED is included on evidence, not from the screenshot. The
+// source report's status list is scrolled with In-Progress as the last
+// visible row, and NOT_STARTED sorts immediately after it, out of view.
+// Measured against staging over the ten weeks to 2026-10-05, IN_PROGRESS
+// alone selects ZERO rows in every one of them, while adding NOT_STARTED
+// gives 11, 28, 10, 1, 1, 2, 0, 0, 4, 3 -- and the CRE report excludes
+// exactly this pair, which only makes sense if this report covers it.
+// An always-empty weekly report is not one anyone keeps scheduled.
+// Confirm by scrolling that list in ServiceNow; if IN_PROGRESS really is
+// alone there, drop NOT_STARTED here and the two stop being complements.
 func OnboardingVariant() Variant {
 	return Variant{
 		Key:                "onboarding",
@@ -89,7 +97,7 @@ func OnboardingVariant() Variant {
 		Heading:            "Weekly SLA Breach Report (Onboarding)",
 		Intro:              "Cases handled by the Onboarding team.",
 		Stages:             []string{"IN_PROGRESS"},
-		OnboardingStatuses: []string{"IN_PROGRESS"},
+		OnboardingStatuses: []string{"IN_PROGRESS", "NOT_STARTED"},
 	}
 }
 

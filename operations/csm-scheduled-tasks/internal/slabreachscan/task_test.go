@@ -223,8 +223,9 @@ func TestOnboardingVariantFilters(t *testing.T) {
 	if len(v.Stages) != 1 || v.Stages[0] != "IN_PROGRESS" {
 		t.Fatalf("stages = %#v, want [IN_PROGRESS]", v.Stages)
 	}
-	if len(v.OnboardingStatuses) != 1 || v.OnboardingStatuses[0] != "IN_PROGRESS" {
-		t.Fatalf("onboarding statuses = %#v, want [IN_PROGRESS]", v.OnboardingStatuses)
+	if len(v.OnboardingStatuses) != 2 ||
+		v.OnboardingStatuses[0] != "IN_PROGRESS" || v.OnboardingStatuses[1] != "NOT_STARTED" {
+		t.Fatalf("onboarding statuses = %#v, want [IN_PROGRESS NOT_STARTED]", v.OnboardingStatuses)
 	}
 	if len(v.ExcludeOnboardingStatuses) != 0 {
 		t.Fatalf("the onboarding report uses is-one-of, not is-not-one-of, got %#v", v.ExcludeOnboardingStatuses)
@@ -237,26 +238,28 @@ func TestOnboardingVariantFilters(t *testing.T) {
 	}
 }
 
-// TestTheTwoVariantsAreNotComplements documents the real gap in the
-// source configuration: the CRE report excludes NOT_STARTED and the
-// onboarding report includes only IN_PROGRESS, so a NOT_STARTED case is
-// reported by neither. Reproduced deliberately -- if this test ever
-// fails because the sets were "tidied up", that is a behaviour change
-// away from ServiceNow and needs saying out loud.
-func TestTheTwoVariantsAreNotComplements(t *testing.T) {
-	excluded := cre().ExcludeOnboardingStatuses
+// TestTheTwoVariantsPartitionTheWeek: the CRE report excludes exactly
+// the status pair the onboarding report includes, so between them every
+// breach is reported once and none twice. Measured on staging: with
+// IN_PROGRESS alone the onboarding report selected zero rows in each of
+// the ten weeks to 2026-10-05, which is what put NOT_STARTED here.
+func TestTheTwoVariantsPartitionTheWeek(t *testing.T) {
 	included := onboarding().OnboardingStatuses
-	for _, status := range excluded {
-		if status == "NOT_STARTED" {
-			for _, inc := range included {
-				if inc == "NOT_STARTED" {
-					t.Fatal("NOT_STARTED is now in both sets; the source has it in neither")
-				}
+	excluded := cre().ExcludeOnboardingStatuses
+	if len(included) != len(excluded) {
+		t.Fatalf("the two sets must match: included=%v excluded=%v", included, excluded)
+	}
+	for _, inc := range included {
+		found := false
+		for _, exc := range excluded {
+			if inc == exc {
+				found = true
 			}
-			return
+		}
+		if !found {
+			t.Fatalf("%q is reported by the onboarding report but not excluded from the CRE one, so it would appear twice", inc)
 		}
 	}
-	t.Fatal("the CRE report no longer excludes NOT_STARTED")
 }
 
 // TestOnboardingSendReportPassesItsOwnFilters: the variant's filters,
@@ -269,7 +272,7 @@ func TestOnboardingSendReportPassesItsOwnFilters(t *testing.T) {
 	if len(fetch.gotStage) != 1 || fetch.gotStage[0] != "IN_PROGRESS" {
 		t.Fatalf("stages = %v", fetch.gotStage)
 	}
-	if len(fetch.gotOnboarding) != 1 || fetch.gotOnboarding[0] != "IN_PROGRESS" {
+	if len(fetch.gotOnboarding) != 2 || fetch.gotOnboarding[0] != "IN_PROGRESS" || fetch.gotOnboarding[1] != "NOT_STARTED" {
 		t.Fatalf("onboarding statuses = %v", fetch.gotOnboarding)
 	}
 	if len(fetch.gotExclude) != 0 {
