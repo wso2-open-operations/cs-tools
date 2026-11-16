@@ -775,6 +775,7 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	ResourceCaseFeedback:    true,
 	ResourcePlgOrganization: true,
 	ResourcePlgRegistration: true,
+	ResourceMTTR:            true,
 }
 
 var validWidgetShapes = map[Shape]bool{
@@ -962,6 +963,8 @@ var validGroupByBuckets = map[string]bool{
 	"day": true, "week": true, "month": true, "rating": true,
 	"reasons_very_dissatisfied": true, "reasons_dissatisfied": true, "reasons_neutral": true,
 	"reasons_satisfied": true, "reasons_very_satisfied": true,
+	// mttr's one fixed bucket -- see ResourceMTTR's own resourceRules entry.
+	"severity": true,
 }
 
 // validDistinctByFields is the legal values of DistinctByConfig.Field -- the
@@ -1032,7 +1035,7 @@ func validateWidgets(d Dashboard, source string) error {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"groupBy.field\" is empty",
 					source, d.ID, w.ID)
 			case hasBucket && !validGroupByBuckets[w.GroupBy.Bucket]:
-				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"groupBy.bucket\" %q; expected one of \"day\", \"week\", \"month\" (time buckets), \"rating\", \"reasons_very_dissatisfied\", \"reasons_dissatisfied\", \"reasons_neutral\", \"reasons_satisfied\", \"reasons_very_satisfied\" (categorical buckets)",
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"groupBy.bucket\" %q; expected one of \"day\", \"week\", \"month\" (time buckets), \"rating\", \"reasons_very_dissatisfied\", \"reasons_dissatisfied\", \"reasons_neutral\", \"reasons_satisfied\", \"reasons_very_satisfied\" (categorical buckets), \"severity\" (mttr)",
 					source, d.ID, w.ID, w.GroupBy.Bucket)
 			}
 			if w.GroupBy.LinkResourceType != "" {

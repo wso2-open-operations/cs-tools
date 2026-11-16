@@ -96,6 +96,7 @@ type resourceRules struct {
 	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
 	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
 	maxGroups  int                  // the largest groupBy.maxGroups the read takes (0 is its default); none means no bound here
+	noSlices   bool                 // true: this type has no per-filter slicing concept at all (e.g. mttr's bands are a fixed server-side aggregate, not something a query filter can isolate) -- groupBy is its only grouping shape
 }
 
 // dayWindowRule is a "day" grouping's window: both keys must be set, and the
@@ -231,6 +232,22 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"reasons_neutral", "reasons_satisfied", "reasons_very_satisfied"},
 		slicesVia: "group with groupBy.bucket or with rating slices",
 	},
+	// MTTR (mean time to resolution): a flat months window and an optional CRE
+	// team restriction, always grouped on the server by the one fixed bucket
+	// "severity" -- entity-service's GET /reports/mttr returns all six bands
+	// (S1-S4, S1-S3, S1..S4) in one call, so there is nothing else to group by
+	// and no raw record to count or list.
+	ResourceMTTR: {
+		noun:   "MTTR",
+		shapes: []Shape{ShapePie, ShapeBar},
+		flat: map[string]valueRule{
+			"months":     {kind: valuesScalarEnum, values: []string{"1", "3", "6", "12"}},
+			"creTeamIds": {kind: valuesTeamNames},
+		},
+		buckets:   []string{"severity"},
+		slicesVia: "group with groupBy.bucket",
+		noSlices:  true,
+	},
 	// PLG organisations and registrations (POST /plg/organizations/search,
 	// /plg/registrations/search) take the PLG list's flat filters, and only
 	// those a prompt can name: products, lifecycle stages, subscription
@@ -346,6 +363,9 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 	at := fmt.Sprintf("widgets[%d] (%q)", i, w.ID)
 	if !containsShape(rules.shapes, w.Shape) {
 		return fmt.Errorf("%w: %s: a %s widget's shape must be %s, not %q", ErrGeneratedInvalid, at, rules.noun, orList(shapeNames(rules.shapes)), w.Shape)
+	}
+	if rules.noSlices && len(w.Slices) > 0 {
+		return fmt.Errorf("%w: %s: a %s widget has no slices; %s", ErrGeneratedInvalid, at, rules.noun, rules.slicesVia)
 	}
 	if w.GroupBy != nil {
 		switch {
