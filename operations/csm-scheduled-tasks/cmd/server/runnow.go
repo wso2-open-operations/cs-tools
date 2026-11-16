@@ -26,12 +26,15 @@ import (
 	"strconv"
 	"strings"
 
+	"time"
+
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogsreport"
@@ -318,6 +321,12 @@ var reportRunNowFlags = []string{"--recipients", "--cc"}
 // the window flags as well.
 var worklogsRunNowFlags = []string{"--from-date", "--to-date", "--recipients", "--cc"}
 
+// slaBreachRunNowFlags: the SLA breach reports take a date window as
+// well as an audience. The window names the week to report, which is how
+// a missed week is re-sent, and the only way to exercise the report on an
+// environment whose data has stopped.
+var slaBreachRunNowFlags = []string{"--from-date", "--to-date", "--recipients", "--cc"}
+
 // orRecipients is the To a report handler is built with in a recipient
 // override run: the task's real To when it has one, so the test-copy notice
 // can name it, and the override list otherwise, so a task that skips or fails
@@ -382,6 +391,38 @@ func consumesCrossings(hook func(o registry.RunNowOptions) (func(ctx context.Con
 // With only a window the task's normal sender is used, so a window run still
 // honours the debug list; with --recipients the override sender is used and
 // the debug list is ignored. With nothing the task's own handler runs.
+// slaBreachRunNow narrows one manual run of an SLA breach report: a
+// --from-date/--to-date window naming the week to report, and an
+// audience that replaces the configured one.
+//
+// The dates arrive as plain calendar dates at UTC midnight, and the week
+// each falls in is the same whether read in UTC or the report's own
+// zone, so the comparison is done in UTC rather than taking a tz
+// dependency here.
+func slaBreachRunNow(normal, raw notify.Sender,
+	build func(email notify.Sender, week time.Time, recipients []string) func(ctx context.Context) error,
+) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		week, err := slabreachscan.RunNowWeek(o.FromDate, o.ToDate, time.UTC)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(o.Recipients) == 0 && len(o.Cc) > 0 {
+			return nil, nil, errors.New("--cc needs --recipients: it only adds copies to a replaced audience")
+		}
+		var settings []any
+		if !week.IsZero() {
+			settings = append(settings, "week", week.Format("2006-01-02"))
+		}
+		email := normal
+		if len(o.Recipients) > 0 {
+			email = notify.ForRunNow(raw, o.Recipients, o.Cc)
+			settings = append(settings, recipientSettings(o)...)
+		}
+		return build(email, week, o.Recipients), settings, nil
+	}
+}
+
 func worklogsRunNow(cadence worklogreport.Cadence, normal, raw notify.Sender,
 	build func(email notify.Sender, win worklogsreport.Override, recipients []string) func(ctx context.Context) error,
 ) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {

@@ -732,14 +732,15 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, name, "30 4 * * 1"),
 			Handler: slabreachscan.SendReport(slaBreachReportClient,
 				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
-				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled),
-			// --recipients/--cc of a manual run-now only; see reportRunNow.
-			RunNowFlags: reportRunNowFlags,
-			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
-				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled, time.Time{}),
+			// --from-date/--to-date name the week, --recipients/--cc the
+			// audience, of a manual run-now only; see slaBreachRunNow.
+			RunNowFlags: slaBreachRunNowFlags,
+			RunNowNarrow: slaBreachRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, week time.Time, rec []string) func(ctx context.Context) error {
 					return slabreachscan.SendReport(slaBreachReportClient, email,
 						v, slaBreachDefinitions, orRecipients(to, rec), cc,
-						slaBreachCaseLinkBase, alertsEnabled)
+						slaBreachCaseLinkBase, alertsEnabled, week)
 				}),
 		})
 	}
