@@ -77,6 +77,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_ACP_REOPEN_ENABLED` | no | `false` | Must be `"true"` for the ACP reopen check to run after `Project__c` / `Invoice__c` events (see "ACP reopen" below). Also needs a pool and the `SALES_ENTITY_*` client. Independent of the ingest flags |
 | `CSM_ACP_REOPEN_DRY_RUN` | no | `true` | The reopen check decides and logs `acp reopen: dry run, would reopen`, and writes nothing. Only an explicit `false` turns it off; an unparseable value keeps it on |
 | `CSM_ACP_REOPEN_TEST_PROJECT_SF_ID` | no | — | When set, the reopen check acts on this one Salesforce project only (15- or 18-character id). For staging tests |
+| `ACP_INTERNAL_EMAIL_DOMAINS` | no | `@wso2.com` | Comma-separated domains the "Back to Open state" notice may go to. Each must start with `@` (it is matched as a suffix, so `wso2.com` would admit `someone@notwso2.com`); `Validate` refuses anything else. Add a domain here, not in code, when internal addresses move to another one |
 | `ACP_REACTIVATION_POLL_INTERVAL` | no | `5s` | How often `ProjectReactivationDrainer` looks for queued "Back to Open state" notices. Its own setting, so tuning `INCIDENT_REPORT_POLL_INTERVAL` never changes it |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
@@ -1282,7 +1283,7 @@ reopen logs a WARN at every start as the reminder.
   `invoice_paid`, none for a project opened by hand), `recipients` and `reactivatedOn`.
   **Recipients** are the account owner, renewal account manager and technical owner, each once,
   keeping only well-formed plain addresses in the internal domains (`acpInternalAddress`,
-  `acpDefaultInternalDomains`: `@wso2.com` and `@choreolabs.com`, as mail moves): it is an internal
+  `ACP_INTERNAL_EMAIL_DOMAINS`, default `@wso2.com`): it is an internal
   notice, the technical owner in Salesforce is sometimes a customer's person, and the notification
   service rejects the whole event for one bad address. csm-notification-service sends the email and
   adds its own CC list. **Deploy csm-notification-service with `project.reactivated` first**: it
