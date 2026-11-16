@@ -25,17 +25,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
-
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// fakeAlertReceiver hands out queued messages and records how each one was settled.
-type fakeAlertReceiver struct {
-	queue chan *azservicebus.ReceivedMessage
+// fakeAlertQueue hands out queued messages and records how each one was settled, standing in for either cloud.
+type fakeAlertQueue struct {
+	name  string
+	queue chan *domain.AlertQueueMessage
 
 	mu           sync.Mutex
 	completed    []string
@@ -45,25 +44,27 @@ type fakeAlertReceiver struct {
 	renewErr     error
 }
 
-func newFakeAlertReceiver(messages ...*azservicebus.ReceivedMessage) *fakeAlertReceiver {
-	r := &fakeAlertReceiver{queue: make(chan *azservicebus.ReceivedMessage, 1024), deadLettered: map[string]string{}}
+func newFakeAlertQueue(name string, messages ...*domain.AlertQueueMessage) *fakeAlertQueue {
+	q := &fakeAlertQueue{name: name, queue: make(chan *domain.AlertQueueMessage, 1024), deadLettered: map[string]string{}}
 	for _, m := range messages {
-		r.queue <- m
+		q.queue <- m
 	}
-	return r
+	return q
 }
 
-func (r *fakeAlertReceiver) ReceiveMessages(ctx context.Context, maxMessages int, _ *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error) {
-	var out []*azservicebus.ReceivedMessage
+func (q *fakeAlertQueue) Name() string { return q.name }
+
+func (q *fakeAlertQueue) Receive(ctx context.Context, maxMessages int) ([]*domain.AlertQueueMessage, error) {
+	var out []*domain.AlertQueueMessage
 	select {
-	case m := <-r.queue:
+	case m := <-q.queue:
 		out = append(out, m)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 	for len(out) < maxMessages {
 		select {
-		case m := <-r.queue:
+		case m := <-q.queue:
 			out = append(out, m)
 		default:
 			return out, nil
@@ -72,49 +73,55 @@ func (r *fakeAlertReceiver) ReceiveMessages(ctx context.Context, maxMessages int
 	return out, nil
 }
 
-func (r *fakeAlertReceiver) CompleteMessage(_ context.Context, m *azservicebus.ReceivedMessage, _ *azservicebus.CompleteMessageOptions) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.completed = append(r.completed, m.MessageID)
+func (q *fakeAlertQueue) Complete(_ context.Context, m *domain.AlertQueueMessage) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.completed = append(q.completed, m.ID)
 	return nil
 }
 
-func (r *fakeAlertReceiver) AbandonMessage(_ context.Context, m *azservicebus.ReceivedMessage, _ *azservicebus.AbandonMessageOptions) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.abandoned = append(r.abandoned, m.MessageID)
+func (q *fakeAlertQueue) Abandon(_ context.Context, m *domain.AlertQueueMessage) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.abandoned = append(q.abandoned, m.ID)
 	return nil
 }
 
-func (r *fakeAlertReceiver) DeadLetterMessage(_ context.Context, m *azservicebus.ReceivedMessage, o *azservicebus.DeadLetterOptions) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.deadLettered[m.MessageID] = *o.Reason
+func (q *fakeAlertQueue) DeadLetter(_ context.Context, m *domain.AlertQueueMessage, reason, _ string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.deadLettered[m.ID] = reason
 	return nil
 }
 
-func (r *fakeAlertReceiver) RenewMessageLock(_ context.Context, m *azservicebus.ReceivedMessage, _ *azservicebus.RenewMessageLockOptions) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.renewErr != nil {
-		return r.renewErr
+func (q *fakeAlertQueue) RenewLock(_ context.Context, m *domain.AlertQueueMessage) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.renewErr != nil {
+		return q.renewErr
 	}
-	r.renewals++
+	q.renewals++
 	lockedUntil := time.Now().Add(time.Minute)
 	m.LockedUntil = &lockedUntil
 	return nil
 }
 
-func (r *fakeAlertReceiver) renewCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.renewals
+func (q *fakeAlertQueue) renewCount() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.renewals
 }
 
-func (r *fakeAlertReceiver) settledCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.completed) + len(r.abandoned) + len(r.deadLettered)
+func (q *fakeAlertQueue) completedCount() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.completed)
+}
+
+func (q *fakeAlertQueue) settledCount() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.completed) + len(q.abandoned) + len(q.deadLettered)
 }
 
 // fakeAlertRepo stores rows in memory with the table's unique message key, and can fail its first calls.
@@ -188,11 +195,11 @@ func mustRegistry(t *testing.T) *alertsource.Registry {
 	return alertsource.New("00000000-0000-4000-8000-000000000001", nil)
 }
 
-func alertMessage(id, source, body string) *azservicebus.ReceivedMessage {
-	return &azservicebus.ReceivedMessage{
-		MessageID: id,
-		Body:      []byte(body),
-		ApplicationProperties: map[string]any{
+func alertMessage(id, source, body string) *domain.AlertQueueMessage {
+	return &domain.AlertQueueMessage{
+		ID:   id,
+		Body: []byte(body),
+		Properties: map[string]string{
 			"source":      source,
 			"received_at": "2026-11-13T10:00:00.1234567Z",
 		},
@@ -201,16 +208,22 @@ func alertMessage(id, source, body string) *azservicebus.ReceivedMessage {
 
 const canonicalAlert = `{"service":"svc-a","metric_name":"cpu","severity":"critical","category":"infra","environment":"prod","source":"Test","description":"high cpu"}`
 
-func newTestConsumer(t *testing.T, repo AlertStore, high, standard AlertReceiver, workers, weight int) *AlertConsumer {
+func newTestConsumer(t *testing.T, repo AlertStore, priority, standard []AlertQueue, workers, weight int) *AlertConsumer {
 	t.Helper()
-	c := NewAlertConsumer(repo, mustRegistry(t), high, "priority-queue", standard, "standard-queue", AlertConsumerConfig{Concurrency: workers, PriorityWeight: weight})
+	c := NewAlertConsumer(repo, mustRegistry(t), priority, standard, AlertConsumerConfig{Concurrency: workers, PriorityWeight: weight})
 	c.sleep = func(ctx context.Context, _ time.Duration) bool { return ctx.Err() == nil }
 	return c
 }
 
+func singleQueueConsumer(t *testing.T, repo AlertStore) (*AlertConsumer, *fakeAlertQueue) {
+	t.Helper()
+	priority := newFakeAlertQueue("priority")
+	return newTestConsumer(t, repo, []AlertQueue{priority}, []AlertQueue{newFakeAlertQueue("standard")}, 1, 4), priority
+}
+
 func TestAlertConsumerProcess_StoresAlertLikeIngestion(t *testing.T) {
 	repo := newFakeAlertRepo()
-	c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+	c, _ := singleQueueConsumer(t, repo)
 
 	decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "ServiceNow", canonicalAlert))
 	if decision.settlement != alertComplete || decision.stored != 1 {
@@ -235,9 +248,23 @@ func TestAlertConsumerProcess_StoresAlertLikeIngestion(t *testing.T) {
 	}
 }
 
+func TestAlertConsumerProcess_FallsBackToTheQueueTime(t *testing.T) {
+	repo := newFakeAlertRepo()
+	c, _ := singleQueueConsumer(t, repo)
+	enqueuedOn := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	message := alertMessage("m-1", "servicenow", canonicalAlert)
+	delete(message.Properties, "received_at")
+	message.EnqueuedOn = &enqueuedOn
+
+	c.process(context.Background(), domain.AlertTierHigh, message)
+	if got := repo.rows["m-1/0"].ReceivedOn; !got.Equal(enqueuedOn) {
+		t.Fatalf("received_on = %s, want the queue's %s", got, enqueuedOn)
+	}
+}
+
 func TestAlertConsumerProcess_KeepsSourceIdentifier(t *testing.T) {
 	repo := newFakeAlertRepo()
-	c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+	c, _ := singleQueueConsumer(t, repo)
 	body := `{"service":"svc-a","metric_name":"cpu","severity":"critical","environment":"prod","source":"Test","unique_identifier":"alarm-7"}`
 
 	c.process(context.Background(), domain.AlertTierDefault, alertMessage("m-1", "servicenow", body))
@@ -250,7 +277,7 @@ func TestAlertConsumerProcess_KeepsSourceIdentifier(t *testing.T) {
 
 func TestAlertConsumerProcess_StoresEveryAlertOfABatch(t *testing.T) {
 	repo := newFakeAlertRepo()
-	c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+	c, _ := singleQueueConsumer(t, repo)
 
 	decision := c.process(context.Background(), domain.AlertTierDefault, alertMessage("m-1", "servicenow", "["+canonicalAlert+","+canonicalAlert+"]"))
 	if decision.stored != 2 || repo.rowCount() != 2 {
@@ -263,7 +290,7 @@ func TestAlertConsumerProcess_StoresEveryAlertOfABatch(t *testing.T) {
 
 func TestAlertConsumerProcess_RedeliveryStoresNothingNew(t *testing.T) {
 	repo := newFakeAlertRepo()
-	c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+	c, _ := singleQueueConsumer(t, repo)
 	message := alertMessage("m-1", "servicenow", "["+canonicalAlert+","+canonicalAlert+"]")
 
 	c.process(context.Background(), domain.AlertTierDefault, message)
@@ -278,17 +305,17 @@ func TestAlertConsumerProcess_RedeliveryStoresNothingNew(t *testing.T) {
 
 func TestAlertConsumerProcess_DeadLettersPayloadsThatCanNeverBeStored(t *testing.T) {
 	cases := map[string]struct {
-		message *azservicebus.ReceivedMessage
+		message *domain.AlertQueueMessage
 		reason  string
 	}{
-		"no source":      {&azservicebus.ReceivedMessage{MessageID: "m", Body: []byte(canonicalAlert)}, alertDeadLetterMissingSource},
+		"no source":      {&domain.AlertQueueMessage{ID: "m", Body: []byte(canonicalAlert)}, alertDeadLetterMissingSource},
 		"unknown source": {alertMessage("m", "nagios", canonicalAlert), alertDeadLetterUnknownSource},
 		"bad body":       {alertMessage("m", "servicenow", "not json"), alertDeadLetterTransformFailed},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeAlertRepo()
-			c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+			c, _ := singleQueueConsumer(t, repo)
 			decision := c.process(context.Background(), domain.AlertTierHigh, tc.message)
 			if decision.settlement != alertDeadLetter || decision.reason != tc.reason {
 				t.Fatalf("decision = %+v, want dead-letter with %s", decision, tc.reason)
@@ -303,7 +330,7 @@ func TestAlertConsumerProcess_DeadLettersPayloadsThatCanNeverBeStored(t *testing
 func TestAlertConsumerProcess_RetriesAShortStoreOutage(t *testing.T) {
 	repo := newFakeAlertRepo()
 	repo.failInserts = 2
-	c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+	c, _ := singleQueueConsumer(t, repo)
 
 	decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "servicenow", canonicalAlert))
 	if decision.settlement != alertComplete || repo.rowCount() != 1 {
@@ -317,25 +344,46 @@ func TestAlertConsumerProcess_AbandonsWhenTheStoreStaysDown(t *testing.T) {
 		"insert":  {rows: map[string]domain.NewAlert{}, failInserts: 99},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c := newTestConsumer(t, repo, newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
+			c, _ := singleQueueConsumer(t, repo)
 			decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "servicenow", canonicalAlert))
 			if decision.settlement != alertAbandon {
-				t.Fatalf("decision = %+v, want abandon so Service Bus redelivers it", decision)
+				t.Fatalf("decision = %+v, want abandon so the queue redelivers it", decision)
 			}
 		})
 	}
 }
 
-func TestAlertConsumerRun_DrainsBothQueuesConcurrently(t *testing.T) {
-	const perQueue = 40
-	var highMessages, standardMessages []*azservicebus.ReceivedMessage
-	for i := range perQueue {
-		highMessages = append(highMessages, alertMessage(fmt.Sprintf("h-%d", i), "servicenow", canonicalAlert))
-		standardMessages = append(standardMessages, alertMessage(fmt.Sprintf("s-%d", i), "servicenow", canonicalAlert))
+func TestAlertConsumerProcess_DeadLettersATransformThatPanics(t *testing.T) {
+	c, _ := singleQueueConsumer(t, newFakeAlertRepo())
+	c.transforms = panickingTransforms{}
+
+	decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "anything", canonicalAlert))
+	if decision.settlement != alertDeadLetter || decision.reason != alertDeadLetterTransformFailed {
+		t.Fatalf("decision = %+v, want dead-letter instead of a crash", decision)
 	}
-	high, standard := newFakeAlertReceiver(highMessages...), newFakeAlertReceiver(standardMessages...)
+}
+
+type panickingTransforms struct{}
+
+func (panickingTransforms) Lookup(string) (alertsource.Transform, bool) {
+	return func([]byte) ([]model.Alert, error) { panic("assignment to entry in nil map") }, true
+}
+
+func TestAlertConsumerRun_DrainsEveryQueueOnBothCloudsConcurrently(t *testing.T) {
+	const perQueue = 20
+	queues := map[string]*fakeAlertQueue{}
+	for _, name := range []string{"servicebus/priority-queue", "sqs/priority-queue", "servicebus/standard-queue", "sqs/standard-queue"} {
+		var messages []*domain.AlertQueueMessage
+		for i := range perQueue {
+			messages = append(messages, alertMessage(fmt.Sprintf("%s-%d", name, i), "servicenow", canonicalAlert))
+		}
+		queues[name] = newFakeAlertQueue(name, messages...)
+	}
 	repo := newFakeAlertRepo()
-	c := newTestConsumer(t, repo, high, standard, 8, 4)
+	c := newTestConsumer(t, repo,
+		[]AlertQueue{queues["servicebus/priority-queue"], queues["sqs/priority-queue"]},
+		[]AlertQueue{queues["servicebus/standard-queue"], queues["sqs/standard-queue"]},
+		8, 4)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -343,10 +391,17 @@ func TestAlertConsumerRun_DrainsBothQueuesConcurrently(t *testing.T) {
 		defer close(done)
 		c.Run(ctx)
 	}()
+	settled := func() int {
+		n := 0
+		for _, q := range queues {
+			n += q.settledCount()
+		}
+		return n
+	}
 	deadline := time.Now().Add(5 * time.Second)
-	for high.settledCount()+standard.settledCount() < 2*perQueue {
+	for settled() < 4*perQueue {
 		if time.Now().After(deadline) {
-			t.Fatalf("settled %d of %d messages", high.settledCount()+standard.settledCount(), 2*perQueue)
+			t.Fatalf("settled %d of %d messages", settled(), 4*perQueue)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -357,45 +412,36 @@ func TestAlertConsumerRun_DrainsBothQueuesConcurrently(t *testing.T) {
 		t.Fatal("Run did not return after the context was cancelled")
 	}
 
-	if len(high.completed) != perQueue || len(standard.completed) != perQueue {
-		t.Fatalf("completed %d high and %d standard, want %d each", len(high.completed), len(standard.completed), perQueue)
+	for name, q := range queues {
+		if q.completedCount() != perQueue {
+			t.Fatalf("%s completed %d messages, want %d", name, q.completedCount(), perQueue)
+		}
 	}
-	if repo.rowCount() != 2*perQueue {
-		t.Fatalf("stored %d rows, want %d", repo.rowCount(), 2*perQueue)
+	if repo.rowCount() != 4*perQueue {
+		t.Fatalf("stored %d rows, want %d", repo.rowCount(), 4*perQueue)
 	}
 	if repo.maxConcurrent < 2 {
 		t.Fatalf("at most %d insert ran at once, want concurrent processing", repo.maxConcurrent)
 	}
 	for _, row := range repo.rows {
-		if (row.MessageID[0] == 'h') != (row.Tier == domain.AlertTierHigh) {
+		wantHigh := len(row.MessageID) > 0 && (row.MessageID[:len("servicebus/priority")] == "servicebus/priority" || row.MessageID[:len("sqs/priority")] == "sqs/priority")
+		if wantHigh != (row.Tier == domain.AlertTierHigh) {
 			t.Fatalf("message %s was stored on the %s tier", row.MessageID, row.Tier)
 		}
 	}
 }
 
 func TestAlertConsumer_ShutdownHandsBufferedMessagesBack(t *testing.T) {
-	high := newFakeAlertReceiver()
-	c := newTestConsumer(t, newFakeAlertRepo(), high, newFakeAlertReceiver(), 2, 4)
+	priority := newFakeAlertQueue("priority")
+	// Two workers, so the priority buffer has room for both messages.
+	c := newTestConsumer(t, newFakeAlertRepo(), []AlertQueue{priority}, []AlertQueue{newFakeAlertQueue("standard")}, 2, 4)
 	lane := c.lanes[domain.AlertTierHigh]
-	lane.messages <- alertMessage("waiting-1", "servicenow", canonicalAlert)
-	lane.messages <- alertMessage("waiting-2", "servicenow", canonicalAlert)
+	lane.messages <- queuedMessage{message: alertMessage("waiting-1", "servicenow", canonicalAlert), queue: priority}
+	lane.messages <- queuedMessage{message: alertMessage("waiting-2", "servicenow", canonicalAlert), queue: priority}
 
 	c.abandonBuffered(lane)
-	if len(high.abandoned) != 2 || len(lane.messages) != 0 {
-		t.Fatalf("abandoned %v with %d still buffered, want both handed back", high.abandoned, len(lane.messages))
-	}
-}
-
-func TestMessageStringProperty(t *testing.T) {
-	properties := map[string]any{"source": "  azure ", "count": 3, "empty": nil}
-	if got := messageStringProperty(properties, "source"); got != "azure" {
-		t.Fatalf("source = %q", got)
-	}
-	if got := messageStringProperty(properties, "count"); got != "3" {
-		t.Fatalf("count = %q", got)
-	}
-	if got := messageStringProperty(properties, "empty") + messageStringProperty(properties, "missing"); got != "" {
-		t.Fatalf("absent properties = %q, want empty", got)
+	if len(priority.abandoned) != 2 || len(lane.messages) != 0 {
+		t.Fatalf("abandoned %v with %d still buffered, want both handed back", priority.abandoned, len(lane.messages))
 	}
 }
 
@@ -410,57 +456,46 @@ func (r slowAlertRepo) InsertAlerts(ctx context.Context, alerts []domain.NewAler
 	return r.fakeAlertRepo.InsertAlerts(ctx, alerts)
 }
 
-func lockedFor(m *azservicebus.ReceivedMessage, d time.Duration) *azservicebus.ReceivedMessage {
+func lockedFor(m *domain.AlertQueueMessage, d time.Duration) *domain.AlertQueueMessage {
 	lockedUntil := time.Now().Add(d)
 	m.LockedUntil = &lockedUntil
 	return m
 }
 
 func TestAlertConsumerHandle_RenewsTheLockOfAMessageThatWaitedInTheBuffer(t *testing.T) {
-	high := newFakeAlertReceiver()
-	c := newTestConsumer(t, newFakeAlertRepo(), high, newFakeAlertReceiver(), 1, 4)
+	c, priority := singleQueueConsumer(t, newFakeAlertRepo())
 
-	c.handle(context.Background(), c.lanes[domain.AlertTierHigh], lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 5*time.Second))
-	if high.renewCount() == 0 || len(high.completed) != 1 {
-		t.Fatalf("renewals %d, completed %v; want the near-expiry lock renewed before the message is completed", high.renewCount(), high.completed)
+	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), 5*time.Second))
+	if priority.renewCount() == 0 || priority.completedCount() != 1 {
+		t.Fatalf("renewals %d, completed %v; want the near-expiry lock renewed before the message is completed", priority.renewCount(), priority.completed)
 	}
 }
 
 func TestAlertConsumerHandle_KeepsTheLockDuringSlowProcessing(t *testing.T) {
-	high := newFakeAlertReceiver()
-	c := newTestConsumer(t, slowAlertRepo{fakeAlertRepo: newFakeAlertRepo(), delay: 300 * time.Millisecond}, high, newFakeAlertReceiver(), 1, 4)
+	c, priority := singleQueueConsumer(t, slowAlertRepo{fakeAlertRepo: newFakeAlertRepo(), delay: 300 * time.Millisecond})
 	c.lockRenewMargin = 950 * time.Millisecond
 
-	c.handle(context.Background(), c.lanes[domain.AlertTierHigh], lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
-	if high.renewCount() == 0 || len(high.completed) != 1 {
-		t.Fatalf("renewals %d, completed %v; want the lock renewed while the insert ran", high.renewCount(), high.completed)
+	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), time.Second))
+	if priority.renewCount() == 0 || priority.completedCount() != 1 {
+		t.Fatalf("renewals %d, completed %v; want the lock renewed while the insert ran", priority.renewCount(), priority.completed)
 	}
 }
 
 func TestAlertConsumerHandle_SkipsAMessageWhoseLockIsAlreadyLost(t *testing.T) {
-	high := newFakeAlertReceiver()
-	high.renewErr = errors.New("lock lost")
 	repo := newFakeAlertRepo()
-	c := newTestConsumer(t, repo, high, newFakeAlertReceiver(), 1, 4)
+	c, priority := singleQueueConsumer(t, repo)
+	priority.renewErr = errors.New("lock lost")
 
-	c.handle(context.Background(), c.lanes[domain.AlertTierHigh], lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), -time.Second))
-	if repo.rowCount() != 0 || high.settledCount() != 0 {
+	c.handle(context.Background(), domain.AlertTierHigh, priority, lockedFor(alertMessage("m-1", "servicenow", canonicalAlert), -time.Second))
+	if repo.rowCount() != 0 || priority.settledCount() != 0 {
 		t.Fatal("a message whose lock was lost was still processed or settled")
 	}
 }
 
-func TestAlertConsumerProcess_DeadLettersATransformThatPanics(t *testing.T) {
-	c := newTestConsumer(t, newFakeAlertRepo(), newFakeAlertReceiver(), newFakeAlertReceiver(), 1, 4)
-	c.transforms = panickingTransforms{}
-
-	decision := c.process(context.Background(), domain.AlertTierHigh, alertMessage("m-1", "anything", canonicalAlert))
-	if decision.settlement != alertDeadLetter || decision.reason != alertDeadLetterTransformFailed {
-		t.Fatalf("decision = %+v, want dead-letter instead of a crash", decision)
+func TestAlertConsumerSettle_DeadLettersWithTheReason(t *testing.T) {
+	c, priority := singleQueueConsumer(t, newFakeAlertRepo())
+	c.settle(context.Background(), priority, alertMessage("m-1", "nagios", canonicalAlert), alertDeadLetterDecision(alertDeadLetterUnknownSource, "no transform"))
+	if priority.deadLettered["m-1"] != alertDeadLetterUnknownSource {
+		t.Fatalf("dead-lettered = %v, want m-1 with %s", priority.deadLettered, alertDeadLetterUnknownSource)
 	}
-}
-
-type panickingTransforms struct{}
-
-func (panickingTransforms) Lookup(string) (alertsource.Transform, bool) {
-	return func([]byte) ([]model.Alert, error) { panic("assignment to entry in nil map") }, true
 }

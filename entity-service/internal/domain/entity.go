@@ -10754,3 +10754,19 @@ type NewAlert struct {
 	MessageIndex int
 	ReceivedOn   time.Time
 }
+
+// AlertQueueMessage is one message received from an alert queue, on Azure Service Bus or AWS SQS alike.
+type AlertQueueMessage struct {
+	// ID is the cloud's message id, stable across redeliveries of the same message.
+	ID string
+	// Body is the monitoring source's request body, unchanged by the gateway.
+	Body []byte
+	// Properties are the gateway's message properties, such as source and received_at.
+	Properties map[string]string
+	// EnqueuedOn is when the queue stored the message, when the cloud reports it.
+	EnqueuedOn *time.Time
+	// LockedUntil is when the message becomes visible to other receivers again unless it is settled or renewed.
+	LockedUntil *time.Time
+	// Handle is the cloud's own message, which only the queue that received it uses to settle it.
+	Handle any
+}
