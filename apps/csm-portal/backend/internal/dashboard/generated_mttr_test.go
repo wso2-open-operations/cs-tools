@@ -80,22 +80,50 @@ func TestParseGenerated_RejectsInvalidMTTRWidgets(t *testing.T) {
 
 // TestValidateWidgets_MTTRIsBarOnly: a hand-authored dashboard file (which
 // goes through validateWidgets, not ParseGenerated/generatedResourceRules)
-// must refuse an mttr widget with any shape but bar too -- the six bands
-// overlap (S1-S4/S1-S3 are sums of the individual ones), so they can never
-// be a pie's wedges of one whole, whichever path loaded the definition.
+// must refuse an mttr widget with any shape but bar, any groupBy.bucket but
+// "severity" (or a groupBy.field, or no groupBy at all), and any slices --
+// the six bands overlap (S1-S4/S1-S3 are sums of the individual ones), so
+// they can never be a pie's wedges of one whole or a per-slice query's own
+// isolated result, and the report is always grouped server-side by that one
+// fixed bucket, whichever path loaded the definition.
 func TestValidateWidgets_MTTRIsBarOnly(t *testing.T) {
-	widget := func(shape Shape) Dashboard {
-		return Dashboard{ID: "d", Widgets: []WidgetTemplate{{
-			ID: "w", DisplayName: "W", ResourceType: ResourceMTTR, Shape: shape, GridWidth: 6,
-			Query:   map[string]any{"months": "3"},
-			GroupBy: &GroupByConfig{Bucket: "severity"},
-		}}}
+	base := WidgetTemplate{
+		ID: "w", DisplayName: "W", ResourceType: ResourceMTTR, Shape: ShapeBar, GridWidth: 6,
+		Query: map[string]any{"months": "3"},
 	}
-	if err := validateWidgets(widget(ShapePie), "test.json"); err == nil || !strings.Contains(err.Error(), `only supports shape "bar"`) {
+	widget := func(w WidgetTemplate) Dashboard {
+		return Dashboard{ID: "d", Widgets: []WidgetTemplate{w}}
+	}
+
+	pie := base
+	pie.Shape = ShapePie
+	pie.GroupBy = &GroupByConfig{Bucket: "severity"}
+	if err := validateWidgets(widget(pie), "test.json"); err == nil || !strings.Contains(err.Error(), `only supports shape "bar"`) {
 		t.Errorf("pie: err = %v, want the bar-only refusal", err)
 	}
-	if err := validateWidgets(widget(ShapeBar), "test.json"); err != nil {
-		t.Errorf("bar: err = %v, want no error", err)
+
+	wrongBucket := base
+	wrongBucket.GroupBy = &GroupByConfig{Bucket: "month"}
+	if err := validateWidgets(widget(wrongBucket), "test.json"); err == nil || !strings.Contains(err.Error(), `groups only by "groupBy.bucket" "severity"`) {
+		t.Errorf("wrong bucket: err = %v, want the severity-bucket refusal", err)
+	}
+
+	byField := base
+	byField.GroupBy = &GroupByConfig{Field: "severity"}
+	if err := validateWidgets(widget(byField), "test.json"); err == nil || !strings.Contains(err.Error(), `groups only by "groupBy.bucket" "severity"`) {
+		t.Errorf("groupBy.field: err = %v, want the severity-bucket refusal", err)
+	}
+
+	noGroupBy := base
+	noGroupBy.Slices = []PieSlice{{Label: "S1", Query: map[string]any{"months": "3"}}}
+	if err := validateWidgets(widget(noGroupBy), "test.json"); err == nil || !strings.Contains(err.Error(), `has no "slices"`) {
+		t.Errorf("slices: err = %v, want the no-slices refusal", err)
+	}
+
+	valid := base
+	valid.GroupBy = &GroupByConfig{Bucket: "severity"}
+	if err := validateWidgets(widget(valid), "test.json"); err != nil {
+		t.Errorf("valid bar + severity bucket: err = %v, want no error", err)
 	}
 }
 

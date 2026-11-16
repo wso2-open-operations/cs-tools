@@ -34,6 +34,7 @@ describe("invalidateWidgetQueries", () => {
     seedQuery(queryClient, [KEY, "pie-slice", targetId, "slice-a"]);
     seedQuery(queryClient, [KEY, "group-by", targetId, "field"]);
     seedQuery(queryClient, [KEY, "feedback-trend", targetId, "month"]);
+    seedQuery(queryClient, [KEY, "mttr-report", targetId, "3", []]);
     seedQuery(queryClient, [KEY, "unrelated-widget"]); // not targeted
 
     await invalidateWidgetQueries(queryClient, new Set([targetId]));
@@ -46,6 +47,7 @@ describe("invalidateWidgetQueries", () => {
     expect(isStale([KEY, "pie-slice", targetId, "slice-a"])).toBe(true);
     expect(isStale([KEY, "group-by", targetId, "field"])).toBe(true);
     expect(isStale([KEY, "feedback-trend", targetId, "month"])).toBe(true);
+    expect(isStale([KEY, "mttr-report", targetId, "3", []])).toBe(true);
     expect(isStale([KEY, "unrelated-widget"])).toBe(false);
   });
 });
