@@ -42,6 +42,7 @@ func TestMaintenance_FailsOnEachKindOfProblem(t *testing.T) {
 		result Result
 		want   string
 	}{
+		{"step error", Result{StepErrors: []string{"could not create partitions"}}, "step failed: could not create partitions"},
 		{"health problem", Result{HealthProblems: []string{"rows landed in the catch-all partition"}}, "catch-all partition"},
 		{"unresolved trigger", Result{UnresolvedTriggers: []TriggerProblem{{"public", "project", "registered table was renamed or dropped"}}}, "public.project is still wrong"},
 		{"repaired trigger", Result{RepairedTriggers: []TriggerProblem{{"public", "account", "audit trigger is disabled"}}}, "public.account was repaired"},

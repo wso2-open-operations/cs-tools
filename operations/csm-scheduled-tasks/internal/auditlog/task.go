@@ -29,9 +29,9 @@ type Maintainer interface {
 }
 
 // Maintenance returns a registry.Task.Handler that runs the audit log upkeep and
-// fails when it found anything a person should look at: a health problem, a
-// trigger that was repaired (the history had a gap while it was off) or one
-// that is still wrong. The failure names each one, and the engine mails it.
+// fails when it found anything a person should look at: a step that could not
+// run, a health problem, a trigger that was repaired (the history had a gap
+// while it was off) or one that is still wrong. The failure names each one, and the engine mails it.
 // The upkeep is safe to repeat, so the retry is just the next run; a repaired
 // trigger is clean by then and the retry succeeds.
 func Maintenance(m Maintainer) func(ctx context.Context) error {
@@ -43,7 +43,8 @@ func Maintenance(m Maintainer) func(ctx context.Context) error {
 
 		slog.InfoContext(ctx, "audit log maintenance: finished",
 			"partitionsCreated", result.PartitionsCreated, "healthProblems", len(result.HealthProblems),
-			"repairedTriggers", len(result.RepairedTriggers), "unresolvedTriggers", len(result.UnresolvedTriggers))
+			"repairedTriggers", len(result.RepairedTriggers), "unresolvedTriggers", len(result.UnresolvedTriggers),
+			"stepErrors", len(result.StepErrors))
 
 		problems := result.problems()
 		if len(problems) == 0 {
@@ -55,7 +56,11 @@ func Maintenance(m Maintainer) func(ctx context.Context) error {
 
 // problems lists what the run found, in words fit for the failure mail.
 func (r Result) problems() []string {
-	problems := append([]string(nil), r.HealthProblems...)
+	var problems []string
+	for _, step := range r.StepErrors {
+		problems = append(problems, "step failed: "+step)
+	}
+	problems = append(problems, r.HealthProblems...)
 	for _, t := range r.UnresolvedTriggers {
 		problems = append(problems, fmt.Sprintf("trigger on %s.%s is still wrong (%s)", t.Schema, t.Table, t.Problem))
 	}

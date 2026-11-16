@@ -50,7 +50,7 @@ func TestClient_RunMaintenancePostsAndDecodes(t *testing.T) {
 		method, path, auth = r.Method, r.URL.Path, r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{"partitionsCreated":2,"healthProblems":["too few future months"],
 			"repairedTriggers":[{"schema":"public","table":"project","problem":"registered table has no audit trigger"}],
-			"unresolvedTriggers":[]}`))
+			"unresolvedTriggers":[],"stepErrors":["could not reconcile triggers"]}`))
 	})
 
 	result, err := c.RunMaintenance(context.Background())
@@ -63,6 +63,9 @@ func TestClient_RunMaintenancePostsAndDecodes(t *testing.T) {
 	}
 	if result.PartitionsCreated != 2 || len(result.HealthProblems) != 1 || len(result.RepairedTriggers) != 1 || len(result.UnresolvedTriggers) != 0 {
 		t.Errorf("result = %+v", result)
+	}
+	if len(result.StepErrors) != 1 || result.StepErrors[0] != "could not reconcile triggers" {
+		t.Errorf("stepErrors = %v", result.StepErrors)
 	}
 	if result.RepairedTriggers[0].Table != "project" {
 		t.Errorf("repaired trigger = %+v", result.RepairedTriggers[0])
