@@ -315,7 +315,8 @@ func main() {
 	}
 
 	// The audit log upkeep's own client: the same deployment and credentials, one
-	// service-only endpoint. Off by default: entity-service needs migration 0295
+	// service-only endpoint. Off by default: entity-service needs
+	// CSM_AUDIT_LOG_ENABLED=true (else the endpoint answers 404), migration 0295
 	// applied and the database role granted EXECUTE on the audit functions first,
 	// or every daily run fails.
 	auditLogMaintenanceEnabled := envBool("AUDIT_LOG_MAINTENANCE_ENABLED", false)
