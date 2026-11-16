@@ -341,6 +341,18 @@ var problemAggregateColumns = map[string]string{
 	"state": "pr.state::TEXT",
 }
 
+// problemAggregateBucket is one aggregate row as a bucket, labelled in lower
+// case. A state bucket keeps the state as stored as its key (NEW,
+// ROOT_CAUSE_ANALYSIS, ...): that is the value problem search's "state" filter
+// takes, so a dashboard slice opened with its own key finds its problems.
+func problemAggregateBucket(groupBy, key string, count int) domain.AggregateBucket {
+	if groupBy == "state" {
+		return domain.AggregateBucket{Key: key, Label: strings.ToLower(key), Count: count}
+	}
+	lowerKey := strings.ToLower(key)
+	return domain.AggregateBucket{Key: lowerKey, Label: lowerKey, Count: count}
+}
+
 // AggregateProblems implements ProblemRepository.
 //
 // crvis: internal callers only: /problems routes are wrapped by internalOnly (server/routes.go); the change_request join only names the linked change request
@@ -372,8 +384,7 @@ func (r *problemRepo) AggregateProblems(ctx context.Context, req domain.SearchPr
 		if err := rows.Scan(&key, &count); err != nil {
 			return domain.AggregateResponse{}, fmt.Errorf("scan problem bucket: %w", err)
 		}
-		lowerKey := strings.ToLower(key)
-		buckets = append(buckets, domain.AggregateBucket{Key: lowerKey, Label: lowerKey, Count: count})
+		buckets = append(buckets, problemAggregateBucket(groupBy, key, count))
 		totalRecords += count
 	}
 	if err := rows.Err(); err != nil {

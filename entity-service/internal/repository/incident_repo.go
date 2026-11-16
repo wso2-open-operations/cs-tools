@@ -675,6 +675,20 @@ var incidentAggregateColumns = map[string]string{
 	"businessService": "inc.service_id::TEXT",
 }
 
+// incidentAggregateBucket is one aggregate row as a bucket, labelled in lower
+// case. A state bucket keeps the domain state as its key (NEW, IN_PROGRESS,
+// ...): that is the value incident search's "state" filter takes, so a
+// dashboard slice opened with its own key finds its incidents. Every other key
+// is lower case like its label.
+func incidentAggregateBucket(groupBy, key string, count int) domain.AggregateBucket {
+	if groupBy == "state" {
+		key = *incidentStateFromEnum(&key)
+		return domain.AggregateBucket{Key: key, Label: strings.ToLower(key), Count: count}
+	}
+	lowerKey := strings.ToLower(key)
+	return domain.AggregateBucket{Key: lowerKey, Label: lowerKey, Count: count}
+}
+
 // AggregateIncidents implements IncidentRepository.
 //
 // crvis: internal callers only: /incidents routes are wrapped by internalOnly (server/routes.go); the change_request join only names the linked change request
@@ -706,11 +720,7 @@ func (r *incidentRepo) AggregateIncidents(ctx context.Context, req domain.Search
 		if err := rows.Scan(&key, &count); err != nil {
 			return domain.AggregateResponse{}, fmt.Errorf("scan incident bucket: %w", err)
 		}
-		if groupBy == "state" {
-			key = *incidentStateFromEnum(&key)
-		}
-		lowerKey := strings.ToLower(key)
-		buckets = append(buckets, domain.AggregateBucket{Key: lowerKey, Label: lowerKey, Count: count})
+		buckets = append(buckets, incidentAggregateBucket(groupBy, key, count))
 		totalRecords += count
 	}
 	if err := rows.Err(); err != nil {
