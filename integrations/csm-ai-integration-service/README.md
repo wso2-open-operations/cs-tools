@@ -21,11 +21,12 @@ See `CLAUDE.md` for what lives here and what stays in the backend.
 | `CLAUDE_BASE_URL` | (none) | **Required with the key**: the URL of the CSM AI gateway the key belongs to (absolute http(s) URL; an internal address, keep it out of committed files). No fallback to the Anthropic API |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model id |
 | `CLAUDE_TIMEOUT` | `45s` | One model call's timeout (Go duration, > 0) |
+| `DASHBOARD_GENERATE_CODE_ENABLED` | off | Exactly `true` registers `POST /ai/dashboards/generate-code`, the code approach (not released). Off, the route is not registered (404). The CSM portal backend and webapp read the same name: turn all three on together |
 
 A bad value or a key without `CLAUDE_BASE_URL` fails the start.
 
-The dashboard catalogue is built into the binary (`internal/catalogue/catalogue.md`): a change to it ships
-with the next build. `CATALOGUE_DIR` and `CATALOGUE_FILE` are no longer read; left set, they are ignored
+The dashboard catalogues are built into the binary (`internal/catalogue/catalogue.md`, and
+`code_catalogue.md` for the code approach): a change to either ships with the next build. `CATALOGUE_DIR` and `CATALOGUE_FILE` are no longer read; left set, they are ignored
 with a warning at start: remove them.
 
 ## API endpoints
@@ -34,12 +35,13 @@ with a warning at start: remove them.
 |---|---|
 | `GET /health` | Liveness, always 200 |
 | `POST /ai/dashboards/generate` | One model call for a dashboard definition: returns the JSON objects the model wrote (see `CLAUDE.md`) |
+| `POST /ai/dashboards/generate-code` | One model call for a dashboard written as JavaScript, with the same teams and PLG playbook answers as `/generate`: returns the source and a chat sentence. **Only when `DASHBOARD_GENERATE_CODE_ENABLED=true`** |
 
 ## Token usage
 
 Each model call logs one line, `dashboard generate: token usage`, with the portal user's id (`userID`, from
 the backend's `X-CSM-User-ID` header; never the email), `correlationID`, `model`, `outcome`, `inputTokens`,
-`outputTokens` and `durationMs` (the model call alone). It never holds the prompt or the reply. In Choreo it
+`outputTokens` and `durationMs` (the model call alone); a code approach call's line adds `approach: code`. It never holds the prompt or the reply. In Choreo it
 is in the component's logs; locally, `docker compose logs csm-ai-integration-service | grep "token usage"`.
 See `CLAUDE.md`.
 

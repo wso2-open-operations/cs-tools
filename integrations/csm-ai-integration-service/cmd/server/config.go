@@ -42,12 +42,16 @@ const (
 // IgnoredCatalogueVars names CATALOGUE_DIR and CATALOGUE_FILE when either is
 // still set: the catalogue is the one built into the binary (see package
 // catalogue) and they are no longer read, so the start warns rather than fails.
+//
+// CodeGenerationEnabled registers POST /ai/dashboards/generate-code, the code
+// approach (phase 2): DASHBOARD_GENERATE_CODE_ENABLED is exactly "true".
 type config struct {
-	APIKey               string
-	Model                string
-	Timeout              time.Duration
-	BaseURL              string
-	IgnoredCatalogueVars []string
+	APIKey                string
+	Model                 string
+	Timeout               time.Duration
+	BaseURL               string
+	IgnoredCatalogueVars  []string
+	CodeGenerationEnabled bool
 }
 
 // GatewayHost is the host model calls go to, for the startup log line:
@@ -70,7 +74,8 @@ func (c config) Enabled() bool { return c.APIKey != "" }
 // loadConfig reads ANTHROPIC_API_KEY, CLAUDE_MODEL (default
 // defaultClaudeModel), CLAUDE_TIMEOUT (a Go duration, default
 // defaultClaudeTimeout, must be > 0), CLAUDE_BASE_URL (an absolute http or
-// https URL; required when ANTHROPIC_API_KEY is set), and notes
+// https URL; required when ANTHROPIC_API_KEY is set),
+// DASHBOARD_GENERATE_CODE_ENABLED (see codeGenerationEnabled), and notes
 // CATALOGUE_DIR and CATALOGUE_FILE when set, which are no longer read.
 // Values are trimmed, so a key pasted with a trailing newline still works.
 // Pure, so tests pass their own getenv.
@@ -108,10 +113,19 @@ func loadConfig(getenv func(string) string) (config, error) {
 		model = defaultClaudeModel
 	}
 	return config{
-		APIKey:               apiKey,
-		Model:                model,
-		Timeout:              timeout,
-		BaseURL:              baseURL,
-		IgnoredCatalogueVars: ignored,
+		APIKey:                apiKey,
+		Model:                 model,
+		Timeout:               timeout,
+		BaseURL:               baseURL,
+		IgnoredCatalogueVars:  ignored,
+		CodeGenerationEnabled: codeGenerationEnabled(getenv("DASHBOARD_GENERATE_CODE_ENABLED")),
 	}, nil
+}
+
+// codeGenerationEnabled reads DASHBOARD_GENERATE_CODE_ENABLED: on only for
+// exactly "true" (whitespace trimmed), so "1", "TRUE" or "yes" leave an
+// unreleased feature off rather than on by accident. The CSM portal backend
+// and webapp read the same name.
+func codeGenerationEnabled(raw string) bool {
+	return strings.TrimSpace(raw) == "true"
 }
