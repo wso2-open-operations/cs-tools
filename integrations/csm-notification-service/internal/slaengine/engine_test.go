@@ -1878,9 +1878,13 @@ func TestTick_EntityServiceHasNoRecordOfClock_SendsAnywayFailOpen(t *testing.T) 
 // TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen is
 // the regression guard for the other CodeRabbit-caught gap: a severity
 // revision cancels the old clock and registers a fresh one for the same
-// (case, clockType) pair. entity-service reporting that NEW, currently-active
-// incarnation must not be read as confirming the OLD, Redis-tracked
-// incarnation (the one this wake entry is actually about) is resolved.
+// (case, clockType) pair. entity-service reporting that NEW, currently-active,
+// NON-terminal incarnation must not be read as confirming the OLD,
+// Redis-tracked incarnation (the one this wake entry is actually about) is
+// resolved -- there is nothing conclusive to go on, so this still fails open.
+// (A terminal new incarnation is the different, now-fixed case covered by
+// TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses
+// below -- that one IS conclusive, regardless of which incarnation it is.)
 func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
@@ -1890,12 +1894,11 @@ func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *t
 	redisStartedAt := time.Now().Add(-4 * time.Hour)
 	// entity-service's own row started far more recently than Redis's own
 	// copy of this clock -- a different incarnation, well outside
-	// clockIncarnationTolerance, even though its stage happens to be
-	// terminal/non-breached (what would otherwise look like a clean
-	// suppression candidate).
+	// clockIncarnationTolerance -- and its stage is still live (IN_PROGRESS,
+	// not terminal), so there is genuinely nothing conclusive here.
 	entityStartedOn := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"case-1|response": {Found: true, IsActive: false, Stage: "ACHIEVED", HasBreached: false, StartedOn: &entityStartedOn},
+		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", HasBreached: false, StartedOn: &entityStartedOn},
 	}}
 
 	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt}
@@ -1905,7 +1908,43 @@ func TestTick_EntityServiceReportsADifferentIncarnation_SendsAnywayFailOpen(t *t
 		t.Fatalf("Tick() error = %v, want nil", err)
 	}
 	if len(chat.calls) == 0 {
-		t.Error("chat calls = none, want at least one -- a mismatched incarnation must not confirm this wake entry's own clock is resolved")
+		t.Error("chat calls = none, want at least one -- a mismatched, still-live incarnation must not confirm this wake entry's own clock is resolved")
+	}
+}
+
+// TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses
+// is the regression guard for a real production false alert: a clock
+// cancelled at 59% business-elapsed (a severity change replaced it with a
+// fresh incarnation) still sent a 75% breach Chat alert, because the old
+// verifyTierStillDue branch ordering let an incarnation mismatch win and
+// fail open before the terminal-stage check ever ran. A terminal,
+// non-breached stage is conclusive regardless of which incarnation it
+// belongs to -- there is no live clock left to alert about either way -- so
+// this must suppress even though entity-service's row is a different
+// incarnation from this wake entry's own.
+func TestTick_EntityServiceReportsADifferentIncarnation_ButTerminal_Suppresses(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+
+	redisStartedAt := time.Now().Add(-4 * time.Hour)
+	entityStartedOn := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {Found: true, IsActive: false, Stage: "CANCELLED", HasBreached: false, StartedOn: &entityStartedOn},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: redisStartedAt}
+	st.wake[wakeMember("case-1", "response", 50)] = redisStartedAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %d, want 0 -- a cancelled, non-breached clock must never alert, whatever incarnation it is", len(chat.calls))
+	}
+	if pub.calls != 0 {
+		t.Errorf("publisher calls = %d, want 0", pub.calls)
 	}
 }
 

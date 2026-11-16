@@ -1058,15 +1058,24 @@ const (
 //     runs on a different trigger than this engine's own Redis
 //     registration, so "no row" can just as easily mean "never registered
 //     there" as "resolved", and must not be read as the latter;
-//   - that row is the SAME incarnation of the clock this wake entry is
-//     about (isSameClockIncarnation, comparing StartedOn) — a severity
-//     revision cancels the old clock and registers a fresh one for the same
-//     (case, clockType) pair, and a stale wake entry for the OLD
-//     incarnation must not be waved through just because entity-service now
-//     has an unrelated, currently-active NEW one;
-//   - and then one of two ways the live record disagrees with this wake:
+//   - and then one of three ways the live record disagrees with this wake:
 //   - isTerminalSLAStage(state.Stage) && !state.HasBreached — resolved
-//     cleanly, no breach ever recorded. Verdict: tierResolved.
+//     cleanly, no breach ever recorded. Verdict: tierResolved. Checked
+//     BEFORE the incarnation comparison below, deliberately: a severity
+//     revision cancels the old clock and registers a fresh one for the
+//     same (case, clockType) pair, and a terminal, unbreached stage means
+//     there is no live clock left to alert about, whichever incarnation —
+//     old or new — this wake entry's own StartedOn happens to match.
+//     Confirmed as a real production false alert before this ordering:
+//     a clock cancelled at 59% (severity changed) still sent a 75% breach
+//     Chat alert, because the incarnation-mismatch branch below used to
+//     run first and fail open before this check ever got a chance to run.
+//   - !isSameClockIncarnation(state.StartedOn, meta.StartedAt) — the row is
+//     a DIFFERENT, non-terminal incarnation of the clock this wake entry is
+//     about (isSameClockIncarnation, comparing StartedOn): entity-service
+//     now has an unrelated, currently-active NEW clock for this (case,
+//     clockType) pair, which this old wake entry can say nothing reliable
+//     about. Verdict: tierDue (fails open — see below).
 //   - state.IsPaused && !state.HasBreached — currently paused, no breach
 //     ever recorded. PAUSED isn't terminal (pausing is routine, not a
 //     resolution), so the check above alone never catches it — but a
@@ -1126,12 +1135,24 @@ func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType strin
 	case !state.Found:
 		slog.WarnContext(ctx, "slaengine: entity-service has no record of this clock, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return tierDue, state
+	case isTerminalSLAStage(state.Stage) && !state.HasBreached:
+		// Checked before the incarnation comparison below, deliberately: a
+		// severity change cancels the old clock and registers a fresh one
+		// (ReviseClocks), so the SAME wake entry that is "due" here can be
+		// about an incarnation entity-service has already moved past. A
+		// terminal, unbreached stage is unambiguous regardless of whose
+		// incarnation it belongs to -- there is no live clock left to alert
+		// about either way -- so this must not be skipped by the
+		// incarnation-mismatch fail-open branch just below. Confirmed as a
+		// real production false alert: a clock cancelled at 59% (severity
+		// changed) still sent a 75% breach Chat alert, because the old
+		// branch ordering let the incarnation mismatch win and fail open
+		// before this check ever ran.
+		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
+		return tierResolved, state
 	case !isSameClockIncarnation(state.StartedOn, meta.StartedAt):
 		slog.WarnContext(ctx, "slaengine: entity-service is tracking a different clock incarnation than this wake entry, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
 		return tierDue, state
-	case isTerminalSLAStage(state.Stage) && !state.HasBreached:
-		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
-		return tierResolved, state
 	case state.IsPaused && !state.HasBreached:
 		slog.WarnContext(ctx, "slaengine: entity-service shows this clock currently paused but this engine's own redis copy did not know, correcting it — this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier)
 		e.setPaused(ctx, caseID, clockType, true)
