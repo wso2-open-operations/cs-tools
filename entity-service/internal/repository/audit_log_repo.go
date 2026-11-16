@@ -1,0 +1,101 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+)
+
+// AuditLogRepository runs the audit log's upkeep functions (migration 0295).
+// They are SECURITY DEFINER, so the application role needs EXECUTE on them and
+// nothing else on the audit tables. Retiring old partitions is deliberately not
+// here: an admin does that by hand.
+type AuditLogRepository interface {
+	// CreatePartitions creates the missing monthly partitions and returns how
+	// many it created.
+	CreatePartitions(ctx context.Context, monthsAhead int) (int, error)
+	// PartitionHealth returns one message per problem; none means healthy.
+	PartitionHealth(ctx context.Context) ([]string, error)
+	// Reconcile compares the registry with the triggers that exist. With repair,
+	// missing or disabled triggers are put back.
+	Reconcile(ctx context.Context, repair bool) ([]domain.AuditTriggerProblem, error)
+}
+
+type auditLogRepository struct {
+	db *Scoped
+}
+
+// NewAuditLogRepository constructs the repository over the scoped pool.
+func NewAuditLogRepository(db *Scoped) AuditLogRepository {
+	return &auditLogRepository{db: db}
+}
+
+// CreatePartitions implements AuditLogRepository.
+func (r *auditLogRepository) CreatePartitions(ctx context.Context, monthsAhead int) (int, error) {
+	var created int
+	err := r.db.QueryRow(WithSystemIdentity(ctx), `SELECT audit_create_partitions($1)`, monthsAhead).Scan(&created)
+	if err != nil {
+		return 0, fmt.Errorf("audit log: create partitions: %w", err)
+	}
+	return created, nil
+}
+
+// PartitionHealth implements AuditLogRepository.
+func (r *auditLogRepository) PartitionHealth(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT problem FROM audit_partition_health()`)
+	if err != nil {
+		return nil, fmt.Errorf("audit log: partition health: %w", err)
+	}
+	defer rows.Close()
+
+	var problems []string
+	for rows.Next() {
+		var problem string
+		if err := rows.Scan(&problem); err != nil {
+			return nil, fmt.Errorf("audit log: scan partition health: %w", err)
+		}
+		problems = append(problems, problem)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit log: partition health: %w", err)
+	}
+	return problems, nil
+}
+
+// Reconcile implements AuditLogRepository.
+func (r *auditLogRepository) Reconcile(ctx context.Context, repair bool) ([]domain.AuditTriggerProblem, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), `SELECT schema_name, table_name, problem FROM audit_reconcile($1)`, repair)
+	if err != nil {
+		return nil, fmt.Errorf("audit log: reconcile: %w", err)
+	}
+	defer rows.Close()
+
+	var problems []domain.AuditTriggerProblem
+	for rows.Next() {
+		var p domain.AuditTriggerProblem
+		if err := rows.Scan(&p.Schema, &p.Table, &p.Problem); err != nil {
+			return nil, fmt.Errorf("audit log: scan reconcile: %w", err)
+		}
+		problems = append(problems, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit log: reconcile: %w", err)
+	}
+	return problems, nil
+}

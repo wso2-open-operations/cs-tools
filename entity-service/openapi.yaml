@@ -18326,6 +18326,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /audit-log/maintenance:
+    post:
+      summary: Run the audit log's upkeep (service credentials only).
+      description: |
+        Called daily by csm-scheduled-tasks. Creates the coming monthly partitions of the audit log,
+        checks the log's health, and puts back audit triggers that are missing or disabled on registered
+        tables. Safe to repeat. It tries every step even if one fails.
+
+        A 200 means the steps ran, not that everything is fine: read the lists. Health problems and
+        unresolved triggers need a person. A repaired trigger was off for a while, so the history had a
+        gap. Retiring old partitions is not part of this; an admin does that by hand.
+      responses:
+        "200":
+          description: The upkeep ran; the body says what it found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogMaintenanceResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: A step could not run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /instances/usage-rollups/daily:
     post:
       summary: Recompute one UTC day's daily usage rows from the hourly rows (internal callers only).
@@ -32979,6 +33016,38 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
+    AuditTriggerProblem:
+      type: object
+      properties:
+        schema:
+          type: string
+        table:
+          type: string
+        problem:
+          type: string
+
+    AuditLogMaintenanceResponse:
+      type: object
+      properties:
+        partitionsCreated:
+          type: integer
+          description: Monthly partitions this run created.
+        healthProblems:
+          type: array
+          description: Rows in the catch-all partition, or fewer than two future months.
+          items:
+            type: string
+        repairedTriggers:
+          type: array
+          description: Triggers that were missing or disabled and have been put back.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+        unresolvedTriggers:
+          type: array
+          description: Triggers that are still wrong after the repair.
+          items:
+            $ref: '#/components/schemas/AuditTriggerProblem'
+
     ErrorResponse:
       type: object
       description: >-

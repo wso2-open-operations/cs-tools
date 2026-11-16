@@ -334,6 +334,9 @@ type Config struct {
 	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
 	// another drainer never changes it.
 	ACPReactivationPollInterval time.Duration
+	// AuditLogMonthsAhead is how many months past the current one get a
+	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3).
+	AuditLogMonthsAhead int
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -1088,6 +1091,7 @@ func Load() *Config {
 	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
+	cfg.AuditLogMonthsAhead = envPositiveInt("CSM_AUDIT_LOG_MONTHS_AHEAD", 3)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))

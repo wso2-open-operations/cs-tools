@@ -78,6 +78,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_ACP_REOPEN_DRY_RUN` | no | `true` | The reopen check decides and logs `acp reopen: dry run, would reopen`, and writes nothing. Only an explicit `false` turns it off; an unparseable value keeps it on |
 | `CSM_ACP_REOPEN_TEST_PROJECT_SF_ID` | no | — | When set, the reopen check acts on this one Salesforce project only (15- or 18-character id). For staging tests |
 | `ACP_REACTIVATION_POLL_INTERVAL` | no | `5s` | How often `ProjectReactivationDrainer` looks for queued "Back to Open state" notices. Its own setting, so tuning `INCIDENT_REPORT_POLL_INTERVAL` never changes it |
+| `CSM_AUDIT_LOG_MONTHS_AHEAD` | no | `3` | Months past the current one that get an audit log partition when `POST /audit-log/maintenance` runs (see "Audit log maintenance" below). An unparseable or non-positive value falls back to the default |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
 | `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
@@ -178,6 +179,20 @@ Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`
     Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
     leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
     (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
+
+## Audit log maintenance
+
+Migration `0295_audit_log_foundation.sql` adds the field-level audit log: `csm_audit_log` (one row per changed field, one partition per UTC month) and `audit_config` (the tables that are audited). A table is audited only after `register_audit()` is called for it, normally in the migration that creates it.
+
+`POST /audit-log/maintenance` (service credentials only, `serviceOnly`; `service.AuditLogMaintenanceService`) is the log's upkeep. `operations/csm-scheduled-tasks` calls it daily as its `audit_log_maintenance` sub-cron, which also retries a failed run and mails the failure (see that component's CLAUDE.md). This service has no scheduler of its own for it, and one must not be added alongside. In order, it: creates partitions (`CSM_AUDIT_LOG_MONTHS_AHEAD`, default 3, past the current month), checks health, and reconciles triggers. Every step is tried even if an earlier one fails. The SQL functions take an advisory lock, so a repeated or concurrent call is harmless.
+
+- **200 means the steps ran, not that all is well.** The body lists `healthProblems` (rows in the catch-all partition, fewer than two future months), `repairedTriggers` (were missing or disabled and are back; the history had a gap) and `unresolvedTriggers` (still wrong after the repair, need a person). The scheduled task turns any of the three into a failure, so the alert mail names them. A 500 means a step could not run at all.
+- **Reconcile runs twice:** with repair on, then off. What the second call still lists is unresolved; what only the first listed was repaired.
+- **The database role needs EXECUTE** on `audit_create_partitions(int)`, `audit_partition_health()` and `audit_reconcile(boolean)`, and nothing on the audit tables. The functions are `SECURITY DEFINER` and revoked from `PUBLIC`. The role must not own the audit tables, or it could drop the trigger or insert rows directly.
+- **No endpoint retires old partitions.** An admin does that monthly: `SELECT * FROM audit_retire_partitions(18, '2s')` detaches partitions older than 18 months and returns their names (a 2s lock timeout; run it again if the lock is busy). A detached partition keeps its data: export it with a checksum, keep it through the review window, and drop it only after approval. The app role needs no grant for this.
+- **Alert on the outcome too:** `SELECT count(*) FROM audit_partition_health()` above 0, checked by a monitoring role, works even if the scheduled task is down.
+
+Tests: `audit_log_maintenance_service_test.go` (service, fake repository) and `audit_log_repo_integration_test.go` (real Postgres with the migration applied, skipped without `ENTITY_TEST_DATABASE_URL`).
 
 ## Health probes
 

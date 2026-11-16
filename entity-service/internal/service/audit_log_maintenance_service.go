@@ -1,0 +1,108 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+package service
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+)
+
+// AuditLogMaintenanceService runs the audit log's upkeep. It is called once a
+// day by csm-scheduled-tasks (its audit_log_maintenance sub-cron), which also
+// retries a failed run and sends the failure mail.
+type AuditLogMaintenanceService interface {
+	// RunMaintenance creates the coming monthly partitions, checks the log's
+	// health and puts back audit triggers that went missing. It always tries
+	// every step, and returns what it found. The error is set only when a step
+	// could not run at all; problems it found are in the response.
+	RunMaintenance(ctx context.Context) (domain.AuditLogMaintenanceResponse, error)
+}
+
+type auditLogMaintenanceService struct {
+	repo        repository.AuditLogRepository
+	monthsAhead int
+}
+
+// NewAuditLogMaintenanceService constructs the service. monthsAhead is how many
+// months past the current one get a partition.
+func NewAuditLogMaintenanceService(repo repository.AuditLogRepository, monthsAhead int) AuditLogMaintenanceService {
+	return &auditLogMaintenanceService{repo: repo, monthsAhead: monthsAhead}
+}
+
+// RunMaintenance implements AuditLogMaintenanceService.
+func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain.AuditLogMaintenanceResponse, error) {
+	// Empty slices, not nil, so the JSON shows [] and not null.
+	resp := domain.AuditLogMaintenanceResponse{
+		HealthProblems:     []string{},
+		RepairedTriggers:   []domain.AuditTriggerProblem{},
+		UnresolvedTriggers: []domain.AuditTriggerProblem{},
+	}
+	var errs []error
+
+	created, err := s.repo.CreatePartitions(ctx, s.monthsAhead)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	resp.PartitionsCreated = created
+
+	healthProblems, err := s.repo.PartitionHealth(ctx)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	resp.HealthProblems = append(resp.HealthProblems, healthProblems...)
+
+	repaired, unresolved, err := s.reconcileTriggers(ctx)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	resp.RepairedTriggers = append(resp.RepairedTriggers, repaired...)
+	resp.UnresolvedTriggers = append(resp.UnresolvedTriggers, unresolved...)
+
+	slog.InfoContext(ctx, "audit log: maintenance run finished",
+		"partitionsCreated", resp.PartitionsCreated, "healthProblems", len(resp.HealthProblems),
+		"repairedTriggers", len(resp.RepairedTriggers), "unresolvedTriggers", len(resp.UnresolvedTriggers),
+		"failedSteps", len(errs))
+	return resp, errors.Join(errs...)
+}
+
+// reconcileTriggers repairs what it can. It reconciles twice: the first call
+// repairs and lists everything it found, the second lists what is still wrong.
+// A trigger only the first call listed was repaired.
+func (s *auditLogMaintenanceService) reconcileTriggers(ctx context.Context) (repaired, unresolved []domain.AuditTriggerProblem, err error) {
+	found, err := s.repo.Reconcile(ctx, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	unresolved, err = s.repo.Reconcile(ctx, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	stillBroken := make(map[string]bool, len(unresolved))
+	for _, p := range unresolved {
+		stillBroken[p.Schema+"."+p.Table] = true
+	}
+	for _, p := range found {
+		if !stillBroken[p.Schema+"."+p.Table] {
+			repaired = append(repaired, p)
+		}
+	}
+	return repaired, unresolved, nil
+}
