@@ -286,8 +286,13 @@ func TestCaseTypeTransferIntegration_OutOfCase_IncidentAndQuery(t *testing.T) {
 				if res.PreviousSeverity == nil || *res.PreviousSeverity != src.wantPrevSev {
 					t.Errorf("PreviousSeverity = %v, want %v", res.PreviousSeverity, src.wantPrevSev)
 				}
-				if res.Severity != nil {
-					t.Errorf("a transfer out of case has no severity, got %v", *res.Severity)
+				// Only a service request holds a severity of its own: the case's
+				// carries over (S2/S4 here, neither needs the S0 downgrade).
+				if (target == "service_request") != (res.Severity != nil) {
+					t.Errorf("Severity = %v after a transfer out of case to %s", res.Severity, target)
+				}
+				if target == "service_request" && (res.Severity == nil || *res.Severity != src.wantPrevSev || res.SeverityDowngrade != nil) {
+					t.Errorf("service request severity = %v (downgrade %v), want %v unchanged", res.Severity, res.SeverityDowngrade, src.wantPrevSev)
 				}
 				if res.State == nil || *res.State != src.wantState {
 					t.Errorf("State = %v, want %v", res.State, src.wantState)
@@ -382,7 +387,9 @@ func TestCaseTypeTransferIntegration_IntoCase_QueryAndIncident(t *testing.T) {
 				if err != nil {
 					t.Fatalf("TransferCaseType: %v", err)
 				}
-				if res.PreviousType != from || res.Type != "case" || res.PreviousSeverity != nil {
+				// A service request carries a severity of its own (S4 by default); the
+				// other source types carry none.
+				if res.PreviousType != from || res.Type != "case" || (res.PreviousSeverity != nil) != (from == "service_request") {
 					t.Errorf("result = %+v", res)
 				}
 				if res.Severity == nil || *res.Severity != sv.sev {
@@ -504,62 +511,4 @@ func TestCaseTypeTransferIntegration_Refusals(t *testing.T) {
 	// Nothing above changed anything.
 	f.assertOnlyIn(t, ctQueryID, "case")
 	f.assertOnlyIn(t, ctEngagementID, "engagement")
-}
-
-// The table's old foreign key to "case"(id) was also what kept an attachment off
-// every work item that is not a case. It now points at work_item (migration 0210,
-// so a case that changes type keeps its attachments), and the insert itself keeps
-// the narrower rule: the four case-like types own attachments, an announcement, a
-// change request or an incident does not. This guards both insert paths.
-func TestCaseTypeTransferIntegration_OnlyCaseLikeWorkItemsOwnAttachments(t *testing.T) {
-	f := newCTFixture(t)
-	cases := repository.NewCaseRepository(f.scoped)
-	now := time.Now().UTC()
-	for _, w := range []struct{ id, number, kind string }{
-		{ctChangeReqID, "CT-TEST-0007", "CHANGE_REQUEST"},
-		{ctIncidentWIID, "CT-TEST-0008", "INCIDENT"},
-	} {
-		f.exec(t, `INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type)
-			VALUES ($1, $2, $2, 'test', 'test', $3, 'type transfer fixture', $4::work_item_type_enum)`, w.id, now, w.number, w.kind)
-	}
-
-	key := "type-transfer-test"
-	create := func(id string) error {
-		_, err := cases.CreateCaseAttachment(f.ctx, domain.CreateAttachmentRequest{
-			ReferenceID: id, ReferenceType: domain.ReferenceTypeCase, Name: "b.txt", Type: "text/plain",
-			StorageKey: &key, SizeBytes: 1, CreatedBy: f.userID, Status: domain.AttachmentStatusComplete,
-		})
-		return err
-	}
-	fromServiceNow := func(id string) error {
-		_, err := cases.CreateCaseAttachmentFromServiceNow(f.ctx, domain.CreateAttachmentRequest{
-			ReferenceID: id, ReferenceType: domain.ReferenceTypeCase, Name: "c.txt", Type: "text/plain",
-		}, "92000000-0000-0000-0000-0000000000b0", 1, f.userID)
-		return err
-	}
-
-	owners := map[string]string{
-		"case": ctQueryID, "engagement": ctEngagementID, "service request": ctServiceReqID, "security report analysis": ctSRAID,
-	}
-	for name, id := range owners {
-		if err := create(id); err != nil {
-			t.Errorf("a %s must be able to own an attachment: %v", name, err)
-		}
-	}
-	if err := fromServiceNow(ctQueryID); err != nil {
-		t.Errorf("a ServiceNow-sourced attachment on a case: %v", err)
-	}
-	_, _ = f.scoped.Exec(f.ctx, `DELETE FROM case_attachment WHERE id = '92000000-0000-0000-0000-0000000000b0'`)
-
-	for name, id := range map[string]string{"announcement": ctAnnouncementID, "change request": ctChangeReqID, "incident": ctIncidentWIID, "unknown id": ctMissingID} {
-		for path, do := range map[string]func(string) error{"create": create, "from ServiceNow": fromServiceNow} {
-			var ve *apierror.ValidationError
-			if err := do(id); !errors.As(err, &ve) {
-				t.Errorf("%s attachment on a %s: want a ValidationError, got %v", path, name, err)
-			}
-		}
-		if got := f.attachments(t, id); got != 0 {
-			t.Errorf("%s ended up owning %d attachment(s)", name, got)
-		}
-	}
 }

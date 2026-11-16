@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import UpdateHistoryTab from "@features/project-details/components/deployments/UpdateHistoryTab";
 import type { ProductUpdate } from "@features/project-details/types/products";
@@ -96,7 +96,7 @@ describe("UpdateHistoryTab", () => {
     render(<UpdateHistoryTab {...defaultProps} />);
 
     expect(screen.getByLabelText(/Update Level \*/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Applied On \*/i)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /Applied On \*/i })).toBeInTheDocument();
     expect(
       screen.getByLabelText(/Description \(Optional\)/i),
     ).toBeInTheDocument();
@@ -120,5 +120,19 @@ describe("UpdateHistoryTab", () => {
     expect(
       screen.getByText(/No update history available/i),
     ).toBeInTheDocument();
+  });
+
+  describe("Applied On date", () => {
+    const appliedOn = () =>
+      screen.getAllByLabelText(/Applied On \*/i).find((el) => el.tagName === "INPUT") as HTMLInputElement;
+
+    it("is empty until a date is entered, then shows the entered day", () => {
+      render(<UpdateHistoryTab {...defaultProps} />);
+      expect(appliedOn().value).not.toMatch(/2026/);
+
+      fireEvent.change(appliedOn(), { target: { value: "02/17/2026" } });
+
+      expect(appliedOn().value).toBe("02/17/2026");
+    });
   });
 });

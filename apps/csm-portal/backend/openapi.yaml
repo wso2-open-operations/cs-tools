@@ -15,11 +15,11 @@ info:
     | `time_cards_and_updates` | every `/time-cards` route and `GET /updates/product-update-levels`, `POST /updates/levels/search` | cs-engineer, time-card-approver, admin |
     | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state` (approve/reject) | time-card-approver, admin |
     | `escalate` | `POST /cases/{id}/escalations` with `action=ESCALATE` (the route itself needs only `view`) | cs_engineer, escalator, admin. De-escalating does not use this permission: it requires being one of the case's ABT team leads, with no other role beyond `view`, and holding `escalate` does not substitute |
-    | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` | attachment-downloader, cs-engineer, admin |
+    | `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
-    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
+    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the five onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate`, `POST /cases/{id}/sla/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -1112,24 +1112,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments:
+  /attachments/delete:
     post:
-      summary: Upload a file attachment to a case.
-      operationId: postAttachments
+      summary: >-
+        Delete a stored attachment (soft delete; the file is removed from storage). Only
+        the person who uploaded it may, or a portal admin, and not once the work item
+        is closed.
+      operationId: postStoredAttachmentsDelete
       requestBody:
-        description: Attachment upload payload. The file must be a base64 data URI (max 10 MB decoded).
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AttachmentCreatePayload'
+              type: object
+              additionalProperties: false
+              required: [type, id]
+              properties:
+                type:
+                  type: string
+                  enum: [work_item, comment, deployment]
+                  description: Which kind of attachment (the table it lives in).
+                id:
+                  type: string
+                  format: uuid
       responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentCreateResponse'
+        "204":
+          description: Deleted (also when it already was).
         "400":
           description: BadRequest
           content:
@@ -1155,19 +1163,518 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Conflict — attachments cannot be uploaded to a closed case.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
+          description: Conflict
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /attachments/download/{id}/content:
+    get:
+      summary: Download an attachment.
+      description: >
+        Streams the file as an attachment of an opaque type: always sent with
+        `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
+        and `X-Content-Type-Options: nosniff`. Supports a single `Range: bytes=a-b`
+        so an interrupted download can resume (206, 416 when past the end). Access
+        is checked by entity-service on every request.
+      operationId: getAttachmentsDownloadIdContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: The file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: A range of the file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "416":
+          description: RangeNotSatisfiable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/inline/{id}/content:
+    get:
+      summary: >-
+        Show a comment's inline image. Streamed through this backend from the entity
+        service, which checks access on every request, so the browser never talks to
+        the file store and no link exists that could be forwarded. The type is one of
+        image/png, image/jpeg, image/gif, image/webp (anything else is sent as
+        application/octet-stream), with X-Content-Type-Options nosniff,
+        Content-Security-Policy "default-src 'none'; sandbox", Content-Disposition
+        inline and Cache-Control private, max-age=300.
+      operationId: getStoredInlineImageContent
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the inline image attachment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The image bytes.
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/gif:
+              schema: {type: string, format: binary}
+            image/webp:
+              schema: {type: string, format: binary}
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /attachments/upload:
+    post:
+      summary: >-
+        Start an upload. Records a pending attachment and returns its id; the browser
+        then sends the file in chunks with `PUT /attachments/upload/{id}/chunks/{index}`
+        and calls confirm. Refused for a closed work item.
+      operationId: postStoredAttachmentsUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [type, name, sizeBytes]
+              properties:
+                type:
+                  type: string
+                  enum: [work_item, comment, deployment]
+                  description: Which kind of attachment (the table it lives in).
+                parentId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The work item (work_item, comment) or deployment the file belongs to.
+                    Required for deployment. For a comment image or a work_item attachment
+                    give exactly one of parentId and projectId.
+                projectId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Comment images and work_item attachments: the project of a draft that is
+                    uploaded before the case exists and linked to it when it is created (a
+                    description image through its src, a security report's file through the
+                    attachmentIds of POST /cases). Give exactly one of parentId and projectId.
+                name:
+                  type: string
+                contentType:
+                  type: string
+                sizeBytes:
+                  type: integer
+                  format: int64
+      responses:
+        "201":
+          description: The attachment id and number, expiresAt (when an unconfirmed upload may be cleaned up) and maxBytes; never cacheable.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: >-
+            BadRequest. For a comment image, also when both or neither of parentId
+            and projectId is given, or projectId is not a valid UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: TooManyRequests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /attachments/upload/{id}/chunks:
+    get:
+      summary: List the chunks already stored for an upload.
+      description: Lets an interrupted upload carry on from the first missing chunk.
+      operationId: getAttachmentsUploadIdChunks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunkBytes:
+                    type: integer
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        size:
+                          type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/upload/{id}/chunks/{index}:
+    put:
+      summary: Send one chunk of an upload.
+      description: >
+        The body is the raw bytes of chunk `index` (0-based), at most 8 MiB; every
+        chunk but the last should be exactly 8 MiB. A chunk may be sent again and
+        in any order. Nothing is visible until the upload is confirmed. Only the
+        person who started the upload may send chunks; entity-service checks that.
+      operationId: putAttachmentsUploadIdChunksIndex
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Stored
+        "411":
+          description: LengthRequired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/upload/{id}/confirm:
+    post:
+      summary: Finish an upload after its chunks were sent. Only the uploader can confirm.
+      description: >
+        The body carries `type` and `chunks`, the number of 8 MiB chunks sent with
+        `PUT /attachments/upload/{id}/chunks/{index}` (at least 1, and at most the
+        number a file of the allowed size can have); the backend assembles them into
+        the file and confirms its stored size and type.
+      operationId: postStoredAttachmentsUploadConfirm
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the attachment returned by the upload call.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  enum: [work_item, comment, deployment]
+                  description: Which kind of attachment (the table it lives in).
+                chunks:
+                  type: integer
+                  minimum: 1
+                  description: Number of uploaded chunks to assemble.
+      responses:
+        "200":
+          description: The completed attachment (id, number, name, contentType, sizeBytes, status).
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
           content:
             application/json:
               schema:
@@ -1211,216 +1718,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "413":
           description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/{id}/content:
-    get:
-      summary: Download the binary content of a case attachment.
-      operationId: getCaseAttachmentContent
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the attachment.
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Raw file content. Content-Type is restricted to a safe allowlist; anything outside the allowlist is served as application/octet-stream. Content-Disposition is always attachment.
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/{id}:
-    get:
-      summary: Get a case attachment's metadata.
-      operationId: getAttachment
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the attachment.
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Attachment'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-    patch:
-      summary: Update a case attachment's name and/or description.
-      operationId: updateAttachment
-      requestBody:
-        description: At least one of name or description must be provided (enforced upstream by the entity service).
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AttachmentUpdatePayload'
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the attachment.
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentUpdateResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "409":
-          description: Conflict — upstream rejected the update (e.g. neither name nor description provided).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-    delete:
-      summary: Delete a case attachment (ServiceNow data source only).
-      operationId: deleteCaseAttachment
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the attachment.
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Attachment deleted successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteAttachmentResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
           content:
             application/json:
               schema:
@@ -2953,10 +3250,11 @@ paths:
         the integration service validates this and rejects an empty update.
         Reachable by cs_engineer, onboarding_lead and admin; which fields a
         caller may set is then decided per field. onboardingStatus and
-        onboardingOwner and the four onboarding dates (onboardingStartDate,
-        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
+        onboardingOwner and the five onboarding dates (onboardingStartDate,
+        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate,
+        onboardingProductionReadinessCompletionDate)
         need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
-        alone gets 403); closureState needs admin. A body mixing fields needs
+        alone gets 403); closureState and suspensionProcessOverridden need admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
         read access to the project separately: onboarding_lead grants none.
       operationId: patchProjectsId
@@ -4309,13 +4607,13 @@ paths:
   /cases/volume-trend:
     post:
       summary: >-
-        Day-bucketed case-volume trend (opened vs. closed), for the Case
-        Summary dashboard's trend chart.
+        Case-volume trend (opened vs. closed), for a dashboard line widget.
       description: >-
         Plain forward-and-return proxy to the entity service's own POST
         /cases/volume-trend: exactly two series, "Opened" (by created date)
         and "Closed" (by closed date), one point per UTC calendar day over a
-        trailing window (30 days by default).
+        trailing window (30 days by default), or over a fixed
+        startDate/endDate window one point per day, week or month.
       operationId: postCasesVolumeTrend
       requestBody:
         description: Case volume-trend payload
@@ -4357,6 +4655,15 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: >-
+            BadGateway. Also when a fixed window (startDate) was asked for and
+            the entity service answered without echoing it, as one older than
+            the fixed window does (it answers its trailing 30 days instead).
           content:
             application/json:
               schema:
@@ -4738,18 +5045,36 @@ paths:
         backend: the draft's id when it is a UUID, else a new one); without
         it, a sample dashboard is returned for every valid request. A team named in a
         creTeam / sreTeam filter (its team registry key) is turned into that
-        team's group id before the reply. 422 when the model declines (the
-        message says why), refuses, or names a team that cannot be filtered
-        (unknown, in the wrong field, or with no group configured; the message
-        says which); 502 when its answer is not
-        a usable dashboard or the model cannot be reached; 504 when it takes
-        too long; 503 when generation is unavailable (no sample loaded, or the
-        AI integration service has no model key). 413 when the dashboard being edited is over
+        team's group id before the reply; a product filter's names become the
+        products' catalog names and a productVersion filter's versions that
+        product's recorded versions; a project or account filter (a key, name
+        or account number) becomes a projectId / accountId filter on the
+        record's id, with the same op; a region filter's regions are
+        matched, ignoring case and surrounding spaces, against the regions of
+        the cases' accounts and written as the account writes them. 422 when
+        the model declines (the
+        message says why, at most 300 characters), refuses, or names a team
+        that cannot be filtered (unknown, in the wrong field, or with no group
+        configured), or a product, version, project or account that names
+        nothing or several (generate_product, generate_project,
+        generate_account; the message names the candidates), or a region no
+        case's account has (generate_region; the message names the regions);
+        502 when its answer is not a usable dashboard, was cut off (its own
+        message), the model cannot be reached, or a product, project, account
+        or region lookup fails; 504 when it takes too long; 503 when generation is
+        unavailable (no sample loaded, or the AI integration service has no
+        model key), or when the AI side's usage limit is reached (the model
+        gateway's 429; its own message, unlike the caller's limit below). 413 when the dashboard being edited is over
         64 KiB as a definition (the size a saved one may be), checked before
         any model call. 429, with Retry-After in seconds, when the caller has
         started more than DASHBOARD_GENERATE_LIMIT_PER_MINUTE (default 10)
         generations in the last minute or DASHBOARD_GENERATE_LIMIT_PER_DAY
         (default 100) in the last 24 hours; a refused prompt does not count.
+        Every 400, 413, 422, 429, 502, 503 and 504 this endpoint words itself
+        carries an `errorCode` starting with `generate_` (e.g.
+        `generate_usage_limit`, `generate_timeout`); the webapp shows the
+        message only when it does, so a proxy's own JSON error is not taken
+        for this backend's.
       operationId: generateDashboard
       requestBody:
         required: true
@@ -5570,6 +5895,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/link:
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved dashboards.
+      description: >
+        Off for every dashboard until its owner turns it on. While on, the
+        response carries the link id (the webapp builds the link from it) and
+        how many people have opened the link; who they are is not listed.
+        Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only.
+      operationId: getCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Turn on the link to one of the caller's saved dashboards.
+      description: >
+        No request body. Any internal user who opens the link
+        (POST /dashboards/shared/link) can then view the dashboard, view only,
+        under Shared Dashboards, while the link stays on. Turning on a link
+        that is already on keeps the same link. Owner only; CS engineers and
+        admins only.
+      operationId: enableCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Turn off the link to one of the caller's saved dashboards.
+      description: >
+        The link stops working, and everyone who had the dashboard only
+        through it loses it; turning it on again makes a new link. Turning off
+        a link that is off is not an error. Owner only; CS engineers and
+        admins only.
+      operationId: disableCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /dashboards/shared:
     get:
       summary: List the dashboards other users shared with the caller.
@@ -5619,6 +6117,69 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "422":
           description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/link:
+    post:
+      summary: Open a saved dashboard's link.
+      description: >
+        The link id is in the body, not the path, so it stays out of access
+        logs. From then on the dashboard is listed under GET /dashboards/shared
+        while the link stays on, unless the caller owns it (own true: open it
+        under My Dashboards): through the link (sharedViaLink true), or
+        through a person or team share while the caller has one, and through
+        the link again if that share goes. Opening it again changes nothing.
+        400 when linkId is not a UUID; 404 when the link is unknown or turned
+        off.
+        Every portal role that can view dashboards.
+      operationId: openDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenDashboardLinkRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
           content:
             application/json:
               schema:
@@ -8861,6 +9422,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /time-cards/aggregate:
+    post:
+      summary: >-
+        Time card counts and summed minutes per state, user, project or day,
+        for dashboard charts (Postgres data sources only).
+      description: >-
+        Counts the cards POST /time-cards/search matches for the same filters.
+        "day" needs filters.startDate and filters.endDate, a window of at most
+        31 days (both inclusive), and returns every day of that window in date
+        order. CS engineers and admins only (narrower than the search, which
+        time card approvers can also use).
+      operationId: aggregateTimeCards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateTimeCardsPayload'
+      responses:
+        "200":
+          description: >-
+            Counts and summed minutes per value of groupBy
+            (groups[].totalMinutes, othersMinutes and totalMinutes are set).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /time-cards:
     post:
       summary: Create a time card in the submitted state (ServiceNow data source only).
@@ -10081,6 +10702,603 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /alert-mute-rules:
+    post:
+      summary: Create an alert mute rule.
+      description: >
+        An alert mute rule mutes SRE alerts matching every condition between
+        startOn and endOn. Proxied to entity-service, which validates the body
+        and answers 400 with the reason (e.g. endOn more than 72h after
+        startOn, a missing service or environment condition).
+      operationId: postAlertMuteRules
+      requestBody:
+        description: Alert mute rule create payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/search:
+    post:
+      summary: Search alert mute rules, newest created first.
+      operationId: postAlertMuteRulesSearch
+      requestBody:
+        description: Alert mute rule search payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAlertMuteRulesPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAlertMuteRulesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}:
+    get:
+      summary: Get an alert mute rule by ID.
+      operationId: getAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    patch:
+      summary: Edit a scheduled alert mute rule.
+      description: Same body as create. Only a scheduled alert mute rule can be edited; otherwise 409.
+      operationId: patchAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Alert mute rule save payload.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteRuleSavePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is no longer scheduled). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+    delete:
+      summary: Delete a scheduled alert mute rule.
+      operationId: deleteAlertMuteRuleById
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is no longer scheduled). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}/extend:
+    post:
+      summary: Move a scheduled or active alert mute rule's end later.
+      description: The new endOn must be after the current one and at most 72h after startOn.
+      operationId: postAlertMuteRuleExtend
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: New end time.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendAlertMuteRulePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is not scheduled or active). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/{id}/end:
+    post:
+      summary: End an active alert mute rule now.
+      description: Sets endedOn to now and endedBy to the caller. Takes no body.
+      operationId: postAlertMuteRuleEnd
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteRule'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Alert mute rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (the alert mute rule is not active). The message says why.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /alert-mute-rules/muted-counts:
+    get:
+      summary: Count the alert groups each of several alert mute rules muted.
+      description: >-
+        Read from sre-alert-core-service in one call, for a page of the rules list. Every requested id is in counts,
+        with 0 when the rule muted nothing.
+      operationId: getAlertMuteRuleMutedCounts
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: Comma-separated alert mute rule UUIDs, at most 100.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  counts:
+                    type: object
+                    additionalProperties:
+                      type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /alert-mute-rules/{id}/muted-alerts:
+    get:
+      summary: List the alerts an alert mute rule muted.
+      description: >-
+        Read from sre-alert-core-service, not entity-service. One row per incident (alerts grouped by fingerprint),
+        newest first, with its outcome (muted, incident, closed_quietly or delivering) and counts by outcome over all of
+        them. Rows the alerting service's retention purged are gone.
+      operationId: getAlertMuteRuleMutedAlerts
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the alert mute rule.
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AlertMuteRuleMutedAlert'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  summary:
+                    type: object
+                    additionalProperties:
+                      type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /alert-field-values:
+    get:
+      summary: List the values real alerts carry in one field.
+      description: >-
+        Read from sre-alert-core-service. Distinct values of the field among the alerts it still keeps that contain q,
+        most recently seen first. The alert mute rule form suggests them, since a rule matches these strings.
+
+        Data exposure: the values are raw alert metadata from incidents seen in the last 30 days, and
+        unique_identifier in particular can carry hostnames, instance ids or customer references. They are
+        internal operational data, shown to the same audience that already reads those alerts' incidents in the
+        Operations area: PermViewOperations (CS engineers, admins and the security team), never a customer. A
+        unique_identifier search needs at least 3 characters, so the list cannot be enumerated from an empty query.
+      operationId: getAlertFieldValues
+      parameters:
+        - name: field
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        - name: q
+          in: query
+          description: Case-insensitive substring to match.
+          schema:
+            type: string
+            maxLength: 255
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  values:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable (sre-alert-core-service is not configured or not reachable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /outages:
     post:
       summary: Create a new outage (ServiceNow data source only).
@@ -10737,6 +11955,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+  /plg/organizations/aggregate:
+    post:
+      summary: Count organisations per owner or per country.
+      description: >-
+        Passed through to entity-service's POST /plg/organizations/aggregate
+        after the filters are checked as the organisation search checks
+        them. groupBy "owner": one group per PLG CS owner (key the owner's
+        user id) and "unowned" ("Unowned"); "country": one group per country
+        (key and label the country as written) and "unknown" ("Unknown").
+        Backs the dashboard's PLG pie and bar widgets grouped on the server.
+      operationId: plgAggregateOrganizations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateOrganizationsRequest"
+      responses:
+        "200":
+          description: Organisations per group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country filter) with its message."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
   /plg/organizations/{organizationId}:
     get:
       summary: One organisation, with its platform cards.
@@ -11271,6 +12537,103 @@ paths:
                 $ref: "#/components/schemas/PlgRegistrationSearchResponse"
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+  /plg/registrations/volume-trend:
+    post:
+      summary: Registrations per day, week or month, for a dashboard chart.
+      description: >-
+        Passed through to entity-service's POST /plg/registrations/volume-trend
+        after the filters are checked as the registration search checks them.
+        The window is taken as POST /cases/volume-trend takes it; one series,
+        "Registered", counted on the registration date. An empty body is every
+        registration over the trailing 30 days. Backs the dashboard's PLG
+        registration line widget.
+      operationId: plgRegistrationVolumeTrend
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgRegistrationVolumeTrendRequest"
+      responses:
+        "200":
+          description: Registrations per point of the window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgRegistrationVolumeTrendResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (the window, a date, or an owner email, country or playbook answer filter) with its message."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: "Forbidden — the caller's token carries no role granting PLG access, or the caller is not an active internal PLG CS user."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+  /plg/registrations/aggregate:
+    post:
+      summary: Count registrations per country or per playbook answer.
+      description: >-
+        Passed through to entity-service's POST /plg/registrations/aggregate
+        after the filters are checked as the registration search checks them:
+        the registrations counted per their organisation's country ("unknown",
+        "Unknown", for none) or, with groupBy "playbookAnswer", per their
+        answer to filters.playbookTask (the option code and label;
+        "unanswered", "Not answered", for none). Backs the dashboard's PLG
+        registration pie and bar widgets grouped by country or by answer.
+      operationId: plgAggregateRegistrations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgAggregateRegistrationsRequest"
+      responses:
+        "200":
+          description: Registrations per country or per answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateResponse"
+        "400":
+          description: "Bad request: an unknown field or filter value, refused here before any call, or entity-service's own refusal (groupBy, maxGroups, the window, a country or playbook answer filter) with its message."
           content:
             application/json:
               schema:
@@ -12068,6 +13431,12 @@ paths:
   /generate-timelogs-breakdown-report:
     get:
       summary: Generate a project's time-log breakdown report.
+      description: >-
+        Time card durations are summed in minutes and shown as "1h 30m". By
+        default the report covers the project's subscription period (start
+        and end date); cases listed are those with a time card whose work date
+        falls in the period or that were created in it, and per-case totals
+        count only in-period time cards.
       operationId: generateTimelogsBreakdownReport
       parameters:
         - name: projectId
@@ -12075,6 +13444,26 @@ paths:
           required: true
           schema:
             type: string
+        - name: from
+          in: query
+          required: false
+          description: Inclusive period start (YYYY-MM-DD). Defaults to the project's start date, or unbounded when it has none.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Inclusive period end (YYYY-MM-DD). Defaults to the project's end date, or unbounded when it has none.
+          schema:
+            type: string
+            format: date
+        - name: allTime
+          in: query
+          required: false
+          description: When true, an absent from/to is left unbounded instead of defaulting to the project's dates.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Ok
@@ -12120,6 +13509,86 @@ paths:
   # than fully typed here. Every endpoint is registered directly on
   # PermUsageMetricsViewer rather than the blanket PermViewerAccess gate --
   # see that permission's own doc comment in internal/handler/access.go.
+
+  /generate-sla-report:
+    get:
+      summary: Generate a project's SLA report.
+      description: >-
+        The SLA clocks of the cases the project opened between from and to
+        (both inclusive; every case is listed, newest first). Each case shows
+        its latest response, workaround and resolution clock: the elapsed time
+        and whether it was met, missed (finished late, or still running and
+        already past the target), is running or paused, or was cancelled. The
+        summary has one row per case type (Incident, or Query for a question)
+        and severity that has a case. For each target it gives the 95th
+        percentile of the elapsed time of the clocks that finished, the policy
+        target, and how many clocks were met, missed or still running.
+        Durations are display strings such as "2 Days 3 Hours".
+      operationId: generateSlaReport
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          description: The project's id or its key.
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          description: First case creation date to include (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: Last case creation date to include (YYYY-MM-DD, the whole day). Must not be before from.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAReportDetails'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /usage-metrics/projects:
     get:
@@ -13708,179 +15177,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /cases/{id}/attachments/upload-token:
-    post:
-      summary: Start a direct-to-storage attachment upload.
-      operationId: mintAttachmentUploadToken
-      description: >
-        Only available when object-storage attachments are enabled for the deployment; when disabled the path is not registered and returns 404. Creates the attachment row in pending status and returns the upload credential.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: Case UUID
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-      responses:
-        "200":
-          description: Ok.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: Not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/{id}/share:
-    post:
-      summary: Create a short-lived download link for an attachment.
-      operationId: createAttachmentShare
-      description: >
-        Only available when object-storage attachments are enabled; otherwise 404. Returns a public, short-lived download URL for the stored file.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: Attachment UUID
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Ok.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: Not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /cases/{caseId}/attachments/{attachmentId}/confirm:
-    post:
-      summary: Confirm a completed direct-to-storage upload.
-      operationId: confirmAttachmentUpload
-      description: >
-        Only available when object-storage attachments are enabled; otherwise 404. Moves the attachment from pending to complete once the browser upload has finished.
-      parameters:
-        - name: caseId
-          in: path
-          required: true
-          description: Case UUID
-          schema:
-            type: string
-            format: uuid
-        - name: attachmentId
-          in: path
-          required: true
-          description: Attachment UUID
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Ok.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: Not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /team-schedule/catalogue:
     get:
       summary: List schedule teams, roles and slots.
@@ -14216,7 +15512,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: The person has upcoming turns on the team or holds its Case Alerts tier (the entity service's reason is kept).
+          description: The person holds the team's Case Alerts tier (the entity service's reason is kept). Their upcoming turns on the team are removed with the membership.
           content:
             application/json:
               schema:
@@ -14315,9 +15611,9 @@ paths:
       description: >
         CSM admin only; the entity service decides and its reason is kept on every refusal. `teamKey`
         is the team the person leaves and `toTeamKey` the team they join. Their role is kept and their
-        alert tier is empty on the new team. Refused with nothing written (409) while they have
-        upcoming turns or an alert tier on the source team, hold a lead-type role, or are on both
-        teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
+        alert tier is empty on the new team, and their upcoming turns on the source team are removed
+        with the move. Refused with nothing written (409) while they hold an alert tier on the source
+        team, hold a lead-type role, or are on both teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
         source only.
       parameters:
         - name: teamKey
@@ -14375,7 +15671,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Refused with nothing written (upcoming turns or an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
+          description: Refused with nothing written (an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
           content:
             application/json:
               schema:
@@ -14499,8 +15795,9 @@ paths:
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
         by shift code), inviteRotations (whether each rotation's reminders carry a calendar
-        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
-        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        invitation, by shift code), copyTo (copied on the reminder emails, never with the
+        invitation), weekendCopyTo (copied on the weekend summary only), inviteCopyTo (copied on
+        the emails that carry an invitation or a cancellation only), updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -14589,6 +15886,9 @@ paths:
                   example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  description: >-
+                    Copied (Cc) on the reminder emails (weekday reminders and the weekend summary),
+                    never with the calendar invitation attached.
                   maxItems: 20
                   items: { type: string, format: email }
                 weekendCopyTo:
@@ -14596,6 +15896,13 @@ paths:
                   description: >-
                     Copied (Cc) on the weekend summary email only. Optional: when absent the stored
                     value is kept.
+                  maxItems: 20
+                  items: { type: string, format: email }
+                inviteCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the emails that carry a calendar invitation or its cancellation,
+                    and on no other; never a guest. Optional: when absent the stored value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:
@@ -16772,6 +18079,283 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/public-holidays/search:
+    post:
+      summary: Public holidays of the given engineers over a date window.
+      operationId: searchTeamSchedulePublicHolidays
+      description: >
+        Each engineer's public holidays (their own location's, else their
+        team's country: India for the India team, Sri Lanka otherwise), for the
+        roster to shade. Not leave; moves no shift. Body is validated by the
+        entity service and forwarded unchanged; the response is returned as sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userIds, from, to]
+              properties:
+                userIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+                from: { type: string, format: date, description: "First day of the window, inclusive." }
+                to: { type: string, format: date, description: "Last day of the window, inclusive; at most 70 days after `from`." }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, count]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      type: object
+                      required: [userId, date, title, country, countrySource]
+                      properties:
+                        userId: { type: string, format: uuid }
+                        date: { type: string, format: date }
+                        title: { type: string }
+                        country: { type: string, description: 'e.g. "Sri Lanka", "India".' }
+                        countrySource: { type: string, enum: [EMPLOYEE, TEAM] }
+                  count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/holiday-availability/search:
+    post:
+      summary: Each CRE team's availability on each public holiday in a window.
+      operationId: searchTeamScheduleHolidayAvailability
+      description: >
+        A CRE member is off on a public holiday of their country (a "Public
+        holiday" tag, placed three weeks ahead). One entry per team and holiday
+        with who is tagged, who was made available, the rota turns with nobody,
+        the confirmation and whether the caller may confirm. Forwarded unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date, description: "Inclusive; at most 70 days after `from`." }
+                teamKeys: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holidays, count]
+                properties:
+                  holidays:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HolidayAvailability'
+                  count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /team-schedule/holiday-availability/{teamKey}/{date}/confirmation:
+    parameters:
+      - { name: teamKey, in: path, required: true, schema: { type: string } }
+      - { name: date, in: path, required: true, schema: { type: string, format: date } }
+    put:
+      summary: Confirm a CRE team's availability on a public holiday.
+      operationId: confirmTeamScheduleHolidayAvailability
+      description: >
+        The team's lead, its rota manager, a CRE rota admin or an admin. Refused
+        (409, with the entity service's reason naming the turns) while a rota
+        turn that day has nobody available.
+      responses:
+        "200":
+          description: The team's availability, now confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailability'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No member of the team is tagged for a holiday that day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: A rota turn that day has nobody available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Withdraw a CRE team's holiday availability confirmation.
+      operationId: withdrawTeamScheduleHolidayAvailability
+      responses:
+        "200":
+          description: The team's availability, no longer confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayAvailability'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/engagement-allocations/search:
     post:
       summary: Search confirmed customer engagement allocations.
@@ -16824,6 +18408,13 @@ paths:
                         engagementType: { type: string, description: "Raw enum value, for example CONSULTANCY." }
                         modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
                         utilization: { type: number }
+                        dismissedDates:
+                          type: array
+                          items: { type: string, format: date }
+                          description: >
+                            The days in the window the allocation was taken off this person's
+                            roster (`POST /team-schedule/engagement-allocations/dismiss`); absent
+                            when there are none.
                   count: { type: integer }
         "400":
           description: Bad request.
@@ -17557,7 +19148,11 @@ paths:
       summary: Add a leave or allocation tag to the catalogue.
       operationId: createTeamScheduleAbsenceKind
       description: >
-        Body forwarded unchanged.
+        Body forwarded unchanged: shortCode, label, bucket (LEAVE or ALLOCATION),
+        colourToken, optional family, optional excludesFromTimesheet (allocation
+        tags only: the tag's days take people off the worklog timesheet) and an
+        optional description (at most 300 characters, shown on hover). A 400,
+        403 or 409 from entity-service is passed through with its reason.
       requestBody:
         required: true
         content:
@@ -17574,7 +19169,7 @@ paths:
                 type: object
                 additionalProperties: true
         "400":
-          description: Bad request.
+          description: Invalid tag (for example a name that is too long or an unknown family); the reason is passed through.
           content:
             application/json:
               schema:
@@ -17586,13 +19181,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: The caller may not add a tag (or not for that family); the reason is passed through.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: A tag with that name or short code already exists; the reason is passed through.
           content:
             application/json:
               schema:
@@ -19515,6 +21116,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/sla/recalculate:
+    post:
+      summary: Recalculate one case's SLA pause totals — the CSM admin action.
+      description: >
+        A CSM admin. Recomputes the case's currently IN_PROGRESS SLA clocks' pause
+        history from the case's own state-change activity log, correcting
+        pause_duration/business_pause_duration when they disagree with what's stored.
+        No request body. A case with no activity history to replay (e.g. one only
+        ever handled through the ServiceNow-backed path) leaves every clock untouched
+        and reports hasHistory: false — never guessed at. Responses are Cache-Control
+        no-store.
+      operationId: recalculateCasePauseTotals
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The recalculation ran; see each clock's own outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseSLAPauseRecalcResponse'
+        "400":
+          description: Invalid case id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /skills/levels:
     get:
       summary: The skill level scales and their levels.
@@ -19592,6 +21245,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+    post:
+      summary: Create a skill category.
+      operationId: createSkillCategory
+      description: >
+        A sub-category goes under an active parent with no skills filed directly under it. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "201":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /skills/search:
     post:
       summary: Search the skill catalogue.
@@ -20094,8 +21802,8 @@ paths:
       summary: Everybody's skills (Skill Manager).
       operationId: searchUserSkills
       description: >
-        Requires the view permission here; the entity service allows only a skill manager and refuses anyone
-        else with 403. Paged and filtered by the entity service.
+        Requires the view permission here; the entity service allows only a holder of the skill directory
+        capability and refuses anyone else with 403. Paged and filtered by the entity service.
       requestBody:
         required: true
         content:
@@ -20140,6 +21848,698 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /skills/me/capabilities:
+    get:
+      summary: The caller's skills capabilities.
+      operationId: getMySkillCapabilities
+      description: >
+        canViewDirectory, canReviewRequests, canManageCatalogue and, for a reviewer, pendingRequestCount.
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/categories/{id}:
+    patch:
+      summary: Edit a skill category.
+      operationId: updateSkillCategory
+      description: >
+        Rename, describe, deactivate or activate. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/check:
+    post:
+      summary: Duplicate preview for a skill request.
+      operationId: checkSkillRequest
+      description: >
+        Exact match, similar names and a pending request for the same name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests:
+    post:
+      summary: Request a skill the catalogue lacks.
+      operationId: createSkillRequest
+      description: >
+        levelId is required - the skill is added at it on approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "201":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/mine:
+    get:
+      summary: The caller's own skill requests.
+      operationId: listMySkillRequests
+      description: >
+        Pending first, then the newest.
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/search:
+    post:
+      summary: The skill request queue.
+      operationId: searchSkillRequests
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/withdraw:
+    post:
+      summary: Withdraw one's own pending skill request.
+      operationId: withdrawSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/approve:
+    post:
+      summary: Approve a skill request.
+      operationId: approveSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/requests/{id}/reject:
+    post:
+      summary: Reject a skill request (a reason is required).
+      operationId: rejectSkillRequest
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/directory/search:
+    post:
+      summary: The skill directory, one row per person.
+      operationId: searchSkillDirectory
+      description: >
+        Criteria of skill and minimum level matched ALL or ANY. Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Passed through to the entity service unchanged (see its openapi.yaml).
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/users/{userId}:
+    get:
+      summary: One person's skills.
+      operationId: getUserSkillProfile
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /skills/users/{userId}/history:
+    get:
+      summary: One person's skill history.
+      operationId: getUserSkillHistory
+      description: >
+        Who may is the entity service's decision (a capability held by admins plus a configured role list).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: skillId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Passed through from the entity service.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: "Bad request. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "Forbidden - the caller lacks the skills capability. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "Not found. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict. The entity service's reason is kept."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Unexpected error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 components:
   securitySchemes:
     bearerAuth:
@@ -20147,6 +22547,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     PagingPhone:
       type: object
       description: A person's paging-only phone number. `phone` is present only for a caller who may edit it.
@@ -20267,7 +22686,11 @@ components:
           $ref: '#/components/schemas/Dashboard'
         reply:
           type: string
-          description: The chat message to show for this turn.
+          description: >
+            The chat message to show for this turn. When the request could
+            not be built exactly and the model built the closest dashboard
+            instead, it starts with the model's one-sentence note saying what
+            differs from the request.
     SaveCustomDashboardRequest:
       type: object
       required:
@@ -20390,7 +22813,7 @@ components:
     SharedViaTeam:
       type: object
       nullable: true
-      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name).
+      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name).
       required:
         - id
         - name
@@ -20404,6 +22827,37 @@ components:
         type:
           type: string
           description: The team's type, e.g. cre-abt, sre-abt.
+    CustomDashboardLink:
+      type: object
+      required: [enabled, openedBy]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether anyone internal with the link may view the dashboard.
+        linkId:
+          type: string
+          format: uuid
+          description: The id in the link; absent while the link is off. A new one each time the link is turned on.
+        openedBy:
+          type: integer
+          description: How many people have opened the link since it was turned on.
+    OpenDashboardLinkRequest:
+      type: object
+      required: [linkId]
+      properties:
+        linkId:
+          type: string
+          format: uuid
+    OpenedDashboardLink:
+      type: object
+      required: [dashboardId, own]
+      properties:
+        dashboardId:
+          type: string
+          format: uuid
+        own:
+          type: boolean
+          description: True when the caller owns the dashboard (open it with GET /dashboards/custom/{id}); otherwise GET /dashboards/shared/{id}.
     SharedDashboardSummary:
       type: object
       required:
@@ -20411,6 +22865,7 @@ components:
         - name
         - owner
         - sharedViaTeam
+        - sharedViaLink
         - sharedOn
         - updatedOn
       properties:
@@ -20426,6 +22881,9 @@ components:
           description: Who shared the dashboard (its owner); null once that user has been deleted.
         sharedViaTeam:
           $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -20448,6 +22906,7 @@ components:
         - dashboard
         - owner
         - sharedViaTeam
+        - sharedViaLink
         - sharedOn
         - updatedOn
       properties:
@@ -20460,6 +22919,9 @@ components:
           description: Who shared the dashboard (its owner); null once that user has been deleted.
         sharedViaTeam:
           $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -21068,6 +23530,173 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SalesforceResyncApplyComponent'
+    AlertMuteRuleMutedAlert:
+      type: object
+      description: >-
+        One group of alerts (one fingerprint) an alert mute rule muted, as sre-alert-core-service reports it.
+      properties:
+        id:
+          type: integer
+          format: int64
+        service:
+          type: string
+        environment:
+          type: string
+        source:
+          type: string
+        metricName:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        uniqueIdentifier:
+          type: string
+        alertCount:
+          type: integer
+          description: How many alerts were grouped into this row.
+        firstSeen:
+          type: string
+          format: date-time
+        lastSeen:
+          type: string
+          format: date-time
+        mutedAt:
+          type: string
+          format: date-time
+          nullable: true
+        unmutedAt:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          type: string
+          enum: [muted, incident, closed_quietly, delivering]
+          description: >-
+            muted (still muted), incident (became a CSM incident after the rule ended), closed_quietly (resolved while
+            muted, never paged) or delivering (a CSM incident is being created).
+        incidentNumber:
+          type: string
+          description: The CSM incident number when outcome is incident; empty otherwise.
+    AlertMuteRuleCondition:
+      type: object
+      required: [field, value]
+      properties:
+        field:
+          type: string
+          enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        value:
+          type: string
+          maxLength: 255
+    AlertMuteRuleSavePayload:
+      type: object
+      required: [name, timeZone, startOn, endOn, conditions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1024
+        timeZone:
+          type: string
+          description: IANA zone the times were entered in, e.g. Asia/Colombo.
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+          description: After startOn, at most 72h after it, and in the future.
+        conditions:
+          type: array
+          description: Each field at most once; must include service and environment.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+    ExtendAlertMuteRulePayload:
+      type: object
+      required: [endOn]
+      properties:
+        endOn:
+          type: string
+          format: date-time
+    AlertMuteRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: AMR0000001
+        name:
+          type: string
+        description:
+          type: string
+        timeZone:
+          type: string
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        endedBy:
+          type: string
+          nullable: true
+        endedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SearchAlertMuteRulesPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            states:
+              type: array
+              description: Omitted means all. expired also returns alert mute rules ended early.
+              items:
+                type: string
+                enum: [active, scheduled, expired]
+            searchQuery:
+              type: string
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+            limit:
+              type: integer
+    SearchAlertMuteRulesResponse:
+      type: object
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
     ErrorPayload:
       type: object
       description: >-
@@ -21531,6 +24160,19 @@ components:
             type: string
             format: uuid
           description: Match cards submitted by any of these users.
+        teamIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only time cards of the people on any of these teams today (the
+            Team Schedule's team ids: a CRE team's CRE group id, an SRE team's
+            SRE group id; a person counts
+            once however many of the teams list them). Membership is the
+            current roster, whenever the card was logged. Not supported on
+            the legacy data source (400).
         startDate:
           type: string
           description: ISO 8601 date (YYYY-MM-DD).
@@ -21541,6 +24183,36 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TimeCardState'
+
+    AggregateTimeCardsPayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchTimeCardsFilters'
+        groupBy:
+          type: string
+          enum: [state, user, project, day, team]
+          description: >-
+            "day" groups by work date and needs filters.startDate and
+            filters.endDate (at most 31 days, both inclusive). A card with no
+            project has no "project" bucket. "team" needs filters.teamIds:
+            one bucket per one of those teams (a team with no cards at 0), a
+            card counted in every one of them its engineer is on.
+        measure:
+          type: string
+          enum: [count, minutes]
+          default: count
+          description: >-
+            What the buckets are ranked by, and so which survive maxGroups.
+            Ignored for "day".
+        maxGroups:
+          type: integer
+          minimum: 0
+          default: 10
+          description: >-
+            How many buckets to return; the rest fold into othersCount and
+            othersMinutes. Ignored for "day".
 
     SearchTimeCardsPayload:
       type: object
@@ -21750,7 +24422,9 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: The new severity of the case.
+          description: >
+            The new severity of the case. For a service request it is the internal severity
+            (`critical`, `high`, `medium` or `low`; `catastrophic` is rejected).
         type:
           type: string
           enum: [case, engagement, security_report_analysis, service_request]
@@ -21896,6 +24570,34 @@ components:
           type: string
         case:
           $ref: '#/components/schemas/UpdatedCase'
+        warnings:
+          type: array
+          description: >
+            Non-fatal notices about what the update did; the update succeeded. Absent when there
+            is none.
+          items:
+            $ref: '#/components/schemas/ResponseWarning'
+
+    ResponseWarning:
+      type: object
+      required: [code, message]
+      description: A machine-readable, non-fatal notice attached to a successful response.
+      properties:
+        code:
+          type: string
+          enum: [SEVERITY_DOWNGRADED]
+          description: >
+            `SEVERITY_DOWNGRADED`: a case moved to a service request had a severity a service
+            request cannot hold (`catastrophic`) and was stored one level lower (`critical`).
+        message:
+          type: string
+          description: English text for logs and fallback display.
+        from:
+          type: string
+          description: The value before the change (`catastrophic` for `SEVERITY_DOWNGRADED`).
+        to:
+          type: string
+          description: The value stored (`critical` for `SEVERITY_DOWNGRADED`).
 
     UpdatedCase:
       type: object
@@ -21916,6 +24618,9 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+          description: >
+            The resulting severity. For a service request it is the internal severity
+            (`critical`, `high`, `medium` or `low`).
         workState:
           type: string
           enum: [ongoing, paused]
@@ -22115,7 +24820,7 @@ components:
             Case type.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
+            - `security_report_analysis`: security report; requires `subject`, `description`, and at least one id in `attachmentIds` (files uploaded first as drafts).
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -22134,7 +24839,10 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: Required for `case` type.
+          description: >
+            Required for `case` type. For `service_request` it is optional and internal
+            (`critical`, `high`, `medium` or `low`; `catastrophic` is a 400); a service request
+            created without one gets the configured default. Ignored for every other type.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
@@ -22152,11 +24860,17 @@ components:
           items:
             $ref: '#/components/schemas/CaseVariable'
           description: Required for `service_request` type.
-        attachments:
+        attachmentIds:
           type: array
+          maxItems: 10
           items:
-            $ref: '#/components/schemas/CaseAttachmentPayload'
-          description: Required for `security_report_analysis` type (at least one entry).
+            type: string
+            format: uuid
+          description: |
+            Required for `security_report_analysis` type (at least one, at most 10). Ids of files
+            already uploaded as drafts to this project by the caller (`POST /attachments/upload`
+            with `type: work_item` and `projectId`). The case links them when it is created;
+            an id that is not a complete, unlinked draft of this project by the caller is a 400.
         relatedCaseId:
           type: string
           format: uuid
@@ -22213,6 +24927,9 @@ components:
             - accountEscalationActive
             - number
             - internalId
+            - salesRegion
+            - stateEntered
+            - stateEnteredOn
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -22272,6 +24989,20 @@ components:
           RFC3339 timestamp or YYYY-MM-DD date bounding the case's created,
           last-updated, or closed timestamp respectively. gte is inclusive
           "on or after"; lte is inclusive "on or before".
+        - **stateEntered** (in): case states (as for state). Matches cases
+          whose logged state history has a change to any of them ("moved to
+          Waiting on WSO2"), whatever their state now; a case that moved there
+          several times matches once. Only logged changes are seen: the
+          history starts on 2026-10-11 and a case's creation state is not
+          logged. Not supported inside an anyOf branch.
+        - **stateEnteredOn** (gte / lte): bounds when that change was logged:
+          a single RFC3339 timestamp, YYYY-MM-DD date, or relative date
+          placeholder such as `__today__` or `__startOfMonth:-1__`; gte is
+          inclusive, a date-only lte covers the whole day. The dashboards
+          resolve a placeholder to the viewer's local day before the request,
+          as for createdOn. Needs a stateEntered filter in the same request;
+          without a stateEnteredOn, stateEntered means at any time. Not
+          supported inside an anyOf branch.
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
           product. Only applied by the ServiceNow data source.
@@ -22324,7 +25055,13 @@ components:
         - **internalId** (eq): a single WSO2 case id; matches exactly. Routed
           as a first-class filter rather than through the free-text
           searchQuery scan.
-
+        - **salesRegion** (in): one or more sales region names (e.g. "EMEA",
+          "APAC"). Matches cases whose parent account's sales region equals
+          any of the given values, compared case-insensitively on trimmed
+          values. Supported at the top level and inside an anyOf branch; eq,
+          notIn, empty and blank values are rejected. Only supported by the
+          relational data source: the other data source rejects the filter
+          with a validation error rather than ignoring it.
     CaseSearchFilters:
       type: object
       properties:
@@ -22350,6 +25087,16 @@ components:
             hits). Defaults to false, which returns the exact total as before.
             Ignored on the ServiceNow data source, which always reports one,
             and for a search that sets groupBy (its totals are the bucket counts).
+        excludeFields:
+          type: array
+          items:
+            type: string
+            enum: [description]
+          description: >-
+            Response fields to leave out of every returned case, for a list
+            that never shows them. Only `description` is supported (it can be
+            megabytes of rich text); an excluded field comes back null. Omitted
+            or empty returns every field as before. Forwarded as is.
         filters:
           $ref: '#/components/schemas/CaseSearchFilters'
         sortBy:
@@ -22415,7 +25162,28 @@ components:
           type: integer
           description: >-
             Size of the trailing window, ending today (UTC). Optional;
-            defaults to 30 when omitted. Must be between 1 and 90.
+            defaults to 30 when omitted. Must be between 1 and 90. Not
+            allowed together with startDate/endDate.
+        startDate:
+          type: string
+          description: >-
+            First day of a fixed window (inclusive, UTC): YYYY-MM-DD or a
+            relative date placeholder. Needs endDate.
+          example: "2025-12-01"
+        endDate:
+          type: string
+          description: >-
+            Last day of a fixed window (inclusive, UTC), in the same forms as
+            startDate. Needs startDate. A day after today counts 0.
+          example: "2025-12-31"
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >-
+            How a fixed window's days are grouped into points. Optional;
+            defaults to day. day covers at most 90 days, week (Monday to
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months.
 
     CaseVolumeTrendPoint:
       type: object
@@ -22423,7 +25191,15 @@ components:
         date:
           type: string
           format: date
-          description: UTC calendar day (YYYY-MM-DD).
+          description: >-
+            UTC calendar day (YYYY-MM-DD); for a week or month point, the
+            bucket's first day within the window.
+        endDate:
+          type: string
+          format: date
+          description: >-
+            For a week or month point only: the bucket's last day within the
+            window.
         count:
           type: integer
 
@@ -22438,18 +25214,31 @@ components:
           items:
             $ref: '#/components/schemas/CaseVolumeTrendPoint'
           description: >-
-            One point per day in the requested window, oldest first. A day
-            with no matching cases is still present, with count 0.
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no matching cases is still present,
+            with count 0.
 
     CaseVolumeTrendResponse:
       type: object
       description: >-
-        Day-bucketed case-volume trend: always exactly two series, "Opened"
-        (by created date) and "Closed" (by closed date).
+        Case-volume trend: always exactly two series, "Opened" (by created
+        date) and "Closed" (by closed date).
       properties:
         days:
           type: integer
-          description: The size of the window actually returned.
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
         series:
           type: array
           items:
@@ -22473,13 +25262,18 @@ components:
         count:
           type: integer
           description: Number of matching records whose grouped field falls in this bucket.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on this bucket's time cards, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     AggregateResponse:
       type: object
       description: >-
         The shared result shape for every resource's dedicated aggregate
         endpoint (cases, incidents, problems, change requests, incident
-        tasks). groups holds the top buckets by count, capped at the
+        tasks, time cards, PLG organisations and registrations). groups holds the top buckets by count, capped at the
         request's maxGroups when set; othersCount folds every bucket beyond
         that cap into a single count. totalRecords is the total number of
         records matching the request's filters, and always equals the sum
@@ -22493,6 +25287,16 @@ components:
           type: integer
         totalRecords:
           type: integer
+        othersMinutes:
+          type: integer
+          description: >-
+            The minutes counterpart of othersCount. Set only by
+            POST /time-cards/aggregate.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on every matching time card, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     CaseFeedback:
       type: object
@@ -22716,6 +25520,8 @@ components:
             - announcement
             - engagement
             - case_feedback
+            - plg_organization
+            - plg_registration
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
@@ -22728,7 +25534,11 @@ components:
             by the caller against POST /cases/feedback/aggregate instead;
             there is no server-side resourceType-to-endpoint mapping, the
             caller picks the endpoint from resourceType on its own, same as
-            every other value here.
+            every other value here. plg_organization is PLG organisations,
+            searched with POST /plg/organizations/search, which only PLG
+            users may call. plg_registration is PLG registrations (one per
+            organisation and product), searched with POST
+            /plg/registrations/search, PLG users only as well.
         shape:
           type: string
           enum:
@@ -22947,6 +25757,54 @@ components:
             instead of a donut plus separate legend list. Omitted/false is a
             no-op — this backend only forwards it, exactly like
             inlineDrilldown.
+        days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: >
+            Only meaningful for shape "line": the trailing window, in days
+            ending today, of the Opened/Closed trend. Omitted means 30.
+        series:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [opened, closed]
+          description: >
+            Only meaningful for shape "line": which of its two lines to draw.
+            Omitted draws both, as every line widget did before this field.
+            An empty list, an unknown or repeated value, and the field on any
+            other shape are refused when the definition is loaded.
+        startDate:
+          type: string
+          description: >
+            Only meaningful for shape "line": the first day of a fixed window
+            instead of days's trailing one, e.g. "2025-12-01" for December
+            2025. A plain YYYY-MM-DD date, or a relative date placeholder when
+            endDate is one too. Needs endDate; not with days.
+        endDate:
+          type: string
+          description: >
+            Only meaningful for shape "line": the last day of the fixed
+            window (inclusive), in the same form as startDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >
+            Only meaningful for shape "line" with startDate/endDate: one point
+            per day (the default, at most 90 days), per week (Monday to
+            Sunday, at most 54 weeks) or per month (at most 24 months). Two
+            relative dates must stay within the limit on every day.
+        chart:
+          type: string
+          enum: [line, bar]
+          description: >
+            Only meaningful for shape "line": how its points are drawn. bar
+            draws them as bars (two side by side when both series are
+            shown); line, or the field left out, draws lines. The data and
+            the window are the same either way.
 
     DashboardListItem:
       type: object
@@ -23300,6 +26158,9 @@ components:
           type: string
         severity:
           type: string
+          description: >
+            For a service request this is the internal severity (`critical`, `high`, `medium`
+            or `low`), always present.
           enum:
             - catastrophic
             - critical
@@ -23547,6 +26408,7 @@ components:
           type: string
         description:
           type: string
+          nullable: true
         severity:
           type: string
           enum:
@@ -24722,6 +27584,97 @@ components:
               - cloud_support
               - professional_services
           description: Excludes projects whose subscriptionType matches any of these values.
+        onboardingStartDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding start date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        onboardingStartDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding start date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        goLivePlanDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a planned go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        goLivePlanDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a planned go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        goLiveDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a actual go-live date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        goLiveDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a actual go-live date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        onboardingExpiryDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding expiry date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        onboardingExpiryDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a onboarding expiry date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        productionReadinessCompletionDateFrom:
+          type: string
+          format: date
+          description: >
+            Only projects with a production-readiness completion date on or after this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            after the matching To bound (400). Postgres data sources only.
+        productionReadinessCompletionDateTo:
+          type: string
+          format: date
+          description: >
+            Only projects with a production-readiness completion date on or before this date (yyyy-MM-dd,
+            inclusive); a project with no such date never matches. Must not be
+            before the matching From bound (400). Postgres data sources only.
+        closureStates:
+          type: array
+          items:
+            type: string
+            enum:
+              - Open
+              - Suspended
+              - Restricted
+          description: >
+            Only projects whose overall closure state is any of these values (the
+            include-side counterpart of excludeClosureStates; a project with no
+            recorded closure state matches none). Postgres data sources only.
+        sortBy:
+          type: string
+          enum: [endDate, goLivePlanDate, goLiveDate, onboardingExpiryDate, productionReadinessCompletionDate]
+          description: >
+            Sort field. Projects with no value for it are last. Only endDate is
+            supported on every data source; the others are Postgres only.
+        sortOrder:
+          type: string
+          enum: [asc, desc]
 
     ProjectSearchResponse:
       type: object
@@ -24939,6 +27892,11 @@ components:
             state (event type + action results) written by an existing suspension
             flow in the backing data source. This is opaque JSON passed through
             as-is — its shape is not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: >
+            True when an admin has exempted the project from the automatic Account
+            Closure Process, which then never evaluates it. Always present.
 
     Project:
       description: >
@@ -24978,6 +27936,31 @@ components:
               format: date-time
               nullable: true
               description: End of the project's current renewed period.
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC). Postgres data sources only; null elsewhere.
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC). Postgres data sources only; null elsewhere.
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC). Postgres data sources only; null elsewhere.
             createdOn:
               type: string
               format: date-time
@@ -25099,6 +28082,11 @@ components:
               format: date-time
               nullable: true
               description: The project's onboarding expiry date (midnight UTC).
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC).
 
     ProjectAccountRef:
       type: object
@@ -25131,7 +28119,8 @@ components:
         simple toggles; the closure-state fields track sub-states of an
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
-        onboardingStatus, onboardingOwner and the four onboarding dates
+        suspensionProcessOverridden requires the admin role;
+        onboardingStatus, onboardingOwner and the five onboarding dates
         require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
       properties:
@@ -25183,6 +28172,15 @@ components:
             onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
             applicable to projects sourced from the database; cannot be
             cleared; an invalid date, or dates out of order, is a 400.
+        onboardingProductionReadinessCompletionDate:
+          type: string
+          format: date
+          description: >
+            Sets the date the project's onboarding production-readiness work was
+            completed (YYYY-MM-DD). Requires onboarding_lead or admin -- a 403
+            for a cs_engineer alone. Only applicable to projects sourced from the
+            database; read back as productionReadinessCompletionDate; cannot be
+            cleared; an invalid date, or one earlier than the start date, is a 400.
         hasAgent:
           type: boolean
         hasKbReferences:
@@ -25212,6 +28210,10 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Exempts the project from the automatic Account Closure Process when true; null or omitted leaves it unchanged. Admin only (403 otherwise, even for an explicit null). Postgres data source only."
 
     ProjectUpdateResponse:
       type: object
@@ -25247,6 +28249,9 @@ components:
               type: object
               additionalProperties: true
               nullable: true
+            suspensionProcessOverridden:
+              type: boolean
+              description: Present on Postgres data sources only.
             onboardingStatus:
               type: string
               nullable: true
@@ -25276,6 +28281,11 @@ components:
               format: date-time
               nullable: true
               description: The project's onboarding expiry date (midnight UTC). Present on Postgres data sources only.
+            productionReadinessCompletionDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding production-readiness completion date (midnight UTC). Present on Postgres data sources only.
 
     DeploymentCreatePayload:
       type: object
@@ -26189,53 +29199,6 @@ components:
             - $ref: '#/components/schemas/EntityRef'
           description: The account's assigned SRE (site reliability engineering) team. null when not set.
 
-    AttachmentCreatePayload:
-      type: object
-      required: [referenceId, referenceType, name, type, file]
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-          description: UUID of the reference entity (case, change request, etc.)
-        referenceType:
-          $ref: '#/components/schemas/ReferenceType'
-        name:
-          type: string
-          description: File name including extension.
-        type:
-          type: string
-          description: MIME type of the file (e.g. image/png, application/pdf).
-        file:
-          type: string
-          description: Base64 data URI of the file (e.g. data:image/png;base64,...). Maximum decoded size is 10 MB.
-        description:
-          type: string
-          nullable: true
-
-    AttachmentDetail:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        sizeBytes:
-          type: integer
-        createdOn:
-          type: string
-          format: date-time
-        createdBy:
-          type: string
-        downloadUrl:
-          type: string
-
-    AttachmentCreateResponse:
-      type: object
-      properties:
-        message:
-          type: string
-        attachment:
-          $ref: '#/components/schemas/AttachmentDetail'
-
     Attachment:
       type: object
       properties:
@@ -26279,41 +29242,6 @@ components:
         - deployment
         - incident
 
-    AttachmentUpdatePayload:
-      type: object
-      required: [referenceId, referenceType]
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-          description: UUID of the reference entity (case, change request, etc.)
-        referenceType:
-          $ref: '#/components/schemas/ReferenceType'
-        name:
-          type: string
-          description: New file name. At least one of name or description is required.
-        description:
-          type: string
-          nullable: true
-          description: New description. At least one of name or description is required.
-
-    AttachmentUpdateResponse:
-      type: object
-      properties:
-        message:
-          type: string
-        attachment:
-          type: object
-          properties:
-            id:
-              type: string
-              format: uuid
-            updatedOn:
-              type: string
-              format: date-time
-            updatedBy:
-              type: string
-
     AttachmentSearchPayload:
       type: object
       required: [referenceId, referenceType]
@@ -26347,12 +29275,6 @@ components:
           type: integer
         hasMore:
           type: boolean
-
-    DeleteAttachmentResponse:
-      type: object
-      properties:
-        message:
-          type: string
 
     ProductUpdateLevel:
       type: object
@@ -27329,17 +30251,6 @@ components:
         value:
           type: string
           description: Answer/value for the variable.
-
-    CaseAttachmentPayload:
-      type: object
-      required: [name, file]
-      properties:
-        name:
-          type: string
-          description: File name including extension.
-        file:
-          type: string
-          description: Base64-encoded file content.
 
     CatalogItemRef:
       type: object
@@ -31187,6 +34098,181 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationSearchFilters:
+      type: object
+      description: >-
+        The filters the PLG organisation and registration searches, the
+        registration trend and both PLG aggregates share, passed to
+        entity-service as they are. Every key is optional; lists match any
+        of their values; keys are ANDed.
+      properties:
+        query:
+          type: string
+          description: Matches the organisation name or registered email, ignoring case.
+        organizationName:
+          type: string
+        registeredEmail:
+          type: string
+        productCodes:
+          type: array
+          items:
+            type: string
+        lifecycleStages:
+          type: array
+          items:
+            type: string
+        subscriptionTiers:
+          type: array
+          items:
+            type: string
+        ownerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        unowned:
+          type: boolean
+          nullable: true
+          description: true matches the organisations with no CS owner.
+        ownerEmails:
+          type: array
+          items:
+            type: string
+            maxLength: 254
+          description: >-
+            Matches the organisation's CS owner by email address, any of
+            these, ignoring case; a registration matches by its organisation's
+            owner. entity-service checks each entry (an email address of at
+            most 254 characters). Not with unowned.
+        registeredFrom:
+          type: string
+          format: date-time
+        registeredTo:
+          type: string
+          format: date-time
+        countryNames:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+          description: >-
+            Matches the organisation's country, any of these, ignoring case;
+            a registration matches by its organisation's country.
+            entity-service checks each entry (1 to 100 characters).
+        countryUnknown:
+          type: boolean
+          nullable: true
+          description: true matches the organisations (registrations) with no country. Not with countryNames.
+        playbookTask:
+          type: string
+          description: >-
+            A playbook task's code, the task playbookAnswers and
+            playbookUnanswered match on (and the registration aggregate's
+            playbookAnswer grouping groups by).
+        playbookAnswers:
+          type: array
+          items:
+            type: string
+          description: >-
+            Matches the registrations that answered playbookTask with any of
+            these option codes; an organisation matches when any of its
+            registrations does. Needs playbookTask; not with
+            playbookUnanswered. entity-service checks the codes (1 to 100
+            characters).
+        playbookUnanswered:
+          type: boolean
+          nullable: true
+          description: true matches the registrations with no answer to playbookTask. Needs playbookTask; not with playbookAnswers.
+    PlgAggregateOrganizationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [owner, country]
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: The groups after the first maxGroups are folded into othersCount; 0 or omitted keeps every group.
+    PlgAggregateRegistrationsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        groupBy:
+          type: string
+          enum: [country, playbookAnswer]
+          description: playbookAnswer needs filters.playbookTask.
+        maxGroups:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: As PlgAggregateOrganizationsRequest's maxGroups.
+    PlgRegistrationVolumeTrendRequest:
+      type: object
+      properties:
+        unacknowledgedOnly:
+          type: boolean
+        filters:
+          $ref: "#/components/schemas/PlgOrganizationSearchFilters"
+        days:
+          type: integer
+          description: The trailing days, ending today (UTC), 1 to 90; 30 when no window is given. Not with startDate/endDate.
+        startDate:
+          type: string
+          description: First day of a fixed window, a YYYY-MM-DD date or a relative date placeholder. Needs endDate.
+        endDate:
+          type: string
+          description: Last day of a fixed window, in startDate's forms. Needs startDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: How a fixed window's days are grouped (day at most 90 days, week 54 weeks, month 24 months).
+    PlgRegistrationVolumeTrendResponse:
+      type: object
+      description: >-
+        Registrations per day, week or month: the case trend's window fields
+        and always exactly one series, "Registered" (by registration date).
+      properties:
+        days:
+          type: integer
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlgRegistrationVolumeTrendSeries"
+    PlgRegistrationVolumeTrendSeries:
+      type: object
+      properties:
+        label:
+          type: string
+          description: '"Registered".'
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseVolumeTrendPoint"
+          description: >-
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no registrations is still present,
+            with count 0.
     PlgPatchOrganizationRequest:
       type: object
       required:
@@ -31539,6 +34625,97 @@ components:
           items:
             $ref: '#/components/schemas/Comment'
 
+    SLAReportMetric:
+      type: object
+      description: One clock target for one case type and severity.
+      required: [elapsed, target, met, missed, running]
+      properties:
+        elapsed:
+          type: string
+          description: 95th percentile of the elapsed time of the finished clocks, or "—" when none finished.
+        target:
+          type: string
+          description: The policy duration the clocks run against, or "Not applicable".
+        met:
+          type: integer
+        missed:
+          type: integer
+        running:
+          type: integer
+    SLAReportSummaryRow:
+      type: object
+      required: [label, caseType, severity, cases, response, workaround, resolution]
+      properties:
+        label:
+          type: string
+        caseType:
+          type: string
+          enum: [incident, query]
+        severity:
+          type: string
+        cases:
+          type: integer
+        response:
+          $ref: '#/components/schemas/SLAReportMetric'
+        workaround:
+          $ref: '#/components/schemas/SLAReportMetric'
+        resolution:
+          $ref: '#/components/schemas/SLAReportMetric'
+    SLAReportClock:
+      type: object
+      required: [elapsed, status]
+      properties:
+        elapsed:
+          type: string
+        status:
+          type: string
+          enum: ["", Met, Missed, Running, Paused, Cancelled]
+    SLAReportCase:
+      type: object
+      required: [caseId, caseNumber, caseType, severity, state, openedOn, response, workaround, resolution]
+      properties:
+        caseId:
+          type: string
+        caseNumber:
+          type: string
+        caseType:
+          type: string
+        severity:
+          type: string
+        state:
+          type: string
+        openedOn:
+          type: string
+          format: date-time
+        response:
+          $ref: '#/components/schemas/SLAReportClock'
+        workaround:
+          $ref: '#/components/schemas/SLAReportClock'
+        resolution:
+          $ref: '#/components/schemas/SLAReportClock'
+    SLAReportDetails:
+      type: object
+      required: [projectName, projectKey, periodStart, periodEnd, summary, cases]
+      properties:
+        projectName:
+          type: string
+        projectKey:
+          type: string
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        summary:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAReportSummaryRow'
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLAReportCase'
+
     TimeLogBreakdownDetails:
       type: object
       properties:
@@ -31550,8 +34727,16 @@ components:
           type: string
         remainingQueryHours:
           type: string
+          description: Remaining query hours as "1h 30m"; empty when unknown.
         totalQueryHours:
           type: string
+          description: Total query hours as "1h 30m"; empty when unknown.
+        periodStart:
+          type: string
+          description: Inclusive start (YYYY-MM-DD) of the period used; empty when unbounded.
+        periodEnd:
+          type: string
+          description: Inclusive end (YYYY-MM-DD) of the period used; empty when unbounded.
         cases:
           type: array
           items:
@@ -32323,6 +35508,39 @@ components:
         levelTypes:
           type: array
           items: {$ref: '#/components/schemas/SkillLevelType'}
+    CaseSLAPauseRecalcClock:
+      type: object
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate.
+      properties:
+        target: {type: string, example: RESOLUTION}
+        schedule: {type: string, example: WSO2 Business days}
+        skipped: {type: boolean}
+        skipReason:
+          type: string
+          description: Empty when skipped is false.
+        oldPauseSeconds: {type: integer, format: int64}
+        newPauseSeconds: {type: integer, format: int64}
+        oldBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        newBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        updated: {type: boolean}
+    CaseSLAPauseRecalcResponse:
+      type: object
+      properties:
+        hasHistory:
+          type: boolean
+          description: >-
+            False (clocks always empty) when the case has no state-change
+            activity history at all to replay -- its clocks are left exactly
+            as they are, never guessed at.
+        clocks:
+          type: array
+          items: {$ref: '#/components/schemas/CaseSLAPauseRecalcClock'}
     SkillCategory:
       type: object
       required: [id, name, isLowestCategory]
@@ -32522,3 +35740,44 @@ components:
         total: {type: integer}
         limit: {type: integer}
         offset: {type: integer}
+
+    HolidayAvailability:
+      type: object
+      description: >
+        One CRE team's availability on one public holiday; the entity
+        service's HolidayAvailability, passed through unchanged.
+      required: [teamKey, teamName, date, titles, countries, status, fullyMarked, members, turns, uncovered, canConfirm]
+      properties:
+        teamKey: { type: string }
+        teamName: { type: string }
+        date: { type: string, format: date }
+        titles: { type: array, items: { type: string } }
+        countries: { type: array, items: { type: string } }
+        status: { type: string, enum: [NEEDS_MARKING, AWAITING_CONFIRMATION, CONFIRMED, NEEDS_ATTENTION] }
+        fullyMarked: { type: boolean }
+        members:
+          type: array
+          items:
+            type: object
+            required: [userId, name, status]
+            properties:
+              userId: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: string }
+              status: { type: string, enum: [TAGGED, AVAILABLE, AWAY] }
+              absenceId: { type: string, format: uuid }
+              awayKind: { type: string }
+        turns: { type: integer }
+        uncovered:
+          type: array
+          items:
+            type: object
+            required: [shiftCode, shiftLabel, userId, name]
+            properties:
+              shiftCode: { type: string }
+              shiftLabel: { type: string }
+              userId: { type: string, format: uuid }
+              name: { type: string }
+        confirmedBy: { type: string }
+        confirmedOn: { type: string, format: date-time }
+        canConfirm: { type: boolean }

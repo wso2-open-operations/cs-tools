@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -47,6 +48,15 @@ func (f *fakeOrgPlatformRepo) UpdateNote(context.Context, domain.UpdateNoteReque
 	panic("not reached")
 }
 func (f *fakeOrgPlatformRepo) SearchRegistrations(context.Context, domain.SearchRegistrationsRequest) ([]domain.RegistrationItem, int, error) {
+	panic("not reached")
+}
+func (f *fakeOrgPlatformRepo) RegistrationVolumeTrend(context.Context, domain.SearchRegistrationsRequest, time.Time, time.Time) (map[string]int, error) {
+	panic("not reached")
+}
+func (f *fakeOrgPlatformRepo) AggregateRegistrationsByCountry(context.Context, domain.SearchRegistrationsRequest, int) (domain.AggregateResponse, error) {
+	panic("not reached")
+}
+func (f *fakeOrgPlatformRepo) AggregateRegistrationsByPlaybookAnswer(context.Context, domain.SearchRegistrationsRequest, int) (domain.AggregateResponse, error) {
 	panic("not reached")
 }
 func (f *fakeOrgPlatformRepo) LocatePairing(context.Context, string) (string, string, error) {

@@ -190,3 +190,41 @@ describe("GenericColumnList — column customizer wiring", () => {
     expect(key).not.toContain("dashboard-generic-list:incident:");
   });
 });
+
+describe("GenericColumnList — rows keep the page's own way back", () => {
+  function StateProbe() {
+    const location = useLocation();
+    return <div data-testid="state-probe">{JSON.stringify(location.state)}</div>;
+  }
+
+  it("passes the page's own state as parentState", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[{ pathname: "/dashboard/preview/cases", state: { from: "/dashboard/my/d-1" } }]}>
+          <Routes>
+            <Route
+              path="/dashboard/preview/cases"
+              element={
+                <GenericColumnList
+                  items={[{ id: "case-1", number: "CS0001", subject: "Patch needed", state: "new" }]}
+                  isLoading={false}
+                  resourceType="case"
+                  columns={[{ path: "number", label: "Number" }]}
+                />
+              }
+            />
+            <Route path="/cases/:id" element={<StateProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("CS0001"));
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+        from: "/dashboard/preview/cases",
+        parentState: { from: "/dashboard/my/d-1" },
+      }),
+    );
+  });
+});

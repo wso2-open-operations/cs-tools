@@ -24,6 +24,7 @@ import type {
   BeCaseActivityEntry,
 } from "@api/backend/types";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
+import { CASE_QUERY_STALE_TIME_MS } from "@features/csm-cases/api/caseStreamShared";
 
 /** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const ACTIVITIES_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
@@ -103,6 +104,6 @@ export function useGetCsmCaseActivities(
         .map(auditEntryFromBeActivity);
     },
     enabled: !!caseId,
-    staleTime: 10_000,
+    staleTime: CASE_QUERY_STALE_TIME_MS,
   });
 }

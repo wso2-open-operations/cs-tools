@@ -101,3 +101,55 @@ describe("ChangeSeverityDialog — S0 is reserved for Managed Cloud", () => {
     expect(onChange).toHaveBeenCalledWith("S0");
   });
 });
+
+describe("ChangeSeverityDialog — service request", () => {
+  it("offers S1-S4 only: there is no S0 option at all, even for Managed Cloud", () => {
+    render(
+      <ChangeSeverityDialog
+        currentSeverity="S4"
+        isManagedCloud
+        isServiceRequest
+        isChanging={false}
+        onClose={() => {}}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("radio", { name: /s0/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("radio").map((r) => (r as HTMLInputElement).value)).toEqual([
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+    ]);
+  });
+
+  it("calls onChange with the picked severity", () => {
+    const onChange = vi.fn();
+    render(
+      <ChangeSeverityDialog
+        currentSeverity="S4"
+        isManagedCloud={false}
+        isServiceRequest
+        isChanging={false}
+        onClose={() => {}}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /s1/i }));
+    fireEvent.click(screen.getByRole("button", { name: /change severity/i }));
+    expect(onChange).toHaveBeenCalledWith("S1");
+  });
+
+  it("still offers S0 for a support case", () => {
+    render(
+      <ChangeSeverityDialog
+        currentSeverity="S4"
+        isManagedCloud
+        isChanging={false}
+        onClose={() => {}}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: /s0/i })).toBeInTheDocument();
+  });
+});

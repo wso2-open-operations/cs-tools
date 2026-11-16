@@ -56,7 +56,7 @@ func NewEolProductUsageReportRepository(db *Scoped) EolProductUsageReportReposit
 //     projects are still customers and are listed.
 //   - deployed_product.life_cycle_stage_status is deliberately not used:
 //     every active product listed in a Primary Production deployment is
-//     reported, whatever its ServiceNow lifecycle status says.
+//     reported, whatever the deployed product's lifecycle status says.
 //   - DISTINCT ON (project, product version) lists a version once per
 //     project however many Primary Production deployments run it.
 //   - The CS ABT is the account's CRE team; the account manager and the

@@ -47,7 +47,7 @@ import { usePostComment } from "@features/support/api/usePostComment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
-  ACTION_TO_CASE_STATE_LABEL,
+  resolveActionStateKey,
   getAvailableCaseActions,
   isWithinOpenRelatedCaseWindow,
   toPresentContinuousActionLabel,
@@ -86,21 +86,6 @@ function getActionButtonSx(
     },
     textTransform: "none",
   };
-}
-
-function getStateKeyForAction(
-  actionLabel: string,
-  caseStates?: { id: string; label: string }[],
-): number | undefined {
-  if (!caseStates?.length) return undefined;
-  const stateLabel = ACTION_TO_CASE_STATE_LABEL[actionLabel];
-  if (!stateLabel) return undefined;
-  const entry = caseStates.find(
-    (s) => s.label.toLowerCase() === stateLabel.toLowerCase(),
-  );
-  if (!entry?.id) return undefined;
-  const num = Number(entry.id);
-  return Number.isNaN(num) ? undefined : num;
 }
 
 export default function CaseDetailsActionRow({
@@ -177,7 +162,7 @@ export default function CaseDetailsActionRow({
   // first, then state — never the reverse, so a comment failure can never be
   // masked by an already-applied state flip.
   const handleRejectSolutionConfirm = (reason: string): void => {
-    const stateKey = getStateKeyForAction(REJECT_SOLUTION_LABEL, caseStates);
+    const stateKey = resolveActionStateKey(REJECT_SOLUTION_LABEL, caseStates);
     if (!caseId || stateKey == null) return;
 
     // Comment content is rendered as sanitized HTML, so the reason must be
@@ -252,7 +237,7 @@ export default function CaseDetailsActionRow({
       {(canManageCase ? CASE_STATUS_ACTIONS : []).filter((action) =>
         availableActions.includes(action.label),
       ).map(({ label, Icon, paletteIntent }) => {
-        const stateKey = getStateKeyForAction(label, caseStates);
+        const stateKey = resolveActionStateKey(label, caseStates);
         const isOpenRelatedCase = label === "Open Related Case";
         const isRejectSolution = label === REJECT_SOLUTION_LABEL;
         const canPatch = !isOpenRelatedCase && stateKey != null && !!caseId;

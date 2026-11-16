@@ -42,7 +42,13 @@ vi.mock("@config/apiConfig", () => ({
 // per-test via `beforeEach` so one test's captures can't leak into another.
 let capturedTileProps: Record<
   string,
-  { filters: unknown; onExpandChange: unknown; renderCount: number; dense?: boolean }
+  {
+    filters: unknown;
+    onExpandChange: unknown;
+    renderCount: number;
+    dense?: boolean;
+    line?: { days?: number; series?: unknown; startDate?: string; endDate?: string; bucket?: string; chart?: string };
+  }
 > = {};
 
 // Stubs the real tile out entirely — this test is only about
@@ -62,6 +68,12 @@ vi.mock("@features/csm-dashboard/components/DashboardWidgetTile", () => ({
     onExpandChange,
     filters,
     dense,
+    days,
+    series,
+    startDate,
+    endDate,
+    bucket,
+    chart,
   }: {
     widgetId: string;
     hideRefreshButton?: boolean;
@@ -69,12 +81,19 @@ vi.mock("@features/csm-dashboard/components/DashboardWidgetTile", () => ({
     onExpandChange?: (slice: PieSliceResult | null) => void;
     filters?: unknown;
     dense?: boolean;
+    days?: number;
+    series?: unknown;
+    startDate?: string;
+    endDate?: string;
+    bucket?: string;
+    chart?: string;
   }) => {
     const previous = capturedTileProps[widgetId];
     capturedTileProps[widgetId] = {
       filters,
       onExpandChange,
       dense,
+      line: { days, series, startDate, endDate, bucket, chart },
       renderCount: (previous?.renderCount ?? 0) + 1,
     };
     return (
@@ -197,6 +216,28 @@ describe("DashboardWidgetGrid", () => {
     expect(
       screen.getByRole("button", { name: "Refresh no_action_widget" }),
     ).toBeInTheDocument();
+  });
+
+  it("passes a line widget's window, series and chart on to its tile", () => {
+    renderGrid([
+      makeWidget({
+        widgetId: "per_month_bars",
+        shape: "line",
+        series: ["opened"],
+        startDate: "__startOfYear:0__",
+        endDate: "__today__",
+        bucket: "month",
+        chart: "bar",
+      }),
+    ]);
+    expect(capturedTileProps.per_month_bars?.line).toEqual({
+      days: undefined,
+      series: ["opened"],
+      startDate: "__startOfYear:0__",
+      endDate: "__today__",
+      bucket: "month",
+      chart: "bar",
+    });
   });
 
   it("renders a section's widgets in the config's own array order, not grouped/reordered by shape", () => {

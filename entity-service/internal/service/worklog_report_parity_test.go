@@ -38,6 +38,12 @@ type fakeWorklogRepo struct {
 	roster []repository.WorklogRosterRow
 	times  []repository.WorklogTimeRow
 	leave  []repository.WorklogLeaveRow
+	moves  []repository.WorklogMoveRow
+}
+
+// MoveSpans returns the fake's move spans, whatever the range.
+func (f *fakeWorklogRepo) MoveSpans(context.Context, time.Time, time.Time) ([]repository.WorklogMoveRow, error) {
+	return f.moves, nil
 }
 
 func (f *fakeWorklogRepo) Roster(context.Context, []string, []string) ([]repository.WorklogRosterRow, error) {
@@ -454,5 +460,122 @@ func TestWorklogWeeklyByTypeEqualsTotal(t *testing.T) {
 	}
 	if issues != r.Totals.Issues {
 		t.Errorf("byType issues = %d, total issues = %d, want them equal (one day per item)", issues, r.Totals.Issues)
+	}
+}
+
+// MOVED MEMBERS. A Team Schedule move keeps the person a member of their
+// own team, so the report files them under the team the move names.
+
+// move builds a move span onto team (an empty to is open-ended).
+func move(user, team, teamType, from, to string) repository.WorklogMoveRow {
+	m := repository.WorklogMoveRow{UserID: user, TeamKey: team, TeamName: team, TeamType: teamType,
+		StartsOn: wd(from)}
+	if to != "" {
+		m.EndsOn = wd(to)
+	}
+	return m
+}
+
+// teamOf returns the one team section a developer is listed under, and fails
+// the test when they are under none or more than one.
+func teamOf(t *testing.T, r domain.WorklogReport, id string) string {
+	t.Helper()
+	var found []string
+	for _, tr := range r.Teams {
+		for _, d := range tr.Developers {
+			if d.Email == id+"@example.com" {
+				found = append(found, tr.TeamKey)
+			}
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("%s is under %v, want exactly one team", id, found)
+	}
+	return found[0]
+}
+
+// The daily report lists a member under the team a move covering its day
+// names, with their hours; somebody with no move stays where they are.
+func TestWorklogDailyFilesMovedMemberUnderTheMoveTeam(t *testing.T) {
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "vega"), person("u2", "vega")},
+		times:  []repository.WorklogTimeRow{card("u1", "A-1", "2026-10-28", "APPROVED", "S4", 60)},
+		moves:  []repository.WorklogMoveRow{move("u1", "americas", "cre-abt", "2026-10-26", "2026-11-06")},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
+	if got := teamOf(t, r, "u1"); got != "americas" {
+		t.Errorf("moved member under %q, want americas", got)
+	}
+	if got := teamOf(t, r, "u2"); got != "vega" {
+		t.Errorf("member with no move under %q, want vega", got)
+	}
+	if d, _ := dev(r, "u1"); d.TotalHours != 1 {
+		t.Errorf("moved member's hours = %v, want 1 (their time moves with them)", d.TotalHours)
+	}
+}
+
+// A move that has not started by the report day leaves the home team.
+func TestWorklogDailyKeepsHomeTeamOutsideTheMoveSpan(t *testing.T) {
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "vega")},
+		moves:  []repository.WorklogMoveRow{move("u1", "americas", "cre-abt", "2026-10-29", "")},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
+	if got := teamOf(t, r, "u1"); got != "vega" {
+		t.Errorf("span starting the next day moved them to %q, want vega", got)
+	}
+}
+
+// The weekly report moves a member only when the move covers more than half
+// of the week's weekdays: 3 of 5 moves them, 2 of 5 does not.
+func TestWorklogWeeklyMovesOnAMajorityOfWeekdays(t *testing.T) {
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "vega"), person("u2", "vega")},
+		moves: []repository.WorklogMoveRow{
+			move("u1", "migrations", "cre", "2026-10-28", ""),           // Wed-Fri: 3 of 5
+			move("u2", "migrations", "cre", "2026-10-29", "2026-11-01"), // Thu-Fri: 2 of 5
+		},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceWeekly, "2026-10-26", "2026-11-01")
+	if got := teamOf(t, r, "u1"); got != "migrations" {
+		t.Errorf("3 of 5 weekdays moved: under %q, want migrations", got)
+	}
+	if got := teamOf(t, r, "u2"); got != "vega" {
+		t.Errorf("2 of 5 weekdays moved: under %q, want vega", got)
+	}
+}
+
+// A move to a team of another type, or to an excluded team, is ignored.
+func TestWorklogIgnoresMoveToTeamOutsideTheScope(t *testing.T) {
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "vega"), person("u2", "vega")},
+		moves: []repository.WorklogMoveRow{
+			move("u1", "saas_night", "sre", "2026-10-26", ""),
+			move("u2", "hidden", "cre-abt", "2026-10-26", ""),
+		},
+	}
+	svc := service.NewWorklogReportService(repo, []string{"cre-abt", "cre"}, []string{"hidden"})
+	r, err := svc.BuildReport(context.Background(), domain.WorklogReportRequest{
+		Cadence: domain.WorklogReportCadenceDaily, From: wd("2026-10-28"), To: wd("2026-10-28")})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if got := teamOf(t, r, "u1"); got != "vega" {
+		t.Errorf("move to an SRE team: under %q, want vega", got)
+	}
+	if got := teamOf(t, r, "u2"); got != "vega" {
+		t.Errorf("move to an excluded team: under %q, want vega", got)
+	}
+}
+
+// A move span never adds somebody who is not on the roster.
+func TestWorklogMoveNeverAddsSomebodyOffTheRoster(t *testing.T) {
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "vega")},
+		moves:  []repository.WorklogMoveRow{move("u9", "americas", "cre-abt", "2026-10-26", "")},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
+	if _, ok := dev(r, "u9"); ok {
+		t.Error("a move span added somebody who is not on the roster")
 	}
 }

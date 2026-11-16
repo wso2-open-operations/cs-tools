@@ -75,14 +75,6 @@ vi.mock("@features/support/hooks/useResolvedInlineImageHtml", () => ({
   }),
 }));
 
-vi.mock("@api/useGetAttachmentContent", () => ({
-  useGetAttachmentContent: () => ({
-    data: undefined,
-    isLoading: false,
-    isError: false,
-  }),
-}));
-
 vi.mock("@utils/useDarkMode", () => ({
   useDarkMode: () => false,
 }));

@@ -18,14 +18,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { useDeleteDeploymentAttachment } from "@features/csm-projects/api/useDeleteDeploymentAttachment";
-import type { BackendApi } from "@api/backend/client";
 
-const delMock = vi.fn();
+const deleteMock = vi.fn();
 
-vi.mock("@api/backend/client", () => ({
-  useBackendApi: (): Partial<BackendApi> => ({ del: delMock }),
+vi.mock("@api/backend/client", () => ({ useBackendApi: () => ({}) }));
+vi.mock("@features/csm-cases/api/entityAttachments", () => ({
+  deleteEntityAttachment: (...args: unknown[]) => deleteMock(...args),
+  entityAttachmentErrorMessage: (err: unknown, fallback: string) =>
+    err instanceof Error ? err.message : fallback,
 }));
+
+import { useDeleteDeploymentAttachment } from "@features/csm-projects/api/useDeleteDeploymentAttachment";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -33,13 +36,23 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("useDeleteDeploymentAttachment", () => {
-  it("DELETEs by attachment id", async () => {
-    delMock.mockResolvedValue({ message: "ok" });
+  it("deletes the attachment by id as a deployment attachment", async () => {
+    deleteMock.mockResolvedValue(undefined);
     const { result } = renderHook(() => useDeleteDeploymentAttachment(), { wrapper });
 
     result.current.mutate({ deploymentId: "dep-1", attachmentId: "att-1" });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(delMock).toHaveBeenCalledWith("/attachments/att-1");
+    expect(deleteMock).toHaveBeenCalledWith(expect.anything(), { type: "deployment", id: "att-1" });
+  });
+
+  it("fails with the backend's message", async () => {
+    deleteMock.mockRejectedValue(new Error("Only the person who uploaded an attachment can delete it."));
+    const { result } = renderHook(() => useDeleteDeploymentAttachment(), { wrapper });
+
+    result.current.mutate({ deploymentId: "dep-1", attachmentId: "att-1" });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Only the person who uploaded an attachment can delete it.");
   });
 });

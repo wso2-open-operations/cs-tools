@@ -1903,6 +1903,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /alert-mute-rules/active:
+    get:
+      summary: List the alert mute rules muting SRE alerts right now.
+      description: >
+        Returns every alert mute rule that has not been ended early and whose
+        window contains the current time (startOn <= now < endOn). An alert
+        matching every condition of any of them is muted by
+        sre-alert-core-service. Alert mute rules are created and managed in the
+        CSM Portal. Postgres-backed, so it works over this service's M2M
+        identity.
+      operationId: listActiveAlertMuteRules
+      responses:
+        "200":
+          description: The active alert mute rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListActiveAlertMuteRulesResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream reported an authentication failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     oauth2ClientCredentials:
@@ -2327,6 +2376,66 @@ components:
           type: string
           nullable: true
 
+    AlertMuteRuleCondition:
+      type: object
+      required: [field, value]
+      properties:
+        field:
+          type: string
+          enum: [service, environment, source, metric_name, severity, category, unique_identifier]
+        value:
+          type: string
+    AlertMuteRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: AMR0000001
+        name:
+          type: string
+        description:
+          type: string
+        timeZone:
+          type: string
+          description: IANA zone the times were entered in.
+        startOn:
+          type: string
+          format: date-time
+        endOn:
+          type: string
+          format: date-time
+        conditions:
+          type: array
+          description: An alert matches when every condition matches its field of the same name.
+          items:
+            $ref: '#/components/schemas/AlertMuteRuleCondition'
+        createdBy:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+          format: date-time
+        endedBy:
+          type: string
+          nullable: true
+        endedOn:
+          type: string
+          format: date-time
+          nullable: true
+    ListActiveAlertMuteRulesResponse:
+      type: object
+      properties:
+        alertMuteRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertMuteRule'
     ErrorResponse:
       type: object
       properties:
@@ -2487,6 +2596,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only here: it is set in the entity service database or by the data sync."
 
     ProjectSearchPayload:
       type: object

@@ -85,6 +85,82 @@ func TestCreateTimeCard(t *testing.T) {
 	})
 }
 
+// TestAggregateTimeCards: the totals route forwards the body and passes the
+// response through, refuses an unauthenticated request or malformed JSON
+// without an upstream call, and maps upstream errors.
+func TestAggregateTimeCards(t *testing.T) {
+	t.Run("rejects unauthenticated requests", func(t *testing.T) {
+		called := false
+		h := NewTimeCardHandler(&mockEntityTimeCardClient{
+			aggregateTimeCardsFn: func(context.Context, []byte) ([]byte, error) { called = true; return nil, nil },
+		})
+		r := httptest.NewRequest(http.MethodPost, "/time-cards/aggregate", strings.NewReader(`{"groupBy":"user"}`))
+		w := httptest.NewRecorder()
+		h.AggregateTimeCards(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		if called {
+			t.Error("the entity service was called for an unauthenticated request")
+		}
+	})
+
+	t.Run("rejects malformed JSON", func(t *testing.T) {
+		called := false
+		h := NewTimeCardHandler(&mockEntityTimeCardClient{
+			aggregateTimeCardsFn: func(context.Context, []byte) ([]byte, error) { called = true; return nil, nil },
+		})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/time-cards/aggregate", strings.NewReader(`{bad`)))
+		w := httptest.NewRecorder()
+		h.AggregateTimeCards(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		if called {
+			t.Error("the entity service was called with malformed JSON")
+		}
+	})
+
+	t.Run("forwards the body and passes the response through", func(t *testing.T) {
+		const req = `{"groupBy":"day","filters":{"startDate":"2026-03-01","endDate":"2026-03-02"}}`
+		const resp = `{"groups":[{"key":"2026-03-01","label":"2026-03-01","count":2,"totalMinutes":90},` +
+			`{"key":"2026-03-02","label":"2026-03-02","count":0,"totalMinutes":0}],` +
+			`"othersCount":0,"totalRecords":2,"othersMinutes":0,"totalMinutes":90}`
+		var captured []byte
+		h := NewTimeCardHandler(&mockEntityTimeCardClient{
+			aggregateTimeCardsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				captured = body
+				return []byte(resp), nil
+			},
+		})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/time-cards/aggregate", strings.NewReader(req)))
+		w := httptest.NewRecorder()
+		h.AggregateTimeCards(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(captured) != req {
+			t.Errorf("upstream received body %q, want %q", captured, req)
+		}
+		if got := w.Body.String(); got != resp {
+			t.Errorf("response body = %s, want it unchanged: %s", got, resp)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to aggregate time cards.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				h := NewTimeCardHandler(&mockEntityTimeCardClient{
+					aggregateTimeCardsFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				})
+				r := withUser(httptest.NewRequest(http.MethodPost, "/time-cards/aggregate", strings.NewReader(`{"groupBy":"user"}`)))
+				w := httptest.NewRecorder()
+				h.AggregateTimeCards(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}
+
 func TestUpdateTimeCard(t *testing.T) {
 	t.Run("rejects unauthenticated requests", func(t *testing.T) {
 		h := NewTimeCardHandler(&mockEntityTimeCardClient{})

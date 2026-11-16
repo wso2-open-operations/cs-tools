@@ -43,7 +43,7 @@ func TestDecodeRequestWithLimit_OversizedTrailingData(t *testing.T) {
 	var dst struct {
 		X string `json:"x"`
 	}
-	ok := decodeRequestWithLimit(rec, req, &dst, limit, attachmentTooLargeMsg)
+	ok := decodeRequestWithLimit(rec, req, &dst, limit, caseTooLargeMsg)
 
 	if ok {
 		t.Fatal("expected decodeRequestWithLimit to return false for oversized trailing data")
@@ -57,8 +57,8 @@ func TestDecodeRequestWithLimit_OversizedTrailingData(t *testing.T) {
 	if rec.Code != 400 {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), attachmentTooLargeMsg) {
-		t.Errorf("response body = %q, want it to contain the size-limit message %q", rec.Body.String(), attachmentTooLargeMsg)
+	if !strings.Contains(rec.Body.String(), caseTooLargeMsg) {
+		t.Errorf("response body = %q, want it to contain the size-limit message %q", rec.Body.String(), caseTooLargeMsg)
 	}
 	if strings.Contains(rec.Body.String(), "must contain a single JSON object") {
 		t.Errorf("response body = %q, should not fall back to the generic trailing-data message for a size-limit case", rec.Body.String())

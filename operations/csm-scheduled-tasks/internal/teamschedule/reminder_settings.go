@@ -48,6 +48,10 @@ type ReminderSettings struct {
 	CopyTo          []string        `json:"copyTo"`
 	// WeekendCopyTo is copied on the weekend summary email only.
 	WeekendCopyTo []string `json:"weekendCopyTo"`
+	// InviteCopyTo is copied on the emails that carry a calendar invitation
+	// or its cancellation, and on no other. Absent from an older
+	// entity-service, which reads as none.
+	InviteCopyTo []string `json:"inviteCopyTo"`
 }
 
 // ReminderSettingsFor is the family's saved reminder settings, or nil when

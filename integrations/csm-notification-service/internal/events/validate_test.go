@@ -18,6 +18,7 @@ package events
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -34,16 +35,18 @@ func TestValidate_Valid(t *testing.T) {
 	}{
 		"case.created": {"CASE-1", TypeCaseCreated, `{"reporterName":"n","projectName":"p","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"d","recipients":["r@x.com"]}`},
 		"case.created omits priority (e.g. security_report_analysis, which has no severity)": {"CASE-1", TypeCaseCreated, `{"reporterName":"n","projectName":"p","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseType":"SECURITY_REPORT_ANALYSIS","createdAt":"2026-01-01","description":"d","recipients":["r@x.com"]}`},
-		"case.comment_added":                    {"CASE-1", TypeCommentAdded, `{"name":"n","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseComment":"c","commentId":"C-1","recipients":["r@x.com"]}`},
-		"case.status_changed":                   {"CASE-1", TypeStatusChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","newStatus":"Open","recipients":["r@x.com"]}`},
-		"case.assigned":                         {"CASE-1", TypeCaseAssigned, `{"assigneeName":"n","assigneeEmail":"e@x.com","projectId":"PROJ-1","caseId":"CASE-1","recipients":["r@x.com"]}`},
-		"case.acknowledged":                     {"CASE-1", TypeCaseAcknowledged, `{"caseId":"CASE-1","acknowledgerName":"n"}`},
-		"case.severity_changed":                 {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
-		"case.workaround_provided":              {"CASE-1", TypeWorkaroundProvided, `{"caseId":"CASE-1"}`},
-		"incident.created":                      {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down","callTo":"+15551234567"}`},
-		"incident.created omits product/callTo": {"INC-1", TypeIncidentCreated, `{"title":"P1 outage","shortDescription":"Everything is down"}`},
-		"incident.acknowledged":                 {"INC-1", TypeIncidentAcknowledged, `{"previousState":"NEW","newState":"IN_PROGRESS"}`},
-		"incident.priority_elevated":            {"INC-1", TypeIncidentPriorityElevated, `{"oldPriority":"MODERATE","newPriority":"HIGH","title":"Gateway 500s"}`},
+		"case.comment_added":                   {"CASE-1", TypeCommentAdded, `{"name":"n","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseComment":"c","commentId":"C-1","recipients":["r@x.com"]}`},
+		"case.status_changed":                  {"CASE-1", TypeStatusChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","newStatus":"Open","recipients":["r@x.com"]}`},
+		"case.assigned":                        {"CASE-1", TypeCaseAssigned, `{"assigneeName":"n","assigneeEmail":"e@x.com","projectId":"PROJ-1","caseId":"CASE-1","recipients":["r@x.com"]}`},
+		"case.acknowledged":                    {"CASE-1", TypeCaseAcknowledged, `{"caseId":"CASE-1","acknowledgerName":"n"}`},
+		"case.severity_changed":                {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
+		"case.severity_changed with changedAt": {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"],"changedAt":"2026-11-03T08:17:55.1Z"}`},
+		"case.comment_added with createdOn and an unchecked role": {"CASE-1", TypeCommentAdded, `{"name":"n","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"t","caseComment":"c","commentId":"C-1","recipients":["r@x.com"],"supportEngineerUnknown":true,"createdOn":"2026-11-03T08:20:15.6Z"}`},
+		"case.workaround_provided":                                {"CASE-1", TypeWorkaroundProvided, `{"caseId":"CASE-1"}`},
+		"incident.created":                                        {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down","callTo":"+15551234567"}`},
+		"incident.created omits product/callTo":                   {"INC-1", TypeIncidentCreated, `{"title":"P1 outage","shortDescription":"Everything is down"}`},
+		"incident.acknowledged":                                   {"INC-1", TypeIncidentAcknowledged, `{"previousState":"NEW","newState":"IN_PROGRESS"}`},
+		"incident.priority_elevated":                              {"INC-1", TypeIncidentPriorityElevated, `{"oldPriority":"MODERATE","newPriority":"HIGH","title":"Gateway 500s"}`},
 		// entity-service builds title from a nilable ServiceNow field, so it
 		// can genuinely publish this. It must not be rejected: an invalid
 		// payload is retried, dead-lettered and dropped.
@@ -345,6 +348,52 @@ func TestValidate_MailAlertReceived(t *testing.T) {
 	} {
 		if err := Validate(c.entityID, TypeMailAlertReceived, rawJSON(t, c.payload)); err == nil {
 			t.Errorf("%s: Validate() error = nil, want an error", name)
+		}
+	}
+}
+
+// The cloud slug is checked for shape only: which slugs exist is
+// configuration, enforced where the post is made.
+func TestValidate_OutageStatusPageDue_CloudSlug(t *testing.T) {
+	build := func(cloud string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{
+			"webhookId": "W-1", "claimToken": "T-1", "outageId": "O-1", "cloud": cloud,
+			"event": "outage_begin", "timestamp": "2026-10-09T06:54:00.000Z",
+		})
+		return b
+	}
+	cases := []struct {
+		name    string
+		cloud   string
+		wantErr bool
+	}{
+		{"existing asgardeo", "asgardeo", false},
+		{"existing choreo", "choreo", false},
+		{"existing bijira", "bijira", false},
+		{"existing devant", "devant", false},
+		{"existing moesif", "moesif", false},
+		{"existing choreo-eu", "choreo-eu", false},
+		{"existing agent-manager", "agent-manager", false},
+		{"new fictional slug", "acme-cloud", false},
+		{"digits", "cloud2-eu1", false},
+		{"max length", strings.Repeat("a", 40), false},
+		{"empty", "", true},
+		{"uppercase", "Acme-Cloud", true},
+		{"underscore", "acme_cloud", true},
+		{"leading hyphen", "-acme", true},
+		{"trailing hyphen", "acme-", true},
+		{"double hyphen", "acme--cloud", true},
+		{"too long", strings.Repeat("a", 41), true},
+		{"path-ish", "acme/../cloud", true},
+		{"slash", "acme/cloud", true},
+		{"dot", "acme.cloud", true},
+		{"space", "acme cloud", true},
+		{"query", "acme?x=1", true},
+	}
+	for _, c := range cases {
+		err := Validate("O-1", TypeOutageStatusPageDue, build(c.cloud))
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err = %v, wantErr %v", c.name, err, c.wantErr)
 		}
 	}
 }

@@ -66,8 +66,23 @@ vi.mock("@features/csm-custom-dashboards/api/useDashboardTeamShares", () => ({
   usePutCustomDashboardTeamShare: () => ({ mutateAsync: shareTeamMock, isPending: false }),
   useDeleteCustomDashboardTeamShare: () => ({ mutateAsync: unshareTeamMock, isPending: false, variables: undefined }),
 }));
+let linkState: { data?: unknown; isLoading?: boolean; isError?: boolean };
+const linkIds: (string | undefined)[] = [];
+vi.mock("@features/csm-custom-dashboards/api/useDashboardLink", () => ({
+  useGetCustomDashboardLink: (id: string | undefined) => {
+    linkIds.push(id);
+    return linkState;
+  },
+}));
 vi.mock("@features/csm-dashboard/api/useTeams", () => ({
   useTeams: () => teamsState,
+}));
+// The link part has its own tests (DashboardLinkSection.test.tsx); here only
+// that the dialog shows it for this dashboard.
+vi.mock("@features/csm-custom-dashboards/components/DashboardLinkSection", () => ({
+  default: ({ dashboardId }: { dashboardId: string | undefined }) => (
+    <div data-testid="link-section">{dashboardId ?? "closed"}</div>
+  ),
 }));
 
 import { BackendApiError } from "@api/backend/client";
@@ -126,6 +141,8 @@ describe("ShareCustomDashboardDialog", () => {
     unshareMock.mockReset();
     teamsState = { data: TEAMS };
     teamSharesState = { data: [] };
+    linkState = { data: { enabled: false, openedBy: 0 } };
+    linkIds.length = 0;
     shareTeamMock.mockReset();
     unshareTeamMock.mockReset();
   });
@@ -299,6 +316,69 @@ describe("ShareCustomDashboardDialog", () => {
       teamSharesState = { data: [{ team: { key: "rigel", name: "Rigel", family: "cre-abt" }, sharedOn: "a" }] };
       renderDialog();
       expect(screen.queryByText("Not shared with anyone yet.")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the link in Shared with", () => {
+    it("lists anyone with the link while it is on, and does not say nobody has it", () => {
+      linkState = { data: { enabled: true, linkId: "5e636a12-0000-4000-8000-0000000000cc", openedBy: 0 } };
+      renderDialog();
+      expect(linkIds).toContain(DASHBOARD.id);
+      const shared = screen.getByLabelText("Shared with");
+      expect(within(shared).getByText("Anyone with CSM Portal Viewer access")).toBeInTheDocument();
+      expect(within(shared).queryByText("Not shared with anyone yet.")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Anyone" }));
+      expect(within(screen.getByLabelText("Shared with")).getByText("Anyone with CSM Portal Viewer access")).toBeInTheDocument();
+    });
+
+    it("leaves it out while the link is off", () => {
+      renderDialog();
+      expect(screen.queryByText("Anyone with CSM Portal Viewer access")).not.toBeInTheDocument();
+      expect(screen.getByText("Not shared with anyone yet.")).toBeInTheDocument();
+    });
+
+    it("lists it before teams and people", () => {
+      linkState = { data: { enabled: true, linkId: "5e636a12-0000-4000-8000-0000000000cc", openedBy: 2 } };
+      teamSharesState = { data: [{ team: { key: "rigel", name: "Rigel", family: "cre-abt" }, sharedOn: "a" }] };
+      renderDialog();
+      const text = screen.getByLabelText("Shared with").textContent ?? "";
+      expect(text.indexOf("Anyone with CSM Portal Viewer access")).toBeLessThan(text.indexOf("Rigel"));
+    });
+
+    it("does not claim nobody has it when the link could not be read", () => {
+      linkState = { isError: true };
+      renderDialog();
+      expect(screen.queryByText("Not shared with anyone yet.")).not.toBeInTheDocument();
+      expect(screen.getByText("Could not load whether the link is on.")).toBeInTheDocument();
+    });
+
+    it("waits for the link before saying nobody has it", () => {
+      linkState = { isLoading: true };
+      renderDialog();
+      expect(screen.queryByText("Not shared with anyone yet.")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Anyone tab", () => {
+    it("is not shown until the tab is chosen", () => {
+      renderDialog();
+      expect(screen.queryByTestId("link-section")).not.toBeInTheDocument();
+    });
+
+    it("shows the link part for this dashboard in place of the search", () => {
+      renderDialog();
+      fireEvent.click(screen.getByRole("button", { name: "Anyone" }));
+      expect(screen.getByTestId("link-section")).toHaveTextContent(DASHBOARD.id);
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("People to share with")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Shared with")).toBeInTheDocument();
+    });
+
+    it("goes back to People when the dialog is closed", () => {
+      renderDialog();
+      fireEvent.click(screen.getByRole("button", { name: "Anyone" }));
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(screen.getByRole("button", { name: "People" })).toHaveAttribute("aria-pressed", "true");
     });
   });
 });

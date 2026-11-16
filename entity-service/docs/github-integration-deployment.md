@@ -46,7 +46,7 @@ an error, which is the single most confusing failure mode here.
 | `GITHUB_WEBHOOK_SECRET` | yes | `openssl rand -hex 32`. This *is* the endpoint's authentication. The same value goes in every repository's webhook settings. |
 | `GITHUB_TOKEN` | yes* | Needs **`repo` scope** — outbound calls `POST /repos/{owner}/{repo}/dispatches`, and inbound reads each repository's mapping file (fine-grained: **Contents: read**). |
 | `GITHUB_REPO_TOKENS` | yes* | Secret. JSON `{"owner/repository":"<PAT>"}` (or `"owner"` for all of an owner's repositories): each repository's own token, as ServiceNow kept a credential per repository. A fine-grained PAT reaches one owner's repositories only. Unlisted repositories use `GITHUB_TOKEN`. *One of the two is required. A repository with no token fails loudly; before this, a repository the single token could not see answered 404, read as "no config file", and its issues were skipped as unmapped. Malformed refuses to start. |
-| `GITHUB_SR_SERVICENOW_FIRST` | dual-write | `true`: a new SR is created in ServiceNow first through the ServiceNow integration service's `POST /github-cases` (ServiceNow's GitHub case API, as the integration service's M2M user; no credential here) and takes ServiceNow's **CS number and WSO2 Case ID** (`<KEY>-<n>`), as a portal SR does. Issue edits (`PATCH /github-cases`) and comments (`POST /comments`) reach ServiceNow; our SR automation runs and its acknowledgement reaches the case too. Needs the integration service with `/github-cases` deployed first, and `snBasicAuthConfig` set there. Default off: Postgres only, `SR-GH-`/`WSO2-GH-`. A repository mapped without a project keeps the GitHub series. |
+| `GITHUB_SR_SERVICENOW_FIRST` | dual-write | `true`: a new SR is created in ServiceNow first through the ServiceNow integration service's `POST /github-cases` (ServiceNow's GitHub case API, as the integration service's M2M user; no credential here) and takes ServiceNow's **CS number and WSO2 Case ID** (`<KEY>-<n>`), as a portal SR does. Issue edits (`PATCH /github-cases`) and comments (`POST /comments`) reach ServiceNow; our SR automation runs and its acknowledgement reaches the case too. Needs the integration service with `/github-cases` deployed first, and `snBasicAuthConfig` set there. Default off: Postgres only, numbered as a portal SR is (CS number, `<KEY>-<n>` id from the project's counter). A repository mapped without a project keeps the `SR-GH-`/`WSO2-GH-` series, since there is no project key to build the id from. |
 | `GITHUB_REPO_CONFIG_PATH` | no | The mapping file in each repository, default **`.github/servicenow-config.yml`** (§6). |
 | `GITHUB_INTEGRATION_LOGIN` | yes | The login this service raises issues under, from a case. **Not** `github-actions[bot]` — see §3. |
 | `CSM_PORTAL_BASE_URL` | yes | **Must be the Postgres-backed portal.** Every outbound comment embeds a link built from this; a host backed by another database cannot resolve the record id. |
@@ -79,7 +79,7 @@ without it will pass validation and create nothing.
 
 ## 4. Migrations
 
-Apply `0108`–`0115` in order. Then verify the objects exist — applying
+Apply `0108`–`0115` in order, and make sure `0180` (native number series) is applied too: a project-bound record takes its functions. Then verify the objects exist — applying
 cleanly says nothing about what a migration contained:
 
 ```sql
@@ -92,11 +92,17 @@ SELECT 1 FROM information_schema.columns
 SELECT indexname FROM pg_indexes
  WHERE indexname IN ('work_item_repo_github_issue_uniq', 'work_item_account_github_issue_uniq');
 
--- numbering for issue-raised records (0113)
+-- numbering for issue-raised records (0113): the GitHub series is now only the
+-- fallback for a repository with no project; a project-bound record takes
+-- next_work_item_number('SERVICE_REQUEST') and next_wso2_id(project)
 SELECT proname FROM pg_proc WHERE proname LIKE 'next_github_service_request%';
 --   next_github_service_request_number     -> SR-GH-000001
 --   next_github_service_request_wso2_id    -> WSO2-GH-000001  (required by
 --                                             work_item_wso2_id_required_by_type)
+
+-- project-bound records (0180): the work item number and the project's WSO2 id
+SELECT proname FROM pg_proc
+ WHERE proname IN ('next_work_item_number', 'next_wso2_id');
 
 SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%github%';
 --   change_request_github_outbound          CR state and planned dates
@@ -159,6 +165,20 @@ delivery (cached five minutes); a repository without the file falls back to
    - Secret: the `GITHUB_WEBHOOK_SECRET` value
    - Events: **Issues** and **Issue comments** only
 5. Set `account.cre_team_id` if these records should carry an ABT team (§9).
+6. Optional, organisation repositories only: severity sync. Install
+   `csm_severity_sync.yml` to keep the issue's **Priority** issue field and the
+   service request's internal **severity** in step (Urgent S1, High S2,
+   Medium S3, Low S4). It needs:
+   - the organisation's issue fields enabled, with a single-select field named
+     `Priority` (personal-account repositories have no issue fields);
+   - secrets `CSM_CLIENT_ID` and `CSM_CLIENT_SECRET`: an M2M client listed in
+     `M2M_CLIENT_IDS`;
+   - variables `CSM_TOKEN_URL` and `CSM_API_URL` (entity-service base URL), and
+     optionally `CSM_PRIORITY_FIELD_ID` when the workflow token cannot list
+     the organisation's issue fields.
+
+   The severity is internal: anyone who can read the repository sees it on the
+   issue. Install it only where that is acceptable.
 
 The gateway must forward the body **byte for byte**. The signature covers the raw
 bytes, so any re-serialisation invalidates it and every delivery 401s.
@@ -187,7 +207,7 @@ before:
    then creation on the workflow's `labeled` event:
    ```
    event=issues skipped="issue has not passed template validation yet"
-   github: service request created from issue number=SR-GH-0000NN
+   github: service request created from issue number=CS0000NNN
    ```
 4. Confirm the record carries its number, `wso2_id`, account and template fields,
    and that the "Created in CSM" comment reached the issue.
@@ -245,7 +265,7 @@ Against a real repository and database, with GitHub delivering over a webhook:
 
 | | |
 |---|---|
-| issue → service request | 17 template fields, correct account and catalog, `SR-GH-` and `WSO2-GH-` numbering |
+| issue → service request | 17 template fields, correct account and catalog, CS number and `<KEY>-<n>` id (`SR-GH-`/`WSO2-GH-` only for a repository with no project) |
 | validation gate | `opened` skipped; the workflow's `labeled` event creates |
 | creation announced on the issue | number, portal link, catalog/priority/environment |
 | GitHub comment → CSM | relayed once, marked `(GitHub Comment)` |
@@ -256,6 +276,12 @@ Against a real repository and database, with GitHub delivering over a webhook:
 ## Change log
 
 Keep this list current — it is how the next deploy knows what changed.
+
+- **2026-11-06** - Severity sync with the issue's Priority field: migration 0277
+  dispatches `csm-severity-update` when a service request's severity is set or
+  changes, `PUT /github/service-requests/{owner}/{repository}/{issueNumber}/severity`
+  takes the field's changes, and a new service request starts from the
+  template's Priority dropdown instead of S4.
 
 - **2026-10-12** — ServiceNow-first SRs under dual-write
   (`GITHUB_SR_SERVICENOW_FIRST`): an issue's SR is created through the integration

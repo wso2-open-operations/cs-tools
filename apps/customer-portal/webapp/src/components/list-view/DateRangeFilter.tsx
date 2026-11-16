@@ -15,15 +15,14 @@
 // under the License.
 
 import type { JSX } from "react";
-import { Box, Typography } from "@wso2/oxygen-ui";
-import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
-import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { Box, Typography, DatePickers, AdapterDateFns } from "@wso2/oxygen-ui";
 import { useControlledDatePickerValue, isPastOrPresentDate } from "@hooks/useControlledDatePickerValue";
 import {
   toUtcStartOfDay,
   toUtcEndOfDay,
 } from "@features/support/utils/support";
+
+const { LocalizationProvider, DatePicker } = DatePickers;
 
 function parseUtcIso(value: string | undefined): Date | null {
   if (!value) return null;

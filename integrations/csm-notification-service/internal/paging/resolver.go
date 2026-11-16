@@ -349,6 +349,11 @@ type Recipient struct {
 	// [LEVEL_n][ERROR][NO_NUMBER][email] and carries on — a missing number
 	// must never abort a level.
 	Phone string
+	// PhoneRejected is why a person with no Phone cannot be called, when it is
+	// more than "none on file": PhoneInvalidFormat for a number dropped as not
+	// E.164, PhoneNotAllowed for one the safety list refused. The work note
+	// reports it; the number itself is never kept.
+	PhoneRejected string
 	// ShiftCode is the rota window that put this person on the hook, as the
 	// schedule names it: CRE_EVENING, CRE_AMERICAS, CRE_WEEKEND_NIGHT.
 	//
@@ -357,6 +362,26 @@ type Recipient struct {
 	// other rung, and empty for every resolver that answers from
 	// configuration rather than from the schedule.
 	ShiftCode string
+}
+
+// Why a recipient with no Phone cannot be called; the codes the work note prints.
+const (
+	PhoneNoNumber      = "NO_NUMBER"
+	PhoneInvalidFormat = "INVALID_PHONE_FORMAT"
+	PhoneNotAllowed    = "NUMBER_NOT_ALLOWED"
+)
+
+// phoneProblem is the reason code for a recipient who cannot be dialled.
+func (r Recipient) phoneProblem() string {
+	if r.PhoneRejected != "" {
+		return r.PhoneRejected
+	}
+	return PhoneNoNumber
+}
+
+// isPhoneProblem reports whether reason is one of the phoneProblem codes.
+func isPhoneProblem(reason string) bool {
+	return reason == PhoneNoNumber || reason == PhoneInvalidFormat || reason == PhoneNotAllowed
 }
 
 // Resolver turns a level plus routing context into the people to contact.

@@ -40,6 +40,23 @@ event backbone), see the
 
 This service stores nothing itself; all data lives behind the entity service.
 
+### Two APIs
+
+`.choreo/component.yaml` declares two endpoints on the same port, and Choreo publishes
+each as its own API from the contract it names:
+
+| API | Contract | Operations |
+|---|---|---|
+| CSM Integration Service API | `openapi.yaml` | every operation below |
+| CSM Cloud Status API | `cloud-status.openapi.yaml` | `GET /health` and the five `GET /cloud-status/*` reads |
+
+A subscription admits an application to every operation of its API. A consumer that
+needs only the cloud status reads, such as a status page, subscribes to the CSM Cloud
+Status API, which serves only the public status data the status pages already show. The
+main API keeps the same reads for its existing consumers. A new endpoint's API is
+published in Choreo (Manage > Lifecycle > Publish) before applications can subscribe to
+it.
+
 ### Authentication model
 
 - **Inbound: no authentication in the application.** The gateway is the trust boundary,
@@ -120,8 +137,9 @@ csm-integration-service/
 │                               #   it_services, alert_incident_mappings, opportunities,
 │                               #   invoices, project_opportunity_links, vulnerabilities,
 │                               #   cloud_status) plus response.go (shared helpers)
-├── .choreo/component.yaml      # Deployment descriptor (port 8080, serves openapi.yaml)
-├── openapi.yaml                # Published API contract
+├── .choreo/component.yaml      # Deployment descriptor (port 8080, two endpoints)
+├── openapi.yaml                # Published contract of the main API
+├── cloud-status.openapi.yaml   # Published contract of the cloud status API (copied reads)
 ├── Makefile
 └── .env.example
 ```
@@ -208,6 +226,7 @@ suppressing it. `#nosec` annotations in the code each carry a justification.
    `uuidRe` and `maxRequestBodyBytes` from `response.go`.
 3. Register the route in `cmd/server/main.go`.
 4. Document it in `openapi.yaml` (this file is the published contract; keep it in step).
+   A new or changed cloud status read is copied into `cloud-status.openapi.yaml` too.
 5. Add handler tests, including an upstream-error case.
 6. Before exposing an operation that needs an end-user identity upstream, remember this
    service cannot supply one (see [Authentication model](#authentication-model)).
@@ -242,7 +261,9 @@ Notes:
 
 ## API endpoints
 
-The authoritative contract is `openapi.yaml`. Routes registered in `cmd/server/main.go`:
+The authoritative contract is `openapi.yaml`; the CSM Cloud Status API's,
+`cloud-status.openapi.yaml`, holds Health and Cloud status only. Routes registered in
+`cmd/server/main.go`:
 
 | Area | Routes |
 |---|---|

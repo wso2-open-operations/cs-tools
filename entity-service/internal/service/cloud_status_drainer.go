@@ -149,6 +149,13 @@ func outageIDOf(c repository.OutboxChange) string {
 // published has its reservation released at once -- nothing was sent -- so the
 // scheduled task posts it on its next tick.
 func (s *cloudStatusService) publishDue(ctx context.Context, due []reservedWebhook) {
+	catalog, err := s.registry.Catalog(ctx)
+	if err != nil {
+		// Nothing can be routed; the reservations run out and the scheduled
+		// task picks the rows up.
+		slog.ErrorContext(ctx, "cloudstatus: cloud registry unavailable; not publishing", "err", err)
+		return
+	}
 	for _, r := range due {
 		w, err := s.repo.PendingByID(ctx, r.id)
 		if err != nil {
@@ -159,7 +166,7 @@ func (s *cloudStatusService) publishDue(ctx context.Context, due []reservedWebho
 		if w == nil {
 			continue
 		}
-		slug, wire := domain.CloudOfferingSlug(w.Cloud), w.Event.WireValue()
+		slug, wire := catalog.SlugForOffering(w.Cloud), w.Event.WireValue()
 		if slug == "" || wire == "" {
 			// Cannot happen for a row recorded through process, which checks
 			// the slug. Released, so the scheduled task closes it visibly.

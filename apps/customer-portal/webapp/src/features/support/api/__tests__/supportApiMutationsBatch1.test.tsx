@@ -18,11 +18,8 @@ import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
 import { usePatchCallRequest } from "@features/support/api/usePatchCallRequest";
 import { usePatchCase } from "@features/support/api/usePatchCase";
-import { usePatchCaseAttachment } from "@features/support/api/usePatchCaseAttachment";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { usePostCaseClassifications } from "@features/support/api/usePostCaseClassifications";
 import { usePostComment } from "@features/support/api/usePostComment";
 import { usePostConversationMessages } from "@features/support/api/usePostConversationMessages";
@@ -68,18 +65,6 @@ describe("support API mutation hooks - batch 1", () => {
     } as Response);
   });
 
-  it("useDeleteAttachment should call DELETE attachment endpoint", async () => {
-    const queryClient = new QueryClient();
-    const { result } = renderHook(() => useDeleteAttachment(), {
-      wrapper: getWrapper(queryClient),
-    });
-
-    await result.current.mutateAsync({ attachmentId: "att-1", caseId: "case-1" });
-    expect(mockAuthFetch).toHaveBeenCalledWith("https://api.test/attachments/att-1", {
-      method: "DELETE",
-    });
-  });
-
   it("usePatchCallRequest should send PATCH payload", async () => {
     const queryClient = new QueryClient();
     const { result } = renderHook(
@@ -111,39 +96,6 @@ describe("support API mutation hooks - batch 1", () => {
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/cases/case-1",
       expect.objectContaining({ method: "PATCH" }),
-    );
-  });
-
-  it("usePatchCaseAttachment should PATCH attachment details", async () => {
-    const queryClient = new QueryClient();
-    const { result } = renderHook(() => usePatchCaseAttachment(), {
-      wrapper: getWrapper(queryClient),
-    });
-
-    await result.current.mutateAsync({
-      caseId: "case-1",
-      attachmentId: "att-1",
-      body: { name: "new.txt" },
-    });
-    expect(mockAuthFetch).toHaveBeenCalledWith(
-      "https://api.test/cases/case-1/attachments/att-1",
-      expect.objectContaining({ method: "PATCH" }),
-    );
-  });
-
-  it("usePostAttachments should POST upload payload", async () => {
-    const queryClient = new QueryClient();
-    const { result } = renderHook(() => usePostAttachments(), {
-      wrapper: getWrapper(queryClient),
-    });
-
-    await result.current.mutateAsync({
-      caseId: "case-1",
-      body: { name: "a.txt", type: "text/plain", content: "abc" },
-    });
-    expect(mockAuthFetch).toHaveBeenCalledWith(
-      "https://api.test/cases/case-1/attachments",
-      expect.objectContaining({ method: "POST" }),
     );
   });
 

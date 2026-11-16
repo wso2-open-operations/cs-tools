@@ -18,6 +18,7 @@ package dto
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -245,7 +246,7 @@ func BuildEntitySearchCasesRequest(projectID string, req CaseSearchRequest) enti
 
 	filters = append(filters, entity.CaseFieldFilter{Field: "projectId", Op: "in", Values: []string{projectID}})
 	addIn("type", req.Filters.CaseTypes)
-	addIn("state", caseIDsToEnums(req.Filters.StatusIDs, caseStateIDToEnum))
+	addIn("state", caseIDsToEnums(expandInProgressStateIDs(req.Filters.StatusIDs), caseStateIDToEnum))
 	addIn("severity", caseIDsToEnums(req.Filters.SeverityIDs, caseSeverityIDToEnum))
 	addIn("issueType", caseIDsToEnums(req.Filters.IssueIDs, caseIssueTypeIDToEnum))
 	addIn("engagementType", caseIDsToEnums(req.Filters.EngagementTypeKeys, caseEngagementTypeIDToEnum))
@@ -480,15 +481,6 @@ func deployedProductRefToIDLabel(r *entity.DeployedProductRef) *IDLabelRef {
 	return &IDLabelRef{ID: r.ID, Label: r.DisplayName}
 }
 
-// CaseCreateAttachment is one file attached at case-creation time, matching
-// the frontend's CreateCaseRequest.attachments entry ({file, name}) — the
-// same shape as entity.CaseAttachment, kept as its own type only for this
-// package's "always mirror the frontend's own type name" convention.
-type CaseCreateAttachment struct {
-	Name string `json:"name"`
-	File string `json:"file"`
-}
-
 // CreateCaseRequest is the portal's request body for POST /cases — shaped to
 // match the frontend's own CreateCaseRequest type
 // (apps/customer-portal/webapp/src/features/support/types/cases.ts)
@@ -502,21 +494,25 @@ type CaseCreateAttachment struct {
 // CaseCreatePayload contract (modules/entity/types.bal), so that flow works
 // unmodified if the frontend adds it later.
 type CreateCaseRequest struct {
-	Title             string                 `json:"title"`
-	Type              string                 `json:"type,omitempty"`
-	ProjectID         string                 `json:"projectId"`
-	DeploymentID      string                 `json:"deploymentId"`
-	DeployedProductID string                 `json:"deployedProductId,omitempty"`
-	Description       string                 `json:"description"`
-	SeverityKey       *int                   `json:"severityKey,omitempty"`
-	IssueTypeKey      *int                   `json:"issueTypeKey,omitempty"`
-	CatalogID         string                 `json:"catalogId,omitempty"`
-	CatalogItemID     string                 `json:"catalogItemId,omitempty"`
-	Variables         []entity.Variable      `json:"variables,omitempty"`
-	RelatedCaseID     string                 `json:"relatedCaseId,omitempty"`
-	ConversationID    string                 `json:"conversationId,omitempty"`
-	WatchList         []string               `json:"watchList,omitempty"`
-	Attachments       []CaseCreateAttachment `json:"attachments,omitempty"`
+	Title             string            `json:"title"`
+	Type              string            `json:"type,omitempty"`
+	ProjectID         string            `json:"projectId"`
+	DeploymentID      string            `json:"deploymentId"`
+	DeployedProductID string            `json:"deployedProductId,omitempty"`
+	Description       string            `json:"description"`
+	SeverityKey       *int              `json:"severityKey,omitempty"`
+	IssueTypeKey      *int              `json:"issueTypeKey,omitempty"`
+	CatalogID         string            `json:"catalogId,omitempty"`
+	CatalogItemID     string            `json:"catalogItemId,omitempty"`
+	Variables         []entity.Variable `json:"variables,omitempty"`
+	RelatedCaseID     string            `json:"relatedCaseId,omitempty"`
+	ConversationID    string            `json:"conversationId,omitempty"`
+	WatchList         []string          `json:"watchList,omitempty"`
+	// AttachmentIDs are files already uploaded as drafts of ProjectID (POST
+	// /attachments/upload with type work_item and projectId). A security report
+	// is created with them, because it must never exist without its report file;
+	// entity-service checks them and links them to the new case.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }
 
 // BuildEntityCreateCaseRequest translates the portal's request into
@@ -531,10 +527,6 @@ func BuildEntityCreateCaseRequest(req CreateCaseRequest) entity.CreateCaseReques
 	}
 	if req.IssueTypeKey != nil {
 		issueType = caseIssueTypeIDToEnum[strconv.Itoa(*req.IssueTypeKey)]
-	}
-	attachments := make([]entity.CaseAttachment, 0, len(req.Attachments))
-	for _, a := range req.Attachments {
-		attachments = append(attachments, entity.CaseAttachment{Name: a.Name, File: a.File})
 	}
 	return entity.CreateCaseRequest{
 		Type:              req.Type,
@@ -551,7 +543,7 @@ func BuildEntityCreateCaseRequest(req CreateCaseRequest) entity.CreateCaseReques
 		RelatedCaseID:     req.RelatedCaseID,
 		ConversationID:    req.ConversationID,
 		WatchList:         req.WatchList,
-		Attachments:       attachments,
+		AttachmentIDs:     req.AttachmentIDs,
 	}
 }
 
@@ -784,12 +776,26 @@ func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseAc
 		if len(a.Changes) > 0 {
 			changes = make([]CaseFieldChange, 0, len(a.Changes))
 			for _, c := range a.Changes {
-				changes = append(changes, CaseFieldChange{
+				change := CaseFieldChange{
 					Field:         c.Field,
 					FieldLabel:    c.FieldLabel,
 					PreviousValue: c.PreviousValue,
 					NewValue:      c.NewValue,
-				})
+				}
+				if strings.EqualFold(c.Field, "state") {
+					change.PreviousValue = inProgressStateText(change.PreviousValue)
+					change.NewValue = inProgressStateText(change.NewValue)
+					// Moving between Work In Progress and Waiting On WSO2 is
+					// invisible to the customer, so there is nothing to show.
+					if change.PreviousValue == change.NewValue {
+						continue
+					}
+				}
+				changes = append(changes, change)
+			}
+			// Every change was such a move: the whole entry is noise.
+			if len(changes) == 0 && a.Type == entity.ActivityTypeFieldChange {
+				continue
 			}
 		}
 

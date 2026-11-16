@@ -29,7 +29,8 @@ import (
 )
 
 // CS report reads the project, the cases opened in the range, and the
-// project's deployments. SLA clocks are not read: those rows are not populated in Postgres yet.
+// project's deployments. SLA clocks are not read here: the SLA report is its own
+// read (GetSLAReport in reports_sla.go).
 
 type entitySearchDeploymentsReportRequest struct {
 	Pagination entityPagination `json:"pagination"`

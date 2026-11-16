@@ -29,13 +29,12 @@ import (
 // test only needs to override the field(s) under test.
 func baseValidConfig() Config {
 	return Config{
-		DataSource:           DataSourcePostgres,
-		SLADataSource:        SLADataSourcePostgres,
-		UsageReadMode:        UsageReadModePostgres,
-		AttachmentDataSource: AttachmentDataSourcePostgres,
-		DBUser:               "user",
-		DBPassword:           "password",
-		DBName:               "db",
+		DataSource:    DataSourcePostgres,
+		SLADataSource: SLADataSourcePostgres,
+		UsageReadMode: UsageReadModePostgres,
+		DBUser:        "user",
+		DBPassword:    "password",
+		DBName:        "db",
 		// Both ports carry their real defaults: Load always populates them,
 		// and Validate rejects the two being equal — which a zero-value
 		// Config would be.
@@ -395,7 +394,6 @@ func baseValidServiceNowConfig() Config {
 		DataSource:                               DataSourceServiceNow,
 		SLADataSource:                            SLADataSourcePostgres,
 		UsageReadMode:                            UsageReadModePostgres,
-		AttachmentDataSource:                     AttachmentDataSourcePostgres,
 		ServiceNowIntegrationServiceBaseURL:      "https://example.com",
 		ServiceNowIntegrationServiceTokenURL:     "https://example.com/token",
 		ServiceNowIntegrationServiceClientID:     "client-id",
@@ -1423,6 +1421,87 @@ func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
 	}
 }
 
+func TestLoad_AttachmentSizeLimits(t *testing.T) {
+	keys := []string{
+		"ATTACHMENT_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_MB",
+		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES",
+	}
+	clear := func() {
+		for _, k := range keys {
+			t.Setenv(k, "")
+		}
+	}
+	got := func() [2]int64 {
+		c := Load()
+		return [2]int64{c.AttachmentMaxBytes, c.InlineImagesTotalMaxBytes}
+	}
+
+	clear()
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("defaults = %v, want 10 / 1 MiB", g)
+	}
+
+	// The megabyte settings: a whole number or a decimal.
+	t.Setenv("ATTACHMENT_MAX_MB", "50")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0.5")
+	if g := got(); g != [2]int64{50 << 20, 1 << 19} {
+		t.Errorf("MB settings = %v, want 50 MiB / 512 KiB", g)
+	}
+
+	// The older bytes settings still work when the MB one is unset...
+	clear()
+	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "2097152")
+	if g := got(); g != [2]int64{52428800, 2097152} {
+		t.Errorf("bytes fallback = %v", g)
+	}
+	// ...and the MB one wins when both are set.
+	t.Setenv("ATTACHMENT_MAX_MB", "10")
+	if g := got(); g[0] != 10<<20 {
+		t.Errorf("ATTACHMENT_MAX_MB did not win over ATTACHMENT_MAX_BYTES: %d", g[0])
+	}
+
+	// A MB setting that is set but invalid gives the default, even when the
+	// older bytes setting is also set: the bytes one is read only when the MB
+	// one is unset.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "lots")
+	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "1048576")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
+	}
+
+	// Above the ceiling (100 MB file, 25 MB images) is as unusable as a typo:
+	// the default is used. The ceiling itself is accepted.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "100.5")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "26")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("above the ceiling = %v, want the defaults", g)
+	}
+	t.Setenv("ATTACHMENT_MAX_MB", "100")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "25")
+	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
+		t.Errorf("at the ceiling = %v, want 100 / 25 MiB", g)
+	}
+	clear()
+	t.Setenv("ATTACHMENT_MAX_BYTES", "209715200")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "52428800")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("bytes above the ceiling = %v, want the defaults", g)
+	}
+
+	// A typo costs the override, not the service.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "lots")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "-5")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("bad values did not fall back to the defaults: %v", g)
+	}
+}
+
 // TestLoad_LongOpenCasesReportSets pins the long-open cases report's two
 // filter sets: the defaults, comma-list trimming with blanks dropped, and a
 // blank value falling back to the default rather than emptying the set.
@@ -1451,5 +1530,97 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " , ,")
 	if got := Load().LongOpenCasesReportProjectTypes; len(got) != 5 {
 		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
+	}
+}
+
+// TestLoad_OpenBeforeYesterdayReportSets pins the open-before-yesterday
+// variant's two project type sets: the defaults, trimming, and a blank value
+// falling back to the default.
+func TestLoad_OpenBeforeYesterdayReportSets(t *testing.T) {
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", "")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", " , ")
+	c := Load()
+	if want := []string{"Subscription", "Managed Cloud Subscription"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("default project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"Cloud Support"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("default product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", " A , ,B")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", "C")
+	c = Load()
+	if want := []string{"A", "B"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"C"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+}
+
+// TestConfig_Validate_ServiceRequestDefaultSeverity: unset means S4 and is
+// valid; S1-S4 (any case, surrounding space ignored) are valid; anything else,
+// S0 included, refuses to start.
+func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
+	for _, v := range []string{"", "S1", "s2", " S3 ", "S4"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		if err := c.Validate(); err != nil {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: unexpected error %v", v, err)
+		}
+	}
+	for _, v := range []string{"S0", "S5", "critical", "4", "S"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "SERVICE_REQUEST_DEFAULT_SEVERITY") {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: error = %v, want one naming the variable", v, err)
+		}
+	}
+	if got, _ := NormalizeServiceRequestSeverity(""); got != "S4" {
+		t.Errorf("unset normalizes to %q, want S4", got)
+	}
+	if got, _ := NormalizeServiceRequestSeverity(" s2 "); got != "S2" {
+		t.Errorf("\" s2 \" normalizes to %q, want S2", got)
+	}
+}
+
+// TestConfig_Validate_PublicHolidaySourcesAllOrNothing checks that the holiday
+// calendar and HR entity connections each validate only when all four settings
+// are given or none are.
+func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
+	type set struct{ base, token, id, secret string }
+	cases := []struct {
+		name     string
+		calendar set
+		hr       set
+		wantErr  bool
+	}{
+		{name: "none set"},
+		{name: "calendar only, complete", calendar: set{"b", "t", "c", "s"}},
+		{name: "hr only, complete", hr: set{"b", "t", "c", "s"}},
+		{name: "both complete", calendar: set{"b", "t", "c", "s"}, hr: set{"b", "t", "c", "s"}},
+		{name: "calendar missing secret", calendar: set{"b", "t", "c", ""}, wantErr: true},
+		{name: "hr only base URL", hr: set{base: "b"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.HolidayCalendarBaseURL, c.HolidayCalendarTokenURL = tc.calendar.base, tc.calendar.token
+			c.HolidayCalendarClientID, c.HolidayCalendarClientSecret = tc.calendar.id, tc.calendar.secret
+			c.HREntityBaseURL, c.HREntityTokenURL = tc.hr.base, tc.hr.token
+			c.HREntityClientID, c.HREntityClientSecret = tc.hr.id, tc.hr.secret
+			err := c.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() = %v, wantErr %v", err, tc.wantErr)
+			}
+			if !tc.wantErr {
+				if got := c.HolidayCalendarConfigured(); got != (tc.calendar.secret != "") {
+					t.Errorf("HolidayCalendarConfigured() = %v", got)
+				}
+				if got := c.HREntityConfigured(); got != (tc.hr.secret != "") {
+					t.Errorf("HREntityConfigured() = %v", got)
+				}
+			}
+		})
 	}
 }

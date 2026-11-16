@@ -254,5 +254,13 @@ export function uiAttachmentFromBe(att: BeAttachment): CaseAttachment {
     uploadedByEmail: att.createdBy?.email || undefined,
     uploadedByUser: userReferenceFromBe(att.createdBy),
     uploadedAt: att.createdOn,
+    ...(att.status === "deleted"
+      ? {
+          deletedAt: att.deletedOn || att.createdOn,
+          deletedBy: att.deletedBy?.name?.trim() || att.deletedBy?.email?.trim() || "Unknown",
+          deletedByEmail: att.deletedBy?.email || undefined,
+          deletedByUser: userReferenceFromBe(att.deletedBy),
+        }
+      : {}),
   };
 }

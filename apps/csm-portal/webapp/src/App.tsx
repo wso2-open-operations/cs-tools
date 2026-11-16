@@ -68,6 +68,7 @@ import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
 import CsmDashboardsLayout from "@features/csm-dashboard/pages/CsmDashboardsLayout";
 import MyDashboardsPage from "@features/csm-custom-dashboards/pages/MyDashboardsPage";
 import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDashboardsPage";
+import OpenDashboardLinkPage from "@features/csm-custom-dashboards/pages/OpenDashboardLinkPage";
 import GenerateDashboardPage from "@features/csm-custom-dashboards/pages/GenerateDashboardPage";
 import EditCustomDashboardPage from "@features/csm-custom-dashboards/pages/EditCustomDashboardPage";
 import CsMonitorDashboardPage from "@features/csm-dashboard/pages/CsMonitorDashboardPage";
@@ -82,6 +83,8 @@ import ProblemDetailPage from "@features/csm-operations/pages/ProblemDetailPage"
 import IncidentTaskDetailPage from "@features/csm-operations/pages/IncidentTaskDetailPage";
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
 import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
+import AlertMuteRuleFormPage from "@features/csm-operations/pages/AlertMuteRuleFormPage";
+import AlertMuteRuleDetailPage from "@features/csm-operations/pages/AlertMuteRuleDetailPage";
 import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
 import StandardChangeTemplateDetailPage from "@features/csm-operations/pages/StandardChangeTemplateDetailPage";
 import StandardChangeProposalPage from "@features/csm-operations/pages/StandardChangeProposalPage";
@@ -143,7 +146,7 @@ import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 // deleted); routing/audience-gating for each is isSplAudience, except Usage
 // Metrics (canViewUsageMetrics) and Customer Health (canViewCustomerHealth) —
 // see each flag's own doc comment.
-import SlaReportUpcomingPage from "@features/csm-reports/pages/SlaReportUpcomingPage";
+import SlaReportPage from "@features/csm-reports/pages/SlaReportPage";
 import TimelogsReportPage from "@features/csm-reports/pages/TimelogsReportPage";
 import UsageMetricsPage from "@features/csm-usage-metrics/pages/UsageMetricsPage";
 import CustomerHealthDashboardPage from "@features/csm-customer-health/pages/CustomerHealthDashboardPage";
@@ -263,6 +266,8 @@ function LegacySettingsRedirect({ to }: { to: string }): JSX.Element {
   return <Navigate to={to} state={state} replace />;
 }
 
+/** The app's root: signals the boot loading screen once React has mounted,
+ * then renders the providers and every route. */
 export default function App(): JSX.Element {
   // Signals the index.html boot loading screen that React has mounted and
   // taken over rendering, so it can remove itself. Not gated on auth/data —
@@ -499,6 +504,9 @@ export default function App(): JSX.Element {
                     <Route path="dashboard/my/:dashboardId" element={<MyDashboardsPage />} />
                     <Route path="dashboard/shared" element={<SharedDashboardsPage />} />
                     <Route path="dashboard/shared/:dashboardId" element={<SharedDashboardsPage />} />
+                    {/* A dashboard's link (DASHBOARD_LINK_PATH): opens it and
+                        replaces itself with the dashboard. */}
+                    <Route path="dashboard/shared/link/:linkId" element={<OpenDashboardLinkPage />} />
                   </Route>
                   {/* Generating a dashboard is its own page, outside the tab
                       strip (its Back button goes first); static "new"
@@ -595,6 +603,23 @@ export default function App(): JSX.Element {
                       element={<CaseDetailRouteSync kind="incident" paramName="id" />}
                     />
                     <Route path="incident-tasks/:id" element={<IncidentTaskDetailPage />} />
+                    <Route
+                      path="alert-mute-rules/new"
+                      element={
+                        <RequireWriteAccess to="/operations/alert-mute-rules">
+                          <AlertMuteRuleFormPage />
+                        </RequireWriteAccess>
+                      }
+                    />
+                    <Route path="alert-mute-rules/:id" element={<AlertMuteRuleDetailPage />} />
+                    <Route
+                      path="alert-mute-rules/:id/edit"
+                      element={
+                        <RequireWriteAccess to="/operations/alert-mute-rules">
+                          <AlertMuteRuleFormPage />
+                        </RequireWriteAccess>
+                      }
+                    />
                     <Route
                       path="problems/new"
                       element={
@@ -728,12 +753,10 @@ export default function App(): JSX.Element {
                     element={<CustomerHealthDetailPage />}
                   />
 
-                  {/* Project reports, launched from a project's own detail page.
-                      The SLA button on that page stays disabled; this route is
-                      the page a direct visit lands on. */}
+                  {/* Project reports, launched from a project's own detail page. */}
                   <Route
                     path="customers/projects/:projectId/sla-report/:sysId"
-                    element={<SlaReportUpcomingPage />}
+                    element={<SlaReportPage />}
                   />
                   <Route
                     path="customers/projects/:projectId/timelogs-report"

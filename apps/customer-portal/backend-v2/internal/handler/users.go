@@ -45,7 +45,7 @@ type entityUserClient interface {
 // scimUserClient abstracts the SCIM operations used by UserHandler.
 type scimUserClient interface {
 	SearchUser(ctx context.Context, email string) (*scim.UserInfo, error)
-	UpdateUserPhone(ctx context.Context, userID, mobile string) (*string, error)
+	UpdateUserPhone(ctx context.Context, userID, email, mobile string) (*string, error)
 }
 
 // UserHandler handles HTTP requests for the logged-in user's own profile.
@@ -217,7 +217,7 @@ func (h *UserHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	entityReq := entity.PatchUserMeRequest{TimeZone: payload.TimeZone}
 
 	if payload.PhoneNumber != nil {
-		updatedPhone, err := h.scim.UpdateUserPhone(r.Context(), user.UserID, *payload.PhoneNumber)
+		updatedPhone, err := h.scim.UpdateUserPhone(r.Context(), user.UserID, user.Email, *payload.PhoneNumber)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "scim UpdateUserPhone failed", "userID", user.UserID, "err", summarizeErr(err))
 			mapUpstreamError(w, err, "Failed to update phone number.")

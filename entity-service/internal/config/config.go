@@ -41,6 +41,24 @@ const (
 	DefaultUpstreamClientTimeout = 60 * time.Second
 )
 
+// DefaultServiceRequestSeverity is the severity a new service request gets when
+// the request names none and SERVICE_REQUEST_DEFAULT_SEVERITY is not set.
+const DefaultServiceRequestSeverity = "S4"
+
+// NormalizeServiceRequestSeverity returns raw as one of "S1".."S4" (trimmed and
+// upper-cased), DefaultServiceRequestSeverity when raw is empty, and an error
+// for anything else. S0 is rejected: a service request never carries it.
+func NormalizeServiceRequestSeverity(raw string) (string, error) {
+	v := strings.ToUpper(strings.TrimSpace(raw))
+	switch v {
+	case "":
+		return DefaultServiceRequestSeverity, nil
+	case "S1", "S2", "S3", "S4":
+		return v, nil
+	}
+	return "", fmt.Errorf("%q must be one of S1, S2, S3, S4 (or unset for S4)", raw)
+}
+
 // DataSource identifies which backend the service reads from.
 type DataSource string
 
@@ -114,36 +132,6 @@ const (
 	// SLADataSourceServiceNow reads SLA data live from the ServiceNow
 	// integration service instead.
 	SLADataSourceServiceNow SLADataSource = "servicenow"
-)
-
-// AttachmentDataSource identifies which backend three case attachment reads
-// (GET /attachments/{id}, POST /attachments/search, GET
-// /attachments/{id}/content) and the case activity feed (POST
-// /cases/{id}/activities/search) use. GetAttachmentByID (GET
-// /attachments/{id}) is included even though it is metadata, not content:
-// backend-v2's content-download route resolves an attachment's owning case
-// through it first, purely for its own authorization check, before ever
-// calling the content route -- leaving it on DataSource would silently
-// reintroduce a 404 in front of the content route this flag exists to fix.
-// It does NOT affect PATCH/DELETE /attachments/{id}, POST /attachments, or
-// POST /attachments/{id}/confirm -- those always follow DataSource, because
-// the ServiceNow-backed implementation this switches to is read-only and
-// cannot serve those writes. Independent of DataSource and SLADataSource,
-// same reasoning as SLADataSource: a deployment can run DataSource=postgres
-// for every other entity while pointing these three attachment reads and the
-// activity feed specifically at ServiceNow. This is a stopgap for while
-// Postgres-synced attachment content and activity history aren't reliable
-// yet, meant to go away once that migration lands -- see routes.go for the
-// wiring.
-type AttachmentDataSource string
-
-const (
-	// AttachmentDataSourcePostgres reads case attachments and the activity
-	// feed from this service's own Postgres tables. The default.
-	AttachmentDataSourcePostgres AttachmentDataSource = "postgres"
-	// AttachmentDataSourceServiceNow reads case attachments and the activity
-	// feed live from the ServiceNow integration service instead.
-	AttachmentDataSourceServiceNow AttachmentDataSource = "servicenow"
 )
 
 // Config holds all environment-driven settings for the service.
@@ -226,11 +214,6 @@ type Config struct {
 	// usage/metrics reads under DATA_SOURCE=postgres-servicenow-dual-write.
 	// Defaults to "postgres" -- see UsageReadMode's own doc comment.
 	UsageReadMode UsageReadMode
-	// AttachmentDataSource controls which backend two case attachment reads
-	// and the activity feed use, independent of DataSource and
-	// SLADataSource. Defaults to "postgres" -- see AttachmentDataSource's
-	// own doc comment.
-	AttachmentDataSource AttachmentDataSource
 	// CSMSLAEngineEnabled gates this service's own in-process SLA clock
 	// engine (internal/service/sla_engine_service.go, source='CSM' "sla"
 	// rows -- see repository.SLAEngineRepository's own doc comment for why
@@ -425,7 +408,7 @@ type Config struct {
 	// and WSO2 Case ID as a portal-created one does. Off by default: turn it on
 	// once the integration service serving /github-cases is deployed, or every
 	// new issue fails to create. Off, an issue's SR is written to Postgres only
-	// and numbered SR-GH-<n>. See GithubServiceNowFirst.
+	// and numbered as a portal SR is (CS number, <KEY>-<n> id) when its repository maps to a project, SR-GH-<n> when not. See GithubServiceNowFirst.
 	GithubSRServiceNowFirst bool
 	// GithubOutboundInterval is how often to drain the outbound queue when the
 	// last pass came back short. A backlog drains at full speed regardless.
@@ -443,6 +426,12 @@ type Config struct {
 	// created unassigned and logged as an error. Validated as a UUID; checked
 	// at startup (best effort, logged only) to exist and have a support group.
 	IncidentDefaultServiceID string
+	// ServiceRequestDefaultSeverity is SERVICE_REQUEST_DEFAULT_SEVERITY: the
+	// internal severity (S1, S2, S3 or S4, case-insensitive) a service request
+	// gets when it is created without an explicit one. Empty means S4 (see
+	// DefaultServiceRequestSeverity). Validated at startup: any other value
+	// refuses to start. Read it through ServiceRequestSeverityOrDefault.
+	ServiceRequestDefaultSeverity string
 	// IncidentExtraAssignmentGroupIDs is INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS:
 	// group ids ("group".id, UUIDs) an incident may be created in even though
 	// they are the support group of no service. They join the set POST
@@ -583,6 +572,12 @@ type Config struct {
 	// excluded tags would list cases the team has set aside.
 	LongOpenCasesReportProjectTypes []string
 	LongOpenCasesReportExcludedTags []string
+	// OpenBeforeYesterdayReportProjectTypes are the project type names that
+	// put a case in the open-before-yesterday variant of that report whatever
+	// its product; OpenBeforeYesterdayReportProductProjectTypes put it there
+	// only when the case has a product set. Blank falls back to the defaults.
+	OpenBeforeYesterdayReportProjectTypes        []string
+	OpenBeforeYesterdayReportProductProjectTypes []string
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -746,6 +741,16 @@ type Config struct {
 	// catalogue. AUTH_ADMIN_ROLES may edit it too.
 	// Matched exactly. Empty means only admins can.
 	AuthProductCatalogManagerRoles []string
+	// AuthSkillDirectoryRoles, AuthSkillRequestReviewerRoles and
+	// AuthSkillCatalogueManagerRoles are AUTH_SKILL_DIRECTORY_ROLES,
+	// AUTH_SKILL_REQUEST_REVIEWER_ROLES and AUTH_SKILL_CATALOGUE_MANAGER_ROLES,
+	// comma-separated: the token roles that hold each skills capability (the
+	// directory of everybody's skills; reviewing skill requests; managing the
+	// skill catalogue) on top of AUTH_ADMIN_ROLES. Matched exactly. Empty means
+	// admins only, which is the default until roles are assigned per task.
+	AuthSkillDirectoryRoles        []string
+	AuthSkillRequestReviewerRoles  []string
+	AuthSkillCatalogueManagerRoles []string
 	// CaseAlertsSecretKey is CASE_ALERTS_SECRET_KEY: 32 bytes, base64, the
 	// AES-256-GCM key that seals the Case Alerts chat-room webhook URLs
 	// (migration 0233). One per environment, so a database copied from
@@ -850,6 +855,17 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
+	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 10, at most 100).
+	// The declared size is checked when an upload starts and the real size when
+	// it is confirmed. Provisional default, to be set from the real size
+	// distribution.
+	AttachmentMaxBytes int64
+	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
+	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1, at most 25), and so also one image.
+	// At most service.MaxInlineImagesPerContent (5) images per comment or
+	// description.
+	InlineImagesTotalMaxBytes int64
+
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
 	// Account ingest to auto-provision a CSM "user" row for an account person
@@ -861,6 +877,22 @@ type Config struct {
 	SCIMClientID     string
 	SCIMClientSecret string
 	SCIMScopes       string
+
+	// HolidayCalendar* is the Choreo connection to the shared calendar-events
+	// service the WSO2 leave app reads public holidays from
+	// (GET /holidays?countries=...). HREntity* is the connection to the HR
+	// entity GraphQL service (employee(email){location}), whose location
+	// decides whose holidays a Team Schedule member keeps. Each set is
+	// all-or-nothing; unset, the daily public holiday refresh skips that
+	// source and the roster reads what is already stored.
+	HolidayCalendarBaseURL      string
+	HolidayCalendarTokenURL     string
+	HolidayCalendarClientID     string
+	HolidayCalendarClientSecret string
+	HREntityBaseURL             string
+	HREntityTokenURL            string
+	HREntityClientID            string
+	HREntityClientSecret        string
 
 	// Escalation* are the fixed EL1/EL2 case-escalation notification
 	// recipients EscalationService.CreateEscalation (Postgres data sources)
@@ -972,7 +1004,6 @@ func Load() *Config {
 		DataSource:                                    DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
 		SLADataSource:                                 SLADataSource(getEnvOrDefault("SLA_DATA_SOURCE", string(SLADataSourcePostgres))),
 		UsageReadMode:                                 UsageReadMode(getEnvOrDefault("PRODUCT_CONSUMPTION_DATA_READ_MODE", string(UsageReadModePostgres))),
-		AttachmentDataSource:                          AttachmentDataSource(getEnvOrDefault("ATTACHMENT_DATA_SOURCE", string(AttachmentDataSourcePostgres))),
 		CSMSLAEngineEnabled:                           envFlagOn("CSM_SLA_ENGINE_ENABLED"),
 		ServiceNowIntegrationServiceBaseURL:           os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
 		ServiceNowIntegrationServiceTokenURL:          os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
@@ -996,6 +1027,7 @@ func Load() *Config {
 		SpecialistHandoffConfig:                       os.Getenv("SPECIALIST_HANDOFF_CONFIG"),
 		SpecialistHandoffGithubTokens:                 os.Getenv("SPECIALIST_HANDOFF_GITHUB_TOKENS"),
 		IncidentDefaultServiceID:                      strings.TrimSpace(os.Getenv("INCIDENT_DEFAULT_SERVICE_ID")),
+		ServiceRequestDefaultSeverity:                 strings.TrimSpace(os.Getenv("SERVICE_REQUEST_DEFAULT_SEVERITY")),
 		IncidentExtraAssignmentGroupIDs:               splitComma(os.Getenv("INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS")),
 		GithubLabelTypeIncident:                       os.Getenv("GITHUB_LABEL_TYPE_INCIDENT"),
 		GithubLabelTypeServiceRequest:                 os.Getenv("GITHUB_LABEL_TYPE_SERVICE_REQUEST"),
@@ -1022,12 +1054,17 @@ func Load() *Config {
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
 		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
 		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
+		OpenBeforeYesterdayReportProjectTypes:         splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProjectTypes),
+		OpenBeforeYesterdayReportProductProjectTypes:  splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProductProjectTypes),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
 		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
 		AuthAdminRoles:                                splitComma(os.Getenv("AUTH_ADMIN_ROLES")),
 		AuthProductCatalogManagerRoles:                splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
+		AuthSkillDirectoryRoles:                       splitComma(os.Getenv("AUTH_SKILL_DIRECTORY_ROLES")),
+		AuthSkillRequestReviewerRoles:                 splitComma(os.Getenv("AUTH_SKILL_REQUEST_REVIEWER_ROLES")),
+		AuthSkillCatalogueManagerRoles:                splitComma(os.Getenv("AUTH_SKILL_CATALOGUE_MANAGER_ROLES")),
 		CaseAlertsSecretKey:                           strings.TrimSpace(os.Getenv("CASE_ALERTS_SECRET_KEY")),
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
@@ -1065,6 +1102,14 @@ func Load() *Config {
 		SCIMClientID:                                  os.Getenv("SCIM_CLIENT_ID"),
 		SCIMClientSecret:                              os.Getenv("SCIM_CLIENT_SECRET"),
 		SCIMScopes:                                    os.Getenv("SCIM_SCOPES"),
+		HolidayCalendarBaseURL:                        os.Getenv("HOLIDAY_CALENDAR_BASE_URL"),
+		HolidayCalendarTokenURL:                       os.Getenv("HOLIDAY_CALENDAR_TOKEN_URL"),
+		HolidayCalendarClientID:                       os.Getenv("HOLIDAY_CALENDAR_CLIENT_ID"),
+		HolidayCalendarClientSecret:                   os.Getenv("HOLIDAY_CALENDAR_CLIENT_SECRET"),
+		HREntityBaseURL:                               os.Getenv("HR_ENTITY_BASE_URL"),
+		HREntityTokenURL:                              os.Getenv("HR_ENTITY_TOKEN_URL"),
+		HREntityClientID:                              os.Getenv("HR_ENTITY_CLIENT_ID"),
+		HREntityClientSecret:                          os.Getenv("HR_ENTITY_CLIENT_SECRET"),
 		CSMMigrationMembershipRegistrationEnabled:     envFlagOn("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED"),
 		EscalationEL1AmericasTLEmails:                 splitComma(os.Getenv("ESCALATION_EL1_AMERICAS_TL_EMAILS")),
 		EscalationEL2AmericasTUEmails:                 splitComma(os.Getenv("ESCALATION_EL2_AMERICAS_TU_EMAILS")),
@@ -1103,6 +1148,8 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
+	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10, maxAttachmentMB)
+	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1209,6 +1256,15 @@ var (
 	// "migrartion" is a historic misspelling that exists as stored on
 	// real cases; it must stay exactly as is to match them.
 	defaultLongOpenCasesReportExcludedTags = []string{"migrartion", "migration-assistance"}
+)
+
+// defaultOpenBeforeYesterdayReportProjectTypes and
+// defaultOpenBeforeYesterdayReportProductProjectTypes are the
+// open-before-yesterday report's project type sets when the environment does
+// not override them. The second set needs the case's product to be set.
+var (
+	defaultOpenBeforeYesterdayReportProjectTypes        = []string{"Subscription", "Managed Cloud Subscription"}
+	defaultOpenBeforeYesterdayReportProductProjectTypes = []string{"Cloud Support"}
 )
 
 func splitComma(s string) []string {
@@ -1335,12 +1391,6 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid PRODUCT_CONSUMPTION_DATA_READ_MODE %q: must be %q or %q", c.UsageReadMode, UsageReadModePostgres, UsageReadModeLegacy)
 	}
-	switch c.AttachmentDataSource {
-	case AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow:
-		// valid
-	default:
-		return fmt.Errorf("invalid ATTACHMENT_DATA_SOURCE %q: must be %q or %q", c.AttachmentDataSource, AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow)
-	}
 	// Postgres credentials are required for DATA_SOURCE=postgres and
 	// DATA_SOURCE=postgres-servicenow-dual-write — both serve every entity read
 	// and write from the pool (the fallback mode's ServiceNow leg is a
@@ -1382,24 +1432,22 @@ func (c *Config) Validate() error {
 	// DATA_SOURCE=servicenow (reads go there), for
 	// DATA_SOURCE=postgres-servicenow-dual-write (the best-effort mirror write
 	// goes there, via the same client — see SNWritebackDispatcher), for
-	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead), and for
-	// ATTACHMENT_DATA_SOURCE=servicenow (attachment/activity-feed reads go
-	// there instead) -- all independent of DATA_SOURCE: a plain
-	// DATA_SOURCE=postgres deployment that points SLA or attachment reads at
+	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead) -- independent of
+	// DATA_SOURCE: a plain DATA_SOURCE=postgres deployment that points SLA reads at
 	// ServiceNow still needs real credentials for that client.
-	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow || c.AttachmentDataSource == AttachmentDataSourceServiceNow
+	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow
 	if snRequired {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceTokenURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientID == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientSecret == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 	}
 	// EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/EVENT_HUB_TOPIC are
@@ -1432,6 +1480,14 @@ func (c *Config) Validate() error {
 	scimSet := c.SCIMBaseURL != "" || c.SCIMTokenURL != "" || c.SCIMClientID != "" || c.SCIMClientSecret != "" || c.SCIMScopes != ""
 	if scimSet && !c.SCIMConfigured() {
 		return fmt.Errorf("SCIM_BASE_URL, SCIM_TOKEN_URL, SCIM_CLIENT_ID, and SCIM_CLIENT_SECRET must be set together or not at all")
+	}
+	holidayCalendarSet := c.HolidayCalendarBaseURL != "" || c.HolidayCalendarTokenURL != "" || c.HolidayCalendarClientID != "" || c.HolidayCalendarClientSecret != ""
+	if holidayCalendarSet && !c.HolidayCalendarConfigured() {
+		return fmt.Errorf("HOLIDAY_CALENDAR_BASE_URL, HOLIDAY_CALENDAR_TOKEN_URL, HOLIDAY_CALENDAR_CLIENT_ID, and HOLIDAY_CALENDAR_CLIENT_SECRET must be set together or not at all")
+	}
+	hrEntitySet := c.HREntityBaseURL != "" || c.HREntityTokenURL != "" || c.HREntityClientID != "" || c.HREntityClientSecret != ""
+	if hrEntitySet && !c.HREntityConfigured() {
+		return fmt.Errorf("HR_ENTITY_BASE_URL, HR_ENTITY_TOKEN_URL, HR_ENTITY_CLIENT_ID, and HR_ENTITY_CLIENT_SECRET must be set together or not at all")
 	}
 	if (c.CSMPortalBackendClientID == "") != (c.CSMPortalUserDomain == "") {
 		return fmt.Errorf("CSM_PORTAL_BACKEND_CLIENT_ID and CSM_PORTAL_USER_DOMAIN must be set together or not at all")
@@ -1467,6 +1523,9 @@ func (c *Config) Validate() error {
 	}
 	if v := c.CaseEscalationNotices; v != "" && v != "true" && v != "false" {
 		return fmt.Errorf("CASE_ESCALATION_NOTICES_ENABLED %q must be true, false or unset", v)
+	}
+	if _, err := NormalizeServiceRequestSeverity(c.ServiceRequestDefaultSeverity); err != nil {
+		return fmt.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY: %w", err)
 	}
 	if v := c.IncidentDefaultServiceID; v != "" && !validate.IsUUID(v) {
 		return fmt.Errorf("INCIDENT_DEFAULT_SERVICE_ID %q is not a valid UUID", v)
@@ -1618,6 +1677,18 @@ func (c *Config) SCIMConfigured() bool {
 		c.SCIMClientSecret != ""
 }
 
+// HolidayCalendarConfigured reports whether every HOLIDAY_CALENDAR_* env var is set.
+func (c *Config) HolidayCalendarConfigured() bool {
+	return c.HolidayCalendarBaseURL != "" && c.HolidayCalendarTokenURL != "" &&
+		c.HolidayCalendarClientID != "" && c.HolidayCalendarClientSecret != ""
+}
+
+// HREntityConfigured reports whether every HR_ENTITY_* env var is set.
+func (c *Config) HREntityConfigured() bool {
+	return c.HREntityBaseURL != "" && c.HREntityTokenURL != "" &&
+		c.HREntityClientID != "" && c.HREntityClientSecret != ""
+}
+
 // DSN constructs a PostgreSQL connection string from the config fields.
 //
 // Pins search_path to DBSchema via the "options" connection parameter, the
@@ -1735,6 +1806,53 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// Hard ceilings on the attachment size settings, in megabytes. A value above one
+// is treated like a bad value (the default is used), so a mistyped setting can
+// never raise a limit past what the portals and the gateway are built for.
+const (
+	maxAttachmentMB        = 100
+	maxInlineImagesTotalMB = 25
+)
+
+// envMegabytes reads a size in megabytes (1 MB = 1 MiB = 1048576 bytes; a
+// decimal such as 0.5 is allowed) from mbKey and returns it in bytes. The older
+// bytes setting bytesKey is read only when mbKey is unset. A value that is not a
+// positive number, or is above maxMB, gives the default (defMB), and so does an
+// older bytes value above maxMB; when mbKey is set but unusable the older setting
+// is not consulted. A typo costs the override, it does not stop the service
+// starting (same posture as envPositiveInt64).
+func envMegabytes(mbKey, bytesKey string, defMB, maxMB int64) int64 {
+	def, ceiling := defMB<<20, maxMB<<20
+	v := strings.TrimSpace(os.Getenv(mbKey))
+	if v == "" {
+		if n := envPositiveInt64(bytesKey, def); n <= ceiling {
+			return n
+		}
+		return def
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= float64(maxMB) {
+		if n := int64(f * (1 << 20)); n > 0 && n <= ceiling {
+			return n
+		}
+	}
+	return def
+}
+
+// envPositiveInt64 reads a positive integer, falling back to def when unset,
+// unparseable or not above zero (same posture as envDuration: a typo costs the
+// override, it does not stop the service starting).
+func envPositiveInt64(key string, def int64) int64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 // envDurationOrOff is envDuration for an interval that can be switched off:

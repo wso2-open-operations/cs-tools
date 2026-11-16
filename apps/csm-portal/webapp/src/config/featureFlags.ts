@@ -58,6 +58,15 @@ import type { PortalAccess } from "@context/current-user/portalAccess";
  */
 export type FeatureState = "enabled" | "wip" | "hidden";
 
+/**
+ * Embedded features: parts of a page that are not navigation nodes but can be
+ * restricted through the same overrides map. Absent from the map means
+ * `enabled`. They carry no nav entry, tab or route, so only `enabled` shows
+ * them; `wip` and `hidden` both hide.
+ */
+export const SLA_TIMELINE_FEATURE_ID = "support.case-sla-timeline";
+const EMBEDDED_FEATURE_IDS: readonly string[] = [SLA_TIMELINE_FEATURE_ID];
+
 const FEATURE_STATES: readonly string[] = ["enabled", "wip", "hidden"];
 
 function isFeatureState(value: unknown): value is FeatureState {
@@ -92,7 +101,10 @@ function parseOverrides(): Record<string, FeatureState> {
   const raw = readRawOverrides();
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
 
-  const knownIds = new Set(flattenNavNodes().map((node) => node.id));
+  const knownIds = new Set([
+    ...flattenNavNodes().map((node) => node.id),
+    ...EMBEDDED_FEATURE_IDS,
+  ]);
   const parsed: Record<string, FeatureState> = {};
 
   for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -149,6 +161,7 @@ function computeStates(): Map<string, FeatureState> {
     }
   };
   inherit(CSM_NAV_ITEMS, "enabled");
+  for (const id of EMBEDDED_FEATURE_IDS) states.set(id, overrides[id] ?? "enabled");
 
   const promote = (nodes: readonly CsmNavNode[]): void => {
     for (const node of nodes) {

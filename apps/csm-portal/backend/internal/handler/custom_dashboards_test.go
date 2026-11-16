@@ -46,7 +46,43 @@ type fakeCustomDashboardClient struct {
 	shared         entity.SharedCustomDashboard
 	gotTeamID      string
 	teamShares     []entity.CustomDashboardTeamShare
+	link           entity.CustomDashboardLink
+	gotLinkID      string
+	opened         entity.OpenedCustomDashboardLink
 	err            error
+}
+
+// GetCustomDashboardLink records the dashboard id and answers f.link, or f.err.
+func (f *fakeCustomDashboardClient) GetCustomDashboardLink(_ context.Context, id string) (entity.CustomDashboardLink, error) {
+	f.called, f.gotID = true, id
+	if f.err != nil {
+		return entity.CustomDashboardLink{}, f.err
+	}
+	return f.link, nil
+}
+
+// EnableCustomDashboardLink records the dashboard id and answers f.link, or f.err.
+func (f *fakeCustomDashboardClient) EnableCustomDashboardLink(_ context.Context, id string) (entity.CustomDashboardLink, error) {
+	f.called, f.gotID = true, id
+	if f.err != nil {
+		return entity.CustomDashboardLink{}, f.err
+	}
+	return f.link, nil
+}
+
+// DisableCustomDashboardLink records the dashboard id and answers f.err.
+func (f *fakeCustomDashboardClient) DisableCustomDashboardLink(_ context.Context, id string) error {
+	f.called, f.gotID = true, id
+	return f.err
+}
+
+// OpenCustomDashboardLink records the link id and answers f.opened, or f.err.
+func (f *fakeCustomDashboardClient) OpenCustomDashboardLink(_ context.Context, linkID string) (entity.OpenedCustomDashboardLink, error) {
+	f.called, f.gotLinkID = true, linkID
+	if f.err != nil {
+		return entity.OpenedCustomDashboardLink{}, f.err
+	}
+	return f.opened, nil
 }
 
 func (f *fakeCustomDashboardClient) ListCustomDashboardTeamShares(_ context.Context, id string) ([]entity.CustomDashboardTeamShare, error) {
@@ -190,7 +226,7 @@ func TestSaveCustomDashboard_StoresCheckedDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stored definition does not parse: %v\n%s", err, client.gotDefinition)
 	}
-	if len(stored.Widgets) != 7 || strings.Contains(client.gotDefinition, "widgetId") {
+	if len(stored.Widgets) != 8 || strings.Contains(client.gotDefinition, "widgetId") {
 		t.Errorf("stored definition = %s", client.gotDefinition)
 	}
 
@@ -1010,5 +1046,179 @@ func TestSharedDashboards_PassTheTeamOn(t *testing.T) {
 	client.sharedList[0].SharedViaTeam = nil
 	if w := serveSharedRoute(client, "/dashboards/shared"); !strings.Contains(w.Body.String(), `"sharedViaTeam":null`) {
 		t.Fatalf("body = %s, want sharedViaTeam null", w.Body.String())
+	}
+}
+
+// Link sharing: the owner's GET / PUT / DELETE /dashboards/custom/{id}/link
+// and anyone's POST /dashboards/shared/link.
+const testDashboardLinkID = "5e636a12-0000-4000-8000-0000000000cc"
+
+// serveLinkRoute serves one request through the four link routes as main.go
+// registers their paths (without the permission middleware), signed in as the
+// test user when signedIn.
+func serveLinkRoute(client *fakeCustomDashboardClient, method, path, body string, signedIn bool) *httptest.ResponseRecorder {
+	h := NewCustomDashboardHandler(client)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /dashboards/custom/{id}/link", h.GetCustomDashboardLink)
+	mux.HandleFunc("PUT /dashboards/custom/{id}/link", h.EnableCustomDashboardLink)
+	mux.HandleFunc("DELETE /dashboards/custom/{id}/link", h.DisableCustomDashboardLink)
+	mux.HandleFunc("POST /dashboards/shared/link", h.OpenDashboardLink)
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if signedIn {
+		req = withUser(req)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	return w
+}
+
+// TestCustomDashboardLink_OwnerRoutes: GET and PUT answer the link (no linkId
+// when it is off) and DELETE is 204; a non-UUID id or no signed-in user is
+// refused without an upstream call.
+func TestCustomDashboardLink_OwnerRoutes(t *testing.T) {
+	link := entity.CustomDashboardLink{Enabled: true, LinkID: testDashboardLinkID, OpenedBy: 2}
+	path := "/dashboards/custom/" + strings.ToUpper(testCustomDashboardID) + "/link"
+
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		t.Run(method+" answers the link", func(t *testing.T) {
+			client := &fakeCustomDashboardClient{link: link}
+			w := serveLinkRoute(client, method, path, "", true)
+			if w.Code != http.StatusOK || client.gotID != testCustomDashboardID {
+				t.Fatalf("status %d, id %q: %s", w.Code, client.gotID, w.Body.String())
+			}
+			if got := decodeJSON[entity.CustomDashboardLink](t, w); got != link {
+				t.Fatalf("link = %+v, want %+v", got, link)
+			}
+		})
+	}
+	t.Run("GET of a link that is off has no linkId", func(t *testing.T) {
+		w := serveLinkRoute(&fakeCustomDashboardClient{}, http.MethodGet, path, "", true)
+		if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"enabled":false,"openedBy":0}` {
+			t.Fatalf("status %d: %s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("DELETE is 204", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{}
+		w := serveLinkRoute(client, http.MethodDelete, path, "", true)
+		if w.Code != http.StatusNoContent || w.Body.Len() != 0 || client.gotID != testCustomDashboardID {
+			t.Fatalf("status %d, body %q, id %q", w.Code, w.Body.String(), client.gotID)
+		}
+	})
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		t.Run(method+" refuses a non-UUID id without an upstream call", func(t *testing.T) {
+			client := &fakeCustomDashboardClient{}
+			w := serveLinkRoute(client, method, "/dashboards/custom/abc/link", "", true)
+			if w.Code != http.StatusBadRequest || client.called {
+				t.Fatalf("status %d, called %v", w.Code, client.called)
+			}
+		})
+		t.Run(method+" needs a signed-in user", func(t *testing.T) {
+			client := &fakeCustomDashboardClient{}
+			w := serveLinkRoute(client, method, path, "", false)
+			if w.Code != http.StatusUnauthorized || client.called {
+				t.Fatalf("status %d, called %v", w.Code, client.called)
+			}
+		})
+		t.Run(method+" of another user's dashboard is a 404", func(t *testing.T) {
+			client := &fakeCustomDashboardClient{err: &apierror.Error{StatusCode: http.StatusNotFound, Body: `{"message":"dashboard not found"}`}}
+			w := serveLinkRoute(client, method, path, "", true)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+	t.Run("an upstream failure shows the fixed message", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{err: &apierror.Error{StatusCode: http.StatusInternalServerError, Body: `{"message":"pg: secret detail"}`}}
+		w := serveLinkRoute(client, http.MethodPut, path, "", true)
+		if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), errMsgDashboardLinkEnableFailed) || strings.Contains(w.Body.String(), "secret") {
+			t.Fatalf("status %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
+// TestOpenDashboardLink: opening a link answers the dashboard and whether it
+// is the caller's own; a bad body is refused without an upstream call, a link
+// that is off or unknown says so, and an upstream failure shows the fixed
+// message.
+func TestOpenDashboardLink(t *testing.T) {
+	body := `{"linkId":"` + strings.ToUpper(testDashboardLinkID) + `"}`
+
+	t.Run("opens the dashboard", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{opened: entity.OpenedCustomDashboardLink{DashboardID: testCustomDashboardID, Own: false}}
+		w := serveLinkRoute(client, http.MethodPost, "/dashboards/shared/link", body, true)
+		if w.Code != http.StatusOK || client.gotLinkID != testDashboardLinkID {
+			t.Fatalf("status %d, link %q: %s", w.Code, client.gotLinkID, w.Body.String())
+		}
+		if strings.TrimSpace(w.Body.String()) != `{"dashboardId":"`+testCustomDashboardID+`","own":false}` {
+			t.Fatalf("body = %s", w.Body.String())
+		}
+	})
+	t.Run("says when it is the caller's own", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{opened: entity.OpenedCustomDashboardLink{DashboardID: testCustomDashboardID, Own: true}}
+		w := serveLinkRoute(client, http.MethodPost, "/dashboards/shared/link", body, true)
+		if got := decodeJSON[entity.OpenedCustomDashboardLink](t, w); !got.Own {
+			t.Fatalf("opened = %+v, want own", got)
+		}
+	})
+	for name, bad := range map[string]string{
+		"no body":          "",
+		"not JSON":         "{",
+		"no link id":       `{}`,
+		"not a UUID":       `{"linkId":"abc"}`,
+		"a UUID with junk": `{"linkId":"` + testDashboardLinkID + `x"}`,
+	} {
+		t.Run("refuses "+name+" without an upstream call", func(t *testing.T) {
+			client := &fakeCustomDashboardClient{}
+			w := serveLinkRoute(client, http.MethodPost, "/dashboards/shared/link", bad, true)
+			if w.Code != http.StatusBadRequest || client.called {
+				t.Fatalf("status %d, called %v: %s", w.Code, client.called, w.Body.String())
+			}
+		})
+	}
+	t.Run("a link that is off or unknown says so", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{err: &apierror.Error{StatusCode: http.StatusNotFound, Body: `{"message":"this link does not open a dashboard"}`}}
+		w := serveLinkRoute(client, http.MethodPost, "/dashboards/shared/link", body, true)
+		if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), errMsgDashboardLinkNotFound) {
+			t.Fatalf("status %d: %s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("an upstream failure shows the fixed message", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{err: &apierror.Error{StatusCode: http.StatusServiceUnavailable}}
+		w := serveLinkRoute(client, http.MethodPost, "/dashboards/shared/link", body, true)
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), errMsgDashboardLinkOpenFailed) {
+			t.Fatalf("status %d: %s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("needs a signed-in user", func(t *testing.T) {
+		client := &fakeCustomDashboardClient{}
+		w := serveLinkRoute(client, http.MethodPost, "/dashboards/shared/link", body, false)
+		if w.Code != http.StatusUnauthorized || client.called {
+			t.Fatalf("status %d, called %v", w.Code, client.called)
+		}
+	})
+}
+
+// A dashboard the caller has only through its link says so on both reads;
+// every other share answers sharedViaLink false (not left out).
+func TestSharedDashboards_PassViaLinkOn(t *testing.T) {
+	list := serveSharedRoute(&fakeCustomDashboardClient{sharedList: []entity.SharedCustomDashboardSummary{
+		{ID: testCustomDashboardID, Name: "By link", Owner: janeOwner(), SharedViaLink: true, SharedOn: "a", UpdatedOn: "b"},
+		{ID: testCustomDashboardID, Name: "Direct", Owner: janeOwner(), SharedOn: "a", UpdatedOn: "b"},
+	}}, "/dashboards/shared")
+	if !strings.Contains(list.Body.String(), `"sharedViaLink":false`) {
+		t.Errorf("body = %s, want sharedViaLink false on the direct share", list.Body.String())
+	}
+	got := decodeJSON[sharedDashboardListResponse](t, list)
+	if list.Code != http.StatusOK || len(got.Dashboards) != 2 || !got.Dashboards[0].SharedViaLink || got.Dashboards[1].SharedViaLink {
+		t.Fatalf("status %d: %+v", list.Code, got)
+	}
+
+	_, draft := customDraft(t, testCustomDashboardID)
+	get := serveSharedRoute(&fakeCustomDashboardClient{shared: entity.SharedCustomDashboard{
+		ID: testCustomDashboardID, Name: "By link", Definition: storedDefinition(t, draft),
+		Owner: janeOwner(), SharedViaLink: true, SharedOn: "a", UpdatedOn: "b",
+	}}, "/dashboards/shared/"+testCustomDashboardID)
+	if one := decodeJSON[sharedDashboardResponse](t, get); get.Code != http.StatusOK || !one.SharedViaLink || one.SharedViaTeam != nil {
+		t.Fatalf("status %d: %s", get.Code, get.Body.String())
 	}
 }

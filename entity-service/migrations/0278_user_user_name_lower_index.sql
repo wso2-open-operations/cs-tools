@@ -1,0 +1,36 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- Performance fix for the project-contact listing and count queries, which
+-- spent ~600ms per call seq-scanning "user".
+--
+-- Why: "user" has only an exact-match unique index on user_name
+-- (user_user_name_key). project_contact_repo.go's projectContactFromJoins
+-- (shared by the list and count queries) does
+--   LEFT JOIN LATERAL (
+--     SELECT * FROM "user" WHERE LOWER(user_name) = LOWER(ac.user_name) ...
+--   ) u ON TRUE
+-- and a plain index on user_name cannot serve a LOWER(user_name) predicate,
+-- so the planner seq-scans "user" for each project contact row. An
+-- expression index on exactly LOWER(user_name) lets it use an index scan.
+-- Other `LOWER(u.user_name) = LOWER(...)` joins (account_contact_repo.go,
+-- project_membership_repo.go, project_stats_repo.go, ...) benefit too.
+--
+-- Applied by `make migrate` as one psql -f per file inside the runner's own
+-- bookkeeping, so CONCURRENTLY is not used. "user" is small (tens of
+-- thousands of rows), so a plain CREATE INDEX's brief lock is acceptable, as
+-- in 0192_user_email_lower_index.sql.
+CREATE INDEX IF NOT EXISTS idx_user_user_name_lower ON "user" (LOWER(user_name));

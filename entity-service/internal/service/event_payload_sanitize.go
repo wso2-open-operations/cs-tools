@@ -19,9 +19,9 @@ package service
 import "regexp"
 
 // inlineBase64ImageTagRe matches a whole <img ...> tag whose src is a raw
-// `data:image/...;base64,<payload>` inline image -- content authored before/
-// without SFTPGo attachment storage never gets its pasted image extracted
-// into a real, separately-stored attachment at all, so it stays as raw
+// `data:image/...;base64,<payload>` inline image -- content authored before
+// pasted images were stored as attachments (or migrated with such content)
+// never had its image extracted into a real, separately-stored attachment, so it stays as raw
 // base64 image data directly inside the case description/comment HTML (see
 // apps/csm-portal/backend's own CLAUDE.md, "Redacting raw base64 inline
 // images", for the read-side version of this same gap). Unlike that read-side

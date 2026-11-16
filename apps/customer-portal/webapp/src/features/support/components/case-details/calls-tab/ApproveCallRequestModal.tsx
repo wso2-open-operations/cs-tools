@@ -25,7 +25,6 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -35,9 +34,9 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ChangeEvent,
   type JSX,
 } from "react";
+import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
 import { usePatchCallRequest } from "@features/support/api/usePatchCallRequest";
 import {
   callRequestApiPreferredTimeToDatetimeLocal,
@@ -132,8 +131,7 @@ export default function ApproveCallRequestModal({
   }, [isPending, onClose]);
 
   const handleDateTimeChange = useCallback(
-    (index: number) => (e: ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
+    (index: number) => (value: string) => {
       setPreferredDateTimes((prev) => {
         const next = [...prev];
         next[index] = value;
@@ -268,29 +266,16 @@ export default function ApproveCallRequestModal({
               gap: 1,
             }}
           >
-            <TextField
+            <DateTimeLocalField
               id={`approve-preferred-time-${index}`}
               label={
                 index === 0
                   ? "Preferred Time *"
                   : `Preferred Time ${index + 1} *`
               }
-              type="datetime-local"
               value={value}
               onChange={handleDateTimeChange(index)}
-              fullWidth
-              size="small"
-              slotProps={{
-                inputLabel: { shrink: true },
-                htmlInput: {
-                  min: minDatetimeLocal,
-                  step: 300,
-                },
-              }}
-              inputProps={{
-                min: minDatetimeLocal,
-                step: 300,
-              }}
+              minDateTime={minDatetimeLocal}
               disabled={isPending}
             />
             <Box

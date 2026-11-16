@@ -22,7 +22,6 @@ import {
   CircleAlert,
   CircleCheck,
   CirclePause,
-  CircleQuestionMark,
   CircleX,
   Clock,
   FileText,
@@ -105,8 +104,14 @@ export const CaseStatus = {
   REOPENED: "Reopened",
   SOLUTION_PROPOSED: "Solution Proposed",
   WAITING_ON_WSO2: "Waiting On WSO2",
-  WORK_IN_PROGRESS: "Work In Progress",
+  // Customers see one In Progress state for what staff track as Work In
+  // Progress and Waiting On WSO2; the backend returns that merged label.
+  WORK_IN_PROGRESS: "In Progress",
 } as const;
+
+// Waiting On WSO2 is no longer in the case state list the backend returns, so
+// the "Wait on WSO2" and "Reject Solution" actions send its key directly.
+export const WAITING_ON_WSO2_STATE_KEY = 1003;
 
 export type CaseStatus = (typeof CaseStatus)[keyof typeof CaseStatus];
 
@@ -254,29 +259,22 @@ export const CaseType = {
 
 export type CaseType = (typeof CaseType)[keyof typeof CaseType];
 
-// Maximum allowed attachment file size in bytes.
-export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-
-// Whole-request cap for POST /cases bodies that carry base64 attachments. The
-// BE accepts up to 15 MiB; a 10 MB raw file encodes to ~13.4 MB, so the cap
-// must sit well above 10 MiB. The margin keeps the FE check from ever passing
-// a body the BE would reject.
+// Whole-request cap for POST /cases bodies. The margin below the BE's own cap
+// keeps the FE check from ever passing a body the BE would reject. Case files
+// are not part of this body: they are uploaded after the case is created.
 export const MAX_CASE_REQUEST_BODY_BYTES = 15 * 1024 * 1024 - 16 * 1024;
 
 // Deliberately stricter than the BE's own request-body cap for
 // POST /cases/{id}/comments (backend-v2's generic `readJSONBody` helper,
 // capped at the blanket `maxRequestBodyBytes = 1 << 20`, i.e. 1 MiB — this was
-// NOT raised for comments). Comments carry inline images as base64 data URIs,
-// so the body can get large fast; this FE-only ceiling nudges users toward
-// attachments well before they'd hit the BE's 413, and matches the same 1 MiB
-// guard applied to the CSM portal webapp for consistency across both portals.
+// NOT raised for comments). Images pasted into a comment are uploaded and
+// referenced by id, so a comment body stays small; this FE-only ceiling blocks a
+// body the BE would reject with a 413, and matches the same 1 MiB guard applied
+// to the CSM portal webapp for consistency across both portals.
 export const MAX_COMMENT_BODY_BYTES = 1 * 1024 * 1024;
 // Reserve headroom for the JSON envelope ({ type, content }) + string escaping
 // so the FE blocks before the BE rejects with 413.
 export const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
-
-// Maximum allowed embedded image size in bytes (10MB for base64 images in rich text).
-export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 
 // Allowed MIME types for inline image uploads in the rich text editor.
 export const ALLOWED_INLINE_IMAGE_TYPES = [
@@ -311,18 +309,13 @@ export const ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER =
 export const DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this document can delete it.";
 
-// Tooltip for deployment documents when edit is disabled for non-owners.
-export const DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER =
-  "Only the person who uploaded this document can edit it.";
-
 /**
  * Valid keys for all cases statistics.
  */
 export type AllCasesStatKey =
   | "openCases"
   | "workInProgress"
-  | "waitingOnClient"
-  | "waitingOnWso2";
+  | "waitingOnClient";
 
 /**
  * Configuration for the all cases statistics cards.
@@ -338,7 +331,7 @@ export const ALL_CASES_STAT_CONFIGS: SupportStatConfig<AllCasesStatKey>[] = [
     icon: Clock,
     iconColor: "success",
     key: "workInProgress",
-    label: "Work in Progress",
+    label: "In Progress",
   },
   {
     icon: MessageCircle,
@@ -346,17 +339,11 @@ export const ALL_CASES_STAT_CONFIGS: SupportStatConfig<AllCasesStatKey>[] = [
     key: "waitingOnClient",
     label: "Awaiting Info",
   },
-  {
-    icon: CircleQuestionMark,
-    iconColor: "info",
-    key: "waitingOnWso2",
-    label: "Waiting on WSO2",
-  },
 ];
 
 /**
  * Flattens the project cases statistics for the stat cards.
- * Total Active = totalCases; Work in Progress, Awaiting Info, Waiting on WSO2 from stateCount.
+ * Total Active = totalCases; In Progress (which includes cases waiting on WSO2) and Awaiting Info from stateCount.
  *
  * @param {ProjectCasesStats | undefined} stats - The original stats.
  * @returns {Record<AllCasesStatKey, number | undefined>} The flattened stats.
@@ -371,14 +358,10 @@ export const getAllCasesFlattenedStats = (
   const waitingOnClient = stateCount.find(
     (s) => s.label === CaseStatus.AWAITING_INFO,
   )?.count;
-  const waitingOnWso2 = stateCount.find(
-    (s) => s.label === CaseStatus.WAITING_ON_WSO2,
-  )?.count;
   const openCases = stats?.totalCases;
   return {
     openCases: openCases != null ? openCases : undefined,
     waitingOnClient,
-    waitingOnWso2,
     workInProgress,
   };
 };

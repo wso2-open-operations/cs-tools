@@ -25,15 +25,48 @@ import {
 import { useBackendApi } from "@api/backend/client";
 import type { BeCaseSeverity, BeCaseType } from "@api/backend/types";
 
-/** GET /sla-status's own four fixed elapsed-percentage buckets -- see
+/** GET /sla-status's own eleven fixed elapsed-percentage buckets -- ten
+ * percent wide each, plus a final open-ended "over100" -- see
  * entity-service's domain.SLAElapsedBucket* constants. */
-export type SlaElapsedBucket = "under50" | "50to75" | "75to100" | "over100";
+export type SlaElapsedBucket =
+  | "under10"
+  | "10to20"
+  | "20to30"
+  | "30to40"
+  | "40to50"
+  | "50to60"
+  | "60to70"
+  | "70to80"
+  | "80to90"
+  | "90to100"
+  | "over100";
 
 export const SLA_ELAPSED_BUCKET_LABEL: Record<SlaElapsedBucket, string> = {
-  under50: "Under 50%",
-  "50to75": "50% - 75%",
-  "75to100": "75% - 100%",
+  under10: "Under 10%",
+  "10to20": "10% - 20%",
+  "20to30": "20% - 30%",
+  "30to40": "30% - 40%",
+  "40to50": "40% - 50%",
+  "50to60": "50% - 60%",
+  "60to70": "60% - 70%",
+  "70to80": "70% - 80%",
+  "80to90": "80% - 90%",
+  "90to100": "90% - 100%",
   over100: "Over 100%",
+};
+
+/** GET /sla-status's own three fixed status/stage values -- see
+ * entity-service's domain.SLAStatus* constants. Matched against the same
+ * isPaused/hasBreached fields the table's own status chips already render
+ * from, not the raw sla_stage_enum column -- a clock can be paused AND
+ * already breached at once, so "paused"/"breached" are not mutually
+ * exclusive matches against the same row. */
+export type SlaStatusFilterValue = "in_progress" | "paused" | "breached";
+
+export const SLA_STATUS_FILTER_LABEL: Record<SlaStatusFilterValue, string> = {
+  in_progress: "In progress",
+  paused: "Paused",
+  breached: "Breached",
 };
 
 /** One row of GET /sla-status/manage -- entity-service's raw SLAStatus shape, passed through unchanged. */
@@ -71,6 +104,7 @@ export interface ActiveSlaStatusFilters {
   /** Matches ONLY the case's own id, number, or WSO2 case id -- never title. */
   search?: string;
   elapsedBucket?: SlaElapsedBucket;
+  status?: SlaStatusFilterValue;
 }
 
 interface ActiveSlaStatusesRequest extends ActiveSlaStatusFilters {
@@ -85,8 +119,8 @@ const ACTIVE_SLA_STATUSES_KEY = ["admin", "sla-status", "manage"] as const;
  * entity-service's GET /sla-status already supports limit+offset+total -- see
  * that endpoint's own doc comment -- this just exercises it instead of
  * fetching a single, uncapped first page. severity/caseType/search/
- * elapsedBucket are forwarded as query params verbatim and are entirely
- * server-side -- this hook never filters a fetched page itself.
+ * elapsedBucket/status are forwarded as query params verbatim and are
+ * entirely server-side -- this hook never filters a fetched page itself.
  */
 export function useActiveSlaStatuses(
   request: ActiveSlaStatusesRequest,
@@ -103,6 +137,7 @@ export function useActiveSlaStatuses(
       if (request.caseType) params.set("caseType", request.caseType);
       if (request.search) params.set("search", request.search);
       if (request.elapsedBucket) params.set("elapsedBucket", request.elapsedBucket);
+      if (request.status) params.set("status", request.status);
       return (
         (await api.get<SearchActiveSlaStatusResponse>(`/sla-status/manage?${params.toString()}`)) ?? {
           statuses: [],

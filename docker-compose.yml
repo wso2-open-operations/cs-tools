@@ -325,6 +325,15 @@ services:
       # Token roles that may edit the product catalogue. The
       # same value as csm-portal-backend's; sign in to mock-oidc with this group.
       AUTH_PRODUCT_CATALOG_MANAGER_ROLES: cs_product_catalog_manager
+      # CSM Portal admins: the same value as csm-portal-backend's. Admins hold
+      # every skills capability (directory, request review, catalogue).
+      AUTH_ADMIN_ROLES: cs_admin
+      # Skills capabilities beyond admins, one role per task (local names; in a
+      # real environment these stay unset -- admins only -- until assigned).
+      # Sign in to mock-oidc with these groups to try each task on its own.
+      AUTH_SKILL_DIRECTORY_ROLES: cs_skill_directory_viewer
+      AUTH_SKILL_REQUEST_REVIEWER_ROLES: cs_skill_reviewer
+      AUTH_SKILL_CATALOGUE_MANAGER_ROLES: cs_skill_curator
       # CSM_PORTAL_BACKEND_CLIENT_ID / CSM_PORTAL_USER_DOMAIN are deliberately NOT set. They make the
       # CSM BFF unrestricted for any user whose email is in that domain (and refuse everyone else),
       # but this stack's staff and customer personas share example.com, so the domain cannot tell them

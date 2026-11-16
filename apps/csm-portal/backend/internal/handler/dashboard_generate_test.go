@@ -17,11 +17,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +102,9 @@ func TestGenerateDashboard_SampleMissingIsServiceUnavailable(t *testing.T) {
 	body := decodeJSON[map[string]any](t, w)
 	if body["message"] != errMsgGenerateUnavailable {
 		t.Fatalf("message = %v, want %q", body["message"], errMsgGenerateUnavailable)
+	}
+	if body["errorCode"] != errCodeGenerateUnavailable {
+		t.Errorf("errorCode = %v, want %q", body["errorCode"], errCodeGenerateUnavailable)
 	}
 }
 
@@ -196,6 +201,9 @@ func TestGenerateDashboard_PromptChecks(t *testing.T) {
 				body := decodeJSON[map[string]any](t, w)
 				if body["message"] != tc.wantMsg {
 					t.Fatalf("message = %v, want %q", body["message"], tc.wantMsg)
+				}
+				if code, _ := body["errorCode"].(string); !strings.HasPrefix(code, "generate_prompt_") {
+					t.Errorf("errorCode = %v, want generate_prompt_...", body["errorCode"])
 				}
 			}
 		})
@@ -317,22 +325,50 @@ func TestGeneratedDashboardID(t *testing.T) {
 	}
 }
 
+// TestGenerateDashboard_AnUnknownErrorHasNoCode: a 500 says only the generic
+// message and carries no errorCode, so the webapp words it itself.
+func TestGenerateDashboard_AnUnknownErrorHasNoCode(t *testing.T) {
+	w := httptest.NewRecorder()
+	NewDashboardGenerateHandler(&fakeGenerator{err: errors.New("boom")}).GenerateDashboard(w, withUser(newGenerateRequest(`{"prompt":"x"}`)))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if body := decodeJSON[map[string]any](t, w); body["errorCode"] != nil {
+		t.Errorf("errorCode = %v, want none", body["errorCode"])
+	}
+}
+
+// TestGenerateDashboard_MapsEachGeneratorError: every generator error answers
+// its own status, message and errorCode: the AI side's usage limit 503 (never
+// 429, the caller's own limit), a reply cut off apart from an unusable one, a
+// timeout 504, any other call failure 502.
 func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 	cases := []struct {
 		name       string
 		err        error
 		wantStatus int
 		wantMsg    string
+		wantCode   string
 	}{
-		{"invalid draft", fmt.Errorf("%w: bad", errDraftInvalid), http.StatusBadRequest, errMsgGenerateDraftInvalid},
-		{"draft too large", fmt.Errorf("%w: 70000 bytes", errDraftTooLarge), http.StatusRequestEntityTooLarge, errMsgGenerateDraftTooBig},
-		{"declined", &generateDeclinedError{Reason: "Resolution time per engineer is not in the catalogue."}, http.StatusUnprocessableEntity, "Resolution time per engineer is not in the catalogue."},
-		{"refused", errGenerateRefused, http.StatusUnprocessableEntity, errMsgGenerateRefused},
-		{"team filter", fmt.Errorf("%w: widgets[0]: unknown team %q (known teams: rigel, sirius)", errDashboardTeam, "orion"), http.StatusUnprocessableEntity, `Unknown team "orion" (known teams: rigel, sirius).`},
-		{"unusable", fmt.Errorf("%w: %w", errGenerateUnusable, dashboard.ErrGeneratedInvalid), http.StatusBadGateway, errMsgGenerateUnusable},
-		{"truncated", errGenerateTruncated, http.StatusBadGateway, errMsgGenerateUnusable},
-		{"call timed out", fmt.Errorf("%w: %w", errGenerateCall, context.DeadlineExceeded), http.StatusGatewayTimeout, errMsgGenerateTimeout},
-		{"call failed", fmt.Errorf("%w: 401 Unauthorized", errGenerateCall), http.StatusBadGateway, errMsgGenerateCall},
+		{"invalid draft", fmt.Errorf("%w: bad", errDraftInvalid), http.StatusBadRequest, errMsgGenerateDraftInvalid, errCodeGenerateDraftInvalid},
+		{"draft too large", fmt.Errorf("%w: 70000 bytes", errDraftTooLarge), http.StatusRequestEntityTooLarge, errMsgGenerateDraftTooBig, errCodeGenerateDraftTooBig},
+		{"declined", &generateDeclinedError{Reason: "Resolution time per engineer is not in the catalogue."}, http.StatusUnprocessableEntity, "Resolution time per engineer is not in the catalogue.", errCodeGenerateDeclined},
+		{"refused", errGenerateRefused, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused},
+		{"team filter", fmt.Errorf("%w: widgets[0]: unknown team %q (known teams: rigel, sirius)", errDashboardTeam, "orion"), http.StatusUnprocessableEntity, `Unknown team "orion" (known teams: rigel, sirius).`, errCodeGenerateTeam},
+		{"playbook answer filter", fmt.Errorf("%w: widgets[0] (\"w\"): unknown playbook task %q (known tasks: ELIGIBILITY_ASSESSMENT_OUTCOME)", errDashboardPlaybook, "OUTCOME"), http.StatusUnprocessableEntity, `Unknown playbook task "OUTCOME" (known tasks: ELIGIBILITY_ASSESSMENT_OUTCOME).`, errCodeGeneratePlaybook},
+		{"unusable", fmt.Errorf("%w: %w", errGenerateUnusable, dashboard.ErrGeneratedInvalid), http.StatusBadGateway, errMsgGenerateUnusable, errCodeGenerateUnusable},
+		{"truncated", errGenerateTruncated, http.StatusBadGateway, errMsgGenerateTruncated, errCodeGenerateTruncated},
+		{"product filter", fmt.Errorf("%w: widgets[0].filters[1]: no product is named like %q", errDashboardProduct, "Orion"), http.StatusUnprocessableEntity, `No product is named like "Orion".`, errCodeGenerateProduct},
+		{"product lookup", fmt.Errorf("%w: widgets[0].filters[1]: status 500", errDashboardProductLookup), http.StatusBadGateway, errMsgGenerateProductLookup, errCodeGenerateProductLookup},
+		{"project filter", fmt.Errorf("%w: widgets[0].filters[1]: no project is named like %q", errDashboardProject, "Orion"), http.StatusUnprocessableEntity, `No project is named like "Orion".`, errCodeGenerateProject},
+		{"project lookup", fmt.Errorf("%w: widgets[0].filters[1]: status 500", errDashboardProjectLookup), http.StatusBadGateway, errMsgGenerateProjectLookup, errCodeGenerateProjectLookup},
+		{"account filter", fmt.Errorf("%w: widgets[0].filters[1]: no account is named like %q", errDashboardAccount, "Orion"), http.StatusUnprocessableEntity, `No account is named like "Orion".`, errCodeGenerateAccount},
+		{"account lookup", fmt.Errorf("%w: widgets[0].filters[1]: status 500", errDashboardAccountLookup), http.StatusBadGateway, errMsgGenerateAccountLookup, errCodeGenerateAccountLookup},
+		{"region filter", fmt.Errorf("%w: widgets[0].filters[1]: no case's account has the region %q; the regions are APAC, EMEA", errDashboardRegion, "LATAM"), http.StatusUnprocessableEntity, `No case's account has the region "LATAM"; the regions are APAC, EMEA.`, errCodeGenerateRegion},
+		{"region lookup", fmt.Errorf("%w: status 500: widgets[0].filters[1]", errDashboardRegionLookup), http.StatusBadGateway, errMsgGenerateRegionLookup, errCodeGenerateRegionLookup},
+		{"usage limit", fmt.Errorf("%w: csmai: status 429 (usage_limit)", errGenerateUsageLimit), http.StatusServiceUnavailable, errMsgGenerateUsageLimit, errCodeGenerateUsageLimit},
+		{"call timed out", fmt.Errorf("%w: %w", errGenerateCall, context.DeadlineExceeded), http.StatusGatewayTimeout, errMsgGenerateTimeout, errCodeGenerateTimeout},
+		{"call failed", fmt.Errorf("%w: 401 Unauthorized", errGenerateCall), http.StatusBadGateway, errMsgGenerateCall, errCodeGenerateCall},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -341,8 +377,12 @@ func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 			if w.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", w.Code, tc.wantStatus)
 			}
-			if body := decodeJSON[map[string]any](t, w); body["message"] != tc.wantMsg {
+			body := decodeJSON[map[string]any](t, w)
+			if body["message"] != tc.wantMsg {
 				t.Fatalf("message = %v, want %q", body["message"], tc.wantMsg)
+			}
+			if body["errorCode"] != tc.wantCode {
+				t.Errorf("errorCode = %v, want %q", body["errorCode"], tc.wantCode)
 			}
 		})
 	}
@@ -363,9 +403,13 @@ func TestGenerateDashboard_ThroughTheAIIntegrationService(t *testing.T) {
 	}{
 		{"dashboard", http.StatusOK, `{"candidates":[` + validGenerated + `],"usage":{}}`, 5 * time.Second, 0, http.StatusOK, ""},
 		{"declined", http.StatusOK, `{"declined":"Not in the catalogue.","usage":{}}`, 5 * time.Second, 0, http.StatusUnprocessableEntity, "Not in the catalogue."},
+		{"declined over two lines", http.StatusOK, `{"declined":"Revenue is not in the portal.\n\nAsk for cases by account instead.","usage":{}}`, 5 * time.Second, 0, http.StatusUnprocessableEntity, "Revenue is not in the portal. Ask for cases by account instead."},
 		{"no valid candidate", http.StatusOK, `{"candidates":[{"displayName":"x"}],"usage":{}}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateUnusable},
 		{"refused", http.StatusUnprocessableEntity, `{"code":"refused","message":"m"}`, 5 * time.Second, 0, http.StatusUnprocessableEntity, errMsgGenerateRefused},
 		{"model timed out", http.StatusGatewayTimeout, `{"code":"timeout","message":"m"}`, 5 * time.Second, 0, http.StatusGatewayTimeout, errMsgGenerateTimeout},
+		{"model usage limit", http.StatusTooManyRequests, `{"code":"usage_limit","message":"m"}`, 5 * time.Second, 0, http.StatusServiceUnavailable, errMsgGenerateUsageLimit},
+		{"reply cut off", http.StatusBadGateway, `{"code":"truncated","message":"m"}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateTruncated},
+		{"model unreachable", http.StatusBadGateway, `{"code":"model_call_failed","message":"m"}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateCall},
 		{"no key in the service", http.StatusServiceUnavailable, `{"code":"not_configured","message":"m"}`, 5 * time.Second, 0, http.StatusServiceUnavailable, errMsgGenerateUnavailable},
 		{"service unauthorised", http.StatusUnauthorized, `{"error":"Unauthorized"}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateCall},
 		{"service too slow", http.StatusOK, `{"candidates":[` + validGenerated + `]}`, 200 * time.Millisecond, 3 * time.Second, http.StatusGatewayTimeout, errMsgGenerateTimeout},
@@ -400,6 +444,9 @@ func TestGenerateDashboard_ThroughTheAIIntegrationService(t *testing.T) {
 				if !strings.Contains(w.Body.String(), tc.wantMsg) {
 					t.Errorf("body = %s, want the message %q", w.Body.String(), tc.wantMsg)
 				}
+				if code, _ := decodeJSON[map[string]any](t, w)["errorCode"].(string); !strings.HasPrefix(code, "generate_") {
+					t.Errorf("errorCode = %q, want one starting generate_ (the webapp shows only those messages)", code)
+				}
 				return
 			}
 			resp := decodeJSON[generateDashboardResponse](t, w)
@@ -411,5 +458,70 @@ func TestGenerateDashboard_ThroughTheAIIntegrationService(t *testing.T) {
 				t.Errorf("query = %v, want the implied type filter injected", resp.Dashboard.Widgets[0].Query)
 			}
 		})
+	}
+}
+
+// End to end: a closest dashboard's note reaches the reply, and the dashboard
+// in the response (the draft the webapp saves) carries no "note" anywhere.
+func TestGenerateDashboard_TheNoteIsInTheReplyNotTheDashboard(t *testing.T) {
+	withNote := strings.Replace(validGenerated, `{"displayName"`, `{"note":"Shown by open cases instead.","displayName"`, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"access_token":"t","token_type":"Bearer","expires_in":3600}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"candidates":[`+withNote+`],"usage":{}}`)
+	}))
+	t.Cleanup(srv.Close)
+	client := csmai.NewClient(csmai.Config{BaseURL: srv.URL, TokenURL: srv.URL + "/token", ClientID: "id", ClientSecret: "s", Timeout: 5 * time.Second})
+	w := httptest.NewRecorder()
+	NewDashboardGenerateHandler(NewServiceDashboardGenerator(client, nil)).
+		GenerateDashboard(w, withUser(newGenerateRequest(`{"prompt":"Top 10 customers by revenue."}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Dashboard json.RawMessage `json:"dashboard"`
+		Reply     string          `json:"reply"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(body.Reply, "Shown by open cases instead. Here's ") {
+		t.Errorf("reply = %q, want it to start with the note", body.Reply)
+	}
+	if strings.Contains(string(body.Dashboard), `"note"`) {
+		t.Errorf("dashboard = %s, want no note in it", body.Dashboard)
+	}
+}
+
+// TestGenerateDashboard_LeavesTypedNamesOutOfTheLog: a product, project or
+// account filter that names nothing usable answers 422 with the name the user
+// typed and the records it matched, and logs only which filter it was.
+func TestGenerateDashboard_LeavesTypedNamesOutOfTheLog(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	for _, tc := range []struct {
+		kind string
+		err  error
+	}{
+		{"product", fmt.Errorf("%w: widgets[0].filters[0]: no product is named like %q", errDashboardProduct, "Jane Example")},
+		{"project", fmt.Errorf("%w: widgets[0].filters[0]: %q matches several projects (Jane Example One (JE-1), Jane Example Two (JE-2)); name the one you mean", errDashboardProject, "Jane Example")},
+		{"account", fmt.Errorf("%w: widgets[0].filters[0]: no account is named like %q", errDashboardAccount, "Jane Example")},
+	} {
+		buf.Reset()
+		w := httptest.NewRecorder()
+		NewDashboardGenerateHandler(&fakeGenerator{err: tc.err}).GenerateDashboard(w, withUser(newGenerateRequest(`{"prompt":"x"}`)))
+		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "Jane Example") {
+			t.Errorf("%s: %d %s, want 422 naming what was typed", tc.kind, w.Code, w.Body.String())
+		}
+		logged := buf.String()
+		if !strings.Contains(logged, "unusable "+tc.kind+" filter") || strings.Contains(logged, "Jane") || strings.Contains(logged, "JE-1") {
+			t.Errorf("%s: log = %q, want the filter's kind and no names", tc.kind, logged)
+		}
 	}
 }

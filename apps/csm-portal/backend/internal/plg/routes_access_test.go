@@ -48,6 +48,7 @@ var everydayRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/plg/cs-users"},
 	{http.MethodGet, "/plg/lifecycle"},
 	{http.MethodPost, "/plg/organizations/search"},
+	{http.MethodPost, "/plg/organizations/aggregate"},
 	{http.MethodGet, "/plg/organizations/org-1"},
 	{http.MethodPatch, "/plg/organizations/org-1"},
 	{http.MethodGet, "/plg/organizations/org-1/products/choreo"},
@@ -58,6 +59,8 @@ var everydayRoutes = []struct{ method, path string }{
 	{http.MethodPatch, "/plg/playbook-run-tasks/task-1"},
 	{http.MethodPatch, "/plg/notes/note-1"},
 	{http.MethodPost, "/plg/registrations/search"},
+	{http.MethodPost, "/plg/registrations/volume-trend"},
+	{http.MethodPost, "/plg/registrations/aggregate"},
 	{http.MethodPost, "/plg/registrations/op-1/acknowledge"},
 	{http.MethodGet, "/plg/playbooks"},
 	{http.MethodGet, "/plg/playbooks/pb-1"},
@@ -125,7 +128,7 @@ func statusAs(t *testing.T, mux *http.ServeMux, method, path string, roles []str
 	return w.Code
 }
 
-// The main split: a CS engineer reaches all 20 everyday routes and is refused
+// The main split: a CS engineer reaches all 23 everyday routes and is refused
 // on the four that author a playbook template.
 func TestRoutes_CsEngineerWorksTheQueueButCannotAuthorPlaybooks(t *testing.T) {
 	mux := plgMux(t)

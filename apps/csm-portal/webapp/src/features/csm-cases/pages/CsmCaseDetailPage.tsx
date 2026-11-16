@@ -21,6 +21,7 @@ import {
   Button,
   Card,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -46,11 +47,13 @@ import {
   Paperclip,
   PauseCircle,
   Phone,
+  RefreshCw,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation } from "react-router";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { releaseInlineImages } from "@features/csm-cases/api/inlineImageUploads";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
@@ -89,9 +92,13 @@ import {
   useDeleteCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { canDeleteAttachment } from "@features/csm-cases/utils/canDeleteAttachment";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
 } from "@features/csm-cases/components/CaseActionBar";
@@ -102,10 +109,14 @@ import ChangeCaseTypeDialog, {
   type CaseTypeTransferSubmission,
 } from "@features/csm-cases/components/ChangeCaseTypeDialog";
 import {
+  hasCommentContent,
   hasPublicComment,
   isGithubRaisedCaseNumber,
 } from "@features/csm-cases/utils/commentContent";
-import { caseTypeTransferLabel } from "@features/csm-cases/utils/caseTypeTransfer";
+import {
+  caseTypeTransferLabel,
+  describeTransferWarnings,
+} from "@features/csm-cases/utils/caseTypeTransfer";
 import SetAutocloseHoldDialog from "@features/csm-cases/components/SetAutocloseHoldDialog";
 import EditCaseDetailsDialog, {
   type FieldSaveResult,
@@ -166,7 +177,9 @@ import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
+import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import { useGetWorkItemSlas } from "@features/csm-sla/api/useGetWorkItemSlas";
+import { usePostCaseSlaRecalculation } from "@features/csm-sla/api/usePostCaseSlaRecalculation";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
 import {
@@ -200,7 +213,7 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import QueryErrorState from "@components/QueryErrorState";
 import RelativeTime from "@components/RelativeTime";
 import EscalationLevelChip from "@components/EscalationLevelChip";
-import SeverityChip from "@components/SeverityChip";
+import CaseSeverityChip from "@features/csm-cases/components/CaseSeverityChip";
 import StateChip from "@components/StateChip";
 import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import type {
@@ -366,6 +379,17 @@ const CASE_TAB_IDS: readonly CaseTabId[] = TAB_DEFS.filter(
   (t) => !t.hidden,
 ).map((t) => t.id);
 
+/**
+ * The detail page of a case and of every case-like record (service request,
+ * engagement, announcement, security report), mounted on its own route or in
+ * an open case tab. Back goes to `state.from` with `state.parentState` (the
+ * list the case was opened from, with that list's own state), else to the
+ * record type's list; a case reached on another type's route is redirected to
+ * its own route with that state kept. It shows the header, its action bar
+ * (including Raise internal Git issue), tabs and side widgets, and owns the
+ * dialogs those actions open and the follow-up writes they trigger, such as
+ * the case tags added after a Git issue is filed.
+ */
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when
@@ -394,6 +418,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     canUseOperations,
     canUseTimeCardsAndUpdates,
     canViewSlaTab,
+    isAdmin,
   } = usePortalAccess();
   // A worknote_creator without full write may still add an internal work
   // note -- and nothing else on this page. The composer is locked to
@@ -441,9 +466,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // forward as router state, so the back button below returns to that exact
   // list view — filters, search text, sort — instead of a bare list path.
   // Falls back to the hardcoded backPath for a bookmarked or directly-linked
-  // detail page, which never got the state set.
-  const fromListState = location.state as { from?: string } | undefined;
+  // detail page, which never got the state set. `parentState` is the state
+  // that list was itself carrying (e.g. `{ from: <dashboard> }`), handed back
+  // to it on Back so the list keeps its own Back button.
+  const fromListState = location.state as { from?: string; parentState?: unknown } | undefined;
   const resolvedBackPath = fromListState?.from ?? backPath;
+  const backNavState = fromListState?.parentState ?? undefined;
+  const goBack = (): void => navigate(resolvedBackPath, { state: backNavState });
   const {
     data,
     isLoading,
@@ -514,7 +543,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     // report and got redirected to its real route.
     navigate(
       { pathname: canonicalDetailPath, search: location.search, hash: location.hash },
-      { replace: true, state: { from: resolvedBackPath } },
+      { replace: true, state: { from: resolvedBackPath, parentState: backNavState ?? null } },
     );
   }, [
     isMisrouted,
@@ -522,6 +551,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     caseId,
     navigate,
     resolvedBackPath,
+    backNavState,
     location.search,
     location.hash,
   ]);
@@ -548,14 +578,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // connection of its own.
   // Case Feedback (CSAT survey) submissions for this case, if any — the
   // survey only exists once a case is closed, so the query itself is
-  // disabled until then rather than firing early for an open case.
+  // disabled until then (and while the case is still loading) rather than
+  // firing early for an open case.
+  const isFeedbackEligible = data?.state === "closed";
   const {
     data: caseFeedback,
     isLoading: isFeedbackLoading,
     isError: isFeedbackError,
     refetch: refetchFeedback,
     isFetching: isFetchingFeedback,
-  } = useGetCsmCaseFeedback(caseId, data?.state === "closed");
+  } = useGetCsmCaseFeedback(caseId, isFeedbackEligible);
   // The chat transcript the case was spawned from, when linked. Loaded lazily
   // off the case's conversation id and merged into the comment stream below so
   // it renders as the earliest activity entries — mirrors the customer portal.
@@ -671,6 +703,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const currentEscalationLevel =
     escalationHistory?.escalations[0]?.currentLevel ?? null;
   const postEscalation = usePostCsmCaseEscalation(caseId);
+  const recalcCaseSla = usePostCaseSlaRecalculation(caseId);
   const requestCaseUpdate = useRequestCaseUpdate();
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
@@ -749,7 +782,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
   >([]);
   const [draftInternal, setDraftInternal] = useState(false);
   const [draftSourceMode, setDraftSourceMode] = useState(false);
+  // Read by clearComposerDraft, which must not depend on the draft itself.
+  const draftHtmlRef = useRef(draftHtml);
+  useEffect(() => {
+    draftHtmlRef.current = draftHtml;
+  }, [draftHtml]);
   const clearComposerDraft = useCallback(() => {
+    // Free the draft's image previews and forget their running uploads, so a
+    // late result cannot come back for a draft that no longer exists.
+    releaseInlineImages(draftHtmlRef.current);
     setDraftHtml("");
     setDraftAttachments([]);
     setDraftInternal(false);
@@ -997,7 +1038,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
     void refetchChat();
     void refetchAttachments();
     void refetchCallRequests();
-    void refetchFeedback();
+    // `refetch()` ignores `enabled`, so guard it: a manual refresh must not
+    // issue the feedback request for a case that isn't closed.
+    if (isFeedbackEligible) void refetchFeedback();
   };
 
   // Re-runs every source the Details tab renders: the case itself plus the
@@ -1104,6 +1147,30 @@ export default function CsmCaseDetailPage(): JSX.Element {
       setIsAcknowledging(false);
     }
   }, [patchCase, showError, showSuccess]);
+
+  // Admin-only: recompute this case's currently active SLA clocks' pause
+  // totals from its real state-change history (see
+  // usePostCaseSlaRecalculation's own doc comment). The hook's own
+  // onSuccess already invalidates the SLA list query, so the table reflects
+  // any correction without a manual refresh.
+  const handleRecalculateSla = useCallback(async (): Promise<void> => {
+    try {
+      const result = await recalcCaseSla.mutateAsync();
+      if (!result.hasHistory) {
+        showSuccess(
+          "This case has no SLA activity history to replay — nothing to recalculate.",
+        );
+        return;
+      }
+      const updatedCount = result.clocks.filter((clock) => clock.updated).length;
+      const skippedCount = result.clocks.filter((clock) => clock.skipped).length;
+      showSuccess(
+        `Recalculated this case's SLA clocks — ${updatedCount} updated, ${skippedCount} skipped.`,
+      );
+    } catch (err) {
+      showError("Could not recalculate this case's SLA clocks. Please try again.", err);
+    }
+  }, [recalcCaseSla, showError, showSuccess]);
 
   // Starting work: enforce the single-active-case rule.
   // 1) look up the engineer's other ongoing cases (abort on failure — we
@@ -1744,11 +1811,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   issueType: submission.issueType,
                 },
         {
-          onSuccess: () => {
+          onSuccess: (res) => {
             setChangeCaseTypeOpen(false);
+            // The transfer succeeded either way; a warning (e.g. an S0 case
+            // stored as S1 on a service request) is shown with the result.
+            const warning = describeTransferWarnings(res?.warnings);
             setFeedback({
-              message: `Case type changed to ${caseTypeTransferLabel(submission.targetType)}.`,
-              severity: "success",
+              message: `Case type changed to ${caseTypeTransferLabel(submission.targetType)}.${warning ? ` ${warning}` : ""}`,
+              severity: warning ? "warning" : "success",
               sticky: true,
             });
           },
@@ -2112,6 +2182,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   );
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(caseId, "case", isAdmin);
 
   // `postAttachment` is a single shared mutation object that stays mounted
   // across `caseId` changes (this page doesn't remount on navigation between
@@ -2239,6 +2311,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
     })();
   }, [attachmentList, downloadAttachment, showError]);
 
+  // Only the person who uploaded a file, or an admin, may delete it, and not
+  // once the case is closed (not even an admin). The backend enforces the rule;
+  // this only hides a button that would fail.
+  const canDeleteAttachmentRow = useCallback(
+    (a: CaseAttachment): boolean =>
+      canDeleteAttachment({
+        caseClosed: data?.state === "closed",
+        isAdmin,
+        myEmail: currentUser?.email || currentUserEmail,
+        uploaderEmail: a.uploadedByUser?.email || a.uploadedByEmail,
+      }),
+    [currentUser?.email, currentUserEmail, data?.state, isAdmin],
+  );
+
   const onConfirmDeleteAttachment = useCallback(() => {
     if (!caseId || !pendingDelete) return;
     const target = pendingDelete;
@@ -2278,7 +2364,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2299,7 +2385,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2394,7 +2480,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           size="small"
           className="csm-print-hide"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2481,12 +2567,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {!isAnnouncement &&
-              !isServiceRequest &&
-              !isSecurityReport &&
-              !isEngagement && (
-                <SeverityChip severity={c.severity} withLabel />
-              )}
+            {!isAnnouncement && !isSecurityReport && !isEngagement && (
+              <CaseSeverityChip
+                caseType={c.caseType}
+                severity={c.severity}
+                withLabel
+                emptyFallback={null}
+              />
+            )}
             {!isAnnouncement && <StateChip state={c.state} />}
             {!isAnnouncement && !isEscalationLevelUnset(currentEscalationLevel) && (
               <EscalationLevelChip level={currentEscalationLevel as string} short />
@@ -2739,6 +2827,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                uploadProgress={commentUploadProgress(postAttachment)}
+                imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
                 canResumeToUnlockPublicReply={canWrite && canResumeToUnlockPublicReply}
@@ -2754,35 +2844,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftInternalChange={setDraftInternal}
                 draftSourceMode={draftSourceMode}
                 onDraftSourceModeChange={setDraftSourceMode}
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!caseId) return;
-                  // Post the comment only when there's text; an attachment-only
-                  // send skips the comment endpoint and just uploads the files.
-                  const hasText =
-                    bodyHtml
-                      .replace(/<[^>]*>/g, "")
-                      .replace(/&nbsp;/g, " ")
-                      .trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      caseId,
-                      bodyHtml,
-                      authorName: engineerName,
-                      internal,
-                    });
-                  }
-                  // Attachments are case-level (no comment linkage on the BE);
-                  // upload each sequentially so a failure surfaces clearly.
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                    });
-                  }
-                  // Collapse and clear the draft only on success; on error the
-                  // input keeps its draft + files and surfaces the failure.
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ caseId, bodyHtml, authorName: engineerName, internal }),
+                    attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({ caseId, file, name, uploadedBy: engineerName }),
+                  });
+                  // Collapse and clear the draft only when everything went through.
                   setComposerOpen(false);
                   clearComposerDraft();
                 }}
@@ -3156,13 +3231,48 @@ export default function CsmCaseDetailPage(): JSX.Element {
       )}
 
       {activeTab === "sla" && canViewSlaTab && caseId && (
-        <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
+        <>
+          {isAdmin && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Tooltip title="Recompute this case's SLA pause totals from its real state-change history.">
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={
+                      recalcCaseSla.isPending ? (
+                        <CircularProgress size={14} color="inherit" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )
+                    }
+                    disabled={recalcCaseSla.isPending}
+                    onClick={() => void handleRecalculateSla()}
+                    sx={{ textTransform: "none" }}
+                  >
+                    Recalculate SLA
+                  </Button>
+                </span>
+              </Tooltip>
+            </Box>
+          )}
+          <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
+          <SlaImpactTimeline
+            entries={activityAudit}
+            isLoading={isActivityLoading}
+            isError={isActivityError}
+            onRetry={() => void refetchActivities()}
+            openedAt={c?.createdAt}
+            currentState={c?.state}
+          />
+        </>
       )}
 
       {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentsTab}
             loading={isAttachmentsLoading}
             error={isAttachmentsError}
             onRetry={() => void refetchAttachments()}
@@ -3171,6 +3281,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             refreshedAt={attachmentsUpdatedAt}
             uploading={isUploadingForThisCase}
             uploadProgress={isUploadingForThisCase ? postAttachment.uploadProgress : null}
+            onCancelUpload={isUploadingForThisCase ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError &&
               postAttachment.variables?.caseId === caseId
@@ -3182,6 +3293,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onDownloadAll={canDownloadAttachment ? onDownloadAllAttachments : undefined}
             onDownload={canDownloadAttachment ? onDownloadAttachment : undefined}
             onDelete={canWrite ? setPendingDelete : undefined}
+            canDeleteAttachment={canDeleteAttachmentRow}
             deletingId={deleteAttachment.isPending ? pendingDelete?.id : null}
             preview={
               canDownloadAttachment
@@ -3290,6 +3402,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           // CsmCaseCreatePage.tsx) — caseProject is the same project fetch
           // already used for the Customer card above.
           isManagedCloud={caseProject?.subscriptionType === "managed_cloud_subscription"}
+          isServiceRequest={c.caseType === "service_request"}
           isChanging={patchCase.isPending}
           onClose={() => setSeverityOpen(false)}
           onChange={onChangeSeverity}
@@ -3368,6 +3481,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isLinking={patchCase.isPending}
           onClose={() => setLinkCaseOpen(false)}
           onLink={onLinkCase}
+          relatedUnavailableReason={
+            isAnnouncement || isServiceRequest || isSecurityReport || isEngagement
+              ? "Only a case can have a related case. Link this one as a parent instead."
+              : undefined
+          }
         />
       )}
 

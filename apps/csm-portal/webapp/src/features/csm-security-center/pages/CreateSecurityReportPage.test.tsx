@@ -20,7 +20,11 @@ import "@testing-library/jest-dom/vitest";
 
 const navigateMock = vi.fn();
 const postCaseMutateAsyncMock = vi.fn();
+const reportUploadMock = vi.fn();
+const reportCancelMock = vi.fn();
 const showErrorMock = vi.fn();
+const uploadImagesMock = vi.fn();
+const releaseImagesMock = vi.fn();
 
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
@@ -30,14 +34,31 @@ vi.mock("react-router", () => ({
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: showErrorMock }),
 }));
+vi.mock("@features/csm-cases/api/usePreCreateInlineImages", () => ({
+  usePreCreateInlineImages: (projectId: string | undefined) => ({
+    onImageUpload: projectId ? () => "blob:test" : undefined,
+    uploadImages: uploadImagesMock,
+    release: releaseImagesMock,
+  }),
+  preCreateImagesErrorMessage: (err: unknown) => (err instanceof Error ? err.message : "failed"),
+}));
 vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
   usePostCsmCase: () => ({ mutateAsync: postCaseMutateAsyncMock }),
 }));
-// AttachmentsField reads only this constant from the module, whose hooks pull
+// AttachmentsField reads only the size constant from this module, whose hooks pull
 // in the current-user context and, through it, the runtime API config that
 // is absent under vitest (same stub as CreateServiceRequestPage.test.tsx).
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   MAX_ATTACHMENT_SIZE_BYTES: 10 * 1024 * 1024,
+}));
+// The report's files are uploaded as drafts BEFORE the case is created.
+vi.mock("@features/csm-cases/api/useReportDraftUploads", () => ({
+  useReportDraftUploads: () => ({
+    upload: reportUploadMock,
+    cancel: reportCancelMock,
+    progress: null,
+    isUploading: false,
+  }),
 }));
 // The project/deployment/product cascade is exercised elsewhere
 // (CsmCaseCreatePage) — stub them here to fixed, already-loaded options so
@@ -108,7 +129,7 @@ vi.mock("@api/backend/client", () => ({
 // Imported after the mocks above so the module picks them up.
 import CreateSecurityReportPage from "@features/csm-security-center/pages/CreateSecurityReportPage";
 
-/** A minimal File the jsdom FileReader used by AttachmentsField can read. */
+/** A minimal File to pick in the attachments field. */
 function makeFile(name: string, content = "scan results"): File {
   return new File([content], name, { type: "text/plain" });
 }
@@ -130,16 +151,19 @@ function fillRequiredFieldsExceptAttachments(): void {
 
 async function addAttachment(name = "scan.txt"): Promise<void> {
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-  await fireEvent.change(input, { target: { files: [makeFile(name)] } });
-  // Reading the file to base64 is async; let the microtask settle.
+  fireEvent.change(input, { target: { files: [makeFile(name)] } });
   await screen.findByText(name);
 }
 
-describe("CreateSecurityReportPage — attachment required at create time", () => {
+describe("CreateSecurityReportPage — files are chosen in the form and uploaded before the report is created", () => {
   beforeEach(() => {
+    reportUploadMock.mockReset();
+    reportUploadMock.mockResolvedValue({ ok: true, ids: ["att-1"] });
     navigateMock.mockReset();
     postCaseMutateAsyncMock.mockReset();
     showErrorMock.mockReset();
+    uploadImagesMock.mockReset();
+    uploadImagesMock.mockImplementation((html: string) => Promise.resolve(html));
   });
 
   it("keeps Create disabled until every required field, including an attachment, is filled", () => {
@@ -156,7 +180,8 @@ describe("CreateSecurityReportPage — attachment required at create time", () =
     render(<CreateSecurityReportPage />);
     const caption = screen.getByText("Attachments");
     expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
-    expect(screen.getByText(/at least one required/i)).toBeInTheDocument();
+    // One report file, and it is required.
+    expect(screen.getByText(/required · 1 attachment/i)).toBeInTheDocument();
   });
 
   it("marks the rich-text Description required: an asterisk on its caption and aria-required on the editor", () => {
@@ -166,8 +191,16 @@ describe("CreateSecurityReportPage — attachment required at create time", () =
     expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
   });
 
-  it("enables Create once an attachment is added, and sends it inside the POST /cases payload", async () => {
-    postCaseMutateAsyncMock.mockResolvedValue({ id: "sra-1" });
+  it("enables Create once a file is chosen, uploads it first, then creates the report naming it", async () => {
+    const order: string[] = [];
+    reportUploadMock.mockImplementation(async () => {
+      order.push("upload");
+      return { ok: true, ids: ["att-1"] };
+    });
+    postCaseMutateAsyncMock.mockImplementation(async () => {
+      order.push("create");
+      return { id: "sra-1" };
+    });
     render(<CreateSecurityReportPage />);
 
     fillRequiredFieldsExceptAttachments();
@@ -177,17 +210,52 @@ describe("CreateSecurityReportPage — attachment required at create time", () =
     expect(submit).toBeEnabled();
 
     fireEvent.click(submit);
-    await screen.findByRole("button", { name: /creating/i });
 
-    expect(postCaseMutateAsyncMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalled());
+    expect(order).toEqual(["upload", "create"]);
+    expect(reportUploadMock).toHaveBeenCalledTimes(1);
+    expect(reportUploadMock.mock.calls[0][0].map((a: { name: string }) => a.name)).toEqual(["scan.txt"]);
     const payload = postCaseMutateAsyncMock.mock.calls[0][0];
     expect(payload.type).toBe("security_report_analysis");
-    expect(payload.attachments).toEqual([
-      { name: "scan.txt", file: expect.any(String) },
-    ]);
+    expect(payload.attachmentIds).toEqual(["att-1"]);
+    expect(payload).not.toHaveProperty("attachments");
+    expect(showErrorMock).not.toHaveBeenCalled();
     expect(navigateMock).toHaveBeenCalledWith("/security-center/security-reports/sra-1", {
       state: { from: "/security-center" },
     });
+  });
+
+  it("creates nothing and keeps the form when the report's file cannot be uploaded", async () => {
+    reportUploadMock.mockResolvedValue({ ok: false, cancelled: false, message: "Storage is busy." });
+    render(<CreateSecurityReportPage />);
+    fillRequiredFieldsExceptAttachments();
+    await addAttachment("scan.txt");
+    fireEvent.click(screen.getByRole("button", { name: /create security report/i }));
+
+    await vi.waitFor(() =>
+      expect(showErrorMock).toHaveBeenCalledWith(
+        "Storage is busy. The security report was not submitted; try again.",
+      ),
+    );
+    expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /create security report/i })).toBeEnabled();
+  });
+
+  it("creates nothing and shows no error when the person cancels the upload", async () => {
+    reportUploadMock.mockResolvedValue({ ok: false, cancelled: true, message: "The upload was cancelled." });
+    render(<CreateSecurityReportPage />);
+    fillRequiredFieldsExceptAttachments();
+    await addAttachment("scan.txt");
+    fireEvent.click(screen.getByRole("button", { name: /create security report/i }));
+
+    await vi.waitFor(() => expect(reportUploadMock).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: /create security report/i })).toBeEnabled(),
+    );
+    expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+    expect(showErrorMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it("surfaces a create-mutation error via the shared error banner instead of navigating", async () => {
@@ -205,5 +273,47 @@ describe("CreateSecurityReportPage — attachment required at create time", () =
       );
     });
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("uploads the description's images before creating the report, and sends the rewritten HTML", async () => {
+    const order: string[] = [];
+    uploadImagesMock.mockImplementation(async () => {
+      order.push("images");
+      return '<p>Please review the attached scan.</p><img src="/img-1">';
+    });
+    postCaseMutateAsyncMock.mockImplementation(async () => {
+      order.push("create");
+      return { id: "sra-1" };
+    });
+    reportUploadMock.mockImplementation(async () => {
+      order.push("upload");
+      return { ok: true, ids: ["att-1"] };
+    });
+    render(<CreateSecurityReportPage />);
+    fillRequiredFieldsExceptAttachments();
+    await addAttachment("scan.txt");
+
+    fireEvent.click(screen.getByRole("button", { name: /create security report/i }));
+
+    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalled());
+    expect(postCaseMutateAsyncMock.mock.calls[0][0].description).toBe(
+      '<p>Please review the attached scan.</p><img src="/img-1">',
+    );
+    expect(order).toEqual(["images", "upload", "create"]);
+  });
+
+  it("creates nothing and keeps the form when an image cannot be uploaded", async () => {
+    uploadImagesMock.mockRejectedValueOnce(new Error("Image storage is busy."));
+    render(<CreateSecurityReportPage />);
+    fillRequiredFieldsExceptAttachments();
+    await addAttachment("scan.txt");
+
+    fireEvent.click(screen.getByRole("button", { name: /create security report/i }));
+
+    await vi.waitFor(() => expect(showErrorMock).toHaveBeenCalledWith("Image storage is busy."));
+    expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+    expect(reportUploadMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /create security report/i })).toBeEnabled();
   });
 });

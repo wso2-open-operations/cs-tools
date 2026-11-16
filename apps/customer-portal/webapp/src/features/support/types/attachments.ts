@@ -26,31 +26,3 @@ export type CaseCommentInlineAttachment = AuditMetadata & {
   sys_id?: string;
   url?: string;
 };
-
-// Response type for downloading an attachment.
-export type AttachmentDownloadResponse = AuditMetadata & {
-  content: string;
-  id: string;
-  referenceId?: string;
-  name: string;
-  type: string;
-  sizeBytes?: number;
-  downloadUrl?: string | null;
-  previewUrl?: string | null;
-  description?: string | null;
-};
-
-// Request type for patching an attachment.
-export type PatchAttachmentRequest = {
-  name?: string;
-  description?: string;
-};
-
-// Request type for posting a case attachment.
-export type PostCaseAttachmentRequest = {
-  name: string;
-  type: string;
-  content: string;
-  description?: string;
-  referenceType?: string;
-};

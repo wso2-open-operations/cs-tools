@@ -14,22 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { EncodedAttachment } from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import type { PostCsmCaseAttachmentInput } from "@features/csm-cases/api/useCsmCaseAttachments";
 
 /**
- * Upload create-form attachments to an already-created case via
- * `POST /attachments` (`referenceType: "case"`). The standard case and
- * service request creation flows attach files this way after the case
- * exists, rather than bundling them into the create request, so a failed
- * attachment upload never blocks or masks a successful create. (Security
- * report analysis is the exception: it requires at least one attachment in
- * the create payload itself, validated atomically at creation time, so it
- * sends attachments there instead of through this post-create path — see
- * `CreateSecurityReportPage.tsx`.)
+ * Upload create-form attachments to an already-created case, through the same
+ * chunked Azure Blob flow as the case page. Every create flow attaches files
+ * this way after the record exists, rather than bundling them into the create
+ * request, so a failed attachment upload never blocks or masks a successful
+ * create.
  *
- * Uploads run concurrently and independently; returns the number that failed
- * so the caller can warn without blocking navigation to the created case.
+ * Uploads run concurrently and independently; returns the names of the files
+ * that failed so the caller can warn (and name them) without blocking
+ * navigation to the created case.
  *
  * @param upload      the `mutateAsync` of {@link usePostCsmCaseAttachment}
  * @param uploadedBy  display name of the uploader (signed-in engineer)
@@ -37,12 +34,22 @@ import type { PostCsmCaseAttachmentInput } from "@features/csm-cases/api/useCsmC
 export async function uploadAttachmentsToCase(
   upload: (input: PostCsmCaseAttachmentInput) => Promise<unknown>,
   caseId: string,
-  attachments: EncodedAttachment[],
+  attachments: PendingAttachment[],
   uploadedBy: string,
-): Promise<number> {
-  if (attachments.length === 0) return 0;
+): Promise<string[]> {
+  if (attachments.length === 0) return [];
   const results = await Promise.allSettled(
     attachments.map((a) => upload({ caseId, file: a.raw, name: a.name, uploadedBy })),
   );
-  return results.filter((r) => r.status === "rejected").length;
+  return attachments.filter((_, i) => results[i].status === "rejected").map((a) => a.name);
+}
+
+/**
+ * The message shown when the record was created but some files did not upload.
+ * It says the record exists and names the files that failed.
+ */
+export function failedUploadsMessage(recordLabel: string, failedNames: string[]): string {
+  const count = failedNames.length;
+  const names = failedNames.map((n) => `"${n}"`).join(", ");
+  return `The ${recordLabel} was created, but ${count} attachment${count === 1 ? "" : "s"} failed to upload (${names}). You can add ${count === 1 ? "it" : "them"} from the ${recordLabel} page.`;
 }

@@ -218,10 +218,16 @@ type activeSLAClock struct {
 	WSO2CaseID string `json:"wso2CaseId"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Product    string `json:"product"`
-	Team       string `json:"team"`
-	Priority   string `json:"priority"`
-	State      string `json:"state"`
+	// EngagementType mirrors entity-service's own domain.SLAStatus.EngagementType
+	// (lowercase, e.g. "migration"; "" for every non-engagement case-like
+	// type) -- reconcileClock carries it into ClockMeta the same way
+	// CaseType already is, so a Redis wipe/restart rebuilds a migration
+	// engagement's clock metadata correctly instead of dropping it to "".
+	EngagementType string `json:"engagementType"`
+	Product        string `json:"product"`
+	Team           string `json:"team"`
+	Priority       string `json:"priority"`
+	State          string `json:"state"`
 }
 
 type searchActiveSLAStatusResponse struct {
@@ -333,6 +339,22 @@ type clockState struct {
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
 	TeamLeadName  string `json:"teamLeadName,omitempty"`
+	// ProjectOnboardingStatus/IsEvaluationAccount mirror entity-service's own
+	// domain.SLAClockState fields of the same name — the real team/
+	// onboarding/evaluation facts Engine.sendBreachAlert passes to
+	// chataudience.Resolve, replacing the hardcoded false/"" it used before
+	// entity-service's GetClockState started resolving these.
+	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
+	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+	// OnboardingTeamEmail mirrors entity-service's own
+	// domain.SLAClockState.OnboardingTeamEmail — the Customer Onboarding
+	// team's own group_email, populated only when ProjectOnboardingStatus
+	// qualifies. A SEPARATE address from TeamEmail (the case's real CRE
+	// team, unaffected by onboarding status) — sendBreachEmails sends the
+	// team breach email to both together rather than one in place of the
+	// other, so the real CRE team is never dropped just because the
+	// project happens to be onboarding.
+	OnboardingTeamEmail string `json:"onboardingTeamEmail,omitempty"`
 }
 
 // GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>

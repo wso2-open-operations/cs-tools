@@ -298,7 +298,11 @@ describe("ChangeRequestDetailsPage: where focus goes after an answer", () => {
       return screen.getByRole("dialog", { name: "Propose New Implementation Time" });
     };
     const sendProposal = (dialog: HTMLElement) => {
-      fireEvent.change(within(dialog).getByLabelText(/Proposed start/), { target: { value: "2099-06-11T15:30" } });
+      // The picker's text input; its value is the wall-clock time as MM/dd/yyyy hh:mm a.
+      const start = within(dialog)
+        .getAllByLabelText(/Proposed start/)
+        .find((el) => el.tagName === "INPUT") as HTMLInputElement;
+      fireEvent.change(start, { target: { value: "06/11/2099 03:30 PM" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Submit Proposal" }));
     };
 

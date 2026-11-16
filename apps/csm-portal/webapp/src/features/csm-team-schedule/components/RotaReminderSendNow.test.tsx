@@ -199,10 +199,10 @@ describe("RotaReminderSendNow", () => {
     expect(bodyRows(screen.getByRole("table", { name: "Who gets it" }))).toEqual([
       ["Saturday, 24 October", "LK Weekend", "3 · Ann, Ben, Cid"],
       ["Saturday, 24 October", "Americas Weekend", "1 · Dee"],
-      ["Saturday, 24 October", "LK On-call", "nobody"],
+      ["Saturday, 24 October", "Americas On-call", "nobody"],
       ["Sunday, 25 October", "LK Weekend", "2 · Ann, Ben"],
       ["Sunday, 25 October", "Americas Weekend", "1 · Dee"],
-      ["Sunday, 25 October", "LK On-call", "1 · Eve"],
+      ["Sunday, 25 October", "Americas On-call", "1 · Eve"],
     ]);
 
     expect(

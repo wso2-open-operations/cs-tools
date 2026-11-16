@@ -65,6 +65,21 @@ func (h *TimeCardHandler) SearchCaseTimeCards(w http.ResponseWriter, r *http.Req
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// AggregateTimeCards handles POST /time-cards/aggregate.
+func (h *TimeCardHandler) AggregateTimeCards(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateTimeCardsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.AggregateTimeCards(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // CreateTimeCard handles POST /time-cards.
 func (h *TimeCardHandler) CreateTimeCard(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateTimeCardRequest

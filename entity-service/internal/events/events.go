@@ -50,7 +50,22 @@ const (
 	// WorkaroundProvidedPayload's own doc comment for why this exists at
 	// all.
 	TypeWorkaroundProvided Type = "case.workaround_provided"
-	TypeIncidentCreated    Type = "incident.created"
+	// TypeCaseTypeChanged is published whenever a case type transfer
+	// (PATCH /cases/{id} with a "type") actually revises this case's own
+	// SLA clocks — i.e. whenever caseService.transferCaseType calls
+	// SLAEngineService.ReviseCaseClocks (the transfer moves into or out of
+	// "case" — see that call site's own doc comment). A plain
+	// case.status_changed/severity_changed publish has an existing consumer
+	// (csm-notification-service's own Engine.ReviseClocks) that re-syncs its
+	// Redis-held clock tracking with entity-service's now-revised state; a
+	// type transfer did exactly the same kind of revision on this side but,
+	// before this event existed, told that consumer nothing at all — its
+	// Redis copy of a cancelled clock kept ticking down under its OLD
+	// duration indefinitely, a real, reproduced false-breach-alert incident
+	// this event closes. See CaseTypeChangedPayload's own doc comment for
+	// the field shape.
+	TypeCaseTypeChanged Type = "case.type_changed"
+	TypeIncidentCreated Type = "incident.created"
 	// TypeIncidentAcknowledged / TypeIncidentPriorityElevated drive the
 	// incident call-escalation ladder in csm-notification-service. The ladder
 	// starts on incident.created (or a priority elevation) and keeps calling
@@ -246,10 +261,16 @@ type StatusChangedPayload struct {
 	CaseID     string `json:"caseId"`
 	CaseNumber string `json:"caseNumber,omitempty"`
 	// WSO2CaseID — see CommentAddedPayload's own doc comment.
-	WSO2CaseID string   `json:"wso2CaseId,omitempty"`
-	CaseTitle  string   `json:"caseTitle,omitempty"`
-	NewStatus  string   `json:"newStatus"`
-	Recipients []string `json:"recipients"`
+	WSO2CaseID string `json:"wso2CaseId,omitempty"`
+	CaseTitle  string `json:"caseTitle,omitempty"`
+	NewStatus  string `json:"newStatus"`
+	// PreviousStatus is the state the case was in before this change, as a
+	// display label. Optional: a consumer uses it to tell whether the change
+	// is visible to a given audience, e.g. customers see Work In Progress and
+	// Waiting On WSO2 as one state, so a move between the two is not news to
+	// them.
+	PreviousStatus string   `json:"previousStatus,omitempty"`
+	Recipients     []string `json:"recipients"`
 }
 
 // CaseAssignedPayload is the Payload shape for TypeCaseAssigned — mirrors
@@ -366,6 +387,43 @@ type SeverityChangedPayload struct {
 	Recipients  []string `json:"recipients"`
 }
 
+// CaseTypeChangedPayload is the Payload shape for TypeCaseTypeChanged. No
+// Chat/email reaction reads this today — it exists solely so
+// csm-notification-service's own SLA engine can re-sync its Redis-held
+// clock tracking (Engine.ReviseClocks) with this case's now-revised set of
+// clocks, the same way case.severity_changed's existing consumer already
+// does for a severity change. Priority is this case's CURRENT severity
+// (raw uppercase, e.g. "CRITICAL") when it's still/now a "case" after the
+// transfer, "" when it transferred OUT of "case" entirely (no
+// severity-keyed policy applies any more) — ReviseClocks' own Priority
+// parameter is what a clock type the new state still covers would be
+// re-registered under; an empty Priority simply means every one of this
+// case's old clocks gets cancelled-and-removed with nothing to replace
+// them, which is exactly right for a case that left "case".
+// CaseNumber/WSO2CaseID/CaseTitle/Product/Team are display-only, read back
+// onto a newly-registered clock's own Redis metadata for a later breach
+// card — never condition-sensitive, so a best-effort/empty value here only
+// ever degrades a future card's display, not the clock tracking itself.
+type CaseTypeChangedPayload struct {
+	CaseID       string `json:"caseId"`
+	CaseNumber   string `json:"caseNumber,omitempty"`
+	WSO2CaseID   string `json:"wso2CaseId,omitempty"`
+	CaseTitle    string `json:"caseTitle,omitempty"`
+	Product      string `json:"product,omitempty"`
+	Team         string `json:"team,omitempty"`
+	Priority     string `json:"priority,omitempty"`
+	PreviousType string `json:"previousType,omitempty"`
+	NewType      string `json:"newType,omitempty"`
+	// NewEngagementType is cv.EngagementType's own lowercase value (e.g.
+	// "migration") when NewType is "engagement", "" otherwise -- lets
+	// csm-notification-service's ReviseClocks keep a transferred clock's
+	// Redis-held EngagementType current the same way it already does for
+	// NewType/CaseType, so slaengine.Engine.sendBreachAlert's migration
+	// suppression check (CaseType=="ENGAGEMENT" && EngagementType=="migration")
+	// doesn't keep reading the case's stale pre-transfer value forever.
+	NewEngagementType string `json:"newEngagementType,omitempty"`
+}
+
 // CaseCreatedPayload is the Payload shape for TypeCaseCreated — mirrors
 // csm-notification-service's own CaseCreatedPayload (its internal/events/
 // validate.go is the schema authority; keep this in sync by hand the same
@@ -383,7 +441,14 @@ type CaseCreatedPayload struct {
 	WSO2CaseID string `json:"wso2CaseId,omitempty"`
 	CaseTitle  string `json:"caseTitle"`
 	CaseType   string `json:"caseType"`
-	Priority   string `json:"priority"`
+	// EngagementType mirrors CommentAddedPayload.EngagementType's own
+	// convention (cv.EngagementType's lowercase value, e.g. "migration"; ""
+	// for every non-engagement case-like type) -- added so
+	// csm-notification-service's SLA engine can tell a migration engagement
+	// apart from any other, the same way dispatch.checkFrustration already
+	// can from CommentAddedPayload's own copy of this field.
+	EngagementType string `json:"engagementType,omitempty"`
+	Priority       string `json:"priority"`
 	// Product is the case's deployed product's display name (e.g. "WSO2 API
 	// Manager") — cv.DeployedProductDetails.Product.Name, "" when the case
 	// has no deployed product. Doubles as csm-notification-service's Google

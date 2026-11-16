@@ -58,8 +58,10 @@ export interface SharedDashboardSummary {
   name: string;
   /** Who shared it (its owner); `null` once that user has been deleted. */
   owner: DashboardPerson | null;
-  /** The caller's team it was shared with; `null` when shared with the caller directly. */
+  /** The caller's team it was shared with; `null` when shared with the caller directly or only by link. */
   sharedViaTeam: SharedViaTeam | null;
+  /** `true` when the caller has it only because they opened its link. */
+  sharedViaLink: boolean;
   sharedOn: string;
   /** When the owner last changed it. */
   updatedOn: string;
@@ -78,8 +80,10 @@ export interface SharedDashboard {
   dashboard: BeDashboard;
   /** Who shared it (its owner); `null` once that user has been deleted. */
   owner: DashboardPerson | null;
-  /** The caller's team it was shared with; `null` when shared with the caller directly. */
+  /** The caller's team it was shared with; `null` when shared with the caller directly or only by link. */
   sharedViaTeam: SharedViaTeam | null;
+  /** `true` when the caller has it only because they opened its link. */
+  sharedViaLink: boolean;
   sharedOn: string;
   updatedOn: string;
 }

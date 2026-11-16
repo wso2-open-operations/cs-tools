@@ -47,6 +47,7 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   workStates: [],
   projects: [],
   engagementTypes: [],
+  salesRegions: [],
   productNames: [],
   csTeams: [],
   sreTeams: [],
@@ -180,6 +181,7 @@ export function readCasesFiltersFromUrl(
     workStates,
     projects: parseFreeFormCsv(params.get("projects")),
     engagementTypes: parseCsv(params.get("engagementTypes"), VALID_ENGAGEMENT_TYPES),
+    salesRegions: parseFreeFormCsv(params.get("salesRegions")),
     productNames: parseFreeFormCsv(params.get("products")),
     csTeams: parseFreeFormCsv(params.get("csTeams")),
     sreTeams: parseFreeFormCsv(params.get("sreTeams")),
@@ -259,6 +261,7 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.workStates.length) out.set("workStates", f.workStates.join(","));
   if (f.projects.length) out.set("projects", f.projects.join(","));
   if (f.engagementTypes.length) out.set("engagementTypes", f.engagementTypes.join(","));
+  if (f.salesRegions.length) out.set("salesRegions", f.salesRegions.join(","));
   if (f.productNames.length) out.set("products", f.productNames.join(","));
   if (f.csTeams.length) out.set("csTeams", f.csTeams.join(","));
   if (f.sreTeams.length) out.set("sreTeams", f.sreTeams.join(","));
@@ -316,6 +319,7 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.workStates.length) n += 1;
   if (f.projects.length) n += 1;
   if (f.engagementTypes.length) n += 1;
+  if (f.salesRegions.length) n += 1;
   if (f.productNames.length) n += 1;
   if (f.csTeams.length) n += 1;
   if (f.sreTeams.length) n += 1;

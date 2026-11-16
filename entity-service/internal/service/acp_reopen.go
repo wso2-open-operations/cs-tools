@@ -35,7 +35,8 @@ import (
 // once the reason it was suspended for is gone, as the previous process did.
 //
 //   - End-date track (end_date_closure_state CLOSED): reopens when the
-//     project's end date is in the future again (a renewal moves it).
+//     project's end date is today or later again (a renewal moves it): ACP
+//     suspends only once the date is past.
 //   - Invoice track (invoice_due_date_closure_state SUSPENDED): reopens when
 //     no invoice ACP counts is past its suspend date any more (paid).
 //
@@ -683,7 +684,7 @@ func (a *ACPReopen) CheckSuspendedProjects(ctx context.Context, req domain.ACPRe
 }
 
 // endDateClear reports whether the end-date track may reopen: the project's
-// end date is set and in the future.
+// end date is set and not yet past (today counts: ACP suspends the day after).
 func (a *ACPReopen) endDateClear(ctx context.Context, projectID string, sp salesentity.Project, now time.Time) bool {
 	end, err := acpParseDate(sp.EndDate)
 	if err != nil {
@@ -691,7 +692,7 @@ func (a *ACPReopen) endDateClear(ctx context.Context, projectID string, sp sales
 			"projectId", projectID, "projectSfId", sp.ID, "err", err)
 		return false
 	}
-	return end != nil && acpDaysBetween(now, *end) > 0
+	return end != nil && acpDaysBetween(now, *end) >= 0
 }
 
 // invoiceTrackClear reads the project's invoices from Salesforce, as ACP

@@ -32,6 +32,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/holidays"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
@@ -132,6 +133,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardHandler *handler.CustomDashboardHandler
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
+	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -142,6 +144,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardTeamShareHandler = handler.NewCustomDashboardTeamShareHandler(
 			service.NewCustomDashboardTeamShareService(repository.NewCustomDashboardTeamShareRepository(db), customDashboardRepo, userRepo),
+		)
+		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
+			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
 		)
 	}
 
@@ -353,6 +358,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// only in Postgres, so its routes are registered only when a pool is
 	// configured.
 	var scheduleHandler *handler.ScheduleHandler
+	// The Team Schedule's public holidays (migration 0283): the roster reads
+	// the stored copy; a daily refresh fills it from the calendar-events and
+	// employee services when those connections are configured.
+	var publicHolidayHandler *handler.PublicHolidayHandler
+	// Working on a public holiday (CRE, migration 0283): the Public holiday
+	// tags, the teams' confirmations and the reminders.
+	var holidayAvailabilityHandler *handler.HolidayAvailabilityHandler
 	// Customer engagement allocations for the CSM Allocations page: Postgres-only,
 	// internal staff only.
 	var engagementAllocationViewHandler *handler.EngagementAllocationViewHandler
@@ -380,6 +392,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
 	var eolProductUsageReportHandler *handler.EolProductUsageReportHandler
+	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
 
@@ -426,12 +439,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// constructed when SLADataSource is servicenow, independent of
 	// DataSource: a plain DataSourcePostgres deployment that points SLA
 	// reads at ServiceNow still needs this client for the task-SLA and
-	// case-search-SLA-filter wiring below. Also constructed when
-	// AttachmentDataSource is servicenow, for the same reason: the
-	// snAttachmentDelegate wiring below needs it too. config.Validate
-	// requires the same four credentials in every one of these cases.
+	// case-search-SLA-filter wiring below. config.Validate requires the same
+	// four credentials in every one of these cases.
 	var serviceNowIntegrationServiceClient *integrationservice.Client
-	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite || cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.AttachmentDataSource == config.AttachmentDataSourceServiceNow {
+	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite || cfg.SLADataSource == config.SLADataSourceServiceNow {
 		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
 			TokenURL:     cfg.ServiceNowIntegrationServiceTokenURL,
 			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
@@ -447,6 +458,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// admin resync compares and overwrites through those same ingests, so a
 	// component whose ingest flag is off reports "skipped".
 	var salesforceResyncHandler *handler.SalesforceResyncHandler
+	// salesforceAccountRefreshHandler is set when the Account ingest is on.
+	var salesforceAccountRefreshHandler *handler.SalesforceAccountRefreshHandler
 	// membershipRegistrationHandler and projectContactSyncHandler both need
 	// the very same membership-ingest-enabled SalesforceEventService this
 	// block builds, so all three are wired together rather than side by side.
@@ -519,6 +532,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			States:   repository.NewSalesforceIngestStateRepository(db),
 			Projects: projectIngestRepo,
 			Owners:   owners,
+		}
+		// The Account refresh (the primary partner backfill) writes accounts
+		// with the duplicate guard off, so it exists only while the Account
+		// ingest is on; it needs none of the other families.
+		if accountIngestRepo != nil {
+			base := service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport)
+			if refresher, ok := base.(service.AccountRefresher); ok {
+				salesforceAccountRefreshHandler = handler.NewSalesforceAccountRefreshHandler(service.NewAccountRefreshService(refresher, accessSvc))
+			}
 		}
 		// The Project branch is update-only unless its insert switch is on
 		// too (csm-sync-service still inserts project rows until cutover).
@@ -751,6 +773,32 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		onboardingStepHandler = handler.NewOnboardingStepHandler(service.NewOnboardingStepService(repository.NewOnboardingStepRepository(db), accessSvc))
 	}
 
+	// The attachment files (work item, comment-image and deployment attachments)
+	// are held by the portal backends in Azure Blob Storage; this service only
+	// records them and checks access. Needs a pool, because the metadata and the
+	// access rules (row-level security) live in Postgres: without one the routes
+	// are not registered and 404.
+	var storedAttachmentHandler *handler.StoredAttachmentHandler
+	var storedAttachmentSvc service.StoredAttachmentService
+	var inlineImageLinker service.InlineImageLinker
+	if db != nil {
+		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
+		storedAttachmentSvc = service.NewStoredAttachmentService(
+			storedAttachmentRepo,
+			service.StoredAttachmentLimits{
+				MaxBytes:            cfg.AttachmentMaxBytes,
+				InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
+			},
+		)
+		// A portal admin may delete an attachment they did not upload, asked
+		// for by the CSM portal backend alone.
+		storedAttachmentSvc = service.WithStoredAttachmentAdminDelete(storedAttachmentSvc, cfg.CSMPortalBackendClientID)
+		// Comments created or edited from here on attach the images they show.
+		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
+		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
+			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc))
+	}
+
 	// The portal-driven membership writes. Gated on a pool AND
 	// cfg.HasPortalMembershipWrites() -- the flag, a Postgres-authoritative data source
 	// and a complete sales-entity-service connection -- because every one of
@@ -833,7 +881,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.WithServiceNowGithubCases(githubSync, service.NewSNGithubCases(serviceNowIntegrationServiceClient))
 			slog.Info("github: service requests from issues are created in ServiceNow first (dual-write)")
 		} else if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
-			slog.Info("github: service requests from issues are written to Postgres only and numbered SR-GH-<n> (GITHUB_SR_SERVICENOW_FIRST is off)")
+			slog.Info("github: service requests from issues are written to Postgres only and numbered natively, SR-GH-<n> only when the repository has no project (GITHUB_SR_SERVICENOW_FIRST is off)")
 		}
 	}
 
@@ -1066,11 +1114,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// SN-mirror snCaseService instance below needs it too. Also constructed
 	// when SLADataSource is servicenow, for the same reason: the SLA
 	// search-delegate snCaseService instance (see below) is itself a
-	// NewServiceNowCaseService and needs one too. Also constructed when
-	// AttachmentDataSource is servicenow, for the same reason: the
-	// snAttachmentDelegate snCaseService instance below needs one too.
+	// NewServiceNowCaseService and needs one too.
 	var snUserService service.SNUserService
-	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite || cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.AttachmentDataSource == config.AttachmentDataSourceServiceNow {
+	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite || cfg.SLADataSource == config.SLADataSourceServiceNow {
 		snUserService = service.NewServiceNowUserService(serviceNowIntegrationServiceClient)
 	}
 
@@ -1085,25 +1131,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var snSLASearchDelegate service.CaseService
 	if cfg.SLADataSource == config.SLADataSourceServiceNow {
 		snSLASearchDelegate = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
-	}
-
-	// snAttachmentDelegate, when non-nil, backs four attachment reads (GET
-	// /attachments/{id}, POST /attachments/search, GET
-	// /attachments/{id}/content, GET /attachments/{id}/case) instead of
-	// activeAttachmentSvc, and the case activity feed (POST
-	// /cases/{id}/activities/search) instead of activeCaseSvc -- see
-	// attachmentReadHandler and activitiesHandler below. A stopgap for while Postgres-synced attachment content and
-	// activity history aren't reliable yet (AttachmentDataSource's own doc
-	// comment), independent of DataSource and SLADataSource. Same read-only
-	// shape as snSLASearchDelegate above: nil publisher/pgFallback/slaEngine.
-	// It must never back CreateCaseAttachment/ConfirmCaseAttachment/
-	// UpdateAttachment/DeleteCaseAttachment -- those need activeAttachmentSvc's
-	// real write/fallback behavior, which this read-only delegate doesn't
-	// have (see attachmentReadHandler's own doc comment for what breaks if
-	// it did).
-	var snAttachmentDelegate service.CaseService
-	if cfg.AttachmentDataSource == config.AttachmentDataSourceServiceNow {
-		snAttachmentDelegate = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
 	}
 
 	// This service's own in-process SLA engine (internal/service/sla_engine_service.go)
@@ -1126,20 +1153,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))
 	}
 
+	// Admin-only (see CaseSLARecalcService's own doc comment); nil the same
+	// way slaEngineSvc itself is when the engine is off, so the route below
+	// is simply never registered rather than registered against a nil
+	// engine.
+	var caseSLARecalcHandler *handler.CaseSLARecalcHandler
+	if slaEngineSvc != nil {
+		caseSLARecalcHandler = handler.NewCaseSLARecalcHandler(service.NewCaseSLARecalcService(slaEngineSvc, accessSvc, cfg.CSMPortalBackendClientID))
+	}
+
 	caseRepo := repository.NewCaseRepository(repository.NewScoped(db), crVisibility)
 	var activeCaseSvc service.CaseService
-	// caseAttachmentOverrideSvc, when non-nil, is the CaseService case
-	// attachment routes (registered further below) use INSTEAD of
-	// activeCaseSvc -- see its assignment in the DataSourcePostgresServiceNowDualWrite
-	// case below for why. nil in every other mode: attachments follow
-	// activeCaseSvc exactly as before this override existed. Unrelated to
-	// AttachmentDataSource=servicenow, which only ever affects the narrower
-	// attachmentReadHandler below (search/content), never the create/
-	// confirm/update/delete routes this override also covers.
-	var caseAttachmentOverrideSvc service.CaseService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
 		pgCaseFallbackSvc := service.NewCaseService(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo)
+		pgCaseFallbackSvc = service.WithDeletedAttachmentsForCSMPortal(pgCaseFallbackSvc, cfg.CSMPortalBackendClientID)
+		pgCaseFallbackSvc = service.WithInlineImageLinker(pgCaseFallbackSvc, inlineImageLinker)
 		activeCaseSvc = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, pgCaseFallbackSvc, eventPublisher, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, slaEngineSvc)
 	case config.DataSourcePostgresServiceNowDualWrite:
 		// Pilot: case CREATE, and UPDATE's WorkState field only.
@@ -1181,13 +1210,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// snCaseMirrorSvc is a full snCaseService, exactly as constructed
 		// for DataSourceServiceNow above, but it is never made the active
 		// CaseService — reads always stay on Postgres in this mode. It
-		// serves four purposes: CreateCase calls its CreateCase directly and
+		// serves three purposes: CreateCase calls its CreateCase directly and
 		// synchronously; UpdateCase dispatches to its patchCaseFields (via
 		// the snFieldPatcher interface) through snWritebackDispatcher, asynchronously;
-		// CreateCaseComment dispatches to its CreateBareCaseComment (via the
-		// snCommentMirror interface) through snWritebackDispatcher, asynchronously;
-		// and it is caseAttachmentOverrideSvc below, for case attachments
-		// specifically.
+		// and CreateCaseComment dispatches to its CreateBareCaseComment (via the
+		// snCommentMirror interface) through snWritebackDispatcher, asynchronously.
 		// snCaseMirrorSvc's own slaEngine is deliberately nil here, mirroring
 		// its nil publisher just above: SLA clock registration must not run
 		// as a side effect of this synchronous, SN-first CreateCase call —
@@ -1201,6 +1228,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// registration with a foreign-key violation).
 		snCaseMirrorSvc := service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
 		activeCaseSvc = service.NewCaseServiceWithSNWriteback(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo, snWritebackDispatcher, snCaseMirrorSvc, slaEngineSvc, cfg.CSEngineerRole)
+		activeCaseSvc = service.WithDeletedAttachmentsForCSMPortal(activeCaseSvc, cfg.CSMPortalBackendClientID)
+		activeCaseSvc = service.WithInlineImageLinker(activeCaseSvc, inlineImageLinker)
 		// CreateCase rejects a case/SR whose deployed product's category
 		// doesn't satisfy its project type's own Default Case/SR Creation
 		// Product Category allow-list — see
@@ -1209,6 +1238,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// below), not for DataSourceServiceNow: that mode's CreateCase never
 		// reaches this service's Postgres data at all.
 		activeCaseSvc = service.WithProductCategoryEnforcement(activeCaseSvc, referenceDataRepo, deployedProductRepo)
+		// The severity a new service request gets when none is sent.
+		activeCaseSvc = service.WithServiceRequestDefaultSeverity(activeCaseSvc, cfg.ServiceRequestDefaultSeverity)
 		// POST /cases/volume-trend's per-day cache -- Redis-backed or
 		// in-memory, see volumeTrendCache's own construction above.
 		activeCaseSvc = service.WithCaseVolumeTrendCache(activeCaseSvc, volumeTrendCache)
@@ -1221,40 +1252,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Without this the request is refused ("only supported for the ServiceNow
 		// data source"), which is how a type change failed for every case here.
 		activeCaseSvc = service.WithCaseTypeTransfer(activeCaseSvc, caseRepo)
-		// Case ATTACHMENTS: file bytes still live ONLY in ServiceNow in this
-		// mode (SFTPGo, the CSM-native/Postgres storage backend, is never
-		// used here) — but metadata is now ALSO written into and read from
-		// Postgres, matching this codebase's "reads come from Postgres,
-		// writes go to both" policy for every other entity. This replaces
-		// the previous permanent "attachments are ServiceNow-only" override:
-		// that reasoning (the sftpgo-backed Postgres attachment
-		// implementation wasn't production-ready for the Oct 4 go-live) is
-		// now obsolete — case_attachment.storage_key is nullable (migration
-		// 0185) precisely so a ServiceNow-sourced row can have metadata-only
-		// Postgres rows alongside the existing SFTPGo-backed ones.
-		//
-		// service.NewCaseAttachmentDualWriteService wraps activeCaseSvc
-		// (itself a *caseService, reused for its Postgres-backed
-		// SearchCaseAttachments/GetAttachmentByID and its repo/resolveActor)
-		// and overrides CreateCaseAttachment (ServiceNow-first/synchronous,
-		// then a Postgres metadata insert via
-		// CaseRepository.CreateCaseAttachmentFromServiceNow),
-		// ConfirmCaseAttachment (still 503s — there is no pending/
-		// in-progress upload state in this mode, same as plain
-		// DataSource=servicenow), GetCaseAttachmentContent (bytes only exist
-		// in ServiceNow, forwarded to snCaseMirrorSvc), and
-		// DeleteCaseAttachment/UpdateAttachment (Postgres-first with a
-		// best-effort, asynchronous ServiceNow mirror via
-		// snWritebackDispatcher, the same shape as every other dual-write
-		// UPDATE/DELETE). SearchCaseAttachments/GetAttachmentByID are
-		// inherited unmodified — see that type's own doc comment
-		// (case_attachment_dual_write_service.go) for the full design.
-		caseAttachmentOverrideSvc = service.NewCaseAttachmentDualWriteService(activeCaseSvc, snCaseMirrorSvc, snWritebackDispatcher)
 	default:
 		activeCaseSvc = service.NewCaseService(caseRepo, userRepo, eventPublisher, accessSvc, projectContactRepo)
+		activeCaseSvc = service.WithDeletedAttachmentsForCSMPortal(activeCaseSvc, cfg.CSMPortalBackendClientID)
+		activeCaseSvc = service.WithInlineImageLinker(activeCaseSvc, inlineImageLinker)
 		// See the matching comment in the DataSourcePostgresServiceNowDualWrite
 		// case above.
 		activeCaseSvc = service.WithProductCategoryEnforcement(activeCaseSvc, referenceDataRepo, deployedProductRepo)
+		activeCaseSvc = service.WithServiceRequestDefaultSeverity(activeCaseSvc, cfg.ServiceRequestDefaultSeverity)
 		activeCaseSvc = service.WithCaseVolumeTrendCache(activeCaseSvc, volumeTrendCache)
 		if snSLASearchDelegate != nil {
 			activeCaseSvc = service.WithSLASearchDelegate(activeCaseSvc, snSLASearchDelegate)
@@ -1308,25 +1313,68 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slog.Info("service request events enabled", "topic", cfg.SREEventHubTopic, "automatedTeams", len(cfg.SRAlertSRETeamIDs))
 	}
 	if githubSync != nil {
+		// slaEngineSvc is nil when CSM_SLA_ENGINE_ENABLED=false or no database
+		// is configured; WithGithubSLAEngine then leaves the sync without one.
+		service.WithGithubSLAEngine(githubSync, slaEngineSvc)
 		service.WithGithubCaseStates(githubSync, activeCaseSvc)
+		service.WithGithubSeverity(githubSync, activeCaseSvc)
+	}
+	// A customer's completed work item attachment moves its case like a comment does.
+	// Set in place, so the attachment handler built above already has it.
+	if storedAttachmentSvc != nil {
+		service.WithStoredAttachmentCaseStates(storedAttachmentSvc, activeCaseSvc)
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
-	// activitiesHandler backs POST /cases/{id}/activities/search
-	// specifically -- see AttachmentDataSource's own doc comment for why
-	// this one route can differ from the rest of caseHandler's
-	// activeCaseSvc (GetCase, PatchCase, CreateCase, comments, tags, ...),
-	// which are deliberately left on activeCaseSvc/DataSource.
-	activitiesHandler := caseHandler
-	if snAttachmentDelegate != nil {
-		activitiesHandler = handler.NewCaseHandler(snAttachmentDelegate, cfg.M2MClientIDs)
-	}
 	if db != nil {
 		announcementRequestHandler = handler.NewAnnouncementRequestHandler(
 			service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db), activeCaseSvc, accessSvc),
 		)
-		scheduleHandler = handler.NewScheduleHandler(
-			service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles),
-		)
+		scheduleSvc := service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles)
+		scheduleHandler = handler.NewScheduleHandler(scheduleSvc)
+		// Keep both nil interfaces when unconfigured: a nil *Client stored in
+		// the interface would make the service think it has a source.
+		var holidayCalendar service.HolidayCalendar
+		if cfg.HolidayCalendarConfigured() {
+			holidayCalendar = holidays.NewCalendarClient(cfg.HolidayCalendarBaseURL, holidays.Credentials{
+				TokenURL: cfg.HolidayCalendarTokenURL, ClientID: cfg.HolidayCalendarClientID, ClientSecret: cfg.HolidayCalendarClientSecret,
+			})
+		}
+		var employeeLocations service.EmployeeLocations
+		if cfg.HREntityConfigured() {
+			employeeLocations = holidays.NewEmployeeClient(cfg.HREntityBaseURL, holidays.Credentials{
+				TokenURL: cfg.HREntityTokenURL, ClientID: cfg.HREntityClientID, ClientSecret: cfg.HREntityClientSecret,
+			})
+		}
+		publicHolidayRepo := repository.NewPublicHolidayRepository(db)
+		// Working on a public holiday (CRE): every refresh places the coming
+		// weeks' Public holiday tags; the leads mark who works by removing
+		// them and confirm the team. Whoever may change a team's rota may
+		// confirm it (the schedule service's own check).
+		rotaZone, zoneErr := time.LoadLocation("Asia/Colombo")
+		if zoneErr != nil {
+			rotaZone = time.UTC
+		}
+		holidayAvailabilitySvc := service.NewHolidayAvailabilityService(
+			repository.NewHolidayAvailabilityRepository(db), publicHolidayRepo, accessSvc,
+			service.RotaWriterCheck(scheduleSvc), rotaZone)
+		holidayAvailabilityHandler = handler.NewHolidayAvailabilityHandler(holidayAvailabilitySvc)
+		publicHolidaySvc := service.WithHolidayTagPlacer(
+			service.NewPublicHolidayService(publicHolidayRepo, accessSvc, holidayCalendar, employeeLocations),
+			holidayAvailabilitySvc)
+		publicHolidayHandler = handler.NewPublicHolidayHandler(publicHolidaySvc)
+		if holidayCalendar != nil || employeeLocations != nil {
+			// First run shortly after start, then daily. Stopped with the
+			// other background workers by closePublishers.
+			ingestRetryWG.Add(1)
+			go func() {
+				defer ingestRetryWG.Done()
+				service.RunPublicHolidayRefresh(ingestRetryCtx, publicHolidaySvc, 2*time.Minute, 24*time.Hour)
+			}()
+			slog.Info("team schedule public holidays: daily refresh enabled",
+				"calendar", holidayCalendar != nil, "employeeLocations", employeeLocations != nil)
+		} else {
+			slog.Warn("team schedule public holidays: HOLIDAY_CALENDAR_* and HR_ENTITY_* unset; no refresh runs, the roster shows only stored holidays")
+		}
 		engagementAllocationViewHandler = handler.NewEngagementAllocationViewHandler(
 			service.NewEngagementAllocationViewService(repository.NewEngagementAllocationViewRepository(db), accessSvc),
 		)
@@ -1363,58 +1411,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Skills exist only in Postgres. Reads are internal-staff-only; a CSM
 		// admin is a token role from AUTH_ADMIN_ROLES, as for rota access.
 		skillHandler = handler.NewSkillHandler(
-			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles),
+			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles, service.SkillCapabilityRoles{
+				domain.SkillCapDirectory:       cfg.AuthSkillDirectoryRoles,
+				domain.SkillCapReviewRequests:  cfg.AuthSkillRequestReviewerRoles,
+				domain.SkillCapManageCatalogue: cfg.AuthSkillCatalogueManagerRoles,
+			}),
 		)
 	}
-	// activeAttachmentSvc backs the case-attachment write/non-content-read
-	// routes registered below (POST/PATCH/DELETE /attachments..., plus
-	// CreateAttachment) — see caseAttachmentOverrideSvc's own doc comment
-	// above for when and why it differs from activeCaseSvc
-	// (DataSourcePostgresServiceNowDualWrite's pilot). GetAttachmentByID,
-	// SearchCaseAttachments, and GetCaseAttachmentContent instead go through
-	// attachmentReadHandler below, which can additionally be overridden by
-	// AttachmentDataSource.
-	activeAttachmentSvc := activeCaseSvc
-	if caseAttachmentOverrideSvc != nil {
-		activeAttachmentSvc = caseAttachmentOverrideSvc
-	}
-	attachmentHandler := handler.NewCaseHandler(activeAttachmentSvc, cfg.M2MClientIDs)
-	// attachmentReadHandler backs the READ attachment routes
-	// AttachmentDataSource=servicenow is meant to affect: POST
-	// /attachments/search, GET /attachments/{id}, GET
-	// /attachments/{id}/content, and GET /attachments/{id}/case (the
-	// attachment-scoped parent-case lookup registered alongside the other
-	// three, used only by backend-v2's attachment authorization check -- see
-	// that route's own doc comment). GetAttachmentByID is included despite
-	// not being part of AttachmentDataSource's original, narrower doc
-	// comment -- backend-v2's GetAttachmentContent handler calls GetAttachment
-	// first, unconditionally, purely to resolve the attachment's ReferenceID
-	// for its own authorization check, and only then calls
-	// GetAttachmentContent; if GetAttachmentByID stayed on activeAttachmentSvc
-	// (Postgres) while only content moved to ServiceNow, that pre-check 404s
-	// on every ServiceNow-only attachment and GetAttachmentContent is never
-	// reached at all -- the fix this flag exists for would be silently inert
-	// end to end. GET /attachments/{id}/case closes the matching gap one
-	// level further in: without it, GetAttachmentByID resolves fine but the
-	// authorization check's own case lookup still fell back to
-	// activeCaseSvc/DataSource, 404ing on a ServiceNow-only attachment's
-	// parent case and rejecting access to content that
-	// GetCaseAttachmentContent could otherwise serve. Safe to include:
-	// GetAttachmentByID and GetCaseByID (what GetAttachmentParentCase calls
-	// internally) are both plain reads (s.client.Get(...), see their own doc
-	// comments) with no dependency on the nil pgFallback/publisher/slaEngine
-	// this read-only delegate lacks, same as SearchCaseAttachments and
-	// GetCaseAttachmentContent. It must still NOT back
-	// CreateCaseAttachment/ConfirmCaseAttachment (snCaseService.
-	// CreateCaseAttachment would skip the normal Postgres/SFTPGo upload path
-	// entirely, and its ConfirmCaseAttachment always 503s) or
-	// UpdateAttachment/DeleteCaseAttachment, which stay on
-	// attachmentHandler/activeAttachmentSvc unchanged.
-	attachmentReadHandler := attachmentHandler
-	if snAttachmentDelegate != nil {
-		attachmentReadHandler = handler.NewCaseHandler(snAttachmentDelegate, cfg.M2MClientIDs)
-	}
-
 	// customer_call (migration 0073) backs call requests on the Postgres
 	// data source, so these routes are registered for both data sources.
 	callRequestRepo := repository.NewCallRequestRepository(repository.NewScoped(db))
@@ -1517,6 +1520,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	default:
 		activeChangeRequestSvc = service.NewChangeRequestService(changeRequestRepo, userRepo)
 	}
+	activeChangeRequestSvc = service.WithChangeRequestInlineImageLinker(activeChangeRequestSvc, inlineImageLinker)
 	changeRequestHandler := handler.NewChangeRequestHandler(activeChangeRequestSvc)
 
 	timeCardRepo := repository.NewTimeCardRepository(repository.NewScoped(db))
@@ -1758,8 +1762,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				service.NewLongOpenCaseReportService(
 					repository.NewLongOpenCaseReportRepository(repository.NewScoped(db)),
 					service.LongOpenCaseReportConfig{
-						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
-						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
+						ProjectTypes:                           cfg.LongOpenCasesReportProjectTypes,
+						ExcludedTags:                           cfg.LongOpenCasesReportExcludedTags,
+						OpenBeforeYesterdayProjectTypes:        cfg.OpenBeforeYesterdayReportProjectTypes,
+						OpenBeforeYesterdayProductProjectTypes: cfg.OpenBeforeYesterdayReportProductProjectTypes,
 					}))
 		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
@@ -1799,6 +1805,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		eolProductUsageReportHandler = handler.NewEolProductUsageReportHandler(
 			service.NewEolProductUsageReportService(
 				repository.NewEolProductUsageReportRepository(repository.NewScoped(db))))
+		// Weekly SLA breach report: the clocks that breached last week, split
+		// into the onboarding and CRE sections the source report mailed as two
+		// attachments, for the scheduled task that mails it.
+		slaBreachReportHandler = handler.NewSLABreachReportHandler(
+			service.NewSLABreachReportService(
+				repository.NewSLABreachReportRepository(repository.NewScoped(db))))
 		caseAlertSettingsHandler = handler.NewCaseAlertSettingsHandler(
 			service.NewCaseAlertSettingsService(repository.NewCaseAlertSettingsRepository(db), repository.NewPagingChainRepository(db), accessSvc,
 				service.CaseAlertSettingsConfig{
@@ -2120,6 +2132,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	default:
 		activeCommentSvc = service.NewCommentService(commentRepo, userRepo)
 	}
+	activeCommentSvc = service.WithCommentInlineImageLinker(activeCommentSvc, inlineImageLinker)
 	commentHandler := handler.NewCommentHandler(activeCommentSvc)
 
 	taskSlaRepo := repository.NewTaskSlaRepository(repository.NewScoped(db))
@@ -2134,6 +2147,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeTaskSlaSvc = service.NewTaskSlaService(taskSlaRepo)
 	}
 	taskSlaHandler := handler.NewTaskSlaHandler(activeTaskSlaSvc)
+
+	// The project SLA report reads the Postgres clocks, so it is switched off
+	// (a 400 saying so) when SLA data is read from ServiceNow, like the task SLA
+	// reads above. It is also switched off when the cases themselves are read
+	// from ServiceNow (DATA_SOURCE=servicenow): the local project and case rows
+	// can be incomplete then, and a report must not silently omit cases.
+	var activeSlaReportSvc service.SlaReportService
+	if cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.DataSource == config.DataSourceServiceNow {
+		activeSlaReportSvc = service.NewSlaReportUnsupportedService()
+	} else {
+		activeSlaReportSvc = service.NewSlaReportService(repository.NewSlaReportRepository(repository.NewScoped(db)))
+	}
+	slaReportHandler := handler.NewSlaReportHandler(activeSlaReportSvc)
 
 	var snUserHandler *handler.SNUserHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
@@ -2175,6 +2201,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /salesforce/resync/preview", salesforceResyncHandler.Preview)
 		mux.HandleFunc("POST /salesforce/resync/apply", salesforceResyncHandler.Apply)
 	}
+	if salesforceAccountRefreshHandler != nil {
+		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh", salesforceAccountRefreshHandler.Refresh)
+	}
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)
 	}
@@ -2188,6 +2217,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PUT /onboarding-steps/{membershipSfId}/{step}", onboardingStepHandler.UpsertOnboardingStep)
 		mux.HandleFunc("GET /onboarding-steps/{membershipSfId}", onboardingStepHandler.GetOnboardingSteps)
 		mux.HandleFunc("POST /onboarding-steps/search", onboardingStepHandler.SearchOnboardingSteps)
+	}
+	if storedAttachmentHandler != nil {
+		mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
+		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
+		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
+		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
+		// The portal backends hold the files: they ask which key to use and read.
+		mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
+		mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
+		mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
+		mux.HandleFunc("POST /attachments/inline/{id}/relocated", storedAttachmentHandler.InlineImageRelocated)
+		mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
 	}
 
 	// event_publish_failures, sla_clocks, scheduled_task_run and
@@ -2206,6 +2247,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /sla-status/clock-state", slaStatusHandler.GetClockState)
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
+	if caseSLARecalcHandler != nil {
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate", caseSLARecalcHandler.RecalculatePauseTotals)
+	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
 	}
@@ -2217,6 +2261,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if githubDeliveryHandler != nil {
 		mux.HandleFunc("POST /github/deliveries", githubDeliveryHandler.Handle)
 		mux.HandleFunc("POST /github/service-requests", githubServiceRequestHandler.Create)
+		mux.HandleFunc("PUT /github/service-requests/{owner}/{repository}/{issueNumber}/severity", githubServiceRequestHandler.SetSeverity)
 	}
 
 	if worklogReportHandler != nil {
@@ -2252,6 +2297,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /team-schedule/engagement-allocations/search", scheduleHandler.SearchScheduleEngagementAllocations)
 		mux.HandleFunc("GET /team-schedule/on-duty", scheduleHandler.GetScheduleOnDuty)
 	}
+	if publicHolidayHandler != nil {
+		mux.HandleFunc("POST /team-schedule/public-holidays/search", publicHolidayHandler.SearchPublicHolidays)
+		mux.HandleFunc("POST /team-schedule/public-holidays/refresh", serviceOnly(accessSvc, publicHolidayHandler.RefreshPublicHolidays))
+	}
+	if holidayAvailabilityHandler != nil {
+		mux.HandleFunc("POST /team-schedule/holiday-availability/search", holidayAvailabilityHandler.SearchHolidayAvailability)
+		mux.HandleFunc("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", holidayAvailabilityHandler.ConfirmHolidayAvailability)
+		mux.HandleFunc("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", holidayAvailabilityHandler.WithdrawHolidayAvailability)
+		mux.HandleFunc("POST /team-schedule/holiday-availability/reminders/due", serviceOnly(accessSvc, holidayAvailabilityHandler.DueHolidayReminders))
+		mux.HandleFunc("PUT /team-schedule/holiday-availability/reminders/{teamKey}/{date}/{stage}", serviceOnly(accessSvc, holidayAvailabilityHandler.RecordHolidayReminder))
+	}
 	if teamMemberHandler != nil {
 		// Who holds which rank. The call-escalation ladder resolves four of its
 		// five rungs from this, and the fifth by intersecting it with on-duty
@@ -2272,8 +2328,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /skills/me/history", skillHandler.GetMySkillHistory)
 		mux.HandleFunc("PUT /skills/me/{skillId}", skillHandler.SetMySkillLevel)
 		mux.HandleFunc("DELETE /skills/me/{skillId}", skillHandler.RemoveMySkill)
-		// Everybody's skills: a CSM admin or a CRE or SRE team lead.
+		mux.HandleFunc("GET /skills/me/capabilities", skillHandler.GetMySkillCapabilities)
+		// Categories: a catalogue manager.
+		mux.HandleFunc("POST /skills/categories", skillHandler.CreateSkillCategory)
+		mux.HandleFunc("PATCH /skills/categories/{id}", skillHandler.UpdateSkillCategory)
+		// Skill requests: anyone asks; a request reviewer decides.
+		mux.HandleFunc("POST /skills/requests/check", skillHandler.CheckSkillRequest)
+		mux.HandleFunc("POST /skills/requests", skillHandler.CreateSkillRequest)
+		mux.HandleFunc("GET /skills/requests/mine", skillHandler.ListMySkillRequests)
+		mux.HandleFunc("POST /skills/requests/{id}/withdraw", skillHandler.WithdrawSkillRequest)
+		mux.HandleFunc("POST /skills/requests/search", skillHandler.SearchSkillRequests)
+		mux.HandleFunc("POST /skills/requests/{id}/approve", skillHandler.ApproveSkillRequest)
+		mux.HandleFunc("POST /skills/requests/{id}/reject", skillHandler.RejectSkillRequest)
+		// Everybody's skills: the directory capability.
 		mux.HandleFunc("POST /skills/users/search", skillHandler.SearchUserSkills)
+		mux.HandleFunc("POST /skills/directory/search", skillHandler.SearchSkillDirectory)
+		mux.HandleFunc("GET /skills/users/{userId}", skillHandler.GetUserSkillProfile)
+		mux.HandleFunc("GET /skills/users/{userId}/history", skillHandler.GetUserSkillHistory)
 	}
 	if pagingChainHandler != nil {
 		// Who is on each tier of the CRE and SRE paging chains, what the caller
@@ -2308,6 +2379,32 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if eolProductUsageReportHandler != nil {
 		// internalOnly: the report names customers and their deployments.
 		mux.HandleFunc("GET /reports/eol-product-usage", internalOnly(accessSvc, eolProductUsageReportHandler.GetEolProductUsageReport))
+	}
+	if slaBreachReportHandler != nil {
+		// internalOnly, same reasoning as the regression report above: the
+		// report names customers' cases, accounts and assignees.
+		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
+	}
+	// Alert mute rules (Operations > Alert mute rules, migration 0278): Postgres only. On the
+	// ServiceNow data source every route answers 400 (alert-core, through
+	// csm-integration-service, then mutes nothing). internalOnly: the rules
+	// name internal services and the staff who muted them.
+	var alertMuteRuleHandler *handler.AlertMuteRuleHandler
+	switch {
+	case cfg.DataSource == config.DataSourceServiceNow:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewSNAlertMuteRuleService())
+	case db != nil:
+		alertMuteRuleHandler = handler.NewAlertMuteRuleHandler(service.NewAlertMuteRuleService(repository.NewAlertMuteRuleRepository(repository.NewScoped(db))))
+	}
+	if alertMuteRuleHandler != nil {
+		mux.HandleFunc("POST /alert-mute-rules/search", internalOnly(accessSvc, alertMuteRuleHandler.SearchAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/active", internalOnly(accessSvc, alertMuteRuleHandler.GetActiveAlertMuteRules))
+		mux.HandleFunc("GET /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.GetAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules", internalOnly(accessSvc, alertMuteRuleHandler.CreateAlertMuteRule))
+		mux.HandleFunc("PATCH /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.UpdateAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules/{id}/extend", internalOnly(accessSvc, alertMuteRuleHandler.ExtendAlertMuteRule))
+		mux.HandleFunc("POST /alert-mute-rules/{id}/end", internalOnly(accessSvc, alertMuteRuleHandler.EndAlertMuteRule))
+		mux.HandleFunc("DELETE /alert-mute-rules/{id}", internalOnly(accessSvc, alertMuteRuleHandler.DeleteAlertMuteRule))
 	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
@@ -2389,6 +2486,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /team-schedule/my-lead-teams", scheduleHandler.GetMyLeadTeams)
 		mux.HandleFunc("POST /team-schedule/assignments/apply", scheduleHandler.ApplyScheduleRange)
 		mux.HandleFunc("POST /team-schedule/absences/apply", scheduleHandler.ApplyScheduleAbsence)
+		mux.HandleFunc("POST /team-schedule/engagement-allocations/dismiss", scheduleHandler.DismissScheduleEngagementAllocation)
 		mux.HandleFunc("POST /team-schedule/rotas/{code}/import", scheduleHandler.ImportRota)
 		mux.HandleFunc("DELETE /team-schedule/absences/{id}", scheduleHandler.DeleteScheduleAbsence)
 		mux.HandleFunc("POST /team-schedule/absence-kinds", scheduleHandler.CreateScheduleAbsenceKind)
@@ -2506,6 +2604,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PUT /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.AddTeamShare)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.RemoveTeamShare)
 	}
+	if customDashboardLinkHandler != nil {
+		// Sharing the caller's saved dashboards by link (owner), and opening
+		// a link (anyone internal); an opened dashboard is read through the
+		// shared-dashboards routes above.
+		mux.HandleFunc("GET /users/me/dashboards/{id}/link", customDashboardLinkHandler.GetLink)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/link", customDashboardLinkHandler.EnableLink)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/link", customDashboardLinkHandler.DisableLink)
+		mux.HandleFunc("POST /users/me/shared-dashboards/link", customDashboardLinkHandler.OpenLink)
+	}
 
 	if membershipRegistrationHandler != nil {
 		mux.HandleFunc("POST /users/me/memberships/register", membershipRegistrationHandler.RegisterInvitedMemberships)
@@ -2586,6 +2693,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("GET /projects/{id}/conversations/stats", projectStatsHandler.GetProjectConversationStats)
 	mux.HandleFunc("GET /projects/{id}/deployments/stats", projectStatsHandler.GetProjectDeploymentStats)
 	mux.HandleFunc("GET /projects/{id}/time-cards/stats", projectStatsHandler.GetProjectTimeCardStats)
+	mux.HandleFunc("GET /projects/{id}/time-cards/report", projectStatsHandler.GetProjectTimeCardReport)
 	mux.HandleFunc("GET /projects/{id}/change-requests/stats", projectStatsHandler.GetProjectChangeRequestStats)
 	if snProductHandler != nil {
 		mux.HandleFunc("POST /products/search", snProductHandler.SearchProducts)
@@ -2642,36 +2750,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /cases/feedback/aggregate", feedbackHandler.AggregateFeedback)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
 	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
-	mux.HandleFunc("POST /cases/{id}/activities/search", activitiesHandler.SearchCaseActivities)
-	mux.HandleFunc("POST /attachments", attachmentHandler.CreateCaseAttachment)
-	mux.HandleFunc("POST /attachments/{id}/confirm", attachmentHandler.ConfirmCaseAttachment)
-	mux.HandleFunc("POST /attachments/search", attachmentReadHandler.SearchCaseAttachments)
-	mux.HandleFunc("GET /attachments/{id}/content", attachmentReadHandler.GetCaseAttachmentContent)
-	mux.HandleFunc("GET /attachments/{id}", attachmentReadHandler.GetAttachmentByID)
-	// GetAttachmentParentCase resolves an attachment's own parent case,
-	// backed by attachmentReadHandler (so AttachmentDataSource, not
-	// DataSource, decides where both the attachment and its case are read
-	// from). Exists for backend-v2's attachment authorization check
-	// (authorizeAttachmentAccess): it needs to verify the caller may see the
-	// attachment's case, and under AttachmentDataSource=servicenow that case
-	// can live only in ServiceNow, never synced to Postgres -- looking it up
-	// via the plain GET /cases/{id} (always DataSource-scoped, used
-	// everywhere else) would 404 even though the attachment's own content is
-	// reachable. {id} is the attachment id, matching every other
-	// /attachments/{id}... route; GetAttachmentParentCase resolves it to a
-	// case id internally via the same CaseService GetAttachmentByID already
-	// uses, so the caller never needs to pass a case id of its own.
-	// A comment-referenced attachment (an image pasted inline into a comment)
-	// has the comment's id as its reference, so GetAttachmentParentCase falls
-	// back to the comment table, read through the caller's own scope. Always
-	// the Postgres comment service, independent of DataSource: that table is
-	// the one place a comment id can be resolved to its case.
-	if cfg.HasDatabase() {
-		attachmentReadHandler.WithCommentResolver(service.NewCommentService(commentRepo, userRepo))
-	}
-	mux.HandleFunc("GET /attachments/{id}/case", attachmentReadHandler.GetAttachmentParentCase)
-	mux.HandleFunc("PATCH /attachments/{id}", attachmentHandler.UpdateAttachment)
-	mux.HandleFunc("DELETE /attachments/{id}", attachmentHandler.DeleteCaseAttachment)
+	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
+	// Attachment metadata is listed from PostgreSQL only. The files are in Azure
+	// Blob Storage and are read and written through the stored-attachment routes
+	// registered above.
+	mux.HandleFunc("POST /attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /cases/{id}/feedback", caseHandler.GetCaseFeedback)
 	mux.HandleFunc("POST /cases/{id}/feedback", caseHandler.SubmitCaseFeedback)
 	mux.HandleFunc("POST /cases/{id}/tags", caseHandler.AddCaseTag)
@@ -2741,6 +2824,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
 
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
+	// Read-only, so open to the same callers as the search (RLS scopes both).
+	mux.HandleFunc("POST /time-cards/aggregate", timeCardHandler.AggregateTimeCards)
 	// Time cards are logged, edited and deleted by internal staff only;
 	// customers can read them (the two search routes) but never write. The
 	// gate makes that a property of entity-service itself rather than of
@@ -2799,6 +2884,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	mux.HandleFunc("GET /slas/{id}", internalOnly(accessSvc, taskSlaHandler.GetTaskSla))
 	mux.HandleFunc("POST /slas/search", internalOnly(accessSvc, taskSlaHandler.SearchTaskSlas))
+	mux.HandleFunc("GET /projects/{id}/slas/report", internalOnly(accessSvc, slaReportHandler.GetProjectSlaReport))
 
 	// Registered unconditionally; the non-ServiceNow data source is served by
 	// service.NewUnavailableTaskService, which answers 503 (see above).

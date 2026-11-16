@@ -76,7 +76,7 @@ var crvisInterfaces = map[string]*regexp.Regexp{
 	"ChangeRequestRepository": nil,
 	"CommentRepository":       nil,
 	"CRNoticeRepository":      nil,
-	"ProjectStatsRepository":  regexp.MustCompile(`ChangeRequest|OutstandingCounts`),
+	"ProjectStatsRepository":  regexp.MustCompile(`ChangeRequest|OutstandingCounts|TimeCardReport`),
 }
 
 type crvisFunc struct {

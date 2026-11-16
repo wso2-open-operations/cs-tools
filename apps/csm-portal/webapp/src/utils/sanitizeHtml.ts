@@ -61,9 +61,18 @@ export function sanitizeAnnouncementHtml(html: string): string {
   // Only a link that carries a target needs anything different; every other
   // announcement gets exactly the sanitiser call it always did.
   if (!LINK_WITH_TARGET.test(html)) return DOMPurify.sanitize(html);
-  const fragment = DOMPurify.sanitize(html, { ADD_ATTR: ["target"], RETURN_DOM_FRAGMENT: true });
-  // ADD_ATTR allows `target` on every element; only a link may keep one (a form
-  // or image map with a target would submit or navigate into another context).
+  return htmlWithNewTabLinksOnly(
+    DOMPurify.sanitize(html, { ADD_ATTR: ["target"], RETURN_DOM_FRAGMENT: true }),
+  );
+}
+
+/**
+ * ADD_ATTR allows `target` on every element; only a link may keep one (a form
+ * or image map with a target would submit or navigate into another context).
+ * A `_blank` link keeps it with `rel="noopener noreferrer"`; any other target
+ * is removed.
+ */
+function htmlWithNewTabLinksOnly(fragment: DocumentFragment): string {
   for (const el of Array.from(fragment.querySelectorAll("[target]"))) {
     if (el.tagName !== "A") el.removeAttribute("target");
   }
@@ -78,6 +87,55 @@ export function sanitizeAnnouncementHtml(html: string): string {
   const holder = document.createElement("div");
   holder.appendChild(fragment);
   return holder.innerHTML;
+}
+
+/**
+ * Tags a banner may not carry. A banner is one strip of markup an
+ * admin pastes in and every signed-in person then sees, so it gets the
+ * announcement policy minus what could restyle or take over the rest of the
+ * page (`style`, `link`, `meta`, `base`) or collect input (a form and its
+ * controls). Scripts, event handlers and `javascript:` URLs are already
+ * stripped by DOMPurify's defaults.
+ */
+const BANNER_FORBID_TAGS = [
+  "style",
+  "link",
+  "meta",
+  "base",
+  "form",
+  "input",
+  "textarea",
+  "select",
+  "option",
+  "iframe",
+  "object",
+  "embed",
+];
+
+/**
+ * Attributes a banner may not carry. A popover is drawn in the browser's top
+ * layer, which neither overflow nor paint containment can clip, so a button
+ * with popovertarget could open a panel over the whole portal (and a manual
+ * popover stays open until the page is reloaded). DOMPurify keeps these by
+ * default.
+ */
+const BANNER_FORBID_ATTRS = ["popover", "popovertarget", "popovertargetaction"];
+
+/**
+ * Sanitize a banner's HTML, both when an admin pastes it in and every time a
+ * stored banner is shown. The display side matters because a banner can also
+ * be saved straight through the API, which stores it as sent, so the policy
+ * has to hold wherever the stored HTML is rendered, not only in the dialog.
+ */
+export function sanitizeBannerHtml(html: string): string {
+  return htmlWithNewTabLinksOnly(
+    DOMPurify.sanitize(html, {
+      ADD_ATTR: ["target"],
+      FORBID_ATTR: BANNER_FORBID_ATTRS,
+      FORBID_TAGS: BANNER_FORBID_TAGS,
+      RETURN_DOM_FRAGMENT: true,
+    }),
+  );
 }
 
 /** DOMPurify config for backend description/body HTML: strips tables and code blocks. */

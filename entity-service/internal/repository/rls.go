@@ -64,7 +64,7 @@ const setViewerProjectIDsSQL = `SELECT set_config('app.viewer_project_ids', COAL
 // exactly that under an index scan in testing, silently using whatever value
 // the GUC held before this call ran.
 func setCallerIdentity(ctx context.Context, tx pgx.Tx, scope SearchScope) error {
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.is_internal', $1, true)", fmt.Sprintf("%t", scope.Unrestricted)); err != nil {
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.is_internal', $1, true), set_config('app.is_internal_staff', $2, true)", fmt.Sprintf("%t", scope.Unrestricted), isInternalStaffArg(scope)); err != nil {
 		return fmt.Errorf("set caller identity: is_internal: %w", err)
 	}
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.viewer_email', $1, true)", scope.ViewerEmail); err != nil {

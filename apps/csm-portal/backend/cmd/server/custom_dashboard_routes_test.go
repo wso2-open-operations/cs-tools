@@ -66,6 +66,8 @@ func TestCustomDashboardRoutePermissions(t *testing.T) {
 		"GET /dashboards/shared", "GET /dashboards/shared/{id}",
 		"GET /dashboards/custom", "PUT /dashboards/custom/{id}",
 		"PUT /dashboards/custom/{id}/shares/{userId}", "POST /dashboards/generate",
+		"GET /dashboards/custom/{id}/link", "PUT /dashboards/custom/{id}/link",
+		"DELETE /dashboards/custom/{id}/link", "POST /dashboards/shared/link",
 	} {
 		if !seen[name] {
 			t.Errorf("route %q is no longer registered with route(...) in main.go; update this test if it moved", name)

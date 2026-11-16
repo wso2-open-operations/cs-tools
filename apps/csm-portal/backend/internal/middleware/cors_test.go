@@ -150,3 +150,31 @@ func TestCORSEmptyAllowListDeniesEveryOrigin(t *testing.T) {
 		t.Fatalf("expected no Allow-Origin with an empty allow-list, got %q", got)
 	}
 }
+
+// The attachment download reads Content-Range and Content-Disposition in the
+// browser; a cross-origin response hides them unless they are exposed.
+func TestCORSExposesTheDownloadHeaders(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusPartialContent) })
+	handler := CORS([]string{"https://frontend.example.com"})(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/attachments/x/content", nil)
+	req.Header.Set("Origin", "https://frontend.example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	exposed := rec.Header().Get("Access-Control-Expose-Headers")
+	for _, h := range []string{"Content-Range", "Content-Disposition", "Accept-Ranges"} {
+		if !strings.Contains(exposed, h) {
+			t.Errorf("Access-Control-Expose-Headers = %q, missing %s", exposed, h)
+		}
+	}
+
+	// A disallowed origin gets no CORS headers at all.
+	req = httptest.NewRequest(http.MethodGet, "/attachments/x/content", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "" {
+		t.Errorf("a disallowed origin was sent Expose-Headers %q", got)
+	}
+}

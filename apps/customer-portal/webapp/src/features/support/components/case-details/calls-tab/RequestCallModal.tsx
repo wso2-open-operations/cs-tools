@@ -44,6 +44,7 @@ import {
   type ChangeEvent,
 } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
+import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
 import { usePostCallRequest } from "@features/support/api/usePostCallRequest";
 import { usePatchCallRequest } from "@features/support/api/usePatchCallRequest";
 import { CALL_REQUEST_STATE_PENDING_ON_WSO2 } from "@features/support/constants/supportConstants";
@@ -210,8 +211,8 @@ export default function RequestCallModal({
 
   const handlePreferredTimeChange = useCallback(
     (index: number) =>
-      (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        let value = event.target.value;
+      (picked: string) => {
+        let value = picked;
         const floorKey = normalizeDatetimeLocalForCompare(minDatetimeLocal);
         const selKey = normalizeDatetimeLocalForCompare(value);
         if (floorKey && selKey && selKey < floorKey) {
@@ -395,29 +396,16 @@ export default function RequestCallModal({
               gap: 1,
             }}
           >
-            <TextField
+            <DateTimeLocalField
               id={`preferred-time-${index}`}
               label={
                 index === 0
                   ? "Preferred Time *"
                   : `Preferred Time ${index + 1} *`
               }
-              type="datetime-local"
               value={value}
               onChange={handlePreferredTimeChange(index)}
-              fullWidth
-              size="small"
-              slotProps={{
-                inputLabel: { shrink: true },
-                htmlInput: {
-                  min: minDatetimeLocal,
-                  step: 300,
-                },
-              }}
-              inputProps={{
-                min: minDatetimeLocal,
-                step: 300,
-              }}
+              minDateTime={minDatetimeLocal}
               disabled={isPending}
             />
             <Box

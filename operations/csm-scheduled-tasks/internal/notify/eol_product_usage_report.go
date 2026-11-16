@@ -16,7 +16,7 @@ var eolProductUsageReportTemplateRaw string
 
 var eolProductUsageReportTemplate = bakeLogo(eolProductUsageReportTemplateRaw)
 
-// eolUsageIntro is the introduction the ServiceNow report carried, word for
+// eolUsageIntro is the introduction the previous system's report carried, word for
 // word.
 var eolUsageIntro = []string{
 	"This monthly report highlights customers who are still using EOL product versions in their deployments, as reflected in the deployment details available in the Customer Portal.",
@@ -27,7 +27,7 @@ var eolUsageIntro = []string{
 
 // RenderEolProductUsageReport fills in the monthly EOL product usage
 // report's HTML email template, the same branded shape as the other reports
-// here: the introduction the ServiceNow report carried, the report date and
+// here: the introduction the previous system's report carried, the report date and
 // totals, then one table per region in the report's order. Within a region
 // each account's cells (account, CS ABT, account manager, technical
 // owner) span all its version rows, and each project's cell spans its own,

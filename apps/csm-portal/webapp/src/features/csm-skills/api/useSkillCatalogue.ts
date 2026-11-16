@@ -104,6 +104,48 @@ export function useSkillPickerSearch(
 }
 
 /** `POST /skills`: create a skill. */
+const TREE_PAGE = 200;
+const TREE_MAX_PAGES = 20;
+
+/**
+ * Every active skill matching the search, for the All Skills tree. The search
+ * runs on the backend; the pages are read until the total is reached (the
+ * catalogue is a few hundred skills, so this is one or two requests).
+ */
+export function useAllSkills(searchQuery: string): UseQueryResult<Skill[], Error> {
+  const api = useBackendApi();
+  const q = searchQuery.trim();
+  return useQuery<Skill[], Error>({
+    queryKey: [...skillKeys.catalogue, "all", q],
+    queryFn: async () => {
+      const out: Skill[] = [];
+      for (let page = 0; page < TREE_MAX_PAGES; page++) {
+        const body: SearchSkillsRequest = {
+          ...(q ? { searchQuery: q } : {}),
+          pagination: { limit: TREE_PAGE, offset: page * TREE_PAGE },
+        };
+        const res = await api.post<SearchSkillsRequest, SearchSkillsResponse>("/skills/search", body);
+        const rows = res?.skills ?? [];
+        out.push(...rows);
+        if (rows.length < TREE_PAGE || out.length >= (res?.total ?? 0)) break;
+      }
+      return out;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** One skill by id (e.g. to pre-select it in the Add skills dialog). */
+export function useSkill(id: string | undefined): UseQueryResult<Skill | null, Error> {
+  const api = useBackendApi();
+  return useQuery<Skill | null, Error>({
+    queryKey: [...skillKeys.catalogue, "one", id ?? ""],
+    queryFn: async () => (await api.get<Skill>(`/skills/${encodeURIComponent(id as string)}`)) ?? null,
+    enabled: !!id,
+    staleTime: REFERENCE_STALE_MS,
+  });
+}
+
 export function useCreateSkill(): UseMutationResult<Skill, Error, CreateSkillRequest> {
   const api = useBackendApi();
   const qc = useQueryClient();

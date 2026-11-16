@@ -26,6 +26,7 @@ import {
   listPreviewableFeatures,
   navigableNavNodes,
   resetFeatureStatesForTests,
+  SLA_TIMELINE_FEATURE_ID,
   visibleNavChildren,
   visibleNavSections,
 } from "@config/featureFlags";
@@ -47,6 +48,20 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("embedded feature: SLA timeline", () => {
+  it("is enabled by default", () => {
+    expect(isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)).toBe(true);
+  });
+
+  it("is hidden by an override without a warning and without touching navigation", () => {
+    setOverrides({ [SLA_TIMELINE_FEATURE_ID]: "hidden" });
+    expect(isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)).toBe(false);
+    expect(isFeatureVisible(SLA_TIMELINE_FEATURE_ID)).toBe(false);
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(featureState("support")).toBe("enabled");
+  });
 });
 
 describe("featureState", () => {

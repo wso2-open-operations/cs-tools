@@ -199,6 +199,9 @@ func TestLongOpenCaseReportIntegration(t *testing.T) {
 		first.AssignedEngineer != "Jane Doe" || first.CsTeam != "Team Alpha" {
 		t.Errorf("first case row = %+v: identifiers, state, severity, assignee or CS team is wrong", first)
 	}
+	if wantID := locrID("c", 2); first.ID != wantID || first.ID == first.InternalID {
+		t.Errorf("first case row id = %q, want the case UUID %q (and not the internal id)", first.ID, wantID)
+	}
 	if first.CreatedOn.IsZero() || first.UpdatedOn.IsZero() {
 		t.Errorf("first case row dates not set: %+v", first)
 	}

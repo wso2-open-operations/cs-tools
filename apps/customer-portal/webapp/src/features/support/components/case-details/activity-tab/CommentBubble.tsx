@@ -18,9 +18,9 @@ import type { CommentBubbleProps } from "@features/support/types/supportComponen
 import {
   Avatar,
   Box,
+  Button,
   IconButton,
   Paper,
-  CircularProgress,
   Skeleton,
   Stack,
   Tooltip,
@@ -29,7 +29,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
-import { useMemo } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import {
   Download,
   File,
@@ -39,6 +39,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
+  downloadSizeOf,
   formatFileSize,
   getAttachmentFileCategory,
   getInitials,
@@ -59,7 +60,10 @@ import DOMPurify from "dompurify";
 import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
-import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
+import { useStoredAttachmentDownload } from "@api/useStoredAttachments";
+import DownloadCancelButton from "@components/download-progress/DownloadCancelButton";
+import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
+import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { stripThinkingBlocks } from "@features/support/utils/chat";
@@ -92,12 +96,16 @@ export default function CommentBubble({
   onImageClick,
   hideAvatar = false,
   userDetails,
-  caseId,
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
-  const { downloadAttachment, isDownloading, downloadingId } =
-    useGetAttachmentContent();
+  const {
+    downloadStoredAttachment,
+    isDownloadingId,
+    downloadProgressOf,
+    cancelDownload,
+  } =
+    useStoredAttachmentDownload();
   // The case Activity tab merges the linked Novera chat into the timeline, so a
   // Novera answer can arrive here still carrying its <thinking> reasoning.
   const isNoveraComment = isNoveraOrBotSender(comment.createdBy, comment.type);
@@ -128,7 +136,7 @@ export default function CommentBubble({
     INLINE_COMMENT_HTML_PURIFY,
   );
   const { resolvedHtml: htmlContent, isLoading: isImagesLoading } =
-    useResolvedInlineImageHtml(sanitizedHtml, caseId);
+    useResolvedInlineImageHtml(sanitizedHtml);
   const displayName = useMemo(() => {
     if (isCurrentUser && userDetails) {
       const { firstName, lastName, email } = userDetails;
@@ -170,11 +178,20 @@ export default function CommentBubble({
   const isPreviewableImage =
     attachmentCategory === "image" &&
     /\.(png|jpe?g|webp)$/i.test(comment.fileName ?? "");
-  const { data: imageDataUrl, isLoading: isImagePreviewLoading } =
-    useAttachmentPreview(
-      isAttachmentEntry && isPreviewableImage ? comment.id : null,
-      caseId,
-    );
+  // An attached image is only fetched once the person asks: each preview
+  // streams the whole file through the backend, and a busy feed would otherwise
+  // fetch every image on every render.
+  const [previewRequested, setPreviewRequested] = useState(false);
+  const {
+    data: imageDataUrl,
+    isLoading: isImagePreviewLoading,
+    isError: isImagePreviewError,
+    refetch: refetchImagePreview,
+  } = useAttachmentPreview(
+    isAttachmentEntry && isPreviewableImage && previewRequested
+      ? comment.id
+      : null,
+  );
 
   const renderAttachmentIcon = () => {
     switch (attachmentCategory) {
@@ -191,11 +208,11 @@ export default function CommentBubble({
   };
 
   const handleAttachmentDownload = async () => {
-    await downloadAttachment({
+    await downloadStoredAttachment({
+      type: "work_item",
       id: comment.id,
       name: comment.fileName ?? "attachment",
-      type: comment.contentType,
-      downloadUrl: comment.downloadUrl,
+      size: downloadSizeOf(comment.sizeBytes),
     });
   };
 
@@ -313,22 +330,36 @@ export default function CommentBubble({
               </Typography>
               <Tooltip title="Download attachment">
                 <span>
+                  <DownloadProgressStatus
+                    name={comment.fileName ?? "attachment"}
+                    downloading={isDownloadingId(comment.id)}
+                    progress={downloadProgressOf(comment.id)}
+                  />
                   <IconButton
                     size="small"
                     aria-label="Download attachment"
+                    aria-busy={isDownloadingId(comment.id) || undefined}
                     onClick={() => {
                       void handleAttachmentDownload();
                     }}
-                    disabled={isDownloading && downloadingId === comment.id}
+                    disabled={isDownloadingId(comment.id)}
                   >
-                    {isDownloading && downloadingId === comment.id ? (
-                      <CircularProgress size={16} />
+                    {isDownloadingId(comment.id) ? (
+                      <DownloadProgressIndicator
+                        progress={downloadProgressOf(comment.id)}
+                      />
                     ) : (
                       <Download size={16} />
                     )}
                   </IconButton>
                 </span>
               </Tooltip>
+              {isDownloadingId(comment.id) && (
+                <DownloadCancelButton
+                  name={comment.fileName ?? "attachment"}
+                  onCancel={() => cancelDownload(comment.id)}
+                />
+              )}
             </Box>
             <Stack
               direction="row"
@@ -372,7 +403,20 @@ export default function CommentBubble({
                 {formatCommentDate(comment.createdOn)}
               </Typography>
             </Stack>
+            {isPreviewableImage && !previewRequested && (
+              <Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Image size={14} aria-hidden />}
+                  onClick={() => setPreviewRequested(true)}
+                >
+                  Preview
+                </Button>
+              </Box>
+            )}
             {isPreviewableImage &&
+              previewRequested &&
               (isImagePreviewLoading ? (
                 <Skeleton
                   variant="rectangular"
@@ -386,13 +430,36 @@ export default function CommentBubble({
                   src={imageDataUrl}
                   alt={comment.fileName ?? "Image attachment"}
                   sx={{
-                    maxWidth: "100%",
+                    // Same thumbnail size as inline images; a click opens it full size.
+                    maxWidth: "min(100%, 360px)",
+                    maxHeight: 240,
+                    width: "auto",
+                    height: "auto",
+                    objectFit: "contain",
                     borderRadius: 1,
                     display: "block",
-                    cursor: "pointer",
+                    cursor: "zoom-in",
                   }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${comment.fileName ?? "image attachment"} full size`}
                   onClick={() => onImageClick?.(imageDataUrl)}
+                  onKeyDown={(e: KeyboardEvent<HTMLElement>) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onImageClick?.(imageDataUrl);
+                    }
+                  }}
                 />
+              ) : isImagePreviewError ? (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    The preview could not be loaded.{" "}
+                  </Typography>
+                  <Button size="small" onClick={() => void refetchImagePreview()}>
+                    Try again
+                  </Button>
+                </Box>
               ) : null)}
           </Paper>
         ) : isImagesLoading ? (

@@ -43,6 +43,8 @@ const (
 	dispatchNote       = "servicenow-note"
 	dispatchCaseUpdate = "servicenow-case-update"
 	dispatchCRUpdate   = "servicenow-cr-update"
+	// dispatchSeverityUpdate is read by csm_severity_sync.yml only.
+	dispatchSeverityUpdate = "csm-severity-update"
 )
 
 // Queue event names, which are internal, unlike the dispatch types above.
@@ -53,6 +55,7 @@ const (
 	outboundCaseClosed    = "case_closed"
 	outboundCaseAssigned  = "case_assigned"
 	outboundRecordCreated = "record_created"
+	outboundSeverity      = "severity_changed"
 )
 
 // githubDispatcher is the one GitHub call this half makes.
@@ -107,6 +110,8 @@ func dispatchTypeFor(item repository.OutboundItem) (string, error) {
 		return dispatchCaseUpdate, nil
 	case outboundCRCreated, outboundCRUpdated:
 		return dispatchCRUpdate, nil
+	case outboundSeverity:
+		return dispatchSeverityUpdate, nil
 	}
 	return "", fmt.Errorf("%w: unknown event %q", ErrOutboundPermanent, item.Event)
 }

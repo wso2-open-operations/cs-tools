@@ -444,15 +444,15 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           color="warning"
           disabled={isApprovalsLoading || isApprovalsRetrying}
           onClick={() => {
-            try {
-              generateChangeRequestDetailsPdf(changeRequest, [], approval);
-            } catch (error) {
-              const message =
-                error instanceof Error
-                  ? error.message
-                  : "Failed to generate PDF";
-              showError(message);
-            }
+            generateChangeRequestDetailsPdf(changeRequest, [], approval).catch(
+              (error: unknown) => {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to generate PDF";
+                showError(message);
+              },
+            );
           }}
         >
           Download Change Request PDF

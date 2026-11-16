@@ -32,7 +32,7 @@ const reportJSON = `{
   "olderThanDays": 30,
   "createdBefore": "2026-10-03T18:30:00Z",
   "cases": [
-    {"number": "CS0000001", "internalId": "WSO2-1001", "createdOn": "2026-08-01T04:05:06Z",
+    {"id": "00000000-0000-0000-0000-000000000001", "number": "CS0000001", "internalId": "ABC-1", "createdOn": "2026-08-01T04:05:06Z",
      "updatedOn": "2026-10-30T10:00:00Z", "state": "work_in_progress", "severity": "high",
      "assignedEngineer": "Jane Doe", "csTeam": "Team Alpha"}
   ],
@@ -84,7 +84,7 @@ func TestReportDecodesContractShape(t *testing.T) {
 		t.Fatalf("tables: cases=%d onboarding=%d", len(report.Cases), len(report.OnboardingCases))
 	}
 	row := report.Cases[0]
-	if row.Number != "CS0000001" || row.InternalID != "WSO2-1001" || row.State != "work_in_progress" ||
+	if row.Number != "CS0000001" || row.ID != "00000000-0000-0000-0000-000000000001" || row.InternalID != "ABC-1" || row.State != "work_in_progress" ||
 		row.Severity != "high" || row.AssignedEngineer != "Jane Doe" || row.CsTeam != "Team Alpha" ||
 		row.CreatedOn.Year() != 2026 || row.UpdatedOn.Month() != 10 {
 		t.Errorf("row decoded wrongly: %+v", row)
@@ -115,5 +115,44 @@ func TestNewClientRejectsPlainHTTP(t *testing.T) {
 	}
 	if _, err := longopenreport.NewClient(longopenreport.Config{BaseURL: "https://example.com", TokenURL: "http://example.com/t"}); err == nil {
 		t.Error("an http token URL must be refused")
+	}
+}
+
+func TestOpenBeforeYesterday(t *testing.T) {
+	var gotQuery string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"variant":"open-before-yesterday","olderThanDays":1,
+		  "createdBefore":"2026-11-05T18:30:00Z",
+		  "cases":[{"number":"CS0000001","internalId":"ID-1","state":"open","severity":"high",
+		    "assignedEngineer":"Jane Doe","accountName":"Example Corp","type":"service_request"},
+		    {"number":"CS0000002","state":"open"}],
+		  "onboardingCases":[],"casesTotal":7,"onboardingCasesTotal":0,
+		  "casesTruncated":true,"onboardingCasesTruncated":false}`))
+	})
+	rep, err := c.OpenBeforeYesterday(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "variant=open-before-yesterday" {
+		t.Errorf("query = %q", gotQuery)
+	}
+	if rep.Variant != "open-before-yesterday" || len(rep.Cases) != 2 || rep.CasesTotal != 7 || !rep.CasesTruncated {
+		t.Errorf("report = %+v", rep)
+	}
+	if rep.Cases[0].Type != "service_request" || rep.Cases[1].Type != "" {
+		t.Errorf("types = %q, %q", rep.Cases[0].Type, rep.Cases[1].Type)
+	}
+	if rep.Cases[0].AccountName != "Example Corp" || rep.Cases[1].AccountName != "" {
+		t.Errorf("account names = %q, %q", rep.Cases[0].AccountName, rep.Cases[1].AccountName)
+	}
+}
+
+func TestOpenBeforeYesterdayRejectsOlderEntityService(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"olderThanDays":30,"cases":[],"onboardingCases":[],"casesTotal":0}`))
+	})
+	if _, err := c.OpenBeforeYesterday(context.Background()); err == nil {
+		t.Fatal("a response without the variant must be refused")
 	}
 }

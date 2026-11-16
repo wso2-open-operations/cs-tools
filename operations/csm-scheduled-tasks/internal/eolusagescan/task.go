@@ -3,7 +3,7 @@
 // customers still running a product version past its EOL date in an active
 // Primary Production deployment, and mails them to the accounts' managers
 // and technical owners and the CS leadership group, one table per region.
-// It replaces a ServiceNow scheduled report. Built the way this component's
+// It replaces the previous system's scheduled report. Built the way this component's
 // own CLAUDE.md ("Per-task report emails") describes: its own template, its
 // own render function, and its recipients wired through cmd/server/main.go.
 package eolusagescan
@@ -28,7 +28,7 @@ const TaskName = "eol_product_usage_report"
 // sends only when the date is the 1st to the 7th (see SendReport).
 const DefaultSchedule = "30 4 * * 1"
 
-// Subject is the report's mail subject, the subject the ServiceNow report
+// Subject is the report's mail subject, the subject the previous system's report
 // had.
 const Subject = "EOL Product Version Usage Monthly Report"
 

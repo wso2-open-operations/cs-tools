@@ -32,28 +32,55 @@ import (
 // slaBreachedPredicate returns an " AND [NOT] EXISTS (...)" fragment
 // restricting to work items with (breached) or without (!breached) a
 // currently-breached SLA record.
+//
+// Restricted to bs.is_active IS TRUE -- a real, reported defect: without
+// this, a long-finished (COMPLETED/ACHIEVED/CANCELLED) clock whose frozen
+// has_breached happened to be true kept matching forever. No further stage
+// restriction, by design: is_active alone already leaves exactly
+// IN_PROGRESS/PAUSED/BREACHED, and bs.live_has_breached is correct for all
+// three -- live-recomputed (migration 0279) for a raw IN_PROGRESS row, and
+// already the right, frozen value for a raw BREACHED or PAUSED row (set at
+// the real past moment it became true, same reasoning slaPercentPredicate's
+// own comment below gives for trusting a PAUSED row's frozen percentage).
+// An earlier version of this restricted further to bs.stage = 'IN_PROGRESS'
+// -- a real, CodeRabbit-caught bug: that silently excluded an
+// already-BREACHED-staged row from breached=true (and wrongly matched it
+// under breached=false), the exact kind of clock a "breached" search most
+// needs to find.
 func slaBreachedPredicate(workItemID string, breached bool) string {
 	not := ""
 	if !breached {
 		not = "NOT "
 	}
-	return fmt.Sprintf(" AND %sEXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = %s AND bs.live_has_breached IS TRUE)", not, workItemID)
+	return fmt.Sprintf(" AND %sEXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = %s AND bs.is_active IS TRUE AND bs.live_has_breached IS TRUE)", not, workItemID)
 }
 
 // slaPercentPredicate returns an " AND EXISTS (...)" fragment (and appends its
 // bind values to args) matching a work item with at least one SLA record whose
 // live business-elapsed percentage is within the bound(s). Both bounds apply
 // to the SAME row (a range like 75..100 means one SLA in that range, not one
-// row >= 75 and another <= 100). Any SLA row counts, whatever its stage. The
-// percentage is uncapped (long-overdue SLAs climb far past 100) and 0 is a
-// real bound, hence the nil checks. Returns the fragment, the extended args,
-// and the next free placeholder index; an empty fragment when f carries no
-// bound.
+// row >= 75 and another <= 100). The percentage is uncapped (long-overdue
+// SLAs climb far past 100) and 0 is a real bound, hence the nil checks.
+// Returns the fragment, the extended args, and the next free placeholder
+// index; an empty fragment when f carries no bound.
+//
+// Restricted to tsla.is_active IS TRUE -- a real, reported defect (this
+// predicate used to count "any SLA row, whatever its stage"): a COMPLETED/
+// ACHIEVED/CANCELLED clock's frozen percentage, written once and never
+// touched again, kept matching a bound it happened to land in forever,
+// which is how a saved "SLA at risk" view accumulated long-finished cases
+// that had nothing left to be at risk of. is_active stays TRUE for a
+// PAUSED row (only the three terminal stages ever set it FALSE -- see
+// sla_engine_repo.go's own slaEngineActiveStageFilter), so a paused clock
+// still matches, same as ServiceNow's own equivalent filter (it has no
+// stage condition beyond active=true) -- its own frozen percentage is
+// already correct, written at the moment it was paused, so there is
+// nothing live to recompute for it either way.
 func slaPercentPredicate(workItemID string, f *domain.TaskSLAFilter, args []any, argIdx int) (string, []any, int) {
 	if f == nil || (f.MinBusinessElapsedPercent == nil && f.MaxBusinessElapsedPercent == nil) {
 		return "", args, argIdx
 	}
-	slaWhere := "tsla.work_item_id = " + workItemID
+	slaWhere := "tsla.work_item_id = " + workItemID + " AND tsla.is_active IS TRUE"
 	if f.MinBusinessElapsedPercent != nil {
 		slaWhere += fmt.Sprintf(" AND tsla.live_elapsed_percentage >= $%d::numeric", argIdx)
 		args = append(args, *f.MinBusinessElapsedPercent)

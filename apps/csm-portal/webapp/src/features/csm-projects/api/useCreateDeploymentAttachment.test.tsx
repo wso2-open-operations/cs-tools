@@ -18,17 +18,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import {
-  MAX_DEPLOYMENT_ATTACHMENT_SIZE_BYTES,
-  useCreateDeploymentAttachment,
-} from "@features/csm-projects/api/useCreateDeploymentAttachment";
-import type { BackendApi } from "@api/backend/client";
 
-const postMock = vi.fn();
+const uploadMock = vi.fn();
 
-vi.mock("@api/backend/client", () => ({
-  useBackendApi: (): Partial<BackendApi> => ({ post: postMock }),
+vi.mock("@api/backend/client", () => ({ useBackendApi: () => ({}) }));
+vi.mock("@features/csm-cases/api/entityAttachments", () => ({
+  uploadEntityAttachment: (...args: unknown[]) => uploadMock(...args),
+  entityAttachmentErrorMessage: (err: unknown, fallback: string) =>
+    err instanceof Error ? err.message : fallback,
 }));
+
+import { useCreateDeploymentAttachment } from "@features/csm-projects/api/useCreateDeploymentAttachment";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -41,38 +41,42 @@ function makeFile(name: string, sizeBytes: number, type = "application/pdf"): Fi
 
 describe("useCreateDeploymentAttachment", () => {
   beforeEach(() => {
-    postMock.mockClear();
+    uploadMock.mockReset();
   });
 
-  it("uploads with referenceType=deployment as a base64 data URI", async () => {
-    postMock.mockResolvedValue({ message: "ok" });
+  it("uploads the file as a deployment attachment through the chunked flow", async () => {
+    uploadMock.mockResolvedValue({ id: "att-1" });
     const { result } = renderHook(() => useCreateDeploymentAttachment(), { wrapper });
+    const file = makeFile("a.txt", 4, "text/plain");
 
-    result.current.mutate({ deploymentId: "dep-1", file: makeFile("a.txt", 4, "text/plain") });
+    result.current.mutate({ deploymentId: "dep-1", file });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(postMock).toHaveBeenCalledWith(
-      "/attachments",
-      expect.objectContaining({
-        referenceId: "dep-1",
-        referenceType: "deployment",
-        name: "a.txt",
-        type: "text/plain",
-      }),
-    );
-    const body = postMock.mock.calls[0][1];
-    expect(body.file).toMatch(/^data:text\/plain;base64,/);
+    expect(uploadMock).toHaveBeenCalledWith(expect.anything(), {
+      type: "deployment",
+      parentId: "dep-1",
+      file,
+      name: "a.txt",
+    });
   });
 
-  it("rejects a file over the size cap without calling the API", async () => {
+  it("uses the given display name", async () => {
+    uploadMock.mockResolvedValue({ id: "att-1" });
     const { result } = renderHook(() => useCreateDeploymentAttachment(), { wrapper });
 
-    result.current.mutate({
-      deploymentId: "dep-1",
-      file: makeFile("big.bin", MAX_DEPLOYMENT_ATTACHMENT_SIZE_BYTES + 1),
-    });
+    result.current.mutate({ deploymentId: "dep-1", file: makeFile("a.txt", 4), name: " Runbook " });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(uploadMock.mock.calls[0][1].name).toBe("Runbook");
+  });
+
+  it("fails with the upload's message", async () => {
+    uploadMock.mockRejectedValue(new Error("The upload is larger than allowed."));
+    const { result } = renderHook(() => useCreateDeploymentAttachment(), { wrapper });
+
+    result.current.mutate({ deploymentId: "dep-1", file: makeFile("big.bin", 4) });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(postMock).not.toHaveBeenCalled();
+    expect(result.current.error?.message).toBe("The upload is larger than allowed.");
   });
 });

@@ -146,8 +146,9 @@ export default function ProblemDetailPage(): JSX.Element {
   const navigate = useNavTransition();
   // Prefer the list URL the row link captured (if any) so "back" returns to
   // the exact view the engineer came from, falling back to the bare tab path
-  // for a bookmarked or directly-linked problem.
-  const backState = useLocation().state as { from?: string } | undefined;
+  // for a bookmarked or directly-linked problem. `parentState` is the state
+  // that list was itself carrying, handed back so it keeps its own Back.
+  const backState = useLocation().state as { from?: string; parentState?: unknown } | undefined;
   const backTarget = backState?.from ?? OPERATIONS_PROBLEMS_PATH;
   const { data, isLoading, isError } = useGetProblem(id);
   const { showError } = useErrorBanner();
@@ -260,7 +261,7 @@ export default function ProblemDetailPage(): JSX.Element {
   );
 
   const back = (): void => {
-    navigate(backTarget);
+    navigate(backTarget, { state: backState?.parentState ?? undefined });
   };
 
   const BackButton = (

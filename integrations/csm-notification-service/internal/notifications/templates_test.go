@@ -169,7 +169,7 @@ func TestSanitizeRichText_Images(t *testing.T) {
 		// The surrounding <br>s trimBoundaryBreaks would otherwise leave in
 		// place are stripped here because the image is the only content in
 		// this input — see the next subtest for the case where they survive.
-		want := `<img src="cid:` + img.ContentID + `" alt="screenshot" style="display:block;max-width:100%;height:auto;margin:8px 0;">`
+		want := `<img src="cid:` + img.ContentID + `" alt="screenshot" style="display:block;max-width:360px;max-height:240px;width:auto;height:auto;margin:8px 0;border:1px solid #e0e0e0;border-radius:4px;">`
 		if html != want {
 			t.Errorf("html = %q, want %q", html, want)
 		}
@@ -189,7 +189,7 @@ func TestSanitizeRichText_Images(t *testing.T) {
 		if len(images) != 1 {
 			t.Fatalf("got %d images, want 1", len(images))
 		}
-		want := `before<br><img src="cid:` + images[0].ContentID + `" alt="" style="display:block;max-width:100%;height:auto;margin:8px 0;"><br>after`
+		want := `before<br><img src="cid:` + images[0].ContentID + `" alt="" style="display:block;max-width:360px;max-height:240px;width:auto;height:auto;margin:8px 0;border:1px solid #e0e0e0;border-radius:4px;"><br>after`
 		if html != want {
 			t.Errorf("html = %q, want %q", html, want)
 		}
@@ -920,4 +920,56 @@ func TestSanitizeRichText_EditorFormats(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSLABreachEmailSubject_NoSeverity_OmitsBracket guards a
+// security_report_analysis case's SLA breach: it never carries a severity
+// (see dispatch.isSecurityReportAnalysisCaseType), and the subject/header
+// title must say so by dropping the bracketed prefix entirely rather than
+// rendering an empty "[]".
+func TestSLABreachEmailSubject_NoSeverity_OmitsBracket(t *testing.T) {
+	subject := SLABreachEmailSubject("response", "100", "", "CS0001", "WSO2-1")
+	if strings.HasPrefix(subject, "[") {
+		t.Errorf("subject = %q, want no empty severity bracket", subject)
+	}
+	if !strings.Contains(subject, "Response SLA Violation") {
+		t.Errorf("subject = %q, want the violation wording intact", subject)
+	}
+
+	withSeverity := SLABreachEmailSubject("response", "100", "HIGH", "CS0001", "WSO2-1")
+	if !strings.HasPrefix(withSeverity, "[HIGH]") {
+		t.Errorf("subject = %q, want the severity bracket when one is set", withSeverity)
+	}
+}
+
+// TestRenderSLABreachTeamEmail_OmitsPriorityRowWhenSeverityEmpty mirrors
+// TestRenderCaseCreatedEmail_OmitsPriorityAndProductRowsWhenEmpty's pattern
+// for the SLA breach team email's own optional Priority row.
+func TestRenderSLABreachTeamEmail_OmitsPriorityRowWhenSeverityEmpty(t *testing.T) {
+	base := SLABreachEmailData{
+		ClockType:  "response",
+		Tier:       "100",
+		CaseNumber: "CS0001",
+		WSO2CaseID: "WSO2-1",
+		CaseTitle:  "Suspicious login reported",
+		CaseType:   "SECURITY_REPORT_ANALYSIS",
+		Team:       "Team Nova",
+		CaseLink:   "https://x/case",
+	}
+
+	t.Run("no severity: Priority row is omitted", func(t *testing.T) {
+		out := RenderSLABreachTeamEmail("", base)
+		if strings.Contains(out, "Priority :") {
+			t.Error("rendered email still has a Priority row with no severity data")
+		}
+	})
+
+	t.Run("severity set: Priority row renders with its resolved label", func(t *testing.T) {
+		withSeverity := base
+		withSeverity.Severity = "HIGH"
+		out := RenderSLABreachTeamEmail("", withSeverity)
+		if !strings.Contains(out, "Priority :") || !strings.Contains(out, "High (P2)") {
+			t.Error("rendered email is missing the Priority row/value")
+		}
+	})
 }

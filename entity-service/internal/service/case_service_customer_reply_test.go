@@ -184,6 +184,9 @@ func TestCaseService_CreateCaseComment_CustomerReplyMovesToWaitingOnWSO2(t *test
 				if payload.NewStatus != "Waiting on WSO2" {
 					t.Errorf("NewStatus = %q, want %q", payload.NewStatus, "Waiting on WSO2")
 				}
+				if payload.PreviousStatus != tc.label {
+					t.Errorf("PreviousStatus = %q, want %q (consumers use it to tell whether the change is visible to customers)", payload.PreviousStatus, tc.label)
+				}
 				// comment_added still goes out first, then status_changed --
 				// the order snCaseService.CreateCaseComment produces.
 				if types := publishedTypes(publisher.calls); len(types) != 2 || types[0] != events.TypeCommentAdded || types[1] != events.TypeStatusChanged {
@@ -377,5 +380,22 @@ func TestCaseService_CreateCaseComment_CustomerReplyMoveIsMirroredAndAppliesSLAE
 	}
 	if len(slaEngine.stateCalls) != 1 || slaEngine.stateCalls[0] != (fakeSLAStateCall{testDeploymentUUID, domain.CaseStateWaitingOnWSO2}) {
 		t.Errorf("SLA state effects = %+v, want one ApplyCaseStateEffects(%s, waiting_on_wso2)", slaEngine.stateCalls, testDeploymentUUID)
+	}
+}
+
+func TestCaseService_CreateCaseComment_LinksTheImagesItShows(t *testing.T) {
+	f := newCustomerReplyFixture("case", domain.CaseStateOpen)
+	linker := &recordingLinker{}
+	svc := WithInlineImageLinker(NewCaseService(f.repo, f.userRepo, &mockEventPublisher{}, customerReplyExternalAccess, nil), linker)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, customerReplyCustomerEmail))
+	req := customerReplyRequest(domain.CommentTypeComment)
+	req.Content = `<img src="/attachments/inline/11111111-1111-4111-8111-111111111111/content">`
+
+	if _, err := svc.CreateCaseComment(ctx, req); err != nil {
+		t.Fatalf("CreateCaseComment: %v", err)
+	}
+	if len(linker.calls) != 1 || linker.calls[0].comment != "comment-1" || linker.calls[0].workItem != req.CaseID ||
+		linker.calls[0].author != customerReplyCustomerEmail || linker.calls[0].content != req.Content {
+		t.Errorf("linker calls = %+v, want one call for the saved comment, its case and its author", linker.calls)
 	}
 }

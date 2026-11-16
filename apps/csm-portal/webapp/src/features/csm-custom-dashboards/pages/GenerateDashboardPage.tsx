@@ -18,14 +18,14 @@ import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, LayoutDashboard, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import { useNavigate } from "react-router";
-import { BackendApiError } from "@api/backend/client";
 import type { BeDashboard } from "@api/backend/types";
-import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import DashboardWidgetGrid from "@features/csm-dashboard/components/DashboardWidgetGrid";
 import { usePutCustomDashboard } from "@features/csm-custom-dashboards/api/useCustomDashboards";
 import { useGenerateDashboard } from "@features/csm-custom-dashboards/api/useGenerateDashboard";
+import { generateErrorMessage } from "@features/csm-custom-dashboards/utils/generateErrorMessage";
 import { saveErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
+import DashboardNameDialog from "@features/csm-custom-dashboards/components/DashboardNameDialog";
 import DiscardGeneratedDashboardDialog from "@features/csm-custom-dashboards/components/DiscardGeneratedDashboardDialog";
 import GenerateChatPanel, {
   type GenerateChatMessage,
@@ -47,10 +47,13 @@ const MY_DASHBOARDS_PATH = "/dashboard/my";
  * the conversation intact. Nothing is kept after leaving the page.
  *
  * Save stores the draft in My Dashboards (`usePutCustomDashboard`, under the
- * draft's own id) and opens it there (`/dashboard/my/:id`). A refused save
- * shows in the error banner and keeps the page as it is: a name the user
- * already has gets its own wording, since the fix is to rename the dashboard
- * in the chat.
+ * draft's own id) and opens it there (`/dashboard/my/:id`). Save first asks
+ * for the name (DashboardNameDialog), starting from the draft's: the one the
+ * model gave a new dashboard, or the edited dashboard's own. Keeping it is
+ * one click, and the dashboard is saved under the name confirmed. A refused
+ * save (a name the user already has, the dashboard limit) shows in that
+ * dialog, which stays open so the name can be changed there; the preview is
+ * left as it is.
  *
  * Leaving: Back and Discard both go through `requestLeave`, which asks first
  * (DiscardGeneratedDashboardDialog) when there is anything to lose -- a draft
@@ -60,8 +63,8 @@ const MY_DASHBOARDS_PATH = "/dashboard/my";
  *
  * Editing a saved dashboard (`initialDashboard`, from EditCustomDashboardPage)
  * starts with it as the draft: the first message is a change to it, Save
- * replaces it in place (same id), and Back returns to it. Until a message
- * changes it there is nothing to save or lose.
+ * (with the same name dialog) replaces it in place (same id), and Back
+ * returns to it. Until a message changes it there is nothing to save or lose.
  *
  * Back names its destination because this page is only ever opened from My
  * Dashboards (the webapp CLAUDE.md's fixed-destination exception).
@@ -79,26 +82,32 @@ export default function GenerateDashboardPage({
   const [draft, setDraft] = useState<BeDashboard | null>(initialDashboard ?? null);
   const [busy, setBusy] = useState(false);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  // Save's name dialog, and why its last save was refused.
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const generate = useGenerateDashboard();
   const save = usePutCustomDashboard();
   const { showSuccess } = useSuccessBanner();
-  const { showError } = useErrorBanner();
 
   // Editing starts with the saved dashboard as the draft: only a change to it,
   // or a message, is something to save or lose.
   const unchanged = editing && draft === initialDashboard;
   const hasWork = editing ? !unchanged || messages.length > 0 : draft !== null || messages.length > 0;
 
-  const handleSave = async (): Promise<void> => {
+  /**
+   * Saves the draft under the name from the name dialog and opens it in My Dashboards.
+   * A failure keeps the dialog open with the error (a name already taken says so).
+   */
+  const handleSaveAs = async (name: string): Promise<void> => {
     if (!draft) return;
+    setNameError(null);
     try {
-      const saved = await save.mutateAsync(draft);
-      showSuccess(
-        editing ? `"${draft.displayName}" was updated.` : `"${draft.displayName}" was saved to My Dashboards.`,
-      );
+      const saved = await save.mutateAsync({ ...draft, displayName: name });
+      setNameOpen(false);
+      showSuccess(editing ? `"${name}" was updated.` : `"${name}" was saved to My Dashboards.`);
       void navigate(`${MY_DASHBOARDS_PATH}/${encodeURIComponent(saved.dashboard.id)}`);
     } catch (err) {
-      showError(saveErrorMessage(err, draft.displayName), err);
+      setNameError(saveErrorMessage(err, name));
     }
   };
   const leave = (): void => {
@@ -122,19 +131,10 @@ export default function GenerateDashboardPage({
       addMessage("assistant", result.reply);
     } catch (err) {
       // The draft is left as it was, so a failed turn never loses the preview.
-      // Over the generate limit (429) or with a draft too large to send (413),
-      // the backend's message says what to do; any other failure reads as the
-      // input not working. With a draft on screen the message was a change to
-      // it, not a new dashboard.
-      const limited = err instanceof BackendApiError && (err.status === 429 || err.status === 413) && err.message;
-      addMessage(
-        "assistant",
-        limited
-          ? err.message
-          : draft
-            ? "This dashboard cannot be modified with your input."
-            : "The dashboard cannot be generated from the input.",
-      );
+      // The reply says what actually went wrong (`generateErrorMessage`): the
+      // backend's own message, or where the failure happened when there is
+      // none; with a draft on screen the message was a change to it.
+      addMessage("assistant", generateErrorMessage(err, draft !== null));
     } finally {
       setBusy(false);
     }
@@ -172,7 +172,10 @@ export default function GenerateDashboardPage({
             color="primary"
             size="small"
             disabled={!draft || busy || save.isPending || unchanged}
-            onClick={() => void handleSave()}
+            onClick={() => {
+              setNameError(null);
+              setNameOpen(true);
+            }}
           >
             {save.isPending ? "Saving…" : "Save"}
           </Button>
@@ -253,6 +256,17 @@ export default function GenerateDashboardPage({
         )}
       </Box>
 
+      <DashboardNameDialog
+        open={nameOpen}
+        title="Save dashboard"
+        initialName={draft?.displayName ?? ""}
+        confirmLabel="Save"
+        busyLabel="Saving…"
+        busy={save.isPending}
+        error={nameError}
+        onCancel={() => setNameOpen(false)}
+        onConfirm={(name) => void handleSaveAs(name)}
+      />
       <DiscardGeneratedDashboardDialog
         open={confirmDiscardOpen}
         onCancel={() => setConfirmDiscardOpen(false)}

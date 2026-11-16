@@ -37,7 +37,7 @@ func TestProcessProject_NoEndDateIsNoOp(t *testing.T) {
 
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: nil}
 
-	err := processProject(context.Background(), reader, updater, ntf, time.Now(), proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, time.Now(), proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -72,7 +72,7 @@ func TestProcessProject_InternalOnlyWindowSkipsCustomerContactLookup(t *testing.
 	endDate := now.AddDate(0, 0, 89) // fires the 90-day window
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -116,7 +116,7 @@ func TestProcessProject_RecordsIgnoredWhenNotifierDoesNotDeliver(t *testing.T) {
 	endDate := now.AddDate(0, 0, 89) // fires the 90-day window
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -166,7 +166,7 @@ func TestProcessProject_SkipsNotifyWhenAlreadyClosedForAnyReason(t *testing.T) {
 		ClosureState: &closureState,
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -220,7 +220,7 @@ func TestProcessProject_CustomerAudienceWindowNotifiesBusinessContact(t *testing
 	endDate := now.AddDate(0, 0, 6) // fires the 7-day window
 	proj := project{ID: "p1", Name: "Acme - Subscription", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -293,7 +293,7 @@ func TestProcessProject_RecordsIgnoredWhenOnlyCustomerNoticeWasntDelivered(t *te
 	endDate := now.AddDate(0, 0, 6) // fires the 7-day window
 	proj := project{ID: "p1", Name: "Acme - Subscription", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -350,7 +350,7 @@ func TestProcessProject_CustomerAudienceWindowSendsNoBusinessContactNoticeWhenNo
 		EndDate:    &endDate,
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -420,7 +420,7 @@ func TestProcessProject_CustomerAudienceWindowSkipsAccountContactLookupWhenNoAcc
 	endDate := now.AddDate(0, 0, 6) // fires the 7-day window
 	proj := project{ID: "p1", Account: nil, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -454,7 +454,7 @@ func TestProcessProject_CustomerAudienceWindowFetchContactsFailureSendsNothing(t
 	endDate := now.AddDate(0, 0, 6) // fires the 7-day window (customer-audience)
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err == nil {
 		t.Fatal("processProject() error = nil, want non-nil")
 	}
@@ -483,7 +483,7 @@ func TestProcessProject_NotifyFailureBlocksStateWrite(t *testing.T) {
 	endDate := now.AddDate(0, 0, 89) // fires the 90-day window (internal-only)
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err == nil {
 		t.Fatal("processProject() error = nil, want non-nil")
 	}
@@ -519,7 +519,7 @@ func TestProcessProject_InvoiceCascadeErrorDoesNotBlockSubscriptionCascade(t *te
 		EndDate: &endDate,
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err == nil {
 		t.Fatal("processProject() error = nil, want non-nil — the invoice cascade's build error must still surface so Run counts this project as failed")
 	}
@@ -560,7 +560,7 @@ func TestProcessProject_Day0SuccessfulNotifyThenSuspend(t *testing.T) {
 	open := "Open"
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate, ClosureState: &open}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -635,10 +635,10 @@ func TestProcessProject_Day0RetrySkipsNotifyWhenAlreadyRecorded(t *testing.T) {
 		Account:                &projectAccountRef{ID: "a1"},
 		EndDate:                &endDate,
 		ClosureState:           &open,
-		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend"}}`),
+		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend_notice"}}`),
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -683,7 +683,7 @@ func TestProcessProject_SuspendGuardSkipsAlreadySuspendedProject(t *testing.T) {
 		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend"}}`),
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -713,7 +713,7 @@ func TestProcessProject_SuspendGuardSkipsWhenEndDateClosureStateIsClosed(t *test
 		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend"}}`),
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -742,7 +742,7 @@ func TestProcessProject_SuspendProceedsWhenEndDateClosureStateIsExplicitlyOpen(t
 	open := "Open"
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate, EndDateClosureState: &open}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -760,7 +760,7 @@ func TestProcessProject_NothingDueIsNoOp(t *testing.T) {
 	endDate := now.AddDate(0, 0, 200) // far beyond the 90-day window
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -817,7 +817,7 @@ func TestProcessProject_ReminderUsesRealAccountContacts(t *testing.T) {
 		EndDate: &endDate,
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -858,7 +858,7 @@ func TestProcessProject_ReminderHasEmptyAccountOwnerEmailWhenNoAccountManager(t 
 	endDate := now.AddDate(0, 0, 89)
 	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &endDate}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}

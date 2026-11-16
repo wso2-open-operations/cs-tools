@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/alertcore"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
@@ -47,7 +48,6 @@ import (
 	plgconfig "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/config"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/risk"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
-	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/sftpgo"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
@@ -201,6 +201,21 @@ func main() {
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
+	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(customerEntityClient)
+	// Muted alerts live in sre-alert-core-service's database; without both values the route answers 503.
+	var alertCoreClient *alertcore.Client
+	if base, token := strings.TrimSpace(os.Getenv("ALERT_CORE_BASE_URL")), strings.TrimSpace(os.Getenv("ALERT_CORE_API_TOKEN")); base != "" && token != "" {
+		// The bearer token must never travel over plain HTTP.
+		base = mustHTTPSBaseURL("ALERT_CORE_BASE_URL", base)
+		alertCoreClient = alertcore.NewClient(alertcore.Config{BaseURL: base, Token: token})
+	} else {
+		slog.Warn("ALERT_CORE_BASE_URL or ALERT_CORE_API_TOKEN not set; the muted-alerts and alert-field-values routes answer 503")
+	}
+	// Pass an untyped nil rather than a nil *alertcore.Client, so the handler's nil check sees it.
+	alertMuteRuleMutedAlertsHandler := handler.NewAlertMuteRuleMutedAlertsHandler(nil)
+	if alertCoreClient != nil {
+		alertMuteRuleMutedAlertsHandler = handler.NewAlertMuteRuleMutedAlertsHandler(alertCoreClient)
+	}
 	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
@@ -212,21 +227,13 @@ func main() {
 	})
 	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
-	// SFTPGo-backed attachment storage — off by default (see loadSftpgoConfig).
-	// When disabled, no SFTPGO_* env var is read at all and neither the client
-	// nor its routes are constructed: the existing streaming attachment
-	// endpoints on caseHandler above are completely unaffected either way.
-	sftpgoAttachmentStorageEnabled, sftpgoCfg := loadSftpgoConfig()
-	var attachmentStorageHandler *handler.AttachmentStorageHandler
-	if sftpgoAttachmentStorageEnabled {
-		sftpgoClientInst := sftpgo.NewClient(sftpgoCfg)
-		attachmentStorageHandler = handler.NewAttachmentStorageHandler(customerEntityClient, sftpgoClientInst)
-		// Inline-image extraction on CreateCaseComment (base64 data: URIs
-		// rewritten into real SFTPGo-backed attachments) shares the same
-		// SFTPGo client and is gated by the same flag — see
-		// CaseHandler.WithInlineImageProcessor. SN-backed comment creation is
-		// unaffected: it never reaches this branch.
-		caseHandler.WithInlineImageProcessor(handler.NewInlineImageProcessor(customerEntityClient, sftpgoClientInst))
+	// Attachment files live in Azure Blob Storage and this service holds the
+	// credentials and moves the bytes; entity-service keeps the access checks.
+	// Without a reachable container there is nothing to serve, so refuse to start.
+	attachmentStore, err := newAttachmentStore(os.Getenv)
+	if err != nil {
+		slog.Error("could not set up attachment storage", "err", err)
+		os.Exit(1)
 	}
 
 	// One guard authorises every route below (including /spl/*) and also
@@ -382,7 +389,7 @@ func main() {
 	// grantableRoles (the same resolution CreateUser's own grant uses) rather
 	// than a second, parallel lookup.
 	timecardApproverRoleIDs := handler.RoleIDsForKey(grantableRoles, "timecard_approver")
-	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, sftpgoAttachmentStorageEnabled, timecardApproverRoleIDs).
+	usersHandler := handler.NewUsersHandler(scimClient, customerEntityClient, dir, timecardApproverRoleIDs).
 		WithAccessGuard(accessGuard).
 		WithGrantableRoles(grantableRoles)
 	grantableRolesHandler := handler.NewGrantableRolesHandler(grantableRoles)
@@ -391,13 +398,43 @@ func main() {
 	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
 	// answers with a fixed sample. This backend holds no model client.
 	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	// PLG reaches entity-service as csm-portal does (see plg.Mount below).
+	plgEntityDefaults := plgconfig.EntityDefaults{
+		BaseURL:      customerEntityCfg.BaseURL,
+		TokenURL:     oauth2TokenURL,
+		ClientID:     oauth2ClientID,
+		ClientSecret: oauth2ClientSecret,
+		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
+	}
 	if aiClient != nil {
 		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+		// The PLG playbooks' answer fields go with every generate request,
+		// read with PLG's own entity-service configuration (see plg.Mount).
+		playbooks, err := plg.NewPlaybookLister(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults)
+		if err != nil {
+			slog.Error("failed to configure the PLG playbook list", "err", err)
+			os.Exit(1)
+		}
+		dashboardGenerator = handler.WithPlaybooks(dashboardGenerator, playbooks)
 	}
 	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
 	// A team named in a generated dashboard's creTeam / sreTeam filter (its
 	// registry key) becomes the team's group id, once, here.
 	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	// A product named in a generated dashboard's product filter ("API
+	// Manager") becomes the product's own name ("WSO2 API Manager"), once,
+	// here: the case search matches product names exactly.
+	dashboardGenerator = handler.WithDashboardProducts(dashboardGenerator, customerEntityClient)
+	// A project named in a generated dashboard's project filter (its key or
+	// name) becomes a projectId filter on the project's id, once, here: the
+	// case search filters projects by id.
+	dashboardGenerator = handler.WithDashboardProjects(dashboardGenerator, customerEntityClient)
+	// Likewise an account (a customer's name or account number) becomes an
+	// accountId filter on the account's id.
+	dashboardGenerator = handler.WithDashboardAccounts(dashboardGenerator, customerEntityClient)
+	// A region filter's values are checked against the regions of the
+	// cases' accounts, and written as an account writes them.
+	dashboardGenerator = handler.WithDashboardRegions(dashboardGenerator, customerEntityClient)
 	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
 		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
 	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
@@ -467,21 +504,21 @@ func main() {
 	// being one of the case's team leads, with no escalation role), which a
 	// route permission cannot express because it depends on the body and the case.
 	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
-	route("POST /attachments", handler.PermWrite, caseHandler.CreateCaseAttachment)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
-	route("GET /attachments/{id}/content", handler.PermDownloadAttachment, caseHandler.GetCaseAttachmentContent)
-	route("DELETE /attachments/{id}", handler.PermWrite, caseHandler.DeleteCaseAttachment)
-	// The SFTPGo-backed attachment-storage routes only exist on the mux when
-	// the feature flag is on: with it off (default), these paths are not
-	// registered at all and 404, rather than existing but erroring, so
-	// shipping this dark carries zero risk to the routes above.
-	if attachmentStorageHandler != nil {
-		route("POST /cases/{id}/attachments/upload-token", handler.PermWrite, attachmentStorageHandler.MintUploadToken)
-		route("POST /attachments/{id}/share", handler.PermDownloadAttachment, attachmentStorageHandler.CreateAttachmentShare)
-		route("POST /cases/{caseId}/attachments/{attachmentId}/confirm", handler.PermWrite, attachmentStorageHandler.ConfirmUpload)
-	}
-	route("GET /attachments/{id}", handler.PermView, caseHandler.GetAttachment)
-	route("PATCH /attachments/{id}", handler.PermWrite, caseHandler.UpdateAttachment)
+	// Stored attachments, forwarded to the entity service, which owns every
+	// access decision. This backend holds the Azure Blob Storage credentials and
+	// moves the bytes: an upload arrives in chunks, a download and a comment's
+	// inline image are streamed through it (so they are PermDownloadAttachment);
+	// upload, confirm and delete are PermWrite.
+	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
+	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore).WithAccessGuard(accessGuard)
+	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
+	route("PUT /attachments/upload/{id}/chunks/{index}", handler.PermWrite, blobAttachmentHandler.PutChunk)
+	route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)
+	route("POST /attachments/upload/{id}/confirm", handler.PermWrite, blobAttachmentHandler.ConfirmUpload)
+	route("POST /attachments/delete", handler.PermWrite, blobAttachmentHandler.DeleteAttachment)
+	route("GET /attachments/download/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.Download)
+	route("GET /attachments/inline/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.InlineImage)
 	route("POST /cases/{id}/call-requests", handler.PermWrite, caseHandler.CreateCallRequest)
 	route("POST /cases/{id}/call-requests/search", handler.PermView, caseHandler.SearchCallRequests)
 	route("POST /call-requests/search", handler.PermView, caseHandler.SearchAllCallRequests)
@@ -510,6 +547,8 @@ func main() {
 	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
 	// the webapp's `canWrite` on that menu section. A literal path, so it never
 	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	// A generated dashboard may hold PLG widgets; every PermWrite role also
+	// holds PermUsePlg (TestAccessGuard_DashboardWritersCanReadPlg).
 	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
 	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
 	// Same permission as generating one. "custom" is a literal segment, so it
@@ -527,6 +566,11 @@ func main() {
 	route("GET /dashboards/custom/{id}/team-shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardTeamShares)
 	route("PUT /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.AddCustomDashboardTeamShare)
 	route("DELETE /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardTeamShare)
+	// Sharing a saved dashboard by link (owner only): anyone internal who
+	// opens the link sees it under Shared Dashboards while it stays on.
+	route("GET /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.GetCustomDashboardLink)
+	route("PUT /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.EnableCustomDashboardLink)
+	route("DELETE /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.DisableCustomDashboardLink)
 	// Dashboards other users shared with the caller, view only. "shared" is a
 	// literal segment, like "custom", so it never collides with {dashboardId}.
 	// PermView, like the system dashboards: anyone a dashboard can be shared
@@ -534,6 +578,9 @@ func main() {
 	// widgets query with the viewer's own permissions.
 	route("GET /dashboards/shared", handler.PermView, customDashboardHandler.ListSharedDashboards)
 	route("GET /dashboards/shared/{id}", handler.PermView, customDashboardHandler.GetSharedDashboard)
+	// Opening a link is PermView like reading a share: anyone a link can
+	// reach (any internal user) can open it. The link id is in the body.
+	route("POST /dashboards/shared/link", handler.PermView, customDashboardHandler.OpenDashboardLink)
 	route("GET /updates/product-update-levels", handler.PermViewUpdates, updatesHandler.GetProductUpdateLevels)
 	route("POST /updates/levels/search", handler.PermViewUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
@@ -732,6 +779,12 @@ func main() {
 	route("POST /team-schedule/assignments/search", handler.PermView, scheduleHandler.SearchScheduleAssignments)
 	route("POST /team-schedule/absences/search", handler.PermView, scheduleHandler.SearchScheduleAbsences)
 	route("POST /team-schedule/engagement-allocations/search", handler.PermView, scheduleHandler.SearchScheduleEngagementAllocations)
+	route("POST /team-schedule/public-holidays/search", handler.PermView, scheduleHandler.SearchSchedulePublicHolidays)
+	route("POST /team-schedule/holiday-availability/search", handler.PermView, scheduleHandler.SearchHolidayAvailability)
+	// Confirming a team's holiday availability (CRE): entity-service allows
+	// the team's lead, its rota manager, a CRE rota admin or an admin.
+	route("PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.ConfirmHolidayAvailability)
+	route("DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation", handler.PermWrite, scheduleHandler.WithdrawHolidayAvailability)
 	route("GET /team-schedule/on-duty", handler.PermView, scheduleHandler.GetScheduleOnDuty)
 
 	// Lead edit. PermWrite keeps the control away from a caller who could not
@@ -754,6 +807,7 @@ func main() {
 	route("POST /team-schedule/paging-contacts/{userId}/test", handler.PermWrite, scheduleHandler.TestPagingContact)
 	route("POST /team-schedule/assignments/apply", handler.PermWrite, scheduleHandler.ApplyScheduleRange)
 	route("POST /team-schedule/absences/apply", handler.PermWrite, scheduleHandler.ApplyScheduleAbsence)
+	route("POST /team-schedule/engagement-allocations/dismiss", handler.PermWrite, scheduleHandler.DismissScheduleEngagementAllocation)
 	route("DELETE /team-schedule/absences/{id}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsence)
 	route("POST /team-schedule/absence-kinds", handler.PermWrite, scheduleHandler.CreateScheduleAbsenceKind)
 	route("DELETE /team-schedule/absence-kinds/{code}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsenceKind)
@@ -787,6 +841,23 @@ func main() {
 	route("POST /skills/me", handler.PermWrite, skillHandler.AddMySkill)
 	route("PUT /skills/me/{skillId}", handler.PermWrite, skillHandler.SetMySkillLevel)
 	route("DELETE /skills/me/{skillId}", handler.PermWrite, skillHandler.RemoveMySkill)
+	// Skill management: who may use the directory, review requests or manage
+	// the catalogue is entity-service's decision (each is a capability held by
+	// admins plus a configured role list); these floors only keep the routes
+	// from a caller who could use none of them.
+	route("GET /skills/me/capabilities", handler.PermView, skillHandler.GetMySkillCapabilities)
+	route("POST /skills/categories", handler.PermWrite, skillHandler.CreateSkillCategory)
+	route("PATCH /skills/categories/{id}", handler.PermWrite, skillHandler.UpdateSkillCategory)
+	route("POST /skills/requests/check", handler.PermView, skillHandler.CheckSkillRequest)
+	route("POST /skills/requests", handler.PermWrite, skillHandler.CreateSkillRequest)
+	route("GET /skills/requests/mine", handler.PermView, skillHandler.ListMySkillRequests)
+	route("POST /skills/requests/search", handler.PermView, skillHandler.SearchSkillRequests)
+	route("POST /skills/requests/{id}/withdraw", handler.PermWrite, skillHandler.WithdrawSkillRequest)
+	route("POST /skills/requests/{id}/approve", handler.PermWrite, skillHandler.ApproveSkillRequest)
+	route("POST /skills/requests/{id}/reject", handler.PermWrite, skillHandler.RejectSkillRequest)
+	route("POST /skills/directory/search", handler.PermView, skillHandler.SearchSkillDirectory)
+	route("GET /skills/users/{userId}", handler.PermView, skillHandler.GetUserSkillProfile)
+	route("GET /skills/users/{userId}/history", handler.PermView, skillHandler.GetUserSkillHistory)
 
 	route("GET /team-schedule/rota-access", handler.PermView, rotaAccessHandler.GetRotaAccess)
 	route("PUT /team-schedule/rota-access/admins/{family}/{userId}", handler.PermWrite, rotaAccessHandler.PutRotaAdmin)
@@ -863,8 +934,10 @@ func main() {
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
 	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
+	route("POST /cases/{id}/sla/recalculate", handler.PermAdmin, slaEngineHandler.RecalculateCasePauseTotals)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
+	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)
 	route("PATCH /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.UpdateTimeCard)
 	route("DELETE /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.DeleteTimeCard)
@@ -916,6 +989,18 @@ func main() {
 	route("PATCH /outages/{id}", handler.PermWrite, outageHandler.PatchOutage)
 	route("POST /outages/{id}/communications", handler.PermWrite, outageHandler.AddOutageCommunication)
 	route("POST /outages/{id}/communications/search", handler.PermViewOperations, outageHandler.SearchOutageCommunications)
+	// Alert mute rules: 1:1 proxies to entity-service. GET /alert-mute-rules/active is
+	// deliberately not exposed here; alert-core reads it via csm-integration-service.
+	route("POST /alert-mute-rules/search", handler.PermViewOperations, alertMuteRuleHandler.SearchAlertMuteRules)
+	route("GET /alert-mute-rules/{id}", handler.PermViewOperations, alertMuteRuleHandler.GetAlertMuteRule)
+	route("GET /alert-mute-rules/{id}/muted-alerts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedAlerts)
+	route("GET /alert-field-values", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListAlertFieldValues)
+	route("GET /alert-mute-rules/muted-counts", handler.PermViewOperations, alertMuteRuleMutedAlertsHandler.ListMutedCounts)
+	route("POST /alert-mute-rules", handler.PermWrite, alertMuteRuleHandler.CreateAlertMuteRule)
+	route("PATCH /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.PatchAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/extend", handler.PermWrite, alertMuteRuleHandler.ExtendAlertMuteRule)
+	route("POST /alert-mute-rules/{id}/end", handler.PermWrite, alertMuteRuleHandler.EndAlertMuteRule)
+	route("DELETE /alert-mute-rules/{id}", handler.PermWrite, alertMuteRuleHandler.DeleteAlertMuteRule)
 	// Called manually today; not yet wired into real incident/case creation.
 	route("POST /notifications/google-chat/alerts", handler.PermWrite, notificationHandler.PostGoogleChatAlert)
 
@@ -932,7 +1017,7 @@ func main() {
 	// PermViewSharedEntity's own doc comment) -- unlike GET /teams/{id}/members
 	// above, which is a genuinely unconditional CS Portal route (see
 	// teamHandler's own construction) and so is registered outside this
-	// block. The account-scoped escalation list stays here only because CS
+	// rule. The account-scoped escalation list stays here only because CS
 	// Portal's own /cases/{id}/escalations is per-case, not per-account.
 	//
 	// Every route below is registered with PermViewerAccess (Viewer only),
@@ -943,13 +1028,14 @@ func main() {
 	// health/* plus the GET /products and GET /abt-teams lists its filters
 	// read), which use PermViewCustomerHealth so a cs_engineer or admin
 	// reaches them without also holding Viewer, and the project reports
-	// (GET /report-details and GET /generate-timelogs-breakdown-report),
-	// which use PermView.
+	// (GET /report-details, GET /generate-timelogs-breakdown-report and
+	// GET /generate-sla-report), which use PermView.
 	route("GET /accounts/{accountId}/escalations", handler.PermViewerAccess, viewerHandlers.accountEsc.GetAccountEscalations)
 	route("GET /products", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetProducts)
 	route("GET /abt-teams", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetABTTeams)
 	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
 	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
+	route("GET /generate-sla-report", handler.PermView, viewerHandlers.reports.GenerateSLAReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)
 	route("GET /files/search", handler.PermViewerAccess, viewerHandlers.files.SearchFolder)
@@ -1006,13 +1092,7 @@ func main() {
 	// its own copy: it reaches the same service as the same OAuth2 application
 	// as every other upstream client above. PLG_* overrides exist but are not
 	// normally set.
-	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgconfig.EntityDefaults{
-		BaseURL:      customerEntityCfg.BaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-		Scope:        os.Getenv("CUSTOMER_ENTITY_SCOPES"),
-	}, route); err != nil {
+	if err := plg.Mount(os.Getenv("PLG_CONFIG_FILE"), plgEntityDefaults, route); err != nil {
 		slog.Error("failed to mount PLG", "err", err)
 		os.Exit(1)
 	}
@@ -1047,7 +1127,7 @@ func main() {
 		),
 		ReadHeaderTimeout: 10 * time.Second,
 		// REST_READ_TIMEOUT / REST_WRITE_TIMEOUT, default 60s each (raised from
-		// 30s so large inline-attachment uploads are not cut off).
+		// 30s so slow upstream calls are not cut off).
 		ReadTimeout:  reqTimeouts.RESTRead,
 		WriteTimeout: reqTimeouts.RESTWrite,
 		IdleTimeout:  60 * time.Second,
@@ -1414,8 +1494,7 @@ const onboardingStatusFlag = "CSM_MIGRATION_ONBOARDING_STATUS_ENABLED"
 //	                                         "TRUE", "yes") keeps it dark and
 //	                                         changes nothing else in this
 //	                                         backend. Deliberately stricter
-//	                                         than the strconv.ParseBool
-//	                                         parsing SFTPGO_* uses: every
+//	                                         than strconv.ParseBool: every
 //	                                         CSM_MIGRATION_* flag is a
 //	                                         cutover switch that must not
 //	                                         flip on by accident.
@@ -1432,74 +1511,12 @@ func onboardingStatusEnabled(raw string) bool {
 	return !strings.EqualFold(strings.TrimSpace(raw), "false")
 }
 
-// loadSftpgoConfig resolves the SFTPGo-backed attachment-storage feature
-// flag and, only when it is on, the client configuration it needs:
-//
-//	SFTPGO_ATTACHMENT_STORAGE_ENABLED  Any strconv.ParseBool-true value (1, t,
-//	                                   T, TRUE, true, True). Off by default —
-//	                                   unset, empty, or any other value keeps
-//	                                   this feature dark and every other
-//	                                   env var below unread. This mirrors
-//	                                   DASHBOARDS_HOT_RELOAD's parsing: an
-//	                                   unparseable non-empty value is a
-//	                                   warning, not fatal, and defaults to off.
-//	SFTPGO_BASE_URL                    SFTPGo's REST API base URL. Required
-//	                                   when the flag is on.
-//	SFTPGO_PUBLIC_BASE_URL             Public host for constructing share
-//	                                   URLs, e.g. when SFTPGo's WebClient
-//	                                   share pages are fronted separately
-//	                                   from its REST API. Optional; defaults
-//	                                   to SFTPGO_BASE_URL when unset.
-//
-// Returns (false, zero Config) when the flag is off, so the caller never
-// touches the returned Config in that case.
-func loadSftpgoConfig() (bool, sftpgo.Config) {
-	enabled := false
-	if raw := strings.TrimSpace(os.Getenv("SFTPGO_ATTACHMENT_STORAGE_ENABLED")); raw != "" {
-		parsed, err := strconv.ParseBool(raw)
-		if err != nil {
-			slog.Warn("SFTPGO_ATTACHMENT_STORAGE_ENABLED is not a boolean; treating it as false",
-				"value", raw, "expected", "1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False")
-		}
-		enabled = parsed
-	}
-	if !enabled {
-		return false, sftpgo.Config{}
-	}
-
-	slog.Info("SFTPGO_ATTACHMENT_STORAGE_ENABLED is on: the SFTPGo-backed attachment-storage endpoints are active")
-	baseURL := mustHTTPSURL("SFTPGO_BASE_URL", mustEnv("SFTPGO_BASE_URL"))
-	publicBaseURL := baseURL
-	if raw := os.Getenv("SFTPGO_PUBLIC_BASE_URL"); raw != "" {
-		publicBaseURL = mustHTTPSURL("SFTPGO_PUBLIC_BASE_URL", raw)
-	}
-	return true, sftpgo.Config{
-		BaseURL:       baseURL,
-		PublicBaseURL: publicBaseURL,
-	}
-}
-
-// mustHTTPSURL validates value via validateHTTPSURL, exiting the process with
-// a logged error if it is invalid. Both SFTPGO_BASE_URL and
-// SFTPGO_PUBLIC_BASE_URL are used to build requests/URLs that carry the
-// caller's email and raw gateway JWT (see internal/sftpgo.Client.MintToken)
-// or are handed to end users as a public download link (see
-// internal/sftpgo.Client.PublicShareURL), so a non-HTTPS or spoofed-looking
-// value here is a credential-leak/MITM risk, not just a misconfiguration —
-// refuse to start rather than proceed with it.
-// mustHTTPSBaseURL is mustHTTPSURL for a base URL that may carry a path; see
-// validateHTTPSBaseURL. Used for upstream services the backend authenticates to
-// with an OAuth2 client, whose token and requests must not travel in cleartext.
+// mustHTTPSBaseURL validates value via validateHTTPSBaseURL, exiting the process
+// with a logged error if it is invalid. Used for upstream services the backend
+// authenticates to with an OAuth2 client, whose token and requests must not
+// travel in cleartext.
 func mustHTTPSBaseURL(key, value string) string {
 	if err := validateHTTPSBaseURL(value); err != nil {
-		slog.Error("invalid environment variable", "key", key, "err", err)
-		os.Exit(1)
-	}
-	return value
-}
-
-func mustHTTPSURL(key, value string) string {
-	if err := validateHTTPSURL(value); err != nil {
 		// Deliberately omit the raw value from this log line: it may carry
 		// embedded userinfo (e.g. "https://user:pass@host"), which would
 		// otherwise write a credential straight into the startup log.
@@ -1509,28 +1526,13 @@ func mustHTTPSURL(key, value string) string {
 	return value
 }
 
-// validateHTTPSURL reports an error unless value parses as a URL with scheme
+// validateHTTPSBaseURL reports an error unless value parses as a URL with scheme
 // "https", a non-empty host, no embedded userinfo (e.g.
 // "https://user:pass@host/...", which could indicate a misconfigured or
-// spoofed URL), and no path/query/fragment beyond an empty or bare "/" path.
-// The path restriction matters beyond cosmetics: internal/sftpgo.Client
-// builds request URLs by plain string concatenation (baseURL +
-// "/api/v2/user/token", etc.), so a configured value with a path component
-// (e.g. "https://host/api") would silently double up into
-// "https://host/api/api/v2/user/token" rather than erroring.
-func validateHTTPSURL(value string) error {
-	return validateSecureURL(value, false)
-}
-
-// validateHTTPSBaseURL is validateHTTPSURL for a base URL that API paths are
-// appended to and that may itself sit under a path (a gateway-hosted service
-// such as "https://host/org/service/v1.0"): the same https, host, userinfo,
-// query and fragment rules, but a path is allowed.
+// spoofed URL), no query and no fragment. A path is allowed, since API paths are
+// appended to the base URL and a gateway-hosted service's base normally has one
+// (such as "https://host/org/service/v1.0").
 func validateHTTPSBaseURL(value string) error {
-	return validateSecureURL(value, true)
-}
-
-func validateSecureURL(value string, allowPath bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return fmt.Errorf("not a valid URL: %w", err)
@@ -1543,9 +1545,6 @@ func validateSecureURL(value string, allowPath bool) error {
 	}
 	if parsed.User != nil {
 		return errors.New("must not contain embedded userinfo (e.g. \"https://user:pass@host/...\")")
-	}
-	if path := parsed.EscapedPath(); !allowPath && path != "" && path != "/" {
-		return fmt.Errorf("must not include a path (got %q); this value is concatenated with API paths, e.g. \"https://host\" not \"https://host/api\"", path)
 	}
 	if parsed.RawQuery != "" {
 		return errors.New("must not include a query string")

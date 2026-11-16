@@ -29,7 +29,21 @@ export interface TimeLogBreakdownDetails extends DataStruct {
   projectType: string;
   remainingQueryHours: string;
   totalQueryHours: string;
+  /** Inclusive start of the period the report covers (YYYY-MM-DD); empty or absent when unbounded. */
+  periodStart?: string;
+  /** Inclusive end of the period the report covers (YYYY-MM-DD); empty or absent when unbounded. */
+  periodEnd?: string;
   cases: TimeLogBreakdownCase[];
+}
+
+/** Optional period for the time report. No fields set means the backend default (the project's subscription period). */
+export interface TimelogsPeriodParams {
+  /** YYYY-MM-DD, inclusive, filters by time card work date. */
+  from?: string;
+  /** YYYY-MM-DD, inclusive. */
+  to?: string;
+  /** Disable the subscription-period defaults and report all time. */
+  allTime?: boolean;
 }
 
 export interface TimeLogBreakdownCase extends DataStruct {
@@ -129,4 +143,68 @@ export interface ProductDetails extends DataStruct {
 export interface MonthlyCounts extends DataStruct {
   yearAndMonth: string;
   counts: { incidentCount: number; queryCount: number };
+}
+
+// ---- SLA report ----
+// Mirrors the backend's viewer.SLAReportDetails (GET /generate-sla-report).
+
+export interface SlaReportMetric {
+  /** 95th percentile of the elapsed time of the finished clocks, or "—". */
+  elapsed: string;
+  /** The policy duration the clocks run against, or "Not applicable". */
+  target: string;
+  /** Clocks that finished within the target. */
+  met: number;
+  /** Clocks that went past the target (finished late, or still running and already over). */
+  missed: number;
+  /** Clocks still inside the target (in progress or paused). */
+  running: number;
+}
+
+export interface SlaReportSummaryRow {
+  label: string;
+  caseType: "incident" | "query";
+  severity: string;
+  cases: number;
+  response: SlaReportMetric;
+  workaround: SlaReportMetric;
+  resolution: SlaReportMetric;
+}
+
+export type SlaClockStatus = "" | "Met" | "Missed" | "Running" | "Paused" | "Cancelled";
+
+export interface SlaReportClock {
+  elapsed: string;
+  /** Empty when the case has no clock for the target. */
+  status: SlaClockStatus;
+}
+
+export interface SlaReportCase {
+  caseId: string;
+  caseNumber: string;
+  caseType: string;
+  severity: string;
+  state: string;
+  /** RFC 3339. */
+  openedOn: string;
+  response: SlaReportClock;
+  workaround: SlaReportClock;
+  resolution: SlaReportClock;
+}
+
+export interface SlaReportDetails {
+  projectName: string;
+  projectKey: string;
+  /** YYYY-MM-DD. */
+  periodStart: string;
+  /** YYYY-MM-DD. */
+  periodEnd: string;
+  summary: SlaReportSummaryRow[];
+  cases: SlaReportCase[];
+}
+
+/** The period of an SLA report: cases created from..to, both YYYY-MM-DD and inclusive. */
+export interface SlaReportPeriodParams {
+  from: string;
+  to: string;
 }

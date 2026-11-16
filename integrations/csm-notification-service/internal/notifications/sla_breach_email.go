@@ -39,14 +39,20 @@ var (
 // tier crossing: "<ClockLabel> SLA at Risk - <caseRef>" below 100%,
 // "[<SEVERITY>] <ClockLabel> SLA Violation - <caseRef>" at a genuine 100%
 // breach (severity uppercase, unresolved, matching SendSLABreachAlert's own
-// header convention exactly).
+// header convention exactly). severity is "" for a security_report_analysis
+// case (it never carries one — see dispatch.isSecurityReportAnalysisCaseType);
+// the bracketed prefix is then dropped entirely rather than rendering as an
+// empty "[]".
 func slaBreachHeaderTitle(clockType, tier, severity, caseNumber, wso2CaseID string) string {
 	clockLabel := slaClockTypeLabel(clockType)
 	caseRef := chatHeaderCaseRef(caseNumber, wso2CaseID)
-	if tier == "100" {
-		return fmt.Sprintf("[%s] %s SLA Violation - %s", strings.ToUpper(strings.TrimSpace(severity)), clockLabel, caseRef)
+	if tier != "100" {
+		return fmt.Sprintf("%s SLA at Risk - %s", clockLabel, caseRef)
 	}
-	return fmt.Sprintf("%s SLA at Risk - %s", clockLabel, caseRef)
+	if sev := strings.ToUpper(strings.TrimSpace(severity)); sev != "" {
+		return fmt.Sprintf("[%s] %s SLA Violation - %s", sev, clockLabel, caseRef)
+	}
+	return fmt.Sprintf("%s SLA Violation - %s", clockLabel, caseRef)
 }
 
 // SLABreachEmailSubject is slaBreachHeaderTitle exported for
@@ -118,6 +124,11 @@ func RenderSLABreachTeamEmail(teamLeadName string, d SLABreachEmailData) string 
 	tmpl = applyOptionalBlock(tmpl, "CASE_TYPE", d.CaseType)
 	tmpl = applyOptionalBlock(tmpl, "PRODUCT", d.Product)
 	tmpl = applyOptionalBlock(tmpl, "TEAM", d.Team)
+	// security_report_analysis cases never carry a severity — the Priority
+	// row is dropped entirely rather than showing slaSeverityLabelAndColor's
+	// "Unknown"/gray fallback, same convention as every other optional row
+	// in this template.
+	tmpl = applyOptionalBlock(tmpl, "PRIORITY", d.Severity)
 	tmpl = applyOptionalBlock(tmpl, "STATE", d.State)
 	tmpl = applyOptionalBlock(tmpl, "OPENED_AT", d.OpenedAt)
 	tmpl = applyOptionalBlock(tmpl, "INTENDED_FOR", d.IntendedFor)

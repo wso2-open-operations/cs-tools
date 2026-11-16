@@ -135,6 +135,9 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   announcement: "Search Announcements",
 };
 
+// Customers see Work In Progress and Waiting On WSO2 as one "In Progress" state. The backend returns it under
+// WORK_IN_PROGRESS's id, leaves WAITING_ON_WSO2 out of the case state list and expands a filter on In Progress
+// to include it, as the webapp relies on. WAITING_ON_WSO2 is still the state key that "Reject Solution" sends.
 export const CASE_STATE_IDS = {
   OPEN: 1,
   WORK_IN_PROGRESS: 10,

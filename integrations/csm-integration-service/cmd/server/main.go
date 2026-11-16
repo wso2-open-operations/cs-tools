@@ -79,6 +79,7 @@ func main() {
 	incidentHandler := handler.NewIncidentHandler(entityClient)
 	itServiceHandler := handler.NewITServiceHandler(entityClient)
 	alertIncidentMappingHandler := handler.NewAlertIncidentMappingHandler(entityClient)
+	alertMuteRuleHandler := handler.NewAlertMuteRuleHandler(entityClient)
 	cloudStatusHandler := handler.NewCloudStatusHandler(entityClient)
 	catalogHandler := handler.NewCatalogHandler(entityClient)
 
@@ -109,6 +110,7 @@ func main() {
 	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
 	mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
 	mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
+	mux.HandleFunc("GET /alert-mute-rules/active", alertMuteRuleHandler.ListActiveAlertMuteRules)
 	mux.HandleFunc("POST /deployed-products/search", catalogHandler.SearchDeployedProducts)
 	mux.HandleFunc("POST /deployments/search", catalogHandler.SearchDeployments)
 	mux.HandleFunc("POST /products/search", catalogHandler.SearchProducts)

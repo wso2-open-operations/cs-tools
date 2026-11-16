@@ -160,14 +160,6 @@ export type DeploymentLicense = {
   signature: string;
 };
 
-// Request type for posting a deployment attachment.
-export type PostDeploymentAttachmentRequest = {
-  name: string;
-  type: string;
-  content: string;
-  description?: string;
-};
-
 // Item type for deployment product update levels.
 export type DeploymentProductUpdate = {
   date: string;

@@ -94,8 +94,11 @@ vi.mock("@features/operations/api/usePostCase", () => ({
   usePostCase: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
-vi.mock("@features/support/api/usePostAttachments", () => ({
-  usePostAttachments: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
+vi.mock("@api/useStoredAttachments", () => ({
+  useStoredAttachmentUpload: () => ({
+    upload: { mutate: vi.fn(), mutateAsync: vi.fn() },
+    confirm: { mutate: vi.fn(), mutateAsync: vi.fn() },
+  }),
 }));
 
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({

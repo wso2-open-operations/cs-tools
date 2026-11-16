@@ -25,7 +25,6 @@ import {
   type JSX,
   type ReactNode,
 } from "react";
-import type { EncodedAttachment } from "@components/attachments/encodeAttachment";
 
 /** The user-entered values of the New service request form. */
 export interface NewServiceRequestDraft {
@@ -40,9 +39,10 @@ export interface NewServiceRequestDraft {
   deployedProductId: string;
   catalogId: string;
   catalogItemId: string;
+  /** The picked severity (S1-S4), or "" when the engineer left it at Default. */
+  severity?: "S1" | "S2" | "S3" | "S4" | "";
   /** The catalog item's variable answers, keyed by variable id. They belong to `catalogItemId`. */
   answers: Record<string, string>;
-  attachments: EncodedAttachment[];
 }
 
 export interface NewServiceRequestDraftStore {

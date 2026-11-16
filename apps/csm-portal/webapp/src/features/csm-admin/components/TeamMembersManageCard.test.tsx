@@ -138,11 +138,11 @@ describe("TeamMembersManageCard", () => {
   });
 
   it("shows the server's reason when a removal is refused (409)", async () => {
-    api.del.mockRejectedValue(new Error("Jane Doe has upcoming turns on Vega."));
+    api.del.mockRejectedValue(new Error("Jane Doe holds the T1 alert tier on Vega."));
     renderCard();
     await fireEvent.click(await screen.findByRole("button", { name: "Remove Jane Doe from Vega" }));
     await fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove" }));
-    expect(await screen.findByText("Jane Doe has upcoming turns on Vega.")).toBeInTheDocument();
+    expect(await screen.findByText("Jane Doe holds the T1 alert tier on Vega.")).toBeInTheDocument();
   });
 
   it("PATCHes only the role when only the role changed", async () => {
@@ -209,13 +209,13 @@ describe("TeamMembersManageCard", () => {
   });
 
   it("shows the server's reason when a move is refused (409)", async () => {
-    api.post.mockRejectedValue(new Error("Jane Doe has upcoming turns on Vega."));
+    api.post.mockRejectedValue(new Error("Jane Doe holds the T1 alert tier on Vega."));
     renderCard();
     await fireEvent.click(await screen.findByRole("button", { name: "Move Jane Doe to another team" }));
     const dialog = await screen.findByRole("dialog");
     await fireEvent.change(within(dialog).getByLabelText("Move to"), { target: { value: "apollo" } });
     await fireEvent.click(within(dialog).getByRole("button", { name: "Move member" }));
-    expect(await screen.findByText("Jane Doe has upcoming turns on Vega.")).toBeInTheDocument();
+    expect(await screen.findByText("Jane Doe holds the T1 alert tier on Vega.")).toBeInTheDocument();
   });
 
   it("disables change and move for a lead, shows the role read-only, and still allows removal", async () => {

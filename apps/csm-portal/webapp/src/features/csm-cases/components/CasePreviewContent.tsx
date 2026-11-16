@@ -19,12 +19,12 @@ import { X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import RelativeTime from "@components/RelativeTime";
-import SeverityChip from "@components/SeverityChip";
+import CaseSeverityChip from "@features/csm-cases/components/CaseSeverityChip";
 import StateChip from "@components/StateChip";
 import WorkStateChip from "@components/WorkStateChip";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import { useGetCsmCaseComments } from "@features/csm-cases/api/useCsmCaseComments";
-import { caseTypeDetailBasePath, caseTypeHasSeverity } from "@features/csm-cases/utils/caseType";
+import { caseTypeDetailBasePath } from "@features/csm-cases/utils/caseType";
 import { effectiveWorkState } from "@features/csm-cases/utils/caseWorkState";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 
@@ -107,7 +107,7 @@ export default function CasePreviewContent({
           {row.state === "work_in_progress" && (
             <WorkStateChip workState={effectiveWorkState(row.workState)} />
           )}
-          {caseTypeHasSeverity(row.caseType) && <SeverityChip severity={row.severity} />}
+          <CaseSeverityChip caseType={row.caseType} severity={row.severity} emptyFallback={null} />
         </Box>
       </Box>
 

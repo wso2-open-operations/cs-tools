@@ -115,8 +115,12 @@ func TestGenerateDashboard_RateLimited(t *testing.T) {
 	if w.Header().Get("Retry-After") != "60" {
 		t.Errorf("Retry-After = %q, want 60", w.Header().Get("Retry-After"))
 	}
-	if msg := decodeJSON[map[string]any](t, w)["message"]; !strings.Contains(msg.(string), "Try again in 60 seconds") {
+	body := decodeJSON[map[string]any](t, w)
+	if msg := body["message"]; !strings.Contains(msg.(string), "Try again in 60 seconds") {
 		t.Errorf("message = %v", msg)
+	}
+	if body["errorCode"] != errCodeGenerateRateLimited {
+		t.Errorf("errorCode = %v, want %q", body["errorCode"], errCodeGenerateRateLimited)
 	}
 }
 

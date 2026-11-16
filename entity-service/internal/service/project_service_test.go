@@ -204,7 +204,7 @@ func TestSearchProjects_MapsParityFields(t *testing.T) {
 			ProjectClosureFields: domain.ProjectClosureFields{
 				ClosureState: str("Suspended"), EndDateClosureState: str("Closed"),
 				InvoiceDueDateClosureState: str("Pending Notified"), ComplianceViolationClosureState: str("Open"),
-				ComplianceViolationDate: str("2026-09-01"),
+				ComplianceViolationDate: str("2026-09-01"), SuspensionProcessOverridden: true,
 			},
 		},
 		{ID: "p2"},
@@ -224,6 +224,9 @@ func TestSearchProjects_MapsParityFields(t *testing.T) {
 	}
 	if *got.InvoiceDueDateClosureState != "Pending Notified" || *got.ComplianceViolationDate != "2026-09-01" {
 		t.Fatalf("closure fields not mapped: %+v", got.ProjectClosureFields)
+	}
+	if !got.SuspensionProcessOverridden || resp.Projects[1].SuspensionProcessOverridden {
+		t.Fatalf("suspensionProcessOverridden not passed through (p1 true, p2 default false): %+v", resp.Projects)
 	}
 	if resp.Projects[1].SfID != nil || resp.Projects[1].Account != nil {
 		t.Fatalf("empty sfId/account must map to null: %+v", resp.Projects[1])

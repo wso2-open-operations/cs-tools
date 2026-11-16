@@ -228,7 +228,7 @@ export default function AllUpdatesTab(): JSX.Element {
     setIsGeneratingPdf(true);
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     try {
-      generateUpdateLevelsReportPdf(reportData);
+      await generateUpdateLevelsReportPdf(reportData);
     } finally {
       setIsGeneratingPdf(false);
     }

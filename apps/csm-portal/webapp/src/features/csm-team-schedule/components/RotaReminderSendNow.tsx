@@ -41,7 +41,7 @@ const ROTATIONS: Record<RotaReminderKind, readonly Rotation[]> = {
   weekend: [
     { code: "CRE_WEEKEND", label: "LK Weekend" },
     { code: "CRE_WEEKEND_NIGHT", label: "Americas Weekend" },
-    { code: "CRE_WEEKEND_NIGHT_OC", label: "LK On-call" },
+    { code: "CRE_WEEKEND_NIGHT_OC", label: "Americas On-call" },
   ],
 };
 

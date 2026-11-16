@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import {
   Alert,
   Box,
@@ -57,6 +58,7 @@ import { BackendApiError } from "@api/backend/client";
 import ExportPdfButton from "@components/ExportPdfButton";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useAttachmentDeletion } from "@features/csm-cases/hooks/useAttachmentDeletion";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
@@ -111,7 +113,9 @@ import {
   pendingCustomerProposal,
 } from "@features/csm-operations/utils/changeRequests";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import { AttachmentsWidget, TagsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
 import {
@@ -119,6 +123,7 @@ import {
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import { useAddCaseTag, useRemoveCaseTag } from "@features/csm-cases/api/useCaseTags";
 import type {
   BeChangeRequestCustomerProposal,
@@ -314,7 +319,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   // UX only — the backend 403s attachment downloads and tag edits the same
   // regardless of these flags, so hiding a control here is never the
   // enforcement.
-  const { canDownloadAttachment, canWrite } = usePortalAccess();
+  const { canDownloadAttachment, canWrite, isAdmin } = usePortalAccess();
   const routedId = useNormalizedIdParam("id");
   const routedNavigate = useNavTransition();
   const routedLocationState = useLocation().state;
@@ -324,8 +329,10 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   // Prefer the list URL the row link captured (if any) so "back" returns to
   // the exact view the engineer came from, falling back to the bare tab path
   // for a bookmarked or directly-linked change request.
+  // `parentState` is the state that list was itself carrying (e.g.
+  // `{ from: <dashboard> }`), handed back on Back so it keeps its own Back.
   const backState = (routeOverride ? routeOverride.state : routedLocationState) as
-    | { from?: string }
+    | { from?: string; parentState?: unknown }
     | undefined;
   const backTarget = backState?.from ?? OPERATIONS_CR_PATH;
   const { data, isLoading, isError, refetch } = useGetChangeRequest(id);
@@ -385,6 +392,11 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   );
   const { data: attachments } = useGetCsmCaseAttachments(id, "change_request");
   const postAttachment = usePostCsmCaseAttachment();
+  const attachmentDeletion = useAttachmentDeletion({
+    ownerId: id,
+    referenceType: "change_request",
+    closed: data?.state === "closed" || data?.state === "canceled",
+  });
   const downloadAttachment = useDownloadCsmCaseAttachment();
   // Tags: the case page's own hooks and widget, pointed at this change
   // request. The routes take a work item id (`POST /cases/{id}/tags`, ...),
@@ -458,6 +470,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   }, [staleNotice]);
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(id, "change_request", isAdmin);
 
   const recordView = useRecordRecentView();
   useEffect(() => {
@@ -496,7 +510,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   );
 
   const back = (): void => {
-    navigate(backTarget);
+    navigate(backTarget, { state: backState?.parentState ?? undefined });
   };
 
   const BackButton = (
@@ -1383,28 +1397,28 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!id}
+                uploadProgress={commentUploadProgress(postAttachment)}
                 publicCommentDisabledReason={changeRequestCommentGateReason(cr.state)}
                 autoFocus
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!id) return;
-                  const hasText =
-                    bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      changeRequestId: id,
-                      bodyHtml,
-                      internal,
-                    });
-                  }
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId: id,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                      referenceType: "change_request",
-                    });
-                  }
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ changeRequestId: id, bodyHtml, internal }),
+                    attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({
+                        caseId: id,
+                        file,
+                        name,
+                        uploadedBy: engineerName,
+                        referenceType: "change_request",
+                      }),
+                  });
                   setComposerOpen(false);
                 }}
               />
@@ -1436,7 +1450,10 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentsTab}
             uploading={postAttachment.isPending}
+            uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
+            onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError
                 ? (postAttachment.error?.message ?? "Could not upload the attachment.")
@@ -1444,9 +1461,14 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             }
             onUpload={onUploadAttachment}
             onDownload={canDownloadAttachment ? onDownloadAttachment : undefined}
+            onDelete={attachmentDeletion.onDelete}
+            canDeleteAttachment={attachmentDeletion.canDeleteAttachment}
+            deletingId={attachmentDeletion.deletingId}
           />
         </Card>
       )}
+
+      {attachmentDeletion.dialog}
 
       {reasonTransition && (
         <ChangeRequestTransitionReasonDialog

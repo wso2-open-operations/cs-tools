@@ -14,6 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  appName,
+  logoDarkModeUrl,
+  logoLightModeUrl,
+} from "@config/appearanceConfig";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useEffect, useState, type JSX } from "react";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -53,7 +58,8 @@ export default function Brand({
     return () => observer.disconnect();
   }, []);
 
-  const logoSrc = isDarkMode ? "/logo-white.svg" : "/logo-dark.svg";
+  const logoSrc = isDarkMode ? logoDarkModeUrl() : logoLightModeUrl();
+  const name = appName();
 
   return (
     <HeaderUI.Brand
@@ -81,8 +87,18 @@ export default function Brand({
         />
       </HeaderUI.BrandLogo>
       {/* brand title */}
-      <HeaderUI.BrandTitle sx={{ whiteSpace: "nowrap" }}>
-        CSM Portal
+      <HeaderUI.BrandTitle
+        sx={{
+          whiteSpace: "nowrap",
+          // A long configured name truncates instead of pushing the pinned
+          // tabs/search bar out of view — the stock "CSM Portal" fits well
+          // within this cap.
+          maxWidth: "16rem",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        <span title={name}>{name}</span>
       </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );

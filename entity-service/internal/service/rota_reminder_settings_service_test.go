@@ -153,6 +153,24 @@ func TestRotaReminderSettings_WeekendCopyTo(t *testing.T) {
 	}
 }
 
+// The invitation copies are stored normalised; a card that sends none keeps
+// what is stored.
+func TestRotaReminderSettings_InviteCopyTo(t *testing.T) {
+	repo := &fakeReminderSettingsRepo{}
+	svc := newReminderSettings(repo, "CRE")
+	req := goodReminderSettings()
+	req.InviteCopyTo = []string{" Admin@Example.com ", "admin@example.com"}
+	out, err := svc.Save(callerWithRoles("ann@example.com"), "CRE", req)
+	if err != nil || len(out.InviteCopyTo) != 1 || out.InviteCopyTo[0] != "admin@example.com" {
+		t.Fatalf("saved %v, %v", out.InviteCopyTo, err)
+	}
+	older := goodReminderSettings()
+	older.InviteCopyTo = nil
+	if out, err = svc.Save(callerWithRoles("ann@example.com"), "CRE", older); err != nil || len(out.InviteCopyTo) != 1 {
+		t.Errorf("an older card's save changed the invitation copies to %v, %v", out.InviteCopyTo, err)
+	}
+}
+
 func TestRotaReminderSettings_RefusesNonsense(t *testing.T) {
 	cases := map[string]func(r *domain.SaveRotaReminderSettingsRequest){
 		"missing switch":  func(r *domain.SaveRotaReminderSettingsRequest) { r.InvitesEnabled = nil },
@@ -173,6 +191,7 @@ func TestRotaReminderSettings_RefusesNonsense(t *testing.T) {
 		},
 		"bad address":         func(r *domain.SaveRotaReminderSettingsRequest) { r.CopyTo = []string{"not an address"} },
 		"bad weekend address": func(r *domain.SaveRotaReminderSettingsRequest) { r.WeekendCopyTo = []string{"nope"} },
+		"bad invite address":  func(r *domain.SaveRotaReminderSettingsRequest) { r.InviteCopyTo = []string{"nope"} },
 		"bad invite rotation": func(r *domain.SaveRotaReminderSettingsRequest) {
 			r.InviteRotations = map[string]bool{"cre morning": false}
 		},

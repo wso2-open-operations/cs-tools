@@ -39,6 +39,15 @@ vi.mock("@api/useSearchUsersByName", () => ({
 }));
 // The search waits a moment for typing to stop; the tests do not.
 vi.mock("@hooks/useDebouncedValue", () => ({ useDebouncedValue: <T,>(v: T) => v }));
+// The remove confirm reads the person's upcoming turns on the team.
+const turnsRead: { data?: { assignments: unknown[]; count: number }; isLoading: boolean; isError: boolean } = {
+  data: { assignments: [], count: 0 },
+  isLoading: false,
+  isError: false,
+};
+vi.mock("../api/useTeamSchedule", () => ({
+  useScheduleAssignmentsByMonth: () => ({ ...turnsRead, error: null }),
+}));
 // The reminder settings card has its own tests; here only whether it is shown.
 vi.mock("./RotaReminderSettings", () => ({ default: () => <div>reminder settings card</div> }));
 
@@ -66,8 +75,23 @@ function lastChange(): RotaAccessChange {
   return mutate.mock.calls.at(-1)?.[0] as RotaAccessChange;
 }
 
+const turn = (userId: string, teamKey: string, rotaDate: string, endsInHours: number) => ({
+  id: `${userId}-${rotaDate}`,
+  engineer: { userId, name: "x", email: "x@example.test" },
+  teamKey,
+  shiftCode: "CRE_AMERICAS",
+  rotaDate,
+  startsAt: new Date(Date.now() + (endsInHours - 9) * 3_600_000).toISOString(),
+  endsAt: new Date(Date.now() + endsInHours * 3_600_000).toISOString(),
+  isOnCall: false,
+  source: "manual",
+});
+
 beforeEach(() => {
   mutate.mockReset();
+  turnsRead.data = { assignments: [], count: 0 };
+  turnsRead.isLoading = false;
+  turnsRead.isError = false;
   found.data = [];
   access.data = {
     canManage: { rotaAdmins: true, markerFamilies: ["CRE", "SRE", "SME"], memberFamilies: ["CRE", "SRE", "SME"] },
@@ -246,6 +270,38 @@ describe("RotaAccessTab", () => {
       expect(lastChange()).toEqual({ kind: "member", teamKey: "apollo", userId: ANA, grant: false });
     });
 
+    it("says in the confirm how many upcoming turns go with the member", () => {
+      turnsRead.data = {
+        assignments: [
+          turn(ANA, "apollo", "2026-12-01", 24),
+          turn(ANA, "apollo", "2026-12-31", 48),
+          turn(ANA, "apollo", "2026-10-01", -24), // ended: stays as history
+          turn(ANA, "lyra", "2026-12-02", 24), // another team
+          turn(BEN, "apollo", "2026-12-03", 24), // somebody else
+        ],
+        count: 5,
+      };
+      render(<RotaAccessTab teams={TEAMS} />);
+      fireEvent.click(screen.getByRole("tab", { name: "SRE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove Ana from Apollo" }));
+      expect(
+        screen.getByText("Their 2 upcoming turns on Apollo (until 31 Dec) will be removed too. This cannot be undone."),
+      ).toBeInTheDocument();
+    });
+
+    it("says when the member has no upcoming turns, and while it checks", () => {
+      render(<RotaAccessTab teams={TEAMS} />);
+      fireEvent.click(screen.getByRole("tab", { name: "SRE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove Ana from Apollo" }));
+      expect(screen.getByText("They have no upcoming turns on Apollo.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      turnsRead.isLoading = true;
+      turnsRead.data = undefined;
+      fireEvent.click(screen.getByRole("button", { name: "Remove Ana from Apollo" }));
+      expect(screen.getByText("Checking their upcoming turns on Apollo…")).toBeInTheDocument();
+    });
+
     it("cancels a removal without changing anything", () => {
       render(<RotaAccessTab teams={TEAMS} />);
       fireEvent.click(screen.getByRole("tab", { name: "SRE" }));
@@ -322,14 +378,14 @@ describe("RotaAccessTab", () => {
       const scrolled = vi.fn();
       Element.prototype.scrollIntoView = scrolled;
       mutate.mockImplementation((_c: RotaAccessChange, opts?: { onError?: (e: Error) => void }) =>
-        opts?.onError?.(new Error("this person still has 1 upcoming turn on apollo: remove or reassign them on the roster first")),
+        opts?.onError?.(new Error("this person is the T1 responder of apollo on Case Alerts: give that tier to someone else first")),
       );
       render(<RotaAccessTab teams={TEAMS} />);
       fireEvent.click(screen.getByRole("tab", { name: "SRE" }));
       fireEvent.click(screen.getByRole("button", { name: "Remove Ben from Apollo" }));
       fireEvent.click(screen.getByRole("button", { name: "Remove" }));
       const alert = screen.getByRole("alert");
-      expect(alert).toHaveTextContent("1 upcoming turn on apollo");
+      expect(alert).toHaveTextContent("T1 responder of apollo");
       expect(scrolled).toHaveBeenCalled();
       expect(scrolled.mock.contexts.at(-1)).toBe(alert);
     });

@@ -61,10 +61,10 @@ describe("useSearchIncidentTasks", () => {
 });
 
 // A fresh client per render, as LinkedIncidentsListWidget.test.tsx does.
-function renderWidget(): void {
+function renderWidget(locationState?: unknown): void {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[{ pathname: `/operations/incidents/${INCIDENT_ID}`, state: locationState }]}>
         <IncidentTasksWidget incidentId={INCIDENT_ID} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -124,7 +124,24 @@ describe("IncidentTasksWidget", () => {
 
     fireEvent.click(screen.getByText("Open"));
     expect(navigateMock).toHaveBeenCalledWith("/operations/incident-tasks/t1", {
-      state: { from: `/operations/incidents/${INCIDENT_ID}?tab=related` },
+      state: { from: `/operations/incidents/${INCIDENT_ID}?tab=related`, parentState: null },
+    });
+  });
+
+  it("passes the incident page's own state on as parentState, so the incident keeps its Back", async () => {
+    navigateMock.mockReset();
+    postMock.mockResolvedValue({
+      incidentTasks: [{ id: "t1", number: "CS-PORTAL-000021", subject: "[Incident Report] Write it", stateLabel: "Open" }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    const incidentState = { from: "/operations?tab=incidents", parentState: { from: "/dashboard/system/7" } };
+    renderWidget(incidentState);
+
+    fireEvent.click(await screen.findByText("Open"));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/incident-tasks/t1", {
+      state: { from: `/operations/incidents/${INCIDENT_ID}?tab=related`, parentState: incidentState },
     });
   });
 

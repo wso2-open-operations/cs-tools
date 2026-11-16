@@ -323,7 +323,7 @@ func TestACPReopen_RenewalReopensTheProject(t *testing.T) {
 func TestACPReopen_EndDateStillPastLeavesItSuspended(t *testing.T) {
 	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: acpSuspendedProject()}}
 	sf := acpRenewedSF()
-	sf.project.EndDate = acpStr("2026-10-29") // today: ACP would suspend it again
+	sf.project.EndDate = acpStr("2026-10-28") // yesterday: ACP would suspend it again
 	pub := &acpFakePublisher{}
 	if err := newACPTestService(repo, sf, pub, nil).HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err != nil {
 		t.Fatal(err)

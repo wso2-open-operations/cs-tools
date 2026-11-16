@@ -17,6 +17,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CSM Portal</title>
     <script src="/config.js"></script>
+    <script>
+      // Apply the configured app name and logo to the tab before React loads.
+      (function () {
+        var c = window.config || {};
+        var v = function (k) {
+          return typeof c[k] === "string" && c[k].trim() ? c[k].trim() : "";
+        };
+        if (v("CSM_PORTAL_APP_NAME")) {
+          document.title = v("CSM_PORTAL_APP_NAME");
+        }
+        // Anchor bare paths ("logos/a.svg") to the site root so they do not
+        // resolve against the current page on deep links.
+        var logo = function (k) {
+          var u = v(k);
+          if (!u || u.charAt(0) === "/" || /^[a-z][a-z0-9+.-]*:/i.test(u)) {
+            return u;
+          }
+          return "/" + u.replace(/^\.\//, "");
+        };
+        var light = logo("CSM_PORTAL_LOGO_LIGHT_MODE_URL");
+        var dark = logo("CSM_PORTAL_LOGO_DARK_MODE_URL") || light;
+        var icons = document.querySelectorAll('link[rel="icon"]');
+        if (light && icons[0]) icons[0].setAttribute("href", light);
+        if (dark && icons[1]) icons[1].setAttribute("href", dark);
+      })();
+    </script>
     <style>
       /*
        * Boot loading screen: styled inline (no framework, no external

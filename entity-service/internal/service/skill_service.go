@@ -31,12 +31,17 @@ import (
 // profile, the manager's view of everybody's, and the admin's catalogue edits.
 //
 // Who may do what:
-//   - any internal caller reads the catalogue (levels, categories, skills);
+//   - any internal caller reads the catalogue (levels, active categories and
+//     skills);
 //   - an internal user with a user record reads and changes only their own
-//     profile, which is always the caller's: no route takes a person's id;
-//   - a skill manager reads everybody's skills: a CSM admin, or a lead of a CRE
-//     or SRE team;
-//   - a CSM admin alone creates, edits and deactivates skills.
+//     profile, which is always the caller's, and requests skills;
+//   - every other task is a capability (domain.SkillCapability): the directory
+//     (everybody's skills), reviewing skill requests, and managing the
+//     catalogue (skills and categories). Each is held by a CSM admin and by the
+//     roles configured for it (AUTH_SKILL_DIRECTORY_ROLES,
+//     AUTH_SKILL_REQUEST_REVIEWER_ROLES, AUTH_SKILL_CATALOGUE_MANAGER_ROLES).
+//     Code checks the capability, never a role name, so who does what is
+//     decided by configuration.
 //
 // A CSM admin is a CSM Portal admin: a caller whose token's "roles" claim holds
 // one of AUTH_ADMIN_ROLES, as for the rota access tab, so the two can never
@@ -57,17 +62,25 @@ type SkillService interface {
 
 	CreateSkill(ctx context.Context, req domain.CreateSkillRequest) (domain.Skill, error)
 	UpdateSkill(ctx context.Context, id string, req domain.UpdateSkillRequest) (domain.Skill, error)
+
+	SkillManagementService
 }
+
+// SkillCapabilityRoles is the configured role list of each capability, on top
+// of the admin roles. An empty list means admins only.
+type SkillCapabilityRoles map[domain.SkillCapability][]string
 
 type skillService struct {
 	repo       repository.SkillRepository
 	access     AccessService
 	adminRoles []string
+	capRoles   SkillCapabilityRoles
 }
 
-// NewSkillService constructs a SkillService. adminRoles is AUTH_ADMIN_ROLES.
-func NewSkillService(repo repository.SkillRepository, access AccessService, adminRoles []string) SkillService {
-	return &skillService{repo: repo, access: access, adminRoles: adminRoles}
+// NewSkillService constructs a SkillService. adminRoles is AUTH_ADMIN_ROLES;
+// capRoles adds roles per capability (nil: admins only).
+func NewSkillService(repo repository.SkillRepository, access AccessService, adminRoles []string, capRoles SkillCapabilityRoles) SkillService {
+	return &skillService{repo: repo, access: access, adminRoles: adminRoles, capRoles: capRoles}
 }
 
 const (
@@ -129,41 +142,51 @@ func (s *skillService) requireMe(ctx context.Context) (userID, email string, err
 	return userID, id.UserEmail, nil
 }
 
-// requireManager is the gate for reading everybody's skills.
-func (s *skillService) requireManager(ctx context.Context) error {
-	id, err := s.requireInternal(ctx)
-	if err != nil {
-		return err
-	}
-	if id.UserEmail == "" {
-		return &apierror.ForbiddenError{Msg: "the skills of everybody need a user token, not a service credential"}
-	}
-	if holdsAnyRole(id.Roles, s.adminRoles) {
-		return nil
-	}
-	lead, err := s.repo.IsCRESRELead(ctx, id.UserEmail)
-	if err != nil {
-		return err
-	}
-	if !lead {
-		return &apierror.ForbiddenError{Msg: "the skills of everybody are read by a CSM admin or a CRE or SRE team lead"}
-	}
-	return nil
+// holds reports whether the identity holds a capability: an admin role, or a
+// role configured for that capability. Roles are matched exactly.
+func (s *skillService) holds(id auth.Identity, c domain.SkillCapability) bool {
+	return holdsAnyRole(id.Roles, s.adminRoles) || holdsAnyRole(id.Roles, s.capRoles[c])
 }
 
-// requireAdmin is the gate for catalogue edits, and returns the actor.
-func (s *skillService) requireAdmin(ctx context.Context) (string, error) {
+// capabilityRefusals is what a caller without the capability is told.
+var capabilityRefusals = map[domain.SkillCapability]string{
+	domain.SkillCapDirectory:       "you don't have access to the skill directory",
+	domain.SkillCapReviewRequests:  "you don't have access to review skill requests",
+	domain.SkillCapManageCatalogue: "you don't have access to change the skill catalogue",
+}
+
+// requireCapability is the gate for a capability, and returns the actor's
+// email. A service credential holds none: every gated task needs a person.
+func (s *skillService) requireCapability(ctx context.Context, c domain.SkillCapability) (string, error) {
 	id, err := s.requireInternal(ctx)
 	if err != nil {
 		return "", err
 	}
 	if id.UserEmail == "" {
-		return "", &apierror.ForbiddenError{Msg: "changing the skill catalogue needs a user token, not a service credential"}
+		return "", &apierror.ForbiddenError{Msg: "this needs a user token, not a service credential"}
 	}
-	if !holdsAnyRole(id.Roles, s.adminRoles) {
-		return "", &apierror.ForbiddenError{Msg: "the skill catalogue is changed by a CSM admin only"}
+	if !s.holds(id, c) {
+		return "", &apierror.ForbiddenError{Msg: capabilityRefusals[c]}
 	}
 	return id.UserEmail, nil
+}
+
+// requireManager is the gate for reading everybody's skills.
+func (s *skillService) requireManager(ctx context.Context) error {
+	_, err := s.requireCapability(ctx, domain.SkillCapDirectory)
+	return err
+}
+
+// requireAdmin is the gate for catalogue edits, and returns the actor.
+func (s *skillService) requireAdmin(ctx context.Context) (string, error) {
+	return s.requireCapability(ctx, domain.SkillCapManageCatalogue)
+}
+
+// managesCatalogue is whether the caller (already known to be internal) may
+// see what only catalogue managers see: inactive entries and holder counts.
+func (s *skillService) managesCatalogue(ctx context.Context) bool {
+	id := auth.IdentityFromContext(ctx)
+	return id.UserEmail != "" && s.holds(id, domain.SkillCapManageCatalogue)
 }
 
 // ListLevelTypes implements SkillService.
@@ -183,7 +206,7 @@ func (s *skillService) ListCategories(ctx context.Context) (domain.SkillCategori
 	if _, err := s.requireInternal(ctx); err != nil {
 		return domain.SkillCategoriesResponse{}, err
 	}
-	cats, err := s.repo.ListCategories(ctx)
+	cats, err := s.repo.ListCategories(ctx, s.managesCatalogue(ctx))
 	if err != nil {
 		return domain.SkillCategoriesResponse{}, err
 	}
@@ -206,6 +229,11 @@ func (s *skillService) SearchSkills(ctx context.Context, req domain.SearchSkills
 			return domain.SearchSkillsResponse{}, err
 		}
 	}
+	// Inactive skills and holder counts are a catalogue manager's view: the
+	// flag is ignored for anyone else, so inactive entries never reach them.
+	manager := s.managesCatalogue(ctx)
+	req.IncludeInactive = req.IncludeInactive && manager
+	req.WithHolderCounts = manager
 	skills, total, err := s.repo.SearchSkills(ctx, req)
 	if err != nil {
 		return domain.SearchSkillsResponse{}, err
@@ -490,8 +518,11 @@ func cleanSkillName(in string) (string, error) {
 	return v, nil
 }
 
-// cleanCategoryIDs validates the ids, drops repeats, and checks they exist.
-func (s *skillService) cleanCategoryIDs(ctx context.Context, ids []string) ([]string, error) {
+// cleanCategoryIDs validates the ids, drops repeats, and checks they exist. A
+// category the skill is newly filed under must be an active leaf; one it is
+// already filed under (keep) may stay, so editing a skill filed under a parent
+// or a since-deactivated category (migrated data) is not refused.
+func (s *skillService) cleanCategoryIDs(ctx context.Context, ids []string, keep []domain.SkillCategoryRef) ([]string, error) {
 	if err := validateSkillIDList("categoryIds", ids); err != nil {
 		return nil, err
 	}
@@ -510,6 +541,22 @@ func (s *skillService) cleanCategoryIDs(ctx context.Context, ids []string) ([]st
 	}
 	if !ok {
 		return nil, &apierror.ValidationError{Msg: "categoryIds names a category that does not exist"}
+	}
+	kept := map[string]bool{}
+	for _, c := range keep {
+		kept[strings.ToLower(c.ID)] = true
+	}
+	var added []string
+	for _, id := range out {
+		if !kept[id] {
+			added = append(added, id)
+		}
+	}
+	if ok, err = s.repo.CategoriesAreActiveLeaves(ctx, added); err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, &apierror.ValidationError{Msg: "a skill is filed only under an active category with no sub-categories"}
 	}
 	return out, nil
 }
@@ -537,6 +584,9 @@ func skillWriteError(res domain.SkillWriteResult) error {
 		return &apierror.ConflictError{Msg: "another skill already has this name"}
 	case domain.SkillOutcomeLevelsInUse:
 		return &apierror.ConflictError{Msg: "people hold levels of this skill, so its level scale cannot be changed"}
+	}
+	if res.Outcome != domain.SkillOutcomeDone {
+		return fmt.Errorf("unexpected skill write outcome %d", res.Outcome)
 	}
 	if res.Skill == nil {
 		return fmt.Errorf("skill write left no skill to return")
@@ -566,7 +616,7 @@ func (s *skillService) CreateSkill(ctx context.Context, req domain.CreateSkillRe
 		return domain.Skill{}, err
 	}
 	req.LevelTypeID = strings.ToLower(req.LevelTypeID)
-	if req.CategoryIDs, err = s.cleanCategoryIDs(ctx, req.CategoryIDs); err != nil {
+	if req.CategoryIDs, err = s.cleanCategoryIDs(ctx, req.CategoryIDs, nil); err != nil {
 		return domain.Skill{}, err
 	}
 	res, err := s.repo.CreateSkill(ctx, req, actor)
@@ -616,7 +666,15 @@ func (s *skillService) UpdateSkill(ctx context.Context, id string, req domain.Up
 		req.LevelTypeID = &lt
 	}
 	if req.CategoryIDs != nil {
-		ids, err := s.cleanCategoryIDs(ctx, *req.CategoryIDs)
+		current, err := s.repo.GetSkill(ctx, id)
+		if err != nil {
+			return domain.Skill{}, err
+		}
+		var keep []domain.SkillCategoryRef
+		if current != nil {
+			keep = current.Categories
+		}
+		ids, err := s.cleanCategoryIDs(ctx, *req.CategoryIDs, keep)
 		if err != nil {
 			return domain.Skill{}, err
 		}

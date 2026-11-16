@@ -494,6 +494,33 @@ func RequirePermission(resolver RoleResolver, module Module, action Action) func
 	}
 }
 
+// CheckPermission is RequirePermission's check for a handler that only learns
+// which module applies after reading the request body (a route that serves more
+// than one resource type). It reports whether the caller may go on; when it
+// returns false the response has already been written.
+func CheckPermission(w http.ResponseWriter, r *http.Request, resolver RoleResolver, module Module, action Action) bool {
+	roles, ok := resolveRolesForRequest(w, r, resolver)
+	if !ok {
+		return false
+	}
+	if !HasPermission(roles, module, action) {
+		writeForbiddenError(w, "You do not have permission to perform this action.")
+		return false
+	}
+	if action != ActionRead {
+		blocked, err := internalWriteBlocked(r.Context(), resolver)
+		if err != nil {
+			writeRolesResolutionError(w, r, err)
+			return false
+		}
+		if blocked {
+			writeForbiddenError(w, "You do not have permission to perform this action.")
+			return false
+		}
+	}
+	return true
+}
+
 // RequirePermissionOneOf is RequirePermission for a route that serves more than
 // one level of access: it lets the request through when the caller holds ANY of
 // actions on module, and records the first one they hold (see

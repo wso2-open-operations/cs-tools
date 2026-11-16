@@ -354,13 +354,24 @@ func renderWorklogTeamSections(r worklogreport.Report, daily bool, caseLinkBase 
 			if daily {
 				b.WriteString(`<td ` + devMid + `>` + strconv.Itoa(d.DisapprovedEntries) + `</td>`)
 			} else {
-				b.WriteString(`<td ` + devMid + `>` + hrs(d.AvgTimePerDay) + `</td>`)
+				b.WriteString(`<td ` + devMid + `>` + avgHoursPerDay(d) + `</td>`)
 			}
 			b.WriteString(`</tr>`)
 		}
 		b.WriteString(`</tbody></table>`)
 	}
 	return b.String()
+}
+
+// avgHoursPerDay renders the weekly Avg. Hrs/Day cell. With no worked days
+// (for example every weekday on leave but time still logged) the average
+// is undefined, and the upstream 0.00 would read as "no work" beside
+// non-zero hours, so it shows n/a instead.
+func avgHoursPerDay(d worklogreport.Developer) string {
+	if d.WorkedDays == 0 {
+		return "n/a"
+	}
+	return hrs(d.AvgTimePerDay)
 }
 
 // dashIfEmpty keeps an empty cell from reading as broken data, the same

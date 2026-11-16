@@ -142,9 +142,15 @@ func (c *GoogleChatClient) SendSLABreachAlert(ctx context.Context, audience, clo
 	caseRef := chatHeaderCaseRef(caseNumber, wso2CaseID)
 
 	var title string
-	if tier == "100" {
-		title = fmt.Sprintf("[%s] %s SLA Violation - %s", strings.ToUpper(strings.TrimSpace(severity)), clockLabel, caseRef)
-	} else {
+	switch sev := strings.ToUpper(strings.TrimSpace(severity)); {
+	case tier == "100" && sev != "":
+		title = fmt.Sprintf("[%s] %s SLA Violation - %s", sev, clockLabel, caseRef)
+	case tier == "100":
+		// security_report_analysis cases never carry a severity (see
+		// dispatch.isSecurityReportAnalysisCaseType) — the bracketed prefix
+		// is dropped entirely rather than rendering as an empty "[]".
+		title = fmt.Sprintf("%s SLA Violation - %s", clockLabel, caseRef)
+	default:
 		title = fmt.Sprintf("%s SLA at Risk - %s", clockLabel, caseRef)
 	}
 
@@ -166,7 +172,12 @@ func (c *GoogleChatClient) SendSLABreachAlert(ctx context.Context, audience, clo
 		}
 		lines = append(lines, caseAlertLine(`<b>Team :</b> <font color="%s"><b>%s</b></font>`, slaBreachColor(tier), teamDisplay))
 	}
-	lines = append(lines, caseAlertLine(`<b>Priority :</b> <font color="%s">%s</font>`, severityColor, severityLabel))
+	// security_report_analysis cases never carry a severity — omit the row
+	// entirely rather than render slaSeverityLabelAndColor's "Unknown"/gray
+	// fallback, same convention as every other optional field in this card.
+	if severity != "" {
+		lines = append(lines, caseAlertLine(`<b>Priority :</b> <font color="%s">%s</font>`, severityColor, severityLabel))
+	}
 	if state != "" {
 		lines = append(lines, caseAlertLine(`<b>State :</b> %s`, state))
 	}

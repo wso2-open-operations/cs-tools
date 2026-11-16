@@ -82,11 +82,32 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   BarChart: ({
     children,
     data,
+    tooltip,
+    bars,
   }: {
     children: ReactNode;
     data?: { name: string; value: number }[];
+    tooltip?: { formatter?: (value: unknown) => string };
+    // A line widget drawn as bars passes its series here (DashboardLineChart).
+    bars?: { dataKey: string; name?: string; onClick?: (data: unknown, index: number, event?: unknown) => void }[];
   }) => (
     <div>
+      {bars?.map((bar) => (
+        <div key={bar.dataKey} data-testid={`bar-${bar.dataKey}`}>
+          {bar.name}:{" "}
+          {(data as Record<string, unknown>[] | undefined)?.map((row) => `${row.label}=${row[bar.dataKey]}`).join(", ")}
+          {/* Row 1's bar, clickable as recharts calls Bar.onClick. */}
+          {bar.onClick && (
+            <button
+              type="button"
+              data-testid={`bar-point-${bar.dataKey}`}
+              onClick={(e) => bar.onClick?.((data ?? [])[1], 1, e)}
+            />
+          )}
+        </div>
+      ))}
+      {/* Only a widget that formats its values passes a tooltip formatter. */}
+      {tooltip?.formatter && data?.[0] && <span>tooltip:{tooltip.formatter(data[0].value)}</span>}
       {Children.map(children, (child) =>
         isValidElement(child)
           ? cloneElement(child as ReactElement<{ data?: typeof data }>, { data })
@@ -97,9 +118,11 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   Bar: ({
     data,
     onClick,
+    label,
   }: {
     data?: { name: string; value: number }[];
     onClick?: (item: unknown, index: number, event?: unknown) => void;
+    label?: { formatter?: (value: unknown) => string };
   }) => (
     <div>
       {(data ?? []).map((item, i) => (
@@ -107,25 +130,31 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
         // above.
         <button key={item.name} type="button" onClick={(e) => onClick?.(item, i, e)}>
           bar:{item.name}:{item.value}
+          {/* The bar's value label, only when the widget formats it. */}
+          {label?.formatter && ` label:${label.formatter(item.value)}`}
         </button>
       ))}
     </div>
   ),
-  // Shape "line" is not click-through (see DashboardLineChart's own doc
-  // comment) — this stand-in just has to render enough of each line's own
-  // data for a test to assert on, same approach DashboardLineChart.test.tsx
-  // uses for this same package.
+  // Renders each line's data, and its hovered point's dot for row 1 when the
+  // line has a function `activeDot` (a clickable point), same approach
+  // DashboardLineChart.test.tsx uses for this same package.
   LineChart: ({
     data,
     lines,
   }: {
     data: Record<string, unknown>[];
-    lines: { dataKey: string; name?: string }[];
+    lines: {
+      dataKey: string;
+      name?: string;
+      activeDot?: boolean | ((props: { cx?: number; cy?: number; index?: number }) => ReactNode);
+    }[];
   }) => (
     <div>
       {lines.map((line) => (
         <div key={line.dataKey} data-testid={`line-${line.dataKey}`}>
           {line.name}: {data.map((row) => `${row.label}=${row[line.dataKey]}`).join(", ")}
+          {typeof line.activeDot === "function" && <svg>{line.activeDot({ cx: 10, cy: 20, index: 1 })}</svg>}
         </div>
       ))}
     </div>
@@ -525,6 +554,34 @@ describe("DashboardWidgetTile", () => {
     expect(params.get("f")).toBeNull();
   });
 
+  it("list shape: 'View more' carries a `from` location.state pointing back to this dashboard page, for the preview page's Back", async () => {
+    postMock.mockResolvedValue({
+      total: 6,
+      cases: [{ id: "11111111-1111-1111-1111-111111111111", number: "CS-1", subject: "Disk full", state: "open" }],
+      limit: 5,
+      offset: 0,
+      hasMore: true,
+    });
+
+    renderWithRoutes(
+      <DashboardWidgetTile
+        widgetId="my_critical_open_back"
+        displayName="My Critical & High Cases"
+        resourceType="case"
+        shape="list"
+        filters={{}}
+        listLimit={5}
+      />,
+      "/dashboard/preview/cases",
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: /view more/i }));
+    await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+    expect(screen.getByTestId("location-state-probe").textContent).toBe(
+      JSON.stringify({ from: "/" }),
+    );
+  });
+
   it("masks the signed-in user's own id in the 'View more' link's filter query params", async () => {
     postMock.mockResolvedValue({
       total: 6,
@@ -825,7 +882,7 @@ describe("DashboardWidgetTile", () => {
     expect(params.get("states")).toBe("open");
   });
 
-  it("resolves a relative-date filter in the click-through href, so the destination list matches the number that was clicked", async () => {
+  it("keeps a case widget's relative date in the click-through href, for the cases list to resolve browser-local", async () => {
     postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
 
     renderWithClient(
@@ -842,23 +899,20 @@ describe("DashboardWidgetTile", () => {
 
     await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
 
+    // The cases list resolves the placeholder itself, in the viewer's own
+    // local day (`useGetCsmCases`), so it counts what the tile counted; an
+    // instant frozen into the link showed as an empty date in the list's
+    // Advanced date row.
     const params = new URLSearchParams(
       (screen.getByRole("link").getAttribute("href") ?? "").split("?")[1],
     );
-    const createdFrom = params.get("createdFrom") ?? "";
-    // An unresolved placeholder reaching the list page is forwarded to the
-    // backing service, which resolves "today" against UTC rather than the
-    // viewer's own local day — so the tile's count and the list behind it
-    // disagreed by the offset between the two midnights. The href must
-    // carry the same browser-local instant the tile itself counted with.
-    expect(createdFrom).not.toContain("__today__");
-    const now = new Date();
-    expect(createdFrom).toBe(
-      new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString(),
-    );
+    expect(params.get("createdFrom")).toBe("__today__");
+    // The tile's own count still went out resolved.
+    const sent = JSON.stringify(postMock.mock.calls[0]?.[1]);
+    expect(sent).not.toContain("__today__");
   });
 
-  it("resolves a relative-date filter in the View more preview href too", async () => {
+  it("keeps a case widget's relative date in the View more preview href too", async () => {
     postMock.mockResolvedValue({
       total: 6,
       cases: [
@@ -881,14 +935,37 @@ describe("DashboardWidgetTile", () => {
         resourceType="case"
         shape="list"
         filters={{
-          filters: [{ field: "createdOn", op: "gte", values: ["__today__"] }],
+          filters: [{ field: "createdOn", op: "gte", values: ["__daysAgo:30__"] }],
         }}
         listLimit={5}
       />,
     );
 
     const viewMoreLink = await screen.findByRole("link", { name: /view more/i });
-    expect(viewMoreLink.getAttribute("href") ?? "").not.toContain("__today__");
+    expect(decodeURIComponent(viewMoreLink.getAttribute("href") ?? "")).toContain(
+      "createdOn~gte=__daysAgo:30__",
+    );
+  });
+
+  it("still resolves a relative date in a non-case widget's href (its list page has no resolver)", async () => {
+    postMock.mockResolvedValue({ total: 2, timeCards: [], limit: 1, offset: 0, hasMore: false });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_month"
+        displayName="My Time Cards This Month"
+        resourceType="time_card"
+        shape="count"
+        filters={{ startDate: "__startOfMonth:0__" }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
+    const href = decodeURIComponent(screen.getByRole("link").getAttribute("href") ?? "");
+    const now = new Date();
+    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    expect(href).not.toContain("__startOfMonth");
+    expect(href).toContain(`startDate=${firstOfMonth}`);
   });
 
   it("shape count: click-through carries a `from` location.state pointing back to this dashboard page, so the destination list can offer a Back button", async () => {
@@ -1252,6 +1329,495 @@ describe("DashboardWidgetTile", () => {
       { signal: expect.any(AbortSignal) },
     );
     expect(screen.getByText("Case volume, last 30 days")).toBeInTheDocument();
+  });
+
+  describe("my PLG organisations", () => {
+    const mine = (
+      <DashboardWidgetTile
+        widgetId="my-orgs"
+        displayName="My PLG organisations"
+        resourceType="plg_organization"
+        shape="count"
+        filters={{ ownerIds: [CURRENT_USER_PLACEHOLDER] }}
+      />
+    );
+
+    it("counts the viewer's own organisations, and links to them", async () => {
+      postMock.mockResolvedValue({ organizations: [], total: 2, limit: 1, offset: 0 });
+      renderWithClient(mine);
+
+      await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/search",
+        { filters: { ownerIds: [SIGNED_IN_USER_ID] }, pagination: { offset: 0, limit: 1 } },
+        { signal: expect.any(AbortSignal) },
+      );
+      const params = new URLSearchParams((screen.getByRole("link").getAttribute("href") ?? "").split("?")[1]);
+      expect(params.get("ownerIds")).toBe(SIGNED_IN_USER_ID);
+    });
+
+    it("asks nothing while the signed-in user is still loading", async () => {
+      mockCurrentUserId = undefined;
+      postMock.mockResolvedValue({ organizations: [], total: 999, limit: 1, offset: 0 });
+      const { container } = renderWithClient(mine);
+
+      await waitFor(() => expect(container.querySelectorAll(".MuiSkeleton-root").length).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(postMock).not.toHaveBeenCalled();
+      expect(screen.queryByText("999")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("PLG organisations by owner", () => {
+    const ALICE = "5e636a12-0000-4000-8000-000000000001";
+    const ownerBar = (
+      <DashboardWidgetTile
+        widgetId="orgs-by-owner"
+        displayName="Organisations by owner"
+        resourceType="plg_organization"
+        shape="bar"
+        filters={{ productCodes: ["IAM"] }}
+        groupBy={{ field: "owner" }}
+      />
+    );
+
+    it.each([
+      ["Alice Perera:2", "ownerIds", ALICE],
+      ["Unowned:4", "unowned", "true"],
+    ])("a click on %s opens those organisations, with the widget's own filters", async (bar, param, value) => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "unowned", label: "Unowned", count: 4 },
+          { key: ALICE, label: "Alice Perera", count: 2 },
+        ],
+        othersCount: 0,
+        totalRecords: 6,
+      });
+      renderWithRoutes(ownerBar, "/dashboard/preview/plg-organizations");
+
+      fireEvent.click(await screen.findByText(`bar:${bar}`));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        { filters: { productCodes: ["IAM"] }, groupBy: "owner", maxGroups: undefined },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probeText.startsWith("/dashboard/preview/plg-organizations?")).toBe(true);
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get(param)).toBe(value);
+      expect(params.get("productCodes")).toBe("IAM");
+    });
+  });
+
+  describe("PLG organisations of named owners", () => {
+    const ALICE = "5e636a12-0000-4000-8000-000000000001";
+
+    it("counts the named owners' organisations, and links to them", async () => {
+      postMock.mockResolvedValue({ organizations: [], total: 3, limit: 1, offset: 0 });
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="bobs-orgs"
+          displayName="Bob's PLG organisations"
+          resourceType="plg_organization"
+          shape="count"
+          filters={{ ownerEmails: ["bob@example.com"] }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/search",
+        { filters: { ownerEmails: ["bob@example.com"] }, pagination: { offset: 0, limit: 1 } },
+        { signal: expect.any(AbortSignal) },
+      );
+      const params = new URLSearchParams((screen.getByRole("link").getAttribute("href") ?? "").split("?")[1]);
+      expect(params.get("ownerEmails")).toBe("bob@example.com");
+    });
+
+    it("a click on an owner's bar opens that owner's organisations, with the named owners kept", async () => {
+      postMock.mockResolvedValue({
+        groups: [{ key: ALICE, label: "Alice Perera", count: 2 }],
+        othersCount: 0,
+        totalRecords: 2,
+      });
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="named-by-owner"
+          displayName="Bob and Alice by owner"
+          resourceType="plg_organization"
+          shape="bar"
+          filters={{ ownerEmails: ["bob@example.com", "alice@example.com"] }}
+          groupBy={{ field: "owner" }}
+        />,
+        "/dashboard/preview/plg-organizations",
+      );
+
+      fireEvent.click(await screen.findByText("bar:Alice Perera:2"));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/organizations/aggregate",
+        { filters: { ownerEmails: ["bob@example.com", "alice@example.com"] }, groupBy: "owner", maxGroups: undefined },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get("ownerIds")).toBe(ALICE);
+      expect(params.get("ownerEmails")).toBe("bob@example.com,alice@example.com");
+    });
+  });
+
+  describe("PLG registrations by country", () => {
+    const countryPie = (
+      <DashboardWidgetTile
+        widgetId="new-by-country"
+        displayName="New registrations by country"
+        resourceType="plg_registration"
+        shape="bar"
+        filters={{ unacknowledgedOnly: true }}
+        groupBy={{ field: "country" }}
+      />
+    );
+
+    it.each([
+      ["Sri Lanka:5", "countryNames", "Sri Lanka"],
+      ["Unknown:2", "countryUnknown", "true"],
+    ])("a click on %s opens those registrations, with the widget's own filters", async (bar, param, value) => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "Sri Lanka", label: "Sri Lanka", count: 5 },
+          { key: "unknown", label: "Unknown", count: 2 },
+        ],
+        othersCount: 0,
+        totalRecords: 7,
+      });
+      renderWithRoutes(countryPie, "/dashboard/preview/plg-registrations");
+
+      fireEvent.click(await screen.findByText(`bar:${bar}`));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        { filters: {}, unacknowledgedOnly: true, groupBy: "country", maxGroups: undefined },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probeText.startsWith("/dashboard/preview/plg-registrations?")).toBe(true);
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get(param)).toBe(value);
+      expect(params.get("unacknowledgedOnly")).toBe("true");
+    });
+  });
+
+  describe("PLG registrations by playbook answer", () => {
+    const outcomeBar = (
+      <DashboardWidgetTile
+        widgetId="by-outcome"
+        displayName="Registrations by assessment outcome"
+        resourceType="plg_registration"
+        shape="bar"
+        filters={{ playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME" }}
+        groupBy={{ field: "playbookAnswer" }}
+      />
+    );
+
+    it.each([
+      ["Monitor:1", "playbookAnswers", "MONITOR"],
+      ["Not answered:2", "playbookUnanswered", "true"],
+    ])("a click on %s opens those registrations, with the widget's task", async (bar, param, value) => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "unanswered", label: "Not answered", count: 2 },
+          { key: "MONITOR", label: "Monitor", count: 1 },
+        ],
+        othersCount: 0,
+        totalRecords: 3,
+      });
+      renderWithRoutes(outcomeBar, "/dashboard/preview/plg-registrations");
+
+      fireEvent.click(await screen.findByText(`bar:${bar}`));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/aggregate",
+        {
+          filters: { playbookTask: "ELIGIBILITY_ASSESSMENT_OUTCOME" },
+          groupBy: "playbookAnswer",
+          maxGroups: undefined,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probeText.startsWith("/dashboard/preview/plg-registrations?")).toBe(true);
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get(param)).toBe(value);
+      expect(params.get("playbookTask")).toBe("ELIGIBILITY_ASSESSMENT_OUTCOME");
+    });
+  });
+
+  describe("shape line on PLG registrations", () => {
+    const TREND = {
+      days: 74,
+      startDate: "2026-01-01",
+      endDate: "2026-03-15",
+      bucket: "month",
+      series: [
+        {
+          label: "Registered",
+          points: [
+            { date: "2026-01-01", endDate: "2026-01-31", count: 3 },
+            { date: "2026-02-01", endDate: "2026-02-28", count: 4 },
+          ],
+        },
+      ],
+    };
+    const plgLineTile = (extra: { linePointClickThrough?: boolean }) => (
+      <DashboardWidgetTile
+        widgetId="signups"
+        displayName="Sign-ups this year"
+        resourceType="plg_registration"
+        shape="line"
+        filters={{ productCodes: ["IAM"] }}
+        startDate="2026-01-01"
+        endDate="2026-03-15"
+        bucket="month"
+        {...extra}
+      />
+    );
+
+    it("asks only the PLG trend and draws one Registered line", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(plgLineTile({}));
+
+      await waitFor(() => expect(screen.getByTestId("line-opened")).toBeInTheDocument());
+      expect(screen.getByTestId("line-opened")).toHaveTextContent("Registered: Jan 2026=3, Feb 2026=4");
+      expect(screen.queryByTestId("line-closed")).not.toBeInTheDocument();
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/plg/registrations/volume-trend",
+        { filters: { productCodes: ["IAM"] }, startDate: "2026-01-01", endDate: "2026-03-15", bucket: "month" },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it("opens a month point's registrations, with the widget's own filters and Back to the dashboard", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithRoutes(plgLineTile({ linePointClickThrough: true }), "/dashboard/preview/plg-registrations");
+
+      fireEvent.click(await screen.findByTestId("line-point-opened"));
+
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probeText = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probeText.startsWith("/dashboard/preview/plg-registrations?")).toBe(true);
+      const params = new URLSearchParams(probeText.split("?")[1]);
+      expect(params.get("registeredFrom")).toBe("2026-02-01");
+      expect(params.get("registeredTo")).toBe("2026-02-28");
+      expect(params.get("productCodes")).toBe("IAM");
+      expect(JSON.parse(screen.getByTestId("location-state-probe").textContent ?? "null")).toEqual({ from: "/" });
+    });
+
+    it("draws it as bars with chart: bar", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="signups"
+          displayName="Sign-ups"
+          resourceType="plg_registration"
+          shape="line"
+          filters={{}}
+          startDate="2026-01-01"
+          endDate="2026-03-15"
+          bucket="month"
+          chart="bar"
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.getByTestId("bar-opened")).toHaveTextContent("Registered: Jan 2026=3, Feb 2026=4");
+      expect(screen.queryByTestId("bar-closed")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("shape line: a click on a point", () => {
+    const TREND = {
+      days: 2,
+      series: [
+        { label: "Opened", points: [{ date: "2026-09-01", count: 3 }, { date: "2026-09-02", count: 1 }] },
+        { label: "Closed", points: [{ date: "2026-09-01", count: 0 }, { date: "2026-09-02", count: 2 }] },
+      ],
+    };
+    const lineTile = (extra: { linePointClickThrough?: boolean }) => (
+      <DashboardWidgetTile
+        widgetId="case_volume_trend"
+        displayName="Case volume"
+        resourceType="case"
+        shape="line"
+        filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+        days={2}
+        {...extra}
+      />
+    );
+
+    it.each([
+      ["closed", "closedFrom", "closedTo"],
+      ["opened", "createdFrom", "createdTo"],
+    ] as const)(
+      "opens the cases %s on that day, with the widget's own filters and Back to the dashboard",
+      async (key, fromParam, toParam) => {
+        postMock.mockResolvedValue(TREND);
+        renderWithRoutes(lineTile({ linePointClickThrough: true }), "/cases");
+
+        fireEvent.click(await screen.findByTestId(`line-point-${key}`));
+
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const probeText = screen.getByTestId("location-probe").textContent ?? "";
+        expect(probeText.startsWith("/cases?")).toBe(true);
+        const params = new URLSearchParams(probeText.split("?")[1]);
+        expect(params.get(fromParam)).toBe("2026-09-02");
+        expect(params.get(toParam)).toBe("2026-09-02");
+        expect(params.get("states")).toBe("open");
+        expect(JSON.parse(screen.getByTestId("location-state-probe").textContent ?? "null")).toEqual({ from: "/" });
+      },
+    );
+
+    it("sends a fixed window and opens a week point's cases from its first day to its last", async () => {
+      postMock.mockResolvedValue({
+        days: 31,
+        startDate: "2025-12-01",
+        endDate: "2025-12-31",
+        bucket: "week",
+        series: [
+          {
+            label: "Opened",
+            points: [
+              { date: "2025-12-01", endDate: "2025-12-07", count: 2 },
+              { date: "2025-12-29", endDate: "2025-12-31", count: 1 },
+            ],
+          },
+          {
+            label: "Closed",
+            points: [
+              { date: "2025-12-01", endDate: "2025-12-07", count: 0 },
+              { date: "2025-12-29", endDate: "2025-12-31", count: 3 },
+            ],
+          },
+        ],
+      });
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="dec_2025_per_week"
+          displayName="Cases per week in December 2025"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+          startDate="2025-12-01"
+          endDate="2025-12-31"
+          bucket="week"
+          linePointClickThrough
+        />,
+        "/cases",
+      );
+
+      fireEvent.click(await screen.findByTestId("line-point-opened"));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        {
+          filters: { filters: [{ field: "state", op: "in", values: ["open"] }] },
+          startDate: "2025-12-01",
+          endDate: "2025-12-31",
+          bucket: "week",
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const params = new URLSearchParams((screen.getByTestId("location-probe").textContent ?? "").split("?")[1]);
+      expect(params.get("createdFrom")).toBe("2025-12-29");
+      expect(params.get("createdTo")).toBe("2025-12-31");
+      expect(params.get("states")).toBe("open");
+    });
+
+    it("draws the trend as bars with chart: bar, from the same request", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="case_volume_bars"
+          displayName="Case volume"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+          days={2}
+          chart="bar"
+        />,
+      );
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.getByTestId("bar-opened")).toHaveTextContent("Opened: Sep 1=3, Sep 2=1");
+      expect(screen.getByTestId("bar-closed")).toHaveTextContent("Closed: Sep 1=0, Sep 2=2");
+      expect(screen.queryByTestId("line-opened")).not.toBeInTheDocument();
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        { filters: { filters: [{ field: "state", op: "in", values: ["open"] }] }, days: 2 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it.each([
+      ["closed", "closedFrom", "closedTo"],
+      ["opened", "createdFrom", "createdTo"],
+    ] as const)(
+      "opens the cases %s on a clicked bar's day, with the widget's own filters",
+      async (key, fromParam, toParam) => {
+        postMock.mockResolvedValue(TREND);
+        renderWithRoutes(
+          <DashboardWidgetTile
+            widgetId="case_volume_bars"
+            displayName="Case volume"
+            resourceType="case"
+            shape="line"
+            filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+            days={2}
+            chart="bar"
+            linePointClickThrough
+          />,
+          "/cases",
+        );
+
+        fireEvent.click(await screen.findByTestId(`bar-point-${key}`));
+
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const params = new URLSearchParams((screen.getByTestId("location-probe").textContent ?? "").split("?")[1]);
+        expect(params.get(fromParam)).toBe("2026-09-02");
+        expect(params.get(toParam)).toBe("2026-09-02");
+        expect(params.get("states")).toBe("open");
+      },
+    );
+
+    it("has no clickable bars unless the page turns it on", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="case_volume_bars"
+          displayName="Case volume"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [] }}
+          days={2}
+          chart="bar"
+        />,
+      );
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.queryByTestId(/^bar-point-/)).not.toBeInTheDocument();
+    });
+
+    it("has no clickable points unless the page turns it on", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(lineTile({}));
+      await waitFor(() => expect(screen.getByTestId("line-opened")).toBeInTheDocument());
+      expect(screen.queryByTestId(/^line-point-/)).not.toBeInTheDocument();
+    });
   });
 
   it("shape pie: issues one search per slice (own filters merged under the widget's base filters) and renders values + percentages", async () => {
@@ -2306,5 +2872,400 @@ describe("DashboardWidgetTile", () => {
         screen.queryByRole("button", { name: "View all cases for Cases by severity" }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  describe("time card totals", () => {
+    const hoursPerUser = {
+      groups: [
+        { key: "u-bob", label: "Bob", count: 2, totalMinutes: 255 },
+        { key: "u-ann", label: "Ann", count: 4, totalMinutes: 135 },
+      ],
+      othersCount: 3,
+      totalRecords: 9,
+      othersMinutes: 90,
+      totalMinutes: 480,
+    };
+
+    it("shape bar, measure hours: bars, tooltip and the total read in hours", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours", maxGroups: 2 }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Bob:4.25 label:4.3 h")).toBeInTheDocument());
+      expect(screen.getByText("bar:Ann:2.25 label:2.3 h")).toBeInTheDocument();
+      expect(screen.getByText("tooltip:4.3 h")).toBeInTheDocument();
+      // A bar chart drops Others, so the total is Bob's and Ann's hours.
+      expect(screen.getByText("6.5 h")).toBeInTheDocument();
+    });
+
+    it("shape bar, measure count: plain numbers, no formatter", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="cards-per-user"
+          displayName="Time Cards per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "count" }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Bob:2")).toBeInTheDocument());
+      expect(screen.queryByText(/tooltip:/)).not.toBeInTheDocument();
+      expect(screen.getByText("6")).toBeInTheDocument();
+    });
+
+    it("shape pie, measure hours: the legend and the centre total read in hours", async () => {
+      postMock.mockResolvedValue(hoursPerUser);
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-pie"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="pie"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours", maxGroups: 2 }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("4.3 h (53%)")).toBeInTheDocument());
+      expect(screen.getByText("1.5 h (19%)")).toBeInTheDocument();
+      expect(screen.getByText("8 h")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Bob: 4.3 h (53%)" })).toBeInTheDocument();
+    });
+
+    it("a role that may not read time card totals sees no access, not an error", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours" }}
+        />,
+      );
+
+      expect(await screen.findByText("You don't have access to time card totals.")).toBeInTheDocument();
+      expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+    });
+
+    it("any other failure is still an error", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("bad gateway"), { status: 502 }));
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="pie"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours" }}
+        />,
+      );
+
+      // The widget retries once before it shows the error.
+      expect(await screen.findByText("Could not load this widget.", {}, { timeout: 5000 })).toBeInTheDocument();
+      expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+    });
+
+    it("a day grouping labels its bars as short dates, in date order", async () => {
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "2026-10-31", label: "2026-10-31", count: 1, totalMinutes: 90 },
+          { key: "2026-11-01", label: "2026-11-01", count: 0, totalMinutes: 0 },
+        ],
+        othersCount: 0,
+        totalRecords: 1,
+        othersMinutes: 0,
+        totalMinutes: 90,
+      });
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="per-day"
+          displayName="My Hours per Day"
+          resourceType="time_card"
+          shape="bar"
+          filters={{ startDate: "2026-10-31", endDate: "2026-11-01" }}
+          groupBy={{ field: "day", measure: "hours" }}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Oct 31:1.5 label:1.5 h")).toBeInTheDocument());
+      const bars = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((t) => t.startsWith("bar:"));
+      expect(bars).toEqual(["bar:Oct 31:1.5 label:1.5 h", "bar:Nov 1:0 label:0 h"]);
+    });
+
+    for (const [field, key, expected] of [
+      ["user", "u-bob", { userIds: "u-bob" }],
+      ["project", "p-1", { projectIds: "p-1" }],
+      ["state", "approved", { states: "approved" }],
+      ["day", "2026-10-31", { startDate: "2026-10-31", endDate: "2026-10-31" }],
+    ] as const) {
+      it(`clicking a ${field} bar opens the time card list filtered to that ${field}`, async () => {
+        postMock.mockResolvedValue({
+          groups: [{ key, label: key, count: 1, totalMinutes: 60 }],
+          othersCount: 0,
+          totalRecords: 1,
+          othersMinutes: 0,
+          totalMinutes: 60,
+        });
+
+        renderWithRoutes(
+          <DashboardWidgetTile
+            widgetId="tc"
+            displayName="Time card totals"
+            resourceType="time_card"
+            shape="bar"
+            filters={{ startDate: "2026-10-01", endDate: "2026-10-31" }}
+            groupBy={{ field, measure: "hours" }}
+          />,
+          "*",
+        );
+
+        const bar = await screen.findByText(/^bar:/);
+        fireEvent.click(bar);
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const probe = screen.getByTestId("location-probe").textContent ?? "";
+        expect(probe).toContain("/time-cards");
+        const params = new URLSearchParams(probe.split("?")[1]);
+        for (const [k, v] of Object.entries(expected)) expect(params.get(k)).toBe(v);
+        if (field !== "day") {
+          // The widget's own window still applies.
+          expect(params.get("startDate")).toBe("2026-10-01");
+          expect(params.get("endDate")).toBe("2026-10-31");
+        }
+        // Never the raw grouping name, which the time card search refuses.
+        expect(params.get(field)).toBeNull();
+      });
+    }
+
+    it("team grouping capped below the team count: only the named teams' bars, no Others bar, each opening its team", async () => {
+      // maxGroups 2 over three teams: the third team comes back folded into
+      // Others, which has no team to open. A bar chart leaves Others out, so
+      // there is no Others bar to click, and the total is the shown teams'.
+      postMock.mockResolvedValue({
+        groups: [
+          { key: "rigel-group", label: "Rigel", count: 3, totalMinutes: 300 },
+          { key: "atlas-group", label: "Atlas", count: 2, totalMinutes: 120 },
+        ],
+        othersCount: 1,
+        totalRecords: 6,
+        othersMinutes: 60,
+        totalMinutes: 480,
+      });
+
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="hours-by-abt"
+          displayName="Hours by ABT"
+          resourceType="time_card"
+          shape="bar"
+          filters={{ teamIds: ["rigel-group", "atlas-group", "vega-group"], startDate: "2026-10-01", endDate: "2026-10-31" }}
+          groupBy={{ field: "team", measure: "hours", maxGroups: 2 }}
+        />,
+        "*",
+      );
+
+      await waitFor(() => expect(screen.getByText("bar:Rigel:5 label:5 h")).toBeInTheDocument());
+      const bars = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((t) => t.startsWith("bar:"));
+      expect(bars).toEqual(["bar:Rigel:5 label:5 h", "bar:Atlas:2 label:2 h"]);
+      expect(screen.queryByText(/^bar:Others/)).not.toBeInTheDocument();
+      expect(screen.getByText("7 h")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("bar:Atlas:2 label:2 h"));
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const probe = screen.getByTestId("location-probe").textContent ?? "";
+      expect(probe).toContain("/time-cards");
+      const params = new URLSearchParams(probe.split("?")[1]);
+      // The bucket's team wins over the widget's three teams.
+      expect(params.getAll("teamIds")).toEqual(["atlas-group"]);
+      expect(params.get("startDate")).toBe("2026-10-01");
+      expect(params.get("team")).toBeNull();
+    });
+  });
+});
+
+describe("DashboardWidgetTile: PLG data the user may not read", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  it("a PLG count says no access, not an error, and links nowhere", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="iam-orgs"
+        displayName="IAM organisations"
+        resourceType="plg_organization"
+        shape="count"
+        filters={{ productCodes: ["IAM"] }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("a PLG list says no access, not an error", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="new-registrations"
+        displayName="New registrations"
+        resourceType="plg_registration"
+        shape="list"
+        filters={{ unacknowledgedOnly: true }}
+        listLimit={5}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+  });
+
+  it("a PLG pie says no access, not an error", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="orgs-by-product"
+        displayName="Organisations by product"
+        resourceType="plg_organization"
+        shape="pie"
+        filters={{}}
+        slices={[
+          { label: "IAM", query: { productCodes: ["IAM"] } },
+          { label: "API Platform", query: { productCodes: ["API_PLATFORM"] } },
+        ]}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+  });
+
+  it("a PLG registration line says no access, not an error", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="signups"
+        displayName="Sign-ups"
+        resourceType="plg_registration"
+        shape="line"
+        filters={{}}
+        days={30}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+  });
+
+  it("any other failure of a PLG registration line is still an error", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("unavailable"), { status: 503 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="signups"
+        displayName="Sign-ups"
+        resourceType="plg_registration"
+        shape="line"
+        filters={{}}
+        days={30}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+  });
+
+  it("a 403 on a case line is still the error it was", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="case_volume_trend"
+        displayName="Case volume"
+        resourceType="case"
+        shape="line"
+        filters={{}}
+        days={30}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+  });
+
+  it("any other PLG failure is still an error, and the count still links", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("unavailable"), { status: 503 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="all-orgs"
+        displayName="All organisations"
+        resourceType="plg_organization"
+        shape="count"
+        filters={{}}
+      />,
+    );
+
+    // The widget retries once before it shows the error.
+    expect(
+      await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link")).toBeInTheDocument();
+  });
+
+  it("a 403 on another resourceType's count is still the error it was", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="open-incidents"
+        displayName="Open incidents"
+        resourceType="incident"
+        shape="count"
+        filters={{}}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
   });
 });

@@ -289,7 +289,11 @@ func TestAutoclosureIntegration_AwaitingInfoFullLifecycle(t *testing.T) {
 	}
 }
 
-func TestAutoclosureIntegration_SolutionProposedClosesWithoutTheAwaitingInfoCode(t *testing.T) {
+// TestAutoclosureIntegration_SolutionProposedWithoutResolutionClosesWithTheAutoClosureCode
+// runs the close stage against a real database for a Solution Proposed ticket
+// that has no resolution code, and checks the stored row ends CLOSED carrying
+// the auto-closure code rather than an empty resolution.
+func TestAutoclosureIntegration_SolutionProposedWithoutResolutionClosesWithTheAutoClosureCode(t *testing.T) {
 	e := newACEnv(t)
 	id := e.ticket(2, "SOLUTION_PROPOSED", 20, nil, nil)
 	e.advance(id, domain.AutoclosureStageFirstReminder)
@@ -298,8 +302,8 @@ func TestAutoclosureIntegration_SolutionProposedClosesWithoutTheAwaitingInfoCode
 		t.Fatalf("close: %+v", r)
 	}
 	got := e.row(id)
-	if got.state != "CLOSED" || got.resolution != "" {
-		t.Errorf("state=%s resolution=%q, want CLOSED with no auto-closure resolution code", got.state, got.resolution)
+	if got.state != "CLOSED" || got.resolution != "ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS_THROUGH_AUTO_CLOSURE" {
+		t.Errorf("state=%s resolution=%q, want CLOSED with the auto-closure resolution code", got.state, got.resolution)
 	}
 }
 

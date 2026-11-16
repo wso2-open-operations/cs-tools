@@ -408,6 +408,28 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// OwnerEmails matches the organisation's PLG CS owner by email address,
+	// any of them, trimmed and ignoring case, so a dashboard can name an
+	// owner without their user id. A registration matches by its
+	// organisation's owner. Never with Unowned.
+	OwnerEmails []string `json:"ownerEmails"`
+	// CountryNames matches the organisation's country (as plg_organization_v
+	// resolves it, inherited from a sibling when the row has none), any of
+	// them, trimmed and ignoring case. CountryUnknown true matches the
+	// organisations with no country. A registration matches by its
+	// organisation's country.
+	CountryNames   []string `json:"countryNames"`
+	CountryUnknown *bool    `json:"countryUnknown"`
+	// PlaybookTask names a playbook task by its code, the task whose answers
+	// (plg_run_task_reason_v, on the registration's attached runs)
+	// PlaybookAnswers and PlaybookUnanswered match: PlaybookAnswers any of
+	// these option codes (a checklist: any of them ticked), PlaybookUnanswered
+	// true no answer at all, including a registration the playbook was never
+	// run on. PlaybookTask on its own filters nothing. An organisation matches
+	// when any of its registrations does.
+	PlaybookTask       string   `json:"playbookTask"`
+	PlaybookAnswers    []string `json:"playbookAnswers"`
+	PlaybookUnanswered *bool    `json:"playbookUnanswered"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.
@@ -439,6 +461,48 @@ type OrganizationSummary struct {
 	RegisteredOn     time.Time       `json:"registeredOn"`
 	PlatformStages   []PlatformStage `json:"platformStages"`
 	Owner            *UserRef        `json:"owner"`
+}
+
+// AggregateOrganizationsRequest is the body of POST
+// /plg/organizations/aggregate: the organisation search's filters, the field
+// to group by ("owner": the organisation's PLG CS owner; "country": its
+// country) and,
+// optionally, how many groups to return before the rest are folded into
+// othersCount. It answers an AggregateResponse, the shape every aggregate
+// endpoint shares.
+type AggregateOrganizationsRequest struct {
+	Filters   OrganizationSearchFilters `json:"filters"`
+	GroupBy   string                    `json:"groupBy"`
+	MaxGroups int                       `json:"maxGroups,omitempty"`
+}
+
+// PlgUnownedGroupKey is the key of the organisations with no PLG CS owner in
+// an owner grouping; every other group's key is the owner's user id.
+const PlgUnownedGroupKey = "unowned"
+
+// PlgUnknownCountryGroupKey is the key of the organisations (or
+// registrations) with no country in a country grouping; every other group's
+// key is the country as written, which countryNames matches.
+const PlgUnknownCountryGroupKey = "unknown"
+
+// PlgUnansweredGroupKey is the key of the registrations with no answer to the
+// task in a playbook answer grouping (playbookUnanswered matches them); every
+// other group's key is an answer's option code, which playbookAnswers
+// matches.
+const PlgUnansweredGroupKey = "unanswered"
+
+// AggregateRegistrationsRequest is the body of POST
+// /plg/registrations/aggregate: the registration search's filters and
+// unacknowledgedOnly, the field to group by ("country": the registration's
+// organisation's country; "playbookAnswer": its answer to the task
+// filters.playbookTask names) and, optionally, how many groups to return
+// before the rest are folded into othersCount. It answers an
+// AggregateResponse.
+type AggregateRegistrationsRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	GroupBy            string                    `json:"groupBy"`
+	MaxGroups          int                       `json:"maxGroups,omitempty"`
 }
 
 // SearchOrganizationsResponse is the paged organisation list.
@@ -872,6 +936,22 @@ type SearchRegistrationsRequest struct {
 	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
 	Filters            OrganizationSearchFilters `json:"filters"`
 	Pagination         Pagination                `json:"pagination"`
+}
+
+// RegistrationVolumeTrendRequest is the body of POST
+// /plg/registrations/volume-trend: the registration search's filters and
+// unacknowledgedOnly, and a window as a case trend takes it
+// (CaseVolumeTrendRequest): the trailing Days, or StartDate and EndDate (plain
+// or relative dates, both inclusive UTC days) with a Bucket of "day", "week"
+// or "month", within the same limits. It answers a CaseVolumeTrendResponse
+// with one series, "Registered", counted on the registration date.
+type RegistrationVolumeTrendRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	Days               int                       `json:"days,omitempty"`
+	StartDate          string                    `json:"startDate,omitempty"`
+	EndDate            string                    `json:"endDate,omitempty"`
+	Bucket             string                    `json:"bucket,omitempty"`
 }
 
 // SearchRegistrationsResponse is the paged registration list.

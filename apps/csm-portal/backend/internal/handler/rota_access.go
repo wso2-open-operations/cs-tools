@@ -106,8 +106,9 @@ func (h *RotaAccessHandler) PutTeamMember(w http.ResponseWriter, r *http.Request
 }
 
 // DeleteTeamMember handles DELETE /team-schedule/teams/{teamKey}/members/{userId}.
-// entity-service refuses it while the person has upcoming turns, a Case Alerts
-// tier or (for a rota admin) a lead role, and says why; the reason is passed on.
+// entity-service removes the person's upcoming turns on the team with the
+// membership, and refuses it while they hold a Case Alerts tier or (for a rota
+// admin) a lead role, saying why; the reason is passed on.
 func (h *RotaAccessHandler) DeleteTeamMember(w http.ResponseWriter, r *http.Request) {
 	h.change(w, r, "teamKey", rotaTeamKeyRe, "DeleteTeamMember", "Failed to remove the team member.", h.entity.DeleteTeamMember)
 }

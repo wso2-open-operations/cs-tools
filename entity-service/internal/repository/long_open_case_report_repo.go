@@ -36,6 +36,14 @@ type LongOpenCaseReportRepository interface {
 	// onboarding status, each oldest first and cut at limit rows, with the
 	// full size of each table.
 	ListLongOpenCases(ctx context.Context, createdBefore time.Time, projectTypes, excludedTags []string, limit int) (domain.LongOpenCaseReportData, error)
+
+	// ListOpenCasesBefore returns the cases in exactly the open state that
+	// were created strictly before createdBefore and whose project is of one
+	// of projectTypes, or of one of productProjectTypes with the case's
+	// product set. Tags and ETAs are not considered. All rows come back in
+	// Cases, oldest first and cut at limit, with CasesTotal the full size;
+	// the onboarding table is empty.
+	ListOpenCasesBefore(ctx context.Context, createdBefore time.Time, projectTypes, productProjectTypes []string, limit int) (domain.LongOpenCaseReportData, error)
 }
 
 type longOpenCaseReportRepository struct {
@@ -64,7 +72,8 @@ func NewLongOpenCaseReportRepository(db *Scoped) LongOpenCaseReportRepository {
 //     the cap is applied, so the totals stay true when a table is cut.
 var listLongOpenCasesSQL = `
 WITH matched AS (
-  SELECT wi.number,
+  SELECT wi.id::text AS id,
+         wi.number,
          COALESCE(wi.wso2_id, '') AS internal_id,
          wi.created_on,
          wi.updated_on,
@@ -94,7 +103,7 @@ WITH matched AS (
          COUNT(*) OVER (PARTITION BY onboarding) AS table_total
     FROM matched
 )
-SELECT number, internal_id, created_on, updated_on, state, severity,
+SELECT id, number, internal_id, created_on, updated_on, state, severity,
        assigned_engineer, cs_team, onboarding, table_total
   FROM numbered
  WHERE rn <= $5
@@ -133,7 +142,7 @@ func (r *longOpenCaseReportRepository) ListLongOpenCases(ctx context.Context, cr
 			onboarding bool
 			total      int
 		)
-		if err := rows.Scan(&row.Number, &row.InternalID, &row.CreatedOn, &row.UpdatedOn, &state, &severity,
+		if err := rows.Scan(&row.ID, &row.Number, &row.InternalID, &row.CreatedOn, &row.UpdatedOn, &state, &severity,
 			&row.AssignedEngineer, &row.CsTeam, &onboarding, &total); err != nil {
 			return domain.LongOpenCaseReportData{}, fmt.Errorf("scan long-open case: %w", err)
 		}
@@ -151,6 +160,102 @@ func (r *longOpenCaseReportRepository) ListLongOpenCases(ctx context.Context, cr
 	}
 	if err := rows.Err(); err != nil {
 		return domain.LongOpenCaseReportData{}, fmt.Errorf("iterate long-open cases: %w", err)
+	}
+	return out, nil
+}
+
+// listOpenCasesBeforeSQL is the open-before-yesterday report. Arguments: $1
+// cut-off (exclusive), $2 project type names, $3 project type names that
+// also need the case's product set, $4 the cap. It covers cases, service
+// requests and security report analyses (the work item types worked in the
+// triage queue); engagements and announcements are not listed. The state is
+// read from the extension table of the row's own type (all three have an OPEN
+// label). Security report analyses carry no severity, so theirs is empty. A
+// case with no project is excluded. Project types are matched exactly, as in
+// the long-open report. The product is the case's own product reference
+// (work_item.product_id).
+var listOpenCasesBeforeSQL = `
+WITH matched AS (
+  SELECT wi.id::text AS id,
+         wi.type::text AS type,
+         wi.number,
+         COALESCE(wi.wso2_id, '') AS internal_id,
+         wi.created_on,
+         wi.updated_on,
+         COALESCE(c.state::text, sr.state::text, sra.state::text) AS state,
+         ` + caseLikeSeverityColumn + `::text AS severity,
+         ` + userDisplayName("ae") + ` AS assigned_engineer,
+         COALESCE(cre.name, '') AS cs_team,
+         COALESCE(a.name, '') AS account_name
+    FROM work_item wi
+    JOIN project p ON p.id = wi.project_id
+    LEFT JOIN "case" c ON c.id = wi.id
+    LEFT JOIN service_request sr ON sr.id = wi.id
+    LEFT JOIN security_report_analysis sra ON sra.id = wi.id
+    LEFT JOIN account a ON a.id = wi.account_id
+    LEFT JOIN "group" cre ON cre.id = a.cre_team_id
+    LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
+   WHERE wi.type = ANY('{CASE,SERVICE_REQUEST,SECURITY_REPORT_ANALYSIS}'::work_item_type_enum[])
+     AND wi.created_on < $1
+     AND CASE wi.type
+           WHEN 'CASE' THEN c.state::text
+           WHEN 'SERVICE_REQUEST' THEN sr.state::text
+           WHEN 'SECURITY_REPORT_ANALYSIS' THEN sra.state::text
+         END = 'OPEN'
+     AND EXISTS (SELECT 1 FROM project_type pt
+                  WHERE pt.id = p.project_type_id
+                    AND (pt.name = ANY($2::text[])
+                         OR (pt.name = ANY($3::text[]) AND wi.product_id IS NOT NULL)))
+), numbered AS (
+  SELECT matched.*,
+         ROW_NUMBER() OVER (ORDER BY created_on, number) AS rn,
+         COUNT(*) OVER () AS table_total
+    FROM matched
+)
+SELECT id, type, number, internal_id, created_on, updated_on, state, severity,
+       assigned_engineer, cs_team, account_name, table_total
+  FROM numbered
+ WHERE rn <= $4
+ ORDER BY created_on, number`
+
+func (r *longOpenCaseReportRepository) ListOpenCasesBefore(ctx context.Context, createdBefore time.Time, projectTypes, productProjectTypes []string, limit int) (domain.LongOpenCaseReportData, error) {
+	if projectTypes == nil {
+		projectTypes = []string{}
+	}
+	if productProjectTypes == nil {
+		productProjectTypes = []string{}
+	}
+	rows, err := r.db.Query(ctx, listOpenCasesBeforeSQL, createdBefore, projectTypes, productProjectTypes, limit)
+	if err != nil {
+		return domain.LongOpenCaseReportData{}, fmt.Errorf("list open cases before cut-off: %w", err)
+	}
+	defer rows.Close()
+
+	out := domain.LongOpenCaseReportData{
+		Cases:           []domain.LongOpenCaseReportRow{},
+		OnboardingCases: []domain.LongOpenCaseReportRow{},
+	}
+	for rows.Next() {
+		var (
+			row      domain.LongOpenCaseReportRow
+			state    string
+			severity *string
+			total    int
+		)
+		if err := rows.Scan(&row.ID, &row.Type, &row.Number, &row.InternalID, &row.CreatedOn, &row.UpdatedOn, &state, &severity,
+			&row.AssignedEngineer, &row.CsTeam, &row.AccountName, &total); err != nil {
+			return domain.LongOpenCaseReportData{}, fmt.Errorf("scan open case: %w", err)
+		}
+		row.State = strings.ToLower(state)
+		if severity != nil {
+			row.Severity = string(caseSeverityFromEnum[*severity])
+		}
+		row.Type = workItemTypeToCaseType[row.Type]
+		out.Cases = append(out.Cases, row)
+		out.CasesTotal = total
+	}
+	if err := rows.Err(); err != nil {
+		return domain.LongOpenCaseReportData{}, fmt.Errorf("iterate open cases: %w", err)
 	}
 	return out, nil
 }

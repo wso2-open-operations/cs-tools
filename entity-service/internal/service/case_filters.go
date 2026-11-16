@@ -41,11 +41,12 @@ var caseFilterFieldSet = map[string]bool{
 	"type": true, "state": true, "severity": true, "engagementType": true,
 	"issueType": true, "workState": true, "tag": true, "projectId": true,
 	"deploymentId": true, "assignedUserId": true, "createdBy": true,
-	"createdOn": true, "updatedOn": true, "closedOn": true, "resolvedOn": true, "product": true,
+	"createdOn": true, "updatedOn": true, "closedOn": true, "resolvedOn": true, "product": true, "productVersion": true,
 	"projectOnboardingStatus": true, "projectType": true, "creTeam": true, "sreTeam": true,
 	"resolutionNotes": true, "parentId": true, "taskSLABusinessElapsedPercent": true,
 	"escalationLevel": true, "escalation": true, "number": true, "internalId": true,
-	"accountId": true, "slaBreached": true, "accountEscalationActive": true,
+	"accountId": true, "salesRegion": true, "slaBreached": true, "accountEscalationActive": true,
+	"stateEntered": true, "stateEnteredOn": true, "region": true,
 }
 
 // caseFilterOpSet is the exact set of CaseFieldFilter.Op values accepted by
@@ -68,6 +69,39 @@ func requireCaseFilterValues(f domain.CaseFieldFilter) error {
 // badCaseFilterCombo reports a field/op combination that is not supported.
 func badCaseFilterCombo(f domain.CaseFieldFilter) error {
 	return &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q does not support op %q", f.Field, f.Op)}
+}
+
+// checkProductVersionFilters refuses a productVersion filter without a
+// product filter naming exactly one product: a version ("4.0.0") is shared
+// by several products, so it only means something with its product. Only a
+// product "in" filter names its product; a notIn one leaves products out.
+func checkProductVersionFilters(filters []domain.CaseFieldFilter) error {
+	hasVersion := false
+	var products []string
+	for _, f := range filters {
+		switch f.Field {
+		case "productVersion":
+			hasVersion = true
+		case "product":
+			if f.Op == "in" {
+				products = append(products, f.Values...)
+			}
+		}
+	}
+	if hasVersion && !oneProductName(products) {
+		return &apierror.ValidationError{Msg: "filters: productVersion needs a product filter naming exactly one product"}
+	}
+	return nil
+}
+
+// oneProductName reports whether names (a request's product filter values)
+// name exactly one product.
+func oneProductName(names []string) bool {
+	distinct := map[string]bool{}
+	for _, n := range names {
+		distinct[n] = true
+	}
+	return len(distinct) == 1
 }
 
 // relativeDatePlaceholderPattern matches the shape of every relative-date
@@ -95,10 +129,17 @@ var relativeDatePlaceholderPattern = regexp.MustCompile(`^__([a-zA-Z]+)(?::([^_]
 // Supported placeholders (N is a signed integer offset, 0 = current):
 //   - __today__                 today's date
 //   - __daysAgo:N__             today minus N days (N >= 0)
+//   - __startOfWeek:N__         Monday of the week N weeks from now
+//   - __endOfWeek:N__           Sunday of the week N weeks from now
 //   - __startOfMonth:N__        1st of the month N months from now
 //   - __endOfMonth:N__          last day of the month N months from now
 //   - __startOfQuarter:N__      1st of the quarter N quarters from now
 //   - __endOfQuarter:N__        last day of the quarter N quarters from now
+//   - __startOfYear:N__         1 January of the year N years from now
+//   - __endOfYear:N__           31 December of the year N years from now
+//
+// Weeks run Monday to Sunday (ISO), as in the webapp's own resolver
+// (resolveRelativeDatePlaceholder.ts).
 //
 // Each resolves to a plain date (no time component); the caller (parseCaseFilterDate)
 // applies the existing date-only handling -- including the lte
@@ -156,6 +197,34 @@ func resolveRelativeDate(value string, now time.Time) (resolved string, matched 
 		}
 		return startOfRelativeQuarter(now, n+1).AddDate(0, 0, -1).Format("2006-01-02"), true, nil
 
+	case "startOfWeek":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeWeek(now, n).Format("2006-01-02"), true, nil
+
+	case "endOfWeek":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeWeek(now, n).AddDate(0, 0, 6).Format("2006-01-02"), true, nil
+
+	case "startOfYear":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeYear(now, n).Format("2006-01-02"), true, nil
+
+	case "endOfYear":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeYear(now, n+1).AddDate(0, 0, -1).Format("2006-01-02"), true, nil
+
 	default:
 		// Shape matches (__name__ or __name:N__) but the name isn't one of
 		// ours -- not a relative-date placeholder at all (e.g. some other
@@ -165,9 +234,18 @@ func resolveRelativeDate(value string, now time.Time) (resolved string, matched 
 	}
 }
 
+// maxRelativeDateOffset bounds a placeholder's :N offset. Without it a huge
+// N overflows the date arithmetic and wraps to a date that looks valid
+// (__startOfYear:9223372036854775807__ gave 2024-12-31). Every offset beyond
+// it lands outside the years 0000-9999, which parseCaseFilterDate already
+// rejects, so the bound refuses nothing that used to resolve. The CSM
+// backend's relativeDate and the webapp's resolver use the same bound.
+const maxRelativeDateOffset = 4_000_000
+
 // parseRelativeDateArg parses a relativeDatePlaceholderPattern match's :N
-// argument, rejecting a missing or non-integer offset with an error naming
-// the full original placeholder value.
+// argument, rejecting a missing, non-integer or out-of-bounds
+// (maxRelativeDateOffset) offset with an error naming the full original
+// placeholder value.
 func parseRelativeDateArg(value, argStr string) (int, error) {
 	if argStr == "" {
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q requires a :N integer offset", value)}
@@ -175,6 +253,9 @@ func parseRelativeDateArg(value, argStr string) (int, error) {
 	n, err := strconv.Atoi(argStr)
 	if err != nil {
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q has a non-integer offset", value)}
+	}
+	if n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
+		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q has an offset beyond %d", value, maxRelativeDateOffset)}
 	}
 	return n, nil
 }
@@ -193,6 +274,21 @@ func startOfRelativeQuarter(now time.Time, n int) time.Time {
 	quarterStartMonth := ((int(now.Month())-1)/3)*3 + 1
 	base := time.Date(now.Year(), time.Month(quarterStartMonth), 1, 0, 0, 0, 0, time.UTC)
 	return base.AddDate(0, n*3, 0)
+}
+
+// startOfRelativeWeek returns the Monday of the week n weeks from now's week
+// (UTC, midnight), e.g. n=0 this week, n=-1 last week.
+func startOfRelativeWeek(now time.Time, n int) time.Time {
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+	sinceMonday := (int(today.Weekday()) + 6) % 7
+	return today.AddDate(0, 0, -sinceMonday+7*n)
+}
+
+// startOfRelativeYear returns 1 January of the year n years from now's year
+// (UTC, midnight), e.g. n=0 this year, n=-1 last year.
+func startOfRelativeYear(now time.Time, n int) time.Time {
+	return time.Date(now.Year()+n, time.January, 1, 0, 0, 0, 0, time.UTC)
 }
 
 // parseCaseFilterDate parses a single filter value into a date/time. The
@@ -244,6 +340,9 @@ func parseCaseFilterDate(f domain.CaseFieldFilter, value string, now time.Time) 
 func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string, callerEmailErr error, now time.Time) (domain.ParsedCaseFilters, error) {
 	var p domain.ParsedCaseFilters
 
+	if err := checkProductVersionFilters(filters); err != nil {
+		return domain.ParsedCaseFilters{}, err
+	}
 	for _, f := range filters {
 		if !caseFilterFieldSet[f.Field] {
 			return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: unsupported field: " + f.Field}
@@ -304,6 +403,20 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 			}
 			for _, v := range f.Values {
 				p.EngagementTypes = append(p.EngagementTypes, domain.EngagementType(v))
+			}
+
+		case "salesRegion":
+			if f.Op != "in" {
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			for _, v := range f.Values {
+				if strings.TrimSpace(v) == "" {
+					return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: salesRegion values must not be blank"}
+				}
+				p.SalesRegions = append(p.SalesRegions, strings.TrimSpace(v))
 			}
 
 		case "issueType":
@@ -486,14 +599,77 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
 
-		case "product":
+		case "productVersion":
 			if f.Op != "in" {
 				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
 			}
 			if err := requireCaseFilterValues(f); err != nil {
 				return domain.ParsedCaseFilters{}, err
 			}
-			p.ProductNames = append(p.ProductNames, f.Values...)
+			p.ProductVersions = append(p.ProductVersions, f.Values...)
+
+		case "product":
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			switch f.Op {
+			case "in":
+				p.ProductNames = append(p.ProductNames, f.Values...)
+			case "notIn":
+				p.ExcludeProductNames = append(p.ExcludeProductNames, f.Values...)
+			default:
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+
+		case "region":
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			for _, v := range f.Values {
+				if strings.TrimSpace(v) == "" {
+					return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: region values must not be blank"}
+				}
+			}
+			switch f.Op {
+			case "in":
+				p.Regions = append(p.Regions, f.Values...)
+			case "notIn":
+				p.ExcludeRegions = append(p.ExcludeRegions, f.Values...)
+			default:
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+
+		case "stateEntered":
+			if f.Op != "in" {
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			for _, v := range f.Values {
+				label, ok := caseStateDisplayLabel[domain.CaseState(v)]
+				if !ok {
+					return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: fmt.Sprintf("filters: stateEntered value %q is not a case state", v)}
+				}
+				p.EnteredStateLabels = append(p.EnteredStateLabels, strings.ToLower(label))
+			}
+
+		case "stateEnteredOn":
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			t, err := parseCaseFilterDate(f, f.Values[0], now)
+			if err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			switch f.Op {
+			case "gte":
+				p.EnteredStartDate = t
+			case "lte":
+				p.EnteredEndDate = t
+			default:
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
 
 		case "projectOnboardingStatus":
 			if err := requireCaseFilterValues(f); err != nil {
@@ -650,6 +826,15 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 		}
 	}
 
+	// stateEnteredOn bounds when a stateEntered change was logged, so it
+	// means nothing on its own.
+	if (p.EnteredStartDate != nil || p.EnteredEndDate != nil) && len(p.EnteredStateLabels) == 0 {
+		return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: stateEnteredOn needs a stateEntered filter (the states the case entered)"}
+	}
+	if p.EnteredStartDate != nil && p.EnteredEndDate != nil && p.EnteredEndDate.Before(*p.EnteredStartDate) {
+		return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "stateEnteredOn: lte value must not be before gte value"}
+	}
+
 	return p, nil
 }
 
@@ -729,6 +914,7 @@ func ParseCaseFieldFilterGroups(branches []domain.CaseFilterBranch) ([]domain.Ca
 			States:           parsed.States,
 			Severities:       parsed.Severities,
 			EngagementTypes:  parsed.EngagementTypes,
+			SalesRegions:     parsed.SalesRegions,
 			IssueTypes:       parsed.IssueTypes,
 			WorkStates:       parsed.WorkStates,
 			ProjectIDs:       parsed.ProjectIDs,
@@ -763,6 +949,8 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"createdOn\" is not supported inside an OR group"}
 	case parsed.StartUpdatedDate != nil || parsed.EndUpdatedDate != nil:
 		return &apierror.ValidationError{Msg: "anyOf: field \"updatedOn\" is not supported inside an OR group"}
+	case len(parsed.EnteredStateLabels) > 0 || parsed.EnteredStartDate != nil || parsed.EnteredEndDate != nil:
+		return &apierror.ValidationError{Msg: "anyOf: fields \"stateEntered\" and \"stateEnteredOn\" are not supported inside an OR group"}
 	case len(parsed.ProductNames) > 0:
 		return &apierror.ValidationError{Msg: "anyOf: field \"product\" is not supported inside an OR group"}
 	case len(parsed.ProjectOnboardingStatuses) > 0 || len(parsed.ExcludeProjectOnboardingStatuses) > 0:
@@ -779,6 +967,10 @@ func rejectUnsupportedOrGroupFields(parsed domain.ParsedCaseFilters) error {
 		return &apierror.ValidationError{Msg: "anyOf: field \"projectId\" (notIn) is not supported inside an OR group"}
 	case len(parsed.ExcludeAccountIDs) > 0:
 		return &apierror.ValidationError{Msg: "anyOf: field \"accountId\" (notIn) is not supported inside an OR group"}
+	case len(parsed.ExcludeProductNames) > 0:
+		return &apierror.ValidationError{Msg: "anyOf: field \"product\" (notIn) is not supported inside an OR group"}
+	case len(parsed.Regions) > 0 || len(parsed.ExcludeRegions) > 0:
+		return &apierror.ValidationError{Msg: "anyOf: field \"region\" is not supported inside an OR group"}
 	case len(parsed.ExcludeStates) > 0:
 		// state+in is supported inside a branch (CaseFilterGroup.States);
 		// state+notIn is not modeled there.

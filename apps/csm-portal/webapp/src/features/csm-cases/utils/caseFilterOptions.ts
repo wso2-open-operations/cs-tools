@@ -37,6 +37,11 @@ export const ALL_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
 export const SEVERITY_OPTIONS: { value: Severity; label: string }[] = ALL_SEVERITIES.map(
   (s) => ({ value: s, label: s }),
 );
+/** Service requests carry only S1-S4 (never S0), so a type-locked
+ * service-request list must not offer S0: selecting it can only return no
+ * rows. Used by both the Simple and Advanced severity controls. */
+export const SERVICE_REQUEST_SEVERITY_OPTIONS: { value: Severity; label: string }[] =
+  SEVERITY_OPTIONS.filter((o) => o.value !== "S0");
 
 /** Every state a case can be in. `reopened` is listed although the
  * transition to it is not offered (see `CaseState`'s own doc comment): cases
@@ -82,6 +87,21 @@ export const ENGAGEMENT_TYPE_LABEL: Record<BeEngagementType, string> = {
 };
 export const ENGAGEMENT_TYPE_OPTIONS: { value: BeEngagementType; label: string }[] =
   ALL_ENGAGEMENT_TYPES.map((t) => ({ value: t, label: ENGAGEMENT_TYPE_LABEL[t] }));
+
+/**
+ * Sales-region options for the Engagements page filter. There is no endpoint
+ * listing region values, so this is a static list; values match the labels
+ * and are compared case-insensitively by the backend.
+ */
+export const SALES_REGION_OPTIONS: { value: string; label: string }[] = [
+  { value: "NA", label: "NA" },
+  { value: "LATAM", label: "LATAM" },
+  { value: "EU", label: "EU" },
+  { value: "EMEA", label: "EMEA" },
+  { value: "ME", label: "ME" },
+  { value: "AFRICA", label: "AFRICA" },
+  { value: "APAC", label: "APAC" },
+];
 
 export const ONBOARDING_STATUS_OPTIONS: { value: string; label: string }[] =
   ALL_ONBOARDING_STATUSES.map((value) => ({

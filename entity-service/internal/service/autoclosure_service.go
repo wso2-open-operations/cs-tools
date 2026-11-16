@@ -453,7 +453,8 @@ func dryRunDetail(stage domain.AutoclosureStage, c repository.AutoclosureCandida
 //
 // Awaiting Info tickets get the non-responsiveness resolution code (which
 // keeps them out of the KB process); Solution Proposed tickets keep whatever
-// resolution they were proposed with.
+// resolution they were proposed with, and get the same code only when none was
+// set, because closing without a resolution code is refused.
 func (s *autoclosureService) closeCase(ctx context.Context, c repository.AutoclosureCandidateRow, comment string) (string, error) {
 	view, err := s.cases.GetCaseByID(ctx, c.ID)
 	if err != nil {
@@ -475,10 +476,10 @@ func (s *autoclosureService) closeCase(ctx context.Context, c repository.Autoclo
 		unknown := domain.CaseCauseUnknown
 		update.Cause = &unknown
 	}
-	if c.State == domain.CaseStateAwaitingInfo {
+	if c.State == domain.CaseStateAwaitingInfo || view.ResolutionCode == nil {
 		code := domain.CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness
 		update.ResolutionCode = &code
-	} else if view.ResolutionCode != nil {
+	} else {
 		update.ResolutionCode = view.ResolutionCode
 	}
 

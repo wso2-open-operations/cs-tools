@@ -19,6 +19,8 @@ package repository
 import (
 	"testing"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // fakeSLAStatusScanRow feeds scanSLAStatus fixed values without a real
@@ -37,6 +39,7 @@ type fakeSLAStatusScanRow struct {
 	businessPauseSeconds              float64
 	caseNumber, wso2CaseID, caseTitle *string
 	fixedCaseType                     string
+	engagementType                    *string
 	product, severity, state          *string
 	team, onboardingStatus            *string
 	isEvaluation                      bool
@@ -58,12 +61,13 @@ func (f fakeSLAStatusScanRow) Scan(dest ...any) error {
 	*dest[12].(**string) = f.wso2CaseID
 	*dest[13].(**string) = f.caseTitle
 	*dest[14].(*string) = f.fixedCaseType
-	*dest[15].(**string) = f.product
-	*dest[16].(*string) = strOrEmpty(f.severity)
-	*dest[17].(**string) = f.state
-	*dest[18].(**string) = f.team
-	*dest[19].(**string) = f.onboardingStatus
-	*dest[20].(*bool) = f.isEvaluation
+	*dest[15].(**string) = f.engagementType
+	*dest[16].(**string) = f.product
+	*dest[17].(*string) = strOrEmpty(f.severity)
+	*dest[18].(**string) = f.state
+	*dest[19].(**string) = f.team
+	*dest[20].(**string) = f.onboardingStatus
+	*dest[21].(*bool) = f.isEvaluation
 	return nil
 }
 
@@ -247,4 +251,64 @@ func TestScanSLAStatus(t *testing.T) {
 			t.Errorf("BusinessElapsedPercent = %v, want unchanged 55 for a PAUSED row", got.BusinessElapsedPercent)
 		}
 	})
+}
+
+func TestSlaElapsedBucketMatches(t *testing.T) {
+	tests := []struct {
+		bucket string
+		pct    float64
+		want   bool
+	}{
+		{"", 999, true}, // no filter requested: always matches
+		{domain.SLAElapsedBucketUnder10, 9.99, true},
+		{domain.SLAElapsedBucketUnder10, 10, false},
+		{domain.SLAElapsedBucket10To20, 10, true},
+		{domain.SLAElapsedBucket10To20, 19.99, true},
+		{domain.SLAElapsedBucket10To20, 20, false},
+		{domain.SLAElapsedBucket50To60, 49.99, false},
+		{domain.SLAElapsedBucket50To60, 50, true},
+		{domain.SLAElapsedBucket50To60, 59.99, true},
+		{domain.SLAElapsedBucket90To100, 90, true},
+		{domain.SLAElapsedBucket90To100, 100, true}, // inclusive of exactly 100
+		{domain.SLAElapsedBucket90To100, 100.01, false},
+		{domain.SLAElapsedBucketOver100, 100, false}, // exclusive of exactly 100
+		{domain.SLAElapsedBucketOver100, 100.01, true},
+		{"not-a-real-bucket", 50, true}, // unrecognized bucket fails open, same as ""
+	}
+	for _, tt := range tests {
+		if got := slaElapsedBucketMatches(tt.bucket, tt.pct); got != tt.want {
+			t.Errorf("slaElapsedBucketMatches(%q, %v) = %v, want %v", tt.bucket, tt.pct, got, tt.want)
+		}
+	}
+}
+
+func TestSlaStatusMatches(t *testing.T) {
+	tests := []struct {
+		name                  string
+		status                string
+		isPaused, hasBreached bool
+		want                  bool
+	}{
+		{"no filter always matches", "", false, false, true},
+		{"in progress row matches in_progress", domain.SLAStatusInProgress, false, false, true},
+		{"paused row does not match in_progress", domain.SLAStatusInProgress, true, false, false},
+		{"breached row does not match in_progress", domain.SLAStatusInProgress, false, true, false},
+		{"paused row matches paused", domain.SLAStatusPaused, true, false, true},
+		{"non-paused row does not match paused", domain.SLAStatusPaused, false, false, false},
+		{"breached row matches breached", domain.SLAStatusBreached, false, true, true},
+		{"non-breached row does not match breached", domain.SLAStatusBreached, false, false, false},
+		// A clock can be paused after its own wall-clock time already ran
+		// out -- the UI renders both chips together for it, so it must
+		// match either filter if selected, not just one.
+		{"paused-and-breached row matches paused", domain.SLAStatusPaused, true, true, true},
+		{"paused-and-breached row matches breached", domain.SLAStatusBreached, true, true, true},
+		{"paused-and-breached row does not match in_progress", domain.SLAStatusInProgress, true, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := slaStatusMatches(tt.status, tt.isPaused, tt.hasBreached); got != tt.want {
+				t.Errorf("slaStatusMatches(%q, isPaused=%v, hasBreached=%v) = %v, want %v", tt.status, tt.isPaused, tt.hasBreached, got, tt.want)
+			}
+		})
+	}
 }

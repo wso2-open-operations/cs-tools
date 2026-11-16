@@ -216,3 +216,72 @@ func TestSkills_NoUserIs401(t *testing.T) {
 		t.Fatalf("got %d (upstream called: %q), want 401 and no call", w.Code, up.method)
 	}
 }
+
+func TestSkills_ManagementRoutesHitTheRightUpstreamCall(t *testing.T) {
+	h, up := newSkillStack(t)
+	m := http.NewServeMux()
+	m.HandleFunc("GET /skills/me/capabilities", h.GetMySkillCapabilities)
+	m.HandleFunc("POST /skills/categories", h.CreateSkillCategory)
+	m.HandleFunc("PATCH /skills/categories/{id}", h.UpdateSkillCategory)
+	m.HandleFunc("POST /skills/requests/check", h.CheckSkillRequest)
+	m.HandleFunc("POST /skills/requests", h.CreateSkillRequest)
+	m.HandleFunc("GET /skills/requests/mine", h.ListMySkillRequests)
+	m.HandleFunc("POST /skills/requests/search", h.SearchSkillRequests)
+	m.HandleFunc("POST /skills/requests/{id}/withdraw", h.WithdrawSkillRequest)
+	m.HandleFunc("POST /skills/requests/{id}/approve", h.ApproveSkillRequest)
+	m.HandleFunc("POST /skills/requests/{id}/reject", h.RejectSkillRequest)
+	m.HandleFunc("POST /skills/directory/search", h.SearchSkillDirectory)
+	m.HandleFunc("GET /skills/users/{userId}", h.GetUserSkillProfile)
+	m.HandleFunc("GET /skills/users/{userId}/history", h.GetUserSkillHistory)
+
+	cases := []struct {
+		method, target, body, wantPath, wantQuery string
+		upstream, want                            int
+	}{
+		{"GET", "/skills/me/capabilities", "", "/skills/me/capabilities", "", 200, 200},
+		{"POST", "/skills/categories", `{"name":"Cloud"}`, "/skills/categories", "", 201, 201},
+		{"PATCH", "/skills/categories/" + skillTestID, `{"active":false}`, "/skills/categories/" + skillTestID, "", 200, 200},
+		{"POST", "/skills/requests/check", `{"name":"go"}`, "/skills/requests/check", "", 200, 200},
+		{"POST", "/skills/requests", `{"name":"Go","levelId":"` + skillTestLvl + `"}`, "/skills/requests", "", 201, 201},
+		{"GET", "/skills/requests/mine", "", "/skills/requests/mine", "", 200, 200},
+		{"POST", "/skills/requests/search", `{}`, "/skills/requests/search", "", 200, 200},
+		{"POST", "/skills/requests/" + skillTestID + "/withdraw", "", "/skills/requests/" + skillTestID + "/withdraw", "", 200, 200},
+		{"POST", "/skills/requests/" + skillTestID + "/approve", `{"mode":"create"}`, "/skills/requests/" + skillTestID + "/approve", "", 200, 200},
+		{"POST", "/skills/requests/" + skillTestID + "/reject", `{"reason":"no"}`, "/skills/requests/" + skillTestID + "/reject", "", 409, 409},
+		{"POST", "/skills/directory/search", `{"match":"ALL"}`, "/skills/directory/search", "", 403, 403},
+		{"GET", "/skills/users/" + skillTestID, "", "/skills/users/" + skillTestID, "", 200, 200},
+		{"GET", "/skills/users/" + skillTestID + "/history?skillId=" + skillTestLvl + "&limit=5", "", "/skills/users/" + skillTestID + "/history", "limit=5&skillId=" + skillTestLvl, 200, 200},
+	}
+	for _, c := range cases {
+		up.method, up.path, up.rawQuery, up.body = "", "", "", ""
+		up.status, up.respBody = c.upstream, `{"message":"upstream says no"}`
+		if c.upstream < 400 {
+			up.respBody = `{}`
+		}
+		rec := httptest.NewRecorder()
+		var body io.Reader
+		if c.body != "" {
+			body = strings.NewReader(c.body)
+		}
+		m.ServeHTTP(rec, withUser(httptest.NewRequest(c.method, c.target, body)))
+		if rec.Code != c.want {
+			t.Fatalf("%s %s: status %d, want %d (%s)", c.method, c.target, rec.Code, c.want, rec.Body.String())
+		}
+		if up.path != c.wantPath || up.rawQuery != c.wantQuery || up.method != c.method {
+			t.Fatalf("%s %s reached %s %s?%s", c.method, c.target, up.method, up.path, up.rawQuery)
+		}
+		if c.body != "" && up.body != c.body {
+			t.Fatalf("%s %s forwarded body %q", c.method, c.target, up.body)
+		}
+		if c.upstream == 409 && !strings.Contains(rec.Body.String(), "upstream says no") {
+			t.Fatalf("a 409's reason was not kept: %s", rec.Body.String())
+		}
+	}
+	// A malformed id never reaches the entity service.
+	up.path = ""
+	rec := httptest.NewRecorder()
+	m.ServeHTTP(rec, withUser(httptest.NewRequest("GET", "/skills/users/not-a-uuid/history", nil)))
+	if rec.Code != 400 || up.path != "" {
+		t.Fatalf("malformed id: %d, upstream %q", rec.Code, up.path)
+	}
+}

@@ -204,7 +204,13 @@ export default function OutagesTab(): JSX.Element {
               ) : (
                 outages.map((outage) => {
                   const detailPath = `/operations/outages/${outage.id}`;
-                  const detailState = { from: `${location.pathname}${location.search}` };
+                  // `parentState` nests this tab's OWN inherited state (e.g.
+                  // `{ from: <dashboard> }`) so the detail page's Back can
+                  // restore it — otherwise Operations loses its own Back.
+                  const detailState = {
+                    from: `${location.pathname}${location.search}`,
+                    parentState: location.state ?? null,
+                  };
                   return (
                     <TableRow
                       key={outage.id}

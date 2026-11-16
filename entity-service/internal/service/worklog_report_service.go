@@ -274,6 +274,12 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		}
 	}
 
+	moves, err := s.repo.MoveSpans(ctx, from, to)
+	if err != nil {
+		return domain.WorklogReport{}, err
+	}
+	s.reseatMovedMembers(users, moves, from, to, daily)
+
 	// Leave first: worked days depend on it, and the daily report's Leave
 	// column is the kind active on the single day in range.
 	for _, l := range leave {
@@ -760,6 +766,97 @@ func orderedTypes[T any](m map[string]T) []string {
 	return append(out, rest...)
 }
 
+// reseatMovedMembers files a person moved to another team by a Team
+// Schedule span (Brazil rotation onto Americas, Migration, India team)
+// under that team instead of the one their membership names. A move never
+// changes membership (migrations 0202, 0274), so without this the report
+// keeps them under the team they were moved away from.
+//
+// Leave taken during a move is part of it: the repository returns leave filed
+// under a move's team as a span on that team (see worklogMoveSpansQuery), so
+// a person on leave from the Migration team is listed under Migration, with
+// their leave, not under their own team.
+//
+// The daily report uses the move covering its day. The weekly uses the
+// team a move covers for more than half of the range's weekdays; less than
+// that and they stay with their own team. A move to a team outside the
+// report's scope (another type, or an excluded key) is ignored, so they
+// keep their own team rather than vanish. Only people already on the
+// roster are moved: nobody is added or dropped.
+func (s *worklogReportService) reseatMovedMembers(users map[string]*perUser,
+	moves []repository.WorklogMoveRow, from, to time.Time, daily bool) {
+	weekdays := 0
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+		if !isWeekend(d) {
+			weekdays++
+		}
+	}
+	type target struct {
+		row  repository.WorklogMoveRow
+		days map[time.Time]bool
+	}
+	byUser := map[string]map[string]*target{}
+	for _, m := range moves {
+		if _, ok := users[m.UserID]; !ok || !s.teamInScope(m.TeamKey, m.TeamType) {
+			continue
+		}
+		covered, onFrom := coveredWeekdays(repository.WorklogLeaveRow{
+			StartsOn: m.StartsOn, EndsOn: m.EndsOn}, from, to)
+		if daily && !onFrom {
+			continue
+		}
+		perTeam := byUser[m.UserID]
+		if perTeam == nil {
+			perTeam = map[string]*target{}
+			byUser[m.UserID] = perTeam
+		}
+		t := perTeam[m.TeamKey]
+		if t == nil {
+			t = &target{row: m, days: map[time.Time]bool{}}
+			perTeam[m.TeamKey] = t
+		}
+		for _, d := range covered {
+			t.days[d] = true
+		}
+	}
+	for userID, perTeam := range byUser {
+		var best *target
+		for _, t := range perTeam {
+			if best == nil || len(t.days) > len(best.days) ||
+				(len(t.days) == len(best.days) && t.row.TeamKey < best.row.TeamKey) {
+				best = t
+			}
+		}
+		if best == nil || (!daily && 2*len(best.days) <= weekdays) {
+			continue
+		}
+		u := users[userID]
+		u.roster.TeamKey = best.row.TeamKey
+		u.roster.TeamName = best.row.TeamName
+		u.roster.TeamType = best.row.TeamType
+	}
+}
+
+// teamInScope reports whether a team belongs in this report: its type is
+// one of teamTypes (any type when none is set) and its key is not excluded,
+// the same rule the roster query applies.
+func (s *worklogReportService) teamInScope(key, teamType string) bool {
+	for _, k := range s.excludedTeamKeys {
+		if k == key {
+			return false
+		}
+	}
+	if len(s.teamTypes) == 0 {
+		return true
+	}
+	for _, t := range s.teamTypes {
+		if strings.EqualFold(strings.TrimSpace(t), teamType) {
+			return true
+		}
+	}
+	return false
+}
+
 // coveredWeekdays returns the report's weekdays this absence covers, and
 // whether it covers the first day of the range (which is the only day the
 // daily report cares about).
@@ -822,9 +919,10 @@ func worklogBucketType(itemType, severity string) string {
 }
 
 // weekdaysBetween counts Monday-to-Friday days in the inclusive range.
-// Public holidays are not modelled anywhere in the schema, so they are not
-// deducted; the delivered mail's worked-day figures top out at 5, which is
-// consistent with that.
+// Public holidays are not deducted. They are stored per country since
+// migration 0283 (team_schedule_public_holiday, PublicHolidayService), but
+// whether the worklog should deduct them is still to be decided; until then
+// the delivered mail's worked-day figures top out at 5, as before.
 func weekdaysBetween(from, to time.Time) float64 {
 	var n float64
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {

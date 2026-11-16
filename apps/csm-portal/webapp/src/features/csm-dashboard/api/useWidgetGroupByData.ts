@@ -19,6 +19,7 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
   BeDashboardGroupByConfig,
+  BeGroupByBucket,
   BeGroupByResponse,
   BeWidgetResourceType,
 } from "@api/backend/types";
@@ -36,6 +37,7 @@ import {
   shouldRetryWidgetFetch,
   withWidgetFetchSlot,
 } from "@features/csm-dashboard/utils/widgetFetchConcurrency";
+import { formatDayLabel } from "@features/csm-dashboard/utils/timeCardTotals";
 import { usesCaseFieldFilterDsl } from "@features/csm-admin/dashboards/utils/widgetQueryConditions";
 import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/useWidgetPieData";
 
@@ -56,6 +58,33 @@ import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/
  */
 const GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES = new Set<BeWidgetResourceType>(["incident", "problem"]);
 
+/** The key of the organisations with no owner in a PLG owner grouping
+ * (entity-service's `PlgUnownedGroupKey`); every other key is an owner's id. */
+const PLG_UNOWNED_GROUP_KEY = "unowned";
+
+/** The key of the organisations (or registrations) with no country in a PLG
+ * country grouping (entity-service's `PlgUnknownCountryGroupKey`); every
+ * other key is the country as written. */
+const PLG_UNKNOWN_COUNTRY_GROUP_KEY = "unknown";
+
+/** The key of the registrations with no answer in a PLG playbook answer
+ * grouping (entity-service's `PlgUnansweredGroupKey`); every other key is an
+ * answer's option code. */
+const PLG_UNANSWERED_GROUP_KEY = "unanswered";
+
+/**
+ * The case search's filter field for a case-family groupBy field whose bucket
+ * key it takes under another name: account and project buckets are keyed by
+ * id, which the search filters as `accountId` / `projectId`. The search has
+ * no `account` or `project` filter, so a bucket's query on its groupBy field
+ * was refused and the list it opened failed to load. Every other groupBy
+ * field is its own filter field.
+ */
+const CASE_GROUP_BY_FILTER_FIELD: ReadonlyMap<string, string> = new Map([
+  ["account", "accountId"],
+  ["project", "projectId"],
+]);
+
 /**
  * Builds a named bucket's own click-through `query` — the same shape
  * `DashboardWidgetTile`'s slice navigation merges under the widget's base
@@ -73,7 +102,9 @@ const GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES = new Set<BeWidgetResourceType>(["inc
  *    `incident_filters.go`'s, and `problem_filters.go`'s own
  *    `badXxxFilterCombo` checks all reject "state"/"eq"). A single-element
  *    `values` array with `op: "in"` is the correct, always-safe way to
- *    express "equals this one value" against any of these contracts.
+ *    express "equals this one value" against any of these contracts. A
+ *    case-family account or project bucket filters on the id field the case
+ *    search takes for it (`CASE_GROUP_BY_FILTER_FIELD`).
  * 2. `change_request`: has no generic filter-array entry for "state" at
  *    all — `ChangeRequestFieldFilter`'s own allowed field set
  *    (`createdOn`/`assignmentGroupId`/`approval`) excludes it. Change
@@ -90,11 +121,47 @@ function bucketQuery(
   field: string,
   key: string,
 ): Record<string, unknown> {
-  if (usesCaseFieldFilterDsl(resourceType) || GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES.has(resourceType)) {
+  if (usesCaseFieldFilterDsl(resourceType)) {
+    return { filters: [{ field: CASE_GROUP_BY_FILTER_FIELD.get(field) ?? field, op: "in", values: [key] }] };
+  }
+  if (GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES.has(resourceType)) {
     return { filters: [{ field, op: "in", values: [key] }] };
   }
   if (resourceType === "change_request" && field === "state") {
     return { states: [key] };
+  }
+  // A time card bucket opens the time card list filtered the way the time
+  // card search takes it: plural id / state lists, and a day as a one-day
+  // date range (which wins over the widget's own window when merged).
+  if (resourceType === "time_card") {
+    switch (field) {
+      case "state":
+        return { states: [key] };
+      case "user":
+        return { userIds: [key] };
+      case "project":
+        return { projectIds: [key] };
+      case "day":
+        return { startDate: key, endDate: key };
+      case "team":
+        return { teamIds: [key] };
+    }
+  }
+  // A PLG organisation owner bucket opens that owner's organisations; the
+  // aggregate's "unowned" bucket opens the ones with no owner.
+  if (resourceType === "plg_organization" && field === "owner") {
+    return key === PLG_UNOWNED_GROUP_KEY ? { unowned: true } : { ownerIds: [key] };
+  }
+  // A PLG country bucket opens that country's organisations or
+  // registrations; the "unknown" bucket opens the ones with no country.
+  if ((resourceType === "plg_organization" || resourceType === "plg_registration") && field === "country") {
+    return key === PLG_UNKNOWN_COUNTRY_GROUP_KEY ? { countryUnknown: true } : { countryNames: [key] };
+  }
+  // A PLG playbook answer bucket opens the registrations with that answer to
+  // the widget's `playbookTask` (which the merge keeps); "unanswered" opens
+  // the ones with none.
+  if (resourceType === "plg_registration" && field === "playbookAnswer") {
+    return key === PLG_UNANSWERED_GROUP_KEY ? { playbookUnanswered: true } : { playbookAnswers: [key] };
   }
   return { [field]: key };
 }
@@ -154,6 +221,11 @@ export function useWidgetGroupByData(
       resolvedFilters,
       groupBy,
     ],
+    /**
+     * Posts the widget's filters and `groupBy.field` to its resource's group-by
+     * endpoint (with the measure for a time card widget). No `groupBy` returns no
+     * buckets; an unsupported resource or a bucket-only `groupBy` throws.
+     */
     queryFn: async (): Promise<BeGroupByResponse> => {
       if (!groupBy) {
         return { groups: [], othersCount: 0, totalRecords: 0 };
@@ -177,19 +249,24 @@ export function useWidgetGroupByData(
         );
       }
       const field = groupBy.field;
+      // Only a time card widget carries a measure (backend-enforced); the
+      // aggregate names hours "minutes". Left out otherwise, so every other
+      // widget's request is unchanged.
+      const measure = groupBy.measure ? { measure: groupBy.measure === "hours" ? "minutes" : "count" } : {};
       // Same shared concurrency slot (and timeout) useWidgetPieData's own
       // slice fetches use — a groupBy widget fires one call on top of every
       // other widget's own call, so it needs both at least as much.
       return withWidgetFetchSlot(async (signal) => {
         return api.post<
-          { filters: Record<string, unknown>; groupBy: string; maxGroups?: number },
+          Record<string, unknown> & { groupBy: string; maxGroups?: number; measure?: string },
           BeGroupByResponse
         >(
           config.groupByEndpoint as string,
           {
-            filters: resolvedFilters,
+            ...(config.buildGroupByBody ? config.buildGroupByBody(resolvedFilters) : { filters: resolvedFilters }),
             groupBy: field,
             maxGroups: groupBy.maxGroups,
+            ...measure,
           },
           { signal },
         );
@@ -210,18 +287,28 @@ export function useWidgetGroupByData(
   // query (which is `false`).
   const isLoading = !enabled || (!!groupBy && awaitingCurrentUser) || (!!groupBy && query.isLoading);
   const isError = !!groupBy && query.isError;
+  // Read from the status, not `instanceof BackendApiError`: a 403 is the
+  // caller's role, not a failure, and the tile says so instead of an error.
+  const isForbidden = isError && (query.error as { status?: unknown } | null)?.status === 403;
 
   const buckets = query.data?.groups ?? [];
-  const othersCount = query.data?.othersCount ?? 0;
+  // A time card widget measuring hours shows each bucket's logged time, in
+  // hours, instead of its card count ("day" buckets keep the aggregate's own
+  // date order, as every bucket list keeps the response's order).
+  const hours = groupBy?.measure === "hours";
+  /** A bucket's value: its hours (from the aggregate's minutes) for an hours widget, else its count. */
+  const bucketValue = (b: BeGroupByBucket): number => (hours ? (b.totalMinutes ?? 0) / 60 : b.count);
+  const othersCount = hours ? (query.data?.othersMinutes ?? 0) / 60 : (query.data?.othersCount ?? 0);
 
+  const dayLabels = resourceType === "time_card" && groupBy?.field === "day";
   const slices: PieSliceResult[] = buckets.map((bucket) => ({
-    label: bucket.label,
+    label: dayLabels ? formatDayLabel(bucket.label) : bucket.label,
     // Scopes this slice's own click-through to exactly this bucket (see
     // `bucketQuery`'s own doc comment) — an empty `query` here would merge
     // to the widget's unfiltered base result set instead of this bucket's,
     // since `mergeWidgetFilters({...}, {})` is a no-op.
     query: groupBy?.field ? bucketQuery(resourceType, groupBy.field, bucket.key) : {},
-    value: bucket.count,
+    value: bucketValue(bucket),
     // Only meaningful when `groupBy.linkResourceType` is set — see
     // `PieSliceResult.linkId`'s own doc comment.
     linkId: bucket.key,
@@ -250,5 +337,5 @@ export function useWidgetGroupByData(
   // `totalRecords` and (groups + othersCount) could ever disagree upstream.
   const total = slices.reduce((sum, s) => sum + s.value, 0);
 
-  return { slices, total, isLoading, isError };
+  return { slices, total, isLoading, isError, isForbidden };
 }

@@ -164,8 +164,10 @@ func parseActualDurationMin(raw *string) *int {
 // (migration 0073), the Postgres backing for call requests.
 //
 // Known gaps, all left at their zero value rather than guessed:
-//   - number has no default/sequence and no confirmed format, so a created
-//     call request has a NULL number (returned as "").
+//   - CreateCallRequest numbers a new call request from the CSTASK series
+//     (migration 0180); the source-system create path
+//     (CreateCallRequestFromServiceNow) leaves number NULL, since that
+//     system supplies its own.
 //   - closed_on/closed_by_id are never set by UpdateCallRequest: which states
 //     count as "closed" isn't specified anywhere.
 //   - State transitions are not validated against the current state, except that
@@ -173,7 +175,8 @@ func parseActualDurationMin(raw *string) *int {
 //     UpdateCallRequest).
 type CallRequestRepository interface {
 	// CreateCallRequest inserts a call request for req.CaseID in state
-	// pending_on_wso2, opened by callerID/callerEmail. Returns a NotFoundError
+	// pending_on_wso2, opened by callerID/callerEmail, numbered from the CSTASK
+	// series. Returns a NotFoundError
 	// if req.CaseID is not an existing case-like work item.
 	CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error)
 	// CreateCallRequestFromServiceNow inserts a call request using id/createdBy/
@@ -182,8 +185,8 @@ type CallRequestRepository interface {
 	// rather than generating its own id -- see that method's own doc comment
 	// for why. callerID still attributes customer_call.opened_by_id to the
 	// resolved caller, matching CreateCallRequest's own attribution; number
-	// is left NULL, matching CreateCallRequest (ServiceNow's call-request
-	// create response carries no number at all). Returns a NotFoundError if
+	// is left NULL (the source system's create response carries no
+	// number at all). Returns a NotFoundError if
 	// req.CaseID is not an existing case-like work item.
 	CreateCallRequestFromServiceNow(ctx context.Context, req domain.CreateCallRequestRequest, id, createdBy string, createdOn time.Time, callerID string) (domain.CreateCallRequestResponse, error)
 	// SearchCallRequests returns the call requests of one case, newest first,
@@ -468,14 +471,20 @@ func (r *callRequestRepo) CreateCallRequest(ctx context.Context, req domain.Crea
 	// INSERT ... SELECT ... FROM work_item so a nonexistent (or non-case)
 	// work item yields zero rows -> NotFoundError, instead of a bare
 	// foreign-key violation.
+	//
+	// number comes from the CSTASK series (migration 0180), drawn only for a
+	// row that is actually inserted. The series must be seeded past the
+	// highest existing call request number at cutover
+	// (scripts/cutover/seed_native_numbering.sql), or new numbers collide
+	// with imported ones.
 	query := `
 		INSERT INTO customer_call (
 			id, created_on, updated_on, created_by, updated_by,
-			work_item_id, opened_by_id, opened_on, is_active, state,
+			number, work_item_id, opened_by_id, opened_on, is_active, state,
 			duration, reason, final_times
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), $1, $1,
-		       wi.id, $2::text::uuid, NOW(), TRUE, $7::text::customer_call_state_enum,
+		       next_series_number('CSTASK'), wi.id, $2::text::uuid, NOW(), TRUE, $7::text::customer_call_state_enum,
 		       make_interval(mins => $3::int), $4::text, $5::text::jsonb
 		FROM work_item wi
 		WHERE wi.id = $6::text::uuid AND wi.type = ANY(` + caseLikeWorkItemTypes + `)

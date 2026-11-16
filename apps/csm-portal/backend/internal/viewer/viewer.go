@@ -28,6 +28,10 @@ var ErrAccountNotFound = errors.New("viewer: no account found for that id")
 // ErrProjectNotFound is returned when no project matches the given id.
 var ErrProjectNotFound = errors.New("viewer: no project found for the given id")
 
+// ErrInvalidTimeLogPeriod is returned when the effective time-log period, after
+// project-date defaults are applied, starts after it ends.
+var ErrInvalidTimeLogPeriod = errors.New("viewer: time-log period start is after its end")
+
 // GoLiveStatus is a project's go-live status badge.
 type GoLiveStatus struct {
 	Status string `json:"status"`
@@ -105,14 +109,75 @@ type EscalationDetail struct {
 	EscalatedOn string `json:"escalatedOn"`
 }
 
+// SLAReportMetric is one clock target (response, workaround or resolution) for
+// one case type and severity. Elapsed is the 95th percentile of the finished
+// clocks (or "—"), Target the policy duration (or "Not applicable"). Met,
+// Missed and Running count the cases' latest clocks: finished within the
+// target, past it, or still inside it.
+type SLAReportMetric struct {
+	Elapsed string `json:"elapsed"`
+	Target  string `json:"target"`
+	Met     int    `json:"met"`
+	Missed  int    `json:"missed"`
+	Running int    `json:"running"`
+}
+
+// SLAReportSummaryRow is one case type and severity with at least one case.
+type SLAReportSummaryRow struct {
+	Label      string          `json:"label"`
+	CaseType   string          `json:"caseType"`
+	Severity   string          `json:"severity"`
+	Cases      int             `json:"cases"`
+	Response   SLAReportMetric `json:"response"`
+	Workaround SLAReportMetric `json:"workaround"`
+	Resolution SLAReportMetric `json:"resolution"`
+}
+
+// SLAReportClock is the latest clock of one target on one case. Status is
+// Met, Missed, Running, Paused or Cancelled, empty when the case has no clock
+// for the target.
+type SLAReportClock struct {
+	Elapsed string `json:"elapsed"`
+	Status  string `json:"status"`
+}
+
+// SLAReportCase is one case opened in the report window.
+type SLAReportCase struct {
+	CaseID     string         `json:"caseId"`
+	CaseNumber string         `json:"caseNumber"`
+	CaseType   string         `json:"caseType"`
+	Severity   string         `json:"severity"`
+	State      string         `json:"state"`
+	OpenedOn   string         `json:"openedOn"`
+	Response   SLAReportClock `json:"response"`
+	Workaround SLAReportClock `json:"workaround"`
+	Resolution SLAReportClock `json:"resolution"`
+}
+
+// SLAReportDetails is the project SLA report: the clocks of the cases the
+// project opened between PeriodStart and PeriodEnd. Both lists are initialised,
+// so an empty report serialises as [] and never null.
+type SLAReportDetails struct {
+	ProjectName string                `json:"projectName"`
+	ProjectKey  string                `json:"projectKey"`
+	PeriodStart string                `json:"periodStart"`
+	PeriodEnd   string                `json:"periodEnd"`
+	Summary     []SLAReportSummaryRow `json:"summary"`
+	Cases       []SLAReportCase       `json:"cases"`
+}
+
 // TimeLogBreakdownDetails is the time-log breakdown report for a project.
 type TimeLogBreakdownDetails struct {
-	ProjectName         string                 `json:"projectName"`
-	ProjectKey          string                 `json:"projectKey"`
-	ProjectType         string                 `json:"projectType"`
-	RemainingQueryHours string                 `json:"remainingQueryHours"`
-	TotalQueryHours     string                 `json:"totalQueryHours"`
-	Cases               []TimeLogBreakdownCase `json:"cases"`
+	ProjectName         string `json:"projectName"`
+	ProjectKey          string `json:"projectKey"`
+	ProjectType         string `json:"projectType"`
+	RemainingQueryHours string `json:"remainingQueryHours"`
+	TotalQueryHours     string `json:"totalQueryHours"`
+	// PeriodStart and PeriodEnd are the inclusive YYYY-MM-DD bounds the report
+	// was computed for; an empty string means that side is unbounded.
+	PeriodStart string                 `json:"periodStart"`
+	PeriodEnd   string                 `json:"periodEnd"`
+	Cases       []TimeLogBreakdownCase `json:"cases"`
 }
 
 // TimeLogBreakdownCase is one case's row in the time-log breakdown report.
@@ -130,7 +195,7 @@ type TimeLogBreakdownCase struct {
 }
 
 // CSReportDetails is the customer-success report for one project over a date range.
-// SLA clocks stay empty: Postgres does not store them yet.
+// Its SLA block stays empty: the CS report does not read SLA clocks (the SLA report is SLAReportDetails).
 type CSReportDetails struct {
 	SubscriptionDetails SubscriptionDetail  `json:"subscriptionDetails"`
 	CasesRecords        []CaseRecordDetail  `json:"casesRecords"`
@@ -168,7 +233,7 @@ type CaseRecordDetail struct {
 	ProductName    string `json:"productName"`
 }
 
-// SlaStats is the SLA block. Records stay empty until SLA clocks live in Postgres.
+// SlaStats is the SLA block. Records stay empty: the CS report does not read SLA clocks.
 // An empty performance object is omitted so the page shows that nothing is available.
 type SlaStats struct {
 	SlaRecords          []SlaRecordDetail   `json:"slaRecords"`

@@ -451,3 +451,13 @@ func TestBuildEntityUpdateDeploymentRequest_PreservesExplicitNullDescription(t *
 		t.Fatalf("Description = %q, want the raw JSON string value preserved through", string(gotValue.Description))
 	}
 }
+
+// A security report is created with the files uploaded before it; dropping them
+// here would turn every security report into a 400 ("needs a report file").
+func TestBuildEntityCreateCaseRequest_CarriesAttachmentIDs(t *testing.T) {
+	ids := []string{"11111111-1111-4111-8111-111111111111"}
+	got := BuildEntityCreateCaseRequest(CreateCaseRequest{Type: "security_report_analysis", ProjectID: "p", AttachmentIDs: ids})
+	if len(got.AttachmentIDs) != 1 || got.AttachmentIDs[0] != ids[0] {
+		t.Errorf("AttachmentIDs = %v, want %v", got.AttachmentIDs, ids)
+	}
+}

@@ -16,6 +16,8 @@
 
 import type { JSX } from "react";
 import WallboardDashboard from "@features/csm-dashboard/components/WallboardDashboard";
+import { usePeriodicPageReload } from "@features/csm-dashboard/hooks/usePeriodicPageReload";
+import { CS_MONITOR_PAGE_RELOAD_INTERVAL_MS } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 /** The `cs-overview` dashboard's own id — the one dashboard this page shows.
  * A fixed constant, not a route param: unlike `/dashboard/:dashboardId`,
@@ -36,5 +38,9 @@ const CS_OVERVIEW_DASHBOARD_ID = "cs-overview";
  * the portal vs. a wallboard/kiosk display).
  */
 export default function CsMonitorDashboardPage(): JSX.Element {
+  // A full page reload every hour, on top of the per-tile polling — clears
+  // any stuck request, stopped tile timer or stale cache on a screen that
+  // stays open for days. Only this route; `/dashboard` doesn't do this.
+  usePeriodicPageReload(CS_MONITOR_PAGE_RELOAD_INTERVAL_MS);
   return <WallboardDashboard dashboardId={CS_OVERVIEW_DASHBOARD_ID} />;
 }

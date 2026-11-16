@@ -111,6 +111,36 @@ func LastNoticeWindowForInvoices(raw json.RawMessage) (*closure.NoticeWindow, er
 // and LastNoticeWindowForInvoices — both sections use the identical
 // {event_type: "..."} shape and the identical eventTypeToWindow vocabulary,
 // only the key differs.
+// HasRecordedEvent reports whether raw records any event_type other than
+// "open" (or none) for either track: a notice, a suspension, or an event type
+// this package does not know. An unparseable state counts as recorded, so a
+// caller screening on it errs toward looking at the project.
+func HasRecordedEvent(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var blob map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &blob); err != nil {
+		return true
+	}
+	for _, key := range []string{subscriptionEndDateKey, dueInvoicesKey} {
+		section, ok := blob[key]
+		if !ok {
+			continue
+		}
+		var state struct {
+			EventType string `json:"event_type"`
+		}
+		if err := json.Unmarshal(section, &state); err != nil {
+			return true
+		}
+		if state.EventType != "" && state.EventType != "open" {
+			return true
+		}
+	}
+	return false
+}
+
 func lastNoticeWindowForKey(raw json.RawMessage, key string) (*closure.NoticeWindow, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -138,6 +168,53 @@ func lastNoticeWindowForKey(raw json.RawMessage, key string) (*closure.NoticeWin
 		return nil, nil
 	}
 	return &window, nil
+}
+
+// SuspensionCompleted reports whether based_on_subscription_end_date holds a
+// completed suspension: event_type "suspend" and no failed suspension action.
+// The legacy process re-ran an event only when its type changed or an action
+// had failed, so a project reopened by a person is left alone while the saved
+// event is still "suspend". ACP's own record has no action result and counts as
+// completed: it is written only after the suspension itself succeeded. A blob
+// that is empty, lacks the key, or holds another event_type reports false.
+func SuspensionCompleted(raw json.RawMessage) (bool, error) {
+	return suspensionCompletedForKey(raw, subscriptionEndDateKey)
+}
+
+// SuspensionCompletedForInvoices is SuspensionCompleted for
+// based_on_due_invoices.
+func SuspensionCompletedForInvoices(raw json.RawMessage) (bool, error) {
+	return suspensionCompletedForKey(raw, dueInvoicesKey)
+}
+
+func suspensionCompletedForKey(raw json.RawMessage, key string) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+
+	var blob map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &blob); err != nil {
+		return false, fmt.Errorf("suspensionstate: parse blob: %w", err)
+	}
+	section, ok := blob[key]
+	if !ok {
+		return false, nil
+	}
+
+	var state struct {
+		EventType            string          `json:"event_type"`
+		ActionSuspendProject json.RawMessage `json:"actionSuspendProject"`
+	}
+	if err := json.Unmarshal(section, &state); err != nil {
+		return false, fmt.Errorf("suspensionstate: parse %s: %w", key, err)
+	}
+	if state.EventType != SuspendEventType {
+		return false, nil
+	}
+	// actionSuspendProject is the legacy result of the suspension action. Absent
+	// (or null) counts as completed; a value must be "SUCCESSFUL".
+	result := string(state.ActionSuspendProject)
+	return result == "" || result == "null" || result == `"SUCCESSFUL"`, nil
 }
 
 // WithSubscriptionEndDateState returns a copy of raw with only the

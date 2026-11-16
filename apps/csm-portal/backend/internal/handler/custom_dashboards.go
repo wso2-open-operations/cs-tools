@@ -19,11 +19,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
@@ -61,6 +63,12 @@ const (
 	errMsgTeamUnshareFailed            = "The dashboard couldn't be unshared from the team. Try again in a moment."
 	errMsgSharedDashboardOutdated      = "This shared dashboard can't be shown any more because dashboards have changed since it was saved. Ask its owner to update it."
 	errMsgCustomDashboardOutdated      = "This saved dashboard can't be shown any more because dashboards have changed since it was saved. Generate it again."
+	errMsgDashboardLinkFailed          = "The dashboard's link couldn't be loaded. Try again in a moment."
+	errMsgDashboardLinkEnableFailed    = "The link couldn't be turned on. Try again in a moment."
+	errMsgDashboardLinkDisableFailed   = "The link couldn't be turned off. Try again in a moment."
+	errMsgDashboardLinkInvalid         = "This isn't a valid dashboard link. Check that it was copied in full."
+	errMsgDashboardLinkNotFound        = "This link doesn't open a dashboard. Its owner may have turned it off."
+	errMsgDashboardLinkOpenFailed      = "The dashboard couldn't be opened from this link. Try again in a moment."
 )
 
 // entityCustomDashboardClient is the part of the entity client the custom
@@ -78,6 +86,10 @@ type entityCustomDashboardClient interface {
 	AddCustomDashboardTeamShare(ctx context.Context, id, teamID string) ([]entity.CustomDashboardTeamShare, error)
 	RemoveCustomDashboardTeamShare(ctx context.Context, id, teamID string) error
 	SaveCustomDashboard(ctx context.Context, id, name, definition string) (entity.CustomDashboard, error)
+	GetCustomDashboardLink(ctx context.Context, id string) (entity.CustomDashboardLink, error)
+	EnableCustomDashboardLink(ctx context.Context, id string) (entity.CustomDashboardLink, error)
+	DisableCustomDashboardLink(ctx context.Context, id string) error
+	OpenCustomDashboardLink(ctx context.Context, linkID string) (entity.OpenedCustomDashboardLink, error)
 }
 
 // customDashboardSummary is one entry of GET /dashboards/custom: enough for
@@ -150,11 +162,13 @@ type sharedDashboardListResponse struct {
 
 // sharedDashboardResponse is the body of GET /dashboards/shared/{id}: the
 // dashboard in the GET /dashboards/{dashboardId} shape, who shared it (nil once
-// the owner's user has been deleted), when, and when its owner last changed it.
+// the owner's user has been deleted), how (a team, or only by link), when, and
+// when its owner last changed it.
 type sharedDashboardResponse struct {
 	Dashboard     dashboardDetailView           `json:"dashboard"`
 	Owner         *entity.CustomDashboardPerson `json:"owner"`
 	SharedViaTeam *entity.CustomDashboardTeam   `json:"sharedViaTeam"`
+	SharedViaLink bool                          `json:"sharedViaLink"`
 	SharedOn      string                        `json:"sharedOn"`
 	UpdatedOn     string                        `json:"updatedOn"`
 }
@@ -439,6 +453,7 @@ func (h *CustomDashboardHandler) GetSharedDashboard(w http.ResponseWriter, r *ht
 		Dashboard:     storedDashboardView(d, shared.ID),
 		Owner:         shared.Owner,
 		SharedViaTeam: shared.SharedViaTeam,
+		SharedViaLink: shared.SharedViaLink,
 		SharedOn:      shared.SharedOn,
 		UpdatedOn:     shared.UpdatedOn,
 	})
@@ -613,4 +628,118 @@ func (h *CustomDashboardHandler) SaveCustomDashboard(w http.ResponseWriter, r *h
 	}
 
 	writeJSONValue(w, http.StatusOK, newCustomDashboardResponse(d, saved))
+}
+
+// openDashboardLinkRequest is the body of POST /dashboards/shared/link.
+type openDashboardLinkRequest struct {
+	LinkID string `json:"linkId"`
+}
+
+// customDashboardLinkID reads {id} for the owner's link routes; a 400 for a
+// non-UUID id.
+func customDashboardLinkID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return "", false
+	}
+	return strings.ToLower(id), true
+}
+
+// GetCustomDashboardLink handles GET /dashboards/custom/{id}/link: whether
+// anyone internal with the link may view the caller's dashboard, the link id
+// while it is on, and how many people opened it. Owner only: another user's
+// dashboard is a 404, the same as a missing one.
+func (h *CustomDashboardHandler) GetCustomDashboardLink(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	id, ok := customDashboardLinkID(w, r)
+	if !ok {
+		return
+	}
+	link, err := h.entity.GetCustomDashboardLink(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCustomDashboardLink failed", "dashboardId", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, errMsgDashboardLinkFailed)
+		return
+	}
+	writeJSONValue(w, http.StatusOK, link)
+}
+
+// EnableCustomDashboardLink handles PUT /dashboards/custom/{id}/link (no
+// body): turns the caller's dashboard's link on and answers it. A link that
+// is already on keeps its id, so copies already sent still work.
+func (h *CustomDashboardHandler) EnableCustomDashboardLink(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	id, ok := customDashboardLinkID(w, r)
+	if !ok {
+		return
+	}
+	link, err := h.entity.EnableCustomDashboardLink(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity EnableCustomDashboardLink failed", "dashboardId", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, errMsgDashboardLinkEnableFailed)
+		return
+	}
+	writeJSONValue(w, http.StatusOK, link)
+}
+
+// DisableCustomDashboardLink handles DELETE /dashboards/custom/{id}/link
+// (204): the link stops working, and whoever had the dashboard only through
+// it loses it. Turning it on again makes a new link.
+func (h *CustomDashboardHandler) DisableCustomDashboardLink(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	id, ok := customDashboardLinkID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.entity.DisableCustomDashboardLink(r.Context(), id); err != nil {
+		slog.ErrorContext(r.Context(), "entity DisableCustomDashboardLink failed", "dashboardId", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, errMsgDashboardLinkDisableFailed)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// OpenDashboardLink handles POST /dashboards/shared/link, body {linkId}: the
+// caller opens a dashboard's link and gets {dashboardId, own}. From then on
+// the dashboard is under Shared Dashboards (GET /dashboards/shared/{id}),
+// unless the caller owns it (own: read it under My Dashboards).
+//
+// The link id is in the body, not the path, and is never logged: anyone who
+// has it can open the dashboard. A link that is unknown or turned off is a
+// 404 with its own message, so the page can say why nothing opened.
+func (h *CustomDashboardHandler) OpenDashboardLink(w http.ResponseWriter, r *http.Request) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	var req openDashboardLinkRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if !uuidRe.MatchString(req.LinkID) {
+		writeError(w, http.StatusBadRequest, errMsgDashboardLinkInvalid)
+		return
+	}
+	opened, err := h.entity.OpenCustomDashboardLink(r.Context(), strings.ToLower(req.LinkID))
+	if err != nil {
+		var apiErr *apierror.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			writeError(w, http.StatusNotFound, errMsgDashboardLinkNotFound)
+			return
+		}
+		slog.ErrorContext(r.Context(), "entity OpenCustomDashboardLink failed", "err", err)
+		mapUpstreamErrorGeneric(w, err, errMsgDashboardLinkOpenFailed)
+		return
+	}
+	writeJSONValue(w, http.StatusOK, opened)
 }

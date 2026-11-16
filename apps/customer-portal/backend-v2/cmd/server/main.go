@@ -229,7 +229,6 @@ func main() {
 	caseHandler := handler.NewCaseHandlerWithAgent(entityClient, aiChatAgentWsClient)
 	deploymentHandler := handler.NewDeploymentHandler(entityClient)
 	deployedProductHandler := handler.NewDeployedProductHandler(entityClient)
-	attachmentHandler := handler.NewAttachmentHandler(entityClient)
 	productHandler := handler.NewProductHandler(entityClient)
 	changeRequestHandler := handler.NewChangeRequestHandler(entityClient)
 	callRequestHandler := handler.NewCallRequestHandler(entityClient)
@@ -246,6 +245,16 @@ func main() {
 	registryHandler := handler.NewRegistryHandler(entityClient, registryClient, adminRole)
 	contactHandler := handler.NewContactHandler(entityClient, userManagementClient, entityClient, csmMigrationPortalContacts)
 	roleResolver := middleware.NewCachedRoleResolver(entityClient, 5*time.Minute).WithInternalWriteGroups(internalWriteGroups)
+	storedAttachmentHandler := handler.NewStoredAttachmentHandler(entityClient,
+		func(w http.ResponseWriter, r *http.Request, m middleware.Module, a middleware.Action) bool {
+			return middleware.CheckPermission(w, r, roleResolver, m, a)
+		})
+
+	attachmentStore, err := newAttachmentStore(os.Getenv)
+	if err != nil {
+		slog.Error("could not set up attachment storage", "err", err)
+		os.Exit(1)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -293,10 +302,8 @@ func main() {
 	mux.Handle("POST /cases/{id}/comments", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionCreate)(http.HandlerFunc(caseHandler.CreateCaseComment)))
 	mux.Handle("POST /cases/{id}/activities/search", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionRead)(http.HandlerFunc(caseHandler.SearchCaseActivities)))
 	mux.Handle("GET /cases/{id}/attachments", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionRead)(http.HandlerFunc(caseHandler.SearchCaseAttachments)))
-	mux.Handle("POST /cases/{id}/attachments", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionCreate)(http.HandlerFunc(caseHandler.CreateCaseAttachment)))
 	mux.Handle("GET /cases/{id}/feedback", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionRead)(http.HandlerFunc(caseHandler.GetCaseFeedback)))
 	mux.Handle("POST /cases/{id}/feedback", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionCreate)(http.HandlerFunc(caseHandler.SubmitCaseFeedback)))
-	mux.Handle("PATCH /cases/{caseId}/attachments/{attachmentId}", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionUpdate)(http.HandlerFunc(caseHandler.PatchCaseAttachment)))
 	mux.Handle("POST /cases/{caseId}/escalations", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionCreate)(http.HandlerFunc(caseHandler.CreateCaseEscalation)))
 	mux.Handle("POST /cases/{caseId}/escalations/search", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionRead)(http.HandlerFunc(caseHandler.SearchCaseEscalations)))
 
@@ -306,8 +313,6 @@ func main() {
 	mux.Handle("POST /projects/{id}/deployments", middleware.RequirePermission(roleResolver, middleware.ModuleDeployments, middleware.ActionCreate)(http.HandlerFunc(deploymentHandler.CreateDeployment)))
 	mux.Handle("PATCH /projects/{projectId}/deployments/{id}", middleware.RequirePermission(roleResolver, middleware.ModuleDeployments, middleware.ActionUpdate)(http.HandlerFunc(deploymentHandler.PatchDeployment)))
 	mux.Handle("GET /deployments/{deploymentId}/attachments", middleware.RequirePermission(roleResolver, middleware.ModuleDeployments, middleware.ActionRead)(http.HandlerFunc(deploymentHandler.SearchDeploymentAttachments)))
-	mux.Handle("POST /deployments/{deploymentId}/attachments", middleware.RequirePermission(roleResolver, middleware.ModuleDeployments, middleware.ActionCreate)(http.HandlerFunc(deploymentHandler.CreateDeploymentAttachment)))
-	mux.Handle("PATCH /deployments/{deploymentId}/attachments/{attachmentId}", middleware.RequirePermission(roleResolver, middleware.ModuleDeployments, middleware.ActionUpdate)(http.HandlerFunc(deploymentHandler.PatchDeploymentAttachment)))
 	mux.HandleFunc("POST /deployments/{id}/instances/search", instanceHandler.SearchDeploymentInstances)
 	mux.HandleFunc("POST /deployments/{id}/instances/metrics/search", instanceHandler.SearchDeploymentInstanceMetrics)
 	mux.HandleFunc("POST /deployments/{id}/instances/usages/search", instanceHandler.SearchDeploymentInstanceUsage)
@@ -337,9 +342,9 @@ func main() {
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/metrics/search", instanceHandler.SearchDeployedProductInstanceMetricsStats)
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/usages/search", instanceHandler.SearchDeployedProductInstanceUsageStats)
 
-	mux.HandleFunc("GET /attachments/{id}/content", attachmentHandler.GetAttachmentContent)
-	mux.HandleFunc("GET /attachments/{id}", attachmentHandler.GetAttachment)
-	mux.HandleFunc("DELETE /attachments/{id}", attachmentHandler.DeleteAttachment)
+	// Stored attachments (entity-service owns the access checks). The module
+	// permission depends on the attachment type, so the handler applies it.
+	registerBlobAttachmentRoutes(mux, storedAttachmentHandler, handler.NewBlobAttachmentHandler(storedAttachmentHandler, entityClient, attachmentStore))
 
 	mux.HandleFunc("GET /products", productHandler.GetProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
@@ -420,8 +425,8 @@ func main() {
 			),
 		),
 		ReadHeaderTimeout: 10 * time.Second,
-		// Read/WriteTimeout default to 60s because create-case carries inline
-		// base64 attachments (up to ~15 MiB) relayed through two hops. The
+		// Read/WriteTimeout default to 60s so a create-case body whose
+		// description embeds images (up to 15 MiB) is relayed through two hops. The
 		// values are operator-configurable and not ordered by the code;
 		// keeping the entity client timeout shorter than the server write
 		// timeout lets the handler return a clean error before the server

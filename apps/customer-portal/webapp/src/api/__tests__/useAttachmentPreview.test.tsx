@@ -107,3 +107,79 @@ describe("useAttachmentPreview", () => {
     expect(result.current.dataUrls.size).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("useAttachmentPreview through the inline image route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (window as unknown as { config?: Record<string, unknown> }).config = {
+      CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test/",
+    };
+    vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (
+      this: FileReader,
+    ) {
+      Object.defineProperty(this, "result", {
+        value: "data:image/png;base64,inline",
+        configurable: true,
+      });
+      this.onloadend?.({} as ProgressEvent<FileReader>);
+    });
+  });
+
+  it("loads the image from the inline route", async () => {
+    authFetchMock.mockResolvedValueOnce(
+      new Response(new Blob(["img"], { type: "image/png" }), {
+        status: 200,
+        headers: { "Content-Type": "image/png" },
+      }),
+    );
+    const { result } = renderHook(() => useAttachmentPreview("att-1"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toBe("data:image/png;base64,inline");
+    expect(String(authFetchMock.mock.calls[0][0])).toBe(
+      "https://api.test/attachments/inline/att-1/content",
+    );
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no image when the inline route does not know the id (404)", async () => {
+    authFetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
+    const { result } = renderHook(() => useAttachmentPreview("att-2"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toBeNull();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no image when the inline route fails for another reason", async () => {
+    authFetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
+    const { result } = renderHook(() => useAttachmentPreview("att-3"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toBeNull();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a removed image (410) without retrying", async () => {
+    authFetchMock.mockResolvedValue(new Response("", { status: 410 }));
+    const { result } = renderHook(
+      () => useAttachmentPreviews(["att-4"]),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.removedIds.has("att-4")).toBe(true));
+    expect(result.current.dataUrls.size).toBe(0);
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a failed image as removed", async () => {
+    authFetchMock.mockResolvedValue(new Response("", { status: 503 }));
+    const { result } = renderHook(() => useAttachmentPreviews(["att-5"]), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.removedIds.size).toBe(0);
+  });
+});

@@ -17,6 +17,7 @@
 import {
   resolveRelativeDatePlaceholder,
   resolveRelativeDatePlaceholderToDate,
+  resolveRelativeDatePlaceholderToUtcDate,
 } from "@utils/resolveRelativeDatePlaceholder";
 import { hasFieldFilterEntries, isFieldFilterEntry } from "./widgetPreviewUrl";
 
@@ -61,11 +62,43 @@ export function resolveRelativeDateFilters(
 /**
  * The flat date keys a non-case resourceType's filters may carry a
  * relative-date placeholder in: a time card search's `startDate` / `endDate`
- * (work date) and a project search's `endDateFrom` / `endDateTo` (the
- * project's end date), all whole days and inclusive. They resolve to a plain
- * local `YYYY-MM-DD`, not an instant: both searches compare dates.
+ * (work date), a project search's `<date>From` / `<date>To` bounds (the
+ * project's end date and its onboarding start, go-live plan, go-live,
+ * onboarding expiry and production readiness completion dates) and a PLG
+ * search's `registeredFrom` / `registeredTo` (the registration date), all
+ * whole days and inclusive. They resolve to a plain `YYYY-MM-DD`, not an
+ * instant: the time card and project searches compare dates, and the PLG
+ * request body turns a plain date into that whole UTC day
+ * (`plgSearchFilters`). The PLG bounds therefore resolve against the UTC
+ * date (UTC_DATE_FILTER_KEYS), the others against the viewer's local one.
  */
-const FLAT_DATE_FILTER_KEYS = ["startDate", "endDate", "endDateFrom", "endDateTo"] as const;
+const FLAT_DATE_FILTER_KEYS = [
+  "startDate",
+  "endDate",
+  "endDateFrom",
+  "endDateTo",
+  "onboardingStartDateFrom",
+  "onboardingStartDateTo",
+  "goLivePlanDateFrom",
+  "goLivePlanDateTo",
+  "goLiveDateFrom",
+  "goLiveDateTo",
+  "onboardingExpiryDateFrom",
+  "onboardingExpiryDateTo",
+  "productionReadinessCompletionDateFrom",
+  "productionReadinessCompletionDateTo",
+  "registeredFrom",
+  "registeredTo",
+] as const;
+
+/**
+ * The flat date keys read as UTC days: a PLG search's registration date
+ * bounds, which the same widget's trend line (`windowDate`) also resolves in
+ * UTC. Resolved against the local date, "today" is already tomorrow's UTC day
+ * for a viewer east of UTC between local midnight and UTC midnight, and the
+ * count would leave out the registrations the trend counts.
+ */
+const UTC_DATE_FILTER_KEYS: ReadonlySet<string> = new Set(["registeredFrom", "registeredTo"]);
 
 /**
  * Resolves relative date placeholders in the flat date filters
@@ -77,7 +110,9 @@ function resolveFlatDateFilters(filters: Record<string, unknown>, now: Date): Re
   for (const key of FLAT_DATE_FILTER_KEYS) {
     const value = filters[key];
     if (typeof value !== "string") continue;
-    const date = resolveRelativeDatePlaceholderToDate(value, now);
+    const date = UTC_DATE_FILTER_KEYS.has(key)
+      ? resolveRelativeDatePlaceholderToUtcDate(value, now)
+      : resolveRelativeDatePlaceholderToDate(value, now);
     if (date === undefined) continue;
     resolved ??= { ...filters };
     resolved[key] = date;

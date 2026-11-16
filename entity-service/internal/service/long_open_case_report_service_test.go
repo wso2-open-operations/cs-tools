@@ -28,18 +28,25 @@ import (
 )
 
 type fakeLongOpenCaseReportRepo struct {
-	data      domain.LongOpenCaseReportData
-	gotCutoff time.Time
-	gotTypes  []string
-	gotTags   []string
-	gotLimit  int
-	calls     int
-	listErr   error
+	data            domain.LongOpenCaseReportData
+	gotCutoff       time.Time
+	gotTypes        []string
+	gotTags         []string
+	gotProductTypes []string
+	gotLimit        int
+	calls           int
+	listErr         error
 }
 
 func (f *fakeLongOpenCaseReportRepo) ListLongOpenCases(_ context.Context, createdBefore time.Time, projectTypes, excludedTags []string, limit int) (domain.LongOpenCaseReportData, error) {
 	f.calls++
 	f.gotCutoff, f.gotTypes, f.gotTags, f.gotLimit = createdBefore, projectTypes, excludedTags, limit
+	return f.data, f.listErr
+}
+
+func (f *fakeLongOpenCaseReportRepo) ListOpenCasesBefore(_ context.Context, createdBefore time.Time, projectTypes, productProjectTypes []string, limit int) (domain.LongOpenCaseReportData, error) {
+	f.calls++
+	f.gotCutoff, f.gotTypes, f.gotProductTypes, f.gotLimit = createdBefore, projectTypes, productProjectTypes, limit
 	return f.data, f.listErr
 }
 

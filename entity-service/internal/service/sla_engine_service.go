@@ -236,6 +236,13 @@ type SLAEngineService interface {
 	// incident's state changes -- there is no separate manual-completion
 	// signal to hook.
 	ApplyIncidentStateEffects(ctx context.Context, incidentID string, state domain.IncidentState)
+
+	// RecalculateCasePauseTotals reconstructs one case's own currently
+	// IN_PROGRESS clocks' pause history from the case's real state-change
+	// history (work_item_activity) and corrects their stored
+	// pause_duration/business_pause_duration when they disagree -- see
+	// sla_case_recalc_service.go's own doc comment for the full design.
+	RecalculateCasePauseTotals(ctx context.Context, caseID string) (CaseSLAPauseRecalcReport, error)
 }
 
 type slaEngineService struct {

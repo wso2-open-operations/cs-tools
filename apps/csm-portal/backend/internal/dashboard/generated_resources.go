@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Besides the case family, a generated dashboard may hold widgets of the
@@ -43,7 +45,25 @@ const (
 	valuesJSONBool                     // a flat key's JSON true / false
 	valuesTeamName                     // a flat key's single team name or key (checked against the registry later)
 	valuesRating                       // a flat key's JSON whole number 1 to 5
+	valuesText                         // free text: 1 to maxGeneratedTextValues values, each 1 to maxGeneratedTextLength characters
+	valuesCode                         // a flat key's single string, 1 to maxGeneratedTextLength characters
+	valuesEmail                        // 1 to maxGeneratedTextValues email addresses, each at most maxGeneratedEmailLength characters
+	valuesTeamNames                    // 1 to maxGeneratedTeams team keys or names (checked against the registry later)
 )
+
+// The most values a valuesText list holds, and the longest one (entity-service
+// refuses a PLG country name over 100 characters).
+const (
+	maxGeneratedTextValues = 20
+	maxGeneratedTextLength = 100
+)
+
+// maxGeneratedEmailLength is the longest email address a valuesEmail list
+// holds (as entity-service's PLG owner email filter takes).
+const maxGeneratedEmailLength = 254
+
+// maxGeneratedTeams is the most teams one valuesTeamNames list may name.
+const maxGeneratedTeams = 20
 
 // valueRule checks a value list: a flat key's list, or a field filter's values.
 type valueRule struct {
@@ -68,7 +88,21 @@ type resourceRules struct {
 	fields     map[string]fieldRule // allowed "filters" list fields; nil means no list
 	sortBy     []string             // allowed list sortBy fields; none means a list sets no sortBy
 	slicesVia  string               // the grouping to suggest when groupBy is not allowed
+	plainDates bool                 // dateKeys take YYYY-MM-DD or a relative date token, never an RFC 3339 time (the backing search rejects one)
+	groupByOn  []Shape              // the shapes a groupBy may be on; none means any
+	exclusive  [][2]string          // flat keys never set together in one query (with a slice's added), the second a JSON boolean set true
+	needs      map[string]string    // flat key -> the flat key a query holding it must hold too (with a slice's added)
+	groupNeeds map[string]string    // groupBy.field -> the flat key the widget's own query must hold
 	fixedDates bool                 // dateKeys take a plain date only: no relative date token (the webapp does not fill one in for this type)
+	dayWindow  *dayWindowRule       // groupBy.field "day": the date keys that bound it and its longest window
+	maxGroups  int                  // the largest groupBy.maxGroups the read takes (0 is its default); none means no bound here
+}
+
+// dayWindowRule is a "day" grouping's window: both keys must be set, and the
+// window at most maxDays long, on every day (see checkDayWindow).
+type dayWindowRule struct {
+	startKey, endKey string
+	maxDays          int
 }
 
 var (
@@ -87,18 +121,24 @@ var (
 // assignmentGroup is refused on the Postgres data source. Problems take no
 // sortBy at all.
 var generatedResourceRules = map[ResourceType]resourceRules{
+	// Time cards group on the server (POST /time-cards/aggregate) by state,
+	// user, project or day, counting cards or summing hours (groupBy.measure).
+	// A "day" grouping returns one bucket per day of its startDate..endDate
+	// window, which entity-service caps at 31 days.
 	ResourceTimeCard: {
-		noun:   "time card",
-		shapes: opsShapes,
+		noun:    "time card",
+		shapes:  opsShapes,
+		groupBy: []string{"state", "user", "project", "day", "team"},
 		flat: map[string]valueRule{
 			"states":    {kind: valuesEnum, values: []string{"pending", "submitted", "approved", "rejected", "processed", "recalled"}},
 			"userIds":   onlyMe,
+			"teamIds":   {kind: valuesTeamNames},
 			"startDate": aDate,
 			"endDate":   aDate,
 		},
 		dateKeys:  map[string]bool{"startDate": true, "endDate": true},
 		sortBy:    []string{"workDate", "updatedOn"},
-		slicesVia: "group by state with slices",
+		dayWindow: &dayWindowRule{startKey: "startDate", endKey: "endDate", maxDays: 31},
 	},
 	ResourceIncident: {
 		noun:    "incident",
@@ -132,8 +172,8 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		sortBy: []string{"createdOn", "updatedOn"},
 	},
 	// Accounts and projects take flat filters only and cannot group on the
-	// server; neither search takes a widget sortBy (projects only sort by end
-	// date). An account's abtTeam is a team name: the generator writes the
+	// server; neither search takes a widget sortBy (projects sort by a small whitelist
+	// of date fields). An account's abtTeam is a team name: the generator writes the
 	// registry key and the team resolver turns it into the name.
 	ResourceAccount: {
 		noun:   "account",
@@ -152,15 +192,27 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		noun:   "project",
 		shapes: opsShapes,
 		flat: map[string]valueRule{
-			"onboardingStatus":     {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable"}},
-			"closureStatus":        {kind: valuesScalarEnum, values: []string{"Open", "Suspended", "Restricted"}},
-			"excludeClosureStates": {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
-			"endDateFrom":          aDate,
-			"endDateTo":            aDate,
+			"onboardingStatus":                      {kind: valuesEnum, values: []string{"Not-Started", "In-Progress", "Completed", "Not-Applicable"}},
+			"closureStatus":                         {kind: valuesScalarEnum, values: []string{"Open", "Suspended", "Restricted"}},
+			"excludeClosureStates":                  {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
+			"closureStates":                         {kind: valuesEnum, values: []string{"Open", "Suspended", "Restricted"}},
+			"endDateFrom":                           aDate,
+			"endDateTo":                             aDate,
+			"onboardingStartDateFrom":               aDate,
+			"onboardingStartDateTo":                 aDate,
+			"goLivePlanDateFrom":                    aDate,
+			"goLivePlanDateTo":                      aDate,
+			"goLiveDateFrom":                        aDate,
+			"goLiveDateTo":                          aDate,
+			"onboardingExpiryDateFrom":              aDate,
+			"onboardingExpiryDateTo":                aDate,
+			"productionReadinessCompletionDateFrom": aDate,
+			"productionReadinessCompletionDateTo":   aDate,
 		},
-		dateKeys:  map[string]bool{"endDateFrom": true, "endDateTo": true},
-		sortBy:    []string{"endDate"},
-		slicesVia: "group with slices",
+		dateKeys:   map[string]bool{"endDateFrom": true, "endDateTo": true, "onboardingStartDateFrom": true, "onboardingStartDateTo": true, "goLivePlanDateFrom": true, "goLivePlanDateTo": true, "goLiveDateFrom": true, "goLiveDateTo": true, "onboardingExpiryDateFrom": true, "onboardingExpiryDateTo": true, "productionReadinessCompletionDateFrom": true, "productionReadinessCompletionDateTo": true},
+		sortBy:     []string{"endDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"},
+		plainDates: true,
+		slicesVia:  "group with slices",
 	},
 	// Case feedback (CSAT): a flat rating and submission dates; grouped on the
 	// server by a date bucket (bars of the average rating) or by rating /
@@ -179,6 +231,56 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 			"reasons_neutral", "reasons_satisfied", "reasons_very_satisfied"},
 		slicesVia: "group with groupBy.bucket or with rating slices",
 	},
+	// PLG organisations and registrations (POST /plg/organizations/search,
+	// /plg/registrations/search) take the PLG list's flat filters, and only
+	// those a prompt can name: products, lifecycle stages, subscription
+	// tiers, the registration dates, "unowned" and the viewer's own (ownerIds
+	// exactly ["__current_user__"], which the webapp resolves to the viewer's
+	// user id, the id an owner is; no other owner ids), no free
+	// text). A pie or bar uses slices (one search per slice, each slice's
+	// query held to the same filters); organisations may instead group by
+	// owner on the server (POST /plg/organizations/aggregate, "Unowned" its
+	// own group), and either type by country (/plg/organizations/aggregate,
+	// /plg/registrations/aggregate, "Unknown" its own group), on a pie or bar
+	// only. A country filter is countryNames (names as written, matched
+	// ignoring case) or countryUnknown, never both in one query. A playbook
+	// answer filter names its task (playbookTask, a task code) and then the
+	// answers (playbookAnswers, option codes) or playbookUnanswered, never
+	// both; registrations may group by their answer to the query's
+	// playbookTask (groupBy playbookAnswer, /plg/registrations/aggregate, "Not
+	// answered" its own group), on a pie or bar only. The codes are checked
+	// against the live playbooks after generation. The
+	// organisation search sorts by name or registration date; the
+	// registration search has one order and takes no sortBy.
+	// Registrations may also be a line: registrations per day, week or month
+	// (POST /plg/registrations/volume-trend), with the case line's days or
+	// fixed window and chart, checked as for any definition; never series.
+	ResourcePlgOrganization: {
+		noun:      "PLG organisation",
+		shapes:    plgShapes,
+		groupBy:   []string{"owner", "country"},
+		flat:      plgFilters,
+		dateKeys:  plgDateKeys,
+		sortBy:    []string{"name", "registeredOn"},
+		slicesVia: "group with slices",
+		groupByOn: plgGroupByShapes,
+		exclusive: plgExclusive,
+		needs:     plgNeeds,
+		maxGroups: maxPlgGroups,
+	},
+	ResourcePlgRegistration: {
+		noun:       "PLG registration",
+		shapes:     plgRegistrationShapes,
+		groupBy:    []string{"country", "playbookAnswer"},
+		flat:       withRule(plgFilters, "unacknowledgedOnly", valueRule{kind: valuesJSONBool}),
+		dateKeys:   plgDateKeys,
+		slicesVia:  "group with slices",
+		groupByOn:  plgGroupByShapes,
+		exclusive:  plgExclusive,
+		needs:      plgNeeds,
+		groupNeeds: map[string]string{"playbookAnswer": "playbookTask"},
+		maxGroups:  maxPlgGroups,
+	},
 	ResourceProblem: {
 		noun:    "problem",
 		shapes:  opsShapes,
@@ -190,9 +292,52 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 	},
 }
 
+// The PLG widgets' shared rules: the values are the PLG domain's own
+// (plg/domain ValidLifecycleStage, ValidSubscriptionTier) and the products
+// seeded in plg_product.
+var (
+	plgShapes  = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar}
+	plgFilters = map[string]valueRule{
+		"productCodes":       {kind: valuesEnum, values: []string{"IAM", "API_PLATFORM", "INTEGRATION_PLATFORM", "AGENT_PLATFORM", "ENG_PLATFORM"}},
+		"lifecycleStages":    {kind: valuesEnum, values: []string{"REGISTRATION", "PLG_CS_ELIGIBLE", "FIRST_VALUE_ACHIEVED", "ACTIVATED", "COMMERCIAL", "ABANDONED"}},
+		"subscriptionTiers":  {kind: valuesEnum, values: []string{"FREE", "TRIAL", "TRIAL_EXTENDED", "PAYG"}},
+		"registeredFrom":     aDate,
+		"registeredTo":       aDate,
+		"unowned":            {kind: valuesJSONBool},
+		"ownerIds":           onlyMe,
+		"ownerEmails":        {kind: valuesEmail},
+		"countryNames":       {kind: valuesText},
+		"countryUnknown":     {kind: valuesJSONBool},
+		"playbookTask":       {kind: valuesCode},
+		"playbookAnswers":    {kind: valuesText},
+		"playbookUnanswered": {kind: valuesJSONBool},
+	}
+	plgDateKeys      = map[string]bool{"registeredFrom": true, "registeredTo": true}
+	plgGroupByShapes = []Shape{ShapePie, ShapeBar}
+	plgExclusive     = [][2]string{{"countryNames", "countryUnknown"}, {"playbookAnswers", "playbookUnanswered"}, {"ownerEmails", "unowned"}}
+	plgNeeds         = map[string]string{"playbookAnswers": "playbookTask", "playbookUnanswered": "playbookTask"}
+)
+
+// maxPlgGroups is the largest maxGroups entity-service's PLG aggregates take
+// (maxPlgAggregateGroups there); a larger one is refused when the tile loads.
+const maxPlgGroups = 50
+
+// plgRegistrationShapes are plgShapes and the registration trend.
+var plgRegistrationShapes = []Shape{ShapeCount, ShapeList, ShapePie, ShapeBar, ShapeLine}
+
+// withRule is rules plus one more key, as a new map.
+func withRule(rules map[string]valueRule, key string, rule valueRule) map[string]valueRule {
+	out := make(map[string]valueRule, len(rules)+1)
+	for k, v := range rules {
+		out[k] = v
+	}
+	out[key] = rule
+	return out
+}
+
 // generatedRelativeDate is a relative date placeholder the webapp turns into
 // a date before the request (resolveRelativeDateFilters).
-var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter)(:-?\d+)?__$`)
+var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfWeek|endOfWeek|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter|startOfYear|endOfYear)(:-?\d+)?__$`)
 
 // checkGeneratedResourceWidget checks a generated widget whose resourceType
 // is in generatedResourceRules: its shape, groupBy, query, every slice's
@@ -213,13 +358,54 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		case w.GroupBy.Bucket != "" || !contains(rules.groupBy, w.GroupBy.Field):
 			return fmt.Errorf("%w: %s.groupBy: a %s widget groups by %s only", ErrGeneratedInvalid, at, rules.noun, orList(rules.groupBy))
 		}
+		if len(rules.groupByOn) > 0 && !containsShape(rules.groupByOn, w.Shape) {
+			return fmt.Errorf("%w: %s.groupBy: a %s widget groups only as a %s, not a %q", ErrGeneratedInvalid, at, rules.noun, orList(shapeNames(rules.groupByOn)), w.Shape)
+		}
+		if need, ok := rules.groupNeeds[w.GroupBy.Field]; ok {
+			if _, has := w.Query[need]; !has {
+				return fmt.Errorf("%w: %s.groupBy: grouping by %s needs query.%s", ErrGeneratedInvalid, at, w.GroupBy.Field, need)
+			}
+		}
+		if rules.maxGroups > 0 && (w.GroupBy.MaxGroups < 0 || w.GroupBy.MaxGroups > rules.maxGroups) {
+			return fmt.Errorf("%w: %s.groupBy.maxGroups is %d; it must be between 1 and %d (or omitted for the default)", ErrGeneratedInvalid, at, w.GroupBy.MaxGroups, rules.maxGroups)
+		}
+		if w.GroupBy.Field == "day" && rules.dayWindow != nil {
+			if err := checkDayWindow(at, w.Query, *rules.dayWindow); err != nil {
+				return err
+			}
+		}
+		// Time cards by team: one group per team the widget names, so the
+		// widget's own query must name them. A bar, never a pie: someone on
+		// two of the teams counts in both, so the slices would not add up to
+		// the cards and a pie would misstate the whole.
+		if w.GroupBy.Field == "team" {
+			if _, has := w.Query["teamIds"]; !has {
+				return fmt.Errorf("%w: %s.groupBy: grouping by team needs query.teamIds (the teams to show)", ErrGeneratedInvalid, at)
+			}
+			if w.Shape == ShapePie {
+				return fmt.Errorf("%w: %s: a widget grouped by team must be a bar, not a pie (someone on two of the teams counts in both)", ErrGeneratedInvalid, at)
+			}
+		}
 	}
 
 	if err := checkGeneratedQuery(at+".query", w.Query, rules); err != nil {
 		return err
 	}
+	if err := checkExclusive(at+".query", w.Query, nil, rules); err != nil {
+		return err
+	}
+	if err := checkNeeds(at+".query", w.Query, nil, rules); err != nil {
+		return err
+	}
 	for j, sl := range w.Slices {
-		if err := checkGeneratedQuery(fmt.Sprintf("%s.slices[%d].query", at, j), sl.Query, rules); err != nil {
+		sat := fmt.Sprintf("%s.slices[%d].query", at, j)
+		if err := checkGeneratedQuery(sat, sl.Query, rules); err != nil {
+			return err
+		}
+		if err := checkExclusive(sat, w.Query, sl.Query, rules); err != nil {
+			return err
+		}
+		if err := checkNeeds(sat, w.Query, sl.Query, rules); err != nil {
 			return err
 		}
 	}
@@ -231,6 +417,42 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		order, _ := w.SortBy["order"].(string)
 		if !contains(rules.sortBy, field) || (order != "asc" && order != "desc") {
 			return fmt.Errorf("%w: %s.sortBy: a %s list sorts by %s, asc or desc", ErrGeneratedInvalid, at, rules.noun, orList(rules.sortBy))
+		}
+	}
+	return nil
+}
+
+// checkExclusive refuses a query (the widget's, with a slice's added when
+// slice is set) that holds both keys of one of rules.exclusive, the second
+// set true: no record matches both.
+func checkExclusive(at string, query, slice map[string]any, rules resourceRules) error {
+	for _, pair := range rules.exclusive {
+		_, inQuery := query[pair[0]]
+		_, inSlice := slice[pair[0]]
+		on := query[pair[1]] == true || slice[pair[1]] == true
+		if (inQuery || inSlice) && on {
+			return fmt.Errorf("%w: %s: %q and %q cannot be combined (with a slice's, the widget's own query counts too)", ErrGeneratedInvalid, at, pair[0], pair[1])
+		}
+	}
+	return nil
+}
+
+// checkNeeds refuses a query (the widget's, with a slice's added when slice
+// is set) that holds a key of rules.needs without the key it needs.
+func checkNeeds(at string, query, slice map[string]any, rules resourceRules) error {
+	keys := make([]string, 0, len(rules.needs))
+	for k := range rules.needs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		need := rules.needs[k]
+		_, inQuery := query[k]
+		_, inSlice := slice[k]
+		_, hasQuery := query[need]
+		_, hasSlice := slice[need]
+		if (inQuery || inSlice) && !hasQuery && !hasSlice {
+			return fmt.Errorf("%w: %s: %q needs %q (with a slice's, the widget's own query counts too)", ErrGeneratedInvalid, at, k, need)
 		}
 	}
 	return nil
@@ -267,6 +489,11 @@ func checkGeneratedQuery(at string, query map[string]any, rules resourceRules) e
 				return fmt.Errorf("%w: %s.%s must be true or false", ErrGeneratedInvalid, at, k)
 			}
 			continue
+		case valuesCode:
+			if s, ok := v.(string); !ok || utf8.RuneCountInString(strings.TrimSpace(s)) == 0 || utf8.RuneCountInString(strings.TrimSpace(s)) > maxGeneratedTextLength {
+				return fmt.Errorf("%w: %s.%s must be one code of 1 to %d characters", ErrGeneratedInvalid, at, k, maxGeneratedTextLength)
+			}
+			continue
 		case valuesTeamName:
 			if s, ok := v.(string); !ok || strings.TrimSpace(s) == "" {
 				return fmt.Errorf("%w: %s.%s must be a team's key from the Teams section", ErrGeneratedInvalid, at, k)
@@ -283,7 +510,7 @@ func checkGeneratedQuery(at string, query map[string]any, rules resourceRules) e
 			if ok && rules.fixedDates && generatedRelativeDate.MatchString(s) {
 				return fmt.Errorf("%w: %s.%s: a %s widget takes a plain date (YYYY-MM-DD), not a relative date", ErrGeneratedInvalid, at, k, rules.noun)
 			}
-			if !ok || !generatedDate(s) {
+			if !ok || !generatedDate(s) || (rules.plainDates && !generatedPlainDate(s)) {
 				return fmt.Errorf("%w: %s.%s must be a date (YYYY-MM-DD) or a relative date such as __daysAgo:30__", ErrGeneratedInvalid, at, k)
 			}
 			continue
@@ -357,6 +584,15 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 				return fmt.Errorf("%w: %s: %q is not a %s %s (%s)", ErrGeneratedInvalid, at, v, noun, singular(key), strings.Join(rule.values, ", "))
 			}
 		}
+	case valuesTeamNames:
+		if len(values) == 0 || len(values) > maxGeneratedTeams {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d team keys from the Teams section", ErrGeneratedInvalid, at, maxGeneratedTeams)
+		}
+		for _, v := range values {
+			if strings.TrimSpace(v) == "" {
+				return fmt.Errorf("%w: %s: each value must be a team's key from the Teams section", ErrGeneratedInvalid, at)
+			}
+		}
 	case valuesOneOf:
 		if len(values) != 1 || !contains(rule.values, values[0]) {
 			return fmt.Errorf("%w: %s must be exactly one of %s", ErrGeneratedInvalid, at, strings.Join(rule.values, ", "))
@@ -373,6 +609,25 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
 			return fmt.Errorf("%w: %s must be exactly one of \"true\", \"false\"", ErrGeneratedInvalid, at)
 		}
+	case valuesEmail:
+		if len(values) == 0 || len(values) > maxGeneratedTextValues {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d email addresses", ErrGeneratedInvalid, at, maxGeneratedTextValues)
+		}
+		for _, v := range values {
+			v = strings.TrimSpace(v)
+			if local, host, ok := strings.Cut(v, "@"); !ok || local == "" || host == "" || utf8.RuneCountInString(v) > maxGeneratedEmailLength {
+				return fmt.Errorf("%w: %s: each value must be an email address of at most %d characters", ErrGeneratedInvalid, at, maxGeneratedEmailLength)
+			}
+		}
+	case valuesText:
+		if len(values) == 0 || len(values) > maxGeneratedTextValues {
+			return fmt.Errorf("%w: %s must be a list of 1 to %d values", ErrGeneratedInvalid, at, maxGeneratedTextValues)
+		}
+		for _, v := range values {
+			if n := utf8.RuneCountInString(strings.TrimSpace(v)); n == 0 || n > maxGeneratedTextLength {
+				return fmt.Errorf("%w: %s: each value must be 1 to %d characters", ErrGeneratedInvalid, at, maxGeneratedTextLength)
+			}
+		}
 	}
 	return nil
 }
@@ -381,6 +636,7 @@ func checkGeneratedValues(at string, values []string, rule valueRule, noun, key 
 var valueNames = map[string]string{
 	"states": "state", "priorities": "priority", "impacts": "impact", "risks": "risk",
 	"onboardingStatus": "onboarding status", "excludeClosureStates": "closure state",
+	"productCodes": "product", "lifecycleStages": "lifecycle stage", "subscriptionTiers": "subscription tier",
 }
 
 // singular is the readable name of one value of key (valueNames), for error
@@ -418,6 +674,181 @@ func generatedDate(s string) bool {
 	_, err := time.Parse(time.RFC3339, s)
 	return err == nil
 }
+
+// generatedPlainDate reports whether s is a relative date placeholder or a
+// YYYY-MM-DD date, but not an RFC 3339 time.
+func generatedPlainDate(s string) bool {
+	if generatedRelativeDate.MatchString(s) {
+		return true
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
+// checkDayWindow checks a "day" grouping's window: both date keys set, and
+// either two plain dates at most rule.maxDays apart (both days counted), or
+// two relative dates at most that long on every day. A saved dashboard is
+// checked again each time it is read, so "on every day" is what keeps one
+// that passes today from failing next month: __startOfQuarter:0__ to
+// __today__ is short at a quarter's start and too long by its end. A plain
+// date with a relative one grows (or shrinks below zero) day by day, so that
+// pair is refused outright. The query's other keys are already checked.
+func checkDayWindow(at string, query map[string]any, rule dayWindowRule) error {
+	start, _ := query[rule.startKey].(string)
+	end, _ := query[rule.endKey].(string)
+	if start == "" || end == "" {
+		return fmt.Errorf("%w: %s: a time card widget grouped by day needs query.%s and query.%s (at most %d days)",
+			ErrGeneratedInvalid, at, rule.startKey, rule.endKey, rule.maxDays)
+	}
+	tooLong := fmt.Errorf("%w: %s: a time card widget grouped by day covers at most %d days, from query.%s to query.%s",
+		ErrGeneratedInvalid, at, rule.maxDays, rule.startKey, rule.endKey)
+	startRel, endRel := generatedRelativeDate.MatchString(start), generatedRelativeDate.MatchString(end)
+	if startRel != endRel {
+		return fmt.Errorf("%w: %s: a time card widget grouped by day takes two plain dates or two relative dates for query.%s and query.%s, not one of each",
+			ErrGeneratedInvalid, at, rule.startKey, rule.endKey)
+	}
+	if !startRel {
+		s, errS := time.Parse("2006-01-02", start)
+		e, errE := time.Parse("2006-01-02", end)
+		if errS != nil || errE != nil {
+			return fmt.Errorf("%w: %s: a time card widget grouped by day takes plain dates (YYYY-MM-DD) for query.%s and query.%s",
+				ErrGeneratedInvalid, at, rule.startKey, rule.endKey)
+		}
+		if days := windowDays(s, e); days < 1 || days > rule.maxDays {
+			return tooLong
+		}
+		return nil
+	}
+	// The years are a sample of calendar shapes, not a limit: every day of
+	// 2024-2027 (a leap year and three others) meets every month length,
+	// quarter length and weekday a relative date can, and a window's length
+	// depends only on those, so a pass holds for any later year too. Walking
+	// every day (about 1,460 date steps, under a millisecond per widget) is
+	// simpler to trust than a hand-picked list of dates.
+	for day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC); day.Year() < 2028; day = day.AddDate(0, 0, 1) {
+		s, okS := relativeDate(start, day)
+		e, okE := relativeDate(end, day)
+		if !okS || !okE {
+			return fmt.Errorf("%w: %s: query.%s or query.%s is not a relative date the dashboard can resolve",
+				ErrGeneratedInvalid, at, rule.startKey, rule.endKey)
+		}
+		if days := windowDays(s, e); days < 1 || days > rule.maxDays {
+			return tooLong
+		}
+	}
+	return nil
+}
+
+// windowDays is how many days start..end covers, both counted; 0 or less when
+// end is before start.
+func windowDays(start, end time.Time) int {
+	return int(end.Sub(start).Hours()/24) + 1
+}
+
+// relativeDate resolves a relative date token on the given day, as the
+// webapp's resolveRelativeDatePlaceholderToDate does: __today__ (no
+// argument), __daysAgo:N__ (N >= 0), and __startOfWeek:N__, __endOfWeek:N__,
+// __startOfMonth:N__, __endOfMonth:N__, __startOfQuarter:N__,
+// __endOfQuarter:N__, __startOfYear:N__, __endOfYear:N__ (N weeks / months /
+// quarters / years from the current one; the argument is required). A week
+// runs Monday to Sunday. false for a token the webapp leaves unresolved,
+// and for an argument beyond maxRelativeDateOffset.
+func relativeDate(token string, today time.Time) (time.Time, bool) {
+	r, ok := parseRelativeDate(token)
+	if !ok {
+		return time.Time{}, false
+	}
+	return r.on(today), true
+}
+
+// relativeDateToken is a relative date token parsed once, so it can be
+// resolved on many days (relativeLinePoints) without parsing it again.
+type relativeDateToken struct {
+	name string
+	arg  int
+}
+
+// parseRelativeDate parses a token relativeDate resolves; false for one it
+// does not.
+func parseRelativeDate(token string) (relativeDateToken, bool) {
+	m := relativeDateParts.FindStringSubmatch(token)
+	if m == nil {
+		return relativeDateToken{}, false
+	}
+	name, arg, hasArg := m[1], 0, m[2] != ""
+	if hasArg {
+		n, err := strconv.Atoi(m[2])
+		if err != nil || n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
+			return relativeDateToken{}, false
+		}
+		arg = n
+	}
+	switch name {
+	case "today":
+		if hasArg {
+			return relativeDateToken{}, false
+		}
+	case "daysAgo":
+		if !hasArg || arg < 0 {
+			return relativeDateToken{}, false
+		}
+	case "startOfMonth", "endOfMonth", "startOfQuarter", "endOfQuarter",
+		"startOfWeek", "endOfWeek", "startOfYear", "endOfYear":
+		if !hasArg {
+			return relativeDateToken{}, false
+		}
+	default:
+		return relativeDateToken{}, false
+	}
+	return relativeDateToken{name: name, arg: arg}, true
+}
+
+// on is the day the token names, counted from today.
+func (r relativeDateToken) on(today time.Time) time.Time {
+	arg := r.arg
+	switch r.name {
+	case "daysAgo":
+		return today.AddDate(0, 0, -arg)
+	case "startOfMonth", "endOfMonth":
+		monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfMonth" {
+			return monthStart.AddDate(0, arg, 0)
+		}
+		return monthStart.AddDate(0, arg+1, -1)
+	case "startOfQuarter", "endOfQuarter":
+		quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfQuarter" {
+			return quarterStart.AddDate(0, 3*arg, 0)
+		}
+		return quarterStart.AddDate(0, 3*(arg+1), -1)
+	case "startOfWeek", "endOfWeek":
+		// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+		weekStart := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
+		if r.name == "startOfWeek" {
+			return weekStart.AddDate(0, 0, 7*arg)
+		}
+		return weekStart.AddDate(0, 0, 7*arg+6)
+	case "startOfYear", "endOfYear":
+		yearStart := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfYear" {
+			return yearStart.AddDate(arg, 0, 0)
+		}
+		return yearStart.AddDate(arg+1, 0, -1)
+	}
+	return today // "today"
+}
+
+// maxRelativeDateOffset bounds a relative date token's argument, as
+// entity-service's resolveRelativeDate and the webapp's resolver do. Without
+// it a huge argument overflows the date arithmetic and wraps to a date that
+// looks valid (__startOfYear:9223372036854775807__ gave 2024-12-31). Every
+// argument beyond it lands outside the years 0000-9999, which entity-service
+// rejects, so the bound refuses nothing that used to resolve there.
+const maxRelativeDateOffset = 4_000_000
+
+// relativeDateParts splits a generatedRelativeDate token into its name and
+// optional argument.
+var relativeDateParts = regexp.MustCompile(`^__([a-zA-Z]+)(?::(-?\d+))?__$`)
 
 // stringList is v as a list of strings; false when it is not one.
 func stringList(v any) ([]string, bool) {

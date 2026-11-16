@@ -237,6 +237,49 @@ func caseStateLookupKey(label string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(label)), "_", " ")
 }
 
+// caseStateInProgressLabel is the one label customers see for every state in
+// the in-progress family: Work In Progress, and Waiting On WSO2, which only
+// means the case is with the support team. Customers act on Awaiting Info, so
+// the split between the other two tells them nothing and moving a case
+// between them would read as a status change that did not happen. The real
+// states are untouched in entity-service and in every internal view; this only
+// changes what the portal returns.
+const caseStateInProgressLabel = "In Progress"
+
+// caseStateInProgressID is the id the merged state travels under: Work In
+// Progress's own, so a client that already filters or compares on it keeps
+// working.
+const caseStateInProgressID = "10"
+
+// caseStateWaitingOnWSO2 is the domain enum for a case waiting on WSO2.
+const caseStateWaitingOnWSO2 = "waiting_on_wso2"
+
+// caseStateWorkInProgress is the domain enum for a case in progress.
+const caseStateWorkInProgress = "work_in_progress"
+
+// isInProgressFamily reports whether a domain enum is shown to customers as
+// the merged In Progress state.
+func isInProgressFamily(enum string) bool {
+	return enum == caseStateWorkInProgress || enum == caseStateWaitingOnWSO2
+}
+
+// inProgressFamilyFromText reports whether a state given as display text or
+// enum ("Waiting on WSO2", "work_in_progress") belongs to the merged state.
+func inProgressFamilyFromText(text string) bool {
+	enum, ok := caseStateLabelWords[caseStateLookupKey(text)]
+	return ok && isInProgressFamily(enum)
+}
+
+// inProgressStateText returns the merged label for a state given as display
+// text or enum when it belongs to the in-progress family, and the text
+// unchanged otherwise.
+func inProgressStateText(text string) string {
+	if inProgressFamilyFromText(text) {
+		return caseStateInProgressLabel
+	}
+	return text
+}
+
 // caseStateClosed is entity-service's domain enum for a closed case — the key
 // caseStateIDs, caseStateLabelWords, and caseStateDisplayLabels all agree on.
 const caseStateClosed = "closed"
@@ -273,6 +316,9 @@ func caseStatusRef(label string) *IDLabelRef {
 	// multi-word state and returned an empty id. Normalising underscores to
 	// spaces lets the one table match both forms.
 	if enum, ok := caseStateLabelWords[caseStateLookupKey(label)]; ok {
+		if isInProgressFamily(enum) {
+			return &IDLabelRef{ID: caseStateInProgressID, Label: caseStateInProgressLabel}
+		}
 		return &IDLabelRef{ID: caseStateIDs[enum], Label: displayLabelOr(caseStateDisplayLabels, enum)}
 	}
 	return &IDLabelRef{Label: displayLabelOr(caseStateDisplayLabels, label)}
@@ -444,8 +490,65 @@ func normalizeCaseSeverityChoices(items []ReferenceItem) []ReferenceItem {
 // case_state_enum's labels are the UPPER_SNAKE form of the domain values, so
 // lower-casing is the whole conversion -- no lookup table is needed for that
 // half.
+//
+// Work In Progress and Waiting On WSO2 are folded into the single In Progress
+// entry (see caseStateInProgressLabel), their counts added, so a filter list
+// or stat grid never shows the two as separate states.
 func normalizeCaseStateChoices(items []ReferenceItem) []ReferenceItem {
-	return normalizeChoices(items, nil, caseStateIDs, caseStateDisplayLabels)
+	normalized := normalizeChoices(items, nil, caseStateIDs, caseStateDisplayLabels)
+	waitingID := caseStateIDs[caseStateWaitingOnWSO2]
+	out := make([]ReferenceItem, 0, len(normalized))
+	merged := -1
+	for _, item := range normalized {
+		if item.ID != caseStateInProgressID && item.ID != waitingID {
+			out = append(out, item)
+			continue
+		}
+		if merged < 0 {
+			merged = len(out)
+			out = append(out, ReferenceItem{ID: caseStateInProgressID, Label: caseStateInProgressLabel, Count: item.Count})
+			continue
+		}
+		out[merged].Count = addCounts(out[merged].Count, item.Count)
+	}
+	return out
+}
+
+// addCounts adds two optional counts, staying nil only when neither is set.
+func addCounts(a, b *int) *int {
+	if a == nil && b == nil {
+		return nil
+	}
+	total := 0
+	if a != nil {
+		total += *a
+	}
+	if b != nil {
+		total += *b
+	}
+	return &total
+}
+
+// expandInProgressStateIDs adds Waiting On WSO2's id whenever the In Progress
+// id is selected, because customers filter on the merged state but the two
+// are still separate states underneath: without this a filter on In Progress
+// would miss every case that is waiting on WSO2.
+func expandInProgressStateIDs(ids []int) []int {
+	inProgress, _ := strconv.Atoi(caseStateInProgressID)
+	waiting, _ := strconv.Atoi(caseStateIDs[caseStateWaitingOnWSO2])
+	hasInProgress, hasWaiting := false, false
+	for _, id := range ids {
+		switch id {
+		case inProgress:
+			hasInProgress = true
+		case waiting:
+			hasWaiting = true
+		}
+	}
+	if hasInProgress && !hasWaiting {
+		return append(append([]int(nil), ids...), waiting)
+	}
+	return ids
 }
 
 // normalizeCaseIssueTypeChoices is normalizeCaseSeverityChoices for issue

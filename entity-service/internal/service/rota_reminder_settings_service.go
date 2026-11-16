@@ -127,10 +127,10 @@ func (s *rotaReminderSettingsService) Save(ctx context.Context, family string, r
 	if err != nil {
 		return domain.RotaReminderSettings{}, err
 	}
-	// A card from before the per-rotation switches and the weekend copies
-	// sends neither: keep what is stored rather than turning every rotation's
-	// invitations back on or dropping the weekend copies.
-	if req.InviteRotations == nil || req.WeekendCopyTo == nil {
+	// A card from before the per-rotation switches and the weekend and
+	// invitation copies does not send them: keep what is stored rather than
+	// turning every rotation's invitations back on or dropping the copies.
+	if req.InviteRotations == nil || req.WeekendCopyTo == nil || req.InviteCopyTo == nil {
 		stored, err := s.repo.Get(ctx, f)
 		if err != nil {
 			return domain.RotaReminderSettings{}, err
@@ -140,6 +140,9 @@ func (s *rotaReminderSettingsService) Save(ctx context.Context, family string, r
 		}
 		if stored != nil && req.WeekendCopyTo == nil {
 			settings.WeekendCopyTo = stored.WeekendCopyTo
+		}
+		if stored != nil && req.InviteCopyTo == nil {
+			settings.InviteCopyTo = stored.InviteCopyTo
 		}
 	}
 	return s.repo.Save(ctx, actor, settings)
@@ -164,6 +167,7 @@ func validRotaReminderSettings(family string, req domain.SaveRotaReminderSetting
 		InviteRotations: map[string]bool{},
 		CopyTo:          []string{},
 		WeekendCopyTo:   []string{},
+		InviteCopyTo:    []string{},
 	}
 	if len(req.WeekendRequired) > maxReminderSettingEntries {
 		return bad("weekendRequired has more than %d shifts", maxReminderSettingEntries)
@@ -213,6 +217,9 @@ func validRotaReminderSettings(family string, req domain.SaveRotaReminderSetting
 		return domain.RotaReminderSettings{}, err
 	}
 	if out.WeekendCopyTo, err = reminderAddresses("weekendCopyTo", req.WeekendCopyTo); err != nil {
+		return domain.RotaReminderSettings{}, err
+	}
+	if out.InviteCopyTo, err = reminderAddresses("inviteCopyTo", req.InviteCopyTo); err != nil {
 		return domain.RotaReminderSettings{}, err
 	}
 	return out, nil

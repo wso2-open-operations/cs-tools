@@ -47,6 +47,9 @@ const maxResponseBytes = 8 << 20
 // Report is the long-open cases report as entity-service returns it: two
 // tables, oldest first, each capped by entity-service.
 type Report struct {
+	// Variant is set by entity-service on a variant report (for example
+	// "open-before-yesterday") and empty on the default age-based report.
+	Variant       string    `json:"variant"`
 	GeneratedAt   time.Time `json:"generatedAt"`
 	OlderThanDays int       `json:"olderThanDays"`
 	CreatedBefore time.Time `json:"createdBefore"`
@@ -65,8 +68,12 @@ type Report struct {
 
 // Row is one long-open case.
 type Row struct {
+	// ID is the case's UUID, the identifier the CSM portal's case page opens by.
+	ID     string `json:"id"`
 	Number string `json:"number"`
-	// InternalID is the case's internal identifier; empty when it has none.
+	// InternalID is the case's secondary reference (a short key such as
+	// ABC-1); empty when it has none. Display only: the portal cannot open a
+	// case by it.
 	InternalID string    `json:"internalId"`
 	CreatedOn  time.Time `json:"createdOn"`
 	UpdatedOn  time.Time `json:"updatedOn"`
@@ -78,6 +85,12 @@ type Row struct {
 	AssignedEngineer string `json:"assignedEngineer"`
 	// CsTeam is the name of the CS team that owns the case's account.
 	CsTeam string `json:"csTeam"`
+	// AccountName is the name of the case's account; empty when absent.
+	AccountName string `json:"accountName"`
+	// Type is the case's type (case, service_request or
+	// security_report_analysis). Only the open-before-yesterday variant sends
+	// it; empty otherwise.
+	Type string `json:"type"`
 }
 
 // Config is the entity-service connection: the same OAuth client credentials
@@ -127,7 +140,30 @@ func NewClient(cfg Config) (*Client, error) {
 func (c *Client) Report(ctx context.Context, olderThanDays int) (Report, error) {
 	q := url.Values{}
 	q.Set("olderThanDays", strconv.Itoa(olderThanDays))
+	return c.fetch(ctx, q)
+}
 
+// OpenBeforeYesterday fetches the "open-before-yesterday" variant: every case
+// still in the open state that was created before the start of yesterday, as
+// entity-service reckons the day (in the team's time zone). The cases are in
+// Report.Cases, oldest first; the variant has no onboarding table.
+func (c *Client) OpenBeforeYesterday(ctx context.Context) (Report, error) {
+	q := url.Values{}
+	q.Set("variant", "open-before-yesterday")
+	rep, err := c.fetch(ctx, q)
+	if err != nil {
+		return Report{}, err
+	}
+	// An entity-service that predates the variant ignores the parameter and
+	// answers with the age-based report. Mailing that to this report's
+	// audience would be wrong, so refuse it.
+	if rep.Variant != "open-before-yesterday" {
+		return Report{}, fmt.Errorf("longopenreport: entity-service answered variant %q, not open-before-yesterday (deploy entity-service first)", rep.Variant)
+	}
+	return rep, nil
+}
+
+func (c *Client) fetch(ctx context.Context, q url.Values) (Report, error) {
 	endpoint := c.baseURL + "/reports/long-open-cases?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

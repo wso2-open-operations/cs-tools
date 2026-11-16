@@ -17,9 +17,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
 )
 
 func acpDate(s string) *time.Time {
@@ -38,7 +41,7 @@ func TestACPDaysBetween_MatchesTheSweep(t *testing.T) {
 		end  string
 		want int
 	}{
-		{"2026-10-29", 0},  // today, already started: suspended
+		{"2026-10-29", 0},  // today: not past, so ACP does not suspend yet
 		{"2026-10-30", 1},  // tomorrow: still a day left
 		{"2026-10-28", -1}, // yesterday
 		{"2027-01-10", 73},
@@ -193,5 +196,41 @@ func TestACPInvoiceTrackClear(t *testing.T) {
 	}
 	if !acpInvoiceTrackClear(now, []acpInvoice{grace}, nil, true, true) {
 		t.Error("primary partner grace period: still within it, should be clear")
+	}
+}
+
+// The reopen decision at the suspension boundary, on both tracks: a track is
+// clear (may reopen) on the date itself and before it, and not clear once the
+// date is past, matching the ACP rule of suspending only below 0 days.
+func TestACPReopen_SuspensionBoundary(t *testing.T) {
+	now := time.Date(2026, 10, 29, 9, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		date string
+		days int
+		want bool
+	}{
+		{"yesterday", "2026-10-28", -1, false},
+		{"today", "2026-10-29", 0, true},
+		{"tomorrow", "2026-10-30", 1, true},
+	}
+	for _, c := range cases {
+		t.Run("end date "+c.name, func(t *testing.T) {
+			if got := acpDaysBetween(now, *acpDate(c.date)); got != c.days {
+				t.Fatalf("daysBetween = %d, want %d", got, c.days)
+			}
+			svc := &ACPReopen{}
+			sp := salesentity.Project{EndDate: acpStr(c.date)}
+			if got := svc.endDateClear(context.Background(), "p", sp, now); got != c.want {
+				t.Errorf("endDateClear(%s) = %v, want %v", c.date, got, c.want)
+			}
+		})
+		t.Run("invoice "+c.name, func(t *testing.T) {
+			// No grace period: the suspend date is the due date.
+			inv := acpInvoice{InvoiceDate: acpDate("2026-08-01"), DueDate: acpDate(c.date), EULAVersion: 3.4}
+			if got := acpInvoiceTrackClear(now, []acpInvoice{inv}, nil, false, false); got != c.want {
+				t.Errorf("invoiceTrackClear(due %s) = %v, want %v", c.date, got, c.want)
+			}
+		})
 	}
 }

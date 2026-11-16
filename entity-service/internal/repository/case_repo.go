@@ -223,6 +223,34 @@ func announcementLeakGuardFor(scope SearchScope) string {
 	return announcementVisibilityLeakGuard
 }
 
+// caseLikeSeverityColumn is the internal severity of a case-like work item:
+// "case".severity, or service_request.severity (migration 0276) for a service
+// request -- at most one of the two rows exists. Only a caller that may see a
+// service request's severity reads it through this; everyone else reads
+// "case".severity alone (see severityColumnFor), so a service request's
+// severity cannot be read, filtered on, sorted by or counted by an external
+// caller.
+const caseLikeSeverityColumn = `COALESCE(c.severity, sr.severity)`
+
+// severityColumnFor is the severity column expression (enum typed, over the
+// case search joins) a query made on behalf of scope may use. A service
+// request's severity is internal-only: it is part of the expression only for an
+// internal caller that did not arrive through the customer portal's backend
+// (an internal user acting through that portal sees what a customer sees).
+func severityColumnFor(scope SearchScope) string {
+	if scope.canSeeServiceRequestSeverity() {
+		return caseLikeSeverityColumn
+	}
+	return "c.severity"
+}
+
+// canSeeServiceRequestSeverity reports whether the caller may read or filter on
+// a service request's internal severity: an internal scope that is not routed
+// through the customer portal.
+func (s SearchScope) canSeeServiceRequestSeverity() bool {
+	return s.Unrestricted && !s.ViaCustomerPortal
+}
+
 // caseLikeStateColumns COALESCEs state across every case-like work_item
 // extension table (aliased c/eng/sr/sra/ann) -- exactly one is non-null for
 // a given row, since each is a shared-PK extension keyed to a specific
@@ -434,7 +462,8 @@ type CaseRepository interface {
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope SearchScope) ([]domain.SearchCaseView, int, error)
 	// AggregateCases counts the cases matching req's filters per value of
 	// groupBy (state, severity, type, engagementType, issueType, workState,
-	// account), largest bucket first. Rows with no value for the field are
+	// account, product, productVersion, project, region), largest bucket
+	// first. Rows with no value for the field are
 	// not counted. The caller applies any top-N cap.
 	AggregateCases(ctx context.Context, req domain.SearchCasesRequest, groupBy string, scope SearchScope) ([]domain.AggregateBucket, error)
 	// CaseVolumeTrend computes the opened and closed counts for each of the
@@ -491,35 +520,6 @@ type CaseRepository interface {
 	// transition AWAY from closed clears closed_by_user_id back to NULL,
 	// mirroring closed_on's own existing clear-on-reopen behaviour.
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest, actorID *string) (c domain.Case, previousSeverity *domain.CaseSeverity, previousState *domain.CaseState, err error)
-	// CreateCaseAttachment inserts a new attachment metadata row for the case
-	// identified by req.ReferenceID. req.StorageKey must be non-nil: this data
-	// source stores file bytes externally in SFTPGo, never inline in Postgres.
-	// Returns a ValidationError if req.ReferenceID does not match an existing case.
-	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error)
-	// CreateCaseAttachmentFromServiceNow inserts a new attachment metadata row
-	// for DATA_SOURCE=postgres-servicenow-dual-write, whose file bytes live
-	// only in ServiceNow (SFTPGo is never used in this mode). Unlike
-	// CreateCaseAttachment, the row's identity is NOT generated here: id is
-	// the caller-supplied sysidToUUID(the real ServiceNow attachment sys_id)
-	// -- the same "ServiceNow decides identity, Postgres mirrors it"
-	// convention CreateCaseFromServiceNow/CreateDeploymentFromServiceNow use.
-	// storage_key is always NULL (see migration 0185's own comment) and
-	// status is always 'complete': ServiceNow's attachment upload is
-	// synchronous, there is no pending/in-progress state to track.
-	// uploadedBy must be an existing user.id (the resolved actor, not a raw
-	// ServiceNow identity string) -- unlike deployment.created_by/
-	// deployment_product.created_by, case_attachment.uploaded_by is a real
-	// FK to "user"(id).
-	//
-	// created_on is deliberately NOT a parameter: it takes the column default,
-	// the database's own clock. ServiceNow's attachment-create reply carries a
-	// zone-less "YYYY-MM-DD HH:MM:SS" createdOn that is not UTC (it is rendered
-	// in a ServiceNow-side timezone), so storing it -- as this method used to --
-	// wrote local wall-clock time into a timestamptz as if it were UTC and put
-	// the row hours in the future. The clock here is the same one the plain
-	// CreateCaseAttachment path uses, and sits within the create call's latency
-	// of the moment ServiceNow accepted the file.
-	CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error)
 	// SearchCaseAttachments returns a paginated slice of attachments for the given
 	// case, most recently created first, together with the total matching count.
 	SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
@@ -532,26 +532,12 @@ type CaseRepository interface {
 	// "deployment", which is not a work_item subtype) returns a
 	// ValidationError.
 	SearchWorkItemAttachments(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
-	// GetCaseAttachmentByID returns the attachment identified by id.
-	// Returns a NotFoundError if no matching row exists.
-	GetCaseAttachmentByID(ctx context.Context, id string) (domain.Attachment, error)
-	// DeleteCaseAttachment permanently removes the attachment metadata row
-	// identified by id. It does not delete the backing SFTPGo file -- that
-	// remains the downstream CSM backend's responsibility.
-	// Returns a NotFoundError if no matching row exists.
-	DeleteCaseAttachment(ctx context.Context, id string) error
-	// UpdateCaseAttachmentName renames the attachment identified by id and
-	// records who did it. Returns a NotFoundError if no matching row exists.
-	UpdateCaseAttachmentName(ctx context.Context, id, name, updatedBy string) (updatedOn time.Time, err error)
-	// ConfirmCaseAttachment atomically transitions the attachment identified
-	// by id from status 'pending' to 'complete'. The WHERE clause's
-	// "AND status = 'pending'" guard is the concurrency safety net: if two
-	// confirm calls race, only one affects a row. Returns a ConflictError
-	// (not a silent no-op) if the row is not currently 'pending' -- including
-	// when it doesn't exist, since by the time this is called the caller has
-	// already resolved the row via GetCaseAttachmentByID and any mismatch
-	// here means it changed state concurrently.
-	ConfirmCaseAttachment(ctx context.Context, id string) (domain.Attachment, error)
+	// SearchDeploymentAttachments returns a paginated slice of attachment metadata
+	// for a deployment, most recently created first, together with the total
+	// matching count. Backed by deployment_attachment, whose row-level security
+	// (migration 100026) scopes the result to the caller's projects. A deployment
+	// with no attachments yields an empty slice and total 0, never an error.
+	SearchDeploymentAttachments(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	// AddCaseTag finds or creates a tag named label (case-insensitively) and
 	// attaches it to the case's underlying work_item, unless it is already
 	// attached (idempotent: a second call for an already-attached label
@@ -762,7 +748,7 @@ type CaseRepository interface {
 	MarkCaseFixIssued(ctx context.Context, caseID string) (fixIssued time.Time, alreadySet bool, err error)
 	// SearchCaseActivities returns a paginated, newest-first feed combining
 	// the case's comments (comment, migration 0040) and complete
-	// attachments (case_attachment, migration 0106) into one merged
+	// attachments (work_item_attachment) into one merged
 	// timeline, together with the total matching count. There is no
 	// field-change audit table in this schema, so entries of that kind are
 	// never produced regardless of req.IncludeFieldChanges -- an absent
@@ -808,12 +794,17 @@ func NewCaseRepository(db *Scoped, vis ...CRVisibility) CaseRepository {
 //
 // work_item.number (every type) and wso2_id (the five case-like types all
 // require one, per work_item_wso2_id_required_by_type) come from
-// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140),
-// which resolves the product decision this method used to defer (see
-// CLAUDE.md, "CreateCase and case numbers"): a portal-created record gets a
-// visually distinct number/id rather than one drawn from the same series
-// ServiceNow's still-running sync allocates from, so the two can never
-// collide. service_request/engagement/security_report_analysis/announcement
+// next_work_item_number()/next_wso2_id() (migration 0180): the same
+// "CS0000123" / "<project key>-<n>" format ServiceNow allocates, so a
+// portal-created record looks like a synced one. These replaced
+// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140,
+// "CS-PORTAL-..." / "<key>-PORTAL-<n>"). The series start at 1, so
+// cs_number_seq and each project's wso2_id_counter MUST be seeded past the
+// highest synced value (scripts/cutover/seed_native_numbering.sql) before this
+// is deployed to a database, and this must only be deployed once ServiceNow
+// has stopped allocating from the same series, or a number issued here can
+// later be issued by ServiceNow too (CLAUDE.md, "CreateCase and case
+// numbers"). service_request/engagement/security_report_analysis/announcement
 // were previously rejected outright on this data source
 // (caseService.CreateCase's own "supported only for dual-write" check,
 // updated alongside this) purely because this method had nowhere to write
@@ -890,7 +881,7 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 		row = tx.QueryRow(ctx, createServiceRequestPortalQuery,
 			req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
 			req.Subject, req.Description,
-			req.ConversationID,
+			req.ConversationID, caseSeverityToEnum[req.Severity],
 		)
 	case "engagement":
 		row = tx.QueryRow(ctx, createEngagementPortalQuery,
@@ -923,7 +914,74 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 	if err := restore(ctx); err != nil {
 		return domain.Case{}, err
 	}
+	// The draft files uploaded before this case (a security report's report) are
+	// linked in THIS transaction: if any of them was taken since the service checked
+	// it (a second create naming the same file), the whole create rolls back, so a
+	// case never exists without the files it was created with.
+	if err := linkReportDraftsTx(ctx, tx, c.ID, req.ProjectID, req.ReportDraftOwnerEmail, req.AttachmentIDs); err != nil {
+		return domain.Case{}, err
+	}
 	return c, nil
+}
+
+// reportDraftsTakenMessage is what a create naming a file that is no longer a usable draft is told.
+const reportDraftsTakenMessage = "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, or is already used by another record."
+
+// linkReportDraftsTx links the drafts in ids to the work item just inserted in tx, or
+// fails if it cannot link every one of them. The UPDATE is the guard and the lock: it
+// only takes a row that is still a COMPLETE draft of this project uploaded by email,
+// and a concurrent create naming the same file waits on the row, then finds it taken
+// (READ COMMITTED re-checks the WHERE) and links nothing. UPDATE on the table is
+// internal-only, so the transaction is marked internal for this one statement (the
+// ownership checks are explicit in the WHERE) and the caller's own value is put back.
+func linkReportDraftsTx(ctx context.Context, tx pgx.Tx, workItemID, projectID, email string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[strings.ToLower(id)] = struct{}{}
+	}
+	var previous string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(current_setting('app.is_internal', true), '')`).Scan(&previous); err != nil {
+		return fmt.Errorf("link report drafts: read caller identity: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', 'true', true)`); err != nil {
+		return fmt.Errorf("link report drafts: mark internal: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		UPDATE work_item_attachment
+		SET work_item_id = $1::uuid, updated_on = now()
+		WHERE id = ANY($4::uuid[])
+		  AND project_id = $2::uuid
+		  AND work_item_id IS NULL
+		  AND status = 'COMPLETE'
+		  AND $3 <> ''
+		  AND lower(created_by) = lower($3)
+		RETURNING id::TEXT`, workItemID, projectID, email, ids)
+	if err != nil {
+		return fmt.Errorf("link report drafts: %w", err)
+	}
+	linked := 0
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("link report drafts: scan: %w", err)
+		}
+		linked++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("link report drafts: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', $1, true)`, previous); err != nil {
+		return fmt.Errorf("link report drafts: restore caller identity: %w", err)
+	}
+	if linked != len(want) {
+		return &apierror.ValidationError{Msg: reportDraftsTakenMessage}
+	}
+	return nil
 }
 
 // caseInsertsCheckedByProjectMembership are the case-like types whose
@@ -1007,7 +1065,7 @@ const createCasePortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
+		       next_work_item_number('CASE'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($9, '')::uuid
 		FROM creator
@@ -1044,7 +1102,7 @@ const createAnnouncementPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
+		       next_work_item_number('ANNOUNCEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
 		       $2::uuid, NULL, NULL, creator.id, p.account_id,
 		       NULLIF($6, '')::uuid
 		FROM creator
@@ -1083,7 +1141,7 @@ const createServiceRequestPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
+		       next_work_item_number('SERVICE_REQUEST'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($7, '')::uuid
 		FROM creator
@@ -1092,15 +1150,16 @@ const createServiceRequestPortalQuery = `
 		          subject, description, created_on, updated_on
 	),
 	inserted_service_request AS (
-		INSERT INTO service_request (id, state)
-		SELECT id, 'OPEN'::service_request_state_enum
+		INSERT INTO service_request (id, state, severity)
+		SELECT id, 'OPEN'::service_request_state_enum,
+		       COALESCE(NULLIF($8, '')::case_severity_enum, 'S4'::case_severity_enum)
 		FROM inserted_work_item
-		RETURNING id, state, closed_on
+		RETURNING id, state, severity, closed_on
 	)
 	SELECT iwi.id, iwi.number, iwi.wso2_id, iwi.created_by,
 	       iwi.project_id, iwi.deployment_id, iwi.deployed_product_id,
 	       iwi.subject, iwi.description,
-	       NULL::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
+	       isr.severity::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
 	       iwi.created_on, iwi.updated_on, isr.closed_on
 	FROM inserted_work_item iwi
 	JOIN inserted_service_request isr ON isr.id = iwi.id`
@@ -1123,7 +1182,7 @@ const createEngagementPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
+		       next_work_item_number('ENGAGEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($9, '')::uuid
 		FROM creator
@@ -1160,7 +1219,7 @@ const createSecurityReportAnalysisPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
+		       next_work_item_number('SECURITY_REPORT_ANALYSIS'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($7, '')::uuid
 		FROM creator
@@ -1199,7 +1258,11 @@ func mapCreateCaseError(err error) error {
 		switch pgErr.Code {
 		case "23503": // foreign_key_violation -- one of the referenced IDs does not exist
 			return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority) and from next_portal_wso2_id when project_id doesn't exist
+		// raise_exception from integrity triggers (deployment/project,
+		// deployed_product/deployment, catastrophic priority) and from
+		// next_wso2_id when project_id doesn't exist; the caller then sees
+		// "next_wso2_id: no project with id <id>" (migration 0180).
+		case "P0001":
 			return &apierror.ValidationError{Msg: pgErr.Message}
 		}
 	}
@@ -1347,14 +1410,15 @@ const createServiceRequestFromServiceNowQuery = `
 		          subject, description, created_on, updated_on
 	),
 	inserted_service_request AS (
-		INSERT INTO service_request (id, state)
-		VALUES ($1, $10::service_request_state_enum)
-		RETURNING id, state, closed_on
+		INSERT INTO service_request (id, state, severity)
+		VALUES ($1, $10::service_request_state_enum,
+		        COALESCE(NULLIF($12, '')::case_severity_enum, 'S4'::case_severity_enum))
+		RETURNING id, state, severity, closed_on
 	)
 	SELECT iwi.id, iwi.number, iwi.wso2_id, iwi.created_by,
 	       iwi.project_id, iwi.deployment_id, iwi.deployed_product_id,
 	       iwi.subject, iwi.description,
-	       NULL::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
+	       isr.severity::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
 	       iwi.created_on, iwi.updated_on, isr.closed_on
 	FROM inserted_work_item iwi
 	JOIN inserted_service_request isr ON isr.id = iwi.id`
@@ -1618,7 +1682,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, deploymentIDArg, deployedProductIDArg,
 			state,
-			conversationIDArg,
+			conversationIDArg, caseSeverityToEnum[req.Severity],
 		)
 	case "engagement":
 		row = r.db.QueryRow(ctx, createEngagementFromServiceNowQuery,
@@ -1743,7 +1807,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 
 	err := r.db.QueryRow(ctx,
 		`SELECT wi.id, wi.number, wi.wso2_id, wi.type::TEXT, ann.announcement_type::TEXT, eng.type::TEXT, eng.payment_type::TEXT,
-		        wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeWorkStateColumn+`,
+		        wi.description, `+severityColumnFor(scope)+`::TEXT, c.issue_type::TEXT, `+caseLikeWorkStateColumn+`,
 		        `+caseLikeStateColumn+`, `+caseLikeCauseColumn+`, `+caseLikeCloseNotesColumn+`,
 		        `+caseLikeResolutionCodeColumn+`, c.current_escalation_level::TEXT, c.is_escalated,
 		        wi.created_on, wi.updated_on, `+caseLikeClosedOnColumn+`, `+caseLikeResolvedOnColumn+`,
@@ -2534,6 +2598,31 @@ const updateServiceRequestQuery = `
 	FROM updated_work_item uwi
 	JOIN updated_sr usr ON usr.id = uwi.id`
 
+// updateServiceRequestSeverityQuery writes a service request's severity ($2, an
+// S1-S4 label already mapped by UpdateCase) and nothing else, and bumps
+// work_item.updated_on like every other case-like update. Same output shape as
+// updateServiceRequestQuery, with the severity filled in.
+const updateServiceRequestSeverityQuery = `
+	WITH updated_sr AS (
+		UPDATE service_request
+		SET severity = $2::case_severity_enum
+		WHERE id = $1
+		RETURNING id, severity, state, work_state, closed_on, resolved_on
+	),
+	updated_work_item AS (
+		UPDATE work_item
+		SET updated_on = NOW()
+		WHERE id = $1 AND EXISTS (SELECT 1 FROM updated_sr)
+		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
+		          subject, description, created_on, updated_on
+	)
+	SELECT uwi.id, uwi.number, uwi.wso2_id, uwi.created_by, uwi.project_id, uwi.deployment_id, uwi.deployed_product_id,
+	       uwi.subject, uwi.description,
+	       usr.severity::TEXT, NULL::TEXT, usr.state::TEXT, usr.work_state::TEXT,
+	       uwi.created_on, uwi.updated_on, usr.closed_on, usr.resolved_on
+	FROM updated_work_item uwi
+	JOIN updated_sr usr ON usr.id = uwi.id`
+
 const updateEngagementQuery = `
 	WITH updated_eng AS (
 		UPDATE engagement
@@ -2601,13 +2690,23 @@ const updateAnnouncementQuery = `
 // validateUpdateCaseFieldsForType rejects fields the work item's type has no
 // column for, and restricts announcement state to "open" or "closed".
 //
-// severity is "case"-only. workState and resolutionCode are on every
+// severity is on "case" and service_request. workState and resolutionCode are on every
 // case-like type except announcement (migration 0184), matching ServiceNow,
 // where u_work_state and resolution_code live on the one case table that
 // holds all of these types.
 func validateUpdateCaseFieldsForType(workItemType string, req domain.UpdateCaseRequest, state string) error {
-	if workItemType != "CASE" && req.Severity != nil {
-		return &apierror.ValidationError{Msg: "severity is only supported for cases"}
+	// A service request's severity is internal: only caseService's own
+	// service-request path (which checks the caller) sets this flag. Any other
+	// route here -- including a record whose work_item.type disagrees with its
+	// extension row, so the service took it for a case -- is refused.
+	if workItemType == "SERVICE_REQUEST" && req.Severity != nil && !req.InternalSeverityWrite {
+		return &apierror.ValidationError{Msg: "a service request's severity can only be changed by an internal user"}
+	}
+	if workItemType != "CASE" && workItemType != "SERVICE_REQUEST" && req.Severity != nil {
+		return &apierror.ValidationError{Msg: "severity is only supported for cases and service requests"}
+	}
+	if workItemType == "SERVICE_REQUEST" && req.Severity != nil && *req.Severity == domain.CaseSeverityCatastrophic {
+		return &apierror.ValidationError{Msg: "severity catastrophic is not allowed for a service request"}
 	}
 	if workItemType == "ANNOUNCEMENT" {
 		if req.WorkState != nil {
@@ -2895,6 +2994,34 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 		return c, previousSeverity, nil, nil
 
 	default:
+		// A service request's severity: lock the row so the previous value is
+		// accurate under a concurrent update, then write only the severity.
+		// The caller (caseService.UpdateCase) has already refused an external
+		// caller and sends severity alone: it is exclusive of every other field.
+		if workItemType == "SERVICE_REQUEST" && req.Severity != nil {
+			var c domain.Case
+			var previousRaw *string
+			err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(ctx, `SELECT severity::TEXT FROM service_request WHERE id = $1 FOR UPDATE`, req.ID).Scan(&previousRaw); err != nil {
+					return err
+				}
+				var txErr error
+				c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateServiceRequestSeverityQuery, req.ID, severity))
+				return txErr
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.Case{}, nil, nil, &apierror.NotFoundError{Msg: "case not found"}
+			}
+			if err != nil {
+				return domain.Case{}, nil, nil, fmt.Errorf("update case: service request severity: %w", err)
+			}
+			var previous *domain.CaseSeverity
+			if previousRaw != nil {
+				sv := caseSeverityFromEnum[*previousRaw]
+				previous = &sv
+			}
+			return c, previous, nil, nil
+		}
 		query, args, label, ok := caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)
 		if !ok {
 			return domain.Case{}, nil, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
@@ -2918,172 +3045,44 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 	}
 }
 
-// CreateCaseAttachment implements CaseRepository.
-func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error) {
-	// The EXISTS is the check the table's old foreign key to "case"(id) used to make
-	// for free: only a case-like work item (never an announcement, a change request,
-	// an incident...) owns an attachment. The key now points at work_item (migration
-	// 0210) so a case that changes type keeps its attachments, which makes this
-	// the only thing keeping the narrower rule. A non-matching id inserts nothing.
-	const query = `
-		INSERT INTO case_attachment (case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status)
-		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::bigint, $6::text, $7::uuid, $8::text
-		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $1::uuid AND w.type = ANY(` + caseLikeNonAnnouncementTypes + `))
-		RETURNING id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
-
-	var (
-		a            domain.Attachment
-		storageKey   string
-		uploadedByID string
-	)
-	err := r.db.QueryRow(ctx, query,
-		req.ReferenceID, req.StorageKey, req.Name, req.Type, req.SizeBytes, req.Description, req.CreatedBy, req.Status,
-	).Scan(
-		&a.ID, &a.ReferenceID, &storageKey, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
-		&uploadedByID, &a.CreatedOn, &a.Status,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// No case-like work item with this id (see the EXISTS above) -- the same
-		// answer the foreign key gave for an id that is not a case.
-		return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist"}
-	}
-	if err != nil {
-		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23503": // foreign_key_violation — case_id or uploaded_by does not exist
-				return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-			case "23514": // check_violation — e.g. size_bytes <= 0 or an invalid status
-				return domain.Attachment{}, &apierror.ValidationError{Msg: pgErr.Message}
-			}
-		}
-		return domain.Attachment{}, fmt.Errorf("create case attachment: %w", err)
-	}
-	a.ReferenceType = domain.ReferenceTypeCase
-	a.StorageKey = &storageKey
-	// The insert returns only the uploader's id; email and display name would
-	// need a further join, so the reference carries the id alone, same as
-	// CreateCaseComment above.
-	a.CreatedBy = domain.NewUserReference(uploadedByID, "", "")
-	return a, nil
-}
-
-// CreateCaseAttachmentFromServiceNow implements CaseRepository. See the
-// interface doc comment for the identity/storage_key/status conventions this
-// follows -- id is supplied by the caller (ServiceNow's own attachment
-// sys_id, converted), not generated, and storage_key is always NULL.
-func (r *caseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
-	// Same case-like-only rule as CreateCaseAttachment, for the same reason.
-	// created_on is left out so the column default (NOW()) applies -- see the
-	// interface doc comment for why ServiceNow's own createdOn is not used.
-	const query = `
-		INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status)
-		SELECT $1::uuid, $2::uuid, NULL, $3::text, $4::text, $5::bigint, $6::text, $7::uuid, 'complete'
-		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $2::uuid AND w.type = ANY(` + caseLikeNonAnnouncementTypes + `))
-		RETURNING id, case_id, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
-
-	var (
-		a            domain.Attachment
-		uploadedByID string
-	)
-	err := r.db.QueryRow(ctx, query,
-		id, req.ReferenceID, req.Name, req.Type, sizeBytes, req.Description, uploadedBy,
-	).Scan(
-		&a.ID, &a.ReferenceID, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
-		&uploadedByID, &a.CreatedOn, &a.Status,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist"}
-	}
-	if err != nil {
-		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23505": // unique_violation -- id already exists (e.g. a retried mirror write)
-				return domain.Attachment{}, &apierror.ValidationError{Msg: "an attachment with this identity already exists"}
-			case "23503": // foreign_key_violation -- case_id or uploaded_by does not exist
-				return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-			case "23514": // check_violation -- e.g. size_bytes <= 0
-				return domain.Attachment{}, &apierror.ValidationError{Msg: pgErr.Message}
-			}
-		}
-		return domain.Attachment{}, fmt.Errorf("create case attachment from servicenow: %w", err)
-	}
-	a.ReferenceType = domain.ReferenceTypeCase
-	// storage_key is never set for a ServiceNow-sourced row -- its bytes live
-	// in ServiceNow, addressed by this row's own id (see uuidToSysid), not by
-	// a storage_key. Left nil, same zero value SearchCaseAttachments/
-	// GetCaseAttachmentByID now return for any row with a NULL storage_key.
-	a.CreatedBy = domain.NewUserReference(uploadedByID, "", "")
-	return a, nil
-}
-
-// ConfirmCaseAttachment implements CaseRepository.
-func (r *caseRepo) ConfirmCaseAttachment(ctx context.Context, id string) (domain.Attachment, error) {
-	const query = `
-		UPDATE case_attachment
-		SET status = 'complete', updated_on = NOW()
-		WHERE id = $1 AND status = 'pending'
-		RETURNING id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
-
-	var (
-		a            domain.Attachment
-		storageKey   string
-		uploadedByID string
-	)
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&a.ID, &a.ReferenceID, &storageKey, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
-		&uploadedByID, &a.CreatedOn, &a.Status,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Attachment{}, &apierror.ConflictError{Msg: "attachment is not pending (it may already be confirmed, or was confirmed/deleted concurrently)"}
-	}
-	if err != nil {
-		return domain.Attachment{}, fmt.Errorf("confirm case attachment: %w", err)
-	}
-	a.ReferenceType = domain.ReferenceTypeCase
-	a.StorageKey = &storageKey
-	a.CreatedBy = domain.NewUserReference(uploadedByID, "", "")
-	return a, nil
-}
-
 // SearchCaseAttachments implements CaseRepository.
 //
-// Returns the case's native uploads (case_attachment) and its synced
-// attachments (work_item_attachment) as one list, ordered newest first with
-// the id as a stable tiebreaker. Both queries read the same UNION ALL, so the
-// total and the page rows always agree.
+// Returns the case's attachments from work_item_attachment, ordered newest first
+// with the id as a stable tiebreaker. The older case_attachment table is not
+// read: nothing writes it any more, so a file that exists only there is not
+// listed. Before this runs against a database, check that no complete
+// case_attachment row lacks a work_item_attachment row of the same id (the SQL
+// is in the pull request), and copy any that do. Both queries read the same
+// SELECT, so the total and the page rows always agree.
 //
-// Native rows keep the status = 'complete' filter -- see the doc comment on
-// CaseService.SearchCaseAttachments for why pending (still-uploading) rows are
-// excluded from the default list/search response rather than shown with a
-// visible status. A synced row is skipped while PENDING, and when
-// case_attachment already holds the same id: a dual-write upload is mirrored
-// into case_attachment under the backing data source's own attachment
-// identity, which is also the id the sync gives its work_item_attachment row,
-// so the two tables describe one file and it must show once (same rule as the
-// activity feed, see SearchCaseActivities).
+// A row is skipped while PENDING, and when it is failed, deleted or still
+// uploading (listedStoredAttachmentSQL). A caller allowed to see deleted
+// attachments can ask for ONLY those instead (WithDeletedAttachmentsOnly): the
+// list, its total and its paging are then all about deleted rows, so the two
+// lists never mix.
 //
-// The synced side is joined to work_item so that work_item's row-level
-// security scopes it like every other work item read. Its uploader is matched
-// to a user by email with a LATERAL ... LIMIT 1 ("user".email has no unique
+// The rows are joined to work_item so that work_item's row-level security
+// scopes them like every other work item read. The uploader is matched to a
+// user by email with a LATERAL ... LIMIT 1 ("user".email has no unique
 // constraint, so a plain join would fan one attachment into several rows
 // while the count still counted it once); an unmatched uploader is still
-// returned, carrying only the email. Synced rows have no storage key.
+// returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
-	const combined = `
-		SELECT ca.id, ca.case_id AS reference_id, ca.filename AS name, ca.mime_type AS content_type,
-		       ca.size_bytes::bigint AS size_bytes, ca.description::text AS description,
-		       u.id::text AS uploader_id, u.email::text AS uploader_email,
-		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), '') AS uploader_name,
-		       ca.created_on, ca.storage_key::text AS storage_key, ca.status::text AS status
-		FROM case_attachment ca
-		JOIN "user" u ON u.id = ca.uploaded_by
-		WHERE ca.case_id = $1 AND ca.status = 'complete'
-		UNION ALL
-		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
-		       COALESCE(wa.size_bytes, 0)::bigint, NULL::text,
-		       COALESCE(su.id::text, ''), COALESCE(wa.created_by, ''),
-		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), ''),
-		       wa.created_on, NULL::text, 'complete'
+	listed := listedStoredAttachmentSQL
+	if DeletedAttachmentsOnlyRequested(ctx) {
+		listed = listedDeletedStoredAttachmentSQL
+	}
+	combined := `
+		SELECT wa.id, wa.work_item_id AS reference_id, COALESCE(wa.name, '') AS name,
+		       COALESCE(wa.content_type, '') AS content_type,
+		       COALESCE(wa.size_bytes, 0)::bigint AS size_bytes, NULL::text AS description,
+		       COALESCE(su.id::text, '') AS uploader_id, COALESCE(wa.created_by, '') AS uploader_email,
+		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), '') AS uploader_name,
+		       wa.created_on, NULL::text AS storage_key,
+		       CASE WHEN wa.status = 'DELETED' THEN 'deleted' ELSE 'complete' END AS status,
+		       wa.deleted_on, COALESCE(wa.deleted_by, '') AS deleter_email,
+		       COALESCE(du.id::text, '') AS deleter_id,
+		       COALESCE(du.name, NULLIF(TRIM(CONCAT_WS(' ', du.first_name, du.last_name)), ''), '') AS deleter_name
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -3093,16 +3092,32 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			ORDER BY u2.id
 			LIMIT 1
 		) su ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) du ON TRUE
 		WHERE wa.work_item_id = $1
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  AND NOT EXISTS (SELECT 1 FROM case_attachment dup WHERE dup.id = wa.id)`
-	const countQuery = `SELECT COUNT(*) FROM (` + combined + `) att`
-	const dataQuery = `
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM (` + combined + `) att`
+	// Most recently deleted first for the deleted list; the others have no
+	// deleted_on, so they stay newest upload first.
+	dataQuery := `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
-		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status
+		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status,
+		       deleted_on, deleter_email, deleter_id, deleter_name
 		FROM (` + combined + `) att
-		ORDER BY created_on DESC, id
+		ORDER BY deleted_on DESC NULLS LAST, created_on DESC, id
 		LIMIT $2 OFFSET $3`
+
+	// The id names ANY work item, a change request included: one the caller may
+	// not see does not exist for them (same guard as the comments and activity).
+	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, caseID, "case not found"); err != nil {
+		return nil, 0, err
+	}
 
 	var total int
 	var attachments []domain.Attachment
@@ -3130,16 +3145,17 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 				sizeBytes                 int64
 				uploaderID, uploaderEmail string
 				uploaderName              string
-				// storageKey is nullable: a dual-write (ServiceNow-sourced)
-				// row has no storage_key at all -- see migration 0185's own
-				// comment -- and neither does a synced row. *string (not
-				// string) is required here so a NULL column value scans as a
-				// nil pointer instead of erroring.
-				storageKey *string
+				// storageKey is nullable: the list query selects NULL for it.
+				// *string (not string) is required here so a NULL column
+				// value scans as a nil pointer instead of erroring.
+				storageKey                           *string
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes, &a.Description,
 				&uploaderID, &uploaderEmail, &uploaderName, &a.CreatedOn, &storageKey, &a.Status,
+				&deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan case attachment: %w", err)
 			}
@@ -3147,6 +3163,10 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			a.ReferenceType = domain.ReferenceTypeCase
 			a.CreatedBy = domain.NewUserReference(uploaderID, uploaderEmail, uploaderName)
 			a.StorageKey = storageKey
+			if a.Status == domain.AttachmentStatusDeleted {
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -3162,6 +3182,18 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 
 	return attachments, total, nil
 }
+
+// listedStoredAttachmentSQL keeps an attachment out of a list when it should not
+// be shown: one the uploader deleted (status DELETED), one whose upload failed,
+// and an upload still in flight (status PENDING on a row the portal itself
+// created, which is told apart from a migrated row waiting for its file by its
+// legacy state column, always NULL for a row this service wrote).
+const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
+		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
+
+// listedDeletedStoredAttachmentSQL is the filter for a caller who asked for the
+// deleted attachments only: just the rows the uploader or an admin deleted.
+const listedDeletedStoredAttachmentSQL = `AND wa.status = 'DELETED'`
 
 // SearchWorkItemAttachments implements CaseRepository.
 //
@@ -3195,21 +3227,28 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		}
 	}
 
-	const where = `
+	listed := listedStoredAttachmentSQL
+	if DeletedAttachmentsOnlyRequested(ctx) {
+		listed = listedDeletedStoredAttachmentSQL
+	}
+	where := `
 		WHERE wa.work_item_id = $1
 		  AND wi.type = ANY($2::text[]::work_item_type_enum[])
-		  AND wa.state IS DISTINCT FROM 'PENDING'`
-	const countQuery = `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
+		  AND wa.state IS DISTINCT FROM 'PENDING'
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
 	// created_by is a free-form string on this table; it is matched to a user
 	// by email (same convention as comment.created_by). The match is a
 	// LATERAL ... LIMIT 1 because "user".email has no unique constraint, and a
 	// plain join would fan one attachment out into several rows while
 	// countQuery above counts it once.
-	const dataQuery = `
+	dataQuery := `
 		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
 		       COALESCE(wa.size_bytes, 0), wa.created_by, COALESCE(u.id::text, ''),
 		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
-		       wa.created_on
+		       wa.created_on, wa.status = 'DELETED', wa.deleted_on,
+		       COALESCE(wa.deleted_by, ''), COALESCE(d.id::text, ''),
+		       COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', d.first_name, d.last_name)), ''), '')
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -3218,8 +3257,15 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			WHERE LOWER(u2.email) = LOWER(wa.created_by)
 			ORDER BY u2.id
 			LIMIT 1
-		) u ON TRUE` + where + `
-		ORDER BY wa.created_on DESC, wa.id
+		) u ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) d ON TRUE` + where + `
+		ORDER BY wa.deleted_on DESC NULLS LAST, wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int
@@ -3244,13 +3290,17 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		result := make([]domain.Attachment, 0, pagination.Limit)
 		for rows.Next() {
 			var (
-				a                                   domain.Attachment
-				sizeBytes                           int64
-				createdBy, uploaderID, uploaderName string
+				a                                    domain.Attachment
+				sizeBytes                            int64
+				createdBy, uploaderID, uploaderName  string
+				deleted                              bool
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
 				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
+				&deleted, &deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan work item attachment: %w", err)
 			}
@@ -3258,6 +3308,11 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			a.ReferenceType = referenceType
 			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
 			a.Status = domain.AttachmentStatusComplete
+			if deleted {
+				a.Status = domain.AttachmentStatusDeleted
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -3274,78 +3329,88 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 	return attachments, total, nil
 }
 
-// GetCaseAttachmentByID implements CaseRepository.
+// SearchDeploymentAttachments implements CaseRepository.
 //
-// Unlike SearchCaseAttachments, this intentionally does not filter by status:
-// a direct id lookup must return a 'pending' row too, since that's how the
-// confirm step resolves the row it's about to transition, and how an
-// uploader can check on their own in-flight upload. See the doc comment on
-// CaseService.SearchCaseAttachments for the read-path status decision.
-func (r *caseRepo) GetCaseAttachmentByID(ctx context.Context, id string) (domain.Attachment, error) {
-	const query = `
-		SELECT ca.id, ca.case_id, ca.filename, ca.mime_type, ca.size_bytes, ca.description,
-		       u.id, u.email, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), '') AS full_name,
-		       ca.created_on, ca.storage_key, ca.status
-		FROM case_attachment ca
-		JOIN "user" u ON u.id = ca.uploaded_by
-		WHERE ca.id = $1`
+// Reads deployment_attachment. The table's own row-level security (migration
+// 100026) carries the visibility: an internal caller sees everything, any other
+// caller only the attachments of deployments in projects they belong to. A row
+// the uploader deleted, one whose upload failed and one still in flight are not
+// listed. No bytes or download links are produced here: the file is read through
+// POST /attachments/locate.
+func (r *caseRepo) SearchDeploymentAttachments(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
+	const where = `
+		WHERE da.deployment_id = $1
+		  AND da.status NOT IN ('DELETED', 'FAILED', 'PENDING')`
+	const countQuery = `SELECT COUNT(*) FROM deployment_attachment da` + where
+	// created_by is a free-form string on this table; it is matched to a user by
+	// email, with a LATERAL ... LIMIT 1 for the reason SearchWorkItemAttachments
+	// gives ("user".email has no unique constraint).
+	const dataQuery = `
+		SELECT da.id, da.deployment_id, COALESCE(da.name, ''), COALESCE(da.content_type, ''),
+		       COALESCE(da.size_bytes, 0), da.created_by, COALESCE(u.id::text, ''),
+		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
+		       da.created_on
+		FROM deployment_attachment da
+		LEFT JOIN LATERAL (
+			SELECT u2.id, u2.name, u2.first_name, u2.last_name
+			FROM "user" u2
+			WHERE LOWER(u2.email) = LOWER(da.created_by)
+			ORDER BY u2.id
+			LIMIT 1
+		) u ON TRUE` + where + `
+		ORDER BY da.created_on DESC, da.id
+		LIMIT $2 OFFSET $3`
 
-	var (
-		a                         domain.Attachment
-		uploaderID, uploaderEmail string
-		uploaderName              string
-		// storageKey is nullable -- see SearchCaseAttachments' identical
-		// comment: a dual-write (ServiceNow-sourced) row has no storage_key.
-		storageKey *string
-	)
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&a.ID, &a.ReferenceID, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
-		&uploaderID, &uploaderEmail, &uploaderName, &a.CreatedOn, &storageKey, &a.Status,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Attachment{}, &apierror.NotFoundError{Msg: "attachment not found"}
-	}
-	if err != nil {
-		return domain.Attachment{}, fmt.Errorf("get case attachment by id: %w", err)
-	}
-	a.ReferenceType = domain.ReferenceTypeCase
-	a.CreatedBy = domain.NewUserReference(uploaderID, uploaderEmail, uploaderName)
-	a.StorageKey = storageKey
-	return a, nil
-}
+	var total int
+	var attachments []domain.Attachment
 
-// DeleteCaseAttachment implements CaseRepository.
-func (r *caseRepo) DeleteCaseAttachment(ctx context.Context, id string) error {
-	tag, err := r.db.Exec(ctx, `DELETE FROM case_attachment WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("delete case attachment: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return &apierror.NotFoundError{Msg: "attachment not found"}
-	}
-	return nil
-}
+	eg, egCtx := errgroup.WithContext(ctx)
 
-// UpdateCaseAttachmentName implements CaseRepository.
-func (r *caseRepo) UpdateCaseAttachmentName(ctx context.Context, id, name, updatedBy string) (time.Time, error) {
-	const query = `
-		UPDATE case_attachment
-		SET filename = $2, updated_on = NOW(), updated_by = $3
-		WHERE id = $1
-		RETURNING updated_on`
-
-	var updatedOn time.Time
-	err := r.db.QueryRow(ctx, query, id, name, updatedBy).Scan(&updatedOn)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, &apierror.NotFoundError{Msg: "attachment not found"}
-	}
-	if err != nil {
-		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return time.Time{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+	eg.Go(func() error {
+		if err := r.db.QueryRow(egCtx, countQuery, deploymentID).Scan(&total); err != nil {
+			return fmt.Errorf("count deployment attachments: %w", err)
 		}
-		return time.Time{}, fmt.Errorf("update case attachment name: %w", err)
+		return nil
+	})
+
+	eg.Go(func() error {
+		rows, err := r.db.Query(egCtx, dataQuery, deploymentID, pagination.Limit, pagination.Offset)
+		if err != nil {
+			return fmt.Errorf("query deployment attachments: %w", err)
+		}
+		defer rows.Close()
+
+		result := make([]domain.Attachment, 0, pagination.Limit)
+		for rows.Next() {
+			var (
+				a                                   domain.Attachment
+				sizeBytes                           int64
+				createdBy, uploaderID, uploaderName string
+			)
+			if err := rows.Scan(
+				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
+				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
+			); err != nil {
+				return fmt.Errorf("scan deployment attachment: %w", err)
+			}
+			a.SizeBytes = int(sizeBytes)
+			a.ReferenceType = domain.ReferenceTypeDeployment
+			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
+			a.Status = domain.AttachmentStatusComplete
+			result = append(result, a)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate deployment attachments: %w", err)
+		}
+		attachments = result
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return nil, 0, err
 	}
-	return updatedOn, nil
+
+	return attachments, total, nil
 }
 
 // caseLikeStateSortColumn ranks caseLikeStateColumn's label by
@@ -3375,7 +3440,7 @@ const caseLikeStateSortColumn = `CASE ` + caseLikeStateColumn + `
 // comment): "case" is a LEFT JOIN here, so a service_request/engagement/
 // security_report_analysis/announcement row's own c.state is always NULL,
 // and sorting on it left every non-CASE row unsorted by state. Severity stays
-// c.severity -- it's genuinely case-only, unlike state.
+// c.severity for a caller that cannot see a service request's severity (SearchCases swaps in severityColumnFor(scope) otherwise).
 var pgSortColMap = map[domain.CaseSortField]string{
 	domain.CaseSortFieldCreatedOn: "wi.created_on",
 	domain.CaseSortFieldUpdatedOn: "wi.updated_on",
@@ -3423,6 +3488,16 @@ func lowerAll(values []string) []string {
 	out := make([]string, len(values))
 	for i, v := range values {
 		out[i] = strings.ToLower(v)
+	}
+	return out
+}
+
+// lowerTrimmed returns a lower-cased copy of values without surrounding
+// spaces.
+func lowerTrimmed(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = strings.ToLower(strings.TrimSpace(v))
 	}
 	return out
 }
@@ -3489,9 +3564,9 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	fieldPreds, fieldArgs, nextIdx, err := caseFieldPredicates(caseFieldSet{
 		Types: req.Parsed.Types, ProjectIDs: req.Parsed.ProjectIDs, AccountIDs: req.Parsed.AccountIDs, DeploymentIDs: req.Parsed.DeploymentIDs,
 		AssignedUserIDs: req.Parsed.AssignedUserIDs, States: req.Parsed.States, Severities: req.Parsed.Severities,
-		IssueTypes: req.Parsed.IssueTypes, EngagementTypes: req.Parsed.EngagementTypes, WorkStates: req.Parsed.WorkStates,
+		IssueTypes: req.Parsed.IssueTypes, EngagementTypes: req.Parsed.EngagementTypes, SalesRegions: req.Parsed.SalesRegions, WorkStates: req.Parsed.WorkStates,
 		EscalationLevels: req.Parsed.EscalationLevels, Tags: req.Parsed.Tags, ExcludeTags: req.Parsed.ExcludeTags,
-		DefaultTypes: true,
+		DefaultTypes: true, SeverityColumn: severityColumnFor(scope),
 	}, argIdx)
 	if err != nil {
 		return "", nil, argIdx, err
@@ -3642,6 +3717,32 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		filterArgs = append(filterArgs, req.Parsed.EndUpdatedDate)
 		argIdx++
 	}
+	// stateEntered / stateEnteredOn: the case's logged state history (the
+	// append-only work_item_activity, one "state" row per change, written by
+	// caseService.UpdateCase under the state's display label) has a change
+	// INTO one of the states, logged in the window. Whatever the case's state
+	// is now, and once however many such changes it has (EXISTS). Served by
+	// idx_work_item_activity_state_entered (migration 0283: the state rows by
+	// LOWER(new_value), created_on), or per case through
+	// idx_work_item_activity_work_item_id when other filters leave few. Top
+	// level only: rejectUnsupportedOrGroupFields refuses both inside an anyOf
+	// branch.
+	if len(req.Parsed.EnteredStateLabels) > 0 {
+		pred := fmt.Sprintf("EXISTS (SELECT 1 FROM work_item_activity sa WHERE sa.work_item_id = wi.id AND sa.field_name = 'state' AND LOWER(sa.new_value) = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.EnteredStateLabels)
+		argIdx++
+		if req.Parsed.EnteredStartDate != nil {
+			pred += fmt.Sprintf(" AND sa.created_on >= $%d", argIdx)
+			filterArgs = append(filterArgs, req.Parsed.EnteredStartDate)
+			argIdx++
+		}
+		if req.Parsed.EnteredEndDate != nil {
+			pred += fmt.Sprintf(" AND sa.created_on <= $%d", argIdx)
+			filterArgs = append(filterArgs, req.Parsed.EnteredEndDate)
+			argIdx++
+		}
+		where += " AND " + pred + ")"
+	}
 
 	// projectOnboardingStatus: the parent project's onboarding_status (p is
 	// the LEFT JOIN below). A case whose project has no status set (NULL)
@@ -3716,6 +3817,35 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		filterArgs = append(filterArgs, req.Parsed.ProductNames)
 		argIdx++
 	}
+	// product notIn: a case without a deployed product (prod.name NULL) has
+	// none of the named products, so it is kept, as for projectId notIn.
+	if len(req.Parsed.ExcludeProductNames) > 0 {
+		where += fmt.Sprintf(" AND (prod.name IS NULL OR prod.name <> ALL($%d::text[]))", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.ExcludeProductNames)
+		argIdx++
+	}
+	// region: the account's region (a is the LEFT JOIN below), ignoring case
+	// and surrounding spaces, as people type it in the account record. notIn
+	// keeps a case without an account or a region, as product notIn does.
+	if len(req.Parsed.Regions) > 0 {
+		where += fmt.Sprintf(" AND LOWER(TRIM(a.region)) = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, lowerTrimmed(req.Parsed.Regions))
+		argIdx++
+	}
+	if len(req.Parsed.ExcludeRegions) > 0 {
+		where += fmt.Sprintf(" AND (a.region IS NULL OR LOWER(TRIM(a.region)) <> ALL($%d::text[]))", argIdx)
+		filterArgs = append(filterArgs, lowerTrimmed(req.Parsed.ExcludeRegions))
+		argIdx++
+	}
+	// productVersion: the deployed product's version (pv is the LEFT JOIN
+	// below), exact match against the version the case detail shows beside
+	// the product name. The parser allows it only beside a product filter
+	// naming one product.
+	if len(req.Parsed.ProductVersions) > 0 {
+		where += fmt.Sprintf(" AND pv.version = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.ProductVersions)
+		argIdx++
+	}
 
 	// creTeam/sreTeam: the parent account's CRE/SRE-owning "group" (a and
 	// cre/sre are the LEFT JOINs below) -- the same account.cre_team_id/
@@ -3750,7 +3880,9 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	if len(req.Parsed.OrGroups) > 0 {
 		branches := make([]string, 0, len(req.Parsed.OrGroups))
 		for _, g := range req.Parsed.OrGroups {
-			preds, branchArgs, next, err := caseFieldPredicates(caseFieldSetFromGroup(g), argIdx)
+			branch := caseFieldSetFromGroup(g)
+			branch.SeverityColumn = severityColumnFor(scope)
+			preds, branchArgs, next, err := caseFieldPredicates(branch, argIdx)
 			if err != nil {
 				return "", nil, argIdx, err
 			}
@@ -3798,6 +3930,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	}
 
 	sortCol := pgSortColMap[req.SortBy.Field]
+	if req.SortBy.Field == domain.CaseSortFieldSeverity {
+		sortCol = severityColumnFor(scope)
+	}
 	sortDir := string(req.SortBy.Order)
 
 	// Deployment/deployed-product/product are LEFT joins here (unlike
@@ -3859,9 +3994,17 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	// WHERE and ORDER BY do not reference. Under RLS this matters: the
 	// policies on the joined tables stop the planner from limiting rows
 	// before joining, so a deep page used to join every matching row first.
+	// A description can be megabytes of rich text. When the caller excluded it,
+	// a typed NULL stands in so the column is never read from the table, and
+	// the scan target and row shape stay the same. Filtering on description
+	// lives in the WHERE clause and is unaffected.
+	descriptionColumn := "wi.description"
+	if req.ExcludesField(domain.SearchExcludeFieldDescription) {
+		descriptionColumn = "NULL::text"
+	}
 	dataQuery := fmt.Sprintf(
 		`SELECT wi.id, wi.number, wi.wso2_id,
-		        wi.type::TEXT, wi.subject, wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
+		        wi.type::TEXT, wi.subject, `+descriptionColumn+`, `+severityColumnFor(scope)+`::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
 		        eng.type::TEXT, `+caseLikeWorkStateColumn+`, c.current_escalation_level::TEXT, wi.created_on, wi.updated_on,
 		        wi.created_by,
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta,
@@ -4608,6 +4751,22 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 	caseArgs := []any{req.ID}
 	idx := 2
 	if req.RelatedCaseID != nil {
+		// related_case_id is a column of "case" alone: a service request,
+		// engagement, security report analysis or announcement has nowhere to
+		// keep it, and the UPDATE below would match no row and answer 404 "case
+		// not found" for a ticket that exists. Refuse it by name instead,
+		// dispatching on the extension row that exists, as UpdateCase does.
+		workItemType, err := readCaseLikeType(ctx, tx, "update case fields", req.ID, false)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, &apierror.NotFoundError{Msg: "case not found"}
+		}
+		if err != nil {
+			return time.Time{}, fmt.Errorf("update case fields: read type: %w", err)
+		}
+		if workItemType != "CASE" {
+			return time.Time{}, &apierror.ValidationError{Msg: "relatedCaseId can only be set on a case, not on a " +
+				strings.ToLower(strings.ReplaceAll(workItemType, "_", " "))}
+		}
 		// The key now points at work_item, which holds every kind of ticket; a case
 		// is related only to another case-like ticket (never an incident, a change
 		// request, an announcement...), as the old key to "case" guaranteed.
@@ -5093,7 +5252,7 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 // single-element Changes slice, rather than guessing at a bundling rule.
 func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) ([]domain.CaseActivity, int, error) {
 	// Confirm req.CaseID is actually a case-like work item before reading
-	// its activity feed -- comment/case_attachment/work_item_activity are
+	// its activity feed -- comment/work_item_attachment/work_item_activity are
 	// all keyed by the generic work_item_id with no type filter of their
 	// own, so without this check a caller could pass any other work_item's
 	// UUID (a change request, incident, ...) through this endpoint and read
@@ -5110,6 +5269,20 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	includeFieldChanges := req.IncludeFieldChanges != nil && *req.IncludeFieldChanges
 	excludeWorkNotes := req.ExcludeWorkNotes != nil && *req.ExcludeWorkNotes
 
+	// A service request's severity changes are internal: its field-change rows
+	// are left out of the feed (and of the total) for a caller that may not see
+	// that severity -- the same rule as severityColumnFor. An identity that
+	// cannot be read from ctx is treated as one that may not. Case severity rows
+	// are unaffected: the filter only matches a work item that has a
+	// service_request row.
+	scope, _ := CallerIdentityFromContext(ctx)
+	fieldChangeFilter, fieldChangeDataFilter := "", ""
+	if !scope.canSeeServiceRequestSeverity() {
+		const clause = ` AND NOT (%[1]s.field_name = 'severity' AND EXISTS (SELECT 1 FROM service_request sr_sev WHERE sr_sev.id = %[1]s.work_item_id))`
+		fieldChangeFilter = fmt.Sprintf(clause, "wa")
+		fieldChangeDataFilter = fieldChangeFilter
+	}
+
 	// IS DISTINCT FROM, not <>: a comment with no type at all (NULL) must
 	// still count/show -- a plain <> comparison against NULL evaluates to
 	// NULL (neither true nor false in a WHERE clause), which would silently
@@ -5121,12 +5294,9 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 		commentWorkNoteDataFilter = ` AND cm.type IS DISTINCT FROM 'WORK_NOTE'::comment_type_enum`
 	}
 
-	// Synced attachments live in work_item_attachment, not case_attachment. A
-	// row is skipped while PENDING, and when case_attachment already holds the
-	// same id: a dual-write upload is mirrored into case_attachment under the
-	// backing data source's own attachment identity, which is also the id the
-	// sync gives its work_item_attachment row, so the two tables describe one
-	// file and it must show once. Shared by both queries so total and rows agree.
+	// Attachments live in work_item_attachment. A row is skipped while PENDING,
+	// and when it is failed, deleted or still uploading. Shared by both queries
+	// so total and rows agree.
 	// A customer-portal caller never sees a soft-deleted comment in the feed or
 	// in its total (see hidesDeletedComments); internal callers are unchanged.
 	commentWorkNoteFilter += deletedCommentFilter(ctx, "")
@@ -5134,16 +5304,15 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 
 	const syncedAttachmentFilter = `
 			  AND wa.state IS DISTINCT FROM 'PENDING'
-			  AND NOT EXISTS (SELECT 1 FROM case_attachment ca WHERE ca.id = wa.id)`
+			  ` + listedStoredAttachmentSQL
 
 	countQuery := `
 		SELECT
 			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1` + commentWorkNoteFilter + `) +
-			(SELECT COUNT(*) FROM case_attachment WHERE case_id = $1 AND status = 'complete') +
 			(SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id
 			 WHERE wa.work_item_id = $1` + syncedAttachmentFilter + `)`
 	if includeFieldChanges {
-		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity WHERE work_item_id = $1)`
+		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity wa WHERE wa.work_item_id = $1` + fieldChangeFilter + `)`
 	}
 
 	// An attachment entry's content is never empty: a client that hides
@@ -5152,12 +5321,9 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	// to the file name, and to a fixed label when a synced row has no name.
 	// Clients render attachment entries from fileName, not from content.
 	//
-	// UNION ALL merges the tables into one timeline. Comment/field-change
-	// rows resolve their (free-text VARCHAR) author by email match against
-	// "user"; case_attachment rows join it directly, since uploaded_by is a
-	// real UUID FK (migration 0106), while synced work_item_attachment rows
-	// carry a free-text created_by and match by email like comments -- see
-	// this file's other created_by fixes for why they differ.
+	// UNION ALL merges the tables into one timeline. Comment, attachment and
+	// field-change rows resolve their (free-text VARCHAR) author by email match
+	// against "user".
 	//
 	// The comment/field-change branches' email joins go through
 	// userByEmailJoin: "user".email has no unique constraint (migration 0002
@@ -5181,19 +5347,6 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1` + commentWorkNoteDataFilter + `
 			) c
-
-			UNION ALL
-
-			SELECT
-				a.id, 'attachment' AS kind, COALESCE(NULLIF(TRIM(a.description), ''), a.filename) AS content, a.created_on AS created_on,
-				u2.email, u2.first_name, u2.last_name,
-				COALESCE(u2.name, NULLIF(TRIM(CONCAT_WS(' ', u2.first_name, u2.last_name)), '')) AS name,
-				NULL::text AS comment_type,
-				a.filename, a.mime_type, a.size_bytes,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
-			FROM case_attachment a
-			JOIN "user" u2 ON u2.id = a.uploaded_by
-			WHERE a.case_id = $1 AND a.status = 'complete'
 
 			UNION ALL
 
@@ -5233,7 +5386,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 					wa.field_name, wa.old_value, wa.new_value
 				FROM work_item_activity wa
 				` + userByEmailJoin("u3", "wa.user_email") + `
-				WHERE wa.work_item_id = $1
+				WHERE wa.work_item_id = $1` + fieldChangeDataFilter + `
 			) fc`
 	}
 	dataQuery += `
@@ -5355,7 +5508,8 @@ func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain
 
 // caseAggregateColumns maps an aggregate/group-by field to the SQL expression
 // buckets are keyed on (over caseSearchJoins) and the expression the bucket
-// label is read from.
+// label is read from (its MAX, unless caseAggregateLabels gives the label's
+// aggregate).
 var caseAggregateColumns = map[string]struct{ key, label string }{
 	"state":          {caseLikeStateColumn, caseLikeStateColumn},
 	"severity":       {"c.severity::TEXT", "c.severity::TEXT"},
@@ -5364,6 +5518,30 @@ var caseAggregateColumns = map[string]struct{ key, label string }{
 	"issueType":      {"c.issue_type::TEXT", "c.issue_type::TEXT"},
 	"workState":      {caseLikeWorkStateColumn, caseLikeWorkStateColumn},
 	"account":        {"wi.account_id::TEXT", "a.name"},
+	// product: the deployed product's catalog name, as the product filter
+	// matches it, so a bucket's count is that filter's total. Products that
+	// share a name are one bucket, as the filter matches them all.
+	"product": {"prod.name", "prod.name"},
+	// productVersion: the deployed product's version, as the productVersion
+	// filter matches it. Only within one product (caseService.AggregateCases),
+	// as a version is shared by several products.
+	"productVersion": {"pv.version", "pv.version"},
+	// project: keyed on the project's id, as the projectId filter takes it,
+	// and labelled with its name, else its key (the name is optional).
+	"project": {"wi.project_id::TEXT", "COALESCE(NULLIF(p.name, ''), p.key)"},
+	// region: the account's region as the region filter compares it (no
+	// surrounding spaces, lower-cased), so a bucket's count is that filter's
+	// total, labelled as most of its cases' accounts write it ("APAC" over
+	// " apac "). A blank region is in no bucket, as the filter takes no blank
+	// value.
+	"region": {"NULLIF(LOWER(TRIM(a.region)), '')", "TRIM(a.region)"},
+}
+
+// caseAggregateLabels is the label aggregate of a field whose bucket is not
+// labelled by its label expression's MAX: a region's by the spelling most of
+// its cases have.
+var caseAggregateLabels = map[string]string{
+	"region": "mode() WITHIN GROUP (ORDER BY TRIM(a.region))",
 }
 
 // AggregateCases implements CaseRepository. It shares buildCaseSearchWhere with
@@ -5380,11 +5558,19 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 	if err != nil {
 		return nil, err
 	}
+	if groupBy == "severity" {
+		sev := severityColumnFor(scope) + "::TEXT"
+		col.key, col.label = sev, sev
+	}
+	labelAgg, ok := caseAggregateLabels[groupBy]
+	if !ok {
+		labelAgg = "MAX(" + col.label + ")"
+	}
 	query := fmt.Sprintf(`
-		SELECT %s AS bucket_key, MAX(%s) AS bucket_label, COUNT(*) AS bucket_count
+		SELECT %s AS bucket_key, %s AS bucket_label, COUNT(*) AS bucket_count
 		FROM work_item wi %s %s AND %s IS NOT NULL
 		GROUP BY bucket_key
-		ORDER BY bucket_count DESC, bucket_key`, col.key, col.label, caseSearchJoins, where, col.key)
+		ORDER BY bucket_count DESC, bucket_key`, col.key, labelAgg, caseSearchJoins, where, col.key)
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate cases: %w", err)
@@ -5400,7 +5586,7 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 			return nil, fmt.Errorf("scan case bucket: %w", err)
 		}
 		k, l := aggregateBucketKey(groupBy, key), stringOrEmpty(label)
-		if l == "" || groupBy != "account" {
+		if l == "" || (groupBy != "account" && groupBy != "project" && groupBy != "region") {
 			l = k
 		}
 		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: l, Count: count})
@@ -5413,10 +5599,13 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 
 // aggregateBucketKey converts a stored enum label to the domain value the
 // case search contract uses (lower-case, severity via caseSeverityFromEnum);
-// account keys are UUIDs and pass through.
+// account and project keys (UUIDs), product keys (names, as the product
+// filter takes them), product version keys (as the productVersion filter
+// takes them) and region keys (already as the region filter compares them)
+// pass through.
 func aggregateBucketKey(groupBy, raw string) string {
 	switch groupBy {
-	case "account":
+	case "account", "project", "product", "productVersion", "region":
 		return raw
 	case "severity":
 		if v, ok := caseSeverityFromEnum[raw]; ok {

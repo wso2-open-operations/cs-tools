@@ -32,10 +32,16 @@ import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
 import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
+import {
+  CREATE_FORM_MAX_ATTACHMENTS,
+  entityAttachmentMaxBytes,
+  formatLimit,
+} from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageCountExceededMessage,
+  imageSizeExceededMessage,
   EMPTY_DROPDOWN_PLACEHOLDER,
 } from "@constants/common";
 
@@ -67,6 +73,7 @@ export function CaseDetailsSection({
   isSecurityReport = false,
   excludeS0 = false,
   isSeverityDisabled = false,
+  onImageUpload,
   isIssueTypeAutoDetected = false,
   isSeverityAutoDetected = false,
   isTitleFromChat = false,
@@ -253,6 +260,7 @@ export function CaseDetailsSection({
             }
             onAttachmentClick={isSecurityReport ? undefined : onAttachmentClick}
             attachments={isSecurityReport ? [] : attachments}
+            maxAttachments={isSecurityReport ? undefined : CREATE_FORM_MAX_ATTACHMENTS}
             onAttachmentRemove={
               isSecurityReport ? undefined : onAttachmentRemove
             }
@@ -260,11 +268,14 @@ export function CaseDetailsSection({
             value={description}
             onChange={setDescription}
             maxHeight="210px"
+            onImageUpload={onImageUpload}
             onPasteError={(reason) =>
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : ERROR_SIZE_EXCEEDED,
+                  : reason === "count"
+                    ? imageCountExceededMessage()
+                    : imageSizeExceededMessage(),
               )
             }
           />
@@ -357,7 +368,8 @@ export function CaseDetailsSection({
                     color="text.secondary"
                     sx={{ mt: 1, display: "block" }}
                   >
-                    PDF, DOCX, TXT, CSV or other formats • Max 10MB per file
+                    PDF, DOCX, TXT, CSV or other formats • Max{" "}
+                    {formatLimit(entityAttachmentMaxBytes())} per file
                   </Typography>
                 </Box>
               </Box>

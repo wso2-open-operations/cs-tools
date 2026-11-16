@@ -24,12 +24,14 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  TextField,
   Typography,
   alpha,
   colors,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
+import DateTimeLocalField, {
+  type DateTimeLocalFieldHandle,
+} from "@components/date-time-picker/DateTimeLocalField";
 import { useEffect, useRef, useState, type JSX } from "react";
 import { usePatchChangeRequest } from "@features/operations/api/usePatchChangeRequest";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -77,6 +79,9 @@ type ProposeNewImplementationTimeModalBodyProps = {
   onRefused?: () => void;
 };
 
+/** The derived end is shown, never typed: its field takes no input. */
+const noop = (): void => undefined;
+
 /**
  * Mounted only while the dialog is open: the start initializes from
  * `changeRequest` on mount (no `setState` in `useEffect`).
@@ -114,7 +119,7 @@ function ProposeNewImplementationTimeModalBody({
   const [proposedStart, setProposedStart] = useState(currentStart);
   const [attempted, setAttempted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const startInputRef = useRef<HTMLInputElement | null>(null);
+  const startInputRef = useRef<DateTimeLocalFieldHandle | null>(null);
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
   const inFlightRef = useRef(false);
   // Set when a failure keeps the dialog open: the submit button the customer
@@ -380,43 +385,31 @@ function ProposeNewImplementationTimeModalBody({
             alignItems: "start",
           }}
         >
-          <TextField
+          <DateTimeLocalField
             id="proposed-start"
             label="Proposed start"
-            type="datetime-local"
-            size="small"
-            fullWidth
             required
             value={proposedStart}
-            onChange={(e) => handleStartChange(e.target.value)}
+            onChange={handleStartChange}
+            minDateTime={minDatetime}
             disabled={isModalBusy || durationMs == null}
             error={Boolean(shown.start)}
             helperText={shown.start}
-            inputRef={startInputRef}
-            slotProps={{
-              inputLabel: { shrink: true },
-              htmlInput: { min: minDatetime },
-            }}
+            focusRef={startInputRef}
           />
           {/* Shown, never typed: a proposal moves the start and keeps the planned
               length. Read-only (not disabled), so it keeps its contrast and is read out. */}
-          <TextField
+          <DateTimeLocalField
             id="proposed-end"
             label="Proposed end"
-            type="datetime-local"
-            size="small"
-            fullWidth
             value={derivedEnd}
+            onChange={noop}
+            readOnly
             helperText={
               durationMs != null
                 ? `Same length as the planned window (${formatPlannedLength(durationMs)})`
                 : undefined
             }
-            slotProps={{
-              inputLabel: { shrink: true },
-              input: { readOnly: true },
-              htmlInput: { "aria-readonly": true },
-            }}
           />
         </Box>
         {shown.window && (

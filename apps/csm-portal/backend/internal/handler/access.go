@@ -324,6 +324,12 @@ const (
 	// viewing role separately to see the catalogue at all. entity-service
 	// re-checks the same role on every change.
 	PermManageProductCatalog
+	// PermViewTimeCardTotals is POST /time-cards/aggregate: time card counts
+	// and logged hours per state, user, project or day. Held by the CS
+	// engineer and admin only -- narrower than PermTimeCardsAndUpdates (no
+	// time card approver) while who may see totals per user is still to be
+	// decided; a separate permission so that decision changes one line here.
+	PermViewTimeCardTotals
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -586,6 +592,7 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// deliberately does NOT hold it. See PermManageProductCatalog's
 			// own doc comment.
 			PermManageProductCatalog: build(cfg.ProductCatalogManager, cfg.Admin),
+			PermViewTimeCardTotals:   build(cfg.CsEngineer, cfg.Admin),
 		},
 	}
 }

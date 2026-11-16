@@ -162,14 +162,9 @@ type mockEntityCaseClient struct {
 	getCaseFn                   func(ctx context.Context, caseID string) ([]byte, error)
 	getProductRepoMappingFn     func(ctx context.Context, name string) ([]byte, error)
 	searchDeployedProductsFn    func(ctx context.Context, body []byte) ([]byte, error)
-	createCaseAttachmentFn      func(ctx context.Context, body []byte) ([]byte, error)
 	searchCaseAttachmentsFn     func(ctx context.Context, body []byte) ([]byte, error)
-	getCaseAttachmentContentFn  func(ctx context.Context, attachmentID string) ([]byte, string, error)
-	deleteCaseAttachmentFn      func(ctx context.Context, attachmentID string) ([]byte, error)
 	getCaseAttachmentFn         func(ctx context.Context, attachmentID string) ([]byte, error)
 	confirmCaseAttachmentFn     func(ctx context.Context, attachmentID string) ([]byte, error)
-	getAttachmentFn             func(ctx context.Context, attachmentID string) ([]byte, error)
-	updateAttachmentFn          func(ctx context.Context, attachmentID string, body []byte) ([]byte, error)
 	createCallRequestFn         func(ctx context.Context, body []byte) ([]byte, error)
 	searchCallRequestsFn        func(ctx context.Context, body []byte) ([]byte, error)
 	searchAllCallRequestsFn     func(ctx context.Context, body []byte) ([]byte, error)
@@ -331,58 +326,11 @@ func (m *mockEntityCaseClient) SearchDeployedProducts(ctx context.Context, body 
 	return []byte(`{"deployedProducts":[],"hasMore":false}`), nil
 }
 
-func (m *mockEntityCaseClient) CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error) {
-	if m.createCaseAttachmentFn != nil {
-		return m.createCaseAttachmentFn(ctx, body)
-	}
-	return []byte(`{}`), nil
-}
-
 func (m *mockEntityCaseClient) SearchCaseAttachments(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchCaseAttachmentsFn != nil {
 		return m.searchCaseAttachmentsFn(ctx, body)
 	}
 	return []byte(`{"attachments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
-}
-
-func (m *mockEntityCaseClient) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
-	if m.getCaseAttachmentContentFn != nil {
-		return m.getCaseAttachmentContentFn(ctx, attachmentID)
-	}
-	return []byte(`fake-content`), "image/png", nil
-}
-
-func (m *mockEntityCaseClient) DeleteCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.deleteCaseAttachmentFn != nil {
-		return m.deleteCaseAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{"message":"Attachment deleted successfully."}`), nil
-}
-
-func (m *mockEntityCaseClient) GetCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.getCaseAttachmentFn != nil {
-		return m.getCaseAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{}`), nil
-}
-func (m *mockEntityCaseClient) GetAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.getAttachmentFn != nil {
-		return m.getAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{}`), nil
-}
-
-func (m *mockEntityCaseClient) ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.confirmCaseAttachmentFn != nil {
-		return m.confirmCaseAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{"message":"Attachment confirmed successfully","attachment":{"id":"` + attachmentID + `","status":"complete"}}`), nil
-}
-func (m *mockEntityCaseClient) UpdateAttachment(ctx context.Context, attachmentID string, body []byte) ([]byte, error) {
-	if m.updateAttachmentFn != nil {
-		return m.updateAttachmentFn(ctx, attachmentID, body)
-	}
-	return []byte(`{}`), nil
 }
 
 func (m *mockEntityCaseClient) CreateCallRequest(ctx context.Context, body []byte) ([]byte, error) {
@@ -1188,10 +1136,20 @@ func (m *mockEntityConfigurationItemClient) SearchConfigurationItems(ctx context
 // ----- mock entity time-card client -----
 
 type mockEntityTimeCardClient struct {
-	searchTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
-	createTimeCardFn  func(ctx context.Context, body []byte) ([]byte, error)
-	updateTimeCardFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
-	deleteTimeCardFn  func(ctx context.Context, id string) ([]byte, error)
+	searchTimeCardsFn    func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
+	createTimeCardFn     func(ctx context.Context, body []byte) ([]byte, error)
+	updateTimeCardFn     func(ctx context.Context, id string, body []byte) ([]byte, error)
+	deleteTimeCardFn     func(ctx context.Context, id string) ([]byte, error)
+}
+
+// AggregateTimeCards calls aggregateTimeCardsFn when set, else answers an
+// empty aggregate (no groups, zero totals).
+func (m *mockEntityTimeCardClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	if m.aggregateTimeCardsFn != nil {
+		return m.aggregateTimeCardsFn(ctx, body)
+	}
+	return []byte(`{"groups":[],"othersCount":0,"totalRecords":0,"othersMinutes":0,"totalMinutes":0}`), nil
 }
 
 func (m *mockEntityTimeCardClient) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {
@@ -1409,4 +1367,65 @@ func (m *mockEntityCommentClient) DeleteComment(ctx context.Context, id string) 
 		return m.deleteCommentFn(ctx, id)
 	}
 	return nil, nil
+}
+
+// ----- mockEntityAlertMuteRuleClient -----
+
+type mockEntityAlertMuteRuleClient struct {
+	searchFn func(ctx context.Context, body []byte) ([]byte, error)
+	getFn    func(ctx context.Context, id string) ([]byte, error)
+	createFn func(ctx context.Context, body []byte) ([]byte, error)
+	patchFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
+	extendFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	endFn    func(ctx context.Context, id string) ([]byte, error)
+	deleteFn func(ctx context.Context, id string) error
+}
+
+func (m *mockEntityAlertMuteRuleClient) SearchAlertMuteRules(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchFn != nil {
+		return m.searchFn(ctx, body)
+	}
+	return []byte(`{"alertMuteRules":[],"total":0,"offset":0,"limit":20}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) GetAlertMuteRule(ctx context.Context, id string) ([]byte, error) {
+	if m.getFn != nil {
+		return m.getFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) CreateAlertMuteRule(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createFn != nil {
+		return m.createFn(ctx, body)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","number":"AMR0000001"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) PatchAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.patchFn != nil {
+		return m.patchFn(ctx, id, body)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) ExtendAlertMuteRule(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.extendFn != nil {
+		return m.extendFn(ctx, id, body)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) EndAlertMuteRule(ctx context.Context, id string) ([]byte, error) {
+	if m.endFn != nil {
+		return m.endFn(ctx, id)
+	}
+	return []byte(`{"id":"` + id + `"}`), nil
+}
+
+func (m *mockEntityAlertMuteRuleClient) DeleteAlertMuteRule(ctx context.Context, id string) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, id)
+	}
+	return nil
 }

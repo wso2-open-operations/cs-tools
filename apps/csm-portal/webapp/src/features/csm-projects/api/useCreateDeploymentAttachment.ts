@@ -21,80 +21,49 @@ import {
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
-import type {
-  BeAttachmentCreatePayload,
-  BeAttachmentCreateResponse,
-} from "@api/backend/types";
-
-/** Max upload size in bytes — the BE caps the decoded file at 10 MB. */
-export const MAX_DEPLOYMENT_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-
-/** Read a File as a base64 data URI (`data:<mime>;base64,...`). */
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("Failed to read the file."));
-    };
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Failed to read the file."));
-    reader.readAsDataURL(file);
-  });
-}
+import {
+  entityAttachmentErrorMessage,
+  uploadEntityAttachment,
+} from "@features/csm-cases/api/entityAttachments";
 
 export interface CreateDeploymentAttachmentInput {
   deploymentId: string;
   file: File;
   /** Display name for the attachment; defaults to the file's own name. */
   name?: string;
-  /** Optional free-text note stored with the attachment. */
-  description?: string;
 }
 
 /**
- * Upload a file to a deployment via `POST /attachments`
- * (`referenceType: "deployment"`). The create response is a thin ack, so the
- * list is invalidated on success to hydrate the new entry from search.
+ * Upload a file to a deployment: it goes to the portal backend in chunks and is
+ * stored in Azure Blob Storage (attachment type `deployment`). The confirm
+ * response is a thin ack, so the list is invalidated on success to hydrate the
+ * new entry from search.
  */
 export function useCreateDeploymentAttachment(): UseMutationResult<
-  BeAttachmentCreateResponse,
+  void,
   Error,
   CreateDeploymentAttachmentInput
 > {
   const api = useBackendApi();
   const queryClient = useQueryClient();
 
-  return useMutation<
-    BeAttachmentCreateResponse,
-    Error,
-    CreateDeploymentAttachmentInput
-  >({
-    mutationFn: async (input): Promise<BeAttachmentCreateResponse> => {
-      if (input.file.size > MAX_DEPLOYMENT_ATTACHMENT_SIZE_BYTES) {
-        throw new Error(
-          `"${input.file.name}" is too large. The maximum attachment size is ${
-            MAX_DEPLOYMENT_ATTACHMENT_SIZE_BYTES / (1024 * 1024)
-          } MB.`,
-        );
+  return useMutation<void, Error, CreateDeploymentAttachmentInput>({
+    mutationFn: async (input): Promise<void> => {
+      try {
+        await uploadEntityAttachment(api, {
+          type: "deployment",
+          parentId: input.deploymentId,
+          file: input.file,
+          name: input.name?.trim() || input.file.name,
+        });
+      } catch (err) {
+        throw new Error(entityAttachmentErrorMessage(err, "Could not upload the attachment."), {
+          cause: err,
+        });
       }
-
-      const dataUri = await readFileAsDataUrl(input.file);
-      const payload: BeAttachmentCreatePayload = {
-        referenceId: input.deploymentId,
-        referenceType: "deployment",
-        name: input.name?.trim() || input.file.name,
-        type: input.file.type || "application/octet-stream",
-        file: dataUri,
-        description: input.description?.trim() || null,
-      };
-      return api.post<BeAttachmentCreatePayload, BeAttachmentCreateResponse>(
-        "/attachments",
-        payload,
-      );
     },
     onSuccess: (_created, variables) => {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.DEPLOYMENT_ATTACHMENTS, variables.deploymentId],
       });
     },

@@ -57,15 +57,25 @@ type fakeFullSLAEngineRepo struct {
 	// next N calls then succeeds -- same semantics the old fixture used.
 	failReviseClocksTimes int
 	reviseClocksCalls     int
+
+	activityEventsByCase map[string][]repository.CaseActivityEvent
+	activeClocksByCase   map[string][]repository.ActiveClockForRecalc
+	pauseUpdates         []string // "caseID|policyID|pauseSeconds|businessPauseSeconds(or '-')"
+	updatePauseErr       error
+	// pausedSnapshotUpdates: "caseID|policyID|pauseSeconds|businessPauseSeconds(or '-')|elapsedPercent|elapsedSeconds|remainingSeconds"
+	pausedSnapshotUpdates   []string
+	updatePausedSnapshotErr error
 }
 
 func newFakeFullSLAEngineRepo() *fakeFullSLAEngineRepo {
 	return &fakeFullSLAEngineRepo{
-		candidatesByTarget: map[string][]repository.SLAPolicyRef{},
-		factsByCase:        map[string]repository.CaseFacts{},
-		factsByIncident:    map[string]repository.IncidentFacts{},
-		activeByCaseTarget: map[string]repository.SLAPolicyRef{},
-		registerOK:         true,
+		candidatesByTarget:   map[string][]repository.SLAPolicyRef{},
+		factsByCase:          map[string]repository.CaseFacts{},
+		factsByIncident:      map[string]repository.IncidentFacts{},
+		activeByCaseTarget:   map[string]repository.SLAPolicyRef{},
+		activityEventsByCase: map[string][]repository.CaseActivityEvent{},
+		activeClocksByCase:   map[string][]repository.ActiveClockForRecalc{},
+		registerOK:           true,
 	}
 }
 
@@ -115,6 +125,48 @@ func (r *fakeFullSLAEngineRepo) ReviseClocks(_ context.Context, workItemID strin
 		r.registered = append(r.registered, workItemID+"|"+policy.ID)
 	}
 	return r.cancelCount, nil
+}
+
+func (r *fakeFullSLAEngineRepo) ListCaseActivityEvents(_ context.Context, workItemID string, fieldNames []string) ([]repository.CaseActivityEvent, error) {
+	wanted := map[string]bool{}
+	for _, f := range fieldNames {
+		wanted[f] = true
+	}
+	var out []repository.CaseActivityEvent
+	for _, e := range r.activityEventsByCase[workItemID] {
+		if wanted[e.FieldName] {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeFullSLAEngineRepo) ListActiveClocksForRecalc(_ context.Context, workItemID string) ([]repository.ActiveClockForRecalc, error) {
+	return r.activeClocksByCase[workItemID], nil
+}
+
+func (r *fakeFullSLAEngineRepo) UpdateClockPauseTotals(_ context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64) error {
+	if r.updatePauseErr != nil {
+		return r.updatePauseErr
+	}
+	bp := "-"
+	if businessPauseSeconds != nil {
+		bp = fmt.Sprintf("%d", *businessPauseSeconds)
+	}
+	r.pauseUpdates = append(r.pauseUpdates, fmt.Sprintf("%s|%s|%d|%s", workItemID, policyID, pauseSeconds, bp))
+	return nil
+}
+
+func (r *fakeFullSLAEngineRepo) UpdateClockPausedSnapshot(_ context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64, elapsedPercent float64, elapsedSeconds, remainingSeconds int64) error {
+	if r.updatePausedSnapshotErr != nil {
+		return r.updatePausedSnapshotErr
+	}
+	bp := "-"
+	if businessPauseSeconds != nil {
+		bp = fmt.Sprintf("%d", *businessPauseSeconds)
+	}
+	r.pausedSnapshotUpdates = append(r.pausedSnapshotUpdates, fmt.Sprintf("%s|%s|%d|%s|%.4f|%d|%d", workItemID, policyID, pauseSeconds, bp, elapsedPercent, elapsedSeconds, remainingSeconds))
+	return nil
 }
 
 func (r *fakeFullSLAEngineRepo) CompleteClock(_ context.Context, workItemID, target string) (bool, error) {

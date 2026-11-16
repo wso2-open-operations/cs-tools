@@ -19,11 +19,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiConfig } from "@config/apiConfig";
 import { useAuthTokens } from "@hooks/useAuthTokens";
 import { useLogger } from "@hooks/useLogger";
+import { useIsIdle } from "@providers/IdleStateContext";
 import {
   MAX_BACKOFF_ATTEMPTS,
   invalidateCaseById,
   invalidateCaseLists,
   invalidateCaseQueries,
+  invalidateCaseThreadById,
   reconnectDelay,
 } from "@features/csm-cases/api/caseStreamShared";
 
@@ -81,6 +83,10 @@ export function parseCaseUpdatedCaseId(data: unknown): string | undefined {
  * - The connection stays open while the browser page is hidden, so a background
  *   case tab is still flagged when the user is on another browser tab. It is
  *   still a single connection, so keeping it costs one slot, not one per tab.
+ * - While the session-warning dialog is showing (`useIsIdle`), no stream is
+ *   held: the open connection is closed and no reconnect is attempted, so an
+ *   abandoned tab does not keep a long-lived connection. Dismissing the dialog
+ *   reconnects through the normal path with the backoff reset.
  * - A 404/405 means the backend predates this endpoint. Retrying every few
  *   seconds would be pointless, so the hook drops straight to the slow idle
  *   retry (`RECONNECT_IDLE_DELAY_MS`), which still recovers after a deploy.
@@ -97,6 +103,7 @@ export function useMultiplexedCaseStream(
   const queryClient = useQueryClient();
   const getTokens = useAuthTokens();
   const logger = useLogger();
+  const isIdle = useIsIdle();
 
   // Order-insensitive, so reordering tabs never reconnects.
   const idsKey = [...new Set(caseIds)].sort().join(",");
@@ -125,10 +132,36 @@ export function useMultiplexedCaseStream(
   // (an id-set change tears one connection down and opens the next).
   const openedIdsRef = useRef<Set<string> | null>(null);
 
-  useEffect(() => {
-    if (!settledKey || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+  // Lower-cased ids of the previous settled set; null until the first settle
+  // with the stream enabled.
+  const settledIdsRef = useRef<Set<string> | null>(null);
 
-    const ids = settledKey.split(",");
+  useEffect(() => {
+    if (!apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+    // While the session warning is showing the tab is idle: hold no stream.
+    // Returning here, with `isIdle` in the deps, means cleanup closes the open
+    // connection and clears any pending reconnect timer, and the re-run once
+    // the warning is dismissed connects fresh with the backoff reset.
+    if (isIdle) return;
+
+    const ids = settledKey ? settledKey.split(",") : [];
+
+    // An id that re-enters the set after being absent got no frames while it
+    // was unsubscribed, and its comments/activities may still be inside their
+    // staleTime when its view remounts, so revalidate them. The first settle
+    // is skipped: nothing was ever cached for an id that was never absent
+    // (mount fetches it). Ids that stay subscribed are left alone. Runs even
+    // when `ids` is empty so that a later reopen of the last closed case counts
+    // as re-entering.
+    const previousSettled = settledIdsRef.current;
+    settledIdsRef.current = new Set(ids.map((id) => id.toLowerCase()));
+    if (previousSettled) {
+      for (const id of ids) {
+        if (!previousSettled.has(id.toLowerCase())) invalidateCaseThreadById(queryClient, id);
+      }
+    }
+
+    if (ids.length === 0) return;
 
     const requested = new Map(ids.map((id) => [id.toLowerCase(), id]));
     let cancelled = false;
@@ -227,5 +260,5 @@ export function useMultiplexedCaseStream(
       clearTimeout(reconnectTimer);
       source?.close();
     };
-  }, [settledKey, queryClient]);
+  }, [settledKey, queryClient, isIdle]);
 }

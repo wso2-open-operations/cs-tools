@@ -86,7 +86,7 @@ func TestProcessProject_BothCascadesFireSameRun_MoreOverdueCascadeNotifiesOnly(t
 		EndDate: &endDate,
 	}
 
-	if err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -150,7 +150,7 @@ func TestProcessProject_BothCascadesFireSameRun_OrderingIsDynamicNotHardcoded(t 
 		EndDate: &endDate,
 	}
 
-	if err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -258,7 +258,7 @@ func TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOth
 				SuspensionProcessState: json.RawMessage(tt.startState),
 			}
 
-			if err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
+			if _, err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
 				t.Fatalf("processProject() error = %v, want nil", err)
 			}
 

@@ -271,10 +271,9 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     expect(within(picker).getByText("Severity")).toBeInTheDocument();
   });
 
-  it("service_request: does not offer a Severity column in the picker, unlike case", () => {
-    // Severity is a support-case concept; a widget for any other case-family
-    // resourceType sharing this same renderer must not offer a column that
-    // would only ever render "—".
+  it("service_request: offers a Severity column in the picker, like case", () => {
+    // A service request carries an internal S1-S4 severity, so the shared
+    // case-family renderer offers the column for it too.
     const Renderer = WIDGET_LIST_RENDERERS.service_request;
     renderRenderer(
       <Renderer
@@ -283,6 +282,25 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
         isLoading={false}
       />,
       "/operations/service-requests/:id",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
+    const picker = screen.getByRole("list", { name: "Customise columns" });
+    expect(within(picker).getByText("Severity")).toBeInTheDocument();
+  });
+
+  it("security_report_analysis: does not offer a Severity column in the picker", () => {
+    // Severity is not a concept for every case-family type; a widget for one
+    // without it sharing this same renderer must not offer a column that
+    // would only ever render "—".
+    const Renderer = WIDGET_LIST_RENDERERS.security_report_analysis;
+    renderRenderer(
+      <Renderer
+        resourceType="security_report_analysis"
+        items={[{ id: "sra-1", caseNumber: "CS0000003", subject: "Report" }]}
+        isLoading={false}
+      />,
+      "/security-center/:id",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
@@ -426,5 +444,217 @@ describe("call_request list: the Scheduled / preferred column", () => {
   it("labels the column for both uses", () => {
     renderCalls([{ ...base, id: "c1" }]);
     expect(screen.getByText("Scheduled / preferred")).toBeInTheDocument();
+  });
+});
+
+describe("widgetListConfig — rows keep the page's own way back", () => {
+  // On View more the page's state is `{ from: <dashboard> }`; a row nests it
+  // as `parentState`, so the record's Back can hand it back and View more's
+  // own Back still returns to that dashboard.
+  function StateProbe() {
+    const location = useLocation();
+    return <div data-testid="state-probe">{JSON.stringify(location.state)}</div>;
+  }
+
+  function renderFeedbackAt(state: unknown) {
+    const Renderer = WIDGET_LIST_RENDERERS.case_feedback;
+    return render(
+      <MemoryRouter initialEntries={[{ pathname: "/dashboard/preview/case-feedback", search: "?w=w-1", state }]}>
+        <Routes>
+          <Route
+            path="/dashboard/preview/case-feedback"
+            element={
+              <Renderer
+                resourceType="case_feedback"
+                items={[{ instanceId: "fb-1", caseId: "case-1", ratingLabel: "Satisfied" }] as never}
+                isLoading={false}
+              />
+            }
+          />
+          <Route path="/cases/:id" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("passes the page's own state as parentState", () => {
+    renderFeedbackAt({ from: "/dashboard/my/d-1" });
+    fireEvent.click(screen.getByText("Satisfied"));
+    expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+      from: "/dashboard/preview/case-feedback?w=w-1",
+      parentState: { from: "/dashboard/my/d-1" },
+    });
+  });
+
+  it("passes a null parentState when the page had no state", () => {
+    renderFeedbackAt(null);
+    fireEvent.click(screen.getByText("Satisfied"));
+    expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+      from: "/dashboard/preview/case-feedback?w=w-1",
+      parentState: null,
+    });
+  });
+});
+
+describe("plg_organization list", () => {
+  function StateProbe() {
+    const location = useLocation();
+    return (
+      <div data-testid="state-probe">
+        {location.pathname} {JSON.stringify(location.state)}
+      </div>
+    );
+  }
+
+  const acme = {
+    id: "org-1",
+    organizationName: "Acme",
+    registeredEmail: "a@acme.test",
+    registeredName: null,
+    registeredOn: "2026-02-03T10:00:00Z",
+    platformStages: [
+      {
+        orgPlatformId: "op-1",
+        product: { id: "p-1", code: "IAM", name: "Identity" },
+        lifecycleStage: "REGISTRATION",
+        stageName: "Registration",
+        registeredOn: "2026-02-03T10:00:00Z",
+        isNew: false,
+      },
+      {
+        orgPlatformId: "op-2",
+        product: { id: "p-2", code: "API_PLATFORM", name: "API Platform" },
+        lifecycleStage: "ACTIVATED",
+        stageName: "Activated",
+        registeredOn: "2026-02-04T10:00:00Z",
+        isNew: false,
+      },
+    ],
+    owner: { id: "u-1", email: "o@example.com", name: "Olivia Owner" },
+  };
+
+  function renderAt(items: Record<string, unknown>[], state: unknown = { from: "/dashboard/my/d-1" }) {
+    const Renderer = WIDGET_LIST_RENDERERS.plg_organization;
+    return render(
+      <MemoryRouter
+        initialEntries={[{ pathname: "/dashboard/preview/plg-organizations", search: "?w=w-1", state }]}
+      >
+        <Routes>
+          <Route
+            path="/dashboard/preview/plg-organizations"
+            element={<Renderer resourceType="plg_organization" items={items} isLoading={false} />}
+          />
+          <Route path="/plg/organizations/:id" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows each product with its lifecycle stage, the owner and the registration date", () => {
+    renderAt([acme]);
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("a@acme.test")).toBeInTheDocument();
+    expect(screen.getByText("Identity")).toBeInTheDocument();
+    expect(screen.getByText("API Platform")).toBeInTheDocument();
+    expect(screen.getByText("Registration")).toBeInTheDocument();
+    expect(screen.getByText("Activated")).toBeInTheDocument();
+    expect(screen.getByText("Olivia Owner")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        formatBackendTimestampForDisplay(acme.registeredOn, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }) ?? "",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says Unassigned for an organisation with no owner", () => {
+    renderAt([{ ...acme, owner: null }]);
+    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("opens the organisation's PLG page, passing the page's own state as parentState", () => {
+    renderAt([acme]);
+    fireEvent.click(screen.getByText("Acme"));
+    expect(screen.getByTestId("state-probe").textContent).toBe(
+      `/plg/organizations/org-1 ${JSON.stringify({
+        from: "/dashboard/preview/plg-organizations?w=w-1",
+        parentState: { from: "/dashboard/my/d-1" },
+      })}`,
+    );
+  });
+
+  it("says so when no organisation matches", () => {
+    renderAt([]);
+    expect(screen.getByText("No organisations match this widget's filters.")).toBeInTheDocument();
+  });
+});
+
+describe("plg_registration list", () => {
+  function StateProbe() {
+    const location = useLocation();
+    return (
+      <div data-testid="state-probe">
+        {location.pathname} {JSON.stringify(location.state)}
+      </div>
+    );
+  }
+
+  const registration = {
+    orgPlatformId: "op-1",
+    organizationId: "org-1",
+    organizationName: "Acme",
+    product: { id: "p-1", code: "IAM", name: "Identity" },
+    registeredEmail: "a@acme.test",
+    registeredName: null,
+    registeredOn: "2026-02-03T10:00:00Z",
+    lifecycleStage: "ACTIVATED",
+    stageName: "Activated",
+    owner: null,
+  };
+
+  function renderAt(items: Record<string, unknown>[]) {
+    const Renderer = WIDGET_LIST_RENDERERS.plg_registration;
+    return render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/dashboard/preview/plg-registrations", search: "?w=w-1", state: { from: "/dashboard/my/d-1" } },
+        ]}
+      >
+        <Routes>
+          <Route
+            path="/dashboard/preview/plg-registrations"
+            element={<Renderer resourceType="plg_registration" items={items} isLoading={false} />}
+          />
+          <Route path="/plg/organizations/:id/:product" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the organisation, product, stage and owner", () => {
+    renderAt([registration]);
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("Identity")).toBeInTheDocument();
+    expect(screen.getByText("Activated")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("opens the product's tab on the organisation's PLG page, passing the page's own state as parentState", () => {
+    renderAt([registration]);
+    fireEvent.click(screen.getByText("Acme"));
+    expect(screen.getByTestId("state-probe").textContent).toBe(
+      `/plg/organizations/org-1/IAM ${JSON.stringify({
+        from: "/dashboard/preview/plg-registrations?w=w-1",
+        parentState: { from: "/dashboard/my/d-1" },
+      })}`,
+    );
+  });
+
+  it("says so when no registration matches", () => {
+    renderAt([]);
+    expect(screen.getByText("No registrations match this widget's filters.")).toBeInTheDocument();
   });
 });

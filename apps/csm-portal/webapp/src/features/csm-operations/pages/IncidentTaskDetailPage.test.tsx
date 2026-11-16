@@ -61,7 +61,7 @@ const TASK: BeIncidentTaskDetail = {
   closedOn: null,
 };
 
-function renderPage(state?: { from: string }): void {
+function renderPage(state?: { from: string; parentState?: unknown }): void {
   render(
     <MemoryRouter initialEntries={[{ pathname: `/operations/incident-tasks/${TASK_ID}`, state }]}>
       <Routes>
@@ -173,14 +173,23 @@ describe("IncidentTaskDetailPage", () => {
     useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
     renderPage({ from: "/somewhere/else" });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(navigateMock).toHaveBeenCalledWith("/somewhere/else");
+    expect(navigateMock).toHaveBeenCalledWith("/somewhere/else", { state: undefined });
+  });
+
+  it("goes back with that page's own state, so it keeps its own Back", () => {
+    useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
+    renderPage({ from: "/operations/incidents/inc-1?tab=related", parentState: { from: "/dashboard/my/d-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/incidents/inc-1?tab=related", {
+      state: { from: "/dashboard/my/d-1" },
+    });
   });
 
   it("falls back to the parent incident's Related tab for a direct link", () => {
     useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(navigateMock).toHaveBeenCalledWith(`/operations/incidents/${INCIDENT_ID}?tab=related`);
+    expect(navigateMock).toHaveBeenCalledWith(`/operations/incidents/${INCIDENT_ID}?tab=related`, { state: undefined });
   });
 
   it("renders not-found for an unknown id", () => {

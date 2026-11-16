@@ -32,7 +32,7 @@ import { Link as RouterLink, useLocation } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import EscalationLevelChip from "@components/EscalationLevelChip";
 import RelativeTime from "@components/RelativeTime";
-import SeverityChip from "@components/SeverityChip";
+import CaseSeverityChip from "@features/csm-cases/components/CaseSeverityChip";
 import StateChip from "@components/StateChip";
 import WorkStateChip from "@components/WorkStateChip";
 import CasePreviewDrawer from "@features/csm-cases/components/CasePreviewDrawer";
@@ -45,7 +45,6 @@ import {
   CASE_TYPE_COLOR,
   CASE_TYPE_LABEL,
   caseTypeDetailBasePath,
-  caseTypeHasSeverity,
 } from "@features/csm-cases/utils/caseType";
 import { ISSUE_TYPE_LABEL } from "@features/csm-cases/utils/caseIssueType";
 import { effectiveWorkState } from "@features/csm-cases/utils/caseWorkState";
@@ -155,11 +154,7 @@ function renderOptionalCell(id: CaseOptionalColumnId, c: CsmCaseRow): JSX.Elemen
     case "severity":
       return (
         <Box sx={{ justifySelf: "start" }}>
-          {caseTypeHasSeverity(c.caseType) ? (
-            <SeverityChip severity={c.severity} clickable />
-          ) : (
-            "—"
-          )}
+          <CaseSeverityChip caseType={c.caseType} severity={c.severity} clickable />
         </Box>
       );
     case "issueType":
@@ -230,6 +225,13 @@ const STATE_TRACK = "minmax(110px, 150px)";
  * (a far-future "Nd from now") from being cut off by a fixed width. */
 const UPDATED_TRACK = "minmax(90px, max-content)";
 
+/**
+ * The cases table shared by the Cases page, View more, project work items and
+ * dashboard widgets: optional columns, server-side sort, row selection and a
+ * quick preview. A row opens its case with `{ from, parentState }` (this
+ * page's URL and its own state), so the case's Back returns here with this
+ * page's own Back intact.
+ */
 export default function CasesList({
   cases,
   isLoading,
@@ -445,7 +447,15 @@ export default function CasesList({
             {!isLoading &&
               cases.map((c) => {
                 const rowBasePath = detailBasePath ?? caseTypeDetailBasePath(c.caseType);
-                const rowState = { from: `${location.pathname}${location.search}` };
+                // `parentState` nests this list's OWN inherited state (e.g.
+                // `{ from: <dashboard> }`) so the detail page's Back can
+                // restore it — otherwise a dashboard → list → case → Back
+                // round trip lands on this list with no `from`, dropping its
+                // own Back button.
+                const rowState = {
+                  from: `${location.pathname}${location.search}`,
+                  parentState: location.state ?? null,
+                };
                 const rowLabel = c.wso2CaseId || c.caseNumber || c.subject;
                 return (
                   <Box

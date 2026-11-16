@@ -17,16 +17,20 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/dashboards"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/playbooks"
 )
 
 type fakeGenerator struct {
@@ -56,10 +60,13 @@ func post(t *testing.T, h *DashboardHandler, body string) (int, map[string]any) 
 	return rec.Code, out
 }
 
+// TestGenerateReturnsTheCandidates: the generator gets the trimmed prompt, the
+// draft and the teams, and the 200 response carries the candidates and all
+// four token counts.
 func TestGenerateReturnsTheCandidates(t *testing.T) {
 	gen := &fakeGenerator{res: dashboards.Result{
 		Candidates:  []json.RawMessage{json.RawMessage(`{"displayName":"A"}`), json.RawMessage(`{"displayName":"B"}`)},
-		InputTokens: 10, OutputTokens: 2,
+		InputTokens: 10, CacheCreationInputTokens: 30, CacheReadInputTokens: 40, OutputTokens: 2,
 	}}
 	status, out := post(t, &DashboardHandler{generator: gen}, `{"prompt":"  Open cases by severity  ",
 		"draft":{"displayName":"Old"},"teams":[{"key":"rigel","name":"Rigel","family":"cre-abt","field":"creTeam"}]}`)
@@ -69,7 +76,8 @@ func TestGenerateReturnsTheCandidates(t *testing.T) {
 	if c, _ := out["candidates"].([]any); len(c) != 2 || out["declined"] != nil {
 		t.Errorf("body = %v, want two candidates and no decline", out)
 	}
-	if u, _ := out["usage"].(map[string]any); u["inputTokens"] != float64(10) || u["outputTokens"] != float64(2) {
+	if u, _ := out["usage"].(map[string]any); u["inputTokens"] != float64(10) || u["outputTokens"] != float64(2) ||
+		u["cacheCreationInputTokens"] != float64(30) || u["cacheReadInputTokens"] != float64(40) {
 		t.Errorf("usage = %v", out["usage"])
 	}
 	if gen.got.Prompt != "Open cases by severity" || string(gen.got.Draft) != `{"displayName":"Old"}` ||
@@ -97,18 +105,26 @@ func TestGenerateReturnsTheDecline(t *testing.T) {
 
 func TestGenerateRejectsABadRequestWithoutACall(t *testing.T) {
 	for name, body := range map[string]string{
-		"not JSON":       `prompt`,
-		"two objects":    `{"prompt":"p"}{"prompt":"q"}`,
-		"unknown field":  `{"prompt":"p","current":{}}`,
-		"empty prompt":   `{"prompt":"   "}`,
-		"long prompt":    `{"prompt":"` + strings.Repeat("é", promptMaxLength+1) + `"}`,
-		"draft an array": `{"prompt":"p","draft":[1]}`,
-		"team no key":    `{"prompt":"p","teams":[{"name":"Rigel","field":"creTeam"}]}`,
-		"team pipe":      `{"prompt":"p","teams":[{"key":"r","name":"Ri|gel","field":"creTeam"}]}`,
-		"team field":     `{"prompt":"p","teams":[{"key":"r","name":"Rigel","field":"accountId"}]}`,
-		"team family":    `{"prompt":"p","teams":[{"key":"r","name":"Rigel","family":"sme","field":"creTeam"}]}`,
-		"body too big":   `{"prompt":"p","draft":{"x":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}}`,
-		"draft too big":  `{"prompt":"p","draft":` + draftOfSize(draftMaxBytes+1) + `}`,
+		"not JSON":        `prompt`,
+		"two objects":     `{"prompt":"p"}{"prompt":"q"}`,
+		"unknown field":   `{"prompt":"p","current":{}}`,
+		"empty prompt":    `{"prompt":"   "}`,
+		"long prompt":     `{"prompt":"` + strings.Repeat("é", promptMaxLength+1) + `"}`,
+		"draft an array":  `{"prompt":"p","draft":[1]}`,
+		"team no key":     `{"prompt":"p","teams":[{"name":"Rigel","field":"creTeam"}]}`,
+		"team pipe":       `{"prompt":"p","teams":[{"key":"r","name":"Ri|gel","field":"creTeam"}]}`,
+		"team field":      `{"prompt":"p","teams":[{"key":"r","name":"Rigel","field":"accountId"}]}`,
+		"team family":     `{"prompt":"p","teams":[{"key":"r","name":"Rigel","family":"sme","field":"creTeam"}]}`,
+		"body too big":    `{"prompt":"p","draft":{"x":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}}`,
+		"draft too big":   `{"prompt":"p","draft":` + draftOfSize(draftMaxBytes+1) + `}`,
+		"answers no code": `{"prompt":"p","playbookAnswers":[{"name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"A"}]}]}`,
+		"answers type":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"BOOLEAN","options":[{"code":"A","label":"A"}]}]}`,
+		"answers none":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"CHECKLIST","options":[]}]}`,
+		"answers label":   `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":" "}]}]}`,
+		"answers pipe":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"Yes|No"}]}]}`,
+		"answers newline": `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Out\ncome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"A"}]}]}`,
+		"answers too many": `{"prompt":"p","playbookAnswers":[` + strings.TrimSuffix(strings.Repeat(
+			`{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"A"}]},`, maxPlaybookAnswers+1), ",") + `]}`,
 	} {
 		gen := &fakeGenerator{}
 		status, out := post(t, &DashboardHandler{generator: gen}, body)
@@ -122,6 +138,23 @@ func TestGenerateRejectsABadRequestWithoutACall(t *testing.T) {
 	}
 	if status, _ := post(t, &DashboardHandler{generator: gen}, `{"prompt":"p","draft":`+draftOfSize(draftMaxBytes)+`}`); status != http.StatusOK {
 		t.Errorf("a draft of exactly %d bytes: status %d, want 200", draftMaxBytes, status)
+	}
+}
+
+// TestGeneratePassesThePlaybookAnswersOn: the generator gets the playbook
+// answer fields as sent.
+func TestGeneratePassesThePlaybookAnswersOn(t *testing.T) {
+	gen := &fakeGenerator{res: dashboards.Result{Candidates: []json.RawMessage{json.RawMessage(`{}`)}}}
+	status, out := post(t, &DashboardHandler{generator: gen}, `{"prompt":"p","teams":[],"playbookAnswers":[
+		{"code":"ELIGIBILITY_ASSESSMENT_OUTCOME","name":"Eligibility Assessment Outcome","valueType":"SINGLE_SELECT",
+		 "options":[{"code":"MONITOR","label":"Monitor"},{"code":"EXCLUDED","label":"Excluded"}]}]}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body %v", status, out)
+	}
+	want := []playbooks.Field{{Code: "ELIGIBILITY_ASSESSMENT_OUTCOME", Name: "Eligibility Assessment Outcome", ValueType: "SINGLE_SELECT",
+		Options: []playbooks.Option{{Code: "MONITOR", Label: "Monitor"}, {Code: "EXCLUDED", Label: "Excluded"}}}}
+	if !reflect.DeepEqual(gen.got.PlaybookAnswers, want) {
+		t.Errorf("generator got %+v, want %+v", gen.got.PlaybookAnswers, want)
 	}
 }
 
@@ -145,6 +178,9 @@ func (timeoutErr) Temporary() bool { return true }
 
 var _ net.Error = timeoutErr{}
 
+// TestGenerateMapsEveryError: every generator error answers its own status and
+// code (the usage limit 429 usage_limit, apart from model_call_failed), with
+// a fixed message that never carries upstream detail.
 func TestGenerateMapsEveryError(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
@@ -157,6 +193,7 @@ func TestGenerateMapsEveryError(t *testing.T) {
 		{fmt.Errorf("%w: %w", dashboards.ErrCall, context.DeadlineExceeded), http.StatusGatewayTimeout, CodeTimeout},
 		{fmt.Errorf("%w: %w", dashboards.ErrCall, timeoutErr{}), http.StatusGatewayTimeout, CodeTimeout},
 		{fmt.Errorf("%w: 401 bad key", dashboards.ErrCall), http.StatusBadGateway, CodeModelCallFailed},
+		{fmt.Errorf("%w: %w: 429 bad key", dashboards.ErrCall, dashboards.ErrUsageLimit), http.StatusTooManyRequests, CodeUsageLimit},
 		{fmt.Errorf("something else"), http.StatusInternalServerError, CodeInternal},
 	} {
 		status, out := post(t, &DashboardHandler{generator: &fakeGenerator{err: tc.err}}, `{"prompt":"p"}`)
@@ -166,6 +203,24 @@ func TestGenerateMapsEveryError(t *testing.T) {
 		if msg, _ := out["message"].(string); strings.Contains(msg, "bad key") || msg == "" {
 			t.Errorf("%v: message %q, want a fixed message without upstream detail", tc.err, msg)
 		}
+	}
+}
+
+// TestGenerateLogsTheUsageLimitCause: the usage limit's log line carries the
+// error, so an operator can tell a request, token or spend limit apart (the
+// response's message stays fixed).
+func TestGenerateLogsTheUsageLimitCause(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	err := fmt.Errorf("%w: %w: 429 token limit exceeded", dashboards.ErrCall, dashboards.ErrUsageLimit)
+	if status, _ := post(t, &DashboardHandler{generator: &fakeGenerator{err: err}}, `{"prompt":"p"}`); status != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", status)
+	}
+	if line := buf.String(); !strings.Contains(line, "usage limit reached") || !strings.Contains(line, "429 token limit exceeded") {
+		t.Errorf("log = %q, want the usage limit line with its cause", line)
 	}
 }
 

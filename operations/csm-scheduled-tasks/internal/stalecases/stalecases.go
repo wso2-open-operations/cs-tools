@@ -50,7 +50,7 @@ type EmailSender interface {
 // ALERT_RECIPIENTS audience, which is about failure alerting.
 //
 // caseLinkBase is the CSM portal's base URL (CSM_PORTAL_WEB_BASE_URL); when
-// set, the case cells link to <caseLinkBase>/cases/<internal id>, else they are plain text.
+// set, the case cells link to <caseLinkBase>/cases/<case id> (the case UUID), else they are plain text.
 //
 // emailsEnabled is cmd/server/main.go's ALERTS_ENABLED, the same global kill
 // switch engine.Engine.AlertsEnabled uses: it silences every email this

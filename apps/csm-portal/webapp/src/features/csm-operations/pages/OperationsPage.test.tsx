@@ -39,6 +39,9 @@ vi.mock("@features/csm-operations/components/ChangeRequestsTab", () => ({
 vi.mock("@features/csm-operations/components/IncidentsTab", () => ({
   default: () => <div data-testid="tab-content">incidents</div>,
 }));
+vi.mock("@features/csm-operations/components/AlertMuteRulesTab", () => ({
+  default: () => <div data-testid="tab-content">alert mute rules</div>,
+}));
 vi.mock("@features/csm-operations/components/ProblemsTab", () => ({
   default: () => <div data-testid="tab-content">problems</div>,
 }));

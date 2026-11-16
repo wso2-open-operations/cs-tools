@@ -32,7 +32,7 @@ import (
 var sysidBodyKeys = map[string]struct{}{
 	"accountid": {}, "accountids": {}, "approvedbyid": {}, "approverid": {}, "approverids": {},
 	"assignedengineerid": {}, "assignedteamid": {}, "assigneduserid": {}, "assignmentgroupid": {},
-	"attachmentid": {}, "callerid": {}, "caseid": {}, "caseids": {}, "catalogid": {},
+	"attachmentid": {}, "attachmentids": {}, "callerid": {}, "caseid": {}, "caseids": {}, "catalogid": {},
 	"catalogitemid": {}, "causedbyid": {}, "changerequestid": {}, "chipids": {},
 	"configurationitemid": {}, "configurationitemids": {}, "contactid": {}, "conversationid": {},
 	"customergroupid": {}, "deployedproductid": {}, "deployedproductids": {}, "deploymentid": {},

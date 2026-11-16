@@ -88,6 +88,12 @@ describe("richTextEditor utils", () => {
       expect(sanitizeUrl("#anchor")).toBe("#anchor");
     });
 
+    it("allows blob: URLs, the local preview of an image being uploaded", () => {
+      expect(sanitizeUrl("blob:http://localhost:5173/abc-123")).toBe(
+        "blob:http://localhost:5173/abc-123",
+      );
+    });
+
     it("returns empty string for javascript and data", () => {
       expect(sanitizeUrl("javascript:alert(1)")).toBe("");
       expect(sanitizeUrl("data:text/html,<script>")).toBe("");

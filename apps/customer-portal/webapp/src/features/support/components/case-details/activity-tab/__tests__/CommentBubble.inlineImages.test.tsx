@@ -53,7 +53,6 @@ function renderBubble(content: string) {
         <CommentBubble
           comment={comment}
           isCurrentUser={false}
-          caseId="case-1"
           primaryBg="rgba(250,123,63,0.1)"
         />
       </ThemeProvider>
@@ -66,6 +65,7 @@ describe("CommentBubble inline images (migrated content)", () => {
     vi.mocked(useAttachmentPreviews).mockReset();
     vi.mocked(useAttachmentPreviews).mockReturnValue({
       dataUrls: new Map([[HEX, DATA]]),
+      removedIds: new Set<string>(),
       isLoading: false,
     });
   });
@@ -74,7 +74,7 @@ describe("CommentBubble inline images (migrated content)", () => {
     const { container } = renderBubble(
       `[code]<p><img src="/${UUID}"><br></p>[/code]`,
     );
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], "case-1");
+    expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([HEX]);
     expect(container.querySelector("img")?.getAttribute("src")).toBe(DATA);
   });
 
@@ -82,7 +82,7 @@ describe("CommentBubble inline images (migrated content)", () => {
     const { container } = renderBubble(
       `[code]<p><img src="/${HEX}.iix"><br></p>[/code]`,
     );
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], "case-1");
+    expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([HEX]);
     expect(container.querySelector("img")?.getAttribute("src")).toBe(DATA);
   });
 });

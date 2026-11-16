@@ -318,8 +318,78 @@ func TestUserService_PatchMe_PhoneTooLong(t *testing.T) {
 	if call.called {
 		t.Error("UpdateUserProfile was called for an over-long phone")
 	}
-	if _, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp(" " + strings.Repeat("1", 32) + " ")}); err != nil {
-		t.Errorf("32 characters after trimming should be accepted, got %v", err)
+	// 32 characters passes the length cap but is not E.164, so it is still a 400,
+	// with the format message rather than the length one.
+	_, err = svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp(" " + strings.Repeat("1", 32) + " ")})
+	ve, ok := err.(*apierror.ValidationError)
+	if !ok || strings.Contains(ve.Msg, "at most") {
+		t.Errorf("32 non-E.164 characters: error = %v, want the E.164 ValidationError", err)
+	}
+}
+
+var invalidPhones = []string{
+	"+1 555-010-0000",
+	"0771234567",
+	"+94 77 123 4567",
+	"12345678",
+	"+0771234567",
+	"+1234567",            // too short (6 digits)
+	"+1234567890123456",   // too long (16 digits)
+	"+1555abc0123",        // letters
+	"(+15555550123)",      // wrapped
+	"+15555550123 ext 4",  // trailing text
+	"+15555550123\n+1555", // embedded newline
+}
+
+// TestUserService_PatchMe_RejectsNonE164Phone proves every non-E.164 value is a
+// ValidationError before the repository is reached, and the value is not echoed.
+func TestUserService_PatchMe_RejectsNonE164Phone(t *testing.T) {
+	for _, in := range invalidPhones {
+		var call patchCall
+		svc := NewUserService(patchRepo(&call), nil)
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+		_, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp(in)})
+		ve, ok := err.(*apierror.ValidationError)
+		if !ok {
+			t.Errorf("%q: error = %v (%T), want *apierror.ValidationError", in, err, err)
+			continue
+		}
+		if ve.Msg != "phone must be in E.164 format, e.g. +14155552671" {
+			t.Errorf("%q: Msg = %q", in, ve.Msg)
+		}
+		if call.called {
+			t.Errorf("%q: UpdateUserProfile was called", in)
+		}
+	}
+}
+
+// TestUserService_PatchMe_AcceptsE164Phone covers the accepted boundaries.
+func TestUserService_PatchMe_AcceptsE164Phone(t *testing.T) {
+	for _, in := range []string{"+15550100000", "+94771234567", "+12345678", "+123456789012345"} {
+		var call patchCall
+		svc := NewUserService(patchRepo(&call), nil)
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+		if _, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp(in)}); err != nil {
+			t.Errorf("%q: unexpected error %v", in, err)
+			continue
+		}
+		if call.phone == nil || *call.phone != in {
+			t.Errorf("%q: stored %v", in, call.phone)
+		}
+	}
+}
+
+// TestUserService_PatchMe_AbsentPhoneUnchanged proves an omitted phone is not
+// validated and not written.
+func TestUserService_PatchMe_AbsentPhoneUnchanged(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call), nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{TimeZone: "Asia/Colombo"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if call.phone != nil {
+		t.Errorf("phone = %q, want nil (untouched)", *call.phone)
 	}
 }
 
@@ -752,7 +822,7 @@ func TestUserService_CreateUser(t *testing.T) {
 	t.Run("systemProvisioned is ignored for a caller whose scope doesn't match the CSM-portal-backend shape", func(t *testing.T) {
 		for name, access := range map[string]AccessService{
 			"plain unrestricted (e.g. a pure M2M client id)": alwaysUnrestrictedAccess{},
-			"nil access (not wired up)":                       nil,
+			"nil access (not wired up)":                      nil,
 		} {
 			t.Run(name, func(t *testing.T) {
 				var gotActor string
@@ -852,6 +922,37 @@ func TestUserService_UpdateUser_RejectsOverLongPhone(t *testing.T) {
 	var ve *apierror.ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected ValidationError for an over-long phone, got %v", err)
+	}
+}
+
+func TestUserService_UpdateUser_RejectsNonE164Phone(t *testing.T) {
+	for _, in := range invalidPhones {
+		var call patchCall
+		svc := NewUserService(patchRepo(&call), alwaysUnrestrictedAccess{})
+		_, err := svc.UpdateUser(context.Background(), testUpdatePhoneUserID, phoneReq(in))
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Errorf("%q: expected ValidationError, got %v", in, err)
+			continue
+		}
+		if ve.Msg != "phone must be in E.164 format, e.g. +14155552671" {
+			t.Errorf("%q: Msg = %q", in, ve.Msg)
+		}
+		if call.called {
+			t.Errorf("%q: UpdateUserProfile was called", in)
+		}
+	}
+}
+
+func TestUserService_UpdateUser_AbsentPhoneUnchanged(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call), alwaysUnrestrictedAccess{})
+	tz := "Asia/Colombo"
+	if _, err := svc.UpdateUser(context.Background(), testUpdatePhoneUserID, domain.UpdateUserRequest{TimeZone: &tz}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if call.phone != nil {
+		t.Errorf("phone = %q, want nil (untouched)", *call.phone)
 	}
 }
 

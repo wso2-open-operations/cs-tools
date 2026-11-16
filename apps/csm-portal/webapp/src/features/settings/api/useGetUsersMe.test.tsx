@@ -45,41 +45,7 @@ describe("useGetUsersMe", () => {
     fetchMock.mockReset();
   });
 
-  it("surfaces sftpgoAttachmentStorageEnabled: true from the response body", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          email: "jane.doe@example.com",
-          sftpgoAttachmentStorageEnabled: true,
-        }),
-        { status: 200 },
-      ),
-    );
-
-    const { result } = renderHook(() => useGetUsersMe(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.sftpgoAttachmentStorageEnabled).toBe(true);
-  });
-
-  it("surfaces sftpgoAttachmentStorageEnabled: false from the response body", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          email: "jane.doe@example.com",
-          sftpgoAttachmentStorageEnabled: false,
-        }),
-        { status: 200 },
-      ),
-    );
-
-    const { result } = renderHook(() => useGetUsersMe(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.sftpgoAttachmentStorageEnabled).toBe(false);
-  });
-
-  it("treats an absent field (older backend) as undefined, not a thrown error", async () => {
+  it("returns the profile from the response body", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ email: "jane.doe@example.com" }), {
         status: 200,
@@ -89,6 +55,6 @@ describe("useGetUsersMe", () => {
     const { result } = renderHook(() => useGetUsersMe(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(result.current.data?.sftpgoAttachmentStorageEnabled).toBeUndefined();
+    expect(result.current.data?.email).toBe("jane.doe@example.com");
   });
 });

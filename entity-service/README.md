@@ -108,9 +108,9 @@ from configuration:
 | `servicenow`                       | Reads and writes for the migrated entities go to an external ticketing system through an integration service. PostgreSQL is optional and only backs the side tables that have no external equivalent. |
 | `postgres-servicenow-dual-write`   | PostgreSQL stays authoritative for every read and write. Selected writes are mirrored afterwards to the external system on a best-effort basis, and failures are recorded rather than surfaced. |
 
-`SLA_DATA_SOURCE` and `ATTACHMENT_DATA_SOURCE` (each `postgres` or `servicenow`) override the
-choice for SLA reads and for case attachment and activity-feed reads independently, so a
-deployment can move one resource at a time. The `servicenow` values are the literal configuration
+`SLA_DATA_SOURCE` (`postgres` or `servicenow`) overrides the choice for SLA reads, so a
+deployment can move that one resource at a time. Attachments have no setting: their files are in
+Azure Blob Storage and their metadata is always read from PostgreSQL. The `servicenow` values are the literal configuration
 spellings of "use the external ticketing system adapter"; the credentials for that adapter are
 the `SERVICENOW_INTEGRATION_SERVICE_*` variables in the [configuration reference](#configuration-reference).
 
@@ -448,7 +448,6 @@ does not read.
 | -------- | -------- | ------- | ----------- | ------- |
 | `DATA_SOURCE` | No | `postgres` | `postgres`, `servicenow` or `postgres-servicenow-dual-write`. See [Pluggable data sources](#pluggable-data-sources). | `postgres` |
 | `SLA_DATA_SOURCE` | No | `postgres` | `postgres` or `servicenow`; overrides the source for SLA reads. | `postgres` |
-| `ATTACHMENT_DATA_SOURCE` | No | `postgres` | `postgres` or `servicenow`; overrides the source for attachment reads and the case activity feed. | `postgres` |
 | `SERVICENOW_INTEGRATION_SERVICE_BASE_URL` | Conditional | none | Base URL of the adapter's integration service. Required when any of the three data-source variables above selects the external system (including dual-write). | `https://adapter.example.com` |
 | `SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL` | Conditional | none | OAuth2 token endpoint for the adapter. Required under the same condition. | `https://idp.example.com/oauth2/token` |
 | `SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID` | Conditional | none | OAuth2 client id. Required under the same condition. | `<adapter-client-id>` |
@@ -521,6 +520,7 @@ synchronous with a bounded timeout, and failures are recorded in `event_publish_
 | `CLOUD_STATUS_DRAINER_ENABLED` | No | `false` | Exact `true` starts the cloud status drainer (it also rewrites cloud monitor status). | `true` |
 | `CLOUD_STATUS_POLL_INTERVAL` | No | `10s` | Poll interval of that drainer. | `10s` |
 | `INCIDENT_REPORT_POLL_INTERVAL` | No | `5s` | Poll interval of the incident report drainer. | `5s` |
+| `SERVICE_REQUEST_DEFAULT_SEVERITY` | No | `S4` | Internal severity (`S1`, `S2`, `S3` or `S4`, case-insensitive) a service request gets when it is created without an explicit one. Unset means `S4`. Any other value (including `S0`) refuses to start. | `S3` |
 | `INCIDENT_DEFAULT_SERVICE_ID` | No | none | Service UUID whose support group is used when an incident's own service has none. Must be a UUID. | `00000000-0000-0000-0000-000000000000` |
 | `INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS` | No | none | Comma-separated group UUIDs an incident may be created in even though they are the support group of no service (for example a security operations group). They are accepted by `POST /incidents` and offered by `POST /groups/search` with `supportGroupsOnly`; inactive groups still are not. Entries are trimmed, empty ones ignored; every entry must be a UUID or startup fails. Match is by id, never by name. | `791ae9fb-1b41-8d10-a30d-edb8b04bcbd4` |
 | `SR_ALERT_SRE_TEAM_IDS` | No | none | Comma-separated team UUIDs whose new service requests are auto-assigned and acknowledged. All entries must be UUIDs. | `00000000-0000-0000-0000-000000000000` |

@@ -32,7 +32,7 @@ func TestOutageEmailsEndLikeTheOtherTemplates(t *testing.T) {
 			t.Errorf("%s email ends %q, want the template ending \"</html>\\n\"", name, body[max(0, len(body)-20):])
 		}
 	}
-	for _, want := range []string{"<!DOCTYPE html", "WSO2 Logo", "Outage Resolved", "Hello Team,<br>", "View outage in the CSM portal", "WSO2 LLC. All Rights Reserved."} {
+	for _, want := range []string{"<!DOCTYPE html", `alt="Logo"`, "Outage Resolved", "Hello Team,<br>", "View outage in the CSM portal", "WSO2 LLC. All Rights Reserved."} {
 		if !strings.Contains(comm, want) {
 			t.Errorf("communication email missing %q (the house shell or its content)", want)
 		}

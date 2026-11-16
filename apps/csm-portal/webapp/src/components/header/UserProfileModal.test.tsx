@@ -40,6 +40,7 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => ({ name: "Jane Doe", email: "jane@example.com" }),
 }));
 
+import { ApiError } from "@utils/ApiError";
 import UserProfileModal from "@components/header/UserProfileModal";
 
 const PHONE = "+15550001111";
@@ -90,10 +91,67 @@ describe("UserProfileModal: phone number", () => {
   it("rejects a number that is not E.164", () => {
     openDialog();
     fireEvent.click(screen.getByLabelText("Edit phone number"));
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "0771234567" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "0555010000" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(mutateMock).not.toHaveBeenCalled();
     expect(showErrorMock).toHaveBeenCalledTimes(1);
+  });
+
+  function saveWith(value: string) {
+    openDialog();
+    fireEvent.click(screen.getByLabelText("Edit phone number"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  }
+
+  it.each(["+1 555-010-0000", "0555010000"])(
+    "rejects %s client-side without calling the API",
+    (value) => {
+      saveWith(value);
+      expect(mutateMock).not.toHaveBeenCalled();
+      expect(showErrorMock).toHaveBeenCalledWith(
+        expect.stringContaining("E.164"),
+      );
+    },
+  );
+
+  it("accepts +15550100000", () => {
+    saveWith("+15550100000");
+    expect(showErrorMock).not.toHaveBeenCalled();
+    expect(mutateMock.mock.calls[0][0]).toEqual({ phoneNumber: "+15550100000" });
+  });
+
+  it("empty clears the number by sending an empty phoneNumber", () => {
+    saveWith("   ");
+    expect(showErrorMock).not.toHaveBeenCalled();
+    expect(mutateMock.mock.calls[0][0]).toEqual({ phoneNumber: "" });
+  });
+
+  it("surfaces the backend's 400 message when the save fails", () => {
+    const msg = "phone must be in E.164 format, e.g. +14155552671";
+    mutateMock.mockImplementation(
+      (_payload: unknown, opts: { onError: (e: Error) => void }) =>
+        opts.onError(new ApiError(400, "Bad Request", msg)),
+    );
+    saveWith("+15550100000");
+    expect(showErrorMock).toHaveBeenCalledWith(msg);
+  });
+
+  it("keeps the generic message for a non-400 failure", () => {
+    mutateMock.mockImplementation(
+      (_payload: unknown, opts: { onError: (e: Error) => void }) =>
+        opts.onError(new ApiError(500, "Internal Server Error", "boom")),
+    );
+    saveWith("+15550100000");
+    expect(showErrorMock).toHaveBeenCalledWith(
+      "Could not update profile. Please try again.",
+    );
+  });
+
+  it("tells the user the phone rule in the helper text", () => {
+    openDialog();
+    fireEvent.click(screen.getByLabelText("Edit phone number"));
+    expect(screen.getByText(/8 to 15 digits, no spaces or dashes/)).toBeInTheDocument();
   });
 });
 

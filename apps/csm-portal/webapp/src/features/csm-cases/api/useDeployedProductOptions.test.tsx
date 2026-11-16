@@ -74,6 +74,32 @@ describe("useDeployedProductOptions", () => {
     expect(payload).toMatchObject({ productCategories: ["pdp"] });
   });
 
+  it("loads every page of a deployment's products", async () => {
+    const mk = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: `dp-${i}`, product: { name: `P${i}` } }));
+    postMock
+      .mockResolvedValueOnce({ deployedProducts: mk(50), hasMore: true })
+      .mockResolvedValueOnce({ deployedProducts: mk(3), hasMore: false });
+    const { result } = renderHook(() => useDeployedProductOptions("dep-1"), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(2);
+    expect(postMock.mock.calls[1][1]).toMatchObject({ pagination: { offset: 50 } });
+    expect(result.current.data).toHaveLength(53);
+  });
+
+  it("rejects instead of returning a partial list when the page bound is exhausted", async () => {
+    const full = Array.from({ length: 50 }, (_, i) => ({ id: `dp-${i}`, product: { name: `P${i}` } }));
+    postMock.mockResolvedValue({ deployedProducts: full, hasMore: true });
+    const { result } = renderHook(() => useDeployedProductOptions("dep-1"), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(200);
+    expect(result.current.data).toBeUndefined();
+  });
+
   it("does not call the backend while no deployment id is given", () => {
     renderHook(() => useDeployedProductOptions(undefined), { wrapper });
     expect(postMock).not.toHaveBeenCalled();

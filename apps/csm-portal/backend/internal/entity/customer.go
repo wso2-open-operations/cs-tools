@@ -304,6 +304,15 @@ func (c *CustomerEntityClient) GetProject(ctx context.Context, id string) ([]byt
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s", url.PathEscape(id)), nil)
 }
 
+// GetProjectSLAReport calls GET /projects/{id}/slas/report on the entity service.
+// from and to are YYYY-MM-DD dates; the response is returned as raw JSON.
+func (c *CustomerEntityClient) GetProjectSLAReport(ctx context.Context, id, from, to string) ([]byte, error) {
+	q := url.Values{}
+	q.Set("from", from)
+	q.Set("to", to)
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s/slas/report?%s", url.PathEscape(id), q.Encode()), nil)
+}
+
 // GetProjectMetadata calls GET /projects/{id}/metadata on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) GetProjectMetadata(ctx context.Context, id string) ([]byte, error) {
@@ -611,6 +620,13 @@ func (c *CustomerEntityClient) SearchTimeCards(ctx context.Context, body []byte)
 	return c.do(ctx, http.MethodPost, "/time-cards/search", body)
 }
 
+// AggregateTimeCards calls POST /time-cards/aggregate on the entity service:
+// the cards POST /time-cards/search matches, counted and their logged minutes
+// summed per state, user, project or day. Response is returned as raw JSON.
+func (c *CustomerEntityClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/time-cards/aggregate", body)
+}
+
 // CreateTimeCard calls POST /time-cards on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) CreateTimeCard(ctx context.Context, body []byte) ([]byte, error) {
@@ -629,65 +645,10 @@ func (c *CustomerEntityClient) DeleteTimeCard(ctx context.Context, id string) ([
 	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/time-cards/%s", url.PathEscape(id)), nil)
 }
 
-// CreateCaseAttachment calls POST /attachments on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/attachments", body)
-}
-
 // SearchCaseAttachments calls POST /attachments/search on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchCaseAttachments(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/attachments/search", body)
-}
-
-// GetCaseAttachmentContent calls GET /attachments/{attachmentId}/content
-// and returns the raw binary body with its Content-Type.
-func (c *CustomerEntityClient) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
-	return c.doBinary(ctx, fmt.Sprintf("/attachments/%s/content", url.PathEscape(attachmentID)))
-}
-
-// DeleteCaseAttachment calls DELETE /attachments/{attachmentId} on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) DeleteCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
-}
-
-// GetCaseAttachment calls GET /attachments/{attachmentId} on the entity
-// service and returns a single attachment's metadata as raw JSON, including
-// (once the entity service supports it) its storageKey — the SFTPGo path the
-// attachment's file lives at.
-//
-// Assumption flagged: this single-attachment GET is not one of the entity
-// service routes this backend calls elsewhere today (only .../search and
-// .../{id}/content exist — see the other CaseAttachment methods above). It
-// is required by the SFTPGo-backed share-creation path
-// (handler.AttachmentStorageHandler.CreateAttachmentShare) to resolve an
-// attachment's storageKey, and assumes a corresponding entity-service change
-// that is out of scope for this layer/PR.
-func (c *CustomerEntityClient) GetCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
-}
-
-// ConfirmCaseAttachment calls POST /attachments/{attachmentId}/confirm on the
-// entity service, transitioning a 'pending' attachment row (see
-// CreateCaseAttachment's status field) to 'complete'. Used by the
-// SFTPGo-backed upload flow once the browser's direct-to-SFTPGo upload has
-// succeeded; see handler.AttachmentStorageHandler.ConfirmUpload.
-func (c *CustomerEntityClient) ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/%s/confirm", url.PathEscape(attachmentID)), nil)
-}
-
-// GetAttachment calls GET /attachments/{attachmentId} on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) GetAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
-}
-
-// UpdateAttachment calls PATCH /attachments/{attachmentId} on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) UpdateAttachment(ctx context.Context, attachmentID string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), body)
 }
 
 // SearchCatalogs calls POST /catalogs/search on the entity service.
@@ -802,6 +763,46 @@ func (c *CustomerEntityClient) SearchScheduleAbsences(ctx context.Context, body 
 // window. Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/search", body)
+}
+
+// SearchSchedulePublicHolidays calls POST /team-schedule/public-holidays/search
+// on the entity service: the given users' public holidays over a date window.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchSchedulePublicHolidays(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/public-holidays/search", body)
+}
+
+// SearchHolidayAvailability calls POST /team-schedule/holiday-availability/search
+// on the entity service: each CRE team's availability on each public holiday
+// in a window. Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchHolidayAvailability(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/holiday-availability/search", body)
+}
+
+// ConfirmHolidayAvailability calls
+// PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation.
+func (c *CustomerEntityClient) ConfirmHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
+	return c.do(ctx, http.MethodPut, holidayConfirmationPath(teamKey, date), nil)
+}
+
+// WithdrawHolidayAvailability calls
+// DELETE /team-schedule/holiday-availability/{teamKey}/{date}/confirmation.
+func (c *CustomerEntityClient) WithdrawHolidayAvailability(ctx context.Context, teamKey, date string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, holidayConfirmationPath(teamKey, date), nil)
+}
+
+// holidayConfirmationPath returns the entity-service path of a team's holiday
+// availability confirmation for one day, with both segments path-escaped.
+func holidayConfirmationPath(teamKey, date string) string {
+	return "/team-schedule/holiday-availability/" + url.PathEscape(teamKey) + "/" + url.PathEscape(date) + "/confirmation"
+}
+
+// DismissScheduleEngagementAllocation calls
+// POST /team-schedule/engagement-allocations/dismiss on the entity service:
+// take a synced allocation off a person's roster for some days, or put them
+// back. Response is returned as raw JSON.
+func (c *CustomerEntityClient) DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/dismiss", body)
 }
 
 // GetScheduleOnDuty calls GET /team-schedule/on-duty on the entity service, passing

@@ -50,9 +50,15 @@ function toDirectoryUser(u: RawDirectoryUser): DirectoryUser {
  * lightweight {@link DirectoryUser} list of active internal users only:
  * customer/external users are listed only in user management and customer
  * contacts, never in an assignee filter.
+ *
+ * `enabled` (default `true`) lets a caller hold the fetch until the directory
+ * is actually needed, e.g. only once there are selected emails to label.
  */
-export function useDirectoryUsers(): UseQueryResult<DirectoryUser[], Error> {
+export function useDirectoryUsers(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<DirectoryUser[], Error> {
   const api = useBackendApi();
+  const { enabled = true } = options;
 
   return useQuery<DirectoryUser[], Error>({
     queryKey: [ApiQueryKeys.CSM_ADMIN_USERS, "directory", "internal"],
@@ -76,5 +82,6 @@ export function useDirectoryUsers(): UseQueryResult<DirectoryUser[], Error> {
       return rows.map(toDirectoryUser).filter((u) => u.name && u.email);
     },
     staleTime: 30_000,
+    enabled,
   });
 }

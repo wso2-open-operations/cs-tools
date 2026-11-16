@@ -570,10 +570,11 @@ func TestEngine_CaseCommentBeforeAssignmentCounts(t *testing.T) {
 	}
 }
 
-// Any severity change stops the running chain and starts a new one for the new
-// severity, even after acknowledgement; S0 brings SRE in and losing it takes
-// SRE out; S4 (off) pages nobody. A case already assigned when raised to S0
-// stops both chains on the assignee's comment.
+// A raised severity stops the running chain and starts a new one for the new
+// severity, even after acknowledgement; a lowered one starts no CRE chain; S0
+// brings SRE in and losing it takes SRE out; S4 (off) pages nobody. A case
+// already assigned when raised to S0 stops both chains on the assignee's
+// comment.
 func TestEngines_CaseSeverityChanges(t *testing.T) {
 	ctx := context.Background()
 	creStore, sreStore := newMemStore(), newMemStore()
@@ -611,20 +612,20 @@ func TestEngines_CaseSeverityChanges(t *testing.T) {
 	}
 
 	both(severityChanged(t, "CATASTROPHIC", "HIGH"))
-	if p, ok := running(); !ok || p != "P2" || sreRunning() {
-		t.Fatalf("S0 -> S2: CRE %v at %s, SRE %v; want a new S2 CRE chain and SRE stopped", ok, p, sreRunning())
+	if p, ok := running(); !ok || p != "P0" || sreRunning() {
+		t.Fatalf("S0 -> S2: CRE %v at %s, SRE %v; want the S0 CRE chain carrying on and SRE stopped", ok, p, sreRunning())
 	}
 
 	// Acknowledged: assigned and the assignee's comment.
 	both(caseAssigned(t, "eng@wso2.com"))
 	both(caseComment(t, "eng@wso2.com", false, true))
 	if _, ok := running(); ok {
-		t.Fatal("the acknowledged S2 chain kept paging")
+		t.Fatal("the acknowledged chain kept paging")
 	}
-	// Lowered after acknowledgement: still a new chain.
+	// Lowered after acknowledgement: no new chain.
 	both(severityChanged(t, "HIGH", "MEDIUM"))
-	if p, ok := running(); !ok || p != "P3" {
-		t.Fatalf("S2 -> S3 after acknowledgement: CRE %v at %s; want a new S3 chain", ok, p)
+	if p, ok := running(); ok {
+		t.Fatalf("S2 -> S3 after acknowledgement started a CRE chain at %s; a lowering pages nobody", p)
 	}
 	// Raised to S0 while assigned: both start; the assignee's comment stops both.
 	both(severityChanged(t, "MEDIUM", "CATASTROPHIC"))
@@ -636,11 +637,71 @@ func TestEngines_CaseSeverityChanges(t *testing.T) {
 		t.Fatalf("the assignee's comment after the raise left CRE %v, SRE %v; want both stopped", ok, sreRunning())
 	}
 
-	// Lowered to S4 while S4 is off: nobody is paged.
+	// Lowered to S4 while S4 is off: a running chain stops.
 	both(severityChanged(t, "CATASTROPHIC", "HIGH"))
-	both(severityChanged(t, "HIGH", "LOW"))
+	both(severityChanged(t, "HIGH", "CRITICAL"))
+	if p, ok := running(); !ok || p != "P1" {
+		t.Fatalf("S2 -> S1: CRE %v at %s; want a new S1 chain", ok, p)
+	}
+	both(severityChanged(t, "CRITICAL", "LOW"))
 	if _, ok := running(); ok || sreRunning() {
 		t.Fatal("a case lowered to S4 (off) is still paging")
+	}
+}
+
+// On the CRE ladder a lowered severity starts no chain: a running one carries
+// on exactly as it was, and a stopped one stays stopped. A change from a
+// severity the code does not recognise counts as a raise and still pages.
+func TestEngine_CaseSeverityLoweredStartsNoCREChain(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	cre := ladderEngine(LadderCRE, &fakeChat{}, store)
+	handle := func(r eventbus.Record) {
+		t.Helper()
+		if err := cre.Handle(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	handle(caseCreated(t, "Atlas", "CRITICAL"))
+	before, _, _ := store.Get(ctx, testIncidentID)
+	handle(severityChanged(t, "CRITICAL", "MEDIUM"))
+	after, found, _ := store.Get(ctx, testIncidentID)
+	if !found || after.Plan.Trigger.Kind == TriggerSeverityChanged || !after.Plan.Trigger.At.Equal(before.Plan.Trigger.At) {
+		t.Fatalf("S1 -> S3 replaced the running chain (found %v, kind %v); want it carrying on", found, after.Plan.Trigger.Kind)
+	}
+
+	handle(caseAssigned(t, "eng@example.com"))
+	handle(caseComment(t, "eng@example.com", false, true))
+	handle(severityChanged(t, "MEDIUM", "LOW"))
+	if _, found, _ := store.Get(ctx, testIncidentID); found {
+		t.Fatal("a lowering after acknowledgement started a chain")
+	}
+
+	handle(severityChanged(t, "URGENT", "MEDIUM"))
+	if st, found, _ := store.Get(ctx, testIncidentID); !found || st.Plan.Trigger.Kind != TriggerSeverityChanged {
+		t.Fatal("a change from an unrecognised severity did not page; it must count as a raise")
+	}
+}
+
+func TestSeverityLowered(t *testing.T) {
+	for _, c := range []struct {
+		from, to string
+		want     bool
+	}{
+		{"CRITICAL", "MEDIUM", true},
+		{"S1", "S3", true},
+		{"P0", "HIGH", true},
+		{"MEDIUM", "CRITICAL", false},
+		{"HIGH", "HIGH", false},
+		{"", "MEDIUM", false},
+		{"URGENT", "MEDIUM", false},
+		{"HIGH", "", false},
+		{"PLANNING", "LOW", false},
+	} {
+		if got := severityLowered(c.from, c.to); got != c.want {
+			t.Errorf("severityLowered(%q, %q) = %v; want %v", c.from, c.to, got, c.want)
+		}
 	}
 }
 
@@ -670,8 +731,8 @@ func TestEngines_CaseSeverityChangeStopsOnAnyEngineersComment(t *testing.T) {
 		t.Fatal("an engineer's comment stopped a new case's chain; it needs the assignee's")
 	}
 
-	// Lowered by the engineer working it; nobody's assignment was ever seen.
-	both(severityChanged(t, "HIGH", "MEDIUM"))
+	// Raised by the engineer working it; nobody's assignment was ever seen.
+	both(severityChanged(t, "HIGH", "CRITICAL"))
 	st, found, _ := creStore.Get(ctx, testIncidentID)
 	if !found {
 		t.Fatal("the severity change did not start a new chain")
@@ -695,13 +756,128 @@ func TestEngines_CaseSeverityChangeStopsOnAnyEngineersComment(t *testing.T) {
 	}
 
 	// Raised to S0: both ladders run, and any engineer's comment stops both.
-	both(severityChanged(t, "MEDIUM", "CATASTROPHIC"))
+	both(severityChanged(t, "CRITICAL", "CATASTROPHIC"))
 	if !creRunning() || !sreRunning() {
-		t.Fatal("S3 -> S0 did not start both chains")
+		t.Fatal("S1 -> S0 did not start both chains")
 	}
 	both(caseComment(t, "other@example.com", false, true))
 	if creRunning() || sreRunning() {
 		t.Fatalf("an engineer's comment after the raise left CRE %v, SRE %v; want both stopped", creRunning(), sreRunning())
+	}
+}
+
+func severityChangedAt(t *testing.T, from, to string, at time.Time) eventbus.Record {
+	return record(t, events.TypeSeverityChanged, events.SeverityChangedPayload{
+		ProjectID: "p-1", CaseID: testIncidentID, CaseNumber: "CS0099001", CaseTitle: "Gateway down",
+		OldSeverity: from, NewSeverity: to, Team: "Atlas", Recipients: []string{"watcher@example.com"},
+		ChangedAt: at.UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func caseCommentAt(t *testing.T, author string, engineer, unknown bool, at time.Time) eventbus.Record {
+	return record(t, events.TypeCommentAdded, events.CommentAddedPayload{
+		Name: "Someone", ProjectID: "p-1", CaseID: testIncidentID, CaseTitle: "Gateway down",
+		CaseComment: "looking", CommentID: "c-1", AuthorEmail: author,
+		IsSupportEngineerResponse: engineer, SupportEngineerUnknown: unknown,
+		CreatedOn: at.UTC().Format(time.RFC3339Nano), Recipients: []string{"watcher@example.com"},
+	})
+}
+
+// A comment written before the severity change -- a redelivery out of the
+// dead-letter queue -- does not stop the chain the change started; one written
+// after it, or within the clock-skew allowance, does.
+func TestEngine_SeverityChangeIgnoresAnEarlierComment(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	cre := ladderEngine(LadderCRE, &fakeChat{}, store)
+	changed := testClock.Add(time.Hour)
+	running := func() bool { _, found, _ := store.Get(ctx, testIncidentID); return found }
+
+	for _, r := range []eventbus.Record{
+		caseCreated(t, "Atlas", "HIGH"),
+		severityChangedAt(t, "HIGH", "CRITICAL", changed),
+		caseCommentAt(t, "eng@example.com", false, true, changed.Add(-10*time.Minute)),
+		caseCommentAt(t, "eng@example.com", true, false, changed.Add(-10*time.Minute)),
+	} {
+		if err := cre.Handle(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !running() {
+		t.Fatal("a comment written before the severity change stopped the new chain")
+	}
+	if err := cre.Handle(ctx, caseCommentAt(t, "eng@example.com", true, false, changed.Add(-30*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if running() {
+		t.Fatal("an engineer's comment within the clock-skew allowance did not stop the chain")
+	}
+}
+
+// When entity-service could not check the author's role, a WSO2 author's
+// public comment still stops a severity-change chain; anyone else's does not.
+func TestEngine_SeverityChangeUnknownRoleCountsAWSO2Author(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	cre := ladderEngine(LadderCRE, &fakeChat{}, store)
+	changed := testClock.Add(time.Hour)
+	running := func() bool { _, found, _ := store.Get(ctx, testIncidentID); return found }
+
+	for _, r := range []eventbus.Record{
+		caseCreated(t, "Atlas", "HIGH"),
+		severityChangedAt(t, "HIGH", "CRITICAL", changed),
+		caseCommentAt(t, "someone@example.com", false, true, changed.Add(time.Minute)),
+	} {
+		if err := cre.Handle(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !running() {
+		t.Fatal("a comment from outside WSO2 with an unchecked role stopped the chain")
+	}
+	if err := cre.Handle(ctx, caseCommentAt(t, "eng"+internalEmailSuffix, false, true, changed.Add(time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if running() {
+		t.Fatal("a WSO2 author's comment with an unchecked role did not stop the chain")
+	}
+}
+
+// A severity change already handled does not start its chain again after an
+// engineer's comment stopped it, and neither does an older one arriving late;
+// a later change still does.
+func TestEngines_SeverityChangeReplayAfterStopIsIgnored(t *testing.T) {
+	ctx := context.Background()
+	creStore, sreStore := newMemStore(), newMemStore()
+	cre, sre := ladderEngine(LadderCRE, &fakeChat{}, creStore), ladderEngine(LadderSRE, &fakeChat{}, sreStore)
+	both := func(r eventbus.Record) {
+		t.Helper()
+		for _, e := range []*Engine{cre, sre} {
+			if err := e.Handle(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	creRunning := func() bool { _, found, _ := creStore.Get(ctx, testIncidentID); return found }
+	sreRunning := func() bool { _, found, _ := sreStore.Get(ctx, testIncidentID); return found }
+	changed := testClock.Add(time.Hour)
+
+	both(caseCreated(t, "Atlas", "HIGH"))
+	both(severityChangedAt(t, "HIGH", "CATASTROPHIC", changed))
+	both(caseCommentAt(t, "eng@example.com", true, false, changed.Add(time.Minute)))
+	if creRunning() || sreRunning() {
+		t.Fatal("the engineer's comment did not stop both chains")
+	}
+
+	both(severityChangedAt(t, "HIGH", "CATASTROPHIC", changed)) // replayed after the stop
+	both(severityChangedAt(t, "MEDIUM", "HIGH", changed.Add(-time.Hour)))
+	if creRunning() || sreRunning() {
+		t.Fatalf("a replayed or older severity change restarted CRE %v, SRE %v", creRunning(), sreRunning())
+	}
+
+	both(severityChangedAt(t, "MEDIUM", "CRITICAL", changed.Add(time.Hour)))
+	if !creRunning() {
+		t.Fatal("a later severity raise did not start a new chain")
 	}
 }
 

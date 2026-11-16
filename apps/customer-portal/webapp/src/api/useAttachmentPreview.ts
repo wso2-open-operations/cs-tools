@@ -16,12 +16,18 @@
 
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import { fetchInlineImageBlob } from "@api/storedAttachments";
 
-function getBackendBaseUrl(): string {
-  const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
-  if (!baseUrl)
-    throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
-  return baseUrl.replace(/\/$/, "");
+/**
+ * Thrown by an image fetch when the image was removed on purpose (deleted, or
+ * expired with its closed case), so a renderer can say "removed" rather than
+ * "not available". Any other failure resolves to null as before.
+ */
+export class ImageRemovedError extends Error {
+  constructor() {
+    super("This image was removed.");
+    this.name = "ImageRemovedError";
+  }
 }
 
 const SAFE_IMAGE_SUBTYPES = /^(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/i;
@@ -42,33 +48,19 @@ async function fetchAttachmentDataUrl(
     init?: RequestInit,
   ) => Promise<Response>,
   attachmentId: string,
-  caseId?: string | null,
 ): Promise<string | null> {
-  const baseUrl = getBackendBaseUrl();
-  // Resolved against window.location.href so a relative
-  // CUSTOMER_PORTAL_BACKEND_BASE_URL still works: the base is ignored when
-  // baseUrl is already absolute (every deployment seen so far), so this
-  // preserves existing behavior and only changes anything for a relative one.
-  const url = new URL(
-    `${baseUrl}/attachments/${encodeURIComponent(attachmentId)}/content`,
-    window.location.href,
-  );
-  // caseId is a hint only: it lets the backend authorize an attachment
-  // pasted inline into a case comment (whose own referenceId is the
-  // comment's id, not the case's, so it can't otherwise be resolved to a
-  // case at all) by re-verifying the caller can see this case and that the
-  // attachment genuinely belongs to one of its comments. Omitted for
-  // attachment-tab previews, where the attachment's own referenceId already
-  // resolves directly.
-  if (caseId) url.searchParams.set("caseId", caseId);
-  const response = await authFetch(url, { method: "GET" });
-  if (!response.ok) return null;
-
-  const blob = await response.blob();
-  const rawType = blob.type || response.headers.get("content-type") || "";
-  const mimeType = toSafeMimeType(rawType);
+  // Entity-service checks the caller's access and the backend streams the image:
+  // a comment's inline image, or a work item attachment that is an image. Anything
+  // that is not an image, or cannot be shown, resolves to null.
+  const inline = await fetchInlineImageBlob(authFetch, attachmentId);
+  if (inline.status === "removed") throw new ImageRemovedError();
+  if (inline.status !== "ok") return null;
+  const mimeType = toSafeMimeType(inline.blob.type);
   if (!mimeType.startsWith("image/")) return null;
+  return blobToDataUrl(inline.blob);
+}
 
+function blobToDataUrl(blob: Blob): Promise<string | null> {
   return new Promise<string | null>((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -84,21 +76,22 @@ async function fetchAttachmentDataUrl(
  * Fetches a single attachment and returns it as a data URL for display.
  *
  * @param attachmentId - Attachment id to fetch, or null/undefined to skip.
- * @param caseId - Optional case-id hint, for an attachment pasted inline
- * into a case comment (see fetchAttachmentDataUrl's own doc comment).
  * @returns Query result with `dataUrl` (string | null).
  */
 export function useAttachmentPreview(
   attachmentId: string | null | undefined,
-  caseId?: string | null,
 ) {
   const authFetch = useAuthApiClient();
   return useQuery({
-    queryKey: ["attachment-preview", attachmentId, caseId],
-    queryFn: () => fetchAttachmentDataUrl(authFetch, attachmentId!, caseId),
+    queryKey: ["attachment-preview", attachmentId],
+    queryFn: () => fetchAttachmentDataUrl(authFetch, attachmentId!),
     enabled: !!attachmentId,
     staleTime: 0,
-    retry: 1,
+    // Each fetch of an attachment preview streams the whole file, so a refocus
+    // of the window must not fetch it again.
+    refetchOnWindowFocus: false,
+    retry: (count: number, error: unknown) =>
+      !(error instanceof ImageRemovedError) && count < 1,
   });
 }
 
@@ -106,19 +99,15 @@ export function useAttachmentPreview(
  * Fetches multiple attachments in parallel and returns a map of id -> data URL.
  *
  * @param attachmentIds - List of attachment ids to fetch.
- * @param caseId - Optional case-id hint, forwarded to every fetch (see
- * fetchAttachmentDataUrl's own doc comment).
- * @returns `{ dataUrls: Map<string, string>, isLoading: boolean }`
+ * @returns `{ dataUrls, removedIds, isLoading }`: `removedIds` holds the ids
+ * whose image was removed (deleted), as opposed to merely failing to load.
  */
-export function useAttachmentPreviews(
-  attachmentIds: string[],
-  caseId?: string | null,
-) {
+export function useAttachmentPreviews(attachmentIds: string[]) {
   const authFetch = useAuthApiClient();
   const queries = useQueries({
     queries: attachmentIds.map((id) => ({
-      queryKey: ["attachment-preview", id, caseId],
-      queryFn: () => fetchAttachmentDataUrl(authFetch, id, caseId),
+      queryKey: ["attachment-preview", id],
+      queryFn: () => fetchAttachmentDataUrl(authFetch, id),
       enabled: !!id,
       staleTime: 0,
       retry: false,
@@ -127,10 +116,12 @@ export function useAttachmentPreviews(
 
   const isLoading = queries.some((q) => q.isLoading);
   const dataUrls = new Map<string, string>();
+  const removedIds = new Set<string>();
   attachmentIds.forEach((id, i) => {
     const result = queries[i]?.data;
     if (result) dataUrls.set(id, result);
+    else if (queries[i]?.error instanceof ImageRemovedError) removedIds.add(id);
   });
 
-  return { dataUrls, isLoading };
+  return { dataUrls, removedIds, isLoading };
 }

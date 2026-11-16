@@ -252,6 +252,11 @@ func buildTimeCardSearchPayload(req domain.SearchTimeCardsRequest) (snTimeCardSe
 		if err := validateUUIDs("userIds", req.Filters.UserIDs); err != nil {
 			return snTimeCardSearchPayload{}, err
 		}
+		// Refused rather than dropped: without it the search would match
+		// every engineer's cards, not the team's.
+		if len(req.Filters.TeamIDs) > 0 {
+			return snTimeCardSearchPayload{}, &apierror.ValidationError{Msg: "filters.teamIds is not supported when DATA_SOURCE=servicenow"}
+		}
 
 		snStates := make([]string, 0, len(req.Filters.States))
 		for _, state := range req.Filters.States {
@@ -318,6 +323,13 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 		Limit:     snResp.Limit,
 		Offset:    snResp.Offset,
 	}, nil
+}
+
+// AggregateTimeCards implements TimeCardService. The ServiceNow integration
+// has no time card aggregate, so this mode refuses it rather than paging
+// through every matching card to count them here.
+func (s *snTimeCardService) AggregateTimeCards(context.Context, domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error) {
+	return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "the time card aggregate is not supported when DATA_SOURCE=servicenow"}
 }
 
 // snCaseTimeCardBillingInfo mirrors the Choreo CaseTimeCardBillingInfo shape.

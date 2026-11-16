@@ -276,8 +276,8 @@ function ManageBody({ teamKey }: { teamKey: string }): JSX.Element {
           <DialogTitle id="manage-remove-title">Remove {removing.name || removing.email}?</DialogTitle>
           <DialogContent>
             <Typography variant="body2">
-              {removing.name || removing.email} will be taken off {team.name}. This is refused while they have upcoming
-              rota turns or hold an alert tier on the team.
+              {removing.name || removing.email} will be taken off {team.name}, and their upcoming rota turns on the team
+              are removed. This is refused while they hold an alert tier on the team.
               {removing.isLead ? " They are the team's lead." : ""}
             </Typography>
           </DialogContent>
@@ -490,7 +490,8 @@ function MoveDialog({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           <Alert severity="warning">
             Moving {who} off {from.name} clears their alert tier and drops their rota manager grant on {from.name}. Their
-            role is kept. It is refused while they have upcoming turns or an alert tier on {from.name}.
+            role is kept, and their upcoming turns on {from.name} are removed. It is refused while they hold an alert
+            tier on {from.name}.
           </Alert>
           <TextField
             select

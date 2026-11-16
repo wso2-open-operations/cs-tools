@@ -32,7 +32,7 @@ func longOpenFixture() longopenreport.Report {
 	return longopenreport.Report{
 		OlderThanDays: 30,
 		Cases: []longopenreport.Row{
-			{Number: "CS0000001", InternalID: "WSO2-1001", CreatedOn: created, UpdatedOn: updated,
+			{ID: "00000000-0000-0000-0000-000000000001", Number: "CS0000001", InternalID: "ABC-1", CreatedOn: created, UpdatedOn: updated,
 				State: "work_in_progress", Severity: "high", AssignedEngineer: "Jane Doe", CsTeam: "Team Alpha"},
 			{Number: "CS0000002", CreatedOn: created, UpdatedOn: updated, State: "waiting_on_wso2",
 				AssignedEngineer: "<script>alert(1)</script>", CsTeam: "Team <b>Beta</b>"},
@@ -48,7 +48,7 @@ func TestRenderLongOpenCasesReport(t *testing.T) {
 
 	for _, want := range []string{
 		"<strong>30 days</strong>", "need action",
-		"CS0000001", "WSO2-1001", "Team Alpha", "Jane Doe", "Work In Progress", "S2",
+		"CS0000001", "ABC-1", "Team Alpha", "Jane Doe", "Work In Progress", "S2",
 		"Waiting On WSO2",
 		"2026-10-30 15:30", "2026-08-01 09:35", // Asia/Colombo
 		"Showing only the oldest 2 of 1500.",
@@ -121,10 +121,20 @@ func TestRenderLongOpenCasesReportToFile(t *testing.T) {
 
 func TestRenderLongOpenCasesReportLinksAndSeverity(t *testing.T) {
 	r := longOpenFixture()
-	r.Cases[0].InternalID = "id with/slash"
+	r.Cases[0].ID = "id with/slash"
 	body := notify.RenderLongOpenCasesReport(r, 30, "https://portal.example.com/")
 	if !strings.Contains(body, `href="https://portal.example.com/cases/id%20with%2Fslash"`) {
-		t.Errorf("case cell is not linked by the escaped internal id")
+		t.Errorf("case cell is not linked by the escaped case id")
+	}
+	if strings.Count(body, `href="https://portal.example.com/cases/id%20with%2Fslash"`) != 2 {
+		t.Errorf("both the Case and Internal ID cells should carry the link")
+	}
+	if strings.Contains(body, "/cases/ABC-1") || strings.Contains(body, "/cases/CS0000001") {
+		t.Errorf("links must not be built from the internal ID or the number")
+	}
+	// A row without an id has nothing to link to: plain text, not a broken href.
+	if strings.Count(body, "CS0000002</td>") != 1 {
+		t.Errorf("a row without an id should render its number as plain text")
 	}
 	if strings.Contains(body, "high</td>") || !strings.Contains(body, ">S2</td>") {
 		t.Errorf("severity should read S2, not the word")

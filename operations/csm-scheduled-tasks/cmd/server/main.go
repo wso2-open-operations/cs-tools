@@ -47,9 +47,9 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/holidayreminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
@@ -66,8 +66,12 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/rotareminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecards"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/unresolvedproducts"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/usagerollup"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
@@ -143,21 +147,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Same entity-service deployment and credentials as ledgerClient above,
-	// but a separate client — see internal/entitycases' own doc comment for
-	// why case search isn't just another method on ledger.Client.
-	entityCasesClient, err := entitycases.NewClient(entitycases.Config{
-		BaseURL:      entityServiceBaseURL,
-		TokenURL:     oauthTokenURL,
-		ClientID:     oauthClientID,
-		ClientSecret: oauthClientSecret,
-		Scopes:       entityServiceScopes,
-	})
-	if err != nil {
-		slog.Error("failed to construct entity-service case-search client", "err", err)
-		os.Exit(1)
-	}
-
 	// The migration scan's own client: the same deployment and credentials,
 	// a distinct endpoint (GET /reports/migration-cases) with its own
 	// timeout.
@@ -173,8 +162,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The stale cases report's own client: the same deployment and
-	// credentials, a distinct endpoint (GET /reports/long-open-cases).
+	// The stale cases report's own client (also used by the open cases
+	// report's variant): the same deployment and credentials, a distinct
+	// endpoint (GET /reports/long-open-cases).
 	longOpenReportClient, err := longopenreport.NewClient(longopenreport.Config{
 		BaseURL:      entityServiceBaseURL,
 		TokenURL:     oauthTokenURL,
@@ -184,6 +174,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service long-open-cases client", "err", err)
+		os.Exit(1)
+	}
+
+	// The time card report's own client: the same deployment and credentials,
+	// a project search, the project's contacts and GET /projects/{id}/time-cards/report.
+	timeCardsClient, err := timecards.NewClient(timecards.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service time-card report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -214,6 +218,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service product-regression-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The weekly SLA breach report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/sla-breaches).
+	slaBreachReportClient, err := slabreachreport.NewClient(slabreachreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service sla-breach-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -297,7 +315,7 @@ func main() {
 	}
 
 	// Same entity-service deployment and credentials again — a fourth,
-	// separate client for the same reason entityCasesClient is its own:
+	// separate client, as every entity-service endpoint here gets its own:
 	// this one's Bearer token must satisfy entity-service's own
 	// AUTH_INTERNAL_CLIENT_IDS (AutoPublish is internal-caller-only), a
 	// concern specific to this one task, not shared with case search or
@@ -741,6 +759,75 @@ func main() {
 			}),
 	}
 
+	// The weekly SLA breach reports: last week's breached clocks on the
+	// covered SLA definitions. There are TWO source reports, separate
+	// definitions with different stage and onboarding-status filters, so
+	// each variant is its own task and its own email.
+	//
+	// Default schedule 10:00 Monday India Standard Time, from the source
+	// scheduled report (Run Weekly, Mon, Time 10:00:00). Its Time zone
+	// field reads "-- None --", meaning the ServiceNow instance's own
+	// default; that default is IST, confirmed with the report's owner
+	// rather than assumed. These cron strings are UTC, so 10:00 IST is
+	// 30 4 * * 1. Audience, schedule and the debug divert all resolve by
+	// task name like every other report.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, for the same reason
+	// the regression reports leave them nil: the engine mails task.To on
+	// every failed attempt and retries a failed period every tick, and
+	// the audience here is leadership mail groups. Failures go to
+	// ALERT_RECIPIENTS alone; the tasks are carried to the EMAIL_BASE_URL
+	// check by name instead.
+	slaBreachDefinitions := slabreachscan.Definitions()
+	slaBreachCaseLinkBase := strings.TrimRight(os.Getenv("SLA_BREACH_REPORT_LINK_BASE_URL"), "/")
+	if slaBreachCaseLinkBase != "" {
+		if err := httpsec.RequireSecureURL(slaBreachCaseLinkBase); err != nil {
+			slog.Error("invalid SLA_BREACH_REPORT_LINK_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant(), slabreachscan.OnboardingVariant()} {
+		v = slabreachscan.ApplyStageOverride(v)
+		name := slabreachscan.TaskName(v)
+		to, cc := recipientsFor(recipientOverrides, name)
+		if len(to) > 0 {
+			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
+		}
+		v, to, cc := v, to, cc
+		regressionTasks = append(regressionTasks, registry.Task{
+			Name:     name,
+			Schedule: scheduleFor(scheduleOverrides, name, "30 4 * * 1"),
+			Handler: slabreachscan.SendReport(slaBreachReportClient,
+				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
+				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return slabreachscan.SendReport(slaBreachReportClient, email,
+						v, slaBreachDefinitions, orRecipients(to, rec), cc,
+						slaBreachCaseLinkBase, alertsEnabled)
+				}),
+		})
+	}
+
+	// The monthly time card report: each project in TIME_CARD_REPORT_PROJECT_KEYS
+	// gets last calendar month's approved effort per case, mailed to the
+	// project's contacts (one mail each, so customers never see one another's
+	// address). Unset or empty keys make the task a logged no-op, so nothing is
+	// sent until a deployment names its projects. SUB_CRON_RECIPIENTS' to/cc for
+	// this task are the FAILURE alert recipients only, as for every task; the
+	// report audience is the projects' contacts.
+	timeCardProjectKeys := timecardreport.ParseProjectKeys(os.Getenv("TIME_CARD_REPORT_PROJECT_KEYS"))
+	timeCardTo, timeCardCc := recipientsFor(recipientOverrides, timecardreport.TaskName)
+	timeCardEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, timecardreport.TaskName))
+	timeCardSchedule := scheduleFor(scheduleOverrides, timecardreport.TaskName, "30 5 2 * *")
+	if len(timeCardProjectKeys) > 0 {
+		// Its audience is not task.To, so the EMAIL_BASE_URL check below
+		// cannot see it; carry it there by name.
+		regressionTasksWithRecipients = append(regressionTasksWithRecipients, timecardreport.TaskName)
+	}
+
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
 
@@ -761,6 +848,8 @@ func main() {
 	rotaWeekendReminderTo, rotaWeekendReminderCc := recipientsFor(recipientOverrides, rotaWeekendReminderTaskName)
 	const rotaManualTaskName = "rota_manual_reminder"
 	rotaManualTo, rotaManualCc := recipientsFor(recipientOverrides, rotaManualTaskName)
+	const holidayReminderTaskName = "holiday_availability_reminder"
+	holidayReminderTo, holidayReminderCc := recipientsFor(recipientOverrides, holidayReminderTaskName)
 
 	tasks := []registry.Task{
 		// This component's first real sub-cron: deletes rows from
@@ -825,20 +914,22 @@ func main() {
 		// Emails openCasesTo/Cc a report of every case created before
 		// yesterday that's still in "open" state (nobody has moved it out of
 		// initial triage) — see internal/opencases's own doc comment. Sends
-		// nothing (but still succeeds) if openCasesTo is empty. Default
-		// schedule is daily at 08:00 (again, TZ=UTC-dependent — see above);
-		// override via SUB_CRON_SCHEDULES if needed.
+		// nothing (but still succeeds) if openCasesTo is empty or there are no
+		// such cases. Default schedule is daily at 03:30 UTC, which is 09:00
+		// in Colombo, when the original report goes out (again,
+		// TZ=UTC-dependent — see above); override via SUB_CRON_SCHEDULES if
+		// needed.
 		{
 			Name:     openCasesTaskName,
-			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "0 8 * * *"),
-			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
+			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "30 3 * * *"),
+			Handler:  opencases.SendReport(longOpenReportClient, openCasesEmail, openCasesTo, openCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
 			RunNowFlags: reportRunNowFlags,
 			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
-					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+					return opencases.SendReport(longOpenReportClient, email, orRecipients(openCasesTo, rec), openCasesCc, worklogCaseLinkBase, alertsEnabled)
 				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
@@ -983,6 +1074,33 @@ func main() {
 			To:       publishScheduledAnnouncementsTo,
 			Cc:       publishScheduledAnnouncementsCc,
 		},
+		// The monthly time card report; see timeCardProjectKeys above. Default
+		// schedule is 05:30 UTC on the 2nd (override via SUB_CRON_SCHEDULES). The
+		// reported month is the one before the PERIOD KEY's month, so every retry
+		// of a period reports the same month.
+		//
+		// MaxAttempts is 2 for the reason acp_closure's is: the handler has no
+		// memory of what it mailed, so a retry after a partial failure mails the
+		// projects that had succeeded again. One retry is the compromise between
+		// that and a transient entity-service outage losing the month's report;
+		// the failure alert says when no retry is coming, and
+		// --run-now=time_card_report --project-key=<KEY> re-sends one project.
+		{
+			Name:     timecardreport.TaskName,
+			Schedule: timeCardSchedule,
+			Handler: timecardreport.SendReports(timeCardsClient, timeCardEmail, periodStart(timeCardSchedule),
+				timecardreport.Config{ProjectKeys: timeCardProjectKeys}, alertsEnabled),
+			To:          timeCardTo,
+			Cc:          timeCardCc,
+			MaxAttempts: 2,
+			// --project-key/--to/--cc of a manual run-now only. These can widen a
+			// run; see registry.Task.RunNowNarrow and timeCardRunNow.
+			RunNowFlags: timeCardRunNowFlags,
+			RunNowNarrow: timeCardRunNow(timeCardEmail, emailClient, timeCardProjectKeys,
+				func(email notify.Sender, cfg timecardreport.Config) func(ctx context.Context) error {
+					return timecardreport.SendReports(timeCardsClient, email, periodStart(timeCardSchedule), cfg, alertsEnabled)
+				}),
+		},
 		// The two outage emails (internal-stakeholder notification and SRE
 		// outage communication) used to be sub-crons here. They moved to
 		// entity-service's outage notice drainer and csm-notification-service,
@@ -1083,17 +1201,18 @@ func main() {
 	}
 
 	// The three rota reminder tasks, on the days and times the rota's owners
-	// asked for (Colombo has no DST; TZ=UTC-dependent like every schedule
-	// here, see internal/schedule.PeriodKey):
-	//   - rota_weekday_reminder, 09:30 UTC = 15:00 Colombo, Mon-Fri: the next
-	//     working day's windows (Friday announces Monday), one email each with
-	//     its calendar invitation;
-	//   - rota_weekend_notice, 14:30 UTC = 20:00 Colombo, Sun-Thu: once the
-	//     coming weekend is fully marked, its summary and one invitation per
-	//     team per day, sent once; until then the rota admins are asked every
-	//     evening;
-	//   - rota_weekend_reminder, 09:30 UTC = 15:00 Colombo, Fri: the weekend
-	//     summary again, the invitations as updates, and cancellations.
+	// asked for, all at 03:30 UTC = 09:00 Colombo (Colombo has no DST;
+	// TZ=UTC-dependent like every schedule here, see
+	// internal/schedule.PeriodKey):
+	//   - rota_weekday_reminder, Sun-Thu: the next working day's windows, the
+	//     day before each (Sunday announces Monday), one email each with its
+	//     calendar invitation;
+	//   - rota_weekend_notice, Mon-Thu: once the coming weekend is fully
+	//     marked, its summary and one invitation per team per day, sent once
+	//     (on Monday when it is already marked); until then the rota admins
+	//     are asked every morning;
+	//   - rota_weekend_reminder, Fri: the weekend summary again, the
+	//     invitations as updates, and cancellations.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
 	if rotaRemindersAvailable {
@@ -1162,10 +1281,10 @@ func main() {
 		weekdayRotations := parseRotations("ROTA_REMINDER_WEEKDAY_SHIFTS",
 			envString("ROTA_REMINDER_WEEKDAY_SHIFTS", "CRE_MORNING=Morning,CRE_MORNING_OC=On-call,CRE_EVENING=Evening"))
 		weekendRotations := parseRotations("ROTA_REMINDER_WEEKEND_SHIFTS",
-			envString("ROTA_REMINDER_WEEKEND_SHIFTS", "CRE_WEEKEND=LK Weekend,CRE_WEEKEND_NIGHT=Americas Weekend,CRE_WEEKEND_NIGHT_OC=LK On-call"))
-		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 9 * * 1-5")
-		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 14 * * 0-4")
-		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 9 * * 5")
+			envString("ROTA_REMINDER_WEEKEND_SHIFTS", "CRE_WEEKEND=LK Weekend,CRE_WEEKEND_NIGHT=Americas Weekend,CRE_WEEKEND_NIGHT_OC=Americas On-call"))
+		rotaWeekdaySchedule := scheduleFor(scheduleOverrides, rotaWeekdayTaskName, "30 3 * * 0-4")
+		rotaWeekendSchedule := scheduleFor(scheduleOverrides, rotaWeekendTaskName, "30 3 * * 1-4")
+		rotaWeekendReminderSchedule := scheduleFor(scheduleOverrides, rotaWeekendReminderTaskName, "30 3 * * 5")
 		// "Send now" requests are picked up at every run: the schedule is finer
 		// than the driver, so it is due at each tick.
 		rotaManualSchedule := scheduleFor(scheduleOverrides, rotaManualTaskName, "*/5 * * * *")
@@ -1204,6 +1323,28 @@ func main() {
 				Cc: rotaManualCc,
 			},
 		)
+
+		// Working on a public holiday (CRE): 09:00 Colombo on weekdays, each
+		// CRE team's leads and rota managers are reminded to mark who works
+		// on a coming public holiday -- 14 days before, then 7 days, 2 and 1
+		// working days before while the team is not fully marked. Which
+		// reminders are due is entity-service's decision; each is recorded
+		// there, so it goes once. Every reminder day is a weekday (a weekend
+		// holiday gets no tag), so the task runs Monday to Friday.
+		holidayReminderSchedule := scheduleFor(scheduleOverrides, holidayReminderTaskName, "30 3 * * 1-5")
+		tasks = append(tasks, registry.Task{
+			Name:     holidayReminderTaskName,
+			Schedule: holidayReminderSchedule,
+			Handler: holidayreminder.Run(teamScheduleClient, emailClient, holidayreminder.Config{
+				ScheduleURL:   scheduleURL,
+				RedirectTo:    splitComma(os.Getenv("ROTA_REMINDER_REDIRECT_TO")),
+				EmailsEnabled: alertsEnabled,
+				Zone:          rotaZone,
+				Anchor:        periodStart(holidayReminderSchedule),
+			}),
+			To: holidayReminderTo,
+			Cc: holidayReminderCc,
+		})
 	}
 
 	// Daily at 02:30 UTC (08:00 IST), every day including weekends, the slot the
@@ -1510,19 +1651,6 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
-	// Salesforce: sales-entity-service, with its own client credentials.
-	salesEntityClient, err := salesentity.NewClient(salesentity.Config{
-		BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
-		TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
-		ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
-		ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
-		Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
-	})
-	if err != nil {
-		slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
-		os.Exit(1)
-	}
-
 	// The unsafe combinations are refused here, not warned about: see
 	// acpConfig.
 	debug := debugFor(recipientOverrides, acpTaskName)
@@ -1535,19 +1663,53 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
+	// Salesforce: sales-entity-service, with its own client credentials. It is
+	// read by the live path and written by a suspension (State__c). With
+	// ACP_SALES_ENTITY_READS=off nothing is read, so a dry run builds no client
+	// and needs no ACP_SALES_ENTITY_* setting; a real run still needs it for the
+	// write.
+	var salesEntity acp.SalesEntity
+	if !cfg.NoSalesEntityReads || !cfg.DryRun {
+		salesEntityClient, err := salesentity.NewClient(salesentity.Config{
+			BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
+			TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
+			ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
+			ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
+			Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
+		})
+		if err != nil {
+			slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		salesEntity = salesEntityClient
+	}
+
 	to, cc := recipientsFor(recipientOverrides, acpTaskName)
+	clients := acp.Clients{
+		CSM:         csmClient,
+		SalesEntity: salesEntity,
+		// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
+		// instead, the same as a report task's debug mail mode.
+		Email: notify.ForReport(emailClient, debug),
+	}
+	// An on-demand run uses the configured settings narrowed by --dry-run and
+	// --limit, which can only tighten them (narrowACP).
+	runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		runCfg, err := narrowACP(cfg, o, len(debug) > 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		return acp.Run(clients, runCfg),
+			[]any{"dryRun", runCfg.DryRun, "emailEnabled", runCfg.EmailEnabled, "dailyLimit", runCfg.DailyLimit}, nil
+	}
 	return registry.Task{
 		// 04:00 UTC is 09:30 in Colombo, Monday to Friday. The handler also
 		// skips a weekend in Colombo time, for a retry that lands on one.
-		Name:     acpTaskName,
-		Schedule: scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
-		Handler: acp.Run(acp.Clients{
-			CSM:         csmClient,
-			SalesEntity: salesEntityClient,
-			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
-			// instead, the same as a report task's debug mail mode.
-			Email: notify.ForReport(emailClient, debug),
-		}, cfg),
+		Name:         acpTaskName,
+		Schedule:     scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
+		Handler:      acp.Run(clients, cfg),
+		RunNowNarrow: runNowNarrow,
+		RunNowFlags:  []string{"--dry-run", "--limit", "--full-sweep"},
 		RetryBackoff: acpRetryBackoff,
 		MaxAttempts:  acpMaxAttempts,
 		To:           to,

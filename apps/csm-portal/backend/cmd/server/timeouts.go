@@ -22,9 +22,9 @@ import (
 )
 
 // Request-timeout defaults. These intentionally raise the previous values
-// (server 30s, entity client 25s) so large inline-attachment uploads, which are
-// relayed through two hops, are not cut off. They match the customer-portal
-// backend (all 60s). Operators may set any values; it is advisable to keep
+// (server 30s, entity client 25s) so slow upstream calls are not cut off. They
+// match the customer-portal backend (all 60s). An attachment chunk or download
+// extends its own deadline, so these do not bound a file transfer. Operators may set any values; it is advisable to keep
 // ENTITY_SERVICE_TIMEOUT shorter than REST_WRITE_TIMEOUT so the handler can
 // still return a clean error, but this is not enforced.
 const (

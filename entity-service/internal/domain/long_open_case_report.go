@@ -18,9 +18,18 @@ package domain
 
 import "time"
 
+// LongOpenCaseReportVariantOpenBeforeYesterday selects the report of cases
+// still in the open state that were created before the start of yesterday.
+const LongOpenCaseReportVariantOpenBeforeYesterday = "open-before-yesterday"
+
 // LongOpenCaseReportRequest asks for the long-open cases report: the cases
 // still being worked on after OlderThanDays.
 type LongOpenCaseReportRequest struct {
+	// Variant selects the report. Empty is the long-open cases report;
+	// LongOpenCaseReportVariantOpenBeforeYesterday is the report of cases
+	// still in the open state that were created before yesterday. That
+	// variant takes no OlderThanDays.
+	Variant string
 	// OlderThanDays is the age a case must have reached to be listed. The
 	// cut-off is the start of the day that many days before Now, in the
 	// report's own timezone, and a case is listed only when it was created
@@ -37,10 +46,14 @@ type LongOpenCaseReportRequest struct {
 // produce an unbounded response; the matching Total says how many cases
 // the table would hold without the cap.
 type LongOpenCaseReport struct {
-	GeneratedAt   time.Time `json:"generatedAt"`
-	OlderThanDays int       `json:"olderThanDays"`
+	GeneratedAt time.Time `json:"generatedAt"`
+	// Variant echoes the requested variant; it is left out of the default
+	// report.
+	Variant       string `json:"variant,omitempty"`
+	OlderThanDays int    `json:"olderThanDays"`
 	// CreatedBefore is the cut-off every listed case was created on or
-	// before.
+	// before. In the open-before-yesterday variant it is the start of
+	// yesterday and every listed case was created strictly before it.
 	CreatedBefore time.Time `json:"createdBefore"`
 	// Cases are the long-open cases whose project is not being onboarded.
 	Cases []LongOpenCaseReportRow `json:"cases"`
@@ -58,8 +71,12 @@ type LongOpenCaseReport struct {
 
 // LongOpenCaseReportRow is one long-open case.
 type LongOpenCaseReportRow struct {
+	// ID is the case's UUID, the identifier the case page and the case
+	// detail endpoint route on. It is not InternalID.
+	ID     string `json:"id"`
 	Number string `json:"number"`
-	// InternalID is the case's internal identifier; empty when it has none.
+	// InternalID is the case's internal identifier (a display reference, not
+	// the routing id); empty when it has none.
 	InternalID string    `json:"internalId"`
 	CreatedOn  time.Time `json:"createdOn"`
 	UpdatedOn  time.Time `json:"updatedOn"`
@@ -71,6 +88,13 @@ type LongOpenCaseReportRow struct {
 	AssignedEngineer string `json:"assignedEngineer"`
 	// CsTeam is the name of the CS team that owns the case's account.
 	CsTeam string `json:"csTeam"`
+	// Type is the case's type (case, service_request or
+	// security_report_analysis). It is filled only by the open-before-yesterday
+	// variant, which lists all three, and left out of the default report.
+	Type string `json:"type,omitempty"`
+	// AccountName is the name of the case's account. It is filled only by
+	// the open-before-yesterday variant and left out of the default report.
+	AccountName string `json:"accountName,omitempty"`
 }
 
 // LongOpenCaseReportData is what the repository returns for the report: the

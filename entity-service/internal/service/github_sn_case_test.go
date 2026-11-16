@@ -75,7 +75,7 @@ func snGithubFixtureIssue() snGithubIssue {
 }
 
 func TestExtractSNIssueFields_MatchesExtractFieldsJS(t *testing.T) {
-	f := extractSNIssueFields(snGithubFixtureBody)
+	f := extractSNIssueFields(snGithubFixtureBody, nil)
 	var keys []string
 	for _, e := range f.order {
 		keys = append(keys, e.key)
@@ -96,7 +96,7 @@ func TestExtractSNIssueFields_MatchesExtractFieldsJS(t *testing.T) {
 	}
 
 	// No priority at all defaults to Moderate, appended last.
-	f = extractSNIssueFields("### Request Details\n\nx")
+	f = extractSNIssueFields("### Request Details\n\nx", nil)
 	if got, _ := f.get("priority"); got != "3 - Moderate" || f.order[len(f.order)-1].key != "priority" {
 		t.Errorf("default priority = %q at the end of %v, want 3 - Moderate", got, f.order)
 	}
@@ -104,7 +104,7 @@ func TestExtractSNIssueFields_MatchesExtractFieldsJS(t *testing.T) {
 
 func TestSNGithubCaseDescription_MatchesTheWorkflow(t *testing.T) {
 	issue := snGithubFixtureIssue()
-	if got := snGithubCaseDescription(extractSNIssueFields(issue.Body), issue); got != snGithubFixtureDescription {
+	if got := snGithubCaseDescription(extractSNIssueFields(issue.Body, issue.Headings), issue); got != snGithubFixtureDescription {
 		t.Errorf("description differs from servicenow_create_case.yml's\n got: %s\nwant: %s", got, snGithubFixtureDescription)
 	}
 }

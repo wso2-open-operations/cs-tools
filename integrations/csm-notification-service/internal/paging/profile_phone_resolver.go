@@ -79,8 +79,10 @@ const (
 )
 
 type profilePhone struct {
-	number  string
-	expires time.Time
+	number string
+	// rejected: the person has a number but it is not E.164.
+	rejected bool
+	expires  time.Time
 }
 
 // ProfilePhoneResolver fills in the phone number of every recipient the
@@ -168,6 +170,8 @@ func (p *ProfilePhoneResolver) fill(ctx context.Context, recipients []Recipient)
 		return out
 	}
 	answers := p.dialNumbers(ctx, out, missing)
+	// rejected[i]: a number was found for out[i] but dropped as not E.164.
+	rejected := make([]bool, len(out))
 	for _, i := range missing {
 		a := answers[strings.ToLower(strings.TrimSpace(out[i].Email))]
 		if a.Source == DialSourceProfile {
@@ -179,11 +183,21 @@ func (p *ProfilePhoneResolver) fill(ctx context.Context, recipients []Recipient)
 			}
 			slog.WarnContext(ctx, "incident escalation: recipient's number in CSM is not E.164; not dialling it",
 				"recipientId", out[i].LogID(), "source", a.Source)
+			rejected[i] = true
 		}
 		// No valid profile number: a number they already carry (the phone
 		// book, paging-alert.yaml, the roster) comes next.
-		if strings.TrimSpace(out[i].Phone) != "" {
-			continue
+		// Only a dialable one ends the search: an invalid carried number is
+		// dropped (and remembered as rejected) so a later source can still
+		// supply a valid one, and the note says INVALID_PHONE_FORMAT.
+		if carried := strings.TrimSpace(out[i].Phone); carried != "" {
+			if e164.MatchString(carried) {
+				continue
+			}
+			slog.WarnContext(ctx, "incident escalation: recipient's carried number is not E.164; not dialling it",
+				"recipientId", out[i].LogID())
+			out[i].Phone = ""
+			rejected[i] = true
 		}
 		if a.Source != "" && a.Source != DialSourceProfile {
 			if e164.MatchString(a.Number) {
@@ -194,11 +208,14 @@ func (p *ProfilePhoneResolver) fill(ctx context.Context, recipients []Recipient)
 			}
 			slog.WarnContext(ctx, "incident escalation: recipient's number in CSM is not E.164; not dialling it",
 				"recipientId", out[i].LogID(), "source", a.Source)
+			rejected[i] = true
 		}
 		// CSM has no number for them, or an older entity-service gave only the
 		// paging-only one, which comes after the profile: ask Asgardeo.
 		if p.lookup != nil {
-			out[i].Phone = p.number(ctx, out[i])
+			var bad bool
+			out[i].Phone, bad = p.number(ctx, out[i])
+			rejected[i] = rejected[i] || bad
 		}
 		if out[i].Phone == "" && a.Source == "" && a.Number != "" {
 			if e164.MatchString(a.Number) {
@@ -208,7 +225,15 @@ func (p *ProfilePhoneResolver) fill(ctx context.Context, recipients []Recipient)
 			} else {
 				slog.WarnContext(ctx, "incident escalation: recipient's paging number is not E.164; not dialling it",
 					"recipientId", out[i].LogID())
+				rejected[i] = true
 			}
+		}
+	}
+	// Remember why a person still has no number to call, so the work note can
+	// say "invalid format" rather than "none". Never the number itself.
+	for _, i := range missing {
+		if out[i].Phone == "" && rejected[i] {
+			out[i].PhoneRejected = PhoneInvalidFormat
 		}
 	}
 	return out
@@ -319,16 +344,17 @@ func (p *ProfilePhoneResolver) Unwrap() Resolver { return p.inner }
 // errNoLeadPool: the wrapped resolver cannot name a lead pool.
 var errNoLeadPool = errors.New("resolver has no lead pool")
 
-// number is one person's profile number, or "" when there is none to dial.
+// number is one person's profile number, or "" when there is none to dial;
+// rejected is true when they have one that is not E.164.
 // The number itself is never logged, and the person is named by LogID.
-func (p *ProfilePhoneResolver) number(ctx context.Context, r Recipient) string {
+func (p *ProfilePhoneResolver) number(ctx context.Context, r Recipient) (number string, rejected bool) {
 	key := strings.ToLower(strings.TrimSpace(r.Email))
 	now := p.now()
 
 	p.mu.Lock()
 	if c, ok := p.cache[key]; ok && now.Before(c.expires) {
 		p.mu.Unlock()
-		return c.number
+		return c.number, c.rejected
 	}
 	p.mu.Unlock()
 
@@ -347,11 +373,11 @@ func (p *ProfilePhoneResolver) number(ctx context.Context, r Recipient) string {
 	case !e164.MatchString(number):
 		slog.WarnContext(ctx, "incident escalation: recipient's profile phone number is not E.164; not dialling it",
 			"recipientId", r.LogID())
-		number = ""
+		number, rejected = "", true
 	}
 
 	p.mu.Lock()
-	p.cache[key] = profilePhone{number: number, expires: now.Add(ttl)}
+	p.cache[key] = profilePhone{number: number, rejected: rejected, expires: now.Add(ttl)}
 	p.mu.Unlock()
-	return number
+	return number, rejected
 }

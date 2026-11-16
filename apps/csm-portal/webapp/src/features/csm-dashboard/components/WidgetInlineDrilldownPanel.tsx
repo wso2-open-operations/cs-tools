@@ -17,12 +17,15 @@
 import { Box, Button, Card, IconButton, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ArrowRight, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
-import { Link as RouterLink } from "react-router";
+import { Link as RouterLink, useLocation } from "react-router";
 import type { BeDashboardWidgetColumn, BeWidgetResourceType } from "@api/backend/types";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
 import type { PieSliceResult } from "@features/csm-dashboard/api/useWidgetPieData";
-import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
+import {
+  isCaseFamilyResourceType,
+  WIDGET_RESOURCE_CONFIG,
+} from "@features/csm-dashboard/config/widgetResourceConfig";
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
 import GenericColumnList from "@features/csm-dashboard/components/GenericColumnList";
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
@@ -87,6 +90,7 @@ export default function WidgetInlineDrilldownPanel({
   onClose,
 }: WidgetInlineDrilldownPanelProps): JSX.Element {
   const { user } = useCurrentUser();
+  const location = useLocation();
   const currentUserId = user?.id;
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   const ListRenderer = WIDGET_LIST_RENDERERS[resourceType];
@@ -107,14 +111,16 @@ export default function WidgetInlineDrilldownPanel({
   // component's own `resolvePlaceholders`) — kept identical here so this
   // panel's request and "View more" href resolve `__current_team__`/
   // `__current_user__`/relative-date placeholders exactly the way the tile
-  // itself already does.
-  const resolvePlaceholders = (f: Record<string, unknown>): Record<string, unknown> =>
-    resolveCurrentUserPlaceholder(
-      resolveRelativeDateFilters(
-        resolveTeamPlaceholder(f, selectedTeamCreGroupId, selectedTeamSreGroupId),
-      ),
+  // itself already does, including keeping a case-family widget's relative
+  // dates unresolved in the href.
+  const keepsRelativeDates = isCaseFamilyResourceType(resourceType);
+  const resolvePlaceholders = (f: Record<string, unknown>): Record<string, unknown> => {
+    const teamResolved = resolveTeamPlaceholder(f, selectedTeamCreGroupId, selectedTeamSreGroupId);
+    return resolveCurrentUserPlaceholder(
+      keepsRelativeDates ? teamResolved : resolveRelativeDateFilters(teamResolved),
       currentUserId,
     );
+  };
 
   const mergedFilters = mergeWidgetFilters(filters, slice.query);
   const listLimitValue = listLimit ?? 4;
@@ -213,6 +219,9 @@ export default function WidgetInlineDrilldownPanel({
                   resourceType,
                   currentUserId,
                 })}
+                // The preview page's Back returns to this dashboard, as from
+                // the tile's own click-throughs (`dashboardReturnState`).
+                state={{ from: `${location.pathname}${location.search}` }}
                 size="small"
                 variant="text"
                 endIcon={<ArrowRight size={14} />}

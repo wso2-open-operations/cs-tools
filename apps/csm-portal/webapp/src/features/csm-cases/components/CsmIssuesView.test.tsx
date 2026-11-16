@@ -418,11 +418,12 @@ describe("CsmIssuesView defaultCaseTypes (Support page's case-type default, digi
     );
   });
 
-  // PermViewSecurityCenter (access.go) is held by comment_updater as well as
-  // cs_engineer/admin -- visibleCaseTypes's eligibility check has to mirror
-  // that exactly, not just canUseSecurityCenter, or a comment_updater-only
-  // caller would get the same 403-on-every-type bug this fallback exists to
-  // prevent.
+  // PermViewSecurityReportCases (access.go) is held by comment_updater as
+  // well as viewer/cs_engineer/admin/security_team -- visibleCaseTypes's
+  // eligibility check has to mirror that exactly, not just
+  // canUseSecurityCenter (PermViewSecurityCenter, narrower), or a
+  // comment_updater-only caller would get the same 403-on-every-type bug
+  // this fallback exists to prevent.
   it("includes security_report_analysis for a comment_updater-only caller even without Security Center access", async () => {
     mockUserRoles = ["comment_updater"];
     const router = createMemoryRouter(
@@ -444,6 +445,46 @@ describe("CsmIssuesView defaultCaseTypes (Support page's case-type default, digi
 
     // Clearing the type control expands to every type this caller can see --
     // must include security_report_analysis for comment_updater.
+    await act(async () => { await router.navigate("/cases"); });
+    await waitFor(() =>
+      expect(useGetCsmCasesMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ caseTypes: visibleCaseTypes(true) }),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      ),
+    );
+  });
+
+  // Reported live: a plain viewer searching a project's Work items tab by a
+  // security report's own case number got no results at all, because this
+  // fallback used to check canUseSecurityCenter (PermViewSecurityCenter)
+  // instead of the correct, broader PermViewSecurityReportCases -- the
+  // backend already let viewer read these cases through an EXPLICIT type
+  // filter; only this unfiltered-search fallback disagreed.
+  it("includes security_report_analysis for a plain viewer, who holds PermViewSecurityReportCases but not Security Center access", async () => {
+    mockUserRoles = ["viewer"];
+    const router = createMemoryRouter(
+      [{ path: "/cases", element: <CsmIssuesView title="Cases" defaultCaseTypes={["case"]} /> }],
+      { initialEntries: ["/cases?types=service_request"] },
+    );
+    render(<RouterProvider router={router} />);
+
+    await waitFor(() =>
+      expect(useGetCsmCasesMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ caseTypes: ["service_request"] }),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      ),
+    );
+
+    // Clearing the type control expands to every type this caller can see --
+    // must include security_report_analysis for viewer.
     await act(async () => { await router.navigate("/cases"); });
     await waitFor(() =>
       expect(useGetCsmCasesMock).toHaveBeenLastCalledWith(

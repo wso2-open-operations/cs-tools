@@ -14,7 +14,7 @@
 // permissions and limitations under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -30,12 +30,26 @@ import { ListItemNode, ListNode } from "@lexical/list";
 
 const initialConfig = {
   namespace: "ToolBarTest",
-  nodes: [ListNode, ListItemNode, ImageNode, CodeNode, LinkNode, HeadingNode, QuoteNode],
+  nodes: [
+    ListNode,
+    ListItemNode,
+    ImageNode,
+    CodeNode,
+    LinkNode,
+    HeadingNode,
+    QuoteNode,
+  ],
   onError: () => {},
   editable: true,
 };
 
-function renderToolbar(props: { onAttachmentClick?: () => void; disabled?: boolean } = {}) {
+function renderToolbar(
+  props: {
+    onAttachmentClick?: () => void;
+    attachDisabledReason?: string;
+    disabled?: boolean;
+  } = {},
+) {
   return render(
     <ThemeProvider theme={createTheme()}>
       <ErrorBannerProvider>
@@ -61,7 +75,25 @@ describe("ToolBar", () => {
   it("renders attachment button when onAttachmentClick is provided", () => {
     const onAttachmentClick = () => {};
     renderToolbar({ onAttachmentClick });
-    expect(screen.getByRole("button", { name: /attach file/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /attach file/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("turns the attachment button off, saying why, when attaching is not allowed", () => {
+    const onAttachmentClick = vi.fn();
+    renderToolbar({
+      onAttachmentClick,
+      attachDisabledReason:
+        "Only one file allowed.",
+    });
+    const button = screen.getByRole("button", {
+      name: /only one file allowed/i,
+    });
+    expect(button).toBeDisabled();
+    button.click();
+    expect(onAttachmentClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Attach File" })).toBeNull();
   });
 
   it("renders when disabled", () => {

@@ -23,7 +23,7 @@ import "net/http"
 // impersonation headers Auth reads, the correlation ID header, and the
 // standard content-type/upload headers used by JSON and binary (zip upload)
 // request bodies.
-const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID"
+const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID, Range"
 
 // corsExposedHeaders lists response headers the browser's fetch API hides
 // from frontend JS unless explicitly exposed via Access-Control-Expose-Headers
@@ -34,7 +34,7 @@ const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user
 // this is a quality improvement (seeing the backend's own authoritative value,
 // including when it generated a fresh one because the caller sent none) not a
 // hard requirement, but costs nothing to expose.
-const corsExposedHeaders = "X-CSM-Correlation-ID"
+const corsExposedHeaders = "X-CSM-Correlation-ID, Content-Range, Content-Disposition, Accept-Ranges"
 
 // CORS returns an HTTP middleware that handles cross-origin requests from the
 // browser-based frontend. It MUST be the outermost middleware in the chain
@@ -75,7 +75,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			}
 
 			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", corsAllowedHeaders)
 				w.Header().Set("Access-Control-Max-Age", "3600")
 				w.WriteHeader(http.StatusNoContent)

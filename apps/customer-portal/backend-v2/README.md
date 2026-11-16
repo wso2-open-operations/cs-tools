@@ -108,6 +108,18 @@ differ.
 | `ENTITY_SERVICE_BASE_URL` | Base URL of `cs-tools/entity-service` |
 | `ENTITY_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
+### Attachment storage (Azure Blob Storage)
+
+Work item, comment-image and deployment attachments are stored in Azure Blob Storage. The service exits at startup if the container cannot be reached.
+
+| Variable | Description |
+|---|---|
+| `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_CONTAINER` | Storage account and (existing) container name |
+| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | Entra app that signs in (recommended); needs "Storage Blob Data Contributor" on the container only. Keep the secret in the secret store |
+| `AZURE_STORAGE_KEY` | Account shared key (development only; full control of the account) |
+| `AZURE_STORAGE_CONNECTION_STRING` / `AZURE_STORAGE_ENDPOINT` | Azurite (local development) |
+| `AZURE_STORAGE_CREATE_CONTAINER` | `true` creates the container if missing (Azurite, development only) |
+
 ### Updates service
 
 | Variable | Description |
@@ -212,7 +224,7 @@ backend-v2/
 │   │   ├── cases.go             # SearchCases, GetCase, CreateCase, UpdateCase, CreateCaseComment, SearchCaseActivities
 │   │   ├── deployments.go       # SearchDeployments, CreateDeployment
 │   │   ├── deployed_products.go # SearchDeployedProducts, CreateDeployedProduct, UpdateDeployedProduct
-│   │   ├── attachments.go       # CreateAttachment, SearchAttachments, GetAttachmentContent, DeleteAttachment
+│   │   ├── attachments.go       # SearchAttachments (the case and deployment attachment lists)
 │   │   ├── products.go          # SearchProducts, SearchProductVersions
 │   │   ├── change_requests.go   # create/search/get/update, approvals get/decide
 │   │   ├── call_requests.go     # CreateCallRequest, SearchCallRequests, UpdateCallRequest
@@ -287,10 +299,10 @@ backend-v2/
 │       ├── accounts.go          # POST /accounts/search, GET /accounts/{id}
 │       ├── projects.go          # POST /projects/search, GET /projects/{id}
 │       ├── project_stats.go     # project filters/features/dashboard-stats (composite, some graceful-degradation), case-grouped time-cards
-│       ├── cases.go             # cases search/get/create/update/comment/activities/feedback/escalations, case-scoped attachment update
+│       ├── cases.go             # cases search/get/create/update/comment/activities/feedback/escalations, case attachment list
 │       ├── deployments.go       # POST /projects/{id}/deployments/search, POST /projects/{id}/deployments, PATCH /projects/{projectId}/deployments/{id}, deployment-scoped attachment update
 │       ├── deployed_products.go # deployed-product search/create/update (scoped under /deployments/{deploymentId}/products) + per-deployed-product metrics/usage-counts
-│       ├── attachments.go       # attachment create/search/download/get/delete
+│       ├── attachments.go       # stored attachments (Azure Blob): chunked upload, streamed download, delete
 │       ├── products.go          # GET /products, POST /products/search, POST /products/{id}/versions/search
 │       ├── product_vulnerabilities.go # vulnerability search/get
 │       ├── catalogs.go          # catalog search (scoped under /deployments/products/{deployedProductId}), catalog item variables
@@ -339,26 +351,19 @@ backend-v2/
 - `GET /cases/{id}/feedback` — get feedback previously submitted for a case (ServiceNow data source only)
 - `POST /cases/{id}/feedback` — submit feedback for a case (ServiceNow data source only)
 - `GET /cases/{id}/attachments` — search a case's attachments, paginated via `limit`/`offset` query params
-- `POST /cases/{id}/attachments` — add an attachment to a case
-- `PATCH /cases/{caseId}/attachments/{attachmentId}` — update a case attachment's name (description not supported on this route — see CLAUDE.md)
 - `POST /cases/{caseId}/escalations` — escalate or de-escalate a case (ServiceNow data source only)
 - `POST /cases/{caseId}/escalations/search` — search a case's escalations (ServiceNow data source only)
 - `POST /projects/{id}/deployments/search` — search a project's deployments
 - `POST /projects/{id}/deployments` — create a deployment (ServiceNow data source only)
 - `PATCH /projects/{projectId}/deployments/{id}` — update a deployment's name/type/description, or deactivate it
 - `GET /deployments/{deploymentId}/attachments` — list a deployment's attachments (paged via `limit`/`offset`)
-- `POST /deployments/{deploymentId}/attachments` — upload an attachment to a deployment
-- `PATCH /deployments/{deploymentId}/attachments/{attachmentId}` — update a deployment attachment's name/description
 - `POST /deployments/{deploymentId}/products/search` — search a deployment's deployed products
 - `POST /deployments/{deploymentId}/products` — create a deployed product (ServiceNow data source only)
 - `PATCH /deployments/{deploymentId}/products/{id}` — update a deployed product's cores/tps/description, or deactivate it (ServiceNow data source only)
 - `POST /deployments/{deploymentId}/products/{productId}/metrics/search` — get core-count metrics for a deployed product over a date range (`productId` is the deployed product's own ID; ServiceNow data source only)
 - `POST /deployments/{deploymentId}/products/{productId}/metrics/usage-counts/search` — get usage-count metrics for a deployed product over a date range (ServiceNow data source only)
-- `POST /attachments` — create an attachment
-- `POST /attachments/search` — search attachments
-- `GET /attachments/{id}` — get an attachment's metadata plus base64-encoded content
-- `GET /attachments/{id}/content` — download an attachment's raw file content
-- `DELETE /attachments/{id}` — delete an attachment
+- `POST /attachments/upload`, `PUT /attachments/upload/{id}/chunks/{index}`, `GET /attachments/upload/{id}/chunks`, `POST /attachments/upload/{id}/confirm` — upload a work item, comment-image or deployment attachment in 16 MiB chunks to Azure Blob Storage
+- `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content`, `POST /attachments/delete` — stream a stored attachment or comment image, and delete one
 - `POST /cases/{id}/activities/search` — search a case's activity feed (comments, attachments, field changes)
 - `POST /change-requests` — create a change request (ServiceNow data source only)
 - `POST /projects/{id}/change-requests/search` — search a project's change requests (ServiceNow data source only)
@@ -509,17 +514,11 @@ curl -X PATCH http://localhost:8080/deployments/<deployment-id>/products/<deploy
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
   -d '{"cores":4}'
 
-curl -X POST http://localhost:8080/attachments \
+curl -H "x-jwt-assertion: $JWT" "http://localhost:8080/attachments/download/<attachment-id>/content?type=work_item" -o downloaded-file
+
+curl -X POST http://localhost:8080/attachments/delete \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"referenceId":"<case-id>","referenceType":"case","name":"log.txt","type":"text/plain","file":"<base64>"}'
-
-curl -X POST http://localhost:8080/attachments/search \
-  -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"referenceId":"<case-id>","referenceType":"case","pagination":{"limit":10,"offset":0}}'
-
-curl -H "x-jwt-assertion: $JWT" http://localhost:8080/attachments/<attachment-id>/content -o downloaded-file
-
-curl -X DELETE -H "x-jwt-assertion: $JWT" http://localhost:8080/attachments/<attachment-id>
+  -d '{"type":"work_item","id":"<attachment-id>"}'
 
 curl -H "x-jwt-assertion: $JWT" "http://localhost:8080/cases/<case-id>/attachments?limit=10&offset=0"
 
@@ -660,16 +659,6 @@ curl -H "x-jwt-assertion: $JWT" http://localhost:8080/cases/<case-id>/feedback
 curl -X POST http://localhost:8080/cases/<case-id>/feedback \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
   -d '{"emojiId":"<emoji-id>","chipIds":["<chip-id>"],"additionalComment":"Resolved quickly, thanks!"}'
-
-curl -H "x-jwt-assertion: $JWT" http://localhost:8080/attachments/<attachment-id>
-
-curl -X PATCH http://localhost:8080/deployments/<deployment-id>/attachments/<attachment-id> \
-  -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"name":"updated-log.txt","description":"Renamed for clarity"}'
-
-curl -X PATCH http://localhost:8080/cases/<case-id>/attachments/<attachment-id> \
-  -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \
-  -d '{"name":"updated-log.txt"}'
 
 curl -X POST http://localhost:8080/deployments/<deployment-id>/products/<deployed-product-id>/metrics/search \
   -H "x-jwt-assertion: $JWT" -H "Content-Type: application/json" \

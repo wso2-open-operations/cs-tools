@@ -436,7 +436,6 @@ describe("operations API hooks", () => {
 
   describe("usePostCase payload size checks", () => {
     const MB = 1024 * 1024;
-    const b64 = (rawBytes: number) => "A".repeat((rawBytes / 3) * 4);
     const base = {
       projectId: "proj-1",
       deploymentId: "dep-1",
@@ -449,41 +448,13 @@ describe("operations API hooks", () => {
       return result.current.mutateAsync({ ...base, ...payload } as never);
     };
 
-    it("sends a case with an 8 MB attachment", async () => {
+    it("sends a case whose body is under the cap", async () => {
       mockAuthFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: "case-1", number: "CS001" }),
       });
-      await run({
-        description: "d",
-        attachments: [{ name: "a.zip", file: b64(8 * MB) }],
-      });
+      await run({ description: "d" });
       expect(mockAuthFetch).toHaveBeenCalledTimes(1);
-    });
-
-    it("rejects a file just over 10 MB raw with a per-file message", async () => {
-      mockAuthFetch.mockClear();
-      await expect(
-        run({
-          description: "d",
-          attachments: [{ name: "big.zip", file: b64(10 * MB + 3) }],
-        }),
-      ).rejects.toThrow('"big.zip" exceeds the 10.00 MB per-file limit');
-      expect(mockAuthFetch).not.toHaveBeenCalled();
-    });
-
-    it("blames attachments when they make the request too large", async () => {
-      mockAuthFetch.mockClear();
-      await expect(
-        run({
-          description: "d",
-          attachments: [
-            { name: "a.bin", file: b64(9 * MB) },
-            { name: "b.bin", file: b64(9 * MB) },
-          ],
-        }),
-      ).rejects.toThrow("attachments are too large");
-      expect(mockAuthFetch).not.toHaveBeenCalled();
     });
 
     it("blames the description when it makes the request too large", async () => {

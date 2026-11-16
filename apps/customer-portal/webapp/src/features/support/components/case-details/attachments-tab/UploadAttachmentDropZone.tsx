@@ -14,6 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  entityAttachmentMaxBytes,
+  formatLimit,
+} from "@config/attachmentLimitsConfig";
 import type { UploadAttachmentDropZoneProps } from "@features/support/types/supportComponents";
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { Upload } from "@wso2/oxygen-ui-icons-react";
@@ -70,7 +74,7 @@ export default function UploadAttachmentDropZone({
         Choose file
       </Button>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
-        Maximum file size: 10 MB.
+        Maximum file size: {formatLimit(entityAttachmentMaxBytes())}.
       </Typography>
     </Box>
   );

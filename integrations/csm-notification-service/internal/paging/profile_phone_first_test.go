@@ -145,3 +145,42 @@ func TestRosterResolver_TestCallToIsFixed(t *testing.T) {
 		t.Errorf("no TEST_CALL_TO: %q fixed=%v; want the CSM profile number", got.Phone, got.PhoneFixed)
 	}
 }
+
+// An invalid number the recipient already carries must not hide a valid one
+// from a later source, nor the rejection from the note.
+func TestProfilePhoneResolver_InvalidCarriedNumber(t *testing.T) {
+	ctx := context.Background()
+	inner := StaticResolver{ByLevel: map[Level][]Recipient{Level0: {
+		{Name: "Book bad, directory good", Email: "a@example.com", Phone: "0770000101"},
+		{Name: "Book bad, nothing else", Email: "b@example.com", Phone: "0770000102"},
+		{Name: "Fixed", Email: "c@example.com", Phone: "not-a-number", PhoneFixed: true},
+		{Name: "Book good", Email: "d@example.com", Phone: "+15550100000"},
+	}}}
+	lookup := &fakeLookup{numbers: map[string]string{"a@example.com": "+15550100001"}}
+	got, err := NewProfilePhoneResolver(inner, lookup).Resolve(ctx, Level0, RoutingContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Recipient{}
+	for _, r := range got {
+		by[r.Email] = r
+	}
+	if by["a@example.com"].Phone != "+15550100001" || by["a@example.com"].PhoneRejected != "" {
+		t.Errorf("valid directory number not used: %+v", by["a@example.com"])
+	}
+	if b := by["b@example.com"]; b.Phone != "" || b.PhoneRejected != PhoneInvalidFormat {
+		t.Errorf("invalid carried number must be cleared and marked rejected: %+v", b)
+	}
+	if c := by["c@example.com"]; c.Phone != "not-a-number" || c.PhoneRejected != "" {
+		t.Errorf("PhoneFixed recipient was altered: %+v", c)
+	}
+	if d := by["d@example.com"]; d.Phone != "+15550100000" {
+		t.Errorf("valid carried number changed: %+v", d)
+	}
+	plan := Plan{Trigger: testTrigger("P1", ShiftLKMorning), Channel: ChannelCall,
+		Calls: []PlannedCall{{Level: Level1, Ordinal: 1, At: triggerAt, Recipient: by["b@example.com"]}}}
+	note := plan.WorkNote([]bool{true}, nil, nil, "")
+	if !strings.Contains(note, "[ERROR][INVALID_PHONE_FORMAT][b@example.com]") {
+		t.Errorf("note should say INVALID_PHONE_FORMAT:\n%s", note)
+	}
+}

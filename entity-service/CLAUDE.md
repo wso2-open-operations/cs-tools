@@ -65,6 +65,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
+| `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -91,13 +93,18 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `USER_CACHE_TTL` | no | `10m` | Backstop lifetime of a cached user; an unparseable or non-positive value falls back to `10m` |
 | `PRODUCT_VULNERABILITY_META_CACHE_TTL` | no | `24h` | Backstop lifetime of the cached product/version options of `GET /products/vulnerabilities/meta`; deleted on a successful vulnerability sync; unparseable or non-positive falls back to `24h` |
 | `INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS` | no | — | Comma-separated `"group"` UUIDs an incident may be created in although they support no service (e.g. the security operations group). Trimmed, empty entries ignored; a non-UUID entry refuses to start. Joins the incident-assignable set (create check + `supportGroupsOnly` picker); never case-alert route options. See "Incident assignment group on create" |
+| `SERVICE_REQUEST_DEFAULT_SEVERITY` | no | `S4` | Internal severity (`S1`..`S4`, case-insensitive) a service request gets when created without one; unset = `S4`; any other value (`S0` included) refuses to start. Internal-only field (customers neither set nor see it), Postgres only, never sent to the backing data source, no SLA or event effect. A customer's or customer-portal-routed caller's explicit severity on create is dropped, on update it is a 403. Set via `PATCH /cases/{id}` `{severity}` by internal users and integration clients only; a case moved to a service request keeps it (`S0` is stored as `S1` with a `SEVERITY_DOWNGRADED` entry in the response's `warnings`; none becomes `S4`) |
 | `INCIDENT_DEFAULT_SERVICE_ID` | no | — | UUID of the service whose support group a new incident gets when no `assignmentGroupId` is sent and its own service has no support group (logged WARN each time). Unset / missing / groupless: such incidents are created unassigned (logged ERROR). A non-UUID refuses to start; checked at startup, log only. See "Incident assignment group on create" |
 | `CR_STRICT_VISIBILITY_FROM` | no | — | RFC 3339 instant **with a zone**: change requests created at or after it are visible to a customer only when designated to them; earlier ones are "legacy" and keep today's visibility. Unset/empty = no cutover, every change request is legacy (the safe default and the rollback; a WARN is logged at startup). An unparsable value refuses to start. Set once per environment at release and never move it — see "Customer visibility and the cutover" |
 | `MIGRATION_CASE_REPORT_HOLD_TAG` | no | `s_mig_hold` | Tag (ignoring case) for the weekly migration scan's "customer requested to hold" table |
 | `MIGRATION_CASE_REPORT_ACCOUNTS_TAG` | no | `s_acc` | Tag (ignoring case) for its "waiting on accounts team" table |
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
+| `OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription` | Project type names (exact match) that list a case, service request or security report analysis (each row carries `type`) in `GET /reports/long-open-cases?variant=open-before-yesterday` whatever its product. Blank falls back to the default |
+| `OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES` | no | `Cloud Support` | Project type names that list a case in that variant only when the case has a product set. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `HOLIDAY_CALENDAR_BASE_URL` / `HOLIDAY_CALENDAR_TOKEN_URL` / `HOLIDAY_CALENDAR_CLIENT_ID` / `HOLIDAY_CALENDAR_CLIENT_SECRET` | no* | — | Choreo connection to the calendar-events service the leave app reads holidays from (`GET /holidays`). All four or none (`Validate`). Unset: no holidays are fetched; the roster shows what is stored. See "Team Schedule public holidays" |
+| `HR_ENTITY_BASE_URL` / `HR_ENTITY_TOKEN_URL` / `HR_ENTITY_CLIENT_ID` / `HR_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection to the HR entity GraphQL service (the GraphQL endpoint URL), for each member's location. All four or none. Unset: every member falls back to their team's country |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -114,6 +121,66 @@ A failed Event Hub publish is logged instead of recorded — see
 and the assignable-role allow-list are organisation vocabulary and live in the CSM
 portal backend (`apps/csm-portal/backend`), resolved once at startup. This service
 holds no organisation vocabulary at all — do not reintroduce it.
+
+## Team Schedule public holidays
+
+Code: `internal/holidays` (the two clients), `service/public_holiday_service.go`,
+`repository/public_holiday_repo.go`, `handler/public_holiday_handler.go`; tables
+`team_schedule_public_holiday` and `team_schedule_person_location` (migration 0283).
+
+- **Source** is the leave app's: `GET /holidays?countries=<country>&startTimeMin&startTimeMax`
+  on the calendar-events service (people-ops-suite `calendar_events:fetchHolidaysForCountry`).
+  An all-day event's end date is exclusive, so it becomes one row per day (`expandEvents`,
+  as `getHolidaysFromEvents`); timed events are skipped. Two holidays on one day are one row,
+  titles joined with " / ".
+- **Whose holiday:** the employee-service location (`employee(email){location}`, as
+  `employee:getEmployeeLocation`), stored per member. Unknown: India for a member of the
+  India team (the team absence kind `ALLO_IND` moves people to), else Sri Lanka. The country
+  string is the leave app's (`Sri Lanka`, `India`), passed to the calendar service as is.
+- **Refresh:** daily (first run two minutes after start) in every replica, and on demand
+  with `POST /team-schedule/public-holidays/refresh` (service credential, 202, background).
+  One run at a time per process. It upserts the current and next year for every country in
+  use plus the two fallbacks. A failed or empty country-year keeps what is stored, so a
+  transient answer never wipes a year. Re-running is safe.
+- **Read:** `POST /team-schedule/public-holidays/search` reads only the stored copy, so the
+  roster works while the services are down. A holiday is not leave and moves no shift.
+- **Working on a public holiday (CRE only)**, `service/holiday_availability_service.go`,
+  `repository/holiday_availability_repo.go`, `handler/holiday_availability_handler.go`, same
+  migration (0283):
+  - **The tag.** After every successful refresh (`WithHolidayTagPlacer`) the Team Schedule
+    places a `PH` "Public holiday" tag (ALLOCATION, `excludes_from_timesheet`, family CRE,
+    colour EXC, note "<title> — public holiday in <country>", actor `team-schedule-holidays`)
+    on every member of a rostered CRE team (management left out) for each weekday holiday of
+    their country in the next 21 days. Like every tag it takes the day off the timesheet (the
+    worklog's `worklogLeaveQuery` rule) and the person off the rota (`absenceOn`), so Case
+    Alerts does not call them. A lead or rota manager makes somebody available by removing the
+    tag; then the person is on the rota and called as usual. No worklog or Case Alerts code
+    changed.
+  - **Placed once.** `team_schedule_holiday_tag_placed` (unique on user and day) records each
+    placement and is kept after the tag is removed, so a removed tag is never placed again. A
+    day the person already has any tag on (leave wins) is skipped and tried again the next day.
+    A weekend holiday gets no tag. A holiday the calendar drops takes away its tags that nobody
+    touched (still one day, created and updated by the actor) and forgets the placements.
+  - **Fully marked** = every rota turn (`is_rotation` assignment) the team holds that day has
+    its person available (no tag that day) **and** the team is confirmed
+    (`team_schedule_holiday_confirmation`, one row per team and day). Confirm
+    (`PUT /team-schedule/holiday-availability/{teamKey}/{date}/confirmation`) and withdraw
+    (`DELETE`) need a user token of whoever may change the team's rota (`RotaWriterCheck`: its
+    lead, its rota manager, a CRE rota admin or the CRE/CS head, a portal or CSM admin); a
+    confirm is refused with 409 `holiday_turns_uncovered`, naming the turns, while a turn has
+    nobody. A turn that loses its person after the confirm reads `NEEDS_ATTENTION` and the
+    reminders resume. Statuses: `NEEDS_MARKING`, `AWAITING_CONFIRMATION`, `CONFIRMED`,
+    `NEEDS_ATTENTION`.
+  - **Reads.** `POST /team-schedule/holiday-availability/search` (internal staff, at most 70
+    days): one entry per team and day with each member's status (TAGGED / AVAILABLE / AWAY),
+    the uncovered turns, the confirmation and `canConfirm` for the caller.
+  - **Reminders** (service credential only, for csm-scheduled-tasks'
+    `holiday_availability_reminder`): `POST .../reminders/due {today}` lists, per team and
+    holiday in the next 14 days, the latest stage whose day has come -- `notice` (14 days
+    before, always), `week` (7 days), `two_days` / `one_day` (working days; a Monday holiday:
+    Thursday and Friday) only while not fully marked -- not yet recorded, with the team's
+    leads and rota managers; `PUT .../reminders/{teamKey}/{date}/{stage}` records one
+    (`team_schedule_holiday_reminder_sent`). A stage whose day passed unsent is not caught up.
 
 ## Health probes
 
@@ -243,8 +310,8 @@ Chat cards in the SR's SRE-team space.
 - `sr.created`: every SR created on the plain-Postgres path
   (`caseService.CreateCase`). Under dual-write the SR is created in ServiceNow
   first and its own flow still runs there, so nothing happens here.
-  **An SR created from a GitHub issue** (`githubSyncService`, the `SR-GH-`
-  series) gets the same `OnCreated` -- assignment, acknowledgement and
+  **An SR created from a GitHub issue** (`githubSyncService`; numbered natively -- CS number and
+  `<KEY>-<n>` id -- when the repository maps to a project, `SR-GH-` series otherwise) gets the same `OnCreated` -- assignment, acknowledgement and
   `sr.created` -- in every mode (`WithGithubSRNotices`, routes.go): it exists
   only in Postgres, so no ServiceNow flow ever announces it. Only a new record;
   a delivery that finds the issue's record already there announces nothing.
@@ -329,14 +396,29 @@ other success; `SearchUsers` and `GetUsersByIDs` are not cached. The client is
 a plain `redis.NewClient`, so the target must not use the "OSS Cluster"
 clustering policy.
 
-## POST /cases/volume-trend: day-bucketed opened/closed counts for a dashboard chart
+## POST /cases/volume-trend: opened/closed counts for a dashboard chart
 
-Backs the CSM portal's "Case Summary" dashboard trend widget (`apps/csm-portal/webapp`'s
-new `"line"` shape): exactly two fixed series, "Opened" (by `work_item.created_on`) and
-"Closed" (by `caseLikeOwnClosedOnColumn`, the per-type closure timestamp), one point per
-UTC calendar day over a trailing window (`days`, default 30, 1-90). Deliberately narrow,
-unlike `AggregateCasesRequest`'s open-ended `groupBy` -- this backs exactly one chart, not
-a platform, so there's no generic series/bucket-unit config.
+Backs the CSM portal's dashboard `"line"` widget (`apps/csm-portal/webapp`): exactly two
+fixed series, "Opened" (by `work_item.created_on`) and "Closed" (by
+`caseLikeOwnClosedOnColumn`, the per-type closure timestamp), one point per UTC calendar day
+over a trailing window (`days`, default 30, 1-90). Deliberately narrow, unlike
+`AggregateCasesRequest`'s open-ended `groupBy` -- this backs one chart, not a platform, so
+there's no generic series config.
+
+**A fixed window: `startDate`/`endDate` + `bucket`.** Instead of `days` (never both), a
+request can name a fixed window -- plain `YYYY-MM-DD` dates or the relative placeholders
+`resolveRelativeDate` knows, both inclusive UTC days -- for a past period such as "December
+2025" that a trailing window can't reach. `testdata/relative_date_parity.json` holds the
+tokens and the dates they resolve to that `resolveRelativeDate`, the CSM backend's
+`relativeDate` and the webapp's resolver must agree on; all three run it, so a change to the
+grammar goes there first. `bucket` groups its points: `day` (default, at most 90 days),
+`week` (Monday to Sunday, at most 54 weeks, a whole leap year that starts on a Sunday) or
+`month` (at most 24 months);
+a week or month point carries `date` and `endDate`, the bucket's first and last day clipped
+to the window. Counting doesn't change: every day is still computed and cached on its own
+(below), and a week or month point is the sum of its days. A day after today counts 0 and is
+never queried or cached -- caching it would pin a 0 under the stable TTL. A request without
+these fields gets exactly the trailing-window response it always did.
 
 **A naive `to_char(timestamp, 'YYYY-MM-DD') = ANY(days)` predicate is non-sargable --
 confirmed against a real staging database (505k `work_item` rows), not assumed.** Wrapping
@@ -443,7 +525,8 @@ the list.
   stored phone), `sales_region`, `sub_region`, `life_cycle` (`status`),
   `naics_industry`, `sub_industry`, `classification`, `technical_owner_id`, the
   billing address (`street`, `city`, `state_province`, `postal_code`, `country`),
-  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`.
+  `account_manager_id` (`owner.email`), `activation_date`, `lost_date`, `lost_reason`,
+  `primary_partner_sf_id` (`primaryPartnerAccountId`, migration 0291).
 - `COALESCE(new, stored)`: `customer_success_manager_id` (`csmEmail`),
   `secondary_technical_owner_id`, `renewal_account_manager_id`
   (`renewalManager.email`), `account_vertical`, `lost_reason_category`,
@@ -477,6 +560,35 @@ later CREATED/UPDATED/RESTORED clears `deleted_on`. Never `DELETE FROM account`
 `deleted_on IS NOT NULL`; `GetAccountByID`, `LookupAccountIDBySfID` (so
 `EnsureAccount`), the partner lookup and the joins from projects/cases/global search
 still see the row.
+
+**Primary partner and life cycle on the account reads.** `hasPrimaryPartner` on
+`GET /accounts/{id}` and `POST /accounts/search` is `primary_partner_sf_id IS NOT NULL`;
+it used to be "any partner link in `account_relationship`", which has no primary
+marker and overstated it for an account with a non-primary partner. The column fills
+only when the Account ingest writes the account, and until then `hasPrimaryPartner`
+reads false. Its only reader is ACP's CSM-only mode (`ACP_SALES_ENTITY_READS=off` in
+csm-scheduled-tasks), where it moves an invoice suspend date. Both reads also return
+`lifeCycle` (`account.life_cycle`), and the opportunity and project-opportunity link
+reads return `sfId` (`sf_opportunity.sf_id`, `sf_opportunity_link.link_sf_id`), all
+`null` on the ServiceNow data source.
+
+**Backfill after 0291: `POST /salesforce/accounts/{sfId}/refresh`, not replayed events.**
+A replayed `UPDATED` event for an account the ledger already holds at that version is
+skipped by the duplicate guard, so it never writes the new column. `RefreshAccount`
+(`salesforce_account_refresh.go`) writes the account from its current Salesforce record
+with the guard off; incoming events keep it. Internal callers only, registered only
+with the Account ingest on; it does not refresh partner links. Call it once per account
+(`SELECT sf_id FROM account WHERE sf_id IS NOT NULL AND deleted_on IS NULL`). Every
+refresh stamps the account's ledger row (`updated_on`, and `status` FAILED when the
+write failed), so before turning on ACP's CSM-only mode this must return 0, or only
+accounts that are known to be broken (`<start>` = when the backfill began):
+
+```sql
+SELECT COUNT(*) FROM account a
+LEFT JOIN salesforce_ingest_state s ON s.entity = 'account' AND s.sf_id = a.sf_id
+WHERE a.sf_id IS NOT NULL AND a.deleted_on IS NULL
+  AND (s.updated_on IS NULL OR s.updated_on < '<start>' OR s.status <> 'SUCCEEDED');
+```
 
 ### One row per sf_id
 
@@ -1023,6 +1135,18 @@ reopen logs a WARN at every start as the reminder.
   not link the invoice to a project yet (the invoice, its opportunity or the link is missing), it falls
   back to "does any project have one", so the local tables can only narrow the check. A `Project__c` event costs one database read when the project
   is not ACP-suspended.
+- **Suspension process overridden (`project.suspension_process_overridden`, migration 0281).** A
+  CSM-owned `BOOLEAN NOT NULL DEFAULT FALSE`: when true, ACP must not evaluate the project. Exposed as
+  `suspensionProcessOverridden` (always present, `false` by default) on `GET /projects/{id}` and
+  `POST /projects/search` (carried by `domain.ProjectClosureFields`). **Writable** via `PATCH /projects/{id}`
+  (`suspensionProcessOverridden`, boolean; null or omitted leaves it unchanged). It is Postgres only: the
+  legacy data source rejects it with a 400, and in dual-write mode it is written to Postgres and never
+  forwarded to the legacy source (a request with only this field has nothing to mirror and succeeds).
+  Setting it touches no closure state or `suspension_process_state`; it stamps `updated_by`/`updated_on`
+  and the PATCH response echoes the stored value. Admin-only is enforced in the BFF, not here (this
+  service only authorises the caller against the project). The legacy data source's own ACP does not see
+  this flag, so until the legacy process is switched off, setting it in CSM does not exempt the project
+  there. The legacy data source reads `false` always. This reopen check does not read it yet.
 - **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
   its `suspension_process_state` section (`based_on_subscription_end_date` /
   `based_on_due_invoices`) has `event_type: "suspend"`, which ACP writes when it suspends. A project
@@ -1050,9 +1174,10 @@ reopen logs a WARN at every start as the reminder.
   `acp_reopen_rules.go`; `testdata/acp_rules_parity.json` holds the cases both copies must agree on
   (`TestACPRulesParity` here, ACP's parity tests over the same file), since a disagreement makes ACP
   suspend a project every day and this check reopen it:
-  - end-date track: the Salesforce project end date is set and in the future (`acpDaysBetween > 0`;
-    ACP suspends at 0 or less);
-  - invoice track: no counted invoice is past its suspend date. Counted = opportunity stage
+  - end-date track: the Salesforce project end date is set and not yet past (`acpDaysBetween >= 0`;
+    ACP suspends only once the date is past, `acpDaysBetween < 0`, so a project renewed to an end date
+    of today reopens and is not suspended again);
+  - invoice track: no counted invoice is past its suspend date (`acpDaysBetween(suspend date) >= 0`, same boundary). Counted = opportunity stage
     "50 - Closed Won" with a EULA that is present and not "Customer contract" (an empty EULA text
     counts, as in ACP); invoice unpaid, has a due date, not PP/CO/TAM, not "Auto Created PS", not due
     before the project start. The earliest due one decides; its suspend date is the due date, or with
@@ -1338,6 +1463,18 @@ revisited.
   `csm-notification-service`'s `events.Validate` would reject anyway for an
   empty `recipients` list.
 
+  **`CaseCreatedPayload.EngagementType`** mirrors `CommentAddedPayload.EngagementType`'s
+  own convention (`cv.EngagementType`'s lowercase value, e.g. `"migration"`; `""`
+  for every non-engagement case-like type) — added so `csm-notification-service`'s
+  SLA engine can tell a migration engagement apart from any other the same way
+  `dispatch.checkFrustration` already can from `CommentAddedPayload`'s own copy
+  of this field (see that repo's own `CLAUDE.md`, "SLA breach-alerting engine",
+  for what this closes: a clock can get attached to an engagement via clock
+  re-evaluation, which has no `case_type` gate the way registration at creation
+  does, and its breach must be suppressed the same way a service request's is).
+  Deploy `csm-notification-service` before this field starts being sent, or its
+  strict decode rejects every `case.created` event outright.
+
   **Only `type: "case"` requires a severity to publish at all.**
   `CaseCreatedPayload.Priority` has no `omitempty` (a consumer always
   expects a real value) and `""` is not a real priority, so a nil severity
@@ -1573,6 +1710,12 @@ link-related. `publishStatusChanged`/`publishCaseAssigned` additionally set
 `case.*` email's subject to follow one explicit standard format,
 `"[WSO2 Support] (<wso2 case id>/<case number>) <title>"` (see that
 service's own `CLAUDE.md`, `dispatch.subjectLine`).
+`publishStatusChangedEvent` also sets `PreviousStatus` (the display label of
+`before.State`, empty when the prior state is unknown) so a consumer can tell
+whether the change is visible to a given audience: customers see Work In
+Progress and Waiting On WSO2 as one "In Progress" state, so
+`csm-notification-service` skips the customer email for a move between the two.
+Entity-service itself never merges the states; it only supplies the previous one.
 - **`snCaseService.UpdateCase`** publishes `case.status_changed` via
   `publishStatusChanged`, called only when the PATCH's own `req.State` was
   set (a `nil` `State` — e.g. an `assigneeEmail`-only PATCH — never
@@ -1849,6 +1992,193 @@ response: the case/comment/incident already exists in ServiceNow by that
 point, so a notification-side hiccup must not be reported to the caller as a
 failed
 create.
+
+## Attachment files held by the portal backends (Azure Blob Storage)
+
+Work item, comment-image and deployment attachment files (`work_item_attachment`,
+`comment_attachment`, `deployment_attachment`; `case_attachment` is an older table: nothing writes it and
+nothing lists it any more, existing rows are only moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
+`apps/csm-portal/backend`) in Azure Blob Storage, through `libs/azblobstore`. **This service never
+touches a file**: it has no file store and needs no storage setting. It keeps the access checks (the
+caller's own row-level security), the three attachment tables, the size and type rules, and the
+storage key layout (`filestore.Key`, the same layout the migrated files use).
+
+Routes, registered only when `db != nil` (otherwise 404): `POST /attachments/upload`,
+`POST /attachments/upload/{id}/authorize`, `POST /attachments/upload/{id}/confirm`,
+`POST /attachments/locate`, `GET /attachments/inline/{id}/location`, `POST /attachments/delete`,
+`POST /attachments/uploads/cleanup` and `POST /attachments/uploads/cleanup/acknowledge`. Code:
+`internal/filestore` (the key layout), `service.StoredAttachmentService` (`stored_attachment_service.go`,
+`stored_attachment_backend.go`), `repository.StoredAttachmentRepository`, `handler.StoredAttachmentHandler`.
+
+**Listing, and what no longer exists.** `POST /attachments/search` (always registered, PostgreSQL only)
+lists metadata for a case, change request, incident, conversation or deployment (`deployment_attachment`);
+it never lists a pending, failed or deleted row. Attachments have no data source switch: the
+`ATTACHMENT_DATA_SOURCE` setting, the ServiceNow attachment dual-write (`caseAttachmentDualWriteService`),
+the ServiceNow attachment calls in `snCaseService`, the legacy routes (`POST /attachments`,
+`POST /attachments/{id}/confirm`, `GET /attachments/{id}`, `GET /attachments/{id}/content`,
+`GET /attachments/{id}/case`, `PATCH /attachments/{id}`, `DELETE /attachments/{id}`) and the base64
+`attachments` array of `POST /cases` were all removed. Every request decoder rejects an unknown field, so
+a client that still sends `attachments` on create-case gets a 400; a case is created without files and
+they are uploaded afterwards. With `DATA_SOURCE=servicenow` the search is answered by PostgreSQL through
+the service's own fallback. A comment image is authorized through `GET /attachments/inline/{id}/location`,
+not through the removed parent-case route. The case activity feed follows `DATA_SOURCE` like every other
+case route.
+
+**The storage key is internal.** `authorize`, `locate` and `inline/{id}/location` return a
+`storageKey`. It is for the portal backend that asked and **must never be sent to a browser**: a
+backend must strip it from anything it forwards. Every response is `Cache-Control: no-store`.
+
+**Access is the caller's own.** The repository holds a `*Scoped`, so reads and the INSERT run
+under the attachment tables' RLS (migration 100026): an external caller needs to be a
+`REGISTERED` member of the parent's project, a parent with no project is internal-only, and an
+attachment of a `WORK_NOTE` comment stays internal because `comment_attachment`'s policy goes
+through `comment`'s. An external INSERT must be `PENDING` with no `storage_key`. UPDATE and DELETE
+are internal-only, which is why confirm runs `MarkComplete`/`MarkFailed` under
+`repository.WithSystemIdentity` after its own checks. There is deliberately no `AccessService`
+in the upload, locate and delete paths. The three tables have no row-level id default except
+`work_item_attachment` (migration 0179), so `InsertPending` generates the id.
+
+**The flow.**
+
+1. `POST /attachments/upload` checks the parent as the caller (a hidden parent is 404), refuses a
+   **closed work item for every caller, internal ones included** (409), checks size and type, inserts a
+   `PENDING` row (`created_by` = the caller's email) and returns `attachmentId`, `number`, `maxBytes`
+   and `expiresAt`. `expiresAt` is when an unconfirmed upload may be cleaned up
+   (`abandonedUploadAge`, 24h). Charged one unit of the per-caller allowance (60 per minute, in
+   memory and per pod).
+2. The backend receives the file from the browser in chunks and, **for every chunk**, calls
+   `POST /attachments/upload/{id}/authorize` (`{type}`). It checks, as the caller, that the upload is
+   theirs, still `PENDING` and its work item still open, and returns `storageKey`, the declared
+   `sizeBytes`/`contentType`, `maxBytes` and `name`. So access removed part-way stops the upload, and
+   the backend never takes a path from the browser. Not charged against the allowance (a 100 MiB file
+   is a handful of calls).
+3. After the last chunk the backend commits the file, then calls
+   `POST /attachments/upload/{id}/confirm` with `{type, sizeBytes, contentType?}`. This service cannot
+   look at the file, so it trusts what the (internal) backend reports but **checks it against the
+   declaration and the limits**: `sizeBytes` is required (400 without it, and that does not fail the
+   upload), must equal the declared size and not exceed the limit, and for a comment image
+   `contentType` (the type the backend found by reading the bytes) must be PNG, JPEG or WebP. A refusal
+   records the row `FAILED` and **the backend must then delete the file it committed**. The row is
+   marked `COMPLETE` with the key from `storageKeyFor`. A repeated confirm answers the same.
+4. Read: `POST /attachments/locate` (`{type, id}`) checks the caller may see the attachment and returns
+   its `storageKey`, or `available: false` with a reason (`NOT_STORED`, `FAILED`, `DELETED`); an
+   attachment the caller cannot see is 404. Charged one unit of the per-caller allowance.
+   `GET /attachments/inline/{id}/location` is the same for an inline image (comment row first, then a
+   migrated work-item image; `410 attachment_removed`). Not charged.
+5. Delete: `POST /attachments/delete` marks the row `DELETED` (soft delete; `deleted_on`/`deleted_by`,
+   migration 0249). Only the person who uploaded it may delete (403 otherwise), **or a portal admin through
+   the CSM portal backend**: the backend sets `asAdmin: true` in the body when the caller's token roles give
+   `PermAdmin`, and this service honours it only when the caller's client id is `CSM_PORTAL_BACKEND_CLIENT_ID`
+   (`WithStoredAttachmentAdminDelete`, like portal banners: the admin decision is made once, in the backend, not
+   against a second `AUTH_ADMIN_ROLES` list here; from any other caller the flag is ignored and the 403 stands;
+   the audit line carries `adminOverride`). Never once the work item
+   is closed (409), even for an admin, an image embedded in a comment is not deleted on its own (400), and a repeated
+   delete answers 204. It **does not remove the file**: the backend removes it afterwards, so it
+   should `locate` first to get the key. A `DELETED` attachment has no file to download, and the case
+   attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides
+   `FAILED` rows and uploads still in flight). Each delete writes an `attachment deleted` audit line.
+
+**Inline comment images** are uploaded against the work item before the comment exists, so a new image
+is a `comment_attachment` row with `comment_id` NULL and `work_item_id` set (migration 0150), visible
+only to its uploader. The portals upload a pasted image when the comment is sent, and the comment's
+HTML refers to it as `src="/<attachment id>"`. When a comment is created or edited
+(`caseService.createCaseCommentAs`, `commentService.CreateComment`/`UpdateComment`, through
+`InlineImageLinker.LinkFromContent`) entity-service reads those ids out of the content and links each
+image (`comment_id` set), but only if the comment's author uploaded it, it is stored, and it belongs to
+the comment's own work item. That is best effort: a failure is logged and the comment is saved anyway.
+Content that embeds a base64 image is saved as written (this service stores no file), but a NEW comment or a
+record's description typed by a user is held to the same limits (`ValidateEmbeddedImages`: at most 5 images and
+the total size, decoded). A machine caller (no user) and an edit of an existing comment are not checked.
+
+**Limits per comment or description.** One comment or description shows at most 5 images
+(`MaxInlineImagesPerContent`) and at most `INLINE_IMAGES_TOTAL_MAX_MB` together (1 MB by default); one image is at most
+that big too. Comment create (`commentService.CreateComment`,
+`caseService.createCaseCommentAs`) and edit (`UpdateComment`) call `InlineImageLinker.ValidateCommentImages`
+BEFORE saving and answer a 400 in words; only the author's own images on the comment's work item are counted
+(the same rule `LinkFromContent` links by). The check costs nothing for content with no image reference
+(`mayHaveInlineImages`, one regexp).
+On an edit, images already linked to that comment are kept: they count toward the 5 but not toward the size limit,
+which applies to the images the edit adds (so lowering `INLINE_IMAGES_TOTAL_MAX_MB` never blocks editing an older comment).
+
+**A security report's file is uploaded before the case exists.** A `security_report_analysis` must never
+exist without its report, and creating the case first and uploading afterwards left a case with no file
+whenever the upload was cancelled or the tab refreshed. So the file goes first: `POST /attachments/upload`
+with `type: "work_item"` and `projectId` (instead of `parentId`) records a **draft** `work_item_attachment`
+(`work_item_id` NULL, `project_id` set; migration 0280, policies 100028) that only its uploader can see and
+that no list shows (every list joins `work_item`). The chunks and the confirm are the ordinary calls. Then
+`POST /cases` carries `attachmentIds`: `validateReportDrafts` checks them BEFORE anything is created (each a
+COMPLETE draft of that project uploaded by the caller, not linked, at most `MaxCreateAttachments` = 10) and,
+for a `security_report_analysis` created by a user, refuses a request with none (400, `reportRequiredMessage`);
+the link itself differs by data source. **Plain `postgres`: atomic.** `createCaseTx` calls `linkReportDraftsTx` in the
+create transaction (the service passes the email it validated as `ReportDraftOwnerEmail`): one guarded UPDATE
+takes only rows that are still COMPLETE drafts of that project uploaded by that email, and unless it takes every
+named file the create fails with a 400 and rolls back, so a case never exists without the files it was created
+with. Two creates naming the same file cannot both succeed: the second UPDATE waits on the row, then finds it
+taken (`TestCaseCreateMemberRLS_LinksReportDraftsAtomically` races two creates). The UPDATE is internal-only, so the
+transaction is marked internal for that one statement, as `insertAsCheckedProjectMember` does for the insert.
+**Dual-write (`createCaseSNFirst`): not atomic, on purpose.** ServiceNow already has the case when the Postgres row
+is written, and that insert must not fail (an orphaned ServiceNow case is the worse outcome, see
+`CreateCaseFromServiceNow`), so `linkReportDrafts` runs after it, best effort: a link that fails leaves a case
+whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
+A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
+**An abandoned draft is cleaned up.** A PENDING one is marked FAILED by the ordinary cleanup after 24 hours. A
+COMPLETE one whose case was never created is handed over by `POST /attachments/uploads/cleanup` in `orphans`
+(`type: "work_item"`, with its storage key; `ListUnlinkedReportDrafts`, served by
+`idx_work_item_attachment_unlinked_drafts`) once it is 25 hours old, and marked DELETED only when the caller
+acknowledges it, exactly like a comment image. The 1 hour past 24 is deliberate: `POST /cases` refuses a draft
+older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a `notBefore`), so a draft is never linked to a
+case after its file was handed over for deletion. A form left open more than a day gets a 400 and the file must be
+attached again. Still not built: the job in the portal backends that deletes the files and acknowledges them (it is
+missing for comment images too).
+
+**Description images (uploaded before the record exists).** A rich-text description can show inline images
+before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
+`parentId` (exactly one; both or neither is a 400): the row is a **draft** (`comment_attachment`:
+`comment_id` and `work_item_id` NULL, `project_id` set, migration 0250). The caller must be a REGISTERED
+member of the project (internal callers unrestricted, an unseen project is 404; `repo.GetProject`, since
+`project` has no RLS); same PNG/JPEG/WebP rule and per-image limit. A draft's storage key is
+`csm/projects/<project>/workitems/drafts/inline_attachments/<number>_<name>` (`storageKeyFor`, `draftFolder`);
+it is stored at confirm. Once the image is linked to a record, the next time a portal backend reads it
+`GET /attachments/inline/{id}/location` returns `relocateTo` (`csm/projects/<project>/workitems/<work item>/inline_attachments/<number>_<name>`,
+the same folder as a comment's images; the number tells them apart); the backend copies the file there, removes the draft copy and
+calls `POST /attachments/inline/{id}/relocated` with that key, which makes the row point at it (only the key this service computes is
+accepted; `UpdateStorageKey` is guarded on the old key, so a repeat is harmless). Until then, and if the backend cannot move it,
+the draft key stays valid. Authorize/confirm resolve the parent through
+`parentOf` (the project for a draft). RLS (100027): a draft is visible only to its uploader while a project
+member; a LINKED description image (`comment_id` NULL, `description_image` true, `work_item_id` set) is
+visible to anyone who can see the work item's project, except a CHANGE REQUEST's (internal-only: the customer-visibility rule cannot be restated in RLS); an external INSERT of a draft must be PENDING, no
+`storage_key`, `created_by` = their email, project member. UPDATE/DELETE stay internal-only.
+Every create path with a rich-text description (`caseService.CreateCase`, both plain and dual-write, so all of
+case/service_request/engagement/security_report_analysis/announcement, and `changeRequestService.CreateChangeRequest`)
+calls `validateDescriptionImages` BEFORE creating anything (`ValidateDescriptionImages`: at most 5 distinct
+images, total within the limit, each a COMPLETE draft of that project uploaded by the caller and not linked
+elsewhere, no `src="blob:`; a 400 in words otherwise; unreferenced drafts are ignored) and `linkDescriptionImages`
+right after the record exists (`LinkDescriptionImages`, best effort: one guarded UPDATE as the system that sets
+`work_item_id` and `description_image = true` only while the row is still a draft of that project by that
+email). Both are free for a description without an image reference. `data:image` base64 images are NOT
+refused (other callers still send them) but count against the same 5-image and total-size limits when a
+user typed them (`ValidateEmbeddedImages`; a machine caller is not checked). Incidents and problems have no project on their create request, so
+they take no draft images; the ServiceNow-only data source stores no images.
+`LinkInlineImages` (comments) never takes a `description_image` row.
+
+**Cleanup.** Nothing here deletes a blob, so cleanup is a two-step handoff to a caller that can both
+delete blobs and call this service (internal callers only). `POST /attachments/uploads/cleanup` marks
+uploads still `PENDING` after 24 hours `FAILED` (an upload that was never confirmed leaves nothing in
+storage: uncommitted blocks expire by themselves) and returns the comment images that were never linked
+to a comment or (for drafts) a record's description in `orphans` (`{id, storageKey}`) **without marking them `DELETED`**, so every run lists them again until
+the caller removes the files and then calls `POST /attachments/uploads/cleanup/acknowledge` with their
+ids (at most 200). Only then are they marked `DELETED`. A `DELETED` row is never listed again, so marking
+first would lose the key if the response were lost; this way nothing is lost and a repeated call is safe.
+Acknowledge only marks an id that is still an orphan (re-read from the unlinked list), so it cannot be
+used to delete an arbitrary image; others are counted as `skipped`. An unlinked image with no file is
+marked `DELETED` straight away. A draft description image (no work item, `project_id` set) is abandoned after 24 hours like an unlinked comment image; a LINKED one (`description_image = true`) is never listed (`ListUnlinkedImages` filters `description_image = false`).
+
+**Audit.** Each upload start, link, delete and cleanup writes an `audit: true` line with the
+`callerId` (the user's UUID, else the client id of a machine caller), the `correlationId`, the kind and
+the attachment id. The email is not logged (personal data) and a storage key is never logged.
+
+Verification: unit tests use in-memory fakes; the repository integration test needs
+`STORED_ATTACHMENT_TEST_DSN` (a role that does not bypass RLS, all migrations applied).
 
 ## Portal-driven membership writes
 
@@ -2322,6 +2652,18 @@ in one bulk list with no per-project/per-case filtering, so it has its own
 pagination cap (`normalizeSLAStatusPagination` — default `500`, max `2000`)
 well above the generic `20`/`50` `normalizePagination` uses everywhere else.
 
+**`GET /projects/{id}/slas/report?from&to` is the project SLA report**
+(`internalOnly`, `SlaReportService`/`slaReportRepo`, spec in `docs/sla.md`
+"Project SLA report"): one project's cases created in the window, each with
+its latest clock per target, plus a per-case-type-and-severity summary (95th
+percentile of the *finished* clocks, and met/missed/running counts). Unlike
+`GET /sla-status` it is historical, so it must **not** filter `is_active`, and
+it takes the target from `sla_policy.duration` and the elapsed time from
+`sla_live`, applying the same `businessDayCorrectedLiveState` correction the
+other SLA reads do so its figures agree with the case SLA tab. The clocks are
+limited to the window's cases inside the CTE so the view is not evaluated for
+every clock.
+
 **There used to be a `source` query param (`csm`/`servicenow`) narrowing the
 result to one `sla.source` value — removed along with the column itself
 (migration `0268`).** It existed so `csm-notification-service`'s Redis
@@ -2398,6 +2740,59 @@ one existing call now serves both purposes, with no second query against
 otherwise narrow scope (see its own doc comment on why it has no
 work_item/case/announcement join otherwise) — purely for these four
 display-only fields, nothing else case-like is added.
+
+**`GetClockState` also resolves `ProjectOnboardingStatus`/`IsEvaluationAccount`**
+(`project`/`project_type` joins, the same ones `SearchActiveSLAStatuses` already
+uses for the identical two fields) — added because `csm-notification-service`'s
+own SLA breach Chat alert had been routing with these two facts hardcoded to
+`false`/`""` ever since `case.created` stopped carrying them, so an
+onboarding-stage case's breach alert never reached the Onboarding Chat space
+at all, regardless of the project's real `onboarding_status` (the
+frustration-detection alert, which gets these facts off its own event
+payload instead, never had this gap). `csm-notification-service`'s
+`Engine.sendBreachAlert` now reads both straight off this same `GetClockState`
+call — see that repo's own `CLAUDE.md`, "SLA breach-alerting engine", and
+`internal/chataudience`'s own doc comments for the routing side of this fix
+(onboarding now adds the Onboarding Chat audience on top of the case's own
+team space, so both the team actually working the case and whoever is
+running the onboarding see the alert — unlike an Evaluation Subscription
+case, which routes to Evaluation alone).
+
+**`GetClockState` also resolves `OnboardingTeamEmail`, a SEPARATE field from
+`TeamEmail`, not a swap of it** — the Customer Onboarding team's own
+`group_email` (`team.key = "customer_onboarding_team"`), populated only when
+`ProjectOnboardingStatus` is `IN_PROGRESS`/`NOT_STARTED`, `""` otherwise.
+`TeamEmail`/`TeamLeadName` always stay the case's real CRE team, completely
+unaffected by onboarding status — an earlier version of this fix swapped
+them to the onboarding team entirely, which a CodeRabbit review caught
+pairing the Customer Onboarding team's lead with the CRE team's own name on
+the displayed Chat card/email (`meta.Team`), a real mismatch. By explicit
+request, an onboarding-stage case's breach EMAIL should reach BOTH inboxes —
+`csm-notification-service`'s `sendBreachEmails` sends to `TeamEmail` and
+`OnboardingTeamEmail` together in one email's "to" list, the same two-
+audience shape its breach CHAT card now posts to — never one in place of
+the other. Matched by `team.key` (UNIQUE), not `team.name` (`team.name`
+carries no uniqueness constraint) — same reasoning
+`evaluationSubscriptionProjectTypeName`'s own doc comment gives for matching
+`project_type` by name instead of id. `slaClockStateOnboardingStatuses`
+(`sla_status_repo.go`) mirrors `csm-notification-service`'s own
+`chataudience.onboardingStatuses` by hand — keep the two in sync, or the
+Chat card and the email end up disagreeing on whether a given case counts
+as "onboarding." Every other field this method resolves (`AssigneeName`/
+`AssigneeEmail`, and the clock state itself) is unaffected by onboarding
+status.
+
+**`SearchActiveSLAStatuses` also resolves `EngagementType`** (`eng.type::TEXT`,
+lowercased — `caseLikeJoins`' own `engagement` table, already joined for every
+other case-like field here) — added for `csm-notification-service`'s
+`Engine.Reconcile`, its startup rebuild of Redis from this bulk endpoint, so a
+migration engagement's clock metadata survives a Redis wipe/restart instead
+of being rebuilt with `EngagementType` dropped to `""` (a CodeRabbit-caught
+follow-up on the fix above: `ClockMeta.EngagementType` also needs a LIVE
+refresh path, not just a durable one — see `events.CaseTypeChangedPayload`'s
+own new `NewEngagementType` field and `case_type_transfer_service.go`'s
+`publishCaseTypeChanged`, which populates it from a fresh `GetCaseByID` the
+same way `Product`/`Team` already are, for the event-driven half of this).
 
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
@@ -3025,6 +3420,7 @@ the Query/SecReport Analysis family) on no severity at all.
   `sla_live`'s own flat-wall-clock computation, so a clock could report
   `BREACHED` with a corrected percentage well under 100 in the same
   response.
+- **`TaskSlaRepository`'s own business-day correction still fed itself from `sla.duration` after migration `0272` — a real, reported case, not a theoretical gap.** `migration 0272`'s own fix (above) made `sla_live`'s flat-time columns and `GetClockState`/`SearchActiveSLAStatuses` read `sla_policy.duration` exclusively, but `task_sla_repo.go`'s two queries (`SearchTaskSlas`'s `taskSlaViewColumns`, backing `POST /slas/search` — the case-detail SLA tab — and `GetTaskSla`) still computed the duration fed into `businessDayCorrectedLiveState` as `COALESCE(sla.duration, sla_policy.duration)`, preferring the clock's own frozen snapshot. A real case showed exactly the failure this invites: its `sla.duration` was permanently stuck at a value over an order of magnitude smaller than its policy's real duration, so the business-day correction confidently reported 1000%+ elapsed and `BREACHED` for a clock that was, by its own policy's real duration, only a fraction elapsed and still in progress — the portal's SLA tab and the raw `sla`/`sla_policy` tables visibly disagreed. Fixed the same way migration `0272` already decided for every other read path: `pol.duration` only, `sla.duration` never consulted. `GetTaskSla` already separately selected a pure `pol.duration` value (`policyDurationSecs`, for the definition's own displayed duration) — the fix removes the redundant, wrong-preferring second column entirely and reuses that one value for both purposes.
 - **`RecomputeActive` was removed, not wired to a periodic worker** — see
   "CSM-native SLA clock engine" below for why a background recompute worker
   was already removed once before. `sla_live` (migration `0204`/`0245`)
@@ -3091,6 +3487,15 @@ the Query/SecReport Analysis family) on no severity at all.
   or revise clocks (and, for a state change, apply SLA effects) before
   calling their own `publishCaseCreated`/`publishStatusChanged`/
   `publishSeverityChanged`.
+
+- **`POST /cases/{id}/sla/recalculate` (CaseSLARecalcService, admin-only) corrects a case's stored pause_duration/business_pause_duration by replaying its real history, not by trusting what's currently on the row.** A single clock's own `start_on`/`pause_duration`/`business_pause_duration` are write-path state, accumulated incrementally at each live pause/resume event (`setPaused`) — if any one of those writes was ever wrong (the exact class of bug the business-day-elapsed-time fixes elsewhere in this file exist to close), nothing afterward self-corrects it; this action is the one place that does, by rebuilding the total from scratch. Decision order mirrors `applyCaseStateEffectsForPolicy` exactly (`decidePauseTransition`, `sla_case_recalc_service.go`) — stop/cancel/pause/resume, in that order, evaluated against the case's REAL state at each point in its own `work_item_activity` history, with every other fact (severity, product, etc.) pinned to today's current value. That's not an approximation: anything that would make a different fact change mid-clock (a severity revision, a case-type transfer) already cancels the clock outright and registers a fresh one (`ReviseCaseClocks`) rather than merely pausing the old one, so within one clock's own lifetime state is structurally the only fact that can ever matter to its own pause/resume decision.
+  - **The ServiceNow-backed case path writes none of this history at all.** `work_item_activity` (migration 0055) is only ever populated by `caseService`'s own Postgres-native write path — `snCaseService` (what this deployment's real `DATA_SOURCE` actually uses for real cases) never calls `RecordCaseFieldChangeActivity`. A case with zero state-activity rows has `HasHistory: false` in the response and every one of its clocks is left exactly as it is — never guessed at from an empty log. This is the common case for a real case today, not a rare edge case.
+  - **A later severity/case-type-change activity row (after the clock's own `start_on`) disqualifies that clock from correction entirely**, reported with a reason rather than corrected: if one happened, the real engine would already have cancelled this clock and registered a different one in its place, so finding one here means this row is either stale or something else is inconsistent.
+  - **Both `IN_PROGRESS` and `PAUSED` clocks are corrected — only a terminal one (`COMPLETED`/`ACHIEVED`/`CANCELLED`/`BREACHED`) is skipped.** A `PAUSED` clock's own `business_elapsed_percentage`/`business_duration`/`remaining_business_duration` were frozen using its pause total at the exact moment it was written (`setPausedFlat`/`setPausedBusinessDays`); correcting `pause_duration`/`business_pause_duration` underneath it without also recomputing that frozen snapshot would leave the two disagreeing, so this recomputes and overwrites all five columns together (`UpdateClockPausedSnapshot`), using the exact same freeze formula those two functions already use, anchored on the clock's own `paused_on` instant rather than `NOW()`. The replay's own still-open trailing segment (from the last known state change up to now) is never folded into a `PAUSED` clock's total — only completed pause spans are, the same way the live engine's own incremental accumulation only ever grows on resume.
+  - **If the replay itself concludes something the live engine disagrees with** (the clock should already have stopped/been cancelled partway through its own history, or its paused/running state at the end of the replay doesn't match what the live row says), that clock is reported and skipped, never force-corrected — a genuine disagreement needs a person, not a guess.
+  - **A clock whose own pause_condition/resume_condition references anything other than `state` is skipped entirely, never replayed** (`clockPauseResumeReferencesOnlyState`). A real WORKAROUND-target policy's own `pause_condition` can reference `u_workaround_provided` instead of state — replaying that against `currentFacts`' today's-value snapshot rather than that fact's own history would misjudge the clock's past pause/resume state wherever that fact's value differed from today's, so such a clock is reported and skipped up front rather than silently mis-corrected.
+  - **`work_item_activity`'s own "state" rows are recorded under their ServiceNow-style display label** (`"Awaiting Info"`, the same vocabulary `caseStateDisplayLabel` writes), **never the raw `case_state_enum` value** (`AWAITING_INFO`) every `pause_condition`/`resume_condition` is actually authored against — `normalizeActivityState` converts every recorded label back into that enum vocabulary (via `snCaseLikeStateLabels`) before it's ever compared against a condition. An activity row whose own state value this table doesn't recognize skips that clock rather than silently matching nothing.
+  - **Admin-gated the same way `POST /sla-engine/recalculate` already is**: `CaseSLARecalcService` wraps `SLAEngineService` with its own `requireCSMPortalBackendCaller` check (trusting csm-portal-backend's own `PermAdmin` route gate, confirming only that the caller really is csm-portal-backend — see that method's own doc comment for why this doesn't *also* independently re-check an `AUTH_ADMIN_ROLES` list). Deliberately a separate wrapper type rather than adding `access`/`csmPortalBackendClientID` fields onto `SLAEngineService` itself: that interface's other dozen-plus methods are purely internal (called from case/incident handling code, never directly from an HTTP request) and are already constructed with no access dependency in several existing test files.
 
 ### CSM-native SLA clock engine (historical — the resolution mechanism below no longer exists)
 
@@ -3841,8 +4246,22 @@ already use — no route path, request, or response shape changed.
     report. Comments on those keep exactly the behaviour they had.
   - **A live comment only.** A comment carrying its own past `createdOn` is
     ServiceNow history being mirrored in at dual-write case creation
-    (`mirrorInitialSNComments`), not something happening now, so it does not move
-    `updated_on`.
+    (`mirrorInitialSNComments`), or the description written as a case's first
+    comment on the plain PostgreSQL create (`addDescriptionAsFirstComment`), not
+    something happening now, so it does not move `updated_on`.
+- **A case starts with its description as the first comment, on every data source.**
+  ServiceNow's case-creation rules write the description as the case's first comment;
+  dual-write copies it (`mirrorInitialSNComments`). With no ServiceNow behind the create
+  (`DATA_SOURCE=postgres`) nothing wrote it, so a new case's activity started without its
+  description. `caseService.addDescriptionAsFirstComment` now writes it right after the
+  insert: a `COMMENT` holding the description HTML unchanged, by the creator, at the case's
+  own `created_on`, through `CreateCaseCommentAsSystem` (no `case.comment_added`, no SLA
+  response, no watcher, no `updated_on`). Skipped for an announcement (its description is
+  shown already; the mirror drops ServiceNow's repeat too) and a blank description. Best
+  effort: the insert has its own 5s deadline (so the SLA clocks and `case.created` after it
+  keep their time), and a failure is logged by SQLSTATE or class only (`dbFailureReason`: a
+  pgx connection error names the host, user and database) while the create still succeeds. Cases created before this have
+  no such comment; nothing backfills them.
   - **Never backwards** (`updated_on <= NOW()`): `NOW()` is the transaction's
     start, so a comment that waited on the row lock behind a later-stamped write
     leaves that newer stamp, and its writer, alone.
@@ -3968,6 +4387,57 @@ already use — no route path, request, or response shape changed.
   threaded to the repository layer for that future decision, unused for
   filtering, the same deliberate posture as `AccountContactRepository`/
   `ProjectContactRepository`'s own `callerEmail` parameter below.
+
+## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
+
+Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
+the minutes logged on them, per `groupBy`: `state`, `user`, `project`, `day` or `team`. It reuses
+`timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
+`project_stats_repo.go`), so the aggregate can never count a different set of cards from
+the search, or a different total from the search's `totalTime`; keep it that way.
+
+- **Response:** the shared `AggregateResponse`, plus `groups[].totalMinutes`,
+  `othersMinutes` and `totalMinutes`. Those three are pointers with `omitempty`, set only
+  here: every other aggregate leaves them nil and its JSON is unchanged
+  (`aggregate_response_json_test.go` pins both shapes). A zero is sent as `0`, not dropped.
+- **Ranking:** `measure` (`count`, the default, or `minutes`) decides which buckets survive
+  `maxGroups` (default 10); the rest fold into `othersCount` / `othersMinutes`. The top 10
+  users by cards and by hours are different people, so a widget showing hours must send
+  `minutes`.
+- **Keys and labels:** a `state` key is lower-cased (what the `states` filter accepts).
+  `user` and `project` keys are ids. Their labels never come back empty or NULL: a user with
+  no name falls back to their email, then their user name; a project with no name falls back
+  to its key. A NULL `p.name` used to fail the scan. A card with no project has no
+  `project` bucket: it is counted in `othersCount` / `othersMinutes`, so every grouping's
+  totals match the search's.
+- **`day`:** groups by `work_date` and needs both `startDate` and `endDate`, at most
+  `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
+  The query runs `generate_series` over the window, so every day comes back in date order,
+  days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`teamIds` (search and aggregate):** the cards of the people on any of the teams **today**:
+  `EXISTS` over `team_member` (the Team Schedule's roster, the list `GET /teams/{id}/members`
+  shows; it can hold a person twice and includes engineers moved onto a team), so a card is
+  matched once however many of the teams, or rows of one team, list its engineer. A team id is
+  the Team Schedule's `team.id`, which is a CRE team's CRE group id or an SRE team's SRE group
+  id. There is no membership
+  history: someone who moved teams counts in the new one, for old cards too.
+- **`team`:** needs `filters.teamIds` and returns one bucket per one of those teams (key the
+  team id, label its name), a team without cards at 0 and an id with no team left out
+  (`aggregateTimeCardsByTeam`). A card counts in every one of the teams its engineer is on, so
+  unlike the other groupings the buckets may overlap: `totalRecords` and `totalMinutes` are the
+  buckets' sums, not the search's total. `measure` and `maxGroups` apply as for `user`.
+- **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
+  time card aggregate. Its time card search refuses `teamIds` (400) too.
+- **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
+  (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
+  `CLAUDE.md`).
+
+Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
+check, the ServiceNow refusal, `teamIds` and `team`), `time_card_aggregate_integration_test.go`
+and `time_card_team_filter_integration_test.go` (both `CASE_STATS_TEST_DSN`; the latter seeds
+teams with a duplicated member, a shared member and no members). The integration fixture is built so that ranking by count and
+ranking by minutes disagree, it has a card with all five minute columns NULL, and the
+search-parity test compares both counts and minutes with `SearchTimeCards`.
 
 ## Linking a case to its originating conversation, and the activity feed's work-note count
 
@@ -4257,7 +4727,7 @@ changed.
   empty — nothing has asked for it on that path, this only wires up the
   search filter.
 - **Case activities** (`CaseRepository.SearchCaseActivities`): merges
-  `comment` and complete `case_attachment` rows into one newest-first feed
+  `comment` and `work_item_attachment` rows into one newest-first feed
   via a `UNION ALL` CTE — was previously an unconditional
   `ServiceUnavailableError` stub. There is no field-change audit table in
   this schema, so `req.IncludeFieldChanges` has no effect on this data
@@ -4554,11 +5024,10 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   without the build leaves a window with no owner-type check, and 0211 without the build leaves
   the old build reading the link through `"case"`. The old key was
   also the only thing keeping an attachment off every other kind of work item (the announcement
-  tables' row-level security relies on an announcement never owning one), so the two insert
-  paths (`CreateCaseAttachment`, `CreateCaseAttachmentFromServiceNow`) now check in SQL that the
-  work item is a case, engagement, service request or security report analysis, and answer the
-  same "one or more referenced IDs do not exist" as the key did for anything else. The effect
-  is that the three non-case types can own attachments, which the old target made impossible.
+  tables' row-level security relies on an announcement never owning one). That insert rule
+  went with the old insert paths, which are gone (see "Attachment files held by the portal
+  backends"): nothing writes `case_attachment` any more, so the rows that remain are only moved
+  with their ticket.
 - **A slow or failing ServiceNow call does not decide the outcome by guessing.** The call is
   bounded so about 20 s of the request's deadline remain afterwards. A refusal (400/401/403/
   404/409 from the integration service) is final and rolls back. Anything else (a deadline, a
@@ -4570,9 +5039,18 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   ServiceNow and another in the portal because of a timeout. The transaction (and a row lock on
   that one work item) stays open for the length of the ServiceNow call.
 - **After the commit, best-effort, never undoing it:** an activity entry ("Type: Case ->
-  Engagement") and the SLA clocks above. No event is published (there is no `case.type_changed`).
-  A GitHub-linked service request still gets the one "record created" notice its insert
-  trigger always sends.
+  Engagement") and the SLA clocks above. **`case.type_changed` (`publishCaseTypeChanged`) now
+  also publishes here, but only when `"case"` is the previous or the new type** (`result.Type ==
+  "case"` or `result.PreviousType == "case"`) — a transfer between two non-`"case"` types (e.g.
+  `service_request` straight to `engagement`) still publishes nothing, so
+  `csm-notification-service`'s own `Engine.ReviseClocks` never hears about those. This stayed
+  undocumented here after it was added; see that repo's own `CLAUDE.md`, "SLA breach-alerting
+  engine", for what it's actually for — keeping a clock's Redis-held `CaseType`/`EngagementType`
+  current after a transfer (confirmed live, not hypothetical: entity-service's clock
+  re-evaluation has no `case_type` gate at creation time's own `slaClockEligibleCreateTypes`
+  does, so a case's clock can survive a transfer into an engagement and keep running under
+  stale metadata without this). A GitHub-linked service request still gets the one "record
+  created" notice its insert trigger always sends.
 - **`GetCaseByID` now returns `engagementType` too** (fixed; previously a known gap, not caused
   by the transfer itself) — it used to select only the list search's own `eng.type` and leave
   the detail read's `CaseView.EngagementType` nil, so anything keyed on it from the detail read
@@ -4587,41 +5065,10 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   inside the transaction and its refusal leaving nothing, ambiguous ServiceNow failures, SLA per
   direction), `case_type_transfer_repo_integration_test.go` (real Postgres as a non-superuser,
   run with `CASE_STATS_TEST_DSN`; every source type to every target, Incident and Query, carried
-  columns, billable flag, attachments, remote state, rollback, who may own an attachment) and
+  columns, billable flag, attachments, remote state, rollback) and
   `case_type_transfer_production_integration_test.go` (another ticket's related link, linked
   change requests / child cases / watchers / tags / comments untouched, a ticket with thousands
   of comments and time cards, a transferred Migration ticket through its normal life).
-
-## Attachment `created_on` under dual-write is the database's clock, not ServiceNow's
-
-`DATA_SOURCE=postgres-servicenow-dual-write` mirrors an uploaded attachment into
-`case_attachment` after ServiceNow accepts it (`caseAttachmentDualWriteService.CreateCaseAttachment`).
-The ServiceNow create reply carries `createdOn` as a zone-less `YYYY-MM-DD HH:MM:SS`, and that
-value is **not UTC** -- it is rendered in a ServiceNow-side timezone. `snCaseService` parses it with
-`snCreatedOnLayout`, which has no zone and so reads it as UTC. The mirror used to store that value
-unchanged, so an upload from Colombo (UTC+5:30) landed 5h30 in the future and the portal showed
-"uploaded 5h from now" (found on csm-dev, ticket CS0450306: stored 19:42:05 against a real
-14:12 UTC; the same skew also puts the row at the top of the case Activity feed, which orders by
-`created_on`).
-
-`CaseRepository.CreateCaseAttachmentFromServiceNow` therefore takes **no timestamp**: the insert
-leaves `created_on` to the column default (`NOW()`), the same clock the plain-Postgres
-`CreateCaseAttachment` uses, a network round trip after ServiceNow accepted the file. The response's
-`createdOn` is the stored value. Do not put a ServiceNow-supplied time back into this insert; if a
-ServiceNow instant is ever needed it has to come from a source that states its zone (the Table API's
-`sys_created_on` is UTC) and be converted explicitly.
-
-Tests: `TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServiceNowCreatedOn`
-(real `snCaseService` against a fake ServiceNow answering with a zone-less createdOn),
-`TestCaseAttachmentSNIntegration_CreateAndReadBackWithNullStorageKey` (real Postgres, asserts
-`created_on` falls inside the database clock's own window around the insert).
-
-**Not verified, same shape:** `CreateDeploymentFromServiceNow`, `CreateDeployedProductFromServiceNow`
-and `CreateCallRequestFromServiceNow` also store a `createdOn` that `time.Parse(snCreatedOnLayout, ...)`
-read from a ServiceNow reply (the call request writes the same value into `updated_on` as well, so
-that column cannot serve as an independent clock there). Whether those replies are zone-skewed too has
-not been checked; compare a freshly created row's `created_on` with the real time of the request on a
-dual-write database before assuming either way.
 
 ## Auto-closure hold (`autocloseHoldUntil`) on the Postgres data sources
 
@@ -7537,7 +7984,8 @@ v5 can't scan a binary-format timestamptz into a `*string`
 Both approval methods (`GetChangeRequestApprovals`, `DecideChangeRequestApproval`)
 are not -- see below for why. (`CreateChangeRequest` used to be on this list
 too, blocked on the same `work_item.number` gap `CaseRepository.CreateCase`
-had; both are now implemented, via `next_portal_work_item_number()` -- see
+had; both are now implemented, via `next_work_item_number('CHANGE_REQUEST')` (originally
+`next_portal_work_item_number()`) -- see
 "CreateCase and case numbers" above and `ChangeRequestRepository.CreateChangeRequest`'s
 own doc comment. Unlike case, `change_request` is excluded from
 `work_item_wso2_id_required_by_type`, so no `wso2_id` generation is needed
@@ -8971,6 +9419,52 @@ an unknown creator is a validation error. Verified against the real schema with
 `PREPARE` on staging and end to end on a local database built from all
 migrations.
 
+**Update: plain-Postgres creates now use ServiceNow's number format.** `case_repo.go`'s
+five `create*PortalQuery` statements (case, announcement, service request, engagement,
+security report analysis) call `next_work_item_number('<TYPE>')` (`CS0000123`, one shared
+`cs_number_seq`) and `next_wso2_id(project)` (`<project key>-<n>`, `project.wso2_id_counter`)
+from migration `0180`, instead of the `CS-PORTAL-` / `-PORTAL-` generators below. The same
+switch applies to **incident** (`INC...`), **change request** (`CHG...`), **problem**
+(`PRB...`, both `problem_repo.go` and the incident report flow) and **conversation**
+(`CHAT...`); incident tasks were already on the `TASK` series (migration 0201, started at
+`TASK1000000`). The portal generators remain only for records already created and for
+`incident_task_cascade_integration_test.go`'s raw SQL.
+
+**Deploy preconditions, not optional.** (1) ServiceNow must have **stopped allocating** these
+numbers and ids and the final sync must be done: both sides draw from the same series, so a
+number issued here can otherwise be issued by ServiceNow too, and the second insert then
+fails on `work_item_number_key` / `work_item_wso2_id_key`. Re-running the seed after a late
+sync moves *our* counters past ServiceNow's new maximum, but it cannot undo a number that was
+already issued on both sides, so it is not a substitute for stopping ServiceNow first (the
+seed script's own header says the same: run it after the final sync, with the sync stopped).
+If the two systems have to run side by side, this change needs disjoint ranges instead (for
+example seeding the counters well above ServiceNow's range, as incident tasks do). (2) Every
+counter starts at 0/1, so each database must run `scripts/cutover/seed_native_numbering.sql`
+(dry run by default; `-v apply=1` to apply) right before this build is deployed to it, or a
+new case's `<key>-1` collides with an existing synced id and a `CS` number does once the
+sequence reaches a synced one. The dual-write create path takes ServiceNow's own number and
+is unaffected. Existing `CS-PORTAL-` records are not renamed. (3) While the seed runs, stop every native
+allocator -- the entity-service API **and its background workers** (for example the incident report
+drainer, which creates `TASK`-numbered tasks) -- wait for in-flight work to finish, and keep them stopped
+until the seed has committed: `setval()` is not atomic with the maximum it was computed from, so an
+allocation in between can be overwritten and a number issued twice.
+
+**Update (migration `0290`): `next_wso2_id` heals a stale counter.** It now checks each candidate
+`<key>-<n>` against `work_item.wso2_id` (the unique index) and advances `project.wso2_id_counter`
+past any existing id, never lowering it, so the counter seed is no longer required for `wso2_id`
+correctness and precondition (2) no longer applies to it (`CS` numbers and the other series still
+need the seed). The check runs with `app.is_internal = 'true'` set by `set_config` inside the body
+around the `work_item` reads only (saved and restored before return or raise), so a
+customer-initiated create also sees ids it cannot read; the caller's own visibility is unchanged. Not
+a function-level `SET app.is_internal`: that needs superuser or `GRANT SET ON PARAMETER`, which the
+migration role lacks.
+
+> **Historical.** The rest of this section, down to the `CaseRepository.CreateCase` paragraph, describes
+> migration `0140`'s `CS-PORTAL-` / `<key>-PORTAL-<n>` generators as they were introduced. Everything it
+> says about *which functions the create queries use* is superseded by the update above (migration
+> `0180`'s generators); the portal generators now remain only for records already created and for the raw
+> SQL in `incident_task_cascade_integration_test.go`.
+
 **Resolved by migration `0140_portal_created_work_item_numbering.sql`**, which
 this section used to say was still an open product decision. `number` for
 every work_item type comes from `next_portal_work_item_number()`
@@ -9001,7 +9495,8 @@ on `req.Type` to one of five `*PortalQuery` consts (`createCasePortalQuery`/
 each a near-identical CTE to its already-existing `*FromServiceNowQuery`
 sibling (used by the dual-write mirror path, `CreateCaseFromServiceNow`) --
 the only real difference is identity: `gen_random_uuid()`/
-`next_portal_work_item_number()`/`next_portal_wso2_id($N)` generate it here,
+`next_work_item_number('<TYPE>')`/`next_wso2_id($N)` generate it here (before the update above:
+`next_portal_work_item_number()`/`next_portal_wso2_id($N)`),
 rather than taking it from a prior ServiceNow response. Every initial state
 literal (`'OPEN'`) was confirmed against the live enum catalog for each of
 the five state enums, not assumed from case's own convention.
@@ -9650,8 +10145,8 @@ by the generic `work_item_id`. Unlike `SearchCaseActivities`, there is no
 have an `"attachment"` kind entry.
 
 **`UpdateConversation` and `CreateConversation` are both implemented.**
-`CreateConversation` takes its number from `next_portal_work_item_number()`
-(migration 0140), starts the conversation `ACTIVE`, and stores the first
+`CreateConversation` takes its number from `next_work_item_number('CONVERSATION')`
+(migration 0180; originally `next_portal_work_item_number()`, migration 0140), starts the conversation `ACTIVE`, and stores the first
 message the way csm-sync-service lands ServiceNow's `u_initial_message`:
 `work_item.subject` (first 100 runes) and `work_item.description` (in full).
 `InitialMessage` on reads is that description, falling back to the earliest
@@ -9680,7 +10175,9 @@ previous SQL as an oracle against a real RLS-forced database (internal caller, p
 stranger, every filter, both sorts, page by page) and `TestConversationSearchQueries` pins the shape.
 
 **`CreateProblem`/`CreateIncident` are now implemented on the plain-Postgres
-data source too**, via `next_portal_work_item_number()` (migration 0140 --
+data source too**, via `next_work_item_number('PROBLEM')` /
+`next_work_item_number('INCIDENT')` (migration 0180; originally
+`next_portal_work_item_number()`, migration 0140 --
 see "CreateCase and case numbers" above): `ProblemRepository.CreateProblem`/
 `IncidentRepository.CreateIncident`, called from `problemService`/
 `incidentService`'s own `CreateProblem`/`CreateIncident` when `s.snMirror ==
@@ -10809,6 +11306,45 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   one endpoint reads Postgres directly (unlike `SearchCatalogs`, which still
   falls back to ServiceNow -- see `catalogService.snMirror`'s own doc comment).
 
+## Case search `stateEntered` / `stateEnteredOn`: cases that entered a state in a window
+
+"Cases moved to Waiting on WSO2 today" is not "cases in Waiting on WSO2 now": a case that moved there
+this morning may have left again, and one that has been there for a week did not move today. The
+case search's `stateEntered` (`in`, case states) and `stateEnteredOn` (`gte` / `lte`, `createdOn`'s
+date forms and relative placeholders) answer the first: `buildCaseSearchWhere` adds `EXISTS` over
+`work_item_activity` (`field_name = 'state'`, `LOWER(new_value)` one of the states' display labels,
+`created_on` in the window), so the search, count, aggregate and volume trend all see it.
+
+- **Values:** the history records a state under its display label (`caseStateDisplayLabel`,
+  "Waiting on WSO2"), so `ParseCaseFieldFilters` turns each state into its label, lower-cased, in
+  `ParsedCaseFilters.EnteredStateLabels`, and the query compares lower-cased, in case a sync writes
+  another letter case. An unknown state is a 400.
+- **Meaning:** whatever the case's state is now, and once per case however many times it entered
+  (`EXISTS`). Add `state in` for "entered today and still there".
+- **Rules:** `stateEnteredOn` needs `stateEntered`; a `lte` before its `gte` is refused; both are top
+  level only (`rejectUnsupportedOrGroupFields`). `snCaseService` (the legacy data source) refuses both
+  (search and aggregate) before any call: it keeps no history, and dropping them would widen the result.
+- **Coverage:** only what was logged, so a period reaching further back undercounts.
+  - The history starts when the portal began logging (2026-10-11). Whether csm-sync-service copies
+    changes made in the legacy data source into this table is not known here.
+  - `caseService.UpdateCase` logs every state change made through the portal, including the automatic
+    moves to Waiting on WSO2 on a customer's reply or attachment, best effort: a failed write is
+    logged and dropped, and `recordFieldChangeActivity` skips the row when no actor email is resolved.
+  - Case creation logs no state row, so `stateEntered in [open]` matches only cases moved back to
+    Open, never one created and left there. The AI catalogue treats "moved to Open" as not expressible.
+- **Cost:** `idx_work_item_activity_state_entered` (migration 0283, partial on `field_name = 'state'`,
+  keyed `LOWER(new_value), created_on`) serves the predicate. Without it the planner seq-scanned the whole
+  table: on 100k cases and 1.5M activity rows, "moved to Waiting on WSO2 today" went from ~100 ms to
+  2-3 ms, and "this month" takes ~25 ms. There is no `updated_on` pre-filter, because it is not confirmed
+  that every writer bumps `updated_on` with the state.
+
+Tests: `service/case_state_entered_filter_test.go` (parsing, refusals, the legacy data source's
+refusal) and `repository/case_state_entered_integration_test.go` (`CASE_STATS_TEST_DSN`, run locally:
+no CI workflow runs the entity-service Go tests; left again, entered twice, yesterday, an upper-case
+label, a non-state row and a change out of the state, created in the state with no history row, window
+edges, the aggregate, and a customer caller inside and outside the case's project, since
+`work_item_activity` has forced row-level security).
+
 ## Case search `countOnly`, and the projectOnboardingStatus `in` filter's exclusion-list rewrite
 
 Reported as a dashboard-performance finding, measured against a real load test and the perf
@@ -11063,6 +11599,38 @@ by always checking every table regardless of the request's own type filter
 -- that would reproduce the exact cost this rewrite exists to avoid, to
 compensate for a handful of rows a separate sync-side data-quality issue
 produced, not something every case search should pay for indefinitely.
+
+## Case search and aggregate: products, versions and projects (AI dashboards)
+
+The CSM portal's generated dashboards filter and group cases by product, product version and project
+(the backend turns the names the user wrote into what these match; its `CLAUDE.md`, "Custom dashboards",
+has that side). Everything here is new to these fields, so no request that worked before changes.
+
+- **`product` `in` / `notIn`.** `in` matches the deployed product's catalog name exactly (`prod.name`,
+  every catalog row of that name). `notIn` (`ParsedCaseFilters.ExcludeProductNames`) keeps the cases
+  whose product is none of them, a case without a deployed product included, as `projectId notIn` does.
+  Neither is allowed in an `anyOf` branch. The ServiceNow data source has no exclusion and refuses
+  `notIn` (`refuseSNProductFilters`) rather than drop it and count every product.
+- **`productVersion` `in`** matches `product_version.version` exactly ("4.3.0"). A version is shared by
+  many products, so it needs a product filter naming exactly one product in the same search
+  (`checkProductVersionFilters`; only `product in` counts, a `notIn` names no product); never in an
+  `anyOf` branch; refused by the ServiceNow data source.
+- **`groupBy`** (`POST /cases/aggregate`, `caseAggregateColumns`): `product` (key and label the name,
+  as the product filter takes it), `productVersion` (needs one product, as above) and `project` (key the
+  project's id, as `projectId` takes it; label its name, else its key). A case without one is in no
+  bucket. The ServiceNow data source refuses all three. Each bucket's count is the matching filter's
+  total: the real-database tests (`case_product_aggregate_integration_test.go`,
+  `case_product_version_integration_test.go`, `case_project_aggregate_integration_test.go`) check it
+  bucket by bucket.
+- `projectId` and `accountId` (`in` / `notIn`) are unchanged; the dashboards use them for projects and
+  customers named by the user.
+- **`region` `in` / `notIn`** (`ParsedCaseFilters.Regions` / `ExcludeRegions`) matches the case's account
+  `region`, compared trimmed and lower-cased (`LOWER(TRIM(a.region))`), so "APAC", " apac " and "apac"
+  are one region. `notIn` keeps the cases with no region or no account. Never in an `anyOf` branch;
+  refused by the other data source. **`groupBy: region`** buckets on the same key (a blank region is in
+  no bucket) and labels each bucket with the spelling most of its cases' accounts have
+  (`caseAggregateLabels`, `mode()`), so the label is "APAC" even when one account wrote "apac"; the other
+  data source refuses it. `case_region_integration_test.go` checks each bucket against its filter total.
 
 ## Announcement requests
 
@@ -11463,6 +12031,36 @@ unaffected and keeps creating external users exactly as before. `apps/csm-portal
 `UsersHandler.CreateUser` mirrors the same check for a fast 400, and the webapp's Add User form
 disables the "External" option in its type selector rather than offering a choice the backend will
 reject — all three are temporary, meant to come out together once external-type creation is ready.
+
+## Creating a deployed product on PostgreSQL (`POST /deployed-products`)
+
+It used to be refused on the plain PostgreSQL data source with a 400 ("not supported"); dual-write
+was the only way to create one. `deployedProductService.CreateDeployedProduct` now writes it
+(`DeployedProductRepository.CreateDeployedProduct`):
+
+- **Number**: `next_series_number('IBITM')` (migration 0180), ServiceNow's own format. Synced deployed
+  products already hold IBITM numbers and the sequence starts at 1 until the cutover seed has run, so
+  before each create `ibitm_number_seq` is moved past the highest stored `IBITM` number, forwards only,
+  as the system identity (under the caller's row-level security the maximum would be taken over what
+  they can see). A number another writer took in between (a sync still running) fails the unique key;
+  that one case is retried once, then answered 409.
+- **Checks**: the four ids are UUIDs and the category valid (the ServiceNow path's checks), plus what
+  ServiceNow enforced itself: the deployment belongs to `projectId` and the version to `productId`, both
+  400. An internal caller skips row-level security, so these are checked in the repository, not left to
+  the insert policy; a deployment the caller may not see reads as absent (400, so its existence is not
+  revealed).
+- **Who**: `created_by` is the caller's email from `x-user-id-token` (401 without it). A customer can
+  create only in a project they are a registered contact of (`deployed_product_write`, migration
+  100017). The insert policy's refusal is a 404; a 42501 that is not a row-level security refusal
+  (the role lacks USAGE on `ibitm_number_seq`) is a 500, not "project not found"
+  (`isRowSecurityRefusal`: the two share the SQLSTATE, only the message differs).
+
+Tests: `TestDeployedProductService_CreateDeployedProduct_Postgres*`, `TestIsRowSecurityRefusal` and
+`TestDeployedProductCreateIntegration` (`CASE_STATS_TEST_DSN`, a login that does not bypass row-level
+security: numbering with an unseeded sequence, the refusals, a customer in and out of their project, and
+the retry: a number committed by another connection between the advance and the insert is retried once
+and succeeds, and taken before both attempts is a 409 that writes nothing; the test reaches in through
+`SetBeforeDeployedProductInsert` in `export_test.go`, compiled into tests only).
 
 ## Air-gapped deployments (`deployment.air_gapped`)
 
@@ -11947,33 +12545,73 @@ new repository method this needed — a single-row lookup
 lower-cased before returning), deliberately not reusing
 `SearchDeployedProducts`' list/filter machinery for a one-row check.
 
+## A deployed product's default category comes from its project's type (migrations 0291/0292)
+
+`project_type.default_deployed_product_category` (0291, entity-service's own column like 0130's, seeded by type
+name only where unset): Managed Cloud Subscription `MS`; Subscription, Professional Services, Evaluation Subscription,
+Internal `PS`; Cloud Support, Cloud Evaluation Support `CL`; every other type none. The create
+(`CreateDeployedProductFromServiceNow`) writes `COALESCE(<request category>, <the project type's default>)` in the same
+`INSERT` (`projectTypeDefaultCategorySQL`), so a category in the request always wins and a type with no default leaves it
+unset; a plain-PostgreSQL create should do the same. Read once, at create: a later change of the project's type or of the default does not touch existing products,
+and PATCH never applies it. 0292 backfilled every product with no category the same way, finding the project through the
+deployment when `project_id` is NULL, as the RLS policy does. Tests: `deployed_product_default_category_integration_test.go`
+(`CASE_STATS_TEST_DSN`).
+
 ## Skills (`/skills`, Postgres only)
 
-`SkillService` (`internal/service/skill_service.go`) serves the skill catalogue, each internal user's own
-skills profile, the manager's view of everybody's, and the admin's catalogue edits, over the tables of
-migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only with a database pool.
+`SkillService` (`internal/service/skill_service.go`, plus `skill_management_service.go`) serves the skill
+catalogue and its categories, each internal user's own skills profile and skill requests, the directory of
+everybody's skills, and the catalogue admin, over migration 0079's tables (`skill*`, `user_skill`,
+`user_skill_history`) as revised by 0282-0286 (`skill_request` among them). Registered only with a database pool.
 
-- **Who.** Catalogue reads: any internal caller. `/skills/me*`: the token's own user, found by the token's
-  email among active internal users; no route takes a person's id, and the identity provider's id is never
-  compared with a platform id. `POST /skills/users/search`: a CSM admin (a token role in `AUTH_ADMIN_ROLES`, as
-  for rota access) or a lead (`lead`, `americas_team_lead`) of a CRE or SRE team. `POST /skills` and
-  `PATCH /skills/{id}`: CSM admin only.
-- **No unique key on `user_skill(user_id, skill_id)`**, and migrated rows are not known to be free of repeats.
-  Every profile write holds `pg_advisory_xact_lock` for the pair and reads the pair's rows `FOR UPDATE`; every
-  read takes one canonical row per pair (`userSkillCanonical`: active, own before inherited, newest). An add
-  over an inactive own row revives it. Adding a held skill is a 409. A unique index needs the production data
-  checked for repeats first, so it is not added here. `skill.name` has no unique key either: create and rename
-  hold a per-name advisory lock and compare ignoring case.
+- **Who: capabilities, never role names in code.** Catalogue reads and `POST /skills/requests/check`: any
+  internal caller. `/skills/me*` and `/skills/requests` (create, mine, withdraw): the token's own user, found by
+  the token's email among active internal users; the identity provider's id is never compared with a platform
+  id. Every other task is a `domain.SkillCapability`, held by `AUTH_ADMIN_ROLES` plus that capability's own list:
+  `skills.directory.view` (`AUTH_SKILL_DIRECTORY_ROLES`: `POST /skills/users/search`,
+  `/skills/directory/search`, `GET /skills/users/{userId}[/history]`), `skills.requests.review`
+  (`AUTH_SKILL_REQUEST_REVIEWER_ROLES`: `/skills/requests/search`, `/approve`, `/reject`) and
+  `skills.catalogue.manage` (`AUTH_SKILL_CATALOGUE_MANAGER_ROLES`: `POST/PATCH /skills`, `POST/PATCH
+  /skills/categories`, and seeing inactive skills/categories and holder counts). Each list is empty by default,
+  so only admins hold them; assigning a task to more people is setting its variable. `requireCapability` is the
+  one gate; a service credential holds none. `GET /skills/me/capabilities` reports the caller's (and the pending
+  request count to a reviewer). Lead status by team is no longer a gate (`IsCRESRELead` is unused by the
+  service): give leads a role and list it.
+- **Uniqueness is in the database now.** `ux_user_skill_own_active` (one own active row per person and skill),
+  `ux_skill_name_lower` (skill names, ignoring case and outer spaces), `ux_skill_category_parent_name` (sibling
+  categories), `ux_skill_request_pending_name` (one pending request per normalised name). The advisory locks
+  stay: they turn a race into a clean outcome instead of a unique violation. Run `scripts/skill_data_checks.sh` (read-only;
+  it exits 1 on any BLOCKER: data a new unique index or the history backfill would fail on) before applying 0282-0286
+  to an environment.
 - **Levels.** A level must belong to the skill's `level_type_id` scale (checked in the service; no FK does it). The profile
   write re-checks it inside its transaction under `FOR SHARE` on the skill row, which an admin's scale change
   (`FOR UPDATE`) queues behind; a scale swapped in between is a 409. Ids are lower-cased once validated.
-  Inactive skills cannot be newly added (an add re-reads `active` in that same locked query, so a deactivation
-  racing the add is a 409 too; changing the level of an already-held skill is unaffected). Every set, change and removal writes a `user_skill_history` row
-  (`level_from_id` null on first set, `level_to_id` null on removal; `created_by` is the actor's email); setting
-  the level already held writes nothing. A removal deletes the `user_skill` row. Inherited rows are never
-  changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
-- **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
-  (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
+  Inactive skills cannot be newly added. One scale is `is_default` (0283): new skills from requests and the
+  request form use it. Inherited rows are never changed (409). A skill's scale cannot change while any
+  `user_skill` holds a level of it (409).
+- **Removal is a soft delete** (0284): `active = FALSE`; adding the skill back revives that row.
+- **History** (0286) records an `action` (ADDED, LEVEL_CHANGED, REMOVED, READDED: an add where the pair has
+  history before), the skill name and category path at the time, `created_by` = the actor's email, and
+  `skill_request_id` when an approval made it. It is append-only: a trigger refuses UPDATE and DELETE, except
+  the cascade from a deleted user; its skill and level FKs are RESTRICT. Test fixtures therefore delete the user
+  to remove history.
+- **Skill requests.** Create refuses a name an active skill has (409) and a second pending request for the same
+  normalised name (409); `levelId` is required and must be on the default scale. Approve (`mode` create /
+  reactivate / existing) runs in one transaction under the request row's lock: it creates, reactivates or points
+  at the skill, marks the request APPROVED, and adds the skill to the requester's profile through the same locked
+  add as `AddMySkill` (`addUserSkillLocked`), at the reviewer's `levelId`, else the requested level mapped onto
+  the skill's scale (same level, else the same value or the closest lower, else the lowest); `auto_add_note`
+  says what happened. Reject needs a reason. Every decision is conditional on the request still being PENDING,
+  so a second reviewer gets a 409 naming who decided. Deleting a user cascades their requests. A reviewer may
+  approve their own request on purpose: there are few reviewers, so requiring a second one would block requests.
+- **Categories.** A sub-category goes only under an active parent with no skills filed directly under it, and
+  turns the parent into a non-leaf; a rename rewrites the stored `category_path` of the subtree; deactivation is
+  refused while an active child or skill is under it. Skills are filed only under active leaves.
+- **Directory** (`POST /skills/directory/search`): one row per active internal person holding at least one active
+  skill, with all their skills. `criteria` are (skill, minimum level value; 0 = any) pairs; `match` ALL needs
+  every one, ANY at least one (best matches first); name search, team keys and categories (with descendants)
+  narrow it, all in SQL. The older `POST /skills/users/search` (one row per person-skill) is kept, behind the
+  same capability.
 
 ## Product catalogue (products API, Postgres only)
 
@@ -12039,7 +12677,7 @@ product version past its EOL date in Primary Production. Internal callers only; 
 - **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
   active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed: they
   are still customers. `deployed_product.life_cycle_stage_status` is deliberately not used: every active product in
-  Primary Production on an EOL version is reported, whatever its ServiceNow lifecycle status says.
+  Primary Production on an EOL version is reported, whatever the deployed product's lifecycle status says.
 - **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
   `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
 - **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
@@ -12048,6 +12686,32 @@ product version past its EOL date in Primary Production. Internal callers only; 
 
 Tests: `eol_product_usage_report_service_test.go` (unit), `eol_product_usage_report_integration_test.go`
 (`ENTITY_TEST_DATABASE_URL`).
+
+## Alert mute rules (`/alert-mute-rules`, Postgres only)
+
+An alert mute rule mutes SRE alerts matching every condition for one window (like a CloudWatch mute rule): alert-core still
+records a muted alert but raises no incident, page or chat post. `AlertMuteRuleService` (`internal/service/alert_mute_rule_service.go`)
+over `alert_mute_rule` (migration 0278, RLS internal-only in 100028; the repository goes through `Scoped`). On the
+ServiceNow data source `snAlertMuteRuleService` answers every route 400. Every route is `internalOnly`; the actor
+(`createdBy`/`updatedBy`/`endedBy`) is `actorOf` (the token's email).
+
+- **Routes.** `POST /alert-mute-rules/search`, `GET|PATCH|DELETE /alert-mute-rules/{id}`, `POST /alert-mute-rules`,
+  `POST /alert-mute-rules/{id}/extend`, `POST /alert-mute-rules/{id}/end`, and `GET /alert-mute-rules/active` (alert-core polls it
+  through csm-integration-service; the CSM portal BFF does not expose it).
+- **State is derived, never stored** (`domain.AlertMuteRule.StateAt`): `ended` if `ended_on` is set, else `scheduled` before
+  `start_on`, `active` until `end_on`, then `expired`. The search's `expired` filter also returns rules ended early.
+- **Writes are state-guarded in their own `WHERE`** (edit and delete: scheduled; extend: scheduled or active; end:
+  active), with the service's clock passed as `$1`, so the check and the write are one statement. No row back means
+  missing (404) or wrong state (409); the service re-reads to tell which.
+- **Validation** (400): name 1-255, description <= 1024, an IANA `timeZone`, RFC 3339 times, end after start, at most
+  72 hours long (also a table CHECK), end in the future, start no earlier than 60 s ago. Conditions name one of
+  `service`, `environment`, `source`, `metric_name`, `severity`, `category`, `unique_identifier`, each at most once,
+  values trimmed, non-empty, <= 255; `service` and `environment` are required. Extend: later than the current end and
+  within 72 hours of the start.
+- **Numbers** come from the `AMR` series of `number_series` (AMR0000001).
+
+Tests: `alert_mute_rule_service_test.go`, `domain/alert_mute_rule_test.go` (unit), `alert_mute_rule_repo_integration_test.go`
+(`ALERT_MUTE_RULE_TEST_DSN`, PostgreSQL 18; applies 0278 and 100028 twice in a private schema).
 
 ## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
 
@@ -12079,6 +12743,59 @@ ingest is not built is reported `skipped` with a reason, by both endpoints.
   call (they carry line items), lists use keyset paging (`minLastModifiedDate` + `minId`). A component the cap (or the
   request deadline, `resyncTimeMargin`) stops is `skipped` as a whole and `capped` is set; apply reads a component
   completely before writing any of it. The server's `REQUEST_TIMEOUT` still bounds a request.
+## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
+
+A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view
+only with people (`custom_dashboard_share`), with teams (`custom_dashboard_team_share`) and, since
+migration 0275, with anyone internal who has its link. Postgres-only: no other data source holds any of it.
+Saved dashboards are live in production, so a change here must leave the stored rows as they are.
+
+**The link** (migration 0275, `custom_dashboard_link_repo.go`, `custom_dashboard_link_service.go`,
+`custom_dashboard_link_handler.go`):
+
+- `custom_dashboard.link_enabled` is the owner's switch; `link_id` is the id in the link, a new random
+  UUID each time the switch is turned on (never derived from the dashboard's id), so turning it off and on
+  again makes every earlier copy stop working. A CHECK keeps them in step (an id exactly when on); a partial
+  unique index serves the lookup by link id.
+- `GET /users/me/dashboards/{id}/link` answers `{enabled, linkId?, openedBy}`; `PUT` turns it on (no body;
+  on again keeps the same id) and `DELETE` turns it off (204), which in the same transaction deletes the
+  dashboard's `custom_dashboard_link_access` rows, so everyone who had it only through the link loses it.
+  All three touch only the caller's own row: another user's dashboard is the same 404 as a missing one.
+- `POST /users/me/shared-dashboards/link` with `{linkId}` opens a link and answers `{dashboardId, own}`.
+  **The link id is a bearer secret**: it travels in the body (never the path, so it is not in access
+  logs), and no error or log line quotes it (`linkId is not a UUID`, never the value; `writeServiceError`
+  logs validation errors). An unknown link, a link that is off and a caller who is not internal staff all
+  get the same 404, so the answer tells nobody whether a link id ever existed. The owner opening their own
+  link gets `own: true` and no row.
+- **Who counts as having opened it.** `custom_dashboard_link_access` holds one row per (dashboard, user)
+  for every internal user but the owner who opened the link, also one it is already shared with directly
+  or through one of their teams (the Shared list still shows that share, see below), and opening it again
+  adds nothing. So whether the user opened the link before or after being shared the dashboard, it stays
+  in their list through the link when that share goes. `openedBy` counts these rows only, never who; rows
+  go with the dashboard and with the user.
+- **The Shared list** (`ListSharedWithUser` / `GetSharedWithUser`) shows each dashboard once: a direct
+  share wins, then a team share (`sharedViaTeam`), then the link (`sharedViaLink: true`). A link row is
+  kept when a direct or team share is added later, so the dashboard comes back through the link when that
+  share goes.
+
+**Deleting the owner.** `owner_user_id` is ON DELETE SET NULL (migration 0255): a deleted user's dashboards
+stay with no owner while a person or a team they are shared with can still see them, and nobody can edit,
+share, unshare, delete or turn the link of an ownerless dashboard on or off (every owner route matches no
+one). The rule is "kept while a person or a team share is left":
+
+- `trg_custom_dashboard_delete_unshared_orphan` (0255, its function replaced by 0276) runs as the owner
+  goes. **It turns the dashboard's link off** (link id cleared, every `custom_dashboard_link_access` row
+  deleted), so offboarding a user leaves no working link to their dashboards and the people who had one
+  only through the link lose it; then it deletes the dashboard when no person share and no team share is
+  left. People with a direct or team share keep it.
+- Migration 0277 deletes an ownerless dashboard later, once its last share goes and its link is off:
+  `custom_dashboard_delete_if_orphaned(id)`, from AFTER DELETE triggers on both share tables (their rows go
+  when the recipient user or the team is deleted, both cascade) and from an AFTER UPDATE OF `link_enabled`
+  trigger for an ownerless dashboard whose link goes off (0276's own update fires it as the owner goes; it
+  applies the same rule). A dashboard that has its owner is never touched by any of them.
+- The integration tests pin each case: `custom_dashboard_team_share_repo_integration_test.go`
+  (`DeletingTheOwnerKeepsOnlySharedDashboards`), `custom_dashboard_link_repo_integration_test.go`
+  (`DeletingTheOwnerTurnsTheLinkOff`) and `custom_dashboard_orphan_integration_test.go` (0277).
 
 ## Adding a new entity
 
@@ -12455,3 +13172,14 @@ read as `parentIncident`, written as `parentIncidentId`). It is **not** `work_it
 Tests: `incident_child_cascade_integration_test.go` (`INCIDENT_TASK_GATE_TEST_DSN`),
 `TestPostResolutionIntegration_ChildResolvedWithParentGetsNoFollowUps`
 (`INCIDENT_REPORT_TEST_DSN`), `incident_child_resolve_test.go` (unit).
+## Case search `excludeFields`
+
+`SearchCasesRequest.ExcludeFields` (`entity.go`) lets a list leave a heavy field out of every row. Only
+`"description"` is supported (rich text, megabytes on some cases; a 20-row page was ~1.25 MB, almost all
+of it descriptions); anything else is a 400 from `validateSearchExcludeFields`, which both the Postgres
+and the ServiceNow-backed `SearchCases` call. Default (field absent) is byte-for-byte unchanged:
+`SearchCaseView.Description` keeps its no-`omitempty` tag, so an excluded description serialises as
+`null`, the same as a case with none. On Postgres `caseRepo.SearchCases` swaps `wi.description` for
+`NULL::text` in the page query, so the column is never read, with the scan shape unchanged; the WHERE
+clause is untouched. The ServiceNow service cannot ask upstream to omit it, so it drops the value in Go.
+`/cases/search` only: aggregate, announcement-registry and every other search ignore it.

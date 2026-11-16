@@ -116,7 +116,9 @@ function CiRef({ value }: { value?: BeOutageConfigurationItemRef | null }): JSX.
 export default function OutageDetailPage(): JSX.Element {
   const id = useNormalizedIdParam("id");
   const navigate = useNavTransition();
-  const backState = useLocation().state as { from?: string } | undefined;
+  // `parentState` is the state the Outages list was itself carrying (e.g.
+  // `{ from: <dashboard> }`), handed back so it keeps its own Back.
+  const backState = useLocation().state as { from?: string; parentState?: unknown } | undefined;
   const backTarget = backState?.from ?? OPERATIONS_OUTAGES_PATH;
   const { data, isLoading, isError } = useGetOutage(id);
   const { showError } = useErrorBanner();
@@ -142,7 +144,7 @@ export default function OutageDetailPage(): JSX.Element {
     });
   }, [data, recordView]);
 
-  const back = (): void => navigate(backTarget);
+  const back = (): void => navigate(backTarget, { state: backState?.parentState ?? undefined });
 
   const BackButton = (
     <Button variant="text" size="small" startIcon={<ArrowLeft size={16} />} onClick={back} sx={{ alignSelf: "flex-start" }}>

@@ -274,6 +274,36 @@ describe("UserProfilePage", () => {
     expect(screen.getByText(/CSM Platform roles \(1\)/i)).toBeInTheDocument();
   });
 
+  it("shows an internal user's mobile number under a 'Mobile number' label", () => {
+    mockQueryResult({ data: INTERNAL_USER });
+    renderPage();
+    expect(screen.getByText("Mobile number")).toBeInTheDocument();
+    expect(screen.getByText("+10000000000")).toBeInTheDocument();
+  });
+
+  it("shows an external user's mobile number too (the cell is not gated by user type)", () => {
+    mockQueryResult({ data: { ...BLOCKED_EXTERNAL_USER, phone: "+15550100000" } });
+    renderPage();
+    expect(screen.getByText("Mobile number")).toBeInTheDocument();
+    expect(screen.getByText("+15550100000")).toBeInTheDocument();
+  });
+
+  it("shows 'Not set' when the phone is absent, null or an empty string", () => {
+    for (const phone of [undefined, null, "", "  "]) {
+      mockQueryResult({ data: { ...INTERNAL_USER, phone } });
+      const { unmount } = renderPage();
+      expect(screen.getByText("Mobile number")).toBeInTheDocument();
+      expect(screen.getByText("Not set")).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("shows a stored value that is not valid E.164 as-is", () => {
+    mockQueryResult({ data: { ...INTERNAL_USER, phone: "+1 555-010-0000" } });
+    renderPage();
+    expect(screen.getByText("+1 555-010-0000")).toBeInTheDocument();
+  });
+
   it("renders 'Unassigned' rather than hiding the field when an internal user has no team", () => {
     mockQueryResult({ data: { ...INTERNAL_USER, teams: [] } });
     renderPage();

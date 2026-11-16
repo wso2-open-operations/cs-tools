@@ -22,7 +22,7 @@ import type { BeProblemDetail } from "@api/backend/types";
 
 const navigateMock = vi.fn();
 const useGetProblemMock = vi.fn();
-const useLocationMock = vi.fn<() => { state: { from?: string } | null }>(() => ({ state: null }));
+const useLocationMock = vi.fn<() => { state: { from?: string; parentState?: unknown } | null }>(() => ({ state: null }));
 const patchMutateMock = vi.fn();
 const patchResetMock = vi.fn();
 const showErrorMock = vi.fn();
@@ -249,7 +249,7 @@ describe("ProblemDetailPage", () => {
     mockQueryResult({ data: BASE_PROBLEM });
     render(<ProblemDetailPage />);
     screen.getByRole("button", { name: "Back" }).click();
-    expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems");
+    expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems", { state: undefined });
   });
 
   it("navigates back to the captured origin (e.g. a dashboard widget) when one is known", () => {
@@ -257,7 +257,7 @@ describe("ProblemDetailPage", () => {
     mockQueryResult({ data: BASE_PROBLEM });
     render(<ProblemDetailPage />);
     screen.getByRole("button", { name: "Back" }).click();
-    expect(navigateMock).toHaveBeenCalledWith("/dashboard");
+    expect(navigateMock).toHaveBeenCalledWith("/dashboard", { state: undefined });
   });
 
   it("navigates back to a captured origin's exact pathname + search (e.g. the Operations tab's own filters)", () => {
@@ -267,7 +267,17 @@ describe("ProblemDetailPage", () => {
     mockQueryResult({ data: BASE_PROBLEM });
     render(<ProblemDetailPage />);
     screen.getByRole("button", { name: "Back" }).click();
-    expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems&state=closed");
+    expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems&state=closed", { state: undefined });
+  });
+
+  it("goes back with the list's own state, so Operations keeps its Back", () => {
+    useLocationMock.mockReturnValue({
+      state: { from: "/operations?tab=problems", parentState: { from: "/dashboard/my/d-1" } },
+    });
+    mockQueryResult({ data: BASE_PROBLEM });
+    render(<ProblemDetailPage />);
+    screen.getByRole("button", { name: "Back" }).click();
+    expect(navigateMock).toHaveBeenCalledWith("/operations?tab=problems", { state: { from: "/dashboard/my/d-1" } });
   });
 
   it("shows a transition action button for a New problem (assess) and PATCHes with { transition } on click", () => {

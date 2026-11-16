@@ -33,7 +33,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Search, Users, X } from "@wso2/oxygen-ui-icons-react";
+import { Link, Search, Users, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useMemo, useState } from "react";
 import { BackendApiError } from "@api/backend/client";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
@@ -50,6 +50,8 @@ import {
   useGetCustomDashboardTeamShares,
   usePutCustomDashboardTeamShare,
 } from "@features/csm-custom-dashboards/api/useDashboardTeamShares";
+import { useGetCustomDashboardLink } from "@features/csm-custom-dashboards/api/useDashboardLink";
+import DashboardLinkSection from "@features/csm-custom-dashboards/components/DashboardLinkSection";
 import { useTeams } from "@features/csm-dashboard/api/useTeams";
 import type { BeTeam } from "@api/backend/types";
 
@@ -75,7 +77,7 @@ function shareErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-type ShareMode = "people" | "teams";
+type ShareMode = "people" | "teams" | "link";
 
 /**
  * Team families in the order the Teams list shows them, with their labels.
@@ -116,15 +118,19 @@ function groupShareableTeams(teams: BeTeam[], query: string, sharedKeys: Set<str
 
 /**
  * Shares one of the caller's saved dashboards, view only, with people or
- * teams (a People / Teams toggle above the search). People: a search over
+ * teams, or with anyone who has the link (a People / Teams / Anyone toggle at
+ * the top). People: a search over
  * internal staff (the Assign engineer dialog's search: `POST /users/search`,
  * internal roles, active only), where clicking a person shares with them;
  * below it, who it is shared with, each with a remove button. The caller and
  * people it is already shared with are left out of the results. Teams: the
  * registry teams grouped by family (CRE ABT, CRE, SRE ABT, SRE), filtered by
  * the same box; clicking one shares with it, and whoever is in the team sees
- * the dashboard. "Shared with" lists teams first, then people. A refusal
- * shows in the dialog; the backend is the real check.
+ * the dashboard. Anyone: DashboardLinkSection, in place of the search, turns
+ * the dashboard's link on or off. "Shared with", under every tab, lists
+ * "Anyone with CSM Portal Viewer access" (who has the link) while the link is
+ * on, then teams, then people. A refusal shows in the dialog; the backend is
+ * the real check.
  */
 export default function ShareCustomDashboardDialog({
   open,
@@ -142,6 +148,8 @@ export default function ShareCustomDashboardDialog({
   const shareTeam = usePutCustomDashboardTeamShare();
   const unshareTeam = useDeleteCustomDashboardTeamShare();
   const teams = useTeams(open && mode === "teams");
+  // The same query as the Anyone tab's, so its switch updates this at once.
+  const link = useGetCustomDashboardLink(open ? dashboard.id : undefined);
 
   const search = useDebouncedValue(input.trim(), 300);
   const results = useSearchUsers(
@@ -231,6 +239,9 @@ export default function ShareCustomDashboardDialog({
   // screen (and its shares can still be removed).
   const peopleFailed = shares.isError || shares.data === null;
   const teamsFailed = teamShares.isError || teamShares.data === null;
+  const linkOn = link.data?.enabled === true;
+  // A link that could not be read is unknown, never "not shared".
+  const linkKnownOff = !link.isError && link.data !== null && !linkOn;
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
@@ -258,6 +269,7 @@ export default function ShareCustomDashboardDialog({
           >
             <ToggleButton value="people">People</ToggleButton>
             <ToggleButton value="teams">Teams</ToggleButton>
+            <ToggleButton value="link">Anyone</ToggleButton>
           </ToggleButtonGroup>
 
           {error && (
@@ -266,26 +278,30 @@ export default function ShareCustomDashboardDialog({
             </Alert>
           )}
 
-          <TextField
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={mode === "people" ? "Search people by name or email…" : "Filter teams by name…"}
-            size="small"
-            fullWidth
-            autoFocus
-            slotProps={{
-              htmlInput: { "aria-label": mode === "people" ? "Search people" : "Filter teams" },
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search size={16} />
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
+          {mode !== "link" && (
+            <TextField
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={mode === "people" ? "Search people by name or email…" : "Filter teams by name…"}
+              size="small"
+              fullWidth
+              autoFocus
+              slotProps={{
+                htmlInput: { "aria-label": mode === "people" ? "Search people" : "Filter teams" },
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search size={16} />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+          )}
 
-          {mode === "teams" ? (
+          {mode === "link" ? (
+            <DashboardLinkSection dashboardId={open ? dashboard.id : undefined} />
+          ) : mode === "teams" ? (
             <Box sx={{ minHeight: 120, maxHeight: 280, overflowY: "auto" }} aria-label="Teams to share with">
               {teams.isLoading ? (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, pt: 0.5 }}>
@@ -379,18 +395,42 @@ export default function ShareCustomDashboardDialog({
 
           <Typography variant="subtitle2">Shared with</Typography>
           <Box aria-label="Shared with">
-            {shares.isLoading || teamShares.isLoading ? (
+            {shares.isLoading || teamShares.isLoading || link.isLoading ? (
               <Skeleton variant="rounded" height={36} />
             ) : peopleFailed && teamsFailed ? (
               <Typography variant="body2" color="error">
                 Could not load who this dashboard is shared with.
               </Typography>
-            ) : !peopleFailed && !teamsFailed && sharedPeople.length === 0 && sharedTeams.length === 0 ? (
+            ) : !peopleFailed &&
+              !teamsFailed &&
+              linkKnownOff &&
+              sharedPeople.length === 0 &&
+              sharedTeams.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 Not shared with anyone yet.
               </Typography>
             ) : (
               <>
+                {link.isError && (
+                  <Typography variant="body2" color="error" sx={{ px: 1, py: 0.5 }}>
+                    Could not load whether the link is on.
+                  </Typography>
+                )}
+                {linkOn && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, px: 1, py: 0.5 }}>
+                    <Avatar sx={{ width: 28, height: 28 }}>
+                      <Link size={14} />
+                    </Avatar>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" sx={{ lineHeight: 1.2 }} noWrap>
+                        Anyone with CSM Portal Viewer access
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
+                        Who has the link · turn it off under Anyone
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
                 {teamsFailed && (
                   <Typography variant="body2" color="error" sx={{ px: 1, py: 0.5 }}>
                     Could not load the teams this dashboard is shared with.

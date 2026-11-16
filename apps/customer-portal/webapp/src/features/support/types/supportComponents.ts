@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ImageUploadHandler } from "@components/rich-text-editor/localImageUpload";
 import type { ReactNode, RefObject } from "react";
 import type { SxProps, Theme } from "@wso2/oxygen-ui";
 import type { ProjectCasesStats } from "@features/support/types/cases";
@@ -105,6 +106,8 @@ export type CaseDetailsSectionProps = {
   isSecurityReport?: boolean;
   excludeS0?: boolean;
   isSeverityDisabled?: boolean;
+  /** Keeps description images as local previews, uploaded when the form is submitted. */
+  onImageUpload?: ImageUploadHandler;
   isIssueTypeAutoDetected?: boolean;
   isSeverityAutoDetected?: boolean;
   isTitleFromChat?: boolean;
@@ -220,12 +223,6 @@ export type CommentBubbleProps = {
     firstName?: string;
     lastName?: string;
   } | null;
-  /**
-   * The case this comment belongs to. Forwarded to the backend as an
-   * authorization hint when resolving inline/attachment images — see
-   * useResolvedInlineImageHtml's own doc comment for why it's needed.
-   */
-  caseId?: string | null;
 };
 
 export type CaseDetailsActivityPanelProps = {
@@ -256,8 +253,6 @@ export type ActivityContentProps = {
     lastName?: string;
   } | null;
   onImageClick?: (src: string) => void;
-  /** Forwarded to each CommentBubble — see CommentBubbleProps.caseId. */
-  caseId?: string | null;
 };
 
 export type UploadAttachmentModalProps = {
@@ -282,15 +277,6 @@ export type SelectedFileDisplayProps = {
   fileType: string;
 };
 
-export type EditCaseAttachmentModalProps = {
-  open: boolean;
-  attachment: CaseAttachment | null;
-  caseId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-};
-
 export type DeleteAttachmentModalProps = {
   open: boolean;
   attachmentName: string | null;
@@ -308,11 +294,14 @@ export type AttachmentListItemProps = {
   attachment: CaseAttachment;
   onDownload: (attachment: CaseAttachment) => void;
   onDelete?: (attachment: CaseAttachment) => void;
-  onEdit?: (attachment: CaseAttachment) => void;
   deleteDisabled?: boolean;
   deleteTooltip?: string;
   hideDescription?: boolean;
   isDownloadLoading?: boolean;
+  /** Percentage (0-100) of the running download, or null while it is not known. */
+  downloadProgress?: number | null;
+  /** Stops the running download of this attachment; the button shows only while it downloads. */
+  onCancelDownload?: (attachment: CaseAttachment) => void;
 };
 
 export type DeleteCallRequestModalProps = {

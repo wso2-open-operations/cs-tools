@@ -22,7 +22,6 @@ import type { DeploymentAttachment } from "@features/csm-projects/types/csmProje
 
 const useSearchDeploymentAttachmentsMock = vi.fn();
 const createMutateAsync = vi.fn();
-const updateMutate = vi.fn();
 const deleteMutate = vi.fn();
 const downloadMock = vi.fn();
 
@@ -35,20 +34,16 @@ vi.mock("@features/csm-projects/api/useCreateDeploymentAttachment", () => ({
     isPending: false,
   }),
 }));
-vi.mock("@features/csm-projects/api/useUpdateDeploymentAttachment", () => ({
-  useUpdateDeploymentAttachment: () => ({ mutate: updateMutate, isPending: false }),
-}));
 vi.mock("@features/csm-projects/api/useDeleteDeploymentAttachment", () => ({
   useDeleteDeploymentAttachment: () => ({ mutate: deleteMutate, isPending: false }),
 }));
 vi.mock("@features/csm-projects/api/useDownloadDeploymentAttachment", () => ({
   useDownloadDeploymentAttachment: () => downloadMock,
 }));
-// `AttachmentsField` pulls `MAX_ATTACHMENT_SIZE_BYTES` from the case
-// attachments module, which reads runtime config (`CSM_PORTAL_BACKEND_BASE_URL`)
-// at module load via `@api/backend/client` — not present under vitest. Stub
-// the module so the import chain doesn't throw (same approach as
-// ProjectContactsTab.test.tsx / CsmChangeRequestDetailPage.test.tsx).
+// The panel's hooks and `usePortalAccess` import the backend client, which reads
+// runtime config (`CSM_PORTAL_BACKEND_BASE_URL`) at module load — not present
+// under vitest. Stub the module so the import chain doesn't throw (same approach
+// as ProjectContactsTab.test.tsx / CsmChangeRequestDetailPage.test.tsx).
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
@@ -62,7 +57,7 @@ vi.mock("@api/backend/client", () => ({
 vi.mock("@config/apiConfig", () => ({
   apiConfig: { backendUrl: "https://example.test" },
 }));
-// This panel now reads usePortalAccess (to gate upload/edit/delete), which
+// This panel reads usePortalAccess (to gate upload/delete), which
 // transitively imports the real backend client/config -- mocked above.
 // Default to full write access; the gating test below overrides it.
 let mockCanWrite = true;
@@ -105,12 +100,11 @@ describe("DeploymentAttachmentsPanel", () => {
     mockCanWrite = true;
   });
 
-  it("hides upload, edit, and delete controls for a caller without write access", () => {
+  it("hides upload and delete controls for a caller without write access", () => {
     mockCanWrite = false;
     mockList({ data: [ATTACHMENT] });
     render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);
 
-    expect(screen.queryByRole("button", { name: /edit runbook\.pdf/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /delete runbook\.pdf/i })).not.toBeInTheDocument();
     // Download stays available -- it's a read action, not gated by canWrite.
     expect(screen.getByRole("button", { name: /download runbook\.pdf/i })).toBeInTheDocument();
@@ -130,32 +124,10 @@ describe("DeploymentAttachmentsPanel", () => {
     expect(screen.getByText(/jane doe/i)).toBeInTheDocument();
   });
 
-  it("opens the edit dialog and saves a changed name", async () => {
+  it("has no edit control: a stored attachment cannot be renamed", () => {
     mockList({ data: [ATTACHMENT] });
     render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);
-
-    fireEvent.click(screen.getByRole("button", { name: /edit runbook\.pdf/i }));
-    const nameField = screen.getByRole("textbox", { name: "Name" });
-    fireEvent.change(nameField, { target: { value: "runbook-v2.pdf" } });
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
-
-    expect(updateMutate).toHaveBeenCalledWith(
-      { deploymentId: "dep-1", attachmentId: "att-1", name: "runbook-v2.pdf" },
-      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
-    );
-  });
-
-  it("marks the attachment's Name required (Description stays optional) and blocks saving it blank", () => {
-    mockList({ data: [ATTACHMENT] });
-    render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);
-
-    fireEvent.click(screen.getByRole("button", { name: /edit runbook\.pdf/i }));
-    const nameField = screen.getByRole("textbox", { name: "Name" });
-    expect(nameField).toBeRequired();
-    expect(screen.getByRole("textbox", { name: "Description" })).not.toBeRequired();
-
-    fireEvent.change(nameField, { target: { value: "  " } });
-    expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /edit runbook\.pdf/i })).not.toBeInTheDocument();
   });
 
   it("confirms and deletes an attachment", () => {

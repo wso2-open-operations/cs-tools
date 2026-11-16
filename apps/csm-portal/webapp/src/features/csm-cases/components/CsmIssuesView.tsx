@@ -58,10 +58,16 @@ import {
   buildCaseSearchFilters,
   mapCaseSearchViewToRow,
   resolveAssignedUserIds,
+  resolveCaseFilterDates,
 } from "@features/csm-cases/utils/caseSearchPayload";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { visibleCaseTypes } from "@features/csm-cases/utils/caseType";
+import {
+  SERVICE_REQUEST_SEVERITY_OPTIONS,
+  SEVERITY_OPTIONS,
+} from "@features/csm-cases/utils/caseFilterOptions";
 import {
   DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
@@ -139,6 +145,7 @@ const FILTER_PARAM_KEYS = [
   "workStates",
   "projects",
   "engagementTypes",
+  "salesRegions",
   "products",
   "csTeams",
   "sreTeams",
@@ -209,6 +216,8 @@ interface CsmIssuesViewProps {
   hideSreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in; only the Engagements page passes it). */
+  showSalesRegionFilter?: boolean;
   /**
    * Force the Severity filter/column on or off, overriding the default
    * "only when `lockedFilters.caseTypes` is locked to `case`" rule below.
@@ -273,6 +282,7 @@ export default function CsmIssuesView({
   hideCreTeamFilter,
   hideSreTeamFilter,
   showEngagementTypeFilter,
+  showSalesRegionFilter,
   showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
   hideSeverityColumn,
@@ -281,38 +291,39 @@ export default function CsmIssuesView({
   columnsViewId,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = useMemo<CasesFilters>(
-    () => readCasesFiltersFromUrl(searchParams),
-    [searchParams],
-  );
-
-  // Writes `defaultCaseTypes` into the URL at most once per mount, the first
-  // time it finds no `types` param at all. Done as a real URL write (in an
-  // effect, gated by a ref) rather than an in-memory override inside the
-  // `filters` memo above: a memo can't tell "fresh visit" apart from "the
-  // user cleared the type filter back to every type" -- both just look like
-  // "no `types` param" -- so an in-memory default would keep reasserting
-  // itself every time the user broadened back, making that choice
-  // impossible to keep. Writing it into the URL once, right after mount,
-  // means every later render (including a later clear) is driven purely by
-  // `searchParams` like every other filter, with no special-casing.
-  const defaultCaseTypesAppliedRef = useRef(false);
+  // `defaultCaseTypes` seeds the type selection only while the URL carries no
+  // `types` param at all, and is applied to the very FIRST render's `filters`
+  // (below) so the first search is already the default-typed one rather than
+  // an unfiltered one that a post-mount URL write then replaces. `armed`
+  // distinguishes "fresh visit" from "the user cleared the type filter back to
+  // every type" -- both just look like "no `types` param": it disarms for good
+  // the first time a render sees a `types` param (an explicit link, or the URL
+  // write below landing), so a later clear is never re-seeded. The URL write
+  // is kept so the address bar / back button carry the selection like every
+  // other filter. Disarming is the guarded set-during-render pattern, not an
+  // effect, so no render in between sees a stale "armed" flag.
+  const [defaultTypesArmed, setDefaultTypesArmed] = useState(true);
+  const urlHasTypes = searchParams.has("types");
+  if (defaultTypesArmed && urlHasTypes) setDefaultTypesArmed(false);
+  const seedTypes =
+    defaultTypesArmed && !urlHasTypes && !hideTypeFilter && !!defaultCaseTypes?.length;
+  const seedTypesKey = seedTypes ? (defaultCaseTypes ?? []).join(",") : "";
+  const filters = useMemo<CasesFilters>(() => {
+    const parsed = readCasesFiltersFromUrl(searchParams);
+    // Sales Region only has a control on views that opt in. A value arriving
+    // through a shared URL or a saved view on any other list would filter
+    // results the user cannot see or clear, and the other data source rejects
+    // the filter outright, so it is dropped here for query and display alike.
+    const fromUrl = showSalesRegionFilter ? parsed : { ...parsed, salesRegions: [] };
+    if (!seedTypesKey) return fromUrl;
+    return { ...fromUrl, caseTypes: seedTypesKey.split(",") as CasesFilters["caseTypes"] };
+  }, [searchParams, seedTypesKey, showSalesRegionFilter]);
   useEffect(() => {
-    if (defaultCaseTypesAppliedRef.current || !defaultCaseTypes?.length || hideTypeFilter) {
-      return;
-    }
-    // Marks the default "consumed" on the very first render regardless of
-    // whether it actually got written -- an initial URL that already names
-    // an explicit `types` (e.g. a direct link to `?types=service_request`)
-    // must permanently disarm the default too, or clearing that explicit
-    // type back to "every type" later would look identical to "no types
-    // param yet" and wrongly reassert `defaultCaseTypes` at that point.
-    defaultCaseTypesAppliedRef.current = true;
-    if (searchParams.has("types")) return;
+    if (!seedTypesKey) return;
     const next = new URLSearchParams(searchParams);
-    next.set("types", defaultCaseTypes.join(","));
+    next.set("types", seedTypesKey);
     setSearchParams(next, { replace: true });
-  }, [searchParams, defaultCaseTypes, hideTypeFilter, setSearchParams]);
+  }, [searchParams, seedTypesKey, setSearchParams]);
 
   const location = useLocation();
   const navigate = useNavTransition();
@@ -456,26 +467,20 @@ export default function CsmIssuesView({
     writePaginationToUrl(clampedPage.page, rowsPerPage);
   }, [clampedPage, rowsPerPage, writePaginationToUrl]);
 
-  const { canWrite, canUseSecurityCenter, canUpdateDeleteAnyComment } = usePortalAccess();
-  // See visibleCaseTypes's own doc comment: must mirror PermViewSecurityCenter
-  // exactly, which comment_updater also holds.
-  const canSeeSecurityReports = canUseSecurityCenter || canUpdateDeleteAnyComment;
+  const { canWrite, canViewSecurityReportCases } = usePortalAccess();
 
-  // Severity (S1-S4) is a support-case concept, so the severity filter is by
-  // default only shown on the support-cases list — i.e. when the surrounding
-  // view locks the record type to `case`. Every other list (service
-  // requests, engagements, security reports) hides it, unless the caller
+  // Severity (S1-S4) is a support-case and service-request concept, so the
+  // severity filter is by default only shown on those lists — i.e. when the
+  // surrounding view locks the record type to `case` or `service_request`.
+  // Every other list (engagements, security reports) hides it, unless the caller
   // overrides with `showSeverityFilter` (see its own doc comment — the
   // project Work items tab does this since its type filter is unlocked and
   // visible rather than fixed via `lockedFilters`).
   const showSeverityFilter =
     showSeverityFilterOverride ??
     (lockedFilters?.caseTypes?.length === 1 &&
-      lockedFilters.caseTypes[0] === "case");
-  // Service Requests don't carry a severity, so the column is redundant there.
-  const isServiceRequestOnly =
-    lockedFilters?.caseTypes?.length === 1 &&
-    lockedFilters.caseTypes[0] === "service_request";
+      (lockedFilters.caseTypes[0] === "case" ||
+        lockedFilters.caseTypes[0] === "service_request"));
 
   const debouncedSearch = useDebouncedValue(filters.search, 300);
   // User filters (debounced search) with the locked overrides applied last so
@@ -516,7 +521,7 @@ export default function CsmIssuesView({
       // so a caller without security-report access doesn't get the whole
       // search 403'd by asking for a type they can't see.
       if (merged.caseTypes.length === 0) {
-        merged.caseTypes = visibleCaseTypes(canSeeSecurityReports);
+        merged.caseTypes = visibleCaseTypes(canViewSecurityReportCases);
       }
       return merged;
     },
@@ -526,7 +531,7 @@ export default function CsmIssuesView({
       showSeverityFilter,
       lockedFilters,
       hideTypeFilter,
-      canSeeSecurityReports,
+      canViewSecurityReportCases,
     ],
   );
 
@@ -552,7 +557,13 @@ export default function CsmIssuesView({
     writePaginationToUrl(0, rowsPerPage);
   };
 
-  const { data: directoryUsers } = useDirectoryUsers();
+  // Only seeds chip labels for assignees already selected (e.g. from a shared
+  // URL); the picker searches the directory itself once opened. So hold the
+  // directory fetch until there is a selected email to label (`@me` has its
+  // own "Me" label).
+  const { data: directoryUsers } = useDirectoryUsers({
+    enabled: filters.assignees.some((a) => a !== ASSIGNEE_ME_TOKEN),
+  });
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
 
@@ -571,10 +582,9 @@ export default function CsmIssuesView({
 
   // "Customise columns" — off unless a caller opts in (see `enableColumnCustomization`'s
   // doc). `showSeverityColumn` mirrors the exact gate `CasesList` itself is given below
-  // (`isServiceRequestOnly || hideSeverityColumn`) so the picker can never offer a
-  // Severity column that would just render "—" for every row (service requests have no
-  // severity concept at all).
-  const showSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // (`hideSeverityColumn`) so the picker can never offer a Severity column that would
+  // just render "—" for every row.
+  const showSeverityColumn = !hideSeverityColumn;
   // Every current caller of this view locks the case type via `lockedFilters` (Case, SR,
   // SRA, Engagements each fix `caseTypes` to one value) — the Type column would then show
   // the same chip on every row, so it's still offered (a legacy row that predates type
@@ -605,8 +615,17 @@ export default function CsmIssuesView({
     defaultVisibleIds: defaultVisibleOptionalColumns,
   });
   const exportSearch = queryFilters.search.trim();
+  // Relative dates resolved once per export, on its first page (offset 0;
+  // pages are fetched one after another), so an export running over the
+  // viewer's local midnight keeps one date window for every page instead of
+  // skipping or repeating cases at the page boundaries.
+  const exportDateFiltersRef = useRef<CasesFilters | null>(null);
   const fetchCasesExportPage = useCallback(
     async (offset: number, limit: number) => {
+      if (offset === 0 || exportDateFiltersRef.current === null) {
+        exportDateFiltersRef.current = resolveCaseFilterDates(queryFilters, new Date());
+      }
+      const exportDateFilters = exportDateFiltersRef.current;
       // Re-resolved per page when an assignee filter is active — a small,
       // deterministic, targeted `/users/search` by email, not a directory
       // scan — rather than caching it across pages, so the export can never
@@ -630,7 +649,11 @@ export default function CsmIssuesView({
         {
           pagination: { offset, limit },
           sortBy: { field: sortField, order: sortOrder },
-          filters: buildCaseSearchFilters(queryFilters, exportSearch, assignedUserIds),
+          filters: buildCaseSearchFilters(
+            exportDateFilters,
+            exportSearch,
+            assignedUserIds,
+          ),
         },
       );
       const items = (res.cases ?? []).map((c) => mapCaseSearchViewToRow(c, currentUserEmail));
@@ -639,10 +662,9 @@ export default function CsmIssuesView({
     [api, queryFilters, exportSearch, sortField, sortOrder, currentUserId, currentUserEmail],
   );
 
-  // Same gate `CasesList` is given (`hideSeverityColumn={isServiceRequestOnly
-  // || hideSeverityColumn}`) so the export's column set can never drift from
-  // what's actually rendered.
-  const showExportSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // Same gate `CasesList` is given (`hideSeverityColumn`) so the export's column
+  // set can never drift from what's actually rendered.
+  const showExportSeverityColumn = !hideSeverityColumn;
   const caseToCsvRow = useCallback(
     (c: CsmCaseRow): string[] => {
       const caseId =
@@ -818,6 +840,17 @@ export default function CsmIssuesView({
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
         showSeverityFilter={showSeverityFilter}
+        // Service requests have no S0, so it is not offered as a new pick.
+        // A shared URL or saved view can still carry `severities=S0`, so keep
+        // it listed while selected, otherwise the user could not deselect it.
+        severityOptions={
+          lockedFilters?.caseTypes?.length === 1 &&
+          lockedFilters.caseTypes[0] === "service_request"
+            ? filters.severities.includes("S0")
+              ? SEVERITY_OPTIONS
+              : SERVICE_REQUEST_SEVERITY_OPTIONS
+            : SEVERITY_OPTIONS
+        }
         hideTypeFilter={hideTypeFilter}
         typeFilterLabel={typeFilterLabel}
         hideProjectFilter={hideProjectFilter}
@@ -825,6 +858,7 @@ export default function CsmIssuesView({
         hideCreTeamFilter={hideCreTeamFilter}
         hideSreTeamFilter={hideSreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
+        showSalesRegionFilter={showSalesRegionFilter}
       />
 
       {canWrite && selectedRows.size > 0 && (
@@ -856,7 +890,7 @@ export default function CsmIssuesView({
         isFetching={isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
-        hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
+        hideSeverityColumn={hideSeverityColumn}
         selectable={canWrite}
         selectedIds={selectedRowIds}
         onToggleRow={toggleRow}

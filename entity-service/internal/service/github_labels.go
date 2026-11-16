@@ -223,7 +223,13 @@ const (
 // A body with no "###" sections yields nothing rather than guessing -- an
 // issue written free-hand has no fields to capture.
 func ExtractTemplateFields(body string) map[string]string {
+	return extractTemplateFields(body, nil)
+}
+
+// extractTemplateFields is ExtractTemplateFields splitting only on the template's own headings when h is set.
+func extractTemplateFields(body string, h issueHeadings) map[string]string {
 	out := map[string]string{}
+	seen := map[string]bool{}
 	var label string
 	var value []string
 
@@ -240,9 +246,15 @@ func ExtractTemplateFields(body string) map[string]string {
 	}
 
 	for _, line := range strings.Split(body, "\n") {
-		if h := strings.TrimSpace(line); strings.HasPrefix(h, "### ") {
+		if h != nil {
+			if l, ok := h.fieldHeading(line, seen); ok {
+				flush()
+				label = l
+				continue
+			}
+		} else if t := strings.TrimSpace(line); strings.HasPrefix(t, "### ") {
 			flush()
-			label = strings.TrimSpace(strings.TrimPrefix(h, "### "))
+			label = strings.TrimSpace(strings.TrimPrefix(t, "### "))
 			continue
 		}
 		if label != "" {

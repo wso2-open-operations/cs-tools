@@ -202,24 +202,41 @@ var slaStatusSeverityFilters = map[string]domain.CaseSeverity{
 }
 
 // slaStatusElapsedBucketFilters is the caller-facing spelling of
-// domain.SLAStatusFilters.ElapsedBucket's four accepted values -- identical
+// domain.SLAStatusFilters.ElapsedBucket's eleven accepted values -- identical
 // to the constants themselves today, kept as its own allow-list (rather than
 // comparing the raw query value directly) so the wire vocabulary and the
 // internal constant are free to diverge later without a breaking API change.
 var slaStatusElapsedBucketFilters = map[string]string{
-	"under50": domain.SLAElapsedBucketUnder50,
-	"50to75":  domain.SLAElapsedBucket50To75,
-	"75to100": domain.SLAElapsedBucket75To100,
+	"under10": domain.SLAElapsedBucketUnder10,
+	"10to20":  domain.SLAElapsedBucket10To20,
+	"20to30":  domain.SLAElapsedBucket20To30,
+	"30to40":  domain.SLAElapsedBucket30To40,
+	"40to50":  domain.SLAElapsedBucket40To50,
+	"50to60":  domain.SLAElapsedBucket50To60,
+	"60to70":  domain.SLAElapsedBucket60To70,
+	"70to80":  domain.SLAElapsedBucket70To80,
+	"80to90":  domain.SLAElapsedBucket80To90,
+	"90to100": domain.SLAElapsedBucket90To100,
 	"over100": domain.SLAElapsedBucketOver100,
 }
 
+// slaStatusStageFilters is the caller-facing spelling of
+// domain.SLAStatusFilters.Stage's three accepted values -- same allow-list
+// shape as slaStatusElapsedBucketFilters above.
+var slaStatusStageFilters = map[string]string{
+	"in_progress": domain.SLAStatusInProgress,
+	"paused":      domain.SLAStatusPaused,
+	"breached":    domain.SLAStatusBreached,
+}
+
 // ParseSLAStatusFilters validates GET /sla-status's optional severity/
-// caseType/search/elapsedBucket query params into a domain.SLAStatusFilters.
-// Every param is optional; an absent (empty string) one leaves that field at
-// its zero value, applying no filtering for it. search is passed through
-// verbatim (trimmed) -- see domain.SLAStatusFilters.Search's own doc comment
-// for what it matches against.
-func ParseSLAStatusFilters(severity, caseType, search, elapsedBucket string) (domain.SLAStatusFilters, error) {
+// caseType/search/elapsedBucket/status query params into a
+// domain.SLAStatusFilters. Every param is optional; an absent (empty
+// string) one leaves that field at its zero value, applying no filtering
+// for it. search is passed through verbatim (trimmed) -- see
+// domain.SLAStatusFilters.Search's own doc comment for what it matches
+// against.
+func ParseSLAStatusFilters(severity, caseType, search, elapsedBucket, status string) (domain.SLAStatusFilters, error) {
 	var f domain.SLAStatusFilters
 	if severity != "" {
 		sev, ok := slaStatusSeverityFilters[strings.ToLower(severity)]
@@ -239,9 +256,16 @@ func ParseSLAStatusFilters(severity, caseType, search, elapsedBucket string) (do
 	if elapsedBucket != "" {
 		b, ok := slaStatusElapsedBucketFilters[strings.ToLower(elapsedBucket)]
 		if !ok {
-			return domain.SLAStatusFilters{}, &apierror.ValidationError{Msg: "elapsedBucket must be one of: under50, 50to75, 75to100, over100"}
+			return domain.SLAStatusFilters{}, &apierror.ValidationError{Msg: "elapsedBucket must be one of: under10, 10to20, 20to30, 30to40, 40to50, 50to60, 60to70, 70to80, 80to90, 90to100, over100"}
 		}
 		f.ElapsedBucket = b
+	}
+	if status != "" {
+		st, ok := slaStatusStageFilters[strings.ToLower(status)]
+		if !ok {
+			return domain.SLAStatusFilters{}, &apierror.ValidationError{Msg: "status must be one of: in_progress, paused, breached"}
+		}
+		f.Stage = st
 	}
 	return f, nil
 }

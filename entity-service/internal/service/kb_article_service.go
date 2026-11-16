@@ -23,6 +23,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
@@ -134,6 +137,18 @@ func (s *kbArticleService) UpdateKBArticleState(ctx context.Context, id string, 
 	article, err := s.repo.UpdateKBArticleState(ctx, id, req)
 	if err != nil {
 		return domain.UpdateKBArticleStateResponse{}, err
+	}
+
+	// Audit log: record every KB article state transition.
+	if current.State != article.State {
+		slog.InfoContext(ctx, "kb.article.state_changed",
+			"correlationId", middleware.CorrelationIDFromContext(ctx),
+			"callerId", auth.IdentityFromContext(ctx).UserID,
+			"articleId", article.ID,
+			"knowledgeBaseId", article.KnowledgeBaseID,
+			"fromState", string(current.State),
+			"toState", string(article.State),
+		)
 	}
 
 	if current.State != domain.KBArticleStatePublished && article.State == domain.KBArticleStatePublished && s.publisher != nil {

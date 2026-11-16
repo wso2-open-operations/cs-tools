@@ -30,6 +30,7 @@ import (
 // entityTimeCardClient abstracts the entity service time-card operations.
 type entityTimeCardClient interface {
 	SearchTimeCards(ctx context.Context, body []byte) ([]byte, error)
+	AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error)
 	CreateTimeCard(ctx context.Context, body []byte) ([]byte, error)
 	UpdateTimeCard(ctx context.Context, id string, body []byte) ([]byte, error)
 	DeleteTimeCard(ctx context.Context, id string) ([]byte, error)
@@ -91,6 +92,34 @@ func (h *TimeCardHandler) SearchTimeCards(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchTimeCards failed", "userID", user.UserID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search time cards.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// AggregateTimeCards handles POST /time-cards/aggregate: time card counts and
+// summed minutes per state, user, project or day, for dashboard charts. The
+// groupBy / measure / day-window rules are entity-service's; this layer
+// forwards the body and passes the response through. The route needs
+// PermViewTimeCardTotals (CS engineer and admin), narrower than the search's
+// PermTimeCardsAndUpdates; see that permission's doc comment.
+func (h *TimeCardHandler) AggregateTimeCards(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	body, ok := readTimeCardBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.AggregateTimeCards(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AggregateTimeCards failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to aggregate time cards.")
 		return
 	}
 

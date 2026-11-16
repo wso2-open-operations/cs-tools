@@ -2023,8 +2023,8 @@ func replaceIncidentWatchers(ctx context.Context, tx pgx.Tx, incidentID string, 
 // createIncidentPortalQuery is CreateIncident's (the plain-Postgres,
 // caller-initiated path) insert of both halves of the row -- structurally
 // identical to createIncidentFromServiceNowQuery except id/number are
-// generated here (gen_random_uuid()/next_portal_work_item_number(), migration
-// 0140) instead of supplied by a prior ServiceNow response. incident.state is
+// generated here (gen_random_uuid()/next_work_item_number('INCIDENT'), migration
+// 0180) instead of supplied by a prior ServiceNow response. incident.state is
 // left to its own column default ('NEW'), which is the state ServiceNow's
 // IncidentUtils.createIncident hard-sets.
 //
@@ -2037,7 +2037,7 @@ const createIncidentPortalQuery = `
 		)
 		VALUES (
 			gen_random_uuid(), NOW(), NOW(), $1, $1,
-			next_portal_work_item_number(), $2, 'INCIDENT'::work_item_type_enum, $3::uuid, $4::uuid, $18::uuid
+			next_work_item_number('INCIDENT'::work_item_type_enum), $2, 'INCIDENT'::work_item_type_enum, $3::uuid, $4::uuid, $18::uuid
 		)
 		RETURNING id, number, subject, created_on, updated_on, created_by
 	),

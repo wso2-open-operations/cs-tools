@@ -40,9 +40,9 @@ import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip
 import DeploymentsTab from "@features/csm-projects/components/DeploymentsTab";
 import SalesforceResyncDialog from "@features/csm-admin/salesforce-resync/SalesforceResyncDialog";
 import EditProjectClosureStateDialog from "@features/csm-projects/components/EditProjectClosureStateDialog";
-import EditProjectOnboardingDialog from "@features/csm-projects/components/EditProjectOnboardingDialog";
 import ProjectMetaCell from "@features/csm-projects/components/ProjectMetaCell";
 import ProjectOnboardingOwnerValue from "@features/csm-projects/components/ProjectOnboardingOwnerValue";
+import ProjectClosureTab from "@features/csm-projects/components/ProjectClosureTab";
 import ProjectOnboardingTab from "@features/csm-projects/components/ProjectOnboardingTab";
 import ProjectContactsTab from "@features/csm-projects/components/ProjectContactsTab";
 import { isOnboardingEnabled } from "@features/csm-projects/utils/projectOnboardingEnabled";
@@ -56,10 +56,17 @@ import { canRaiseServiceRequests } from "@features/csm-projects/utils/subscripti
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
 
-type ProjectTabId = "overview" | "onboarding" | "deployments" | "contacts" | "workItems";
+type ProjectTabId =
+  | "overview"
+  | "onboarding"
+  | "closure"
+  | "deployments"
+  | "contacts"
+  | "workItems";
 const PROJECT_TAB_IDS: readonly ProjectTabId[] = [
   "overview",
   "onboarding",
+  "closure",
   "deployments",
   "contacts",
   "workItems",
@@ -168,6 +175,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
     canWrite,
     canViewWorkItemsStaffView,
     canUpdateProjectClosureState,
+    canUpdateProjectSuspensionOverride,
     canEditProjectOnboarding,
     isAdmin: canCompareWithSalesforce,
   } = usePortalAccess();
@@ -175,13 +183,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const patchClosureState = usePatchProjectClosureState(id);
   const [editClosureStateOpen, setEditClosureStateOpen] = useState(false);
   const patchOnboarding = usePatchProjectOnboarding(id);
-  const [editOnboardingOpen, setEditOnboardingOpen] = useState(false);
-  // One dialog for both entry points (overview pencil, Onboarding tab Edit).
-  // Drops a stale error from a previous session with the dialog.
-  const openEditOnboarding = (): void => {
-    patchOnboarding.reset();
-    setEditOnboardingOpen(true);
-  };
   // Prefer wherever the caller came from (e.g. a case's Overview panel) over
   // the hardcoded projects list, so Back returns to that page instead of
   // skipping past it — same convention as CsmCaseDetailPage's own back path.
@@ -283,8 +284,15 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", flexShrink: 0 }}>
           {/* Shown to anyone who can open this project. Outlined, not
               contained: the single contained CTA on this page is Create. */}
-          <Button variant="outlined" size="small" className="csm-print-hide" disabled>
-            SLA Report — Coming soon
+          <Button
+            variant="outlined"
+            size="small"
+            className="csm-print-hide"
+            component={RouterLink}
+            to={`/customers/projects/${p.id}/sla-report/${p.id}`}
+            state={{ from: projectPath, parentState: location.state ?? null }}
+          >
+            SLA Report
           </Button>
           <Button
             variant="outlined"
@@ -391,6 +399,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
           <Tab value="overview" label="Overview" />
           <Tab value="onboarding" label="Onboarding" />
+          <Tab value="closure" label="Closure" />
           <Tab value="deployments" label="Deployments" />
           <Tab value="contacts" label="Project contacts" />
           {/* A caller without the staff view never sees Chats inside this tab
@@ -465,33 +474,16 @@ export default function CsmProjectDetailPage(): JSX.Element {
             <ProjectMetaCell label={endDateLabel(p.endDate)}>
               <Typography variant="body2">{formatDate(p.endDate)}</Typography>
             </ProjectMetaCell>
-            {(onboardingEnabled || canEditProjectOnboarding) && (
+            {onboardingEnabled && (
               <ProjectMetaCell label="Onboarding Status">
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  {onboardingEnabled ? (
-                    <ProjectOnboardingStatusChip onboardingStatus={p.onboardingStatus} />
-                  ) : (
-                    <Typography variant="body2">—</Typography>
-                  )}
-                  {canEditProjectOnboarding && (
-                    <IconButton
-                      size="small"
-                      aria-label="Edit onboarding"
-                      className="csm-print-hide"
-                      onClick={openEditOnboarding}
-                    >
-                      <Pencil size={14} />
-                    </IconButton>
-                  )}
-                </Box>
+                <ProjectOnboardingStatusChip onboardingStatus={p.onboardingStatus} />
               </ProjectMetaCell>
             )}
-            {(onboardingEnabled || canEditProjectOnboarding) &&
-              (p.onboardingOwner || canEditProjectOnboarding) && (
-                <ProjectMetaCell label="Onboarding Owner">
-                  <ProjectOnboardingOwnerValue owner={p.onboardingOwner} />
-                </ProjectMetaCell>
-              )}
+            {onboardingEnabled && p.onboardingOwner && (
+              <ProjectMetaCell label="Onboarding Owner">
+                <ProjectOnboardingOwnerValue owner={p.onboardingOwner} />
+              </ProjectMetaCell>
+            )}
           </Box>
         </Card>
       )}
@@ -500,8 +492,23 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <ProjectOnboardingTab
           project={p}
           canEdit={canEditProjectOnboarding}
-          onEdit={openEditOnboarding}
+          isSaving={patchOnboarding.isPending}
+          saveError={
+            patchOnboarding.isError
+              ? onboardingSaveErrorMessage(patchOnboarding.error)
+              : null
+          }
+          onResetError={patchOnboarding.reset}
+          onSave={(patch, onSuccess) =>
+            // No onError handler: the tab's own inline alert (saveError
+            // above) already surfaces the failure.
+            patchOnboarding.mutate(patch, { onSuccess })
+          }
         />
+      )}
+
+      {activeTab === "closure" && (
+        <ProjectClosureTab project={p} canEdit={canUpdateProjectSuspensionOverride} />
       )}
 
       {activeTab === "deployments" && <DeploymentsTab projectId={p.id} />}
@@ -512,30 +519,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
 
       {compareOpen && (
         <SalesforceResyncDialog open scope="project" id={p.id} onClose={() => setCompareOpen(false)} />
-      )}
-
-      {editOnboardingOpen && (
-        <EditProjectOnboardingDialog
-          currentStatus={p.onboardingStatus}
-          currentOwner={p.onboardingOwner}
-          currentDates={p}
-          isSaving={patchOnboarding.isPending}
-          saveError={
-            patchOnboarding.isError
-              ? onboardingSaveErrorMessage(patchOnboarding.error)
-              : null
-          }
-          onClose={() => {
-            if (!patchOnboarding.isPending) setEditOnboardingOpen(false);
-          }}
-          onSave={(patch) =>
-            // No onError handler: the dialog's own inline alert (saveError
-            // above) already surfaces the failure.
-            patchOnboarding.mutate(patch, {
-              onSuccess: () => setEditOnboardingOpen(false),
-            })
-          }
-        />
       )}
 
       {editClosureStateOpen && (

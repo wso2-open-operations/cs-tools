@@ -118,6 +118,20 @@ type ConflictError struct {
 // Error implements the error interface.
 func (e *ConflictError) Error() string { return e.Msg }
 
+// GoneError signals that the resource existed and was removed on purpose, and
+// should be reported as HTTP 410. The caller could see it, so saying it was
+// removed reveals nothing; an id the caller cannot see is a NotFoundError.
+//
+// Code, when set, is the refusal's machine-readable name (see codes.go),
+// returned beside the message as the body's errorCode.
+type GoneError struct {
+	Msg  string
+	Code string
+}
+
+// Error implements the error interface.
+func (e *GoneError) Error() string { return e.Msg }
+
 // TooManyRequestsError signals that the caller is repeating an operation
 // faster than its own cooldown allows and should be reported as HTTP 429. It
 // is a caller-pacing decision this service makes deliberately (e.g. the

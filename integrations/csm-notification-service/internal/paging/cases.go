@@ -18,6 +18,8 @@ package paging
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -34,10 +36,14 @@ import (
 //   - A case S0 pages CRE and SRE; S1-S4 page CRE only (which severities is
 //     cre.trigger.priorities -- S4 is off unless listed). Routing decides
 //     which ladders, as it does for incidents (DefaultRouting).
-//   - Any severity change stops the running chain and starts a new one for the
+//   - A severity change stops the running chain and starts a new one for the
 //     new severity, from the first tier, even on a case already acknowledged.
 //     A severity a ladder does not page (S4 when it is off; anything below S0
 //     for SRE) just stops that ladder's chain.
+//   - On the CRE ladder a LOWERED severity (S1 -> S3) starts no chain: a
+//     running one carries on until it is acknowledged, a stopped one stays
+//     stopped. A severity either side of which is unrecognised counts as
+//     raised, so a malformed event still pages.
 //   - CRE stops when an engineer is assigned AND that engineer posts a public
 //     comment. SRE on an S0 case stops when any engineer is assigned, or --
 //     on a case already assigned when it became S0 -- when the assignee posts
@@ -47,7 +53,14 @@ import (
 //     engineer's public comment: the case was already being worked, and the
 //     assignee is known here only from a case.assigned this service saw, so
 //     an assignment made earlier left the assignee's own comment unmatched
-//     and the calls running (seen on prod, 2026-11-03).
+//     and the calls running (seen on prod, 2026-11-03). A comment written
+//     before the change (createdOn earlier than changedAt, past
+//     commentClockSkew) does not count: a redelivered old comment must not
+//     stop the new chain. When entity-service could not check the author's
+//     role, a @wso2.com author counts as an engineer.
+//   - A severity change already handled, or older than the last one handled
+//     (by changedAt), is a replay and is ignored even after its chain
+//     stopped, so it cannot start the chain again.
 //   - A closed case stops both.
 //
 // The case events that start a chain carry no assignee, so the current one is
@@ -60,6 +73,15 @@ const (
 	cancelEngineerComment  cancelReason = "Public comment by an engineer after a severity change"
 	cancelCaseClosed       cancelReason = "Case closed"
 )
+
+// commentClockSkew is how far before a severity change a comment may have
+// been written and still stop the chain the change started: createdOn and
+// changedAt come from different entity-service requests.
+const commentClockSkew = time.Minute
+
+// internalEmailSuffix marks a WSO2 author, counted as an engineer when
+// entity-service could not check the role (SupportEngineerUnknown).
+const internalEmailSuffix = "@wso2.com"
 
 // caseGesture is one thing an engineer did on a case.
 type caseGesture int
@@ -100,22 +122,49 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 		}
 		t := triggerFromSeverityChanged(caseID, p, e.now())
 		t.CardThread = notifications.CaseS0ThreadKey(caseID, record)
-		if e.admit(ctx, &t) {
-			// A new chain for the new severity, replacing whatever runs.
-			return e.schedule(ctx, t, true)
+		// The live and dead-letter consumers can each hold a severity change
+		// for this case; the check, the new chain and the record below must
+		// not interleave, or an older change could replace a newer chain.
+		// The rest runs under the lock's context: it is cancelled if the
+		// lock is lost, so nothing below writes after another handler took it.
+		ctx, unlock, err := e.lockCaseSeverity(ctx, caseID)
+		if err != nil {
+			return err
 		}
-		if e.pagesSeverity(ctx, t) {
+		defer unlock()
+		if e.severityChangeHandled(ctx, caseID, t.ChangedAt) {
+			slog.InfoContext(ctx, "escalation: severity change already handled; ignoring the replay",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "priority", t.Priority,
+				"changedAt", t.ChangedAt.Format(time.RFC3339Nano))
+			return nil
+		}
+		switch {
+		case e.cfg.Kind == LadderCRE && severityLowered(p.OldSeverity, p.NewSeverity) && e.pagesSeverity(ctx, t):
+			// A lowered case is no more urgent than it was: nobody is
+			// paged again for it, and a chain still waiting for its
+			// acknowledgement carries on as it was.
+			slog.InfoContext(ctx, "escalation: severity lowered; no new chain, a running one carries on",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind),
+				"from", p.OldSeverity, "to", p.NewSeverity)
+		case e.admit(ctx, &t):
+			// A new chain for the new severity, replacing whatever runs.
+			err = e.schedule(ctx, t, true)
+		case e.pagesSeverity(ctx, t):
 			// Refused for a reason that is not the severity -- a team or
 			// shift setting in trigger -- which decides whether a chain may
 			// START, not whether a running one should stop. Silencing a case
 			// raised outside an allowed shift would be the worst outcome.
 			slog.InfoContext(ctx, "escalation: severity change refused by a team or shift setting; the running chain carries on",
 				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "priority", t.Priority)
-			return nil
+		default:
+			// This ladder does not page the new severity: S4 while it is off, or
+			// the SRE ladder below S0. Whatever it was running stops.
+			err = e.stopRunning(ctx, caseID, cancelReason("Severity changed to "+strings.ToUpper(strings.TrimSpace(p.NewSeverity))))
 		}
-		// This ladder does not page the new severity: S4 while it is off, or
-		// the SRE ladder below S0. Whatever it was running stops.
-		return e.stopRunning(ctx, caseID, cancelReason("Severity changed to "+strings.ToUpper(strings.TrimSpace(p.NewSeverity))))
+		if err == nil {
+			e.rememberSeverityChange(ctx, caseID, t.ChangedAt)
+		}
+		return err
 
 	case events.TypeCaseAssigned:
 		var p events.CaseAssignedPayload
@@ -126,7 +175,7 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 		if err := e.store.SetCaseAssignee(ctx, caseID, assignee); err != nil {
 			return fmt.Errorf("escalation: record assignee for case %s: %w", caseID, err)
 		}
-		return e.caseGesture(ctx, caseID, gestureAssigned, assignee)
+		return e.caseGesture(ctx, caseID, gestureAssigned, assignee, time.Time{})
 
 	case events.TypeCommentAdded:
 		var p events.CommentAddedPayload
@@ -146,11 +195,12 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 		if err != nil {
 			return fmt.Errorf("escalation: read assignee for case %s: %w", caseID, err)
 		}
+		at := parseEventTime(p.CreatedOn)
 		if assignee != "" && strings.EqualFold(author, assignee) {
-			return e.caseGesture(ctx, caseID, gestureAssigneeComment, author)
+			return e.caseGesture(ctx, caseID, gestureAssigneeComment, author, at)
 		}
-		if p.IsSupportEngineerResponse {
-			return e.caseGesture(ctx, caseID, gestureEngineerComment, author)
+		if p.IsSupportEngineerResponse || (p.SupportEngineerUnknown && strings.HasSuffix(author, internalEmailSuffix)) {
+			return e.caseGesture(ctx, caseID, gestureEngineerComment, author, at)
 		}
 		// A customer, or anybody else who is not on the case: never stops it.
 		return nil
@@ -169,8 +219,9 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 }
 
 // caseGesture records one gesture on a running case chain and stops it when
-// the ladder's rule is met.
-func (e *Engine) caseGesture(ctx context.Context, caseID string, g caseGesture, who string) error {
+// the ladder's rule is met. at is when a comment was written (zero when not
+// known, and for an assignment).
+func (e *Engine) caseGesture(ctx context.Context, caseID string, g caseGesture, who string, at time.Time) error {
 	st, found, err := e.store.Get(ctx, caseID)
 	if err != nil {
 		return fmt.Errorf("escalation: load ladder for case %s: %w", caseID, err)
@@ -185,6 +236,12 @@ func (e *Engine) caseGesture(ctx context.Context, caseID string, g caseGesture, 
 	}
 	if st.Plan.Trigger.Kind == TriggerSeverityChanged &&
 		(g == gestureAssigneeComment || g == gestureEngineerComment) {
+		if changed := st.Plan.Trigger.ChangedAt; !at.IsZero() && !changed.IsZero() && at.Before(changed.Add(-commentClockSkew)) {
+			slog.InfoContext(ctx, "escalation: a comment from before the severity change; the chain keeps climbing",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind),
+				"commentAt", at.Format(time.RFC3339Nano), "changedAt", changed.Format(time.RFC3339Nano))
+			return nil
+		}
 		return e.stopLadder(ctx, caseID, st, cancelEngineerComment)
 	}
 
@@ -317,6 +374,7 @@ func triggerFromSeverityChanged(caseID string, p events.SeverityChangedPayload, 
 		Team:       p.Team,
 		Kind:       TriggerSeverityChanged,
 		At:         now,
+		ChangedAt:  parseEventTime(p.ChangedAt),
 		Record:     RecordCase,
 		Routing: RoutingContext{
 			Product:         p.Product,
@@ -328,6 +386,25 @@ func triggerFromSeverityChanged(caseID string, p events.SeverityChangedPayload, 
 	}
 }
 
+// severityLowered reports whether a case's severity went down, S0 being the
+// highest. Either side unrecognised (or empty) is not a lowering, so the
+// change is handled as a raise and still pages.
+func severityLowered(from, to string) bool {
+	f, okFrom := severityRank(from)
+	t, okTo := severityRank(to)
+	return okFrom && okTo && t > f
+}
+
+// severityRank is a severity's place from S0/P0 (0) down to S4/P4 (4), in
+// any spelling NormalisePriority knows.
+func severityRank(severity string) (int, bool) {
+	p := NormalisePriority(severity)
+	if len(p) != 2 || p[0] != 'P' || p[1] < '0' || p[1] > '4' {
+		return 0, false
+	}
+	return int(p[1] - '0'), true
+}
+
 // isClosedCaseStatus reports whether a case.status_changed label means the
 // case is finished. entity-service's labels end at "Closed"; ServiceNow may
 // pass its own through, so a resolved or cancelled label counts too.
@@ -337,6 +414,134 @@ func isClosedCaseStatus(status string) bool {
 }
 
 func normaliseEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// parseEventTime reads an RFC 3339 instant an event carries; zero when it is
+// absent or unreadable, which turns the check that uses it off.
+func parseEventTime(raw string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// severityChangeHandled reports whether this ladder already handled a severity
+// change at or after changedAt: a replay, or an older change arriving late.
+// Without changedAt, or when the record cannot be read, nothing is skipped.
+func (e *Engine) severityChangeHandled(ctx context.Context, caseID string, changedAt time.Time) bool {
+	if changedAt.IsZero() {
+		return false
+	}
+	last, err := e.store.SeverityChangedAt(ctx, caseID)
+	if err != nil {
+		slog.WarnContext(ctx, "escalation: could not read the last severity change; handling this one",
+			"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+		return false
+	}
+	return !last.IsZero() && !changedAt.After(last)
+}
+
+// severityLockTTL bounds one case's severity lock between renewals: a holder
+// that died delays the next change by at most this.
+const severityLockTTL = 30 * time.Second
+
+// severityLockRenew is how often a holder extends its lock. Handling can
+// outlast the TTL -- building a plan makes sequential entity-service calls of
+// up to 25s each -- so the lock is a lease renewed while the work runs.
+var severityLockRenew = severityLockTTL / 3
+
+// severityLockPoll is how often a waiting severity change retries the lock.
+const severityLockPoll = 100 * time.Millisecond
+
+// severityLockWait is how long a severity change waits for another handler of
+// the same case before returning an error, so the consumer retries it.
+var severityLockWait = 10 * time.Second
+
+// lockCaseSeverity takes the case's severity lock for this ladder, waiting up
+// to severityLockWait, and returns the context to do the work under and the
+// function that releases the lock. The lock is renewed every
+// severityLockRenew while held; if a renewal finds it lost (or cannot reach
+// Redis), the returned context is cancelled, so the work's writes fail and
+// the consumer retries instead of overwriting the chain of whoever holds the
+// lock now. A Redis error taking the lock leaves the change unlocked, logged,
+// as it was handled before the lock.
+func (e *Engine) lockCaseSeverity(ctx context.Context, caseID string) (context.Context, func(), error) {
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	token := hex.EncodeToString(buf)
+	deadline := time.Now().Add(severityLockWait)
+	for {
+		ok, err := e.store.LockCaseSeverity(ctx, caseID, token, severityLockTTL)
+		if err != nil {
+			slog.WarnContext(ctx, "escalation: could not take the case's severity lock; handling without it",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+			return ctx, func() {}, nil
+		}
+		if ok {
+			held, cancel := context.WithCancel(ctx)
+			stop := make(chan struct{})
+			renewed := make(chan struct{})
+			go func() {
+				defer close(renewed)
+				e.renewCaseSeverity(held, cancel, stop, caseID, token)
+			}()
+			return held, func() {
+				close(stop)
+				<-renewed
+				cancel()
+				if err := e.store.UnlockCaseSeverity(context.WithoutCancel(ctx), caseID, token); err != nil {
+					slog.WarnContext(ctx, "escalation: could not release the case's severity lock; it expires on its own",
+						"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+				}
+			}, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, nil, fmt.Errorf("escalation: another severity change for case %s is still being handled", caseID)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(severityLockPoll):
+		}
+	}
+}
+
+// renewCaseSeverity extends the case's severity lock every severityLockRenew
+// until stop is closed, and cancels the holder's work once the lock is lost.
+func (e *Engine) renewCaseSeverity(held context.Context, cancel context.CancelFunc, stop <-chan struct{}, caseID, token string) {
+	tick := time.NewTicker(severityLockRenew)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-held.Done():
+			return
+		case <-tick.C:
+			ok, err := e.store.RenewCaseSeverity(held, caseID, token, severityLockTTL)
+			if err == nil && ok {
+				continue
+			}
+			slog.WarnContext(held, "escalation: lost the case's severity lock; abandoning this change so it is retried",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+			cancel()
+			return
+		}
+	}
+}
+
+// rememberSeverityChange records the severity change this ladder just handled,
+// so a replay is recognised after its chain has stopped and its state is gone.
+// Best effort: a failed write only loses that protection.
+func (e *Engine) rememberSeverityChange(ctx context.Context, caseID string, changedAt time.Time) {
+	if changedAt.IsZero() {
+		return
+	}
+	if err := e.store.SetSeverityChangedAt(ctx, caseID, changedAt); err != nil {
+		slog.WarnContext(ctx, "escalation: could not record the severity change",
+			"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+	}
+}
 
 func containsFold(list []string, s string) bool {
 	for _, v := range list {

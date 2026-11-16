@@ -128,6 +128,17 @@ describe("CsmSlaEnginePage", () => {
     await waitFor(() => expect(screen.getByText("Failed to start SLA recalculation.")).toBeInTheDocument());
   });
 
+  it("forwards the selected status filter as a query param", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/no active sla clocks/i)).toBeInTheDocument());
+    api.get.mockClear();
+
+    fireEvent.mouseDown(screen.getByLabelText("Status"));
+    fireEvent.click(await screen.findByRole("option", { name: "Breached" }));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("status=breached")));
+  });
+
   it("resets to the last valid page when the total shrinks between fetches", async () => {
     api.statuses = Array.from({ length: 60 }, (_, i) => makeStatus(`case-${i}`));
     renderPage();

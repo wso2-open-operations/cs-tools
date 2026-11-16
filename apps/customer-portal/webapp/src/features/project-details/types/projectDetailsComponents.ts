@@ -229,15 +229,6 @@ export type DeleteDeploymentModalProps = {
   isDeleting?: boolean;
 };
 
-export type EditDeploymentAttachmentModalProps = {
-  open: boolean;
-  document: DeploymentDocument | null;
-  deploymentId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-};
-
 export type UpdateHistorySaveAction = "add" | "delete" | "edit";
 
 export type UpdateHistoryTabFormState = {

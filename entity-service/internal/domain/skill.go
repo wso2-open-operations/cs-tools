@@ -30,10 +30,12 @@ type SkillLevel struct {
 
 // SkillLevelType is a level scale: the set of levels a skill is rated on.
 type SkillLevelType struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Description *string      `json:"description"`
-	Levels      []SkillLevel `json:"levels"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// IsDefault marks the scale new skills and skill requests use.
+	IsDefault bool         `json:"isDefault"`
+	Levels    []SkillLevel `json:"levels"`
 }
 
 // SkillLevelTypesResponse is the body of GET /skills/levels.
@@ -51,6 +53,10 @@ type SkillCategory struct {
 	CategoryPath     *string `json:"categoryPath"`
 	IsLowestCategory bool    `json:"isLowestCategory"`
 	ParentID         *string `json:"parentId"`
+	Active           bool    `json:"active"`
+	Description      *string `json:"description"`
+	// SkillCount is the number of active skills filed directly under it.
+	SkillCount int `json:"skillCount"`
 }
 
 // SkillCategoriesResponse is the body of GET /skills/categories.
@@ -74,8 +80,10 @@ type Skill struct {
 	Active      bool               `json:"active"`
 	LevelTypeID *string            `json:"levelTypeId"`
 	Categories  []SkillCategoryRef `json:"categories"`
-	CreatedOn   time.Time          `json:"createdOn"`
-	UpdatedOn   time.Time          `json:"updatedOn"`
+	// HolderCount is how many people hold it; only set for a catalogue manager.
+	HolderCount *int      `json:"holderCount,omitempty"`
+	CreatedOn   time.Time `json:"createdOn"`
+	UpdatedOn   time.Time `json:"updatedOn"`
 }
 
 // SearchSkillsRequest is the body of POST /skills/search. Every filter is
@@ -87,6 +95,8 @@ type SearchSkillsRequest struct {
 	LevelTypeID     string     `json:"levelTypeId"`
 	IncludeInactive bool       `json:"includeInactive"`
 	Pagination      Pagination `json:"pagination"`
+	// WithHolderCounts is set by the service for a catalogue manager.
+	WithHolderCounts bool `json:"-"`
 }
 
 // SearchSkillsResponse is the body of POST /skills/search.
@@ -152,17 +162,30 @@ type SetMySkillLevelRequest struct {
 	LevelID string `json:"levelId"`
 }
 
-// SkillHistoryEntry is one level change on somebody's profile. LevelFrom is
-// nil for the first time the skill was set, LevelTo is nil when it was
-// removed.
+// SkillHistoryAction says what a history row records.
+type SkillHistoryAction string
+
+const (
+	SkillHistoryAdded        SkillHistoryAction = "ADDED"
+	SkillHistoryLevelChanged SkillHistoryAction = "LEVEL_CHANGED"
+	SkillHistoryRemoved      SkillHistoryAction = "REMOVED"
+	SkillHistoryReadded      SkillHistoryAction = "READDED"
+)
+
+// SkillHistoryEntry is one change on somebody's profile. LevelFrom is nil when
+// the skill was (re)added, LevelTo is nil when it was removed. Action is empty
+// only for a migrated row that recorded neither level.
 type SkillHistoryEntry struct {
-	ID        string      `json:"id"`
-	SkillID   string      `json:"skillId"`
-	SkillName string      `json:"skillName"`
-	LevelFrom *SkillLevel `json:"levelFrom"`
-	LevelTo   *SkillLevel `json:"levelTo"`
-	ChangedBy *string     `json:"changedBy"`
-	ChangedOn time.Time   `json:"changedOn"`
+	ID     string             `json:"id"`
+	Action SkillHistoryAction `json:"action"`
+	// SkillRequestID is set when an approved skill request made the change.
+	SkillRequestID *string     `json:"skillRequestId"`
+	SkillID        string      `json:"skillId"`
+	SkillName      string      `json:"skillName"`
+	LevelFrom      *SkillLevel `json:"levelFrom"`
+	LevelTo        *SkillLevel `json:"levelTo"`
+	ChangedBy      *string     `json:"changedBy"`
+	ChangedOn      time.Time   `json:"changedOn"`
 }
 
 // SkillHistoryRequest filters GET /skills/me/history.
@@ -243,6 +266,24 @@ const (
 	// SkillOutcomeSkillInactive: when an add took its lock, the skill was inactive.
 	// The service checked it just before, so it was deactivated in between.
 	SkillOutcomeSkillInactive
+	// SkillOutcomeCategoryNotFound: the category does not exist.
+	SkillOutcomeCategoryNotFound
+	// SkillOutcomeCategoryInvalid: the parent is inactive, or has skills filed under it.
+	SkillOutcomeCategoryInvalid
+	// SkillOutcomeCategoryInUse: deactivating it would hide active children or skills.
+	SkillOutcomeCategoryInUse
+	// SkillOutcomeRequestNotPending: the request was already decided or withdrawn.
+	SkillOutcomeRequestNotPending
+	// SkillOutcomePendingExists: a pending request already asks for this name.
+	SkillOutcomePendingExists
+	// SkillOutcomeSkillExists: an active skill already has this name.
+	SkillOutcomeSkillExists
+	// SkillOutcomeNoDefaultScale: no level scale is marked as the default.
+	SkillOutcomeNoDefaultScale
+	// SkillOutcomeSkillNotInactive: "reactivate" named a skill that is active.
+	SkillOutcomeSkillNotInactive
+	// SkillOutcomeSkillNotActive: "existing" named a skill that is inactive.
+	SkillOutcomeSkillNotActive
 )
 
 // SkillWriteResult is a skill write's outcome and, for a profile write, the
@@ -251,4 +292,6 @@ type SkillWriteResult struct {
 	Outcome SkillOutcome
 	Skill   *Skill
 	Row     *UserSkill
+	// Action is what a profile add recorded (ADDED or READDED).
+	Action SkillHistoryAction
 }

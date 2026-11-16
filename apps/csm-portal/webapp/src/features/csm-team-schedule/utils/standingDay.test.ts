@@ -425,6 +425,21 @@ describe("atWorkOnTheDay", () => {
     expect(kept([row("a", "vega", "CRE_REGULAR", MONDAY)], [span("a", "MIGRATION", "migration")])).toEqual([]);
   });
 
+  it("keeps the rotation turn of someone on a customer allocation, but not their regular hours", () => {
+    const allocated = [...KINDS, kind("ALLO_EXT", "ALLOCATION")];
+    const shifts = new Map([
+      ["CRE_REGULAR", { code: "CRE_REGULAR", isRotation: false } as ScheduleShift],
+      ["CRE_EVENING", { code: "CRE_EVENING", isRotation: true } as ScheduleShift],
+    ]);
+    const rows = [row("a", "draco", "CRE_REGULAR", MONDAY), row("a", "draco", "CRE_EVENING", MONDAY)];
+    expect(
+      atWorkOnTheDay(rows, [span("a", "ALLO_EXT")], allocated, shifts).map((r) => `${r.engineer.userId}:${r.shiftCode}`),
+    ).toEqual(["a:CRE_EVENING"]);
+    // Leave and a move to a team with no rota still take the turn.
+    expect(atWorkOnTheDay(rows, [span("a", "ANNUAL_LEAVE")], allocated, shifts)).toEqual([]);
+    expect(atWorkOnTheDay(rows, [span("a", "MIGRATION", "migration")], allocated, shifts)).toEqual([]);
+  });
+
   it("keeps half-day leave, the Brazil rotation on the Americas team, Excluded and retired kinds", () => {
     expect(kept([row("a", "draco", "CRE_REGULAR", MONDAY)], [span("a", "HALF_DAY_LEAVE_MORNING")])).toEqual([
       "a:CRE_REGULAR",

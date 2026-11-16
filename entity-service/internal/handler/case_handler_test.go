@@ -38,25 +38,12 @@ import (
 // reach them.
 type stubCaseService struct {
 	service.CaseService
-	createCaseCalled       bool
-	createAttachmentCalled bool
-	createAttachmentResp   domain.CreateAttachmentResponse
-	createAttachmentErr    error
+	createCaseCalled bool
 
 	searchTagsCalled bool
 	searchTagsReq    domain.SearchTagsRequest
 	searchTagsTags   []domain.Tag
 	searchTagsErr    error
-
-	getAttachmentCalled bool
-	getAttachmentID     string
-	getAttachmentResp   domain.AttachmentDetails
-	getAttachmentErr    error
-
-	updateAttachmentCalled bool
-	updateAttachmentReq    domain.UpdateAttachmentRequest
-	updateAttachmentResp   domain.UpdateAttachmentResponse
-	updateAttachmentErr    error
 
 	addCaseTagCalled   bool
 	addCaseTagCaseID   string
@@ -126,117 +113,12 @@ func (s *stubCaseService) CreateCase(_ context.Context, _ domain.CreateCaseReque
 	return domain.CreateCaseResponse{}, nil
 }
 
-func (s *stubCaseService) GetAttachmentByID(_ context.Context, attachmentID string) (domain.AttachmentDetails, error) {
-	s.getAttachmentCalled = true
-	s.getAttachmentID = attachmentID
-	return s.getAttachmentResp, s.getAttachmentErr
-}
-
-func (s *stubCaseService) UpdateAttachment(_ context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
-	s.updateAttachmentCalled = true
-	s.updateAttachmentReq = req
-	return s.updateAttachmentResp, s.updateAttachmentErr
-}
-
-func (s *stubCaseService) CreateCaseAttachment(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
-	s.createAttachmentCalled = true
-	return s.createAttachmentResp, s.createAttachmentErr
-}
-
-// attachmentRequestBody builds a valid CreateAttachmentRequest JSON body whose
-// base64 "file" field is padded to approximately targetBytes total size, so
-// tests can exercise the size cap without depending on a real file.
-func attachmentRequestBody(t *testing.T, targetBytes int) []byte {
-	t.Helper()
-	// Reserve room for the JSON envelope; pad only the base64 payload.
-	const envelopeOverhead = 512
-	payloadBytes := targetBytes - envelopeOverhead
-	if payloadBytes < 0 {
-		payloadBytes = 0
-	}
-	raw := make([]byte, payloadBytes)
-	encoded := base64.StdEncoding.EncodeToString(raw)
-
-	req := domain.CreateAttachmentRequest{
-		ReferenceID:   "11111111-1111-1111-1111-111111111111",
-		ReferenceType: domain.ReferenceTypeCase,
-		Name:          "test-file.bin",
-		Type:          "application/octet-stream",
-		File:          encoded,
-	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	return body
-}
-
-// TestCreateCaseAttachment_UnderNewLimit_OverOldLimit verifies a body larger
-// than the old generic 1 MiB cap, but under the new 15 MiB attachment cap,
-// is no longer rejected at the decode stage (this is the QA regression: a
-// 2 MB attachment used to fail with "request body too large").
-func TestCreateCaseAttachment_UnderNewLimit_OverOldLimit(t *testing.T) {
-	body := attachmentRequestBody(t, 2<<20) // ~2 MiB, matches QA's repro size.
-	if int64(len(body)) <= maxRequestBodySize {
-		t.Fatalf("test body (%d bytes) must exceed the old 1 MiB limit (%d) to be meaningful", len(body), maxRequestBodySize)
-	}
-	if int64(len(body)) >= maxAttachmentBodySize {
-		t.Fatalf("test body (%d bytes) must stay under the new attachment limit (%d)", len(body), maxAttachmentBodySize)
-	}
-
-	stub := &stubCaseService{
-		createAttachmentResp: domain.CreateAttachmentResponse{Message: "created"},
-	}
-	h := NewCaseHandler(stub, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(string(body)))
-	rec := httptest.NewRecorder()
-
-	h.CreateCaseAttachment(rec, req)
-
-	if !stub.createAttachmentCalled {
-		t.Fatalf("expected CreateCaseAttachment to reach the service layer, got status %d body %q", rec.Code, rec.Body.String())
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestCreateCaseAttachment_OverNewLimit verifies a body over the new 15 MiB
-// attachment cap is still rejected, with the attachment-specific message.
-func TestCreateCaseAttachment_OverNewLimit(t *testing.T) {
-	body := attachmentRequestBody(t, 16<<20) // ~16 MiB, over the 15 MiB cap.
-
-	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(string(body)))
-	rec := httptest.NewRecorder()
-
-	h.CreateCaseAttachment(rec, req)
-
-	if stub.createAttachmentCalled {
-		t.Fatalf("expected the request to be rejected before reaching the service layer")
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), attachmentTooLargeMsg) {
-		t.Fatalf("expected the attachment-specific too-large message, got: %s", rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), "request body too large") {
-		t.Fatalf("expected the generic message to be replaced by the attachment-specific one, got: %s", rec.Body.String())
-	}
-}
-
 func createCaseRequestBody(t *testing.T, payloadBytes int) []byte {
 	t.Helper()
 	body, err := json.Marshal(domain.CreateCaseRequest{
-		Subject: "Case with attachment",
-		Attachments: []domain.CaseAttachment{{
-			Name: "test-file.bin",
-			File: base64.StdEncoding.EncodeToString(make([]byte, payloadBytes)),
-		}},
+		Subject: "Case with an inline image",
+		// A description can embed a base64 image; this is what the size cap is for.
+		Description: "<img src=\"data:image/png;base64," + base64.StdEncoding.EncodeToString(make([]byte, payloadBytes)) + "\">",
 	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
@@ -244,13 +126,13 @@ func createCaseRequestBody(t *testing.T, payloadBytes int) []byte {
 	return body
 }
 
-// TestCreateCase_InlineAttachment_UnderLimit verifies a ~5 MB inline
+// TestCreateCase_InlineImageInDescription_UnderLimit verifies a ~5 MB inline
 // attachment (~6.7 MB body) passes the decode step instead of being rejected
 // by the generic 1 MiB cap.
-func TestCreateCase_InlineAttachment_UnderLimit(t *testing.T) {
+func TestCreateCase_InlineImageInDescription_UnderLimit(t *testing.T) {
 	body := createCaseRequestBody(t, 5<<20)
-	if int64(len(body)) <= maxRequestBodySize || int64(len(body)) >= maxAttachmentBodySize {
-		t.Fatalf("test body (%d bytes) must sit between %d and %d", len(body), maxRequestBodySize, maxAttachmentBodySize)
+	if int64(len(body)) <= maxRequestBodySize || int64(len(body)) >= maxCaseBodySize {
+		t.Fatalf("test body (%d bytes) must sit between %d and %d", len(body), maxRequestBodySize, maxCaseBodySize)
 	}
 	stub := &stubCaseService{}
 	h := NewCaseHandler(stub, nil)
@@ -284,7 +166,7 @@ func TestCreateCase_OverLimit(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), attachmentTooLargeMsg) {
+	if !strings.Contains(rec.Body.String(), caseTooLargeMsg) {
 		t.Fatalf("expected the too-large message, got: %s", rec.Body.String())
 	}
 }
@@ -448,92 +330,6 @@ func TestSearchTagsQuery_NoParams(t *testing.T) {
 	}
 	if (stub.searchTagsReq != domain.SearchTagsRequest{}) {
 		t.Fatalf("expected a zero request, got %#v", stub.searchTagsReq)
-	}
-}
-
-// TestGetAttachment_PassesPathIDToService pins the GET /attachments/{id} handler's
-// wiring: the path value must reach the service layer as-is (the service layer
-// owns UUID validation), and the response body must round-trip the service result.
-func TestGetAttachment_PassesPathIDToService(t *testing.T) {
-	const attachmentID = "11111111-1111-1111-1111-111111111111"
-	stub := &stubCaseService{getAttachmentResp: domain.AttachmentDetails{ID: attachmentID, Name: "logs.txt"}}
-	h := NewCaseHandler(stub, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/attachments/"+attachmentID, nil)
-	req.SetPathValue("id", attachmentID)
-	rec := httptest.NewRecorder()
-
-	h.GetAttachmentByID(rec, req)
-
-	if !stub.getAttachmentCalled {
-		t.Fatalf("expected GetAttachmentByID to reach the service layer")
-	}
-	if stub.getAttachmentID != attachmentID {
-		t.Fatalf("service saw id %q, want %q", stub.getAttachmentID, attachmentID)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "logs.txt") {
-		t.Fatalf("expected response body to contain the attachment name, got: %s", rec.Body.String())
-	}
-}
-
-// TestUpdateAttachment_DecodesBodyAndPathID pins the PATCH /attachments/{id}
-// handler's wiring: the path id populates req.AttachmentID (the request body has
-// no id field of its own -- see domain.UpdateAttachmentRequest's `json:"-"` tag),
-// and the JSON body fields decode into the rest of the request.
-func TestUpdateAttachment_DecodesBodyAndPathID(t *testing.T) {
-	const attachmentID = "11111111-1111-1111-1111-111111111111"
-	stub := &stubCaseService{
-		updateAttachmentResp: domain.UpdateAttachmentResponse{Message: "updated"},
-	}
-	h := NewCaseHandler(stub, nil)
-
-	body := `{"referenceId":"22222222-2222-2222-2222-222222222222","referenceType":"deployment","name":"renamed.txt"}`
-	req := httptest.NewRequest(http.MethodPatch, "/attachments/"+attachmentID, strings.NewReader(body))
-	req.SetPathValue("id", attachmentID)
-	rec := httptest.NewRecorder()
-
-	h.UpdateAttachment(rec, req)
-
-	if !stub.updateAttachmentCalled {
-		t.Fatalf("expected UpdateAttachment to reach the service layer, got status %d body %q", rec.Code, rec.Body.String())
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if stub.updateAttachmentReq.AttachmentID != attachmentID {
-		t.Fatalf("AttachmentID = %q, want %q (from the URL path, not the body)", stub.updateAttachmentReq.AttachmentID, attachmentID)
-	}
-	if stub.updateAttachmentReq.ReferenceID != "22222222-2222-2222-2222-222222222222" {
-		t.Fatalf("ReferenceID = %q, want the decoded body value", stub.updateAttachmentReq.ReferenceID)
-	}
-	if stub.updateAttachmentReq.ReferenceType != domain.ReferenceTypeDeployment {
-		t.Fatalf("ReferenceType = %q, want %q", stub.updateAttachmentReq.ReferenceType, domain.ReferenceTypeDeployment)
-	}
-	if stub.updateAttachmentReq.Name == nil || *stub.updateAttachmentReq.Name != "renamed.txt" {
-		t.Fatalf("Name = %v, want renamed.txt", stub.updateAttachmentReq.Name)
-	}
-}
-
-// TestUpdateAttachment_RejectsMalformedBody proves a body the decoder cannot
-// parse is rejected before the service layer runs.
-func TestUpdateAttachment_RejectsMalformedBody(t *testing.T) {
-	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/attachments/x", strings.NewReader(`{"name":`))
-	req.SetPathValue("id", "11111111-1111-1111-1111-111111111111")
-	rec := httptest.NewRecorder()
-
-	h.UpdateAttachment(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if stub.updateAttachmentCalled {
-		t.Fatalf("expected the request to be rejected before the service layer")
 	}
 }
 
