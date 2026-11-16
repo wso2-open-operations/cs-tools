@@ -2752,12 +2752,43 @@ revision replaced it with a brand new incarnation" — all three look
 identical to that caller ("not in the active list" / "some other active row
 of this type exists"), and treating either of the latter two as "resolved"
 would wrongly suppress a genuine alert. `domain.SLAClockState`
-(`Found`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists specifically
-to make those three distinguishable: `GetClockState` returns the single
-most recently-started row for `(workItemID, target[, source])`,
-**regardless of `is_active`**, with `Found=false` (every other field zero)
-when no row exists at all. `StartedOn` is what lets the caller compare
-clock *incarnations*, not just clock types, after a severity revision.
+(`Found`/`ID`/`IsActive`/`Stage`/`HasBreached`/`StartedOn`) exists
+specifically to make those three distinguishable: `GetClockState` returns
+one row for `(workItemID, target)`, **regardless of `is_active`**, with
+`Found=false` (every other field zero) when no row exists at all. `StartedOn`
+is what lets the caller compare clock *incarnations*, not just clock types,
+after a severity revision. (The `source` query param this endpoint used to
+also take was removed along with `sla.source` itself — a caller that still
+sends one is simply ignored.)
+
+**`slaId`, an optional third parameter, narrows the lookup to one exact
+`sla` row instead of this method's own default — the real fix for a former
+"known, deliberate limitation" here.** Without it, this method always
+picked "whichever row is most recently started" for `(workItemID, target)`
+— a real problem once a caller tracks a *specific* clock over time, because
+the per-policy registration guard genuinely lets two policies both have a
+*open* clock on the same target at once (confirmed live, not theoretical —
+see `ActiveClockPolicies`' own doc comment below for the Hosting-case
+example, and staging/production both show plenty of real `RESPONSE`/
+`RESOLUTION` cases with more than one simultaneously-active policy). A
+caller with no row id to disambiguate could have this method's own terminal-
+stage answer about one sibling policy wrongly confirmed as "resolved" for a
+DIFFERENT, still genuinely due sibling. `csm-notification-service` found
+this the hard way: `verifyTierStillDue`'s own terminal-stage check (see that
+repo's own `CLAUDE.md`) had to be reordered to close a real production false
+alert, and a CodeRabbit review on that fix caught that the reordering could,
+in the two-simultaneously-open-policies case, now wrongly suppress a
+genuine alert instead. `ID` (this exact row's own primary key, on both
+`SLAClockState` and `SLAStatus`) is what that service now remembers — in its
+own Redis-held `ClockMeta.SLAID` — and passes back here as `slaId` every
+time it re-checks a clock it already tracks, so entity-service's answer is
+about THAT specific row, not an ambiguous "whichever one is newest." Passing
+`slaId=""` (or omitting it) keeps the original behavior, for a caller that's
+discovering entity-service's current policy resolution rather than
+re-verifying one it already knows (`ReviseClocks`'s own
+`refreshAndReconcileClock` call, deliberately — see that function's own doc
+comment there). A `slaId` matching no row for the given `(workItemID,
+target)` reports `Found=false`, same as no row existing at all.
 
 **`GetClockState` also resolves `AssigneeName`/`AssigneeEmail`/`TeamEmail`/
 `TeamLeadName`** (`work_item`/`account`/`"group"`/`"user"` joins, the exact

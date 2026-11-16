@@ -1622,12 +1622,12 @@ paths:
   /sla-status/clock-state:
     get:
       summary: >-
-        Return the full, current state of one (work item, clock target) "sla"
-        row, regardless of whether it is currently active — unlike
-        GET /sla-status, which only ever lists active rows. Lets a caller
-        tell a genuinely resolved clock (a real row, in a terminal stage)
-        apart from one that was never registered at all (no row found),
-        which the active-only list can never distinguish between. Used by
+        Return the current state of one (work item, clock target) "sla" row,
+        regardless of whether it is currently active — unlike GET
+        /sla-status, which only ever lists active rows. Lets a caller tell a
+        genuinely resolved clock (a real row, in a terminal stage) apart from
+        one that was never registered at all (no row found), which the
+        active-only list can never distinguish between. Used by
         integrations/csm-notification-service as a final check against this
         service's own durable record immediately before sending a breach
         alert for a clock whose Redis-held completion state may have fallen
@@ -1648,20 +1648,25 @@ paths:
           schema:
             type: string
             enum: [response, workaround, resolution]
-        - name: source
+        - name: slaId
           in: query
           description: >-
-            Optional, same accepted values as GET /sla-status's own "source".
-            Omitted matches a row of either source.
+            Optional. The exact "sla" row's own id (as previously returned
+            on this same field by this endpoint or by GET /sla-status) —
+            narrows the lookup to that specific row instead of the
+            ambiguous "whichever row is most recently started" default,
+            which cannot tell two policies that both have a genuinely open
+            clock on the same (work item, target) apart. Omitting it keeps
+            that original, ambiguous lookup.
           schema:
             type: string
-            enum: [csm, servicenow]
+            format: uuid
       responses:
         "200":
           description: >-
             The clock's current state, or an all-zero/false body with
-            found=false when no row exists for this (work item, target,
-            source) at all.
+            found=false when no row exists for this (work item, target)
+            at all, or (slaId given) no row with that exact id exists.
           content:
             application/json:
               schema:
@@ -38302,6 +38307,14 @@ components:
       properties:
         caseId:
           type: string
+        id:
+          type: string
+          format: uuid
+          description: >-
+            This exact "sla" row's own id — pass it as GET
+            /sla-status/clock-state's slaId query parameter to re-check this
+            specific row later instead of its ambiguous "most recently
+            started" default.
         clockType:
           type: string
           description: One of response, workaround, resolution.
@@ -38386,6 +38399,13 @@ components:
       properties:
         found:
           type: boolean
+        id:
+          type: string
+          format: uuid
+          description: >-
+            This exact "sla" row's own id — pass it back as this endpoint's
+            slaId query parameter to re-check this specific row again,
+            instead of the ambiguous "most recently started" default.
         isActive:
           type: boolean
         stage:

@@ -303,8 +303,13 @@ func (s *slaStatusService) RequestRecalculation(ctx context.Context) error {
 	return nil
 }
 
-// GetClockState implements SLAStatusService.
-func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
+// GetClockState implements SLAStatusService. slaID is optional -- "" keeps
+// the original "most recently started row" lookup; a non-empty value must
+// be a valid UUID (the "sla" row's own id, as a caller previously received
+// it back from this same method's response) and narrows the lookup to that
+// exact row -- see repository.SLAStatusRepository.GetClockState's own doc
+// comment for why that disambiguation exists at all.
+func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target, slaID string) (domain.SLAClockState, error) {
 	if err := s.requireInternalCaller(ctx); err != nil {
 		return domain.SLAClockState{}, err
 	}
@@ -315,5 +320,8 @@ func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target
 	if !ok {
 		return domain.SLAClockState{}, &apierror.ValidationError{Msg: "target must be one of: response, workaround, resolution"}
 	}
-	return s.repo.GetClockState(ctx, workItemID, targetEnum)
+	if slaID != "" && !validate.IsUUID(slaID) {
+		return domain.SLAClockState{}, &apierror.ValidationError{Msg: "slaId must be a valid UUID"}
+	}
+	return s.repo.GetClockState(ctx, workItemID, targetEnum, slaID)
 }
