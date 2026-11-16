@@ -1156,7 +1156,12 @@ function DashboardWidgetTile({
             // `noWrap`-equivalent behavior below `xl` is reproduced by hand
             // there instead of relying on the (non-responsive) `noWrap` prop.
             noWrap={!dense}
-            sx={denseWidgetLabelSx(dense)}
+            // The info icon (top-right) must not sit on the end of the title,
+            // so the title ends before it when the tile has a description.
+            sx={{
+              ...(denseWidgetLabelSx(dense) ?? { display: "block" }),
+              ...(resolvedDescription ? { pr: 3.5 } : {}),
+            }}
           >
             {resolvedDisplayName}
           </Typography>
@@ -1176,10 +1181,12 @@ function DashboardWidgetTile({
               // An MTTR number carries a unit ("1,259.64 h"), so it is
               // longer than a plain count; a smaller size keeps it whole in
               // a four-across row instead of ending in an ellipsis.
+              // Scales with the tile (a container query unit), so a narrow
+              // tile gets a smaller number instead of "452.…".
               fontSize: isMttrCount
                 ? dense
-                  ? { xs: "2.25rem", xl: "1.5rem" }
-                  : "2.25rem"
+                  ? { xs: "clamp(1.25rem, 10cqw, 2.25rem)", xl: "clamp(1.1rem, 9cqw, 1.5rem)" }
+                  : "clamp(1.25rem, 10cqw, 2.25rem)"
                 : dense
                   ? { xs: "3.25rem", xl: "2rem" }
                   : "3.25rem",
@@ -1208,6 +1215,8 @@ function DashboardWidgetTile({
         position: "relative",
         p: dense ? { xs: 1.75, xl: 1 } : 1.75,
         height: "100%",
+        // Lets the MTTR number size itself against the tile (cqw units).
+        ...(isMttrCount ? { containerType: "inline-size" } : {}),
         ...cardRefreshRevealSx,
       }}
     >
