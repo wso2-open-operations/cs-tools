@@ -631,7 +631,7 @@ func adminAddresses(admins []teamschedule.RotaAdmin) (to, named []string) {
 // the evening before, to finish marking a weekday's rotations (WeekdayMarkCheck).
 // Unlike the weekend's, nothing waits for it: the reminders go out the next
 // morning to whoever is marked by then, copied to the rota admins.
-func buildMarkCheckEmail(cfg Config, admins []teamschedule.RotaAdmin, day time.Time, gaps []gap) (shiftEmail, bool) {
+func buildMarkCheckEmail(cfg Config, admins []teamschedule.RotaAdmin, reminderDay, day time.Time, gaps []gap) (shiftEmail, bool) {
 	to, named := adminAddresses(admins)
 	if len(to) == 0 {
 		return shiftEmail{}, false
@@ -639,8 +639,10 @@ func buildMarkCheckEmail(cfg Config, admins []teamschedule.RotaAdmin, day time.T
 	date := day.Format("Monday, 2 January")
 	data := notify.RotaReminderData{
 		Greeting: greeting(named),
+		// The reminder's own date, not "tomorrow": a retry after midnight
+		// would otherwise name the wrong day.
 		Intro: fmt.Sprintf("The %s weekday rota for %s is not fully marked in the Team Schedule. The rotation reminders for that day "+
-			"go out tomorrow at 09:00 IST, to the people marked by then.", cfg.Family, date),
+			"go out on %s at 09:00 IST, to the people marked by then.", cfg.Family, date, reminderDay.Format("Monday, 2 January")),
 		ScheduleURL: cfg.ScheduleURL,
 		Columns:     []string{"Day", "Rotation", "Marked", "Needed"},
 		AfterTable: []string{"Please mark the missing rotations before then. You are copied on each reminder, so you can see who " +

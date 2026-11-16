@@ -52,8 +52,32 @@ func WeekdayMarkCheck(rota RotaReader, store ReminderStore, email EmailSender, c
 			slog.InfoContext(ctx, "rota mark check: no weekday rotation has a required headcount; nothing checked", "family", cfg.Family)
 			return nil
 		}
-		day := NextWorkingDay(dayOf(cfg.anchor(), cfg.Zone).AddDate(0, 0, 1))
+		// The reminder this check prepares for runs at 09:00 the day after the
+		// check's own scheduled day (Config.Anchor, so a retry keeps it), and
+		// announces the next working day after that.
+		reminderDay := dayOf(cfg.anchor(), cfg.Zone).AddDate(0, 0, 1)
+		if !cfg.Now().Before(reminderDay.Add(reminderHour)) {
+			// A retry that ran past the reminder: it has gone out already,
+			// copied to the rota admins, so a warning now helps nobody.
+			slog.WarnContext(ctx, "rota mark check: the weekday reminder has already gone out; nothing checked",
+				"reminder", reminderDay.Format(dateLayout))
+			return nil
+		}
+		day := NextWorkingDay(reminderDay)
 		date := day.Format(dateLayout)
+		// Only rotations the reminders announce are checked: a required code
+		// that is not in the weekday shifts would never be marked by anyone
+		// the reminders reach, and would warn "0 of N" every evening.
+		required := make(map[string]int, len(cfg.WeekdayRequired))
+		for code, need := range cfg.WeekdayRequired {
+			if cfg.Rotations[code] != "" {
+				required[code] = need
+			}
+		}
+		if len(required) == 0 {
+			slog.InfoContext(ctx, "rota mark check: no announced weekday rotation has a required headcount; nothing checked", "family", cfg.Family)
+			return nil
+		}
 
 		cat, err := rota.Catalogue(ctx)
 		if err != nil {
@@ -65,7 +89,7 @@ func WeekdayMarkCheck(rota RotaReader, store ReminderStore, email EmailSender, c
 		}
 		rostered := selectRostered(cfg, cat, assignments, map[string]time.Time{date: day})
 		weekday := cfg
-		weekday.Required = cfg.WeekdayRequired
+		weekday.Required = required
 		gaps := missingSlots(weekday, rostered, []time.Time{day})
 		if len(gaps) == 0 {
 			slog.InfoContext(ctx, "rota mark check: every weekday rotation is fully marked; nothing sent", "day", date)
@@ -79,11 +103,17 @@ func WeekdayMarkCheck(rota RotaReader, store ReminderStore, email EmailSender, c
 			return fmt.Errorf("rotareminder: read the %s rota admins: %w", cfg.Family, err)
 		}
 		if len(admins) == 0 {
-			for _, a := range cfg.AlertTo {
+			// No rota admin: the task's alert audience instead, its Cc list
+			// when it has no To.
+			fallback := cfg.AlertTo
+			if len(fallback) == 0 {
+				fallback = cfg.AlertCc
+			}
+			for _, a := range fallback {
 				admins = append(admins, teamschedule.RotaAdmin{Email: a})
 			}
 		}
-		msg, ok := buildMarkCheckEmail(cfg, admins, day, gaps)
+		msg, ok := buildMarkCheckEmail(cfg, admins, reminderDay, day, gaps)
 		if !ok {
 			slog.WarnContext(ctx, "rota mark check: the weekday rota is not fully marked and there is nobody to tell", "family", cfg.Family, "day", date)
 			return nil
@@ -91,3 +121,7 @@ func WeekdayMarkCheck(rota RotaReader, store ReminderStore, email EmailSender, c
 		return send(ctx, email, cfg, msg)
 	}
 }
+
+// reminderHour is when rota_weekday_reminder runs on its day, in the rota's
+// zone: 09:00 (its default schedule, 03:30 UTC in Colombo).
+const reminderHour = 9 * time.Hour

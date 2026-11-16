@@ -335,7 +335,9 @@ schedules assume `TZ=UTC` like every other here.
   `ROTA_REMINDER_WEEKDAY_REQUIRED` (default `CRE_EVENING=7`; people on leave are not counted, the
   on-call variant does not count, one person counts once) gets one email to the family's rota admins
   (`GET /team-schedule/rota-admins/{family}`; the task's alert audience when there are none) with a
-  Day | Rotation | Marked | Needed table; a fully marked day sends nothing. The weekday switch on the
+  Day | Rotation | Marked | Needed table naming the reminder's own date; a fully marked day sends
+  nothing. Only codes the weekday reminders announce are checked, and a retry that runs after the
+  09:00 reminder sends nothing (the admins are already copied on it). The weekday switch on the
   card applies; the minimums are not on the card. Then every weekday reminder, scheduled and Send now,
   copies (Cc) the rota admins, the email carrying the invitation included, and never makes them guests
   of the event (`Config.Admins` / `AdminCopy`); the plain `copyTo` copy skips them. A failed admin read

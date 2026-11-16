@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
 )
@@ -67,7 +68,7 @@ func TestWeekdayMarkCheck_AShortRotationTellsTheRotaAdmins(t *testing.T) {
 		t.Errorf("subject = %q, want %q", got.subject, want)
 	}
 	for _, s := range []string{
-		"go out tomorrow at 09:00 IST, to the people marked by then",
+		"go out on Sunday, 18 October at 09:00 IST, to the people marked by then",
 		row("Monday, 19 October", "Evening Rotation", "2", "3"),
 		"You are copied on each reminder",
 	} {
@@ -134,6 +135,60 @@ func TestWeekdayMarkCheck_NoHeadcountChecksNothing(t *testing.T) {
 	}
 	if rota.reads != 0 || len(mail.sent) != 0 {
 		t.Errorf("reads %d, sent %d; want neither", rota.reads, len(mail.sent))
+	}
+}
+
+// A required code the reminders do not announce is not checked: nobody the
+// reminders reach could ever mark it.
+func TestWeekdayMarkCheck_AnUnannouncedRotationIsNotChecked(t *testing.T) {
+	rota := &fakeRota{}
+	cfg := markCheckConfig("2026-10-17 17:00")
+	cfg.Rotations = map[string]string{"CRE_MORNING": "Morning"}
+	mail := &fakeEmail{}
+	if err := WeekdayMarkCheck(rota, &fakeStore{admins: []teamschedule.RotaAdmin{{Email: "ria@example.com"}}}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rota.reads != 0 || len(mail.sent) != 0 {
+		t.Errorf("reads %d, sent %d; want neither for an Evening the reminders never announce", rota.reads, len(mail.sent))
+	}
+}
+
+// With no rota admin and no alert To, the alert Cc list is told.
+func TestWeekdayMarkCheck_NoAdminAndNoAlertToTellsTheAlertCc(t *testing.T) {
+	rota := &fakeRota{assignments: evening("2026-10-19", "Ann")}
+	cfg := markCheckConfig("2026-10-17 17:00")
+	cfg.AlertCc = []string{"watch@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekdayMarkCheck(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Join(mail.sent[0].to, ",") != "watch@example.com" {
+		t.Errorf("want one email to the alert Cc list, got %+v", mail.sent)
+	}
+}
+
+// A retry that runs after the reminder went out sends nothing; one that runs
+// after midnight but before it names the reminder's own day.
+func TestWeekdayMarkCheck_ALateRetry(t *testing.T) {
+	cfg := markCheckConfig("2026-10-22 10:00") // Thursday 10:00, after Thursday's reminder
+	cfg.Anchor = func() time.Time { return at("2026-10-21 17:00") }
+	rota := &fakeRota{assignments: evening("2026-10-23", "Ann")}
+	mail := &fakeEmail{}
+	if err := WeekdayMarkCheck(rota, &fakeStore{admins: []teamschedule.RotaAdmin{{Email: "ria@example.com"}}}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rota.reads != 0 || len(mail.sent) != 0 {
+		t.Errorf("reads %d, sent %d after the reminder went out; want neither", rota.reads, len(mail.sent))
+	}
+
+	cfg = markCheckConfig("2026-10-22 01:00") // Thursday 01:00, before Thursday's reminder
+	cfg.Anchor = func() time.Time { return at("2026-10-21 17:00") }
+	mail = &fakeEmail{}
+	if err := WeekdayMarkCheck(rota, &fakeStore{admins: []teamschedule.RotaAdmin{{Email: "ria@example.com"}}}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || !strings.Contains(mail.sent[0].body, "go out on Thursday, 22 October at 09:00 IST") {
+		t.Errorf("want one email naming Thursday's reminder, got %+v", mail.sent)
 	}
 }
 
