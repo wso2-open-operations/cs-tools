@@ -37,6 +37,7 @@ import {
 import {
   Activity,
   ArrowLeft,
+  ArrowUpRight,
   CheckSquare,
   Clock,
   Eye,
@@ -327,6 +328,7 @@ type CaseTabId =
   | "related"
   | "watchers"
   | "sla"
+  | "escalation"
   | "attachments"
   | "time"
   | "call-requests"
@@ -359,6 +361,7 @@ const TAB_DEFS: Array<{
   { id: "related", label: "Linked Items", icon: <LinkIcon size={16} /> },
   { id: "watchers", label: "Watchers", icon: <Eye size={16} /> },
   { id: "sla", label: "SLAs", icon: <Clock size={16} /> },
+  { id: "escalation", label: "Escalation", icon: <ArrowUpRight size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
@@ -2844,6 +2847,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 ? c.watchers.length
                 : t.id === "sla"
                   ? slaList?.count
+                  : t.id === "escalation"
+                    ? escalationHistory?.escalations.length
                   : t.id === "attachments"
                     ? attachmentList.length
                     : t.id === "time"
@@ -3176,6 +3181,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRemove={isClosed || !canWrite ? undefined : (t) => onRemoveTag(t.id)}
             removingId={removeTag.isPending ? removeTag.variables : null}
           />
+        </Box>
+      )}
+
+      {activeTab === "escalation" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <EscalationWidget
             currentLevel={c.escalationLevel ?? null}
             history={escalationHistory?.escalations ?? []}
