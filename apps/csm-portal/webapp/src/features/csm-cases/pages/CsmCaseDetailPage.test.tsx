@@ -696,7 +696,7 @@ vi.mock("@features/csm-cases/components/CaseDetailWidgets", () => ({
     </div>
   ),
   CustomerContextWidget: () => null,
-  EscalationWidget: () => null,
+  EscalationWidget: () => <div data-testid="escalation-widget-probe" />,
   ProductContextWidget: () => null,
   // Stubbed to a probe rather than `null`: the tests below assert only that
   // the page mounts it for a service request and not for a plain case. The
@@ -973,6 +973,21 @@ describe("CsmCaseDetailPage — tab lives in the URL", () => {
     expect(screen.getByTestId("location-search-probe")).toHaveTextContent(
       "tab=watchers",
     );
+  });
+
+  it("shows the escalation widget in its own Escalation tab, not in Details", () => {
+    renderPageAt("/cases/case-1?tab=details");
+    expect(screen.queryByTestId("escalation-widget-probe")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /escalation/i }));
+    expect(screen.getByTestId("location-search-probe")).toHaveTextContent("tab=escalation");
+    expect(screen.getByTestId("escalation-widget-probe")).toBeInTheDocument();
+  });
+
+  it("opens the Escalation tab from a ?tab=escalation link", () => {
+    renderPageAt("/cases/case-1?tab=escalation");
+    expect(screen.getByRole("tab", { name: /escalation/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("escalation-widget-probe")).toBeInTheDocument();
   });
 
   it("falls back to Activities for ?tab=tasks, the hidden tab with no rendered <Tab>", () => {
