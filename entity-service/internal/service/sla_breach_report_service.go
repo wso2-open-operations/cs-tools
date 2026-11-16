@@ -57,14 +57,23 @@ func NewSLABreachReportService(repo repository.SLABreachReportRepository) SLABre
 }
 
 // SLABreachReportWeek resolves the Monday-to-Monday window the report
-// covers: the full calendar week before the one `week` falls in, in loc.
+// covers, in loc.
 //
-// ServiceNow's own "Breach time on Last week" means the previous whole
-// week, never a trailing seven days, so a run on any day of week N always
-// reports week N-1 unchanged -- a retry or a manual re-run later the same
-// week produces the identical report rather than a sliding window.
+// The two paths mean different things, deliberately:
+//
+//   - No week given (the scheduled run): the full calendar week BEFORE
+//     the one now falls in. ServiceNow's "Breach time on Last week" means
+//     the previous whole week, never a trailing seven days, so a run on
+//     any day of week N reports week N-1 unchanged -- a retry later the
+//     same week reproduces the report rather than sliding it.
+//   - An explicit week: the week CONTAINING that date. This is the
+//     re-send path, and a caller asking for a week names a day in the
+//     week they want, not a day in the week after it. An earlier version
+//     subtracted seven days here too, which contradicted the documented
+//     contract and made `week=<a Monday>` return the week before it.
 func SLABreachReportWeek(week, now time.Time, loc *time.Location) (time.Time, time.Time) {
-	if week.IsZero() {
+	explicit := !week.IsZero()
+	if !explicit {
 		if now.IsZero() {
 			now = time.Now()
 		}
@@ -74,6 +83,9 @@ func SLABreachReportWeek(week, now time.Time, loc *time.Location) (time.Time, ti
 	// Monday as the week's first day: Go's Sunday==0 needs the shift.
 	offset := (int(local.Weekday()) + 6) % 7
 	thisMonday := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -offset)
+	if explicit {
+		return thisMonday, thisMonday.AddDate(0, 0, 7)
+	}
 	return thisMonday.AddDate(0, 0, -7), thisMonday
 }
 
@@ -100,9 +112,18 @@ func (s *slaBreachReportService) BuildReport(ctx context.Context, req domain.SLA
 			Msg: fmt.Sprintf("definitions may name at most %d SLA definitions", SLABreachReportMaxDefinitions)}
 	}
 
-	stages := upperNonEmpty(req.Stages)
-	onboarding := upperNonEmpty(req.OnboardingStatuses)
-	excludeOnboarding := upperNonEmpty(req.ExcludeOnboardingStatuses)
+	stages, err := validatedFilter(req.Stages, validSLAStages, "stages")
+	if err != nil {
+		return domain.SLABreachReport{}, err
+	}
+	onboarding, err := validatedFilter(req.OnboardingStatuses, validOnboardingStatuses, "onboardingStatuses")
+	if err != nil {
+		return domain.SLABreachReport{}, err
+	}
+	excludeOnboarding, err := validatedFilter(req.ExcludeOnboardingStatuses, validOnboardingStatuses, "excludeOnboardingStatuses")
+	if err != nil {
+		return domain.SLABreachReport{}, err
+	}
 
 	from, to := SLABreachReportWeek(req.Week, req.Now, s.loc)
 
@@ -116,6 +137,39 @@ func (s *slaBreachReportService) BuildReport(ctx context.Context, req domain.SLA
 		rows = make([]domain.SLABreachRow, 0)
 	}
 	return domain.SLABreachReport{PeriodStart: from, PeriodEnd: to, Rows: rows}, nil
+}
+
+// validSLAStages and validOnboardingStatuses are the sla_stage_enum and
+// onboarding_status_enum values this report can filter on.
+//
+// Unknown values are rejected rather than passed through. A typo in a
+// stage silently returns no rows, and a typo in an exclusion silently
+// excludes nothing -- and because an empty week is this report's normal
+// state, neither mistake is visible in the delivered mail. These filters
+// come from deployment configuration, so a typo is the likely failure,
+// not a malformed API call.
+var validSLAStages = map[string]bool{
+	"IN_PROGRESS": true, "COMPLETED": true, "BREACHED": true,
+	"CANCELLED": true, "PAUSED": true, "ACHIEVED": true,
+}
+
+var validOnboardingStatuses = map[string]bool{
+	"NOT_STARTED": true, "IN_PROGRESS": true, "COMPLETED": true, "ON_HOLD": true,
+	"NOT_APPLICABLE": true, "EXPIRED": true, "CANCELLED": true,
+}
+
+// validatedFilter normalises one filter list and rejects any value that
+// is not in the enum. Normalisation runs first, so ServiceNow's own
+// spelling ("In progress", "In-Progress") is accepted.
+func validatedFilter(in []string, valid map[string]bool, field string) ([]string, error) {
+	out := upperNonEmpty(in)
+	for _, v := range out {
+		if !valid[v] {
+			return nil, &apierror.ValidationError{
+				Msg: fmt.Sprintf("%s contains an unknown value %q", field, v)}
+		}
+	}
+	return out, nil
 }
 
 // upperNonEmpty trims, upper-cases and drops the blanks from one filter

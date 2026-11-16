@@ -105,7 +105,7 @@ func renderSLABreachRows(rows []slabreachreport.Row, caseLinkBase string, loc *t
 	for i, row := range rows {
 		if i == 0 || row.Team != team {
 			team = row.Team
-			fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">Integration CS Team: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
+			fmt.Fprintf(&b, `<tr><td class="teamHeading" colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">Integration CS Team: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
 				slaBreachRowColumns, orDash(escapeHTML(team)), slaBreachTeamCount(rows, i))
 		}
 		b.WriteString("<tr>")

@@ -72,6 +72,31 @@ func CREVariant() Variant {
 	}
 }
 
+// OnboardingVariant is "Weekly SLA Breach Report (Onboarding)": the
+// cases the Onboarding team handles.
+//
+// Stage {IN_PROGRESS} and onboarding status IS one of {IN_PROGRESS} --
+// both differ from CREVariant's, and this is an "is one of" where the
+// CRE report uses "is not one of".
+//
+// The two are NOT complements. The CRE report also excludes
+// NOT_STARTED, which this one does not include, so a NOT_STARTED case
+// is reported by neither. An earlier revision added NOT_STARTED here on
+// the reasoning that IN_PROGRESS alone selected zero rows in each of the
+// ten weeks measured on staging -- that reasoning was wrong: the source
+// report's own View Report shows "0 total Task SLAs" and is kept
+// scheduled anyway. Reproduced as configured.
+func OnboardingVariant() Variant {
+	return Variant{
+		Key:                "onboarding",
+		Subject:            "Weekly SLA Breach Report (Onboarding)",
+		Heading:            "Weekly SLA Breach Report (Onboarding)",
+		Intro:              "Cases handled by the Onboarding team.",
+		Stages:             []string{"IN_PROGRESS"},
+		OnboardingStatuses: []string{"IN_PROGRESS"},
+	}
+}
+
 // TaskName is the registry (and SUB_CRON_SCHEDULES / SUB_CRON_RECIPIENTS)
 // name of a variant's task. The CRE report keeps the unsuffixed name it
 // was registered under.

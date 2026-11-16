@@ -58,13 +58,15 @@ func csvParam(raw []string) []string {
 // definitions is required and may be given once comma-separated or
 // repeated; the service answers a missing list with a validation error.
 // The other filters are optional and each means "no restriction" when
-// absent. onboardingStatuses is ServiceNow's "Onboarding Status is one
-// of", excludeOnboardingStatuses its "is not one of" -- one report uses
-// each, which is why both exist rather than a single flag. week is any
-// date inside the week to report on and defaults to the week before now,
-// so a missed run can be re-sent for the right week rather than silently
-// reporting the wrong one. The scheduled tasks that mail the two reports
-// are the only expected callers.
+// absent, but a value that is not one of its enum's is rejected rather
+// than silently matching nothing. onboardingStatuses is ServiceNow's
+// "Onboarding Status is one of", excludeOnboardingStatuses its "is not
+// one of" -- one report uses each, which is why both exist rather than a
+// single flag. week is any date inside the week to report on, meaning
+// the week CONTAINING it rather than the week before, and defaults to
+// the week before now; a missed run can therefore be re-sent for the
+// right week rather than silently reporting the wrong one. The scheduled
+// tasks that mail the two reports are the only expected callers.
 func (h *SLABreachReportHandler) GetSLABreachReport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 

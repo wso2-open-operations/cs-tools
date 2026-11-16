@@ -36,6 +36,11 @@
             .footerContent { color: #a2a3a4 !important; }
             .footerContent a { color: #bbbdc1 !important; }
             .reportTable th { background-color: #33383d !important; color: #e2e2e2 !important; }
+            /* The team heading cell carries an inline light background; without
+               this it keeps that background while the p/li/td rule above forces
+               light text onto it. The inline style has no !important, so this
+               rule wins. */
+            .reportTable .teamHeading { background-color: #33383d !important; }
             .reportTable td { border-color: #454b52 !important; }
         }
     </style>

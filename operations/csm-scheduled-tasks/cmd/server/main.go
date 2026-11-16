@@ -719,7 +719,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant()} {
+	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant(), slabreachscan.OnboardingVariant()} {
 		v = slabreachscan.ApplyStageOverride(v)
 		name := slabreachscan.TaskName(v)
 		to, cc := recipientsFor(recipientOverrides, name)

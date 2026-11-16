@@ -75,19 +75,66 @@ func TestSLABreachReportWeekIsThePreviousWholeWeek(t *testing.T) {
 	}
 }
 
-// TestSLABreachReportWeekExplicitWeekOverridesNow covers the re-send
-// path: an explicit week reports that week's predecessor regardless of
-// now.
-func TestSLABreachReportWeekExplicitWeekOverridesNow(t *testing.T) {
+// TestSLABreachReportWeekExplicitWeekIsTheContainingWeek covers the
+// re-send path: a caller naming a date wants the week that date is in,
+// not the week before it. An earlier version subtracted seven days here
+// too, contradicting the documented contract.
+func TestSLABreachReportWeekExplicitWeekIsTheContainingWeek(t *testing.T) {
 	loc := mustColomboLoc(t)
-	week := time.Date(2026, 10, 14, 0, 0, 0, 0, loc)
-	now := time.Date(2026, 12, 25, 0, 0, 0, 0, loc)
-	from, to := SLABreachReportWeek(week, now, loc)
+	now := time.Date(2026, 12, 25, 0, 0, 0, 0, loc) // months later; must not matter
+	wantFrom := time.Date(2026, 10, 12, 0, 0, 0, 0, loc)
+	wantTo := time.Date(2026, 10, 19, 0, 0, 0, 0, loc)
 
-	wantFrom := time.Date(2026, 10, 5, 0, 0, 0, 0, loc)
-	wantTo := time.Date(2026, 10, 12, 0, 0, 0, 0, loc)
-	if !from.Equal(wantFrom) || !to.Equal(wantTo) {
-		t.Fatalf("got [%s, %s), want [%s, %s)", from, to, wantFrom, wantTo)
+	// Every day of the week of 12 Oct must resolve to that same week,
+	// including its Monday -- the boundary the old behaviour got wrong.
+	for day := 12; day <= 18; day++ {
+		from, to := SLABreachReportWeek(time.Date(2026, 10, day, 0, 0, 0, 0, loc), now, loc)
+		if !from.Equal(wantFrom) || !to.Equal(wantTo) {
+			t.Fatalf("week=Oct %d: got [%s, %s), want [%s, %s)", day, from, to, wantFrom, wantTo)
+		}
+	}
+}
+
+// TestBuildReportRejectsUnknownFilterValues: a typo in a configured
+// stage returns no rows, and a typo in an exclusion excludes nothing.
+// Neither is visible in the delivered mail, because an empty week is
+// this report's normal state -- so they have to fail loudly here.
+func TestBuildReportRejectsUnknownFilterValues(t *testing.T) {
+	cases := []struct {
+		name string
+		req  domain.SLABreachReportRequest
+	}{
+		{"bad stage", domain.SLABreachReportRequest{
+			Definitions: []string{"P1 - Response (Open Source)"}, Stages: []string{"PASUED"}}},
+		{"bad onboarding status", domain.SLABreachReportRequest{
+			Definitions: []string{"P1 - Response (Open Source)"}, OnboardingStatuses: []string{"IN-PROGRES"}}},
+		{"bad excluded status", domain.SLABreachReportRequest{
+			Definitions:               []string{"P1 - Response (Open Source)"},
+			ExcludeOnboardingStatuses: []string{"NOT_STARTD"}}},
+	}
+	for _, c := range cases {
+		repo := &fakeSLABreachRepo{}
+		if _, err := newSLABreachSvc(repo).BuildReport(context.Background(), c.req); err == nil {
+			t.Fatalf("%s: want a validation error, got nil", c.name)
+		}
+		if repo.calls != 0 {
+			t.Fatalf("%s: repository must not be queried, got %d calls", c.name, repo.calls)
+		}
+	}
+}
+
+// TestBuildReportAcceptsServiceNowSpelling: validation must not reject
+// the spelling a configuration copied from ServiceNow would carry.
+func TestBuildReportAcceptsServiceNowSpelling(t *testing.T) {
+	repo := &fakeSLABreachRepo{}
+	_, err := newSLABreachSvc(repo).BuildReport(context.Background(), domain.SLABreachReportRequest{
+		Definitions:               []string{"P1 - Response (Open Source)"},
+		Stages:                    []string{"In progress"},
+		OnboardingStatuses:        []string{"In-Progress"},
+		ExcludeOnboardingStatuses: []string{"Not-Started"},
+	})
+	if err != nil {
+		t.Fatalf("ServiceNow spelling must be accepted: %v", err)
 	}
 }
 
