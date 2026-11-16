@@ -108,15 +108,18 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
 }
 
-// Report fetches last week's breaches under one report's filters.
-// entity-service decides which week "last week" is, in the report's own
-// timezone, from the instant of the call.
+// Report fetches one week's breaches under one report's filters.
+//
+// A zero week asks for last week, which entity-service resolves in the
+// report's own timezone from the instant of the call -- the scheduled
+// path. A non-zero week asks for the week CONTAINING that date, which is
+// the manual re-send and testing path.
 //
 // onboardingStatuses is ServiceNow's "Onboarding Status is one of" and
 // excludeOnboardingStatuses its "is not one of"; the two reports use one
 // each. An empty filter is omitted entirely rather than sent blank, so
 // the server reads it as "no restriction".
-func (c *Client) Report(ctx context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) (Report, error) {
+func (c *Client) Report(ctx context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string, week time.Time) (Report, error) {
 	q := url.Values{}
 	q.Set("definitions", strings.Join(definitions, ","))
 	if len(stages) > 0 {
@@ -127,6 +130,9 @@ func (c *Client) Report(ctx context.Context, definitions, stages, onboardingStat
 	}
 	if len(excludeOnboardingStatuses) > 0 {
 		q.Set("excludeOnboardingStatuses", strings.Join(excludeOnboardingStatuses, ","))
+	}
+	if !week.IsZero() {
+		q.Set("week", week.Format("2006-01-02"))
 	}
 
 	endpoint := c.baseURL + "/reports/sla-breaches?" + q.Encode()

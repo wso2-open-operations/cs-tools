@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
@@ -85,7 +86,7 @@ func TaskName(v Variant) string {
 // ReportFetcher is the subset of *slabreachreport.Client this package
 // depends on.
 type ReportFetcher interface {
-	Report(ctx context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) (slabreachreport.Report, error)
+	Report(ctx context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string, week time.Time) (slabreachreport.Report, error)
 }
 
 // EmailSender is the subset of *notify.Client this package depends on.
@@ -151,6 +152,41 @@ func ParseList(raw string) []string {
 	return out
 }
 
+// RunNowWeek turns a manual run's --from-date/--to-date into the single
+// week the report covers.
+//
+// The report is always a whole Monday-to-Monday week, so the two dates
+// have to name the same one; a range spanning a boundary has no answer
+// this report could give, and silently reporting one of the two weeks
+// would be worse than refusing. Both zero means "not given", and the
+// caller reports last week as usual.
+func RunNowWeek(from, to time.Time, loc *time.Location) (time.Time, error) {
+	if from.IsZero() && to.IsZero() {
+		return time.Time{}, nil
+	}
+	if from.IsZero() || to.IsZero() {
+		return time.Time{}, fmt.Errorf("--from-date and --to-date must be given together")
+	}
+	if to.Before(from) {
+		return time.Time{}, fmt.Errorf("--to-date %s is before --from-date %s",
+			to.Format("2006-01-02"), from.Format("2006-01-02"))
+	}
+	if mondayOf(from, loc) != mondayOf(to, loc) {
+		return time.Time{}, fmt.Errorf(
+			"--from-date %s and --to-date %s are in different weeks; this report always covers one whole Monday-to-Monday week",
+			from.Format("2006-01-02"), to.Format("2006-01-02"))
+	}
+	return from, nil
+}
+
+// mondayOf is the date of the Monday starting the week that t falls in,
+// as a plain YYYY-MM-DD string for comparison.
+func mondayOf(t time.Time, loc *time.Location) string {
+	local := t.In(loc)
+	offset := (int(local.Weekday()) + 6) % 7
+	return local.AddDate(0, 0, -offset).Format("2006-01-02")
+}
+
 // SendReport returns a registry.Task.Handler that fetches last week's SLA
 // breaches for one variant and mails them to to/cc.
 //
@@ -164,9 +200,14 @@ func ParseList(raw string) []string {
 // would be indistinguishable from the task being broken -- the exact
 // confusion the regression reports' own "expect silence" caveat causes.
 //
+// A zero week is the scheduled behaviour: entity-service resolves last
+// week itself. A non-zero week reports the week containing that date,
+// which is how a manual run covers a week that was missed -- or, on an
+// environment whose data has stopped, a week that actually has rows.
+//
 // emailsEnabled is cmd/server/main.go's ALERTS_ENABLED. When false the
 // handler succeeds without contacting entity-service.
-func SendReport(reports ReportFetcher, email EmailSender, v Variant, definitions, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
+func SendReport(reports ReportFetcher, email EmailSender, v Variant, definitions, to, cc []string, caseLinkBase string, emailsEnabled bool, week time.Time) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled {
 			return nil
@@ -182,7 +223,7 @@ func SendReport(reports ReportFetcher, email EmailSender, v Variant, definitions
 			return fmt.Errorf("slabreachscan %s: no SLA definitions configured", v.Key)
 		}
 
-		report, err := reports.Report(ctx, definitions, v.Stages, v.OnboardingStatuses, v.ExcludeOnboardingStatuses)
+		report, err := reports.Report(ctx, definitions, v.Stages, v.OnboardingStatuses, v.ExcludeOnboardingStatuses, week)
 		if err != nil {
 			return fmt.Errorf("slabreachscan %s: fetch report: %w", v.Key, err)
 		}
