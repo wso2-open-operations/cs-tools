@@ -105,14 +105,14 @@ func TestBuildProjectReactivatedPayload_OnlyInternalWellFormedRecipients(t *test
 		TechnicalOwner: acpStr("tech@customer.example"),
 	}
 	got := buildProjectReactivatedPayload(domain.ACPReopenProject{ID: "pid"}, salesentity.Project{}, c,
-		domain.ACPReopenWrite{ReopenEndDate: true}, acpTestNow, "@example.com")
+		domain.ACPReopenWrite{ReopenEndDate: true}, acpTestNow, []string{"@example.com"})
 	if !reflect.DeepEqual(got.Recipients, []string{"alex@example.com"}) {
 		t.Errorf("recipients = %v, want only the internal, well-formed address", got.Recipients)
 	}
 	// An account owner outside the domain is not named as the owner either.
 	c.Owner.Email = acpStr("owner@customer.example")
 	got = buildProjectReactivatedPayload(domain.ACPReopenProject{ID: "pid"}, salesentity.Project{}, c,
-		domain.ACPReopenWrite{ReopenEndDate: true}, acpTestNow, "@example.com")
+		domain.ACPReopenWrite{ReopenEndDate: true}, acpTestNow, []string{"@example.com"})
 	if got.AccountOwnerEmail != "" || len(got.Recipients) != 0 {
 		t.Errorf("owner=%q recipients=%v, want none", got.AccountOwnerEmail, got.Recipients)
 	}
@@ -134,9 +134,39 @@ func TestACPInternalAddress(t *testing.T) {
 		{"", false},
 	}
 	for _, tt := range tests {
-		if _, got := acpInternalAddress(tt.in, "@example.com"); got != tt.want {
+		if _, got := acpInternalAddress(tt.in, []string{"@example.com"}); got != tt.want {
 			t.Errorf("acpInternalAddress(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+// During the move from wso2.com to choreolabs.com an internal person may
+// have either address, so both domains are kept and a third is not.
+func TestBuildProjectReactivatedPayload_SeveralInternalDomains(t *testing.T) {
+	c := &salesentity.Customer{
+		Owner:          &salesentity.CustomerUser{Email: acpStr("owner@example.com")},
+		RenewalManager: &salesentity.CustomerUser{Email: acpStr("renewals@example.org")},
+		TechnicalOwner: acpStr("tech@customer.example"),
+	}
+	got := buildProjectReactivatedPayload(domain.ACPReopenProject{ID: "pid"}, salesentity.Project{}, c,
+		domain.ACPReopenWrite{ReopenEndDate: true}, acpTestNow, []string{"@example.com", "@example.org"})
+	if !reflect.DeepEqual(got.Recipients, []string{"owner@example.com", "renewals@example.org"}) {
+		t.Errorf("recipients = %v, want both internal domains and not the customer's", got.Recipients)
+	}
+	if got.AccountOwnerEmail != "owner@example.com" {
+		t.Errorf("owner = %q", got.AccountOwnerEmail)
+	}
+}
+
+// With nothing configured the notice may go to either of the company's
+// domains; a configured list replaces them.
+func TestACPReopen_InternalDomains(t *testing.T) {
+	if got := (&ACPReopen{}).internalDomains(); !reflect.DeepEqual(got, []string{"@wso2.com", "@choreolabs.com"}) {
+		t.Errorf("default = %v", got)
+	}
+	r := &ACPReopen{InternalDomains: []string{" @Example.COM ", ""}}
+	if got := r.internalDomains(); !reflect.DeepEqual(got, []string{"@example.com"}) {
+		t.Errorf("configured = %v, want trimmed and lower-cased", got)
 	}
 }
 
@@ -223,7 +253,7 @@ func acpOpenedByHandProject() *domain.ACPReopenProject {
 }
 
 func newACPChecker(repo *acpFakeRepo, sf ACPReopenSalesforce, mod func(*ACPReopen)) *ACPReopen {
-	r := &ACPReopen{Projects: repo, SalesEntity: sf, Notify: true, InternalDomain: "@example.com",
+	r := &ACPReopen{Projects: repo, SalesEntity: sf, Notify: true, InternalDomains: []string{"@example.com"},
 		Now: func() time.Time { return acpTestNow }}
 	if mod != nil {
 		mod(r)
