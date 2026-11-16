@@ -3844,6 +3844,701 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /users/me/code-dashboards:
+    get:
+      summary: List the caller's saved code dashboards.
+      description: >
+        Postgres-only. The authenticated user's own saved code (advanced)
+        dashboards (migration 0295), ordered by name, without their source.
+        The owner is always the caller resolved from x-user-id-token.
+      operationId: listCodeDashboards
+      responses:
+        "200":
+          description: The caller's code dashboards.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeDashboardList'
+        "400":
+          description: Bad request — the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/code-dashboards/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get one of the caller's saved code dashboards.
+      description: >
+        Postgres-only. Another user's dashboard is reported as not found.
+      operationId: getCodeDashboard
+      responses:
+        "200":
+          description: The code dashboard, with its source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeDashboard'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no code dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Save a code dashboard.
+      description: >
+        Postgres-only. Creates the code dashboard with this id, or replaces it
+        when the caller already has one with this id; 200 either way. At most
+        50 code dashboards per user, counted apart from the custom dashboards
+        (replacing does not count). An id that belongs to another user, or to
+        a dashboard with no owner, is reported as not found and left unchanged.
+      operationId: saveCodeDashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveCodeDashboardRequest'
+      responses:
+        "200":
+          description: The saved code dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeDashboard'
+        "400":
+          description: Bad request — invalid id, name or source, the 50-dashboard limit, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the id is another user's dashboard, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Conflict — the caller already has another code dashboard with that name (ignoring case).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete one of the caller's saved code dashboards.
+      operationId: deleteCodeDashboard
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no code dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/code-dashboards/{id}/shares:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: List who one of the caller's saved code dashboards is shared with.
+      description: >
+        Postgres-only. Owner only: a dashboard that is not the caller's
+        (missing, or another user's) is not found. Recipients are ordered by
+        name.
+      operationId: listCodeDashboardShares
+      responses:
+        "200":
+          description: The dashboard's shares.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/code-dashboards/{id}/shares/{userId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Share one of the caller's saved code dashboards with a user.
+      description: >
+        Postgres-only. No request body. The recipient can view the dashboard
+        (GET /users/me/shared-code-dashboards/{id}), not change it, and sees the
+        owner's current version. Owner only. The recipient must be internal
+        staff and not the caller. Sharing again is not an error (200). The
+        response is the dashboard's shares after the change.
+      operationId: addCodeDashboardShare
+      responses:
+        "200":
+          description: The dashboard's shares after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: Bad request — an id is not a UUID, the user is the caller, the user is not internal staff, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, there is no such user, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Stop sharing one of the caller's saved code dashboards with a user.
+      description: >
+        Postgres-only. Owner only.
+      operationId: removeCodeDashboardShare
+      responses:
+        "204":
+          description: No longer shared with that user.
+        "400":
+          description: Bad request — an id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, it is not shared with that user, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/code-dashboards/{id}/team-shares:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: List the teams one of the caller's saved code dashboards is shared with.
+      description: >
+        Postgres-only. Owner only: a dashboard that is not the caller's
+        (missing, or another user's) is not found. Teams are ordered by name.
+      operationId: listCodeDashboardTeamShares
+      responses:
+        "200":
+          description: The dashboard's team shares.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/code-dashboards/{id}/team-shares/{teamId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: teamId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          description: A team table id (Rigel, Castor, Americas, Apollo, ...).
+    put:
+      summary: Share one of the caller's saved code dashboards with a team.
+      description: >
+        Postgres-only. No request body. Whoever is in the team when the
+        dashboard is read can view it (GET /users/me/shared-code-dashboards),
+        provided they are internal staff and not its owner: membership is
+        read live from team_member, so someone who joins later sees it and
+        someone who leaves stops seeing it. Owner only. Sharing again is not
+        an error (200). The response is the dashboard's team shares after
+        the change.
+      operationId: addCodeDashboardTeamShare
+      responses:
+        "200":
+          description: The dashboard's team shares after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: Bad request — an id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, there is no such team, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Stop sharing one of the caller's saved code dashboards with a team.
+      description: >
+        Postgres-only. Owner only.
+      operationId: removeCodeDashboardTeamShare
+      responses:
+        "204":
+          description: No longer shared with that team.
+        "400":
+          description: Bad request — an id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, it is not shared with that team, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/code-dashboards/{id}/link:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved code dashboards.
+      description: >
+        Postgres-only. Owner only: a dashboard that is not the caller's
+        (missing, or another user's) is not found. Off for every dashboard
+        until its owner turns it on.
+      operationId: getCodeDashboardLink
+      responses:
+        "200":
+          description: The dashboard's link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Turn on the link to one of the caller's saved code dashboards.
+      description: >
+        Postgres-only. No request body. Owner only. Any internal staff member
+        who opens the link (POST /users/me/shared-code-dashboards/link) can then
+        view the dashboard, view only, while the link stays on. Turning on a
+        link that is already on keeps the same link (200).
+      operationId: enableCodeDashboardLink
+      responses:
+        "200":
+          description: The dashboard's link, on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Turn off the link to one of the caller's saved code dashboards.
+      description: >
+        Postgres-only. Owner only. Everyone who had the dashboard only
+        through the link loses it, and the old link stops working; turning
+        it on again makes a new link. Turning off a link that is off is not
+        an error (204).
+      operationId: disableCodeDashboardLink
+      responses:
+        "204":
+          description: The link is off.
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/shared-code-dashboards:
+    get:
+      summary: List the code dashboards other users shared with the caller.
+      description: >
+        Postgres-only. View only; each entry names its owner. Ordered by name,
+        without sources. The caller's own dashboards are not listed here.
+      operationId: listSharedCodeDashboards
+      responses:
+        "200":
+          description: The dashboards shared with the caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedCustomDashboardList'
+        "400":
+          description: Bad request — the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/shared-code-dashboards/link:
+    post:
+      summary: Open a saved code dashboard's link.
+      description: >
+        Postgres-only, internal staff only. The link id is in the body, not
+        the path, so it stays out of access logs. From then on the dashboard
+        is listed under GET /users/me/shared-code-dashboards while the link stays
+        on, unless the caller owns it: through the link (sharedViaLink true),
+        or through a person or team share while the caller has one, and
+        through the link again if that share goes. Opening it again changes
+        nothing. A link that is unknown or off, and a caller who is not
+        internal staff, are not found.
+      operationId: openCodeDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenCustomDashboardLinkRequest'
+      responses:
+        "200":
+          description: The dashboard the link opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedCustomDashboardLink'
+        "400":
+          description: Bad request — the body is not valid, linkId is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the link does not open a dashboard (unknown, or turned off), the caller is not internal staff, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/shared-code-dashboards/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get one code dashboard shared with the caller.
+      description: >
+        Postgres-only. View only: the owner's current version, with its
+        source. A dashboard not shared with the caller (including the
+        caller's own) is not found.
+      operationId: getSharedCodeDashboard
+      responses:
+        "200":
+          description: The shared dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedCodeDashboard'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — not shared with the caller, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/me/dashboards/{id}/shares:
     parameters:
       - name: id
@@ -7351,6 +8046,52 @@ paths:
         "503":
           description: >-
             groupBy is only supported for the ServiceNow data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cases/resolution-time:
+    post:
+      summary: Case resolution time (MTTR), for a dashboard.
+      description: >-
+        The cases matching the filters that are solution proposed or closed
+        and were resolved (else closed) in a window of UTC days (the last 12
+        months by default, at most 24), with the average business time they
+        took: each case's latest finished RESOLUTION SLA clock, else the
+        business duration a migrated case carries. A case with neither is
+        counted but not averaged. Optionally per group, the largest kept
+        and the rest merged into others. Scoped to the caller's cases, as the
+        aggregate operation is.
+      operationId: caseResolutionTime
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseResolutionTimeRequest'
+      responses:
+        "200":
+          description: The resolved cases' count and average business time.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseResolutionTimeResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            Case resolution time is only supported for the Postgres data source.
           content:
             application/json:
               schema:
@@ -25425,6 +26166,80 @@ components:
             remainder is folded into AggregateResponse.othersCount. Optional; a
             default is applied when omitted.
 
+    CaseResolutionTimeRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchCasesFilters'
+        resolvedFrom:
+          type: string
+          description: >-
+            First day a case may have been resolved (else closed) on
+            (inclusive, UTC): a YYYY-MM-DD date or a relative date placeholder
+            (__today__, __startOfQuarter:-1__, ...). Needs resolvedTo. With
+            neither, the 12 months ending today.
+          example: "2026-07-01"
+        resolvedTo:
+          type: string
+          description: >-
+            Last day (inclusive, UTC), in the same forms. Needs resolvedFrom;
+            at most 24 months after it.
+          example: "2026-09-30"
+        groupBy:
+          type: string
+          enum: [severity, type, issueType, engagementType, account, product, project, region]
+          description: Splits the result by this case field. Optional.
+        maxGroups:
+          type: integer
+          description: >-
+            Keeps this many groups, those with the most resolved cases; the
+            rest are merged into others. Optional; defaults to 10.
+
+    CaseResolutionTimeBucket:
+      type: object
+      required: [count, measured, averageHours]
+      properties:
+        key:
+          type: string
+          description: The group's value, as the field's filter takes it (groups only).
+        label:
+          type: string
+          description: The group's name (an account's, project's or region's), else its key (groups only).
+        count:
+          type: integer
+          description: Cases resolved in the window.
+        measured:
+          type: integer
+          description: Of those, the cases with a business duration.
+        averageHours:
+          type: number
+          nullable: true
+          description: The measured cases' mean business duration in hours; null when none is measured.
+
+    CaseResolutionTimeResponse:
+      type: object
+      required: [resolvedFrom, resolvedTo, total]
+      properties:
+        resolvedFrom:
+          type: string
+          format: date
+          description: The window's first day.
+        resolvedTo:
+          type: string
+          format: date
+          description: The window's last day.
+        total:
+          $ref: '#/components/schemas/CaseResolutionTimeBucket'
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseResolutionTimeBucket'
+          description: >-
+            With groupBy, the groups with the most resolved cases. A case with
+            no value for the field is in total only.
+        others:
+          $ref: '#/components/schemas/CaseResolutionTimeBucket'
+
     CaseVolumeTrendRequest:
       type: object
       properties:
@@ -31999,6 +32814,59 @@ components:
         definition:
           type: string
           description: The dashboard JSON as text, at most 65536 bytes; must not be blank.
+    CodeDashboard:
+      type: object
+      required: [id, name, source, createdOn, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        source:
+          type: string
+          description: The dashboard's JavaScript as text. Checked by the CSM portal backend and run by the portal; not parsed or run here.
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CodeDashboardSummary:
+      type: object
+      required: [id, name, createdOn, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CodeDashboardList:
+      type: object
+      required: [dashboards]
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeDashboardSummary'
+    SaveCodeDashboardRequest:
+      type: object
+      required: [name, source]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          description: Trimmed before saving; must not be blank. Unique per user among their code dashboards, ignoring case.
+        source:
+          type: string
+          description: The dashboard's JavaScript as text, at most 262144 bytes; must not be blank.
     CustomDashboardShare:
       type: object
       required: [user, sharedOn]
@@ -32139,6 +33007,37 @@ components:
         sharedViaLink:
           type: boolean
           description: True when the caller has the dashboard only because they opened its link (POST /users/me/shared-dashboards/link); false for a person or team share.
+        sharedOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    SharedCodeDashboard:
+      type: object
+      required: [id, name, source, owner, sharedViaTeam, sharedViaLink, sharedOn, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        source:
+          type: string
+          description: The dashboard's JavaScript as text (the owner's current version). Checked by the CSM portal backend and again by the portal, which runs it in its sandbox; never parsed or run here.
+        owner:
+          allOf:
+            - $ref: '#/components/schemas/UserReference'
+          nullable: true
+          description: Who shared the dashboard (its owner); null once that user has been deleted.
+        sharedViaTeam:
+          allOf:
+            - $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
+          nullable: true
+          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name). sharedOn is that share's date.
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link (POST /users/me/shared-code-dashboards/link); false for a person or team share.
         sharedOn:
           type: string
           format: date-time

@@ -3864,6 +3864,110 @@ func (s *caseService) AggregateCases(ctx context.Context, req domain.AggregateCa
 	return domain.AggregateResponse{Groups: buckets[:maxGroups], OthersCount: others, TotalRecords: total}, nil
 }
 
+// maxCaseResolutionTimeMonths bounds CaseResolutionTimeRequest's window: two
+// years of resolved cases, the case volume trend's own longest window.
+const maxCaseResolutionTimeMonths = 24
+
+// CaseResolutionTime implements CaseService: the window is resolved
+// (resolveCaseResolutionWindow), the filters prepared and the caller's scope
+// applied as for AggregateCases, and the repository's per-group sums turned
+// into averages. The groups with the most resolved cases are kept (MaxGroups,
+// default as AggregateCases'); the rest are merged into Others, their seconds
+// summed before averaging so Others' average is its cases', not its groups'.
+func (s *caseService) CaseResolutionTime(ctx context.Context, req domain.CaseResolutionTimeRequest) (domain.CaseResolutionTimeResponse, error) {
+	from, to, err := resolveCaseResolutionWindow(req, time.Now().UTC())
+	if err != nil {
+		return domain.CaseResolutionTimeResponse{}, err
+	}
+	search, err := s.prepareCaseSearch(ctx, domain.SearchCasesRequest{Filters: req.Filters})
+	if err != nil {
+		return domain.CaseResolutionTimeResponse{}, err
+	}
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.CaseResolutionTimeResponse{}, err
+	}
+	sums, err := s.repo.CaseResolutionTime(ctx, search, req.GroupBy, from, to.AddDate(0, 0, 1), scope)
+	if err != nil {
+		return domain.CaseResolutionTimeResponse{}, err
+	}
+	resp := domain.CaseResolutionTimeResponse{
+		ResolvedFrom: from.Format("2006-01-02"),
+		ResolvedTo:   to.Format("2006-01-02"),
+		Total:        mergeCaseResolutionSums(sums),
+	}
+	if req.GroupBy == "" {
+		return resp, nil
+	}
+	groups := make([]domain.CaseResolutionTimeSum, 0, len(sums))
+	for _, sum := range sums {
+		if sum.Key != nil {
+			groups = append(groups, sum)
+		}
+	}
+	maxGroups := req.MaxGroups
+	if maxGroups <= 0 {
+		maxGroups = defaultCaseAggregateMaxGroups
+	}
+	if maxGroups < len(groups) {
+		others := mergeCaseResolutionSums(groups[maxGroups:])
+		resp.Others = &others
+		groups = groups[:maxGroups]
+	}
+	resp.Groups = make([]domain.CaseResolutionTimeBucket, 0, len(groups))
+	for _, g := range groups {
+		b := mergeCaseResolutionSums([]domain.CaseResolutionTimeSum{g})
+		b.Key, b.Label = *g.Key, g.Label
+		resp.Groups = append(resp.Groups, b)
+	}
+	return resp, nil
+}
+
+// mergeCaseResolutionSums adds sums together into one bucket and averages its
+// measured seconds in hours (nil when nothing is measured).
+func mergeCaseResolutionSums(sums []domain.CaseResolutionTimeSum) domain.CaseResolutionTimeBucket {
+	var b domain.CaseResolutionTimeBucket
+	seconds := 0.0
+	for _, sum := range sums {
+		b.Count += sum.Count
+		b.Measured += sum.Measured
+		seconds += sum.Seconds
+	}
+	if b.Measured > 0 {
+		hours := seconds / float64(b.Measured) / 3600
+		b.AverageHours = &hours
+	}
+	return b
+}
+
+// resolveCaseResolutionWindow validates req's window against today (UTC):
+// ResolvedFrom and ResolvedTo, both or neither, as inclusive days at most
+// maxCaseResolutionTimeMonths long; neither is the 12 months ending today.
+func resolveCaseResolutionWindow(req domain.CaseResolutionTimeRequest, today time.Time) (time.Time, time.Time, error) {
+	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if req.ResolvedFrom == "" && req.ResolvedTo == "" {
+		return today.AddDate(-1, 0, 1), today, nil
+	}
+	if req.ResolvedFrom == "" || req.ResolvedTo == "" {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "resolvedFrom and resolvedTo are both required"}
+	}
+	from, err := parseCaseVolumeTrendDate("resolvedFrom", req.ResolvedFrom, today)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	to, err := parseCaseVolumeTrendDate("resolvedTo", req.ResolvedTo, today)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if to.Before(from) {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "resolvedTo must not be before resolvedFrom"}
+	}
+	if !to.Before(from.AddDate(0, maxCaseResolutionTimeMonths, 0)) {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: fmt.Sprintf("the resolution window covers at most %d months", maxCaseResolutionTimeMonths)}
+	}
+	return from, to, nil
+}
+
 // defaultCaseVolumeTrendDays/maxCaseVolumeTrendDays bound
 // CaseVolumeTrendRequest.Days and a fixed window's day bucket;
 // maxCaseVolumeTrendWeeks/maxCaseVolumeTrendMonths bound its week and month

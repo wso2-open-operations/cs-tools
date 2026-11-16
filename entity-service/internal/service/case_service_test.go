@@ -66,6 +66,7 @@ func (s stubAccessServiceWithScope) ResolveScope(context.Context) (AccessScope, 
 type stubCaseRepo struct {
 	aggregateCases              func(ctx context.Context, req domain.SearchCasesRequest, groupBy string) ([]domain.AggregateBucket, error)
 	caseVolumeTrend             func(ctx context.Context, req domain.SearchCasesRequest, days []string) (map[string]domain.CaseVolumeDayCount, error)
+	caseResolutionTime          func(ctx context.Context, req domain.SearchCasesRequest, groupBy string, from, to time.Time, scope repository.SearchScope) ([]domain.CaseResolutionTimeSum, error)
 	searchCases                 func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
 	searchCaseAttachments       func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	searchWorkItemAttachments   func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
@@ -149,6 +150,12 @@ func (s *stubCaseRepo) CaseVolumeTrend(ctx context.Context, req domain.SearchCas
 		return s.caseVolumeTrend(ctx, req, days)
 	}
 	panic("CaseVolumeTrend called unexpectedly")
+}
+func (s *stubCaseRepo) CaseResolutionTime(ctx context.Context, req domain.SearchCasesRequest, groupBy string, from, to time.Time, scope repository.SearchScope) ([]domain.CaseResolutionTimeSum, error) {
+	if s.caseResolutionTime != nil {
+		return s.caseResolutionTime(ctx, req, groupBy, from, to, scope)
+	}
+	panic("CaseResolutionTime called unexpectedly")
 }
 func (s *stubCaseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope repository.SearchScope) ([]domain.SearchCaseView, int, error) {
 	if s.searchCases != nil {

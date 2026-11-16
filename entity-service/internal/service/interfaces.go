@@ -141,6 +141,38 @@ type CustomDashboardService interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// CodeDashboardService is the caller's own saved code (advanced) dashboards
+// (migration 0295), the same as CustomDashboardService: Postgres-only, the
+// owner is always the authenticated user resolved from x-user-id-token, and
+// another user's dashboard is reported as not found.
+type CodeDashboardService interface {
+	List(ctx context.Context) (domain.CodeDashboardList, error)
+	Get(ctx context.Context, id string) (domain.CodeDashboard, error)
+	Save(ctx context.Context, id string, req domain.SaveCodeDashboardRequest) (domain.CodeDashboard, error)
+	Delete(ctx context.Context, id string) error
+}
+
+// CodeDashboardShareService shares the caller's saved code dashboards with
+// people, teams and by link (migration 0296), and serves the code dashboards
+// shared with the caller: CustomDashboardShareService,
+// CustomDashboardTeamShareService and CustomDashboardLinkService in one, by
+// the same rules and with the same answers, except that a shared dashboard
+// carries its source.
+type CodeDashboardShareService interface {
+	ListShares(ctx context.Context, dashboardID string) (domain.CustomDashboardShareList, error)
+	AddShare(ctx context.Context, dashboardID, userID string) (domain.CustomDashboardShareList, error)
+	RemoveShare(ctx context.Context, dashboardID, userID string) error
+	ListTeamShares(ctx context.Context, dashboardID string) (domain.CustomDashboardTeamShareList, error)
+	AddTeamShare(ctx context.Context, dashboardID, teamID string) (domain.CustomDashboardTeamShareList, error)
+	RemoveTeamShare(ctx context.Context, dashboardID, teamID string) error
+	GetLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	EnableLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	DisableLink(ctx context.Context, dashboardID string) error
+	OpenLink(ctx context.Context, req domain.OpenCustomDashboardLinkRequest) (domain.OpenedCustomDashboardLink, error)
+	ListSharedWithMe(ctx context.Context) (domain.SharedCustomDashboardList, error)
+	GetSharedWithMe(ctx context.Context, dashboardID string) (domain.SharedCodeDashboard, error)
+}
+
 // CustomDashboardShareService shares the caller's saved dashboards with other
 // users, view only (CSM portal Shared Dashboards). Postgres-only. The caller is
 // always resolved from x-user-id-token. Only a dashboard's owner lists or
@@ -870,6 +902,11 @@ type CaseService interface {
 	// domain.CaseVolumeTrendResponse's own doc comment. A ValidationError is
 	// returned for invalid input.
 	CaseVolumeTrend(ctx context.Context, req domain.CaseVolumeTrendRequest) (domain.CaseVolumeTrendResponse, error)
+	// CaseResolutionTime returns how many cases matching req.Filters were
+	// resolved in a window of days (default: the last 12 months) and the
+	// average business duration of those that have one, overall and per
+	// req.GroupBy. A ValidationError is returned for invalid input.
+	CaseResolutionTime(ctx context.Context, req domain.CaseResolutionTimeRequest) (domain.CaseResolutionTimeResponse, error)
 	// CreateCaseComment creates a new comment on the case identified by req.CaseID.
 	// A ValidationError is returned for invalid input or constraint violations.
 	CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CreateCaseCommentResponse, error)

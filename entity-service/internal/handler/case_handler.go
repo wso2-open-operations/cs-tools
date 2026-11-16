@@ -277,6 +277,21 @@ func (h *CaseHandler) AggregateCases(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// CaseResolutionTime handles POST /cases/resolution-time.
+func (h *CaseHandler) CaseResolutionTime(w http.ResponseWriter, r *http.Request) {
+	var req domain.CaseResolutionTimeRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.CaseResolutionTime(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // CaseVolumeTrend handles POST /cases/volume-trend.
 func (h *CaseHandler) CaseVolumeTrend(w http.ResponseWriter, r *http.Request) {
 	var req domain.CaseVolumeTrendRequest

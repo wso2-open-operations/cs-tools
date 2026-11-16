@@ -3594,6 +3594,62 @@ type AggregateCasesRequest struct {
 	MaxGroups int `json:"maxGroups,omitempty"`
 }
 
+// CaseResolutionTimeRequest is the input for the case resolution time (MTTR):
+// the case filters, the window of days the cases were resolved in, and an
+// optional grouping.
+type CaseResolutionTimeRequest struct {
+	Filters SearchCasesFilters `json:"filters"`
+	// ResolvedFrom and ResolvedTo bound the day a case was resolved (else
+	// closed): inclusive UTC days, each a plain YYYY-MM-DD or a relative date
+	// placeholder. Both or neither; neither is the last 12 months, ending
+	// today.
+	ResolvedFrom string `json:"resolvedFrom,omitempty"`
+	ResolvedTo   string `json:"resolvedTo,omitempty"`
+	// GroupBy splits the result by a case field ("severity", "type",
+	// "issueType", "engagementType", "account", "product", "project",
+	// "region"). Optional.
+	GroupBy string `json:"groupBy,omitempty"`
+	// MaxGroups keeps the MaxGroups groups with the most resolved cases; the
+	// rest are folded into Others (optional; a default applies).
+	MaxGroups int `json:"maxGroups,omitempty"`
+}
+
+// CaseResolutionTimeBucket is the resolution time of one set of resolved
+// cases. Count is how many were resolved in the window; Measured how many of
+// them have a business duration, which AverageHours averages (nil when none
+// has).
+type CaseResolutionTimeBucket struct {
+	Key          string   `json:"key,omitempty"`
+	Label        string   `json:"label,omitempty"`
+	Count        int      `json:"count"`
+	Measured     int      `json:"measured"`
+	AverageHours *float64 `json:"averageHours"`
+}
+
+// CaseResolutionTimeResponse is the result of a case resolution time query:
+// the window used (YYYY-MM-DD), every resolved case together (Total), and,
+// when grouped, the groups with the most cases and the rest folded into
+// Others. A case with no value for the grouped field is in Total only.
+type CaseResolutionTimeResponse struct {
+	ResolvedFrom string                     `json:"resolvedFrom"`
+	ResolvedTo   string                     `json:"resolvedTo"`
+	Total        CaseResolutionTimeBucket   `json:"total"`
+	Groups       []CaseResolutionTimeBucket `json:"groups,omitempty"`
+	Others       *CaseResolutionTimeBucket  `json:"others,omitempty"`
+}
+
+// CaseResolutionTimeSum is one group as the repository reads it: Seconds is
+// the sum of its Measured cases' business durations, so groups can be merged
+// before they are averaged. Key is nil for the cases with no value for the
+// grouped field (and for the one row of an ungrouped query).
+type CaseResolutionTimeSum struct {
+	Key      *string
+	Label    string
+	Count    int
+	Measured int
+	Seconds  float64
+}
+
 // CaseGroup is one bucket in a grouped case-search result: Key is the group's
 // field value (e.g. a CaseState string), Count is the number of matching cases.
 type CaseGroup struct {

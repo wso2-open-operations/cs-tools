@@ -280,6 +280,16 @@ const caseLikeOwnClosedOnColumn = `CASE wi.type
 	WHEN 'ANNOUNCEMENT' THEN ann.closed_on
 END`
 
+// caseLikeOwnResolvedOnColumn is caseLikeOwnClosedOnColumn's resolved_on:
+// the resolution time from the extension table of the row's own type.
+const caseLikeOwnResolvedOnColumn = `CASE wi.type
+	WHEN 'CASE' THEN c.resolved_on
+	WHEN 'ENGAGEMENT' THEN eng.resolved_on
+	WHEN 'SERVICE_REQUEST' THEN sr.resolved_on
+	WHEN 'SECURITY_REPORT_ANALYSIS' THEN sra.resolved_on
+	WHEN 'ANNOUNCEMENT' THEN ann.resolved_on
+END`
+
 // caseLikeClosedByUserIDColumn mirrors caseLikeClosedOnColumn for
 // closed_by_user_id -- a real column on all five case-like extension tables
 // (migrations 0023/0024), joined in GetCaseByID to resolve CaseView.ClosedBy.
@@ -445,6 +455,10 @@ type CaseRepository interface {
 	// may be filling in cache misses for only some days of a window) can
 	// always distinguish "zero" from "not asked for".
 	CaseVolumeTrend(ctx context.Context, req domain.SearchCasesRequest, days []string, scope SearchScope) (map[string]domain.CaseVolumeDayCount, error)
+	// CaseResolutionTime sums, per group of groupBy ("" for none), the
+	// business durations of the cases matching req that were resolved (else
+	// closed) at or after from and before to. See its implementation.
+	CaseResolutionTime(ctx context.Context, req domain.SearchCasesRequest, groupBy string, from, to time.Time, scope SearchScope) ([]domain.CaseResolutionTimeSum, error)
 	// CreateCaseComment inserts a new comment row for the given case.
 	// createdOn is nil for an ordinary comment (created_on = NOW()); pass a
 	// non-nil value to preserve a known past timestamp instead -- see the
@@ -5510,11 +5524,8 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 		if err := rows.Scan(&key, &label, &count); err != nil {
 			return nil, fmt.Errorf("scan case bucket: %w", err)
 		}
-		k, l := aggregateBucketKey(groupBy, key), stringOrEmpty(label)
-		if l == "" || (groupBy != "account" && groupBy != "project" && groupBy != "region") {
-			l = k
-		}
-		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: l, Count: count})
+		k := aggregateBucketKey(groupBy, key)
+		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: aggregateBucketLabel(groupBy, k, label), Count: count})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate case buckets: %w", err)
@@ -5538,6 +5549,107 @@ func aggregateBucketKey(groupBy, raw string) string {
 		}
 	}
 	return strings.ToLower(raw)
+}
+
+// aggregateBucketLabel is a bucket's label: an account's, project's or
+// region's own label when it has one, otherwise the bucket's key.
+func aggregateBucketLabel(groupBy, key string, label *string) string {
+	l := stringOrEmpty(label)
+	if l == "" || (groupBy != "account" && groupBy != "project" && groupBy != "region") {
+		return key
+	}
+	return l
+}
+
+// caseResolutionDurationColumn is a resolved case's business duration: its
+// latest finished RESOLUTION SLA clock's (the SLA engine's own, ACHIEVED, or
+// one migrated as COMPLETED), else the business duration a migrated work item
+// carries, else NULL (the case is resolved but not measured).
+const caseResolutionDurationColumn = `COALESCE(
+		(SELECT s.business_duration
+		   FROM sla s
+		   JOIN sla_policy sp ON sp.id = s.sla_policy_id
+		  WHERE s.work_item_id = wi.id
+		    AND sp.target = 'RESOLUTION'
+		    AND s.stage IN ('ACHIEVED', 'COMPLETED')
+		    AND s.business_duration IS NOT NULL
+		  ORDER BY s.end_on DESC NULLS LAST, s.updated_on DESC
+		  LIMIT 1),
+		wi.business_duration)`
+
+// caseResolutionTimeGroupBy are the fields CaseResolutionTime groups by: the
+// aggregate's own columns, less the state ones (every case it reads is
+// solution proposed or closed) and productVersion (shared across products).
+var caseResolutionTimeGroupBy = map[string]bool{
+	"severity": true, "type": true, "issueType": true, "engagementType": true,
+	"account": true, "product": true, "project": true, "region": true,
+}
+
+// CaseResolutionTime implements CaseRepository. A case counts when it is
+// solution proposed or closed (its own type's state, as the list filters read
+// it) and its resolution time -- resolved_on, else closed_on, from its own
+// type's table -- is in [from, to). It shares buildCaseSearchWhere and
+// caseSearchJoins with AggregateCases, so the same filters pick the same
+// cases. Each group sums its cases' business durations
+// (caseResolutionDurationColumn); a case without one is counted but not
+// measured. The duration is read inside the aggregates, so its clock lookup
+// runs only for the cases the WHERE keeps (twice each: an indexed lookup); as
+// a LATERAL join the planner ran it for every work item scanned, before the
+// window and state conditions. With a groupBy, the cases with no value for it come back as one
+// row with a nil Key, so the caller's total covers every resolved case.
+func (r *caseRepo) CaseResolutionTime(ctx context.Context, req domain.SearchCasesRequest, groupBy string, from, to time.Time, scope SearchScope) ([]domain.CaseResolutionTimeSum, error) {
+	key, label, group := "NULL::TEXT", "NULL::TEXT", ""
+	if groupBy != "" {
+		col, ok := caseAggregateColumns[groupBy]
+		if !ok || !caseResolutionTimeGroupBy[groupBy] {
+			return nil, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + groupBy}
+		}
+		key, group = col.key, "GROUP BY bucket_key"
+		label, ok = caseAggregateLabels[groupBy]
+		if !ok {
+			label = "MAX(" + col.label + ")"
+		}
+	}
+	ctx = WithCallerIdentity(ctx, scope)
+	where, args, argIdx, err := buildCaseSearchWhere(req, scope)
+	if err != nil {
+		return nil, err
+	}
+	resolvedOn := "COALESCE(" + caseLikeOwnResolvedOnColumn + ", " + caseLikeOwnClosedOnColumn + ")"
+	query := fmt.Sprintf(`
+		SELECT %[1]s AS bucket_key, %[2]s AS bucket_label, COUNT(*) AS bucket_count,
+		       COUNT(%[4]s) AS bucket_measured,
+		       COALESCE(SUM(EXTRACT(EPOCH FROM %[4]s)), 0)::FLOAT8 AS bucket_seconds
+		FROM work_item wi %[3]s
+		%[5]s
+			AND %[6]s IN ('SOLUTION_PROPOSED', 'CLOSED')
+			AND %[7]s >= $%[8]d AND %[7]s < $%[9]d
+		%[10]s
+		ORDER BY bucket_count DESC, bucket_key`,
+		key, label, caseSearchJoins, caseResolutionDurationColumn, where, caseLikeOwnStateColumn, resolvedOn, argIdx, argIdx+1, group)
+	rows, err := r.db.Query(ctx, query, append(append([]any{}, args...), from, to)...)
+	if err != nil {
+		return nil, fmt.Errorf("case resolution time: %w", err)
+	}
+	defer rows.Close()
+
+	sums := []domain.CaseResolutionTimeSum{}
+	for rows.Next() {
+		var rawKey, rawLabel *string
+		var sum domain.CaseResolutionTimeSum
+		if err := rows.Scan(&rawKey, &rawLabel, &sum.Count, &sum.Measured, &sum.Seconds); err != nil {
+			return nil, fmt.Errorf("scan case resolution time: %w", err)
+		}
+		if rawKey != nil {
+			k := aggregateBucketKey(groupBy, *rawKey)
+			sum.Key, sum.Label = &k, aggregateBucketLabel(groupBy, k, rawLabel)
+		}
+		sums = append(sums, sum)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate case resolution time: %w", err)
+	}
+	return sums, nil
 }
 
 // CaseVolumeTrend implements CaseRepository. It shares buildCaseSearchWhere/
