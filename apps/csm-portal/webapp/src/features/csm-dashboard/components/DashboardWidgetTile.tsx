@@ -39,6 +39,7 @@ import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
 import { useWidgetPieData, type PieSliceResult } from "@features/csm-dashboard/api/useWidgetPieData";
 import { useWidgetGroupByData } from "@features/csm-dashboard/api/useWidgetGroupByData";
 import { useCaseFeedbackTrendData } from "@features/csm-dashboard/api/useCaseFeedbackTrendData";
+import { useMttrReportData } from "@features/csm-dashboard/api/useMttrReportData";
 import { useCaseVolumeTrendData } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
 import { usePlgRegistrationTrendData } from "@features/csm-dashboard/api/usePlgRegistrationTrendData";
 import {
@@ -557,10 +558,34 @@ function DashboardWidgetTile({
   const feedbackTrendData = useCaseFeedbackTrendData(
     widgetId,
     filters,
-    (shape === "bar" || shape === "pie") && groupBy?.bucket ? groupBy : undefined,
+    (shape === "bar" || shape === "pie") && resourceType === "case_feedback" && groupBy?.bucket
+      ? groupBy
+      : undefined,
     isVisible,
   );
-  const pieData = groupBy?.bucket ? feedbackTrendData : groupBy ? groupByData : sliceData;
+  // mttr's one bucket ("severity") is the resourceType: "mttr" counterpart
+  // of case_feedback's groupBy.bucket above — same reasoning, a dedicated
+  // hook rather than useWidgetGroupByData, since GET /reports/mttr's
+  // request/response shape is unrelated to BeGroupByResponse too. Gated on
+  // resourceType the same way feedbackTrendData now is, so the two can never
+  // both think they own one widget's bucket.
+  const mttrData = useMttrReportData(
+    widgetId,
+    filters,
+    shape === "bar" && resourceType === "mttr" && groupBy?.bucket
+      ? groupBy
+      : undefined,
+    selectedTeamCreGroupId,
+    selectedTeamSreGroupId,
+    isVisible,
+  );
+  const pieData = groupBy?.bucket
+    ? resourceType === "mttr"
+      ? mttrData
+      : feedbackTrendData
+    : groupBy
+      ? groupByData
+      : sliceData;
   // Shape "line" is its own fixed resolution path (`POST
   // /cases/volume-trend`, always exactly two series) — unrelated to
   // slices/groupBy, so this is independent of `pieData` above. Called

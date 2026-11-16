@@ -181,6 +181,7 @@ func main() {
 	itServiceHandler := handler.NewITServiceHandler(customerEntityClient)
 	serviceOfferingHandler := handler.NewServiceOfferingHandler(customerEntityClient)
 	groupHandler := handler.NewGroupHandler(customerEntityClient)
+	mttrReportHandler := handler.NewMTTRReportHandler(customerEntityClient)
 	referenceHandler := handler.NewReferenceHandler(dir)
 	// entity-service registers POST /teams/search only on the PostgreSQL data
 	// source, so a ServiceNow deployment keeps serving the registry alone.
@@ -713,6 +714,9 @@ func main() {
 	// stage's assignment group. A "group" id (from the approvals response), not a
 	// team id; internal staff only (entity-service refuses anyone else).
 	route("GET /groups/{id}", handler.PermView, groupHandler.GetGroup)
+	// MTTR report: the dashboard builder's "mttr" resourceType, same read
+	// audience as the other aggregate widgets (e.g. /cases/feedback/aggregate).
+	route("GET /reports/mttr", handler.PermView, mttrReportHandler.GetMTTRReport)
 
 	// Customer engagement allocations: the list, one allocation, and the status
 	// updates written against it. Pure pass-through; entity-service restricts all

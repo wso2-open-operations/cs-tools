@@ -492,6 +492,52 @@ does it elsewhere in this codebase: an inclusion-list `{"field": "type", "op": "
 ["case", "engagement", "security_report_analysis"]}` filter, set in the dashboard's own JSON
 config, not hardcoded into the endpoint.
 
+## GET /reports/mttr: mean time to resolution by severity band
+
+Backs a dashboard's MTTR numbers: for each severity band (`S1-S4`, `S1-S3`, `S1`, `S2`, `S3`,
+`S4` -- `S0`/catastrophic is deliberately never included, since the requirement this was built
+for only ever asked for S1 through S4), the average time from a case's `created_on` to the
+**last** time it entered Solution Proposed, over cases whose last such entry falls within a
+trailing `months` window (`1`/`3`/`6`/`12` only -- any other value is a 400). An optional
+repeated `creTeamId` query param restricts to cases whose account's CRE team
+(`account.cre_team_id`) is one of the given `"group"` ids; omitted, every team is included.
+`internalOnly`-gated at the route, like `/reports/long-open-cases`, and not registered at all
+under `DATA_SOURCE=servicenow` -- it reads the Postgres case/`work_item_activity` tables only.
+
+**Filtered by when a case was resolved, not when it was created.** An earlier case-created-date
+filter was considered and rejected: a case opened four months ago and resolved last month should
+count toward a 3-month MTTR, because the metric answers "how fast are we resolving things
+lately" -- filtering on `created_on` instead would exclude it and bias the average toward only
+recently-opened, already-fast cases. This also matches the ServiceNow report this feature
+mirrors, which filtered on the state-change date range, not the opened date.
+
+**"Last entry", not "first entry", into Solution Proposed.** A case can be proposed a solution,
+have it rejected (bounced back for more work), and have a later proposal actually stick before
+the case closes. `work_item_activity` has no explicit "rejected" state -- it only logs state
+transitions, not why a case left one -- so there is no way to tell "the customer rejected it"
+apart from "we pulled it back for more work" from this table alone. Given that, `MAX(created_on)`
+per case (not `MIN`) is the deliberate choice: it measures how long the case actually took to
+reach a proposal that held, not how fast the first (possibly rejected) attempt was -- the explicit
+call made when this was raised as an open question.
+
+**Matches both casings the column actually carries.** `work_item_activity.new_value` for a
+state entry is written as either the raw enum label (`SOLUTION_PROPOSED`) or the display label
+(`Solution Proposed`), depending on the write path, confirmed directly against prod (roughly
+90k rows of the former, ~1.5k of the latter). `LOWER(new_value) IN ('solution_proposed',
+'solution proposed')` catches both -- the same case-insensitive convention the case search's own
+`stateEntered` filter already uses (see that filter's own comment in `case_repo.go`), served by
+the same partial index, `idx_work_item_activity_state_entered` (migration 0283).
+
+**`work_item_activity` has `FORCE ROW LEVEL SECURITY`.** A plain `psql` session with no
+`app.is_internal` session variable set sees zero rows from this table, not an error -- looking
+empty when it is not. `MTTRReportService.BuildReport` runs its repository read under
+`repository.WithSystemIdentity(ctx)` for exactly this reason, same as the long-open-cases report;
+a raw query against this table (e.g. ad hoc investigation) needs the identical session variable
+set, or it will silently read as empty.
+
+`internal/domain/mttr_report.go`, `internal/repository/mttr_report_repo.go`,
+`internal/service/mttr_report_service.go`, `internal/handler/mttr_report_handler.go`.
+
 ## Salesforce Account ingest
 
 `POST /salesforce/events` accepts the ASB envelope `{eventType, entity, referenceId}`

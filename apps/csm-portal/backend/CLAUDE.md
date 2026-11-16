@@ -742,6 +742,39 @@ total}` untouched.
   `TestGetChangeRequestApprovals_PassesAssignmentGroupThrough` (`groups_test.go`) and
   `TestGetGroupSendsGetToGroupsID` (`internal/entity/customer_client_test.go`).
 
+## MTTR report (`GET /reports/mttr`) backs the dashboard builder's `mttr` resourceType
+
+A thin `PermView` proxy of entity-service's own `GET /reports/mttr` (`MTTRReportHandler`,
+`internal/entity/customer.go`'s `GetMTTRReport`) — mean time to resolution by severity band
+(S1-S4, S1-S3, S1, S2, S3, S4), over a trailing `months` window (1/3/6/12 only), optionally
+restricted to one or more CRE teams via a repeated `creTeamId` (each validated as a UUID here
+before the upstream call, same convention as `GetGroup`'s `id`). Response is passed through
+untouched.
+
+**The dashboard builder's one `resourceType` with no raw record at all.** Every other
+`WidgetTemplate.resourceType` resolves to a real search endpoint, even one with no standalone
+list page (`task`, `case_feedback`); `mttr` has none — `GET /reports/mttr` only ever returns
+the one fixed six-band aggregate, never a page of individual records. `internal/dashboard`'s
+`ResourceMTTR` rules (`generated_resources.go`) reflect that: shape `bar` only, never `pie` (the
+six bands overlap — S1-S4 and S1-S3 are sums of the individual ones — so they can never be wedges
+of one whole, and `DashboardPieChart`'s percentage, `slice.value / total`, would divide hours by a
+case count anyway, which is meaningless even setting the overlap aside), `groupBy` only
+(`noSlices: true` — a severity band isn't something a query filter can isolate, so there's
+no per-band slice to hand-author), and its one bucket, `"severity"`, is fixed rather than
+chosen (`buckets: []string{"severity"}`, `requiredFlat: []string{"months"}` — there is no default
+window). `registry.go`'s `validGroupByBuckets` carries `"severity"` alongside `case_feedback`'s own
+bucket names. A generated widget's `creTeamIds`
+(team keys/names, same vocabulary as a case's `creTeam` filter) are resolved to real CRE group
+ids once, right after generation, by `dashboardTeams.resolveMTTRTeams` (`dashboard_teams.go`) —
+the `mttr`-specific sibling of `resolveTimeCardTeams`; CRE-only, since an MTTR widget has no SRE
+equivalent and no `"__current_team__"` concept.
+
+Tests: `TestGetMTTRReport` (`mttr_report_test.go`), `TestParseGenerated_AcceptsMTTRWidgets` /
+`_RejectsInvalidMTTRWidgets` / `_TheCatalogueMTTRExamplesAreValid` (`internal/dashboard/generated_mttr_test.go`
+— the last one runs the AI integration service's own catalogue section 5f examples through
+`ParseGenerated`, same "catalogue can't teach a widget the save would refuse" contract as the
+time-card-totals test above).
+
 ## Health endpoints
 
 Two, registered directly on the mux in `cmd/server/main.go` (not through `route()`) and both exempt

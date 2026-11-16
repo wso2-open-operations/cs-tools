@@ -8290,6 +8290,73 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /reports/mttr:
+    get:
+      summary: MTTR (mean time to resolution) by severity band, over a trailing window.
+      description: >-
+        Thin proxy of entity-service's own GET /reports/mttr -- backs the dashboard
+        builder's "mttr" resourceType. For each severity band (S1-S4, S1-S3, S1, S2, S3,
+        S4 -- S0 is never included), the average time in hours from a case's creation to
+        the LAST time it entered Solution Proposed (a rejected proposal bounces a case
+        back for more work before a later one sticks, so the last entry, not the first,
+        is when it was actually resolved), over cases whose last such entry falls within
+        the window. creTeamId may repeat to restrict to one or more CRE teams; omitted,
+        every team is included. Same read audience as the other aggregate widgets
+        (e.g. POST /cases/feedback/aggregate).
+      operationId: getMTTRReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: months
+          in: query
+          required: true
+          schema:
+            type: integer
+            enum: [1, 3, 6, 12]
+          description: The trailing window, in months.
+        - name: creTeamId
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          description: Restrict to cases whose account's CRE team is one of these ids. Omitted means every team.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MTTRReport'
+        "400":
+          description: months is missing or not one of 1, 3, 6 or 12; or a creTeamId is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /configuration-items/search:
     post:
       summary: Search configuration items (CMDB, ServiceNow data source only).
@@ -26168,6 +26235,50 @@ components:
         total:
           type: integer
           description: The number of members.
+
+    MTTRReport:
+      type: object
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        windowMonths:
+          type: integer
+          enum: [1, 3, 6, 12]
+        windowStart:
+          type: string
+          format: date-time
+          description: Inclusive start of the window the "entered Solution Proposed" filter ran against.
+        windowEnd:
+          type: string
+          format: date-time
+          description: Exclusive end of the window.
+        creTeamIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The team restriction actually applied; empty means every team.
+        bands:
+          type: array
+          items:
+            $ref: '#/components/schemas/MTTRReportBand'
+
+    MTTRReportBand:
+      type: object
+      required: [band, caseCount, avgResolutionHours]
+      properties:
+        band:
+          type: string
+          enum: ["S1-S4", "S1-S3", "S1", "S2", "S3", "S4"]
+        caseCount:
+          type: integer
+          description: How many cases last entered Solution Proposed in the window and are counted in this band's average.
+        avgResolutionHours:
+          type: number
+          format: double
+          description: Mean hours from a case's creation to the last time it entered Solution Proposed. Zero when caseCount is zero.
 
     ChangeRequestApprovalDecisionPayload:
       type: object

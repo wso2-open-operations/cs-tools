@@ -722,6 +722,19 @@ func (c *CustomerEntityClient) GetGroup(ctx context.Context, id string) ([]byte,
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/groups/%s", url.PathEscape(id)), nil)
 }
 
+// GetMTTRReport calls GET /reports/mttr on the entity service: MTTR by
+// severity band over a trailing window. months is "1", "3", "6" or "12";
+// creTeamIDs (CRE "group" ids), when non-empty, restricts to those teams.
+// Internal callers only, enforced by entity-service. Response is returned as
+// raw JSON.
+func (c *CustomerEntityClient) GetMTTRReport(ctx context.Context, months string, creTeamIDs []string) ([]byte, error) {
+	q := url.Values{"months": {months}}
+	for _, id := range creTeamIDs {
+		q.Add("creTeamId", id)
+	}
+	return c.do(ctx, http.MethodGet, "/reports/mttr?"+q.Encode(), nil)
+}
+
 // GetScheduleCatalogue calls GET /team-schedule/catalogue on the entity service.
 // The Team Schedule zones, windows and absence kinds, in one payload: a client
 // needs all three to draw a single day. Response is returned as raw JSON.
