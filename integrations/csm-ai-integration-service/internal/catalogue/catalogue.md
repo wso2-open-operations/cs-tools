@@ -110,9 +110,10 @@ state, user, project, day or team, counting cards or summing hours; no `line`).
 An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`/`bar` with `slices` or
 `groupBy` by `state` only (no `line`). An `account` or `project` widget is `count`, `list`, or `pie`/`bar`
 with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
-with `groupBy.bucket` (section 5d) or rating `slices` (no `line`). An `mttr` widget is **only** `pie` or
-`bar` with `groupBy.bucket` (section 5f) — never `count`, `list`, `slices`, `groupBy.field` or `line`
-(there is no single MTTR record to count or list).
+with `groupBy.bucket` (section 5d) or rating `slices` (no `line`). An `mttr` widget is **only** `bar`
+with `groupBy.bucket` (section 5f) — never `count`, `list`, `pie`, `slices`, `groupBy.field` or `line`
+(there is no single MTTR record to count or list, and the six bands overlap — S1-S4 and S1-S3 are
+sums of the individual ones — so they can never be pie wedges of one whole).
 
 Fields that belong to one shape must not appear on another (`listLimit`/`sortBy` on lists only,
 `slices`/`groupBy` on pie/bar only, `days`/`series`/`startDate`/`endDate`/`bucket` on line only).
@@ -614,9 +615,10 @@ records: there is no "MTTR record" to count or list, only this one server-side a
 | `months` | **Required.** One of `"1"`, `"3"`, `"6"`, `"12"` — the trailing window, in months, counted back from today. There is no other window shape (no `days`, no `startDate`/`endDate`): a request for a different period ("this quarter", "last 45 days") is not expressible; use the closest of 1/3/6/12 months and say so in `note` (section 1). |
 | `creTeamIds` | Optional, 1 to 20 team **keys** from the Teams section ("Rigel's MTTR", "MTTR for Sirius and Draco"). Only CRE teams (the same field a case's `creTeam` filter uses) — an SRE team here is not expressible. Leave it out for every team. There is no `"__current_team__"` for MTTR. |
 
-Grouping is **always** on the server with `"groupBy": {"bucket": "severity"}` on a `pie` or `bar` —
-`"severity"` is the only bucket value there is, and every MTTR widget carries it: the one call
-always answers with all six bands at once (in this order) —
+Grouping is **always** on the server with `"groupBy": {"bucket": "severity"}` on a `bar` — never a
+`pie` (the six bands overlap: S1-S4 and S1-S3 are sums of the individual ones, so they can never be
+wedges of one whole). `"severity"` is the only bucket value there is, and every MTTR widget carries
+it: the one call always answers with all six bands at once (in this order) —
 
 | Band | Shows |
 |---|---|
