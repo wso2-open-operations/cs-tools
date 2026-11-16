@@ -1633,3 +1633,17 @@ func TestEnvIntInRange(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_AuditLogEnabled pins the audit log's switch: off unless it parses as
+// true, so a typo leaves the upkeep endpoint unregistered.
+func TestLoad_AuditLogEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"": false, "true": true, "TRUE": true, "1": true,
+		"false": false, "0": false, "yes": false, "on": false, "garbage": false,
+	} {
+		t.Setenv("CSM_AUDIT_LOG_ENABLED", value)
+		if got := Load().AuditLogEnabled; got != want {
+			t.Errorf("CSM_AUDIT_LOG_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}

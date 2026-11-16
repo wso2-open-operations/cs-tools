@@ -338,6 +338,13 @@ type Config struct {
 	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
 	// another drainer never changes it.
 	ACPReactivationPollInterval time.Duration
+	// AuditLogEnabled registers POST /audit-log/maintenance, the audit log's
+	// upkeep (CSM_AUDIT_LOG_ENABLED). Defaults to false, and while it is false
+	// routes.go does not register the route at all, so it 404s. Turn it on only
+	// once migration 0295 is applied and the database role may run the audit
+	// functions; the audit_log_maintenance sub-cron in csm-scheduled-tasks has
+	// its own switch and must be turned on after this one.
+	AuditLogEnabled bool
 	// AuditLogMonthsAhead is how many months past the current one get a
 	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
 	// the audit log's own health check reports a problem every day.
@@ -1097,6 +1104,7 @@ func Load() *Config {
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
 	cfg.ACPInternalEmailDomains = splitComma(os.Getenv("ACP_INTERNAL_EMAIL_DOMAINS"))
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
+	cfg.AuditLogEnabled = getBoolOrDefault("CSM_AUDIT_LOG_ENABLED", false)
 	cfg.AuditLogMonthsAhead = envIntInRange("CSM_AUDIT_LOG_MONTHS_AHEAD", 3, 2, 24)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
