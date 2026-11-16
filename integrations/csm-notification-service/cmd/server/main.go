@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -1955,14 +1956,18 @@ func acpInternalEmailDomains() []string {
 	return domains
 }
 
+// emailDomainPattern is a bare domain name: dot-separated labels of letters,
+// digits and inner hyphens, at least two of them. A URL ("https://...") or a
+// port fails it, so it cannot become a suffix that matches nobody.
+var emailDomainPattern = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
 // parseACPInternalEmailDomains splits ACP_INTERNAL_EMAIL_DOMAINS on commas
 // (entries trimmed, empty ones dropped; the leading "@" is optional) and
-// refuses an entry that is not a domain with a dot.
+// refuses an entry that is not a domain name.
 func parseACPInternalEmailDomains(raw string) ([]string, error) {
 	domains := splitComma(raw)
 	for i, d := range domains {
-		name := strings.TrimPrefix(d, "@")
-		if !strings.Contains(name, ".") || strings.ContainsAny(name, "@ ") || strings.HasPrefix(name, ".") {
+		if !emailDomainPattern.MatchString(strings.TrimPrefix(d, "@")) {
 			return nil, fmt.Errorf("entry %d is not a domain like @example.com", i+1)
 		}
 	}

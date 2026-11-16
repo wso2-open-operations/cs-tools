@@ -29,7 +29,8 @@ func TestParseACPInternalEmailDomains(t *testing.T) {
 	if got, err := parseACPInternalEmailDomains(""); err != nil || got != nil {
 		t.Errorf("empty: got %v, %v", got, err)
 	}
-	for _, bad := range []string{"@localhost", "me@example.com", "@.com", "@example .com"} {
+	for _, bad := range []string{"@localhost", "me@example.com", "@.com", "@example .com",
+		"https://example.com", "@https://example.com", "@example.com/", "@example.com:443", "@-example.com", "@example..com"} {
 		if _, err := parseACPInternalEmailDomains(bad); err == nil {
 			t.Errorf("%q was accepted", bad)
 		}
