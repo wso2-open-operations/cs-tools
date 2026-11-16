@@ -17,7 +17,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -30,8 +29,9 @@ import (
 type AuditLogMaintenanceService interface {
 	// RunMaintenance creates the coming monthly partitions, checks the log's
 	// health and puts back audit triggers that went missing. It always tries
-	// every step, and returns what it found. The error is set only when a step
-	// could not run at all; problems it found are in the response.
+	// every step and returns what it found, including a step that could not run
+	// (StepErrors), so one failing step never hides the others' results. The
+	// error is set only when the request itself was cancelled.
 	RunMaintenance(ctx context.Context) (domain.AuditLogMaintenanceResponse, error)
 }
 
@@ -53,24 +53,24 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 		HealthProblems:     []string{},
 		RepairedTriggers:   []domain.AuditTriggerProblem{},
 		UnresolvedTriggers: []domain.AuditTriggerProblem{},
+		StepErrors:         []string{},
 	}
-	var errs []error
 
 	created, err := s.repo.CreatePartitions(ctx, s.monthsAhead)
 	if err != nil {
-		errs = append(errs, err)
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not create partitions", err))
 	}
 	resp.PartitionsCreated = created
 
 	healthProblems, err := s.repo.PartitionHealth(ctx)
 	if err != nil {
-		errs = append(errs, err)
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not check partition health", err))
 	}
 	resp.HealthProblems = append(resp.HealthProblems, healthProblems...)
 
 	repaired, unresolved, err := s.reconcileTriggers(ctx)
 	if err != nil {
-		errs = append(errs, err)
+		resp.StepErrors = append(resp.StepErrors, s.stepFailed(ctx, "could not reconcile triggers", err))
 	}
 	resp.RepairedTriggers = append(resp.RepairedTriggers, repaired...)
 	resp.UnresolvedTriggers = append(resp.UnresolvedTriggers, unresolved...)
@@ -78,8 +78,15 @@ func (s *auditLogMaintenanceService) RunMaintenance(ctx context.Context) (domain
 	slog.InfoContext(ctx, "audit log: maintenance run finished",
 		"partitionsCreated", resp.PartitionsCreated, "healthProblems", len(resp.HealthProblems),
 		"repairedTriggers", len(resp.RepairedTriggers), "unresolvedTriggers", len(resp.UnresolvedTriggers),
-		"failedSteps", len(errs))
-	return resp, errors.Join(errs...)
+		"failedSteps", len(resp.StepErrors))
+	return resp, ctx.Err()
+}
+
+// stepFailed logs a step's full error and returns the short, detail-free text
+// that goes in the response.
+func (s *auditLogMaintenanceService) stepFailed(ctx context.Context, message string, err error) string {
+	slog.ErrorContext(ctx, "audit log: maintenance step failed", "step", message, "err", err)
+	return message
 }
 
 // reconcileTriggers repairs what it can. It reconciles twice: the first call

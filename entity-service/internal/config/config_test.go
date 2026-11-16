@@ -1608,3 +1608,28 @@ func TestConfig_Validate_PublicHolidaySourcesAllOrNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvIntInRange(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{"unset uses the default", "", 3},
+		{"lowest allowed", "2", 2},
+		{"in range", "6", 6},
+		{"highest allowed", "24", 24},
+		{"below the range uses the default", "1", 3},
+		{"above the range uses the default", "25", 3},
+		{"not a number uses the default", "many", 3},
+		{"zero uses the default", "0", 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CSM_TEST_MONTHS_AHEAD", tc.value)
+			if got := envIntInRange("CSM_TEST_MONTHS_AHEAD", 3, 2, 24); got != tc.want {
+				t.Errorf("envIntInRange(%q) = %d, want %d", tc.value, got, tc.want)
+			}
+		})
+	}
+}

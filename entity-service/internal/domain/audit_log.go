@@ -24,8 +24,8 @@ type AuditTriggerProblem struct {
 }
 
 // AuditLogMaintenanceResponse is what one run of the audit log upkeep found.
-// A run that finds nothing wrong has no health problems, no repaired triggers
-// and no unresolved triggers.
+// A run that finds nothing wrong has no health problems, no repaired triggers,
+// no unresolved triggers and no step errors.
 type AuditLogMaintenanceResponse struct {
 	// PartitionsCreated is how many monthly partitions this run created.
 	PartitionsCreated int `json:"partitionsCreated"`
@@ -36,4 +36,7 @@ type AuditLogMaintenanceResponse struct {
 	RepairedTriggers []AuditTriggerProblem `json:"repairedTriggers"`
 	// UnresolvedTriggers are still wrong after the repair and need a person.
 	UnresolvedTriggers []AuditTriggerProblem `json:"unresolvedTriggers"`
+	// StepErrors names each step that could not run at all, in words that carry
+	// no database detail. The full error is in the service log.
+	StepErrors []string `json:"stepErrors"`
 }
