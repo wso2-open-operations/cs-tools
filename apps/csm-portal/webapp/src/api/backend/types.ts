@@ -4724,7 +4724,7 @@ export interface BeMttrReportBand {
  * band, over a trailing window -- backs `resourceType: "mttr"`
  * (`useMttrReportData`). */
 export interface BeMttrReport {
-  generatedAt: string;
+  generatedOn: string;
   windowMonths: 1 | 3 | 6 | 12;
   windowStart: string;
   windowEnd: string;

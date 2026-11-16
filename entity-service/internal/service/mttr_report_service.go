@@ -97,7 +97,7 @@ func (s *mttrReportService) BuildReport(ctx context.Context, req domain.MTTRRepo
 	}
 
 	return domain.MTTRReport{
-		GeneratedAt:  now,
+		GeneratedOn:  now,
 		WindowMonths: req.WindowMonths,
 		WindowStart:  windowStart,
 		WindowEnd:    windowEnd,

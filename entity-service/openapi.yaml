@@ -32697,9 +32697,9 @@ components:
     MTTRReport:
       type: object
       description: The MTTR report.
-      required: [generatedAt, windowMonths, windowStart, windowEnd, creTeamIds, bands]
+      required: [generatedOn, windowMonths, windowStart, windowEnd, creTeamIds, bands]
       properties:
-        generatedAt:
+        generatedOn:
           type: string
           format: date-time
         windowMonths:

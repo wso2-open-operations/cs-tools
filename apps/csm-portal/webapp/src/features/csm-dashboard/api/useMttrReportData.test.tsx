@@ -46,7 +46,7 @@ describe("useMttrReportData", () => {
   it("issues a single GET /reports/mttr request, forwarding the slot's abort signal, and maps bands into ordered, non-navigable avg-hours slices", async () => {
     getResponseMock.mockResolvedValue(
       jsonResponse({
-        generatedAt: "2026-11-16T00:00:00Z",
+        generatedOn: "2026-11-16T00:00:00Z",
         windowMonths: 3,
         windowStart: "2026-08-16T00:00:00Z",
         windowEnd: "2026-11-16T00:00:00Z",
@@ -96,7 +96,7 @@ describe("useMttrReportData", () => {
   it("appends a repeated creTeamId per team", async () => {
     getResponseMock.mockResolvedValue(
       jsonResponse({
-        generatedAt: "2026-11-16T00:00:00Z",
+        generatedOn: "2026-11-16T00:00:00Z",
         windowMonths: 6,
         windowStart: "2026-05-16T00:00:00Z",
         windowEnd: "2026-11-16T00:00:00Z",

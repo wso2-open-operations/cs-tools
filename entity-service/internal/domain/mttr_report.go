@@ -53,7 +53,7 @@ type MTTRReportBand struct {
 
 // MTTRReport is the MTTR report: one row per severity band.
 type MTTRReport struct {
-	GeneratedAt  time.Time `json:"generatedAt"`
+	GeneratedOn  time.Time `json:"generatedOn"`
 	WindowMonths int       `json:"windowMonths"`
 	// WindowStart/WindowEnd are the instants the "entered Solution Proposed
 	// in window" filter ran against (WindowStart inclusive, WindowEnd

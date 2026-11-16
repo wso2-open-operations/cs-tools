@@ -69,8 +69,8 @@ func TestMTTRReportCombinesBandsAndResolvesWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
 	}
-	if got.WindowMonths != 3 || !got.GeneratedAt.Equal(now) {
-		t.Errorf("WindowMonths/GeneratedAt = %d/%s, want 3/%s", got.WindowMonths, got.GeneratedAt, now)
+	if got.WindowMonths != 3 || !got.GeneratedOn.Equal(now) {
+		t.Errorf("WindowMonths/GeneratedOn = %d/%s, want 3/%s", got.WindowMonths, got.GeneratedOn, now)
 	}
 	wantStart := time.Date(2026, 8, 16, 0, 0, 0, 0, time.UTC)
 	if !got.WindowStart.Equal(wantStart) || !got.WindowEnd.Equal(now) {
