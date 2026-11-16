@@ -78,6 +78,27 @@ func TestParseGenerated_RejectsInvalidMTTRWidgets(t *testing.T) {
 	}
 }
 
+// TestValidateWidgets_MTTRIsBarOnly: a hand-authored dashboard file (which
+// goes through validateWidgets, not ParseGenerated/generatedResourceRules)
+// must refuse an mttr widget with any shape but bar too -- the six bands
+// overlap (S1-S4/S1-S3 are sums of the individual ones), so they can never
+// be a pie's wedges of one whole, whichever path loaded the definition.
+func TestValidateWidgets_MTTRIsBarOnly(t *testing.T) {
+	widget := func(shape Shape) Dashboard {
+		return Dashboard{ID: "d", Widgets: []WidgetTemplate{{
+			ID: "w", DisplayName: "W", ResourceType: ResourceMTTR, Shape: shape, GridWidth: 6,
+			Query:   map[string]any{"months": "3"},
+			GroupBy: &GroupByConfig{Bucket: "severity"},
+		}}}
+	}
+	if err := validateWidgets(widget(ShapePie), "test.json"); err == nil || !strings.Contains(err.Error(), `only supports shape "bar"`) {
+		t.Errorf("pie: err = %v, want the bar-only refusal", err)
+	}
+	if err := validateWidgets(widget(ShapeBar), "test.json"); err != nil {
+		t.Errorf("bar: err = %v, want no error", err)
+	}
+}
+
 // TestParseGenerated_TheCatalogueMTTRExamplesAreValid: every MTTR widget the
 // catalogue shows the model (section 5f) passes this backend's own check, so
 // the catalogue cannot teach a widget the save would refuse.

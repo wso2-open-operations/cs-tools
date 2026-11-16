@@ -1010,7 +1010,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `playbookUnanswered` only with `playbookTask`, never together, and every code from the "PLG playbook
     answers" section; never an organisation `line`.
 14. An `mttr` widget: a flat `query` with only `months` (required, `"1"`/`"3"`/`"6"`/`"12"`) and
-    `creTeamIds` (CRE team keys only); shape `pie`/`bar` with `groupBy: {"bucket": "severity"}` only —
+    `creTeamIds` (CRE team keys only); shape `bar` only (never `pie` — the six bands overlap, so
+    they can never be wedges of one whole) with `groupBy: {"bucket": "severity"}` only —
     never `count`, `list`, `slices`, `groupBy.field`, `line`, or a single band on its own.
 15. The output is a single JSON object.
 16. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when

@@ -1012,6 +1012,17 @@ func validateWidgets(d Dashboard, source string) error {
 			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"shape\" %q; expected one of %q, %q, %q, %q, %q",
 				source, d.ID, w.ID, w.Shape, ShapeCount, ShapeList, ShapePie, ShapeBar, ShapeLine)
 		}
+		// mttr is bar-only, in hand-authored dashboard definitions too --
+		// not just the generated path's own ResourceMTTR.shapes (see
+		// generated_resources.go). Its six bands overlap (S1-S4/S1-S3 are
+		// sums of the individual ones), so they can never be a pie's
+		// wedges-of-one-whole, and this check is this file's own
+		// resourceType-agnostic validateWidgets, which generatedResourceRules
+		// is never consulted from.
+		if w.ResourceType == ResourceMTTR && w.Shape != ShapeBar {
+			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q only supports shape %q, not %q",
+				source, d.ID, w.ID, ResourceMTTR, ShapeBar, w.Shape)
+		}
 		if w.GridWidth < 1 || w.GridWidth > 12 {
 			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"gridWidth\" is %d; it is a column count out of 12 and must be between 1 and 12",
 				source, d.ID, w.ID, w.GridWidth)
