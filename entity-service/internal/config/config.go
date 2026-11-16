@@ -744,9 +744,9 @@ type Config struct {
 	// ports, it runs wherever the data is.
 	IncidentReportPollInterval time.Duration
 
-	// AlertConsumerEnabled turns on the Service Bus alert consumer (ALERT_CONSUMER_ENABLED, default false).
-	AlertConsumerEnabled bool
-	// AlertServiceBusNamespace is the Service Bus namespace the alerting gateway queues alerts on (ALERT_SERVICEBUS_NAMESPACE).
+	// AlertingVersion picks which alert pipeline runs (ALERTING_VERSION): v1 the ingestion and alert-core services only, v2 the queue consumer, hybrid both.
+	AlertingVersion AlertingVersion
+	// AlertServiceBusNamespace is the Azure Service Bus namespace the Azure gateway queues alerts on (ALERT_SERVICEBUS_NAMESPACE); empty leaves Azure out.
 	AlertServiceBusNamespace string
 	// AlertServiceBusTenantID, AlertServiceBusClientID and AlertServiceBusClientSecret are the Entra ID application that receives from the queues.
 	AlertServiceBusTenantID     string
@@ -759,6 +759,14 @@ type Config struct {
 	AlertConsumerConcurrency int
 	// AlertConsumerPriorityWeight is how many priority alerts run in a row while a standard alert waits (ALERT_CONSUMER_PRIORITY_WEIGHT, default 4).
 	AlertConsumerPriorityWeight int
+	// AlertSQSPriorityQueueURL and AlertSQSStandardQueueURL are the AWS gateway's two SQS standard queues; empty leaves AWS out.
+	AlertSQSPriorityQueueURL string
+	AlertSQSStandardQueueURL string
+	// AlertSQSDeadLetterQueueURL is where an SQS message that can never be stored is moved with its reason; empty leaves it to the redrive policy.
+	AlertSQSDeadLetterQueueURL string
+	// AlertSQSAccessKeyID and AlertSQSSecretAccessKey sign in to SQS; empty uses the default AWS credential chain.
+	AlertSQSAccessKeyID     string
+	AlertSQSSecretAccessKey string
 
 	AuthIssuer             string
 	AuthJWKSURL            string
@@ -1117,7 +1125,7 @@ func Load() *Config {
 		CloudStatusDrainerEnabled:                     os.Getenv("CLOUD_STATUS_DRAINER_ENABLED") == "true",
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
 		IncidentReportPollInterval:                    envDuration("INCIDENT_REPORT_POLL_INTERVAL", 5*time.Second),
-		AlertConsumerEnabled:                          os.Getenv("ALERT_CONSUMER_ENABLED") == "true",
+		AlertingVersion:                               AlertingVersion(strings.ToLower(getEnvOrDefault("ALERTING_VERSION", string(AlertingVersionV1)))),
 		AlertServiceBusNamespace:                      strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_NAMESPACE")),
 		AlertServiceBusTenantID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_TENANT_ID")),
 		AlertServiceBusClientID:                       strings.TrimSpace(os.Getenv("ALERT_SERVICEBUS_CLIENT_ID")),
@@ -1126,6 +1134,11 @@ func Load() *Config {
 		AlertStandardQueue:                            getEnvOrDefault("ALERT_SERVICEBUS_STANDARD_QUEUE", "standard-queue"),
 		AlertConsumerConcurrency:                      envPositiveInt("ALERT_CONSUMER_CONCURRENCY", 8),
 		AlertConsumerPriorityWeight:                   envPositiveInt("ALERT_CONSUMER_PRIORITY_WEIGHT", 4),
+		AlertSQSPriorityQueueURL:                      strings.TrimSpace(os.Getenv("ALERT_SQS_PRIORITY_QUEUE_URL")),
+		AlertSQSStandardQueueURL:                      strings.TrimSpace(os.Getenv("ALERT_SQS_STANDARD_QUEUE_URL")),
+		AlertSQSDeadLetterQueueURL:                    strings.TrimSpace(os.Getenv("ALERT_SQS_DEAD_LETTER_QUEUE_URL")),
+		AlertSQSAccessKeyID:                           strings.TrimSpace(os.Getenv("ALERT_SQS_ACCESS_KEY_ID")),
+		AlertSQSSecretAccessKey:                       os.Getenv("ALERT_SQS_SECRET_ACCESS_KEY"),
 		SalesforceIngestRetryInterval:                 envDurationOrOff("SALESFORCE_INGEST_RETRY_INTERVAL", 5*time.Minute),
 		SalesforceDeferredWritesEnabled:               os.Getenv("SALESFORCE_DEFERRED_WRITES_ENABLED") == "true",
 		SalesforceWriteEventHubTopic:                  getEnvOrDefault("SALESFORCE_WRITE_EVENT_HUB_TOPIC", "salesforce-writes"),
@@ -1969,25 +1982,124 @@ func (c *Config) applySREEventHubTopic() {
 // maxAlertConsumerConcurrency keeps the alert consumer from taking most of the database pool from API requests.
 const maxAlertConsumerConcurrency = 64
 
+// AlertingVersion is a stage of the move from the ingestion and alert-core services to the queue consumer.
+type AlertingVersion string
+
+// Alerting versions; v1 is the default, so nothing changes until a deployment opts in.
+const (
+	AlertingVersionV1     AlertingVersion = "v1"
+	AlertingVersionV2     AlertingVersion = "v2"
+	AlertingVersionHybrid AlertingVersion = "hybrid"
+)
+
+// AlertConsumerEnabled reports whether the queue consumer runs, which it does in v2 and hybrid.
+func (c *Config) AlertConsumerEnabled() bool {
+	return c.AlertingVersion == AlertingVersionV2 || c.AlertingVersion == AlertingVersionHybrid
+}
+
+// HasAlertServiceBus reports whether the alert consumer receives from Azure Service Bus.
+func (c *Config) HasAlertServiceBus() bool {
+	return c.AlertServiceBusNamespace != "" || c.AlertServiceBusTenantID != "" || c.AlertServiceBusClientID != "" || c.AlertServiceBusClientSecret != ""
+}
+
+// HasAlertSQS reports whether the alert consumer receives from AWS SQS.
+func (c *Config) HasAlertSQS() bool {
+	return c.AlertSQSPriorityQueueURL != "" || c.AlertSQSStandardQueueURL != "" || c.AlertSQSDeadLetterQueueURL != "" || c.AlertSQSAccessKeyID != "" || c.AlertSQSSecretAccessKey != ""
+}
+
+// AlertSQSRegion is the region the SQS queues live in, read from the priority queue URL.
+func (c *Config) AlertSQSRegion() string {
+	region, _ := SQSRegionFromQueueURL(c.AlertSQSPriorityQueueURL)
+	return region
+}
+
+// SQSRegionFromQueueURL reads the region from a queue URL such as https://sqs.us-east-1.amazonaws.com/123456789012/priority-queue.
+func SQSRegionFromQueueURL(queueURL string) (string, error) {
+	u, err := url.Parse(queueURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" || strings.Trim(u.Path, "/") == "" {
+		return "", fmt.Errorf("%q is not an https SQS queue url", queueURL)
+	}
+	labels := strings.Split(u.Hostname(), ".")
+	switch {
+	case len(labels) >= 4 && labels[0] == "sqs":
+		return labels[1], nil
+	case len(labels) >= 4 && labels[1] == "queue":
+		return labels[0], nil
+	}
+	return "", fmt.Errorf("%q does not name an SQS region", queueURL)
+}
+
 // validateAlertConsumer rejects an enabled alert consumer that could never receive or store an alert.
 func (c *Config) validateAlertConsumer() error {
-	if !c.AlertConsumerEnabled {
+	switch c.AlertingVersion {
+	case "", AlertingVersionV1:
 		return nil
+	case AlertingVersionV2, AlertingVersionHybrid:
+	default:
+		return fmt.Errorf("ALERTING_VERSION must be v1, v2 or hybrid, got %q", c.AlertingVersion)
 	}
 	if !c.HasDatabase() {
-		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs DB_USER, DB_PASSWORD and DB_NAME, because alerts are stored in the database")
-	}
-	if c.AlertServiceBusNamespace == "" || c.AlertServiceBusTenantID == "" || c.AlertServiceBusClientID == "" || c.AlertServiceBusClientSecret == "" {
-		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs ALERT_SERVICEBUS_NAMESPACE, ALERT_SERVICEBUS_TENANT_ID, ALERT_SERVICEBUS_CLIENT_ID and ALERT_SERVICEBUS_CLIENT_SECRET")
+		return fmt.Errorf("ALERTING_VERSION %s needs DB_USER, DB_PASSWORD and DB_NAME, because alerts are stored in the database", c.AlertingVersion)
 	}
 	if c.IncidentDefaultServiceID == "" {
-		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs INCIDENT_DEFAULT_SERVICE_ID, the service an alert gets when its source names none")
+		return fmt.Errorf("ALERTING_VERSION %s needs INCIDENT_DEFAULT_SERVICE_ID, the service an alert gets when its source names none", c.AlertingVersion)
+	}
+	if !c.HasAlertServiceBus() && !c.HasAlertSQS() {
+		return fmt.Errorf("ALERTING_VERSION %s needs Azure Service Bus (ALERT_SERVICEBUS_*), AWS SQS (ALERT_SQS_*), or both", c.AlertingVersion)
+	}
+	if c.HasAlertServiceBus() {
+		if err := c.validateAlertServiceBus(); err != nil {
+			return err
+		}
+	}
+	if c.HasAlertSQS() {
+		if err := c.validateAlertSQS(); err != nil {
+			return err
+		}
+	}
+	if c.AlertConsumerConcurrency > maxAlertConsumerConcurrency || int32(c.AlertConsumerConcurrency) >= c.DBPoolMaxConns { // #nosec G115 -- capped at 64 just before
+		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY must be at most %d and below DB_POOL_MAX_CONNS (%d), got %d", maxAlertConsumerConcurrency, c.DBPoolMaxConns, c.AlertConsumerConcurrency)
+	}
+	return nil
+}
+
+// validateAlertServiceBus rejects a partial Azure Service Bus configuration.
+func (c *Config) validateAlertServiceBus() error {
+	if c.AlertServiceBusNamespace == "" || c.AlertServiceBusTenantID == "" || c.AlertServiceBusClientID == "" || c.AlertServiceBusClientSecret == "" {
+		return fmt.Errorf("ALERT_SERVICEBUS_NAMESPACE, ALERT_SERVICEBUS_TENANT_ID, ALERT_SERVICEBUS_CLIENT_ID and ALERT_SERVICEBUS_CLIENT_SECRET must be set together")
 	}
 	if c.AlertPriorityQueue == c.AlertStandardQueue {
 		return fmt.Errorf("ALERT_SERVICEBUS_PRIORITY_QUEUE and ALERT_SERVICEBUS_STANDARD_QUEUE must name different queues")
 	}
-	if c.AlertConsumerConcurrency > maxAlertConsumerConcurrency || int32(c.AlertConsumerConcurrency) >= c.DBPoolMaxConns { // #nosec G115 -- capped at 64 just before
-		return fmt.Errorf("ALERT_CONSUMER_CONCURRENCY must be at most %d and below DB_POOL_MAX_CONNS (%d), got %d", maxAlertConsumerConcurrency, c.DBPoolMaxConns, c.AlertConsumerConcurrency)
+	return nil
+}
+
+// validateAlertSQS rejects a partial or inconsistent AWS SQS configuration.
+func (c *Config) validateAlertSQS() error {
+	if c.AlertSQSPriorityQueueURL == "" || c.AlertSQSStandardQueueURL == "" {
+		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URL and ALERT_SQS_STANDARD_QUEUE_URL must be set together")
+	}
+	if c.AlertSQSPriorityQueueURL == c.AlertSQSStandardQueueURL {
+		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URL and ALERT_SQS_STANDARD_QUEUE_URL must name different queues")
+	}
+	if (c.AlertSQSAccessKeyID == "") != (c.AlertSQSSecretAccessKey == "") {
+		return fmt.Errorf("ALERT_SQS_ACCESS_KEY_ID and ALERT_SQS_SECRET_ACCESS_KEY must be set together")
+	}
+	region, err := SQSRegionFromQueueURL(c.AlertSQSPriorityQueueURL)
+	if err != nil {
+		return fmt.Errorf("ALERT_SQS_PRIORITY_QUEUE_URL: %w", err)
+	}
+	for name, queueURL := range map[string]string{"ALERT_SQS_STANDARD_QUEUE_URL": c.AlertSQSStandardQueueURL, "ALERT_SQS_DEAD_LETTER_QUEUE_URL": c.AlertSQSDeadLetterQueueURL} {
+		if queueURL == "" {
+			continue
+		}
+		other, err := SQSRegionFromQueueURL(queueURL)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		if other != region {
+			return fmt.Errorf("%s is in %s, but the priority queue is in %s; every SQS queue must be in one region", name, other, region)
+		}
 	}
 	return nil
 }

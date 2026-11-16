@@ -25,20 +25,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
-
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// AlertReceiver is the part of a Service Bus queue receiver the alert consumer uses; *azservicebus.Receiver satisfies it.
-type AlertReceiver interface {
-	ReceiveMessages(ctx context.Context, maxMessages int, options *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
-	CompleteMessage(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.CompleteMessageOptions) error
-	AbandonMessage(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.AbandonMessageOptions) error
-	DeadLetterMessage(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.DeadLetterOptions) error
-	RenewMessageLock(ctx context.Context, message *azservicebus.ReceivedMessage, options *azservicebus.RenewMessageLockOptions) error
+// AlertQueue is one alert queue on one cloud; servicebus.Queue and sqsqueue.Queue satisfy it.
+type AlertQueue interface {
+	// Name identifies the queue in logs.
+	Name() string
+	// Receive waits until at least one message arrives or ctx is done, and returns at most maxMessages.
+	Receive(ctx context.Context, maxMessages int) ([]*domain.AlertQueueMessage, error)
+	// Complete removes a message for good.
+	Complete(ctx context.Context, message *domain.AlertQueueMessage) error
+	// Abandon makes a message available again at once.
+	Abandon(ctx context.Context, message *domain.AlertQueueMessage) error
+	// DeadLetter moves a message that can never be stored aside, with the reason.
+	DeadLetter(ctx context.Context, message *domain.AlertQueueMessage, reason, description string) error
+	// RenewLock extends how long the message stays hidden from other receivers, and updates LockedUntil.
+	RenewLock(ctx context.Context, message *domain.AlertQueueMessage) error
 }
 
 // AlertStore is the storage the alert consumer writes to; repository.AlertRepository satisfies it.
@@ -54,7 +59,7 @@ type AlertTransforms interface {
 
 // AlertConsumerConfig tunes the alert consumer.
 type AlertConsumerConfig struct {
-	// Concurrency is how many messages are processed at once across both queues.
+	// Concurrency is how many messages are processed at once across every queue.
 	Concurrency int
 	// PriorityWeight is how many priority alerts may be processed in a row while a standard alert waits.
 	PriorityWeight int
@@ -77,7 +82,7 @@ const (
 // maxAlertsPerMessage bounds one message's alerts, far above any real batch but low enough for one insert.
 const maxAlertsPerMessage = 1000
 
-// maxDeadLetterDescription keeps a dead-letter description within what Service Bus accepts.
+// maxDeadLetterDescription keeps a dead-letter description within what every cloud accepts.
 const maxDeadLetterDescription = 1024
 
 // Store attempts happen while the message lock is held, so a short database blip does not cost a delivery.
@@ -118,37 +123,42 @@ type alertDecision struct {
 	alerts      int
 }
 
-type alertLane struct {
-	tier     domain.AlertTier
-	queue    string
-	receiver AlertReceiver
-	messages chan *azservicebus.ReceivedMessage
+// queuedMessage is a received message with the queue it must be settled on.
+type queuedMessage struct {
+	message *domain.AlertQueueMessage
+	queue   AlertQueue
 }
 
-// AlertConsumer streams alerts from the priority and standard Service Bus queues into the alert table.
+// alertLane is one tier: every queue of that tier, on every cloud, feeds its buffer.
+type alertLane struct {
+	tier     domain.AlertTier
+	queues   []AlertQueue
+	messages chan queuedMessage
+}
+
+// AlertConsumer streams alerts from the priority and standard queues of every configured cloud into the alert table.
 type AlertConsumer struct {
 	repo            AlertStore
 	transforms      AlertTransforms
 	lanes           map[domain.AlertTier]*alertLane
-	scheduler       *priorityScheduler[*azservicebus.ReceivedMessage]
+	scheduler       *priorityScheduler[queuedMessage]
 	workers         int
 	now             func() time.Time
 	sleep           func(ctx context.Context, d time.Duration) bool
 	lockRenewMargin time.Duration
 }
 
-// NewAlertConsumer wires one receiver per queue; each queue buffers at most one message per worker, so locks stay fresh.
+// NewAlertConsumer wires every priority queue into the priority tier and every standard queue into the standard tier; each tier buffers at most one message per worker.
 func NewAlertConsumer(
 	repo AlertStore,
 	transforms AlertTransforms,
-	high AlertReceiver, highQueue string,
-	standard AlertReceiver, standardQueue string,
+	priorityQueues, standardQueues []AlertQueue,
 	cfg AlertConsumerConfig,
 ) *AlertConsumer {
 	workers := max(cfg.Concurrency, 1)
 	lanes := map[domain.AlertTier]*alertLane{
-		domain.AlertTierHigh:    {tier: domain.AlertTierHigh, queue: highQueue, receiver: high, messages: make(chan *azservicebus.ReceivedMessage, workers)},
-		domain.AlertTierDefault: {tier: domain.AlertTierDefault, queue: standardQueue, receiver: standard, messages: make(chan *azservicebus.ReceivedMessage, workers)},
+		domain.AlertTierHigh:    {tier: domain.AlertTierHigh, queues: priorityQueues, messages: make(chan queuedMessage, workers)},
+		domain.AlertTierDefault: {tier: domain.AlertTierDefault, queues: standardQueues, messages: make(chan queuedMessage, workers)},
 	}
 	return &AlertConsumer{
 		repo:            repo,
@@ -166,7 +176,9 @@ func NewAlertConsumer(
 func (c *AlertConsumer) Run(ctx context.Context) {
 	var receiving, working sync.WaitGroup
 	for _, lane := range c.lanes {
-		receiving.Go(func() { c.receive(ctx, lane) })
+		for _, queue := range lane.queues {
+			receiving.Go(func() { c.receive(ctx, lane, queue) })
+		}
 	}
 	for range c.workers {
 		working.Go(func() { c.work(ctx) })
@@ -178,18 +190,18 @@ func (c *AlertConsumer) Run(ctx context.Context) {
 	}
 }
 
-// receive keeps one link open on a queue and asks for as many messages as the lane has room for.
-func (c *AlertConsumer) receive(ctx context.Context, lane *alertLane) {
+// receive keeps waiting on one queue and asks for as many messages as its tier has room for.
+func (c *AlertConsumer) receive(ctx context.Context, lane *alertLane, queue AlertQueue) {
 	backoff := receiveBackoffMin
 	for ctx.Err() == nil {
 		room := max(cap(lane.messages)-len(lane.messages), 1)
-		messages, err := lane.receiver.ReceiveMessages(ctx, room, nil)
+		messages, err := queue.Receive(ctx, room)
 		if err != nil {
 			if ctx.Err() != nil {
-				c.abandonAll(lane, messages)
+				c.abandonAll(queue, messages)
 				return
 			}
-			slog.ErrorContext(ctx, "alert consumer: receive failed, retrying", "queue", lane.queue, "retryIn", backoff, "err", err)
+			slog.ErrorContext(ctx, "alert consumer: receive failed, retrying", "queue", queue.Name(), "retryIn", backoff, "err", err)
 			if !c.sleep(ctx, backoff) {
 				return
 			}
@@ -199,9 +211,9 @@ func (c *AlertConsumer) receive(ctx context.Context, lane *alertLane) {
 		backoff = receiveBackoffMin
 		for i, message := range messages {
 			select {
-			case lane.messages <- message:
+			case lane.messages <- queuedMessage{message: message, queue: queue}:
 			case <-ctx.Done():
-				c.abandonAll(lane, messages[i:])
+				c.abandonAll(queue, messages[i:])
 				return
 			}
 		}
@@ -211,45 +223,45 @@ func (c *AlertConsumer) receive(ctx context.Context, lane *alertLane) {
 // work takes the next message by priority and settles it, until ctx is done.
 func (c *AlertConsumer) work(ctx context.Context) {
 	for {
-		message, tier, ok := c.scheduler.next(ctx)
+		queued, tier, ok := c.scheduler.next(ctx)
 		if !ok {
 			return
 		}
-		c.handle(ctx, c.lanes[tier], message)
+		c.handle(ctx, tier, queued.queue, queued.message)
 	}
 }
 
 // handle processes and settles one message; it runs on a context shutdown does not cancel, so an alert in flight is finished.
-func (c *AlertConsumer) handle(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage) {
+func (c *AlertConsumer) handle(ctx context.Context, tier domain.AlertTier, queue AlertQueue, message *domain.AlertQueueMessage) {
 	processCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processTimeout)
 	defer cancel()
-	if err := c.renewLockIfDue(processCtx, lane, message); err != nil {
-		slog.WarnContext(ctx, "alert consumer: lock lost while the message waited for a worker, Service Bus will redeliver it", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+	if err := c.renewLockIfDue(processCtx, queue, message); err != nil {
+		slog.WarnContext(ctx, "alert consumer: lock lost while the message waited for a worker, the queue will redeliver it", "messageId", message.ID, "queue", queue.Name(), "err", err)
 		return
 	}
-	stopRenewing := c.keepLock(processCtx, lane, message)
-	decision := c.process(processCtx, lane.tier, message)
+	stopRenewing := c.keepLock(processCtx, queue, message)
+	decision := c.process(processCtx, tier, message)
 	stopRenewing()
 	// Renewal stops before settling, so the two never touch the message at once; a last renewal covers a slow settlement.
 	renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
 	defer cancelRenew()
-	if err := c.renewLockIfDue(renewCtx, lane, message); err != nil {
-		slog.WarnContext(ctx, "alert consumer: lock lost before settlement, Service Bus will redeliver the message", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+	if err := c.renewLockIfDue(renewCtx, queue, message); err != nil {
+		slog.WarnContext(ctx, "alert consumer: lock lost before settlement, the queue will redeliver the message", "messageId", message.ID, "queue", queue.Name(), "err", err)
 		return
 	}
-	c.settle(processCtx, lane, message, decision)
+	c.settle(processCtx, queue, message, decision)
 }
 
 // renewLockIfDue renews the message lock when it expires within lockRenewMargin.
-func (c *AlertConsumer) renewLockIfDue(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage) error {
+func (c *AlertConsumer) renewLockIfDue(ctx context.Context, queue AlertQueue, message *domain.AlertQueueMessage) error {
 	if message.LockedUntil == nil || c.now().Add(c.lockRenewMargin).Before(*message.LockedUntil) {
 		return nil
 	}
-	return lane.receiver.RenewMessageLock(ctx, message, nil)
+	return queue.RenewLock(ctx, message)
 }
 
 // keepLock renews the message lock while it is processed and returns the function that stops renewing.
-func (c *AlertConsumer) keepLock(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage) func() {
+func (c *AlertConsumer) keepLock(ctx context.Context, queue AlertQueue, message *domain.AlertQueueMessage) func() {
 	done := make(chan struct{})
 	var renewing sync.WaitGroup
 	renewing.Go(func() {
@@ -268,8 +280,8 @@ func (c *AlertConsumer) keepLock(ctx context.Context, lane *alertLane, message *
 				return
 			case <-timer.C:
 			}
-			if err := lane.receiver.RenewMessageLock(ctx, message, nil); err != nil {
-				slog.WarnContext(ctx, "alert consumer: lock renewal failed", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+			if err := queue.RenewLock(ctx, message); err != nil {
+				slog.WarnContext(ctx, "alert consumer: lock renewal failed", "messageId", message.ID, "queue", queue.Name(), "err", err)
 				return
 			}
 		}
@@ -281,8 +293,8 @@ func (c *AlertConsumer) keepLock(ctx context.Context, lane *alertLane, message *
 }
 
 // process stores one message's alerts and decides how to settle it; bad payloads are dead-lettered, store failures retried.
-func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, message *azservicebus.ReceivedMessage) alertDecision {
-	source := strings.ToLower(messageStringProperty(message.ApplicationProperties, alertPropertySource))
+func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, message *domain.AlertQueueMessage) alertDecision {
+	source := strings.ToLower(strings.TrimSpace(message.Properties[alertPropertySource]))
 	if source == "" {
 		return alertDeadLetterDecision(alertDeadLetterMissingSource, "the message has no source property")
 	}
@@ -306,7 +318,7 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 		ids, err = c.repo.ReserveAlertIDs(ctx, len(alerts))
 		return err
 	}); err != nil {
-		slog.ErrorContext(ctx, "alert consumer: could not reserve alert ids, the message will be redelivered", "messageId", message.MessageID, "err", err)
+		slog.ErrorContext(ctx, "alert consumer: could not reserve alert ids, the message will be redelivered", "messageId", message.ID, "err", err)
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 
@@ -319,7 +331,7 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, mess
 		stored, err = c.repo.InsertAlerts(ctx, rows)
 		return err
 	}); err != nil {
-		slog.ErrorContext(ctx, "alert consumer: could not store alerts, the message will be redelivered", "messageId", message.MessageID, "err", err)
+		slog.ErrorContext(ctx, "alert consumer: could not store alerts, the message will be redelivered", "messageId", message.ID, "err", err)
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 	return alertDecision{settlement: alertComplete, stored: stored, alerts: len(alerts)}
@@ -336,7 +348,7 @@ func safeTransform(transform alertsource.Transform, body []byte) (alerts []model
 }
 
 // buildRows gives each alert its id and fingerprint the way alert-ingestion does: an alert with no identifier takes its own id.
-func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message *azservicebus.ReceivedMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
+func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) ([]domain.NewAlert, error) {
 	receivedOn := c.receivedOn(message)
 	rows := make([]domain.NewAlert, len(alerts))
 	for i, alert := range alerts {
@@ -353,7 +365,7 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message 
 			Alert:        body,
 			Fingerprint:  model.Fingerprint(alert),
 			Tier:         tier,
-			MessageID:    message.MessageID,
+			MessageID:    message.ID,
 			MessageIndex: i,
 			ReceivedOn:   receivedOn,
 		}
@@ -361,15 +373,15 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, message 
 	return rows, nil
 }
 
-// receivedOn is when the gateway accepted the request, falling back to when Service Bus stored the message.
-func (c *AlertConsumer) receivedOn(message *azservicebus.ReceivedMessage) time.Time {
-	if raw := messageStringProperty(message.ApplicationProperties, alertPropertyReceivedAt); raw != "" {
+// receivedOn is when the gateway accepted the request, falling back to when the queue stored the message.
+func (c *AlertConsumer) receivedOn(message *domain.AlertQueueMessage) time.Time {
+	if raw := strings.TrimSpace(message.Properties[alertPropertyReceivedAt]); raw != "" {
 		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 			return t.UTC()
 		}
 	}
-	if message.EnqueuedTime != nil {
-		return message.EnqueuedTime.UTC()
+	if message.EnqueuedOn != nil {
+		return message.EnqueuedOn.UTC()
 	}
 	return c.now().UTC()
 }
@@ -386,33 +398,32 @@ func (c *AlertConsumer) withStoreRetry(ctx context.Context, fn func() error) err
 	return err
 }
 
-// settle completes, dead-letters or abandons a message; a failed settlement only means Service Bus redelivers it.
-func (c *AlertConsumer) settle(ctx context.Context, lane *alertLane, message *azservicebus.ReceivedMessage, decision alertDecision) {
+// settle completes, dead-letters or abandons a message; a failed settlement only means the queue redelivers it.
+func (c *AlertConsumer) settle(ctx context.Context, queue AlertQueue, message *domain.AlertQueueMessage, decision alertDecision) {
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
 	defer cancel()
 	var err error
 	switch decision.settlement {
 	case alertComplete:
-		err = lane.receiver.CompleteMessage(settleCtx, message, nil)
+		err = queue.Complete(settleCtx, message)
 		if err == nil && decision.stored < int64(decision.alerts) {
-			slog.InfoContext(ctx, "alert consumer: redelivered message was already stored", "messageId", message.MessageID, "queue", lane.queue, "alerts", decision.alerts, "new", decision.stored)
+			slog.InfoContext(ctx, "alert consumer: redelivered message was already stored", "messageId", message.ID, "queue", queue.Name(), "alerts", decision.alerts, "new", decision.stored)
 		}
 	case alertDeadLetter:
-		slog.WarnContext(ctx, "alert consumer: dead-lettering a message", "messageId", message.MessageID, "queue", lane.queue, "reason", decision.reason)
-		reason, description := decision.reason, truncateRunes(decision.description, maxDeadLetterDescription)
-		err = lane.receiver.DeadLetterMessage(settleCtx, message, &azservicebus.DeadLetterOptions{Reason: &reason, ErrorDescription: &description})
+		slog.WarnContext(ctx, "alert consumer: dead-lettering a message", "messageId", message.ID, "queue", queue.Name(), "reason", decision.reason)
+		err = queue.DeadLetter(settleCtx, message, decision.reason, truncateRunes(decision.description, maxDeadLetterDescription))
 	case alertAbandon:
-		err = lane.receiver.AbandonMessage(settleCtx, message, nil)
+		err = queue.Abandon(settleCtx, message)
 	}
 	if err != nil {
-		slog.WarnContext(ctx, "alert consumer: settlement failed, Service Bus will redeliver the message", "messageId", message.MessageID, "queue", lane.queue, "err", err)
+		slog.WarnContext(ctx, "alert consumer: settlement failed, the queue will redeliver the message", "messageId", message.ID, "queue", queue.Name(), "err", err)
 	}
 }
 
 // abandonAll hands messages back so they are redelivered at once rather than after their lock expires.
-func (c *AlertConsumer) abandonAll(lane *alertLane, messages []*azservicebus.ReceivedMessage) {
+func (c *AlertConsumer) abandonAll(queue AlertQueue, messages []*domain.AlertQueueMessage) {
 	for _, message := range messages {
-		c.settle(context.Background(), lane, message, alertDecision{settlement: alertAbandon})
+		c.settle(context.Background(), queue, message, alertDecision{settlement: alertAbandon})
 	}
 }
 
@@ -420,8 +431,8 @@ func (c *AlertConsumer) abandonAll(lane *alertLane, messages []*azservicebus.Rec
 func (c *AlertConsumer) abandonBuffered(lane *alertLane) {
 	for {
 		select {
-		case message := <-lane.messages:
-			c.abandonAll(lane, []*azservicebus.ReceivedMessage{message})
+		case queued := <-lane.messages:
+			c.abandonAll(queued.queue, []*domain.AlertQueueMessage{queued.message})
 		default:
 			return
 		}
@@ -430,18 +441,6 @@ func (c *AlertConsumer) abandonBuffered(lane *alertLane) {
 
 func alertDeadLetterDecision(reason, description string) alertDecision {
 	return alertDecision{settlement: alertDeadLetter, reason: reason, description: description}
-}
-
-// messageStringProperty reads an application property as text; the gateway sends every property as a string.
-func messageStringProperty(properties map[string]any, key string) string {
-	value, ok := properties[key]
-	if !ok || value == nil {
-		return ""
-	}
-	if s, ok := value.(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 // sleepContext waits for d and reports whether ctx was still live afterwards.
