@@ -40,9 +40,29 @@ function openedByText(count: number): string {
   return `Opened by ${count} ${count === 1 ? "person" : "people"}.`;
 }
 
+/**
+ * The hooks and link URL the link section uses. The custom dashboards' are the
+ * default; advanced dashboards pass their own (CODE_DASHBOARD_SHARING).
+ */
+export interface DashboardLinkHooks {
+  useGetLink: typeof useGetCustomDashboardLink;
+  usePutLink: typeof usePutCustomDashboardLink;
+  useDeleteLink: typeof useDeleteCustomDashboardLink;
+  linkUrl: (linkId: string) => string;
+}
+
+const CUSTOM_DASHBOARD_LINK_HOOKS: DashboardLinkHooks = {
+  useGetLink: useGetCustomDashboardLink,
+  usePutLink: usePutCustomDashboardLink,
+  useDeleteLink: useDeleteCustomDashboardLink,
+  linkUrl: dashboardLinkUrl,
+};
+
 interface DashboardLinkSectionProps {
   /** The caller's dashboard; `undefined` while the Share dialog is closed (nothing is read). */
   dashboardId: string | undefined;
+  /** Whose link this is; the custom dashboards' when left out. Fixed for the section's life. */
+  hooks?: DashboardLinkHooks;
 }
 
 /**
@@ -53,16 +73,20 @@ interface DashboardLinkSectionProps {
  * while the link stays on; turning it off takes it away from them, and
  * turning it on again makes a new link.
  */
-export default function DashboardLinkSection({ dashboardId }: DashboardLinkSectionProps): JSX.Element {
-  const link = useGetCustomDashboardLink(dashboardId);
-  const enable = usePutCustomDashboardLink();
-  const disable = useDeleteCustomDashboardLink();
+export default function DashboardLinkSection({
+  dashboardId,
+  hooks = CUSTOM_DASHBOARD_LINK_HOOKS,
+}: DashboardLinkSectionProps): JSX.Element {
+  const { useGetLink, usePutLink, useDeleteLink, linkUrl } = hooks;
+  const link = useGetLink(dashboardId);
+  const enable = usePutLink();
+  const disable = useDeleteLink();
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const busy = enable.isPending || disable.isPending;
   const on = link.data?.enabled === true;
-  const url = on && link.data?.linkId ? dashboardLinkUrl(link.data.linkId) : null;
+  const url = on && link.data?.linkId ? linkUrl(link.data.linkId) : null;
 
   /** Turns the link on or off; a failure keeps the switch as it was and says which way it failed. */
   const handleToggle = async (next: boolean): Promise<void> => {

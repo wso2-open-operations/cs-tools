@@ -151,6 +151,13 @@ declare global {
        */
       CSM_MIGRATION_ONBOARDING_STATUS_ENABLED?: boolean | string;
       /**
+       * The code approach to dashboard generation (`/dashboard/my/new-code`),
+       * phase 2. Only `true` (or the string `"true"`) turns it on; off is the
+       * default. Same flag name as the backend and csm-ai-integration-service
+       * env vars gating its routes — see `codeDashboardConfig.ts`.
+       */
+      DASHBOARD_GENERATE_CODE_ENABLED?: boolean | string;
+      /**
        * Largest file, in megabytes, offered for upload (default 10, the
        * entity-service default). A number or numeric
        * string. See `attachmentLimitsConfig.ts`.

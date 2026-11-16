@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, LayoutDashboard, MessageSquare } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Code, LayoutDashboard, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import { useNavigate } from "react-router";
 import type { BeDashboard } from "@api/backend/types";
@@ -25,6 +25,7 @@ import { usePutCustomDashboard } from "@features/csm-custom-dashboards/api/useCu
 import { useGenerateDashboard } from "@features/csm-custom-dashboards/api/useGenerateDashboard";
 import { generateErrorMessage } from "@features/csm-custom-dashboards/utils/generateErrorMessage";
 import { saveErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
+import { useCanGenerateAdvancedDashboards } from "@features/csm-custom-dashboards/utils/advancedDashboardAccess";
 import DashboardNameDialog from "@features/csm-custom-dashboards/components/DashboardNameDialog";
 import DiscardGeneratedDashboardDialog from "@features/csm-custom-dashboards/components/DiscardGeneratedDashboardDialog";
 import GenerateChatPanel, {
@@ -32,6 +33,7 @@ import GenerateChatPanel, {
 } from "@features/csm-custom-dashboards/components/GenerateChatPanel";
 
 const MY_DASHBOARDS_PATH = "/dashboard/my";
+const ADVANCED_GENERATE_PATH = "/dashboard/my/new-code";
 
 /**
  * Dashboards > My Dashboards > new (`/dashboard/my/new`), opened
@@ -55,9 +57,10 @@ const MY_DASHBOARDS_PATH = "/dashboard/my";
  * dialog, which stays open so the name can be changed there; the preview is
  * left as it is.
  *
- * Leaving: Back and Discard both go through `requestLeave`, which asks first
- * (DiscardGeneratedDashboardDialog) when there is anything to lose -- a draft
- * or any message -- and leaves straight away otherwise. Other ways out (the menu, a refresh, closing the tab) are not
+ * Leaving: Back, Discard and Generate Advanced Dashboard all go through
+ * `requestLeave`, which asks first (DiscardGeneratedDashboardDialog) when
+ * there is anything to lose -- a draft or any message -- and leaves straight
+ * away otherwise. Other ways out (the menu, a refresh, closing the tab) are not
  * guarded: this app's router is not a data router, so `useBlocker` is not
  * available.
  *
@@ -68,6 +71,12 @@ const MY_DASHBOARDS_PATH = "/dashboard/my";
  *
  * Back names its destination because this page is only ever opened from My
  * Dashboards (the webapp CLAUDE.md's fixed-destination exception).
+ *
+ * A new dashboard's header also offers Generate Advanced Dashboard, the code
+ * approach's page (`/dashboard/my/new-code`), to whoever may use it
+ * (`useCanGenerateAdvancedDashboards`); My Dashboards itself has only
+ * Generate Dashboard. Editing never offers it: the code page cannot edit a
+ * saved dashboard.
  */
 export default function GenerateDashboardPage({
   initialDashboard,
@@ -81,7 +90,9 @@ export default function GenerateDashboardPage({
   const [chatOpen, setChatOpen] = useState(true);
   const [draft, setDraft] = useState<BeDashboard | null>(initialDashboard ?? null);
   const [busy, setBusy] = useState(false);
-  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  // Where the discard dialog leaves to once confirmed; null while it is closed.
+  const [leaveTo, setLeaveTo] = useState<string | null>(null);
+  const canGoAdvanced = useCanGenerateAdvancedDashboards() && !editing;
   // Save's name dialog, and why its last save was refused.
   const [nameOpen, setNameOpen] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -110,12 +121,10 @@ export default function GenerateDashboardPage({
       setNameError(saveErrorMessage(err, name));
     }
   };
-  const leave = (): void => {
-    void navigate(editing ? `${MY_DASHBOARDS_PATH}/${encodeURIComponent(initialDashboard.id)}` : MY_DASHBOARDS_PATH);
-  };
-  const requestLeave = (): void => {
-    if (hasWork) setConfirmDiscardOpen(true);
-    else leave();
+  const backPath = editing ? `${MY_DASHBOARDS_PATH}/${encodeURIComponent(initialDashboard.id)}` : MY_DASHBOARDS_PATH;
+  const requestLeave = (to: string = backPath): void => {
+    if (hasWork) setLeaveTo(to);
+    else void navigate(to);
   };
 
   const addMessage = (role: GenerateChatMessage["role"], text: string): void => {
@@ -146,7 +155,7 @@ export default function GenerateDashboardPage({
         variant="text"
         size="small"
         startIcon={<ArrowLeft size={16} />}
-        onClick={requestLeave}
+        onClick={() => requestLeave()}
         sx={{ alignSelf: "flex-start" }}
       >
         Back to My Dashboards
@@ -154,6 +163,16 @@ export default function GenerateDashboardPage({
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
         <Typography variant="h5">{editing ? "Edit dashboard" : "New dashboard"}</Typography>
         <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          {canGoAdvanced && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<Code size={16} />}
+              onClick={() => requestLeave(ADVANCED_GENERATE_PATH)}
+            >
+              Generate Advanced Dashboard
+            </Button>
+          )}
           {!chatOpen && (
             <Button
               variant="outlined"
@@ -164,7 +183,7 @@ export default function GenerateDashboardPage({
               Open chat
             </Button>
           )}
-          <Button variant="outlined" size="small" onClick={requestLeave}>
+          <Button variant="outlined" size="small" onClick={() => requestLeave()}>
             Discard
           </Button>
           <Button
@@ -268,9 +287,11 @@ export default function GenerateDashboardPage({
         onConfirm={(name) => void handleSaveAs(name)}
       />
       <DiscardGeneratedDashboardDialog
-        open={confirmDiscardOpen}
-        onCancel={() => setConfirmDiscardOpen(false)}
-        onConfirm={leave}
+        open={leaveTo !== null}
+        onCancel={() => setLeaveTo(null)}
+        onConfirm={() => {
+          if (leaveTo !== null) void navigate(leaveTo);
+        }}
         editing={editing}
       />
     </Box>

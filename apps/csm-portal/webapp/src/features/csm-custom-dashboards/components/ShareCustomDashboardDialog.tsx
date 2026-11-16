@@ -51,9 +51,36 @@ import {
   usePutCustomDashboardTeamShare,
 } from "@features/csm-custom-dashboards/api/useDashboardTeamShares";
 import { useGetCustomDashboardLink } from "@features/csm-custom-dashboards/api/useDashboardLink";
-import DashboardLinkSection from "@features/csm-custom-dashboards/components/DashboardLinkSection";
+import DashboardLinkSection, {
+  type DashboardLinkHooks,
+} from "@features/csm-custom-dashboards/components/DashboardLinkSection";
 import { useTeams } from "@features/csm-dashboard/api/useTeams";
 import type { BeTeam } from "@api/backend/types";
+
+/**
+ * The hooks the dialog shares through: people, teams and the link. The custom
+ * dashboards' are the default; advanced dashboards pass their own
+ * (CODE_DASHBOARD_SHARING), which leaves `linkHooks` to the link section.
+ */
+export interface DashboardShareHooks {
+  useGetShares: typeof useGetCustomDashboardShares;
+  usePutShare: typeof usePutCustomDashboardShare;
+  useDeleteShare: typeof useDeleteCustomDashboardShare;
+  useGetTeamShares: typeof useGetCustomDashboardTeamShares;
+  usePutTeamShare: typeof usePutCustomDashboardTeamShare;
+  useDeleteTeamShare: typeof useDeleteCustomDashboardTeamShare;
+  /** For the link section; `undefined` keeps its own default (the custom dashboards' link). */
+  linkHooks?: DashboardLinkHooks;
+}
+
+const CUSTOM_DASHBOARD_SHARE_HOOKS: DashboardShareHooks = {
+  useGetShares: useGetCustomDashboardShares,
+  usePutShare: usePutCustomDashboardShare,
+  useDeleteShare: useDeleteCustomDashboardShare,
+  useGetTeamShares: useGetCustomDashboardTeamShares,
+  usePutTeamShare: usePutCustomDashboardTeamShare,
+  useDeleteTeamShare: useDeleteCustomDashboardTeamShare,
+};
 
 interface ShareCustomDashboardDialogProps {
   open: boolean;
@@ -62,6 +89,8 @@ interface ShareCustomDashboardDialogProps {
   /** The signed-in user's email, left out of the search results. */
   currentUserEmail?: string;
   onClose: () => void;
+  /** Which kind of dashboard is shared; the custom dashboards' hooks when left out. Fixed for the dialog's life. */
+  hooks?: DashboardShareHooks;
 }
 
 /**
@@ -131,25 +160,32 @@ function groupShareableTeams(teams: BeTeam[], query: string, sharedKeys: Set<str
  * "Anyone with CSM Portal Viewer access" (who has the link) while the link is
  * on, then teams, then people. A refusal shows in the dialog; the backend is
  * the real check.
+ *
+ * It shares a custom dashboard unless `hooks` says otherwise: a saved advanced
+ * dashboard passes CODE_DASHBOARD_SHARING, the same dialog on its own routes.
  */
 export default function ShareCustomDashboardDialog({
   open,
   dashboard,
   currentUserEmail,
   onClose,
+  hooks = CUSTOM_DASHBOARD_SHARE_HOOKS,
 }: ShareCustomDashboardDialogProps): JSX.Element {
+  const { useGetShares, usePutShare, useDeleteShare, useGetTeamShares, usePutTeamShare, useDeleteTeamShare, linkHooks } =
+    hooks;
+  const useGetLink = linkHooks?.useGetLink ?? useGetCustomDashboardLink;
   const [mode, setMode] = useState<ShareMode>("people");
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const shares = useGetCustomDashboardShares(open ? dashboard.id : undefined);
-  const share = usePutCustomDashboardShare();
-  const unshare = useDeleteCustomDashboardShare();
-  const teamShares = useGetCustomDashboardTeamShares(open ? dashboard.id : undefined);
-  const shareTeam = usePutCustomDashboardTeamShare();
-  const unshareTeam = useDeleteCustomDashboardTeamShare();
+  const shares = useGetShares(open ? dashboard.id : undefined);
+  const share = usePutShare();
+  const unshare = useDeleteShare();
+  const teamShares = useGetTeamShares(open ? dashboard.id : undefined);
+  const shareTeam = usePutTeamShare();
+  const unshareTeam = useDeleteTeamShare();
   const teams = useTeams(open && mode === "teams");
   // The same query as the Anyone tab's, so its switch updates this at once.
-  const link = useGetCustomDashboardLink(open ? dashboard.id : undefined);
+  const link = useGetLink(open ? dashboard.id : undefined);
 
   const search = useDebouncedValue(input.trim(), 300);
   const results = useSearchUsers(
@@ -300,7 +336,7 @@ export default function ShareCustomDashboardDialog({
           )}
 
           {mode === "link" ? (
-            <DashboardLinkSection dashboardId={open ? dashboard.id : undefined} />
+            <DashboardLinkSection dashboardId={open ? dashboard.id : undefined} hooks={linkHooks} />
           ) : mode === "teams" ? (
             <Box sx={{ minHeight: 120, maxHeight: 280, overflowY: "auto" }} aria-label="Teams to share with">
               {teams.isLoading ? (

@@ -45,6 +45,14 @@ vi.mock("@features/csm-dashboard/components/DashboardWidgetGrid", () => ({
     <div data-line-points={String(Boolean(linePointClickThrough))}>Grid: {widgets.map((w) => w.widgetId).join(", ")}</div>
   ),
 }));
+// Advanced dashboards are off here, so none of these is called; their modules
+// only need to load without the portal's config
+// (SharedDashboardsPage.code.test.tsx covers them).
+vi.mock("@features/csm-custom-dashboards/utils/advancedDashboardAccess", () => ({
+  useCanViewAdvancedDashboards: () => false,
+}));
+vi.mock("@features/csm-custom-dashboards/api/useCodeDashboardShares", () => ({}));
+vi.mock("@features/csm-custom-dashboards/components/CodeDashboardFrame", () => ({ default: () => null }));
 
 import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDashboardsPage";
 

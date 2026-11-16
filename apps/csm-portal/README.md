@@ -356,7 +356,7 @@ README (and its `.env.example`) for the full list, defaults and validation rules
 | CSM backend | env / `.env` (from `.env.example`) | `OAUTH2_CLIENT_ID`, `OAUTH2_CLIENT_SECRET`, `OAUTH2_TOKEN_URL`; `CUSTOMER_ENTITY_BASE_URL`, `UPDATES_BASE_URL`, `SCIM_BASE_URL` (+ `*_SCOPES`); `AUTH_JWKS_ENDPOINT`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_TOKEN_VALIDATOR_ENABLED`; `AUTH_*_ROLES`; `CORS_ALLOWED_ORIGINS`, `PORT` | [`backend/README.md`](./backend/README.md#configuration-reference) |
 | entity-service | env / `.env` (from `.env.example`) | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`; `SERVER_PORT`, `HEALTH_PORT`; `DATA_SOURCE` (default `postgres`); `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_USER_TOKEN_AUDIENCES`; `M2M_CLIENT_IDS`; `EVENT_PUBLISHING_ENABLED`, `EVENT_HUB_BROKER`, `EVENT_HUB_CONNECTION_STRING`, `EVENT_HUB_TOPIC`; optional `REDIS_URL` / `REDIS_ADDR` | [`entity-service/README.md`](../../entity-service/README.md#configuration-reference) |
 | csm-integration-service | env / `.env` | `ENTITY_BASE_URL`, `ENTITY_TOKEN_URL`, `ENTITY_CLIENT_ID`, `ENTITY_CLIENT_SECRET`, `ENTITY_SCOPES`, `PORT` | [README](../../integrations/csm-integration-service/README.md) |
-| csm-ai-integration-service | env / `.env` | `ANTHROPIC_API_KEY` (secret), `CLAUDE_BASE_URL`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT`, `PORT` | [README](../../integrations/csm-ai-integration-service/README.md) |
+| csm-ai-integration-service | env / `.env` | `ANTHROPIC_API_KEY` (secret), `CLAUDE_BASE_URL`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT`, `DASHBOARD_GENERATE_CODE_ENABLED`, `PORT` | [README](../../integrations/csm-ai-integration-service/README.md) |
 | csm-notification-service | env / `.env` | `EVENT_HUB_*` consumer settings, channel credentials, `PORT` | [README](../../integrations/csm-notification-service/README.md) |
 | Activity-stream services | env / `.env` | `EVENT_HUB_*`, `OAUTH2_*`, `CUSTOMER_ENTITY_BASE_URL`, `AUTH_JWKS_ENDPOINT`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `HEALTH_PORT`, `STREAM_PORT` | [CSM](../../integrations/csm-portal-activity-stream-service/README.md), [customer](../../integrations/customer-portal-activity-stream-service/README.md) |
 | Scheduled tasks, webhooks, alert services | env or `config.toml` | see each README | [`operations/`](../../operations), [`integrations/`](../../integrations) |
@@ -372,6 +372,7 @@ How the settings line up across components (the same value must agree in both pl
 | Browser to backend | `CSM_PORTAL_BACKEND_BASE_URL` (webapp), `CORS_ALLOWED_ORIGINS` (backend) | The gateway URL in front of the backend; the webapp's origin |
 | Event bus | `EVENT_HUB_BROKER`, `EVENT_HUB_CONNECTION_STRING`, `EVENT_HUB_TOPIC` (entity-service, consumers) | The same broker and topic everywhere; consumers also need their own consumer group |
 | Portal roles | `AUTH_*_ROLES` (backend) | The role names the identity provider puts in the token's `roles` claim |
+| Code approach to dashboards (not released) | `DASHBOARD_GENERATE_CODE_ENABLED` (webapp `config.js`, backend, csm-ai-integration-service) | The same value in all three: each one alone only adds a button or a route the others answer 404 to |
 
 The Compose file sets working local values for all of this; it is the most complete worked example.
 
