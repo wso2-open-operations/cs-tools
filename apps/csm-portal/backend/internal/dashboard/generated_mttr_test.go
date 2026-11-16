@@ -172,6 +172,24 @@ func TestValidateWidgets_MTTRIsBarOnly(t *testing.T) {
 		t.Errorf("slices: err = %v, want the no-slices refusal", err)
 	}
 
+	for name, bands := range map[string]any{"no bands": nil, "two bands": []any{"S1", "S2"}} {
+		count := base
+		count.Shape = ShapeCount
+		count.Query = map[string]any{"months": "3"}
+		if bands != nil {
+			count.Query["bands"] = bands
+		}
+		if err := validateWidgets(widget(count), "test.json"); err == nil || !strings.Contains(err.Error(), `must name exactly one`) {
+			t.Errorf("count with %s: err = %v, want the one-band refusal", name, err)
+		}
+	}
+	oneBand := base
+	oneBand.Shape = ShapeCount
+	oneBand.Query = map[string]any{"months": "3", "bands": []any{"S1"}}
+	if err := validateWidgets(widget(oneBand), "test.json"); err != nil {
+		t.Errorf("count with one band: err = %v, want no error", err)
+	}
+
 	valid := base
 	valid.GroupBy = &GroupByConfig{Bucket: "severity"}
 	if err := validateWidgets(widget(valid), "test.json"); err != nil {

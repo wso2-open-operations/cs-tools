@@ -669,7 +669,7 @@ S3, S4" is the same `bar` widget with `"bands": ["S1","S2","S3","S4"]`; a single
   "groupBy": { "bucket": "severity" } }
 ```
 
-**Not expressible** (section 1): MTTR for a single case, account, project or engineer; a window other than 1/3/6/12 months; MTTR by anything other than severity (by
+**Not expressible** (section 1): MTTR for a single case, account, project or engineer; a window other than 7 days or 1/3/6/12 months; MTTR by anything other than severity (by
 team member, by product, by account); a trend of MTTR over time (a `line` is never MTTR); an SRE team's
 MTTR.
 

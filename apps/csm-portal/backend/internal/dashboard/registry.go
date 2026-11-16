@@ -1035,6 +1035,12 @@ func validateWidgets(d Dashboard, source string) error {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: an %q count shows one band and takes no \"groupBy\"",
 					source, d.ID, w.ID, ResourceMTTR)
 			}
+			if w.Shape == ShapeCount {
+				if b, ok := w.Query["bands"].([]any); !ok || len(b) != 1 {
+					return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: an %q count shows one band, so \"bands\" must name exactly one",
+						source, d.ID, w.ID, ResourceMTTR)
+				}
+			}
 			if w.Shape == ShapeBar && (w.GroupBy == nil || w.GroupBy.Bucket != "severity") {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q groups only by \"groupBy.bucket\" \"severity\"",
 					source, d.ID, w.ID, ResourceMTTR)
