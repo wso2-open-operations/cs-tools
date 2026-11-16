@@ -2894,8 +2894,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 
 	// The audit log's upkeep (migration 0295), called daily by csm-scheduled-tasks.
-	// Needs EXECUTE on the audit_* functions for the application's database role.
-	if db != nil {
+	// Off unless CSM_AUDIT_LOG_ENABLED=true: it needs the migration applied and
+	// EXECUTE on the audit_* functions for the application's database role.
+	if db != nil && cfg.AuditLogEnabled {
 		auditLogMaintenanceHandler := handler.NewAuditLogMaintenanceHandler(
 			service.NewAuditLogMaintenanceService(repository.NewAuditLogRepository(repository.NewScoped(db)), cfg.AuditLogMonthsAhead))
 		mux.HandleFunc("POST /audit-log/maintenance", serviceOnly(accessSvc, auditLogMaintenanceHandler.Run))

@@ -18330,6 +18330,8 @@ paths:
     post:
       summary: Run the audit log's upkeep (service credentials only).
       description: |
+        Registered only when CSM_AUDIT_LOG_ENABLED=true; otherwise the route does not exist and answers 404.
+
         Called daily by csm-scheduled-tasks. Creates the coming monthly partitions of the audit log,
         checks the log's health, and puts back audit triggers that are missing or disabled on registered
         tables. Safe to repeat. It tries every step even if one fails.
@@ -18352,6 +18354,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: Not a service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The audit log is switched off (CSM_AUDIT_LOG_ENABLED is not true).
           content:
             application/json:
               schema:
