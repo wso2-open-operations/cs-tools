@@ -19,6 +19,7 @@ import { useMemo, useState, type JSX } from "react";
 import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
+import { useUserNamesById } from "@features/csm-users/api/useUserNamesById";
 
 interface AssignedUserOption {
   id: string;
@@ -92,12 +93,23 @@ export default function AsyncAssignedUserIdMultiSelect({
 
   const [pickedNames, setPickedNames] = useState<Map<string, string>>(() => new Map());
 
-  const nameById = useMemo(() => {
+  const knownNames = useMemo(() => {
     const m = new Map<string, string>();
     users.forEach((u) => m.set(u.id, u.name));
     pickedNames.forEach((name, id) => m.set(id, name));
     return m;
   }, [users, pickedNames]);
+
+  // A selection restored without a name (URL, a remount on a Quick/Advanced
+  // switch) is looked up by id, so its chip shows the person, not a UUID.
+  const unnamedIds = useMemo(() => values.filter((v) => !knownNames.has(v)), [values, knownNames]);
+  const lookedUpNames = useUserNamesById(unnamedIds);
+
+  const nameById = useMemo(() => {
+    const m = new Map<string, string>(lookedUpNames);
+    knownNames.forEach((name, id) => m.set(id, name));
+    return m;
+  }, [knownNames, lookedUpNames]);
 
   const selectedOptions: AssignedUserOption[] = useMemo(
     () => values.map((v) => ({ id: v, name: nameById.get(v) ?? v })),

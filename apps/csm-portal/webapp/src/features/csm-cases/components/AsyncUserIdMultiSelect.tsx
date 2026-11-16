@@ -19,6 +19,7 @@ import { useMemo, useState, type JSX } from "react";
 import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
+import { useUserNamesById } from "@features/csm-users/api/useUserNamesById";
 
 interface UserIdOption {
   id: string;
@@ -124,12 +125,26 @@ export default function AsyncUserIdMultiSelect({
 
   const [pickedNames, setPickedNames] = useState<Map<string, string>>(() => new Map());
 
-  const nameById = useMemo(() => {
+  const knownNames = useMemo(() => {
     const m = new Map<string, string>(nameSeed);
     users.forEach((u) => m.set(u.id, u.name));
     pickedNames.forEach((name, uid) => m.set(uid, name));
     return m;
   }, [nameSeed, users, pickedNames]);
+
+  // A selection with no known name (not seeded, not searched yet) is looked
+  // up by id, so its chip shows the person, not a raw UUID.
+  const unnamedIds = useMemo(
+    () => values.filter((v) => v !== currentUserId && !knownNames.has(v)),
+    [values, knownNames, currentUserId],
+  );
+  const lookedUpNames = useUserNamesById(unnamedIds);
+
+  const nameById = useMemo(() => {
+    const m = new Map<string, string>(lookedUpNames);
+    knownNames.forEach((name, uid) => m.set(uid, name));
+    return m;
+  }, [knownNames, lookedUpNames]);
 
   const selectedOptions: UserIdOption[] = useMemo(
     () =>

@@ -19,15 +19,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import AsyncUserIdMultiSelect from "@features/csm-cases/components/AsyncUserIdMultiSelect";
 import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
+import { useUserNamesById } from "@features/csm-users/api/useUserNamesById";
 
 vi.mock("@features/csm-cases/api/useUserSearch", () => ({
   useInfiniteUserSearch: vi.fn(),
 }));
+vi.mock("@features/csm-users/api/useUserNamesById", () => ({
+  useUserNamesById: vi.fn(() => new Map()),
+}));
+
+const mockedUseUserNamesById = vi.mocked(useUserNamesById);
 
 const mockedUseInfiniteUserSearch = vi.mocked(useInfiniteUserSearch);
 
 afterEach(() => {
   mockedUseInfiniteUserSearch.mockReset();
+  mockedUseUserNamesById.mockReset();
+  mockedUseUserNamesById.mockImplementation(() => new Map());
 });
 
 const NO_RESULTS = {
@@ -115,5 +123,39 @@ describe("AsyncUserIdMultiSelect — server-side role scoping", () => {
       roleIds: undefined,
       active: undefined,
     });
+  });
+});
+
+describe("AsyncUserIdMultiSelect — names looked up by id", () => {
+  it("shows the looked-up name for a selected id with no known name", () => {
+    mockedUseInfiniteUserSearch.mockReturnValue(NO_RESULTS);
+    mockedUseUserNamesById.mockImplementation(
+      (ids) => new Map(ids.map((id) => [id, "Jane Doe"] as [string, string])),
+    );
+
+    render(
+      <AsyncUserIdMultiSelect
+        values={["22222222-2222-2222-2222-222222222222"]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText("22222222-2222-2222-2222-222222222222")).not.toBeInTheDocument();
+  });
+
+  it("does not look up an id already named by nameSeed or the current user", () => {
+    mockedUseInfiniteUserSearch.mockReturnValue(NO_RESULTS);
+
+    render(
+      <AsyncUserIdMultiSelect
+        values={["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]}
+        onChange={vi.fn()}
+        currentUserId="11111111-1111-1111-1111-111111111111"
+        nameSeed={new Map([["22222222-2222-2222-2222-222222222222", "Seeded"]])}
+      />,
+    );
+
+    expect(mockedUseUserNamesById).toHaveBeenLastCalledWith([]);
   });
 });
