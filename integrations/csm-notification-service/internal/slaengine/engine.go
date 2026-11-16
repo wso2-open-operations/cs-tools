@@ -1101,24 +1101,48 @@ const (
 //     runs on a different trigger than this engine's own Redis
 //     registration, so "no row" can just as easily mean "never registered
 //     there" as "resolved", and must not be read as the latter;
-//   - and then one of three ways the live record disagrees with this wake:
-//   - isTerminalSLAStage(state.Stage) && !state.HasBreached — resolved
-//     cleanly, no breach ever recorded. Verdict: tierResolved. Checked
-//     BEFORE the incarnation comparison below, deliberately: a severity
-//     revision cancels the old clock and registers a fresh one for the
-//     same (case, clockType) pair, and a terminal, unbreached stage means
-//     there is no live clock left to alert about, whichever incarnation —
-//     old or new — this wake entry's own StartedOn happens to match.
-//     Confirmed as a real production false alert before this ordering:
-//     a clock cancelled at 59% (severity changed) still sent a 75% breach
-//     Chat alert, because the incarnation-mismatch branch below used to
-//     run first and fail open before this check ever got a chance to run.
+//   - and then one of four ways the live record disagrees with this wake,
+//     checked in this order:
+//   - meta.SLAID != "" && isTerminalSLAStage(state.Stage) && !state.HasBreached
+//     — resolved cleanly, no breach ever recorded, AND GetClockState was
+//     asked about this clock's own exact row (meta.SLAID non-empty), so the
+//     answer is guaranteed to be about the SAME clock regardless of
+//     incarnation. Verdict: tierResolved. Checked BEFORE the incarnation
+//     comparison below, deliberately: a severity revision cancels the old
+//     clock and registers a fresh one for the same (case, clockType) pair,
+//     and a terminal, unbreached stage for THIS exact row means there is no
+//     live clock left to alert about, whichever incarnation — old or new —
+//     this wake entry's own StartedOn happens to match. Confirmed as a real
+//     production false alert before this ordering existed: a clock
+//     cancelled at 59% (severity changed) still sent a 75% breach Chat
+//     alert, because the incarnation-mismatch branch below used to run
+//     first, unconditionally, and fail open before this check ever got a
+//     chance to run. Requiring meta.SLAID is itself a CodeRabbit-caught fix
+//     on top of that: without it, this branch could fire off an entirely
+//     unrelated SIBLING policy's row (entity-service genuinely lets two
+//     policies both have an open clock on one target at once — confirmed
+//     live, not theoretical), permanently losing a still-due tier's alert.
 //   - !isSameClockIncarnation(state.StartedOn, meta.StartedAt) — the row is
-//     a DIFFERENT, non-terminal incarnation of the clock this wake entry is
-//     about (isSameClockIncarnation, comparing StartedOn): entity-service
-//     now has an unrelated, currently-active NEW clock for this (case,
-//     clockType) pair, which this old wake entry can say nothing reliable
-//     about. Verdict: tierDue (fails open — see below).
+//     a DIFFERENT incarnation of the clock this wake entry is about
+//     (isSameClockIncarnation, comparing StartedOn, 5-minute tolerance):
+//     entity-service now has an unrelated, currently-active NEW clock for
+//     this (case, clockType) pair, which this old wake entry can say
+//     nothing reliable about. Verdict: tierDue (fails open — see below).
+//     Reached whenever meta.SLAID is empty (the branch above requires it)
+//     or the exact-row lookup still disagrees for some other reason.
+//   - isTerminalSLAStage(state.Stage) && !state.HasBreached, UNGUARDED —
+//     reached only once incarnation match is already confirmed (so
+//     meta.SLAID was empty, and the row happened to pass the tolerance
+//     above too — the ordinary case when there's genuinely one policy on
+//     this target). Verdict: tierResolved, for the identical reason the
+//     pre-SLAID version of this whole function was: incarnation match is
+//     the only confirmation available when there's no row id. Known,
+//     pre-existing, NOT newly introduced limitation: the 5-minute tolerance
+//     can't tell two SIBLING policies that started close together apart
+//     from one clock's own processing-lag jitter, so a terminal sibling
+//     that merely started within that window can still reach this branch
+//     for an empty-SLAID clock — closing that needs a known SLAID, which
+//     this clock's own next severity revision or a Recalculate backfills.
 //   - state.IsPaused && !state.HasBreached — currently paused, no breach
 //     ever recorded. PAUSED isn't terminal (pausing is routine, not a
 //     resolution), so the check above alone never catches it — but a
