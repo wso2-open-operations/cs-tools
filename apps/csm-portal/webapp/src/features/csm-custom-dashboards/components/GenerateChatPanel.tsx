@@ -48,6 +48,7 @@ const ASK_ABOUT: { title: string; detail: string }[] = [
   { title: "Incidents, change requests and problems", detail: "by state, priority and date" },
   { title: "Customers and projects", detail: "by lifecycle, health, risks and team" },
   { title: "Customer satisfaction", detail: "ratings and CSAT" },
+  { title: "MTTR", detail: "mean time to resolution by severity (S1-S4), over the last 1, 3, 6 or 12 months, by team" },
   {
     title: "PLG organisations and sign-ups",
     detail: "by product, lifecycle stage, tier, owner, country and playbook answers",

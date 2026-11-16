@@ -1114,6 +1114,23 @@ function CaseFeedbackWidgetList({ items, isLoading }: WidgetListRendererProps): 
   );
 }
 
+/**
+ * Structurally-required `shape: "list"` renderer for `resourceType: "mttr"`
+ * -- genuinely unreachable: `ParseGenerated` refuses every shape but
+ * `pie`/`bar` with `groupBy.bucket` for this resourceType (backend's own
+ * `noSlices`/`shapes` rule), so no saved dashboard can ever produce a
+ * `shape: "list"` mttr widget for this to render. Exists only because
+ * `WIDGET_LIST_RENDERERS` is a `Record<BeWidgetResourceType, ...>` -- every
+ * key needs an entry, or the map fails to compile.
+ */
+function MttrWidgetList(): JSX.Element {
+  return (
+    <Typography variant="body2" color="text.secondary">
+      MTTR has no list view.
+    </Typography>
+  );
+}
+
 /** Per-resourceType renderer for a `shape: "list"` dashboard widget. Every
  * resource type is covered — `WIDGET_RESOURCE_CONFIG` (in
  * `widgetResourceConfig.ts`) is keyed the same way, so a missing entry here
@@ -1145,4 +1162,5 @@ export const WIDGET_LIST_RENDERERS: Record<
   case_feedback: CaseFeedbackWidgetList,
   plg_organization: PlgOrganizationWidgetList,
   plg_registration: PlgRegistrationWidgetList,
+  mttr: MttrWidgetList,
 };
