@@ -13843,6 +13843,84 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/sla-breaches:
+    get:
+      summary: >-
+        Build the weekly SLA breach report: the SLA clocks on the named
+        definitions that breached during one calendar week, split into the
+        cases whose project is still onboarding and everything else.
+        Read-only. Internal callers only.
+      description: >-
+        A clock is listed when its policy is one of `definitions` (matched
+        exactly), it has breached, its recorded breach time falls at or
+        after the first instant of the week and before the first instant of
+        the next, in the report's timezone (Asia/Colombo), and -- when
+        `stages` is given -- its stage is one of them. `week` is any date
+        inside the week reported and defaults to the week before now; a
+        week runs Monday to Monday. Rows are ordered by the account's
+        integration CS team, then SLA definition, then breach time. A row
+        lands in `onboarding` when its project's onboarding status is
+        IN_PROGRESS or NOT_STARTED, and in `cre` otherwise.
+      operationId: getSLABreachReport
+      parameters:
+        - name: definitions
+          in: query
+          required: true
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+          description: The SLA definition names the report covers, comma-separated.
+        - name: stages
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            The clock stages the report covers, comma-separated. Omitted
+            means every stage.
+        - name: week
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          description: >-
+            Any date inside the week reported, YYYY-MM-DD. Defaults to the
+            week before now.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLABreachReport'
+        "400":
+          description: definitions is missing, or week is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/migration-cases:
     get:
       summary: >-
@@ -36163,6 +36241,60 @@ components:
           type: string
           format: date-time
           nullable: true
+    SLABreachRow:
+      type: object
+      properties:
+        team:
+          type: string
+          description: The account's integration CS team; the report groups on it.
+        caseNumber:
+          type: string
+        wso2CaseId:
+          type: string
+        caseId:
+          type: string
+        subject:
+          type: string
+        account:
+          type: string
+        severity:
+          type: string
+        product:
+          type: string
+        definition:
+          type: string
+          description: The SLA definition (sla_policy name) that breached.
+        breachedOn:
+          type: string
+          format: date-time
+        stage:
+          type: string
+        assigneeName:
+          type: string
+        onboardingStatus:
+          type: string
+          description: The project onboarding status that decided the row's section.
+    SLABreachReport:
+      type: object
+      properties:
+        periodStart:
+          type: string
+          format: date-time
+          description: First instant of the week reported, inclusive.
+        periodEnd:
+          type: string
+          format: date-time
+          description: First instant of the next week, exclusive.
+        onboarding:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLABreachRow'
+          description: Rows whose project is still onboarding.
+        cre:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLABreachRow'
+          description: Every other row.
     ProductRegressionReport:
       type: object
       description: One monthly product regression report.
