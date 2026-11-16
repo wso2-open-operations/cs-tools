@@ -46,9 +46,10 @@ function bandSortIndex(band: string): number {
  * Renders **average resolution hours per band** as the primary metric
  * (`PieSliceResult.value`) — there is no count-based alternative mode the
  * way `case_feedback`'s "rating"/"reasons_*" buckets have, since every mttr
- * widget's one bucket is always "severity". `total` is the "S1-S4" band's
- * own `caseCount` (how many cases the whole report covers), the closest
- * analogue to `case_feedback`'s `totalRecords` for the tile's header badge.
+ * widget's one bucket is always "severity". `total` is how many cases
+ * the shown bars cover (the shown individual severities' `caseCount`s
+ * added up), the closest analogue to `case_feedback`'s `totalRecords` for
+ * the tile's header badge.
  *
  * No slice is click-through navigable: unlike a date or rating bucket, a
  * severity band has no existing case-list filter that corresponds to "cases
@@ -134,7 +135,14 @@ export function useMttrReportData(
     navigable: false,
     value: b.avgResolutionHours,
   }));
-  const total = bands.find((b) => b.band === "S1-S4")?.caseCount ?? 0;
+  // How many cases the shown bars cover: the individual severities shown,
+  // added up (S1-S4/S1-S3 are sums of those, so counting them too would count
+  // a case twice); only when just a combined bar is shown, that bar's own.
+  const shownSingles = shown.filter((b) => b.band !== "S1-S4" && b.band !== "S1-S3");
+  const total =
+    shownSingles.length > 0
+      ? shownSingles.reduce((n, b) => n + b.caseCount, 0)
+      : (shown[0]?.caseCount ?? 0);
 
   return { slices, total, isLoading, isError };
 }

@@ -1173,7 +1173,16 @@ function DashboardWidgetTile({
               // and for any non-dense tile, so a laptop-width viewer (or a
               // count tile that isn't part of an all-count section) sees
               // this exact size unchanged.
-              fontSize: dense ? { xs: "3.25rem", xl: "2rem" } : "3.25rem",
+              // An MTTR number carries a unit ("1,259.64 h"), so it is
+              // longer than a plain count; a smaller size keeps it whole in
+              // a four-across row instead of ending in an ellipsis.
+              fontSize: isMttrCount
+                ? dense
+                  ? { xs: "2.25rem", xl: "1.5rem" }
+                  : "2.25rem"
+                : dense
+                  ? { xs: "3.25rem", xl: "2rem" }
+                  : "3.25rem",
               overflow: "hidden",
               textOverflow: "ellipsis",
             }}
