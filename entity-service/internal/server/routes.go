@@ -391,6 +391,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
+	var slaBreachReportHandler *handler.SLABreachReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
 
@@ -1797,6 +1798,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewProductRegressionReportService(
 				repository.NewProductRegressionReportRepository(repository.NewScoped(db)),
 				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
+		// Weekly SLA breach report: the clocks that breached last week, split
+		// into the onboarding and CRE sections the source report mailed as two
+		// attachments, for the scheduled task that mails it.
+		slaBreachReportHandler = handler.NewSLABreachReportHandler(
+			service.NewSLABreachReportService(
+				repository.NewSLABreachReportRepository(repository.NewScoped(db))))
 		caseAlertSettingsHandler = handler.NewCaseAlertSettingsHandler(
 			service.NewCaseAlertSettingsService(repository.NewCaseAlertSettingsRepository(db), repository.NewPagingChainRepository(db), accessSvc,
 				service.CaseAlertSettingsConfig{
@@ -2361,6 +2368,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the report names customers' cases and deployments; a
 		// customer token must never reach it.
 		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
+	}
+	if slaBreachReportHandler != nil {
+		// internalOnly, same reasoning as the regression report above: the
+		// report names customers' cases, accounts and assignees.
+		mux.HandleFunc("GET /reports/sla-breaches", internalOnly(accessSvc, slaBreachReportHandler.GetSLABreachReport))
 	}
 	// Alert mute rules (Operations > Alert mute rules, migration 0278): Postgres only. On the
 	// ServiceNow data source every route answers 400 (alert-core, through
