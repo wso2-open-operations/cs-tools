@@ -185,11 +185,7 @@ func (r *fakeAlertRepo) rowCount() int {
 
 func mustRegistry(t *testing.T) *alertsource.Registry {
 	t.Helper()
-	registry, err := alertsource.New(nil)
-	if err != nil {
-		t.Fatalf("alertsource.New: %v", err)
-	}
-	return registry
+	return alertsource.New("00000000-0000-4000-8000-000000000001", nil)
 }
 
 func alertMessage(id, source, body string) *azservicebus.ReceivedMessage {

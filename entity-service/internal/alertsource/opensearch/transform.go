@@ -18,7 +18,6 @@
 package opensearch
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,11 +38,8 @@ const (
 
 // defaults are used when a field is absent from both the payload and the operator config, keyed by canonical field name.
 var defaults = map[string]string{
-	"METRIC_NAME": "OpenSearchAlert",
-	"SERVICE":     "managed_services",
 	"CATEGORY":    "service_interruption",
 	"ENVIRONMENT": "production",
-	"SEVERITY":    "1",
 }
 
 // numericSeverityMap maps OpenSearch's native numeric severity to the canonical severity labels.
@@ -61,23 +57,10 @@ var ErrInvalidStructure = errors.New("invalid opensearch alert payload structure
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides mirroring "edge.api.opensearch.alert.config"; any field left empty falls back to the default.
+// Config holds per-field overrides, which the registry leaves empty; any field left empty falls back to the default.
 type Config map[string]string
 
-// LoadConfig reads operator overrides from the OPENSEARCH_ALERT_CONFIG env var.
-func LoadConfig() (Config, error) {
-	raw := fieldvalue.AlertConfigRaw("OPENSEARCH_ALERT_CONFIG")
-	if strings.TrimSpace(raw) == "" {
-		return Config{}, nil
-	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, fmt.Errorf("invalid OPENSEARCH_ALERT_CONFIG: %w", err)
-	}
-	return cfg, nil
-}
-
-// Transform parses a raw inbound OpenSearch alert and produces the canonical Alert, cfg supplying operator overrides.
+// Transform parses a raw inbound OpenSearch alert and produces the canonical Alert, cfg supplying any overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	var payload map[string]any
 	if err := jsonnum.Unmarshal(raw, &payload); err != nil {

@@ -18,7 +18,6 @@
 package azure
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -31,13 +30,10 @@ import (
 // source identifies alerts produced by this adapter.
 const source = "Azure"
 
-// defaults mirror "edge.api.azure.alert.config" so its JSON can be pasted into AZURE_ALERT_CONFIG unchanged.
+// defaults fill the category and environment a payload leaves out; the registry fills the service, metric name and severity.
 var defaults = map[string]string{
-	"metric_name": "AzureCloudAlert",
-	"service":     "Managed Services",
 	"category":    "Service Interruption",
 	"environment": "Unknown",
-	"severity":    "Critical",
 }
 
 // severityMap maps Azure Monitor's Sev0-Sev4 severity to the canonical severity labels.
@@ -55,23 +51,10 @@ var ErrMissingBody = errors.New("missing or invalid request body")
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config holds operator overrides, keyed the same way as defaults; any field left empty falls back to the default.
+// Config holds per-field overrides keyed like defaults, which the registry leaves empty; any field left empty falls back to the default.
 type Config map[string]string
 
-// LoadConfig reads operator overrides from the AZURE_ALERT_CONFIG env var.
-func LoadConfig() (Config, error) {
-	raw := fieldvalue.AlertConfigRaw("AZURE_ALERT_CONFIG")
-	if strings.TrimSpace(raw) == "" {
-		return Config{}, nil
-	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, fmt.Errorf("invalid AZURE_ALERT_CONFIG: %w", err)
-	}
-	return cfg, nil
-}
-
-// Transform parses a raw inbound Azure Monitor Common Alert Schema webhook and produces the canonical Alert, cfg supplying operator overrides.
+// Transform parses a raw inbound Azure Monitor Common Alert Schema webhook and produces the canonical Alert, cfg supplying any overrides.
 func Transform(raw []byte, cfg Config) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody

@@ -14,17 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package alertsource maps each route name to its transform, following the ServiceNow Edge API mappings.
+// Package alertsource maps each gateway route to its transform and fills the fields a source left empty with shared defaults.
 package alertsource
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/aws"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/azure"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/datadog"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/elasticsearch"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/fieldvalue"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/gcp"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/icinga"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/model"
@@ -35,108 +35,102 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/alertsource/site24x7"
 )
 
-// Transform turns one webhook body into canonical alerts; an error means the payload is rejected with 400.
+// DefaultSeverity is the severity of an alert whose source sent none, the most severe level.
+const DefaultSeverity = "1"
+
+// metricNameSuffix completes a source's name into the metric name of an alert that has none, such as "Azure Alert".
+const metricNameSuffix = " Alert"
+
+// routeNames names each route's source for an alert that does not name its own.
+var routeNames = map[string]string{
+	"aws":           "AWS",
+	"azure":         "Azure",
+	"datadog":       "Datadog",
+	"elasticsearch": "ElasticSearch",
+	"gcp":           "GCP",
+	"icinga":        "Icinga",
+	"openobserve":   "OpenObserve",
+	"opensearch":    "OpenSearch",
+	"prometheus":    "Prometheus",
+	"servicenow":    "ServiceNow",
+	"site24x7":      "Site24x7",
+}
+
+// Transform turns one webhook body into canonical alerts; an error means the payload can never be stored.
 type Transform func(raw []byte) ([]model.Alert, error)
 
-// Registry holds every source's transform, bound to the config it loaded at startup.
+// Registry holds every source's transform.
 type Registry struct {
 	transforms map[string]Transform
 }
 
-// New loads every source's <SOURCE>_ALERT_CONFIG, failing startup on a malformed config; budgetTags may be nil.
-func New(budgetTags aws.BudgetTagFetcher) (*Registry, error) {
-	awsCfg, err := aws.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("aws: %w", err)
-	}
-	azureCfg, err := azure.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("azure: %w", err)
-	}
-	datadogCfg, err := datadog.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("datadog: %w", err)
-	}
-	esCfg, err := elasticsearch.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("elasticsearch: %w", err)
-	}
-	gcpCfg, err := gcp.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("gcp: %w", err)
-	}
-	icingaCfg, err := icinga.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("icinga: %w", err)
-	}
-	ooCfg, err := openobserve.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("openobserve: %w", err)
-	}
-	osCfg, err := opensearch.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: %w", err)
-	}
-	promCfg, err := prometheus.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("prometheus: %w", err)
-	}
-	s247Cfg, err := site24x7.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("site24x7: %w", err)
-	}
-
-	return &Registry{transforms: map[string]Transform{
+// New builds every source's transform; defaultServiceID fills a missing service, and budgetTags may be nil.
+func New(defaultServiceID string, budgetTags aws.BudgetTagFetcher) *Registry {
+	parsers := map[string]Transform{
 		"aws": func(raw []byte) ([]model.Alert, error) {
-			a, err := aws.Transform(raw, awsCfg, budgetTags)
-			return one(err, model.Alert(a))
+			a, err := aws.Transform(raw, aws.Config{}, budgetTags)
+			return one(err, a)
 		},
 		"azure": func(raw []byte) ([]model.Alert, error) {
-			a, err := azure.Transform(raw, azureCfg)
-			return one(err, model.Alert(a))
+			a, err := azure.Transform(raw, azure.Config{})
+			return one(err, a)
 		},
 		"datadog": func(raw []byte) ([]model.Alert, error) {
-			a, err := datadog.Transform(raw, datadogCfg)
-			return one(err, model.Alert(a))
+			a, err := datadog.Transform(raw, datadog.Config{})
+			return one(err, a)
 		},
 		"elasticsearch": func(raw []byte) ([]model.Alert, error) {
-			a, err := elasticsearch.Transform(raw, esCfg)
-			return one(err, model.Alert(a))
+			a, err := elasticsearch.Transform(raw, elasticsearch.Config{})
+			return one(err, a)
 		},
 		"gcp": func(raw []byte) ([]model.Alert, error) {
-			a, err := gcp.Transform(raw, gcpCfg)
-			return one(err, model.Alert(a))
+			a, err := gcp.Transform(raw, gcp.Config{})
+			return one(err, a)
 		},
 		"icinga": func(raw []byte) ([]model.Alert, error) {
-			a, err := icinga.Transform(raw, icingaCfg)
-			return one(err, model.Alert(a))
+			a, err := icinga.Transform(raw, icinga.Config{})
+			return one(err, a)
 		},
 		"openobserve": func(raw []byte) ([]model.Alert, error) {
-			a, err := openobserve.Transform(raw, ooCfg)
+			a, err := openobserve.Transform(raw, openobserve.Config{})
 			return one(err, fromOpenObserve(a))
 		},
 		"opensearch": func(raw []byte) ([]model.Alert, error) {
-			a, err := opensearch.Transform(raw, osCfg)
-			return one(err, model.Alert(a))
+			a, err := opensearch.Transform(raw, opensearch.Config{})
+			return one(err, a)
 		},
 		"prometheus": func(raw []byte) ([]model.Alert, error) {
-			batch, err := prometheus.Transform(raw, promCfg)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]model.Alert, len(batch))
-			for i, a := range batch {
-				out[i] = model.Alert(a)
-			}
-			return out, nil
+			return prometheus.Transform(raw, prometheus.Config{})
 		},
-		// Temporary: alerts ServiceNow forwards already in canonical form, during the parallel run.
 		"servicenow": servicenow.Transform,
 		"site24x7": func(raw []byte) ([]model.Alert, error) {
-			a, err := site24x7.Transform(raw, s247Cfg)
-			return one(err, model.Alert(a))
+			a, err := site24x7.Transform(raw, site24x7.Config{TagList: site24x7.DefaultTagList})
+			return one(err, a)
 		},
-	}}, nil
+	}
+
+	transforms := make(map[string]Transform, len(parsers))
+	for route, parse := range parsers {
+		transforms[route] = withDefaults(parse, routeNames[route], defaultServiceID)
+	}
+	return &Registry{transforms: transforms}
+}
+
+// withDefaults fills what a source left empty: the default service, "<source> Alert" as the metric name, and severity 1.
+func withDefaults(parse Transform, routeName, defaultServiceID string) Transform {
+	return func(raw []byte) ([]model.Alert, error) {
+		alerts, err := parse(raw)
+		if err != nil {
+			return nil, err
+		}
+		for i := range alerts {
+			a := &alerts[i]
+			a.Service = fieldvalue.FirstNonEmpty(a.Service, defaultServiceID)
+			a.MetricName = fieldvalue.FirstNonEmpty(a.MetricName, fieldvalue.FirstNonEmpty(a.Source, routeName)+metricNameSuffix)
+			a.Severity = fieldvalue.FirstNonEmpty(a.Severity, DefaultSeverity)
+		}
+		return alerts, nil
+	}
 }
 
 // Lookup returns the transform for a route name.

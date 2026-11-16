@@ -1980,6 +1980,9 @@ func (c *Config) validateAlertConsumer() error {
 	if c.AlertServiceBusNamespace == "" || c.AlertServiceBusTenantID == "" || c.AlertServiceBusClientID == "" || c.AlertServiceBusClientSecret == "" {
 		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs ALERT_SERVICEBUS_NAMESPACE, ALERT_SERVICEBUS_TENANT_ID, ALERT_SERVICEBUS_CLIENT_ID and ALERT_SERVICEBUS_CLIENT_SECRET")
 	}
+	if c.IncidentDefaultServiceID == "" {
+		return fmt.Errorf("ALERT_CONSUMER_ENABLED needs INCIDENT_DEFAULT_SERVICE_ID, the service an alert gets when its source names none")
+	}
 	if c.AlertPriorityQueue == c.AlertStandardQueue {
 		return fmt.Errorf("ALERT_SERVICEBUS_PRIORITY_QUEUE and ALERT_SERVICEBUS_STANDARD_QUEUE must name different queues")
 	}

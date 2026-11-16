@@ -1764,6 +1764,7 @@ func alertConsumerConfig() Config {
 	c.AlertStandardQueue = "standard-queue"
 	c.AlertConsumerConcurrency = 8
 	c.AlertConsumerPriorityWeight = 4
+	c.IncidentDefaultServiceID = "00000000-0000-4000-8000-000000000001"
 	return c
 }
 
@@ -1780,6 +1781,7 @@ func TestConfig_Validate_AlertConsumer(t *testing.T) {
 		{name: "no tenant", change: func(c *Config) { c.AlertServiceBusTenantID = "" }, wantErr: true},
 		{name: "no client id", change: func(c *Config) { c.AlertServiceBusClientID = "" }, wantErr: true},
 		{name: "no client secret", change: func(c *Config) { c.AlertServiceBusClientSecret = "" }, wantErr: true},
+		{name: "no default service", change: func(c *Config) { c.IncidentDefaultServiceID = "" }, wantErr: true},
 		{name: "same queue twice", change: func(c *Config) { c.AlertStandardQueue = c.AlertPriorityQueue }, wantErr: true},
 		{name: "concurrency takes the whole pool", change: func(c *Config) { c.AlertConsumerConcurrency = 20 }, wantErr: true},
 		{name: "concurrency above the cap", change: func(c *Config) { c.DBPoolMaxConns = 200; c.AlertConsumerConcurrency = 65 }, wantErr: true},

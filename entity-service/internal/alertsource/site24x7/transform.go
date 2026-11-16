@@ -18,7 +18,6 @@
 package site24x7
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,30 +41,17 @@ var severityMap = map[string]string{
 // ErrMissingBody is returned when the webhook is called with no body, or a body that isn't valid JSON at all.
 var ErrMissingBody = errors.New("missing or invalid request body")
 
-// ErrMissingStatus is returned when neither the payload's STATUS field nor a configured Defaults.Severity is present.
-var ErrMissingStatus = errors.New("missing required field STATUS")
-
 // Alert is the canonical alert model handed to the core component.
 type Alert = model.Alert
 
-// Config is the operator-supplied "edge.api.site24x7.alert.config" system property: TagList maps a canonical field to its tag prefix, Defaults is the fallback value per field.
+// Config maps a canonical field to the tag prefix it is read from (TagList), and holds a fallback value per field (Defaults).
 type Config struct {
 	TagList  map[string]string `json:"TagList"`
 	Defaults map[string]string `json:"Defaults"`
 }
 
-// LoadConfig reads the Config from the SITE24X7_ALERT_CONFIG env var.
-func LoadConfig() (Config, error) {
-	raw := fieldvalue.AlertConfigRaw("SITE24X7_ALERT_CONFIG")
-	if strings.TrimSpace(raw) == "" {
-		return Config{}, nil
-	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return Config{}, fmt.Errorf("invalid SITE24X7_ALERT_CONFIG: %w", err)
-	}
-	return cfg, nil
-}
+// DefaultTagList reads the service, environment and category from tags such as Service:checkout, the form the gateway also reads.
+var DefaultTagList = map[string]string{"Service": "Service", "Environment": "Environment", "Category": "Category"}
 
 // Transform parses a raw inbound Site24x7 alert and produces the canonical Alert, cfg supplying the tag-prefix mapping and defaults.
 func Transform(raw []byte, cfg Config) (Alert, error) {
@@ -81,10 +67,8 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 		return Alert{}, fmt.Errorf("%w: body is not a JSON object", ErrMissingBody)
 	}
 
+	// A missing or unknown STATUS leaves the severity empty, for the shared default to fill.
 	status := fieldvalue.FirstNonEmpty(fieldvalue.Str(payload, "STATUS"), cfg.Defaults["Severity"])
-	if status == "" {
-		return Alert{}, ErrMissingStatus
-	}
 
 	extracted := extractTags(strSlice(payload, "TAGS"), cfg.TagList)
 

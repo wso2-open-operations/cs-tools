@@ -23,11 +23,7 @@ import (
 
 // TestDescription_IsReadableTextNotThePayload: every source fills description from the vendor's own message field and never with the request body, which raw_alerts keeps instead.
 func TestDescription_IsReadableTextNotThePayload(t *testing.T) {
-	t.Setenv("SITE24X7_ALERT_CONFIG", `{"TagList":{"Service":"svc","Category":"cat","Environment":"env"}}`)
-	r, err := New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := New(testDefaultServiceID, nil)
 	cases := map[string]struct{ body, want string }{
 		"aws": {`{"Type":"Notification","TopicArn":"arn:aws:sns:us-east-1:1:t","Message":"{\"AlarmName\":\"cpu\",\"AlarmArn\":\"arn:a\",\"NewStateValue\":\"ALARM\",\"NewStateReason\":\"Threshold Crossed: 92.4 > 90\"}"}`,
 			"Threshold Crossed: 92.4 > 90"},

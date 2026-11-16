@@ -350,10 +350,8 @@ func startAlertConsumer(cfg *config.Config, pool *pgxpool.Pool) func() {
 	if !cfg.AlertConsumerEnabled || pool == nil {
 		return func() {}
 	}
-	transforms, err := alertsource.New(nil)
-	if err != nil {
-		log.Fatalf("alert consumer: invalid source configuration: %v", err)
-	}
+	// An alert whose source names no service gets the same default service an incident does.
+	transforms := alertsource.New(cfg.IncidentDefaultServiceID, nil)
 	client, err := servicebus.NewClient(servicebus.Config{
 		Namespace:    cfg.AlertServiceBusNamespace,
 		TenantID:     cfg.AlertServiceBusTenantID,
