@@ -97,10 +97,13 @@ type Result struct {
 	HealthProblems     []string         `json:"healthProblems"`
 	RepairedTriggers   []TriggerProblem `json:"repairedTriggers"`
 	UnresolvedTriggers []TriggerProblem `json:"unresolvedTriggers"`
+	// StepErrors names each step that could not run at all.
+	StepErrors []string `json:"stepErrors"`
 }
 
 // RunMaintenance runs the upkeep once. Safe to repeat. The error is set when the
-// call failed or a step could not run; problems the upkeep found are in the Result.
+// call itself failed; problems the upkeep found, and steps that could not run,
+// are in the Result.
 func (c *Client) RunMaintenance(ctx context.Context) (Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/audit-log/maintenance", nil)
 	if err != nil {
