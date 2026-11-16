@@ -12816,6 +12816,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/sla-breaches:
+    get:
+      summary: >-
+        Build one weekly SLA breach report: the SLA clocks on the named
+        definitions that breached during one calendar week, under the
+        given stage and onboarding-status filters. Read-only. Internal
+        callers only.
+      description: >-
+        A clock is listed when its policy is one of `definitions` (matched
+        exactly), it has breached, its recorded breach time falls at or
+        after the first instant of the week and before the first instant of
+        the next, in the report's timezone (Asia/Colombo), and it passes
+        whichever of `stages`, `onboardingStatuses` and
+        `excludeOnboardingStatuses` are given. `week` is any date inside
+        the week reported and defaults to the week before now; a week runs
+        Monday to Monday. Rows are ordered by the account's integration CS
+        team, then SLA definition, then breach time. Stage and status
+        values are matched case-insensitively with spaces and hyphens
+        treated as underscores, so ServiceNow's own spelling ("In
+        progress", "In-Progress") matches the stored enum.
+      operationId: getSLABreachReport
+      parameters:
+        - name: definitions
+          in: query
+          required: true
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+          description: The SLA definition names the report covers, comma-separated.
+        - name: stages
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            The clock stages the report covers, comma-separated. Omitted
+            means every stage.
+        - name: week
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          description: >-
+            Any date inside the week reported, YYYY-MM-DD. Defaults to the
+            week before now.
+        - name: onboardingStatuses
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            Keep only cases whose project carries one of these onboarding
+            statuses (ServiceNow's "is one of"). Omitted applies no such
+            restriction.
+        - name: excludeOnboardingStatuses
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            Drop cases whose project carries one of these (ServiceNow's
+            "is not one of"). A case with no project, and so no status, is
+            kept. Omitted applies no exclusion.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLABreachReport'
+        "400":
+          description: definitions is missing, or week is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/migration-cases:
     get:
       summary: >-
@@ -32243,6 +32349,61 @@ components:
           type: string
           format: date-time
           nullable: true
+    SLABreachRow:
+      type: object
+      description: >-
+        One breached SLA clock, carrying the columns the source report
+        lists plus the case number its link needs.
+      properties:
+        team:
+          type: string
+          description: The account's integration CS team; the report groups on it.
+        wso2CaseId:
+          type: string
+        caseNumber:
+          type: string
+          description: Not a column in the source report; the case link needs it.
+        product:
+          type: string
+        caseType:
+          type: string
+        priority:
+          type: string
+          description: The case severity, which the source report labels Priority.
+        target:
+          type: string
+          description: The SLA policy's target - RESPONSE, RESOLUTION or WORKAROUND.
+        businessElapsedPercent:
+          type: number
+          format: double
+          description: Over 100 on a breached clock.
+        definition:
+          type: string
+          description: The SLA policy name; the sort key within a team.
+        breachedOn:
+          type: string
+          format: date-time
+        onboardingStatus:
+          type: string
+          description: The project onboarding status that decided which report this row belongs to.
+    SLABreachReport:
+      type: object
+      properties:
+        periodStart:
+          type: string
+          format: date-time
+          description: First instant of the week reported, inclusive.
+        periodEnd:
+          type: string
+          format: date-time
+          description: First instant of the next week, exclusive.
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLABreachRow'
+          description: >-
+            The matching breaches, ordered by the account's integration CS
+            team, then SLA definition, then breach time.
     ProductRegressionReport:
       type: object
       description: One monthly product regression report.
