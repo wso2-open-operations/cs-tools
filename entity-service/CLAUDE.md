@@ -1276,7 +1276,8 @@ reopen logs a WARN at every start as the reminder.
   email showed it) / key, start and end date, account owner name and email, `reasons` (`renewal`,
   `invoice_paid`, none for a project opened by hand), `recipients` and `reactivatedOn`.
   **Recipients** are the account owner, renewal account manager and technical owner, each once,
-  keeping only well-formed plain addresses in `@wso2.com` (`acpInternalAddress`): it is an internal
+  keeping only well-formed plain addresses in the internal domains (`acpInternalAddress`,
+  `acpDefaultInternalDomains`: `@wso2.com` and `@choreolabs.com`, as mail moves): it is an internal
   notice, the technical owner in Salesforce is sometimes a customer's person, and the notification
   service rejects the whole event for one bad address. csm-notification-service sends the email and
   adds its own CC list. **Deploy csm-notification-service with `project.reactivated` first**: it
