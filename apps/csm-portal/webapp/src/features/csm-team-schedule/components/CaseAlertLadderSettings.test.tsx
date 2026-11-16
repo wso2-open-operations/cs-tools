@@ -56,6 +56,7 @@ const CRE_ROWS = [
   "Priorities",
   "Max calls per ladder",
   "Call before every lead has a number",
+  "Case with no ABT team",
   "Email per step",
   "ABT team lists (Cc on L1 and L2)",
   "CRE team list (Cc on L3)",
@@ -453,6 +454,18 @@ describe("CaseAlertLadderSettings: CRE", () => {
       ladder: "CRE",
       values: { "safety.callWithoutVerifiedLeads": true },
     });
+  });
+
+  it("shows the shift's leads for a case with no ABT team until a value is saved, and saves the rule table on Submit", async () => {
+    render(<CaseAlertSettings chain="CRE" />);
+    const pick = within(row("Case with no ABT team")).getByRole("combobox", { name: "Case with no ABT team" });
+    // The alert service reports only a value that is set; unset is the shift's leads, never "Not reported yet".
+    expect(pick).toHaveValue("shift_leads");
+    expect(within(row("Case with no ABT team")).queryByText("Not reported yet")).not.toBeInTheDocument();
+    fireEvent.change(pick, { target: { value: "rules" } });
+    expect(pick).toHaveValue("rules");
+    await submit();
+    expect(saveValues.mutateAsync).toHaveBeenCalledWith({ ladder: "CRE", values: { "teams.unassignedLeads": "rules" } });
   });
 
   it("takes a switch back to the file's value from its row", async () => {

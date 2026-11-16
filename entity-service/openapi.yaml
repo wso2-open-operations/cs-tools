@@ -31077,7 +31077,8 @@ components:
             teams.leadership, teams.teamLeadsToCall, teams.teamLeads,
             teams.rotaMembersToCall, teams.americasWeekendRotaShifts,
             teams.rotaTeams, teams.unassignedTeamLead,
-            teams.unassignedTeamLeadCount, heads.cre, heads.cs (name and email
+            teams.unassignedTeamLeadCount, teams.unassignedLeads (rules or
+            shift_leads), heads.cre, heads.cs (name and email
             only), alertDuty.tiers, alertDuty.perTeam,
             acknowledgement.requireBoth, email.enabled, email.teamLists (CRE
             team key to one mailing list address), email.creTeamList,

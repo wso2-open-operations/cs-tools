@@ -240,6 +240,10 @@ type ruleNamer interface {
 	RuleFor(rc RoutingContext) (Rule, bool)
 }
 
+// shiftLeadsRepeatMax is the largest shift's-leads rung still called on every
+// attempt of its level; a larger one is called once (see BuildPlan).
+const shiftLeadsRepeatMax = 3
+
 func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolicy, r Resolver, channel Channel) (Plan, error) {
 	// Stamp the rule before anything reads it: every log line, the chat card
 	// and the work note report it, and they must name the row the recipients
@@ -330,6 +334,13 @@ func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolic
 			reachable = append(reachable, rec)
 		}
 
+		// A shift's leads rung of more than shiftLeadsRepeatMax people is
+		// called once, not once per attempt: seven ABT leads three times is
+		// twenty-one calls, which a call cap of twelve truncates before the
+		// heads -- and seven people called once have had their chance.
+		if haveRule && matched.Levels[level] == SourceShiftLeads && len(reachable) > shiftLeadsRepeatMax {
+			attempts = attempts[:1]
+		}
 		for _, a := range attempts {
 			for _, rec := range reachable {
 				plan.Calls = append(plan.Calls, PlannedCall{
