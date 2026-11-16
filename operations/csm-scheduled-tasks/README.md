@@ -90,6 +90,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | `usage_rollup_monthly` | `30 1 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild last month's and the current month's monthly usage rows from the daily rows. |
 | `plg_moesif_sync` | `*/15 * * * *` | Only if `PLG_MOESIF_SYNC_ENABLED=true` | Reads WSO2 Cloud registration and subscription events from Moesif and lands each in the PLG portal by company id, user id and product. Rejected events are recorded once in `plg_ingest_failure`. |
 | `unresolved_products_digest` | `0 6 * * *` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the deployment nodes seen in the last 24 hours whose reported product or version is not in the product catalogue (from entity-service's `GET /instances/unresolved-products`). Sends nothing on a day with nothing to report. |
+| `eol_product_usage_report` | `30 4 * * 1` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the monthly EOL product usage report on the first Monday (the schedule fires every Monday; it sends only on the 1st to the 7th; a failed run retries until the next Monday and still sends as of the first Monday): customers running a product version past its EOL date in an active Primary Production deployment (from entity-service's `GET /reports/eol-product-usage`), one table per region, to each listed account's manager and technical owner plus its `to` (the CS leadership group). A month with none sends a short note to its `to`/`cc`. |
 | `rota_weekday_reminder` | `30 3 * * 0-4` | When `EMAIL_BASE_URL` is set; scheduled sends also need the weekday switch on the portal's Rota Access card | Emails the people on the next working day's rotation windows at 09:00 IST the day before (Sunday announces Monday), one email per window with a calendar invitation. |
 | `rota_weekend_notice` | `30 3 * * 1-4` | Same as above, weekend switch | Once the coming weekend is fully marked, sends the weekend summary and one invitation per team per day, once. Until then it asks the rota admins each morning (09:00 IST, Monday to Thursday). |
 | `rota_weekend_reminder` | `30 3 * * 5` | Same as above, weekend switch | Friday 09:00 IST re-send of the weekend summary, with updated invitations and cancellations. Sends even when not fully marked, listing the gaps. |
@@ -158,7 +159,7 @@ csm-scheduled-tasks --run-now=stale_cases_report --recipients=jane.doe@example.c
 
 Tasks: `cs_worklogs_daily_report`, `cs_worklogs_weekly_report`, `migration_case_report`, `open_cases_report`,
 `stale_cases_report`, `unresolved_products_digest`, `product_regression_report_apim`, `_iam`, `_integration`,
-`query_hours_usage_notifications` and `query_hours_weekly_report`. Failure alerts to `ALERT_RECIPIENTS` and the rota
+`eol_product_usage_report`, `query_hours_usage_notifications` and `query_hours_weekly_report`. Failure alerts to `ALERT_RECIPIENTS` and the rota
 reminders are not affected.
 
 - `--recipients` replaces the whole audience for that one run: the real To and the real Cc are both never
@@ -335,6 +336,7 @@ treated as unset, except where noted. All example values are placeholders.
 | `SUB_CRON_RECIPIENTS` | No | empty | JSON object of per-task recipients keyed by task name: `{"<task>": {"to": [...], "cc": [...], "debug": [...]}}`. Extra failure-alert audience for most tasks; the actual report audience for `stale_cases_report` and `open_cases_report`. `debug`, on a report task, puts that one report in debug mail mode (see "Debug mail mode and tryouts"). | `{"stale_cases_report":{"to":["team@example.com"],"cc":[],"debug":["you@example.com"]}}` |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No | `180` | The age, in days, a migration must reach before `migration_case_report` lists it. | `180` |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | empty | The support portal's case page prefix; the migration case scan links each issue to `<prefix>/<case UUID>`. Unset leaves the keys as plain text. Must be https. | `https://support.example.com/cases` |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | empty | The CSM portal's base URL; the EOL product usage report links each account and project to its page (`<base>/customers/accounts/<id>`). Unset leaves plain text. Must be https. | `https://csm.example.com` |
 | `SUB_CRON_SCHEDULES` | No | empty | JSON object overriding task schedules by name: `{"<task>": "<cron>"}`. Unlisted tasks keep their built-in default. An invalid cron expression stops startup. | `{"housekeeping_cleanup":"0 4 * * *"}` |
 | `DRIVER_INTERVAL` | No | `1h` | Expected invocation cadence; must match the platform trigger. Go duration syntax, must be positive. Used as the default retry backoff and to size the orphaned-claim safety margin. | `15m` |
 | `HOUSEKEEPING_RETENTION_DAYS` | No | `30` | Days of resolved ledger history kept by `housekeeping_cleanup`. Plain positive integer, not a duration string. | `30` |
