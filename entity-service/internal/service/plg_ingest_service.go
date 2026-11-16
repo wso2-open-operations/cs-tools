@@ -37,8 +37,9 @@ func NewIngestService(repo repository.IngestRepository, failures repository.Fail
 //
 // One bad record does not reject the rest, which is why the batch is handled
 // here rather than by the caller issuing one request per record. Idempotency is
-// structural: plg_organization's UNIQUE
-// organization_name is what makes a redelivered event a no-op.
+// structural: plg_organization's UNIQUE organization_name (or, for a cloud
+// platform, its UNIQUE moesif_company_id) is what makes a redelivered event a
+// no-op.
 func (s *ingestService) Register(ctx context.Context, req domain.IngestRegistrationsRequest) (domain.IngestBatchResult, error) {
 	// Accepted and Failed are counted as the loop goes, not derived afterwards.
 	// They are part of this endpoint's JSON contract and the BFF's own ingest
@@ -50,7 +51,7 @@ func (s *ingestService) Register(ctx context.Context, req domain.IngestRegistrat
 
 	for i := range req.Registrations {
 		reg := req.Registrations[i]
-		res, err := s.repo.Register(ctx, reg.Registration, reg.Attributes)
+		res, err := s.registerOne(ctx, reg)
 		if err != nil {
 			// Logged and recorded, never fatal to the batch. The event is already
 			// gone from the queue — consuming deletes — so a registration that
@@ -74,6 +75,17 @@ func (s *ingestService) Register(ctx context.Context, req domain.IngestRegistrat
 		out.Accepted++
 	}
 	return out, nil
+}
+
+// registerOne lands one registration; a userId, when sent, must be a UUID.
+func (s *ingestService) registerOne(ctx context.Context, reg domain.IngestRegistration) (*domain.IngestResult, error) {
+	reg.UserID = strings.TrimSpace(reg.UserID)
+	if reg.UserID != "" {
+		if err := validateUUID("userId", reg.UserID); err != nil {
+			return nil, err
+		}
+	}
+	return s.repo.Register(ctx, reg.Registration, reg.Attributes)
 }
 
 func (s *ingestService) RecordFailure(ctx context.Context, req domain.RecordIngestFailureRequest) (domain.RecordIngestFailureResult, error) {

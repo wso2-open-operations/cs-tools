@@ -11913,6 +11913,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+  /plg/organizations/{organizationId}/reveal:
+    post:
+      summary: Reveal one organisation's name and owner email.
+      description: >-
+        Reveals the name and owner email behind one organisation's company id: stored
+        values first, else the Cloud Directory API. Never cached (Cache-Control: no-store)
+        and audited with the organisation id only. Limited per user (PLG_REVEAL_LIMIT_PER_MINUTE,
+        PLG_REVEAL_LIMIT_PER_DAY). source is DATABASE, CLOUD, UNRESOLVED or FAILED.
+      operationId: plgRevealOrganization
+      parameters:
+        - name: organizationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The organisation, revealed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgCompanyIdentity"
+        "400":
+          description: Bad request — the id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: Forbidden — needs the PLG permission (CS engineer or admin).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "404":
+          description: No such organisation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "429":
+          description: Too many reveals; Retry-After gives the seconds to wait.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "503":
+          description: The reveal is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -12012,10 +12077,9 @@ paths:
         - name: organizationId
           in: path
           required: true
-          description: "The organisation's id."
+          description: "The organisation's record id or its Cloud organisation id (moesifCompanyId)."
           schema:
             type: string
-            format: uuid
       responses:
         "200":
           description: The organisation.
@@ -13113,7 +13177,7 @@ paths:
         - name: health
           in: query
           required: false
-          description: "Repeatable. `HEALTHY` or `AT_RISK`."
+          description: "Repeatable. `NONE`, `HEALTHY` or `AT_RISK`."
           schema:
             type: string
         - name: reason
@@ -33295,11 +33359,13 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
         createdOn:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         registeredName:
           nullable: true
@@ -33319,7 +33385,17 @@ components:
         companyNameFromDomain:
           type: string
         moesifCompanyId:
+          nullable: true
           type: string
+          description: The Cloud organisation id.
+        cloudUserId:
+          type: string
+          nullable: true
+          description: The Cloud user id of the organisation's owner.
+        emailClassification:
+          type: string
+          nullable: true
+          description: The owner's email classification from a registration playbook.
         fieldsInherited:
           type: boolean
         platformCards:
@@ -33374,8 +33450,14 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -33436,7 +33518,12 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
+        moesifCompanyId:
+          nullable: true
+          type: string
+          description: The company id.
         product:
           type: object
           properties:
@@ -33472,6 +33559,7 @@ components:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         subscriptionTier:
           type: string
@@ -33848,7 +33936,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -33926,6 +34019,7 @@ components:
               type: integer
     PlgRegistrationSearchResponse:
       type: object
+      description: One item per organisation; total counts organisations.
       properties:
         registrations:
           type: array
@@ -33939,7 +34033,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -33951,6 +34050,7 @@ components:
                   name:
                     type: string
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -33972,6 +34072,37 @@ components:
                     type: string
                   name:
                     type: string
+              platforms:
+                type: array
+                description: >
+                  The organisation's matching registrations, newest first. The
+                  top-level registration fields are the newest one's.
+                items:
+                  type: object
+                  properties:
+                    orgPlatformId:
+                      type: string
+                      format: uuid
+                    product:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        code:
+                          type: string
+                        name:
+                          type: string
+                    registeredOn:
+                      type: string
+                      format: date-time
+                    lifecycleStage:
+                      type: string
+                    stageName:
+                      type: string
+                    isNew:
+                      type: boolean
+                      description: Not acknowledged yet.
         total:
           type: integer
         limit:
@@ -34098,6 +34229,24 @@ components:
               type: integer
             offset:
               type: integer
+    PlgCompanyIdentity:
+      type: object
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        companyId:
+          nullable: true
+          type: string
+        organizationName:
+          nullable: true
+          type: string
+        email:
+          nullable: true
+          type: string
+        source:
+          type: string
+          enum: [DATABASE, CLOUD, UNRESOLVED, FAILED]
     PlgOrganizationSearchFilters:
       type: object
       description: >-
@@ -34292,7 +34441,7 @@ components:
           type: string
         healthState:
           type: string
-          description: "`HEALTHY` or `AT_RISK`."
+          description: "`NONE` (not yet marked), `HEALTHY` or `AT_RISK`."
         subscriptionTier:
           type: string
           description: "`FREE`, `TRIAL`, `TRIAL_EXTENDED` or `PAYG`."

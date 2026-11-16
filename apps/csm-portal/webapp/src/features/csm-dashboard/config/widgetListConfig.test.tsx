@@ -38,6 +38,10 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
 vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => ({ email: "agent@example.test" }),
 }));
+// The PLG rows mask the name and email; nothing is revealed here.
+vi.mock("@features/plg/api/hooks", () => ({
+  useCompanyReveal: () => ({ identity: undefined }),
+}));
 
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -509,6 +513,7 @@ describe("plg_organization list", () => {
   const acme = {
     id: "org-1",
     organizationName: "Acme",
+    moesifCompanyId: "01a1ba70-b841-718f-86f2-56d0de00d195",
     registeredEmail: "a@acme.test",
     registeredName: null,
     registeredOn: "2026-02-03T10:00:00Z",
@@ -552,8 +557,10 @@ describe("plg_organization list", () => {
 
   it("shows each product with its lifecycle stage, the owner and the registration date", () => {
     renderAt([acme]);
-    expect(screen.getByText("Acme")).toBeInTheDocument();
-    expect(screen.getByText("a@acme.test")).toBeInTheDocument();
+    expect(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email hidden")).toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    expect(screen.queryByText("a@acme.test")).not.toBeInTheDocument();
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("API Platform")).toBeInTheDocument();
     expect(screen.getByText("Registration")).toBeInTheDocument();
@@ -577,7 +584,7 @@ describe("plg_organization list", () => {
 
   it("opens the organisation's PLG page, passing the page's own state as parentState", () => {
     renderAt([acme]);
-    fireEvent.click(screen.getByText("Acme"));
+    fireEvent.click(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195"));
     expect(screen.getByTestId("state-probe").textContent).toBe(
       `/plg/organizations/org-1 ${JSON.stringify({
         from: "/dashboard/preview/plg-organizations?w=w-1",
@@ -606,6 +613,7 @@ describe("plg_registration list", () => {
     orgPlatformId: "op-1",
     organizationId: "org-1",
     organizationName: "Acme",
+    moesifCompanyId: "01a1ba70-b841-718f-86f2-56d0de00d195",
     product: { id: "p-1", code: "IAM", name: "Identity" },
     registeredEmail: "a@acme.test",
     registeredName: null,
@@ -636,7 +644,8 @@ describe("plg_registration list", () => {
 
   it("shows the organisation, product, stage and owner", () => {
     renderAt([registration]);
-    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195")).toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("Activated")).toBeInTheDocument();
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
@@ -644,7 +653,7 @@ describe("plg_registration list", () => {
 
   it("opens the product's tab on the organisation's PLG page, passing the page's own state as parentState", () => {
     renderAt([registration]);
-    fireEvent.click(screen.getByText("Acme"));
+    fireEvent.click(screen.getByText("01a1ba70-b841-718f-86f2-56d0de00d195"));
     expect(screen.getByTestId("state-probe").textContent).toBe(
       `/plg/organizations/org-1/IAM ${JSON.stringify({
         from: "/dashboard/preview/plg-registrations?w=w-1",

@@ -12,13 +12,12 @@ import {
 import {
   ArrowLeft as ArrowBackIcon,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 
 
-
 import { useOrganization, useSetOrganizationOwner } from "@features/plg/api/hooks";
-import type { UserRef } from "@features/plg/api/types";
+import type { OrganizationDetail, UserRef } from "@features/plg/api/types";
 import {
   EmptyState,
   ErrorBlock,
@@ -28,6 +27,7 @@ import {
   SectionCard,
   StatusChip,
 } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
 import { formatDate } from "@features/plg/utils/format";
 import { ProductTab } from "./ProductTab";
 import { CSUserSelect } from "@features/plg/components/CSUserSelect";
@@ -108,6 +108,16 @@ function OwnerEditor({
   );
 }
 
+/** The URL id of an organisation: its Cloud organisation id, else the record id. */
+function organizationPathId(org: Pick<OrganizationDetail, "id" | "moesifCompanyId">): string {
+  return org.moesifCompanyId ?? org.id;
+}
+
+/** Title-cases a playbook option code: PERSONAL reads "Personal". */
+function optionLabel(code: string): string {
+  return code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
+}
+
 /** The page this one was opened from, when the caller says (a dashboard
  * widget's row passes `from` and its own page's state as `parentState`). */
 interface BackState {
@@ -121,6 +131,15 @@ export default function OrganizationDetailPage() {
   const location = useLocation();
   const { data: org, isPending, error } = useOrganization(organizationId);
   const backState = location.state as BackState | null;
+
+  // A link by record id settles on the Cloud organisation id, the id people use.
+  const pathId = org ? organizationPathId(org) : undefined;
+  useEffect(() => {
+    if (pathId && organizationId !== pathId) {
+      const tab = productCode ? `/${productCode}` : "";
+      navigate(`/plg/organizations/${encodeURIComponent(pathId)}${tab}`, { replace: true, state: location.state });
+    }
+  }, [pathId, organizationId, productCode, navigate, location.state]);
 
   if (error) return <ErrorBlock error={error} />;
   if (isPending || !org) return <LoadingSpinner />;
@@ -150,9 +169,11 @@ export default function OrganizationDetailPage() {
         {backState?.from ? "Back" : "All organisations"}
       </Button>
 
+      {/* The company id, never the name: the name and email stay hidden until
+          an engineer reveals them, on the Registration details card below. */}
       <PageHeader
-        title={org.organizationName}
-        subtitle={`Registered ${formatDate(org.createdOn)} by ${org.registeredName ?? org.registeredEmail}`}
+        title={org.moesifCompanyId ?? "No company id"}
+        subtitle={`Registered ${formatDate(org.createdOn)}`}
       />
 
       <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
@@ -162,7 +183,9 @@ export default function OrganizationDetailPage() {
           // the page was opened from.
           onChange={(_, value: string) =>
             navigate(
-              value === "overview" ? `/plg/organizations/${org.id}` : `/plg/organizations/${org.id}/${value}`,
+              value === "overview"
+                ? `/plg/organizations/${encodeURIComponent(organizationPathId(org))}`
+                : `/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${value}`,
               { state: location.state },
             )
           }
@@ -216,12 +239,28 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, md: 5 }}>
         <SectionCard fill title="Registration details">
-          <Field label="Registered email" value={org.registeredEmail} />
-          <Field label="Registered by" value={org.registeredName ?? "—"} />
+          {/* The company id with the eye; revealing replaces it with the
+              organisation's name and the stars with its email. The registrant's
+              name and the company name from the email domain identify the
+              customer just as the name does, so they are not shown at all. */}
+          <Field
+            label="Organisation"
+            value={
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CompanyName organizationId={org.id} companyId={org.moesifCompanyId} />
+                <RevealButton organizationId={org.id} />
+              </Stack>
+            }
+          />
+          <Field label="Registered email" value={<MaskedEmail organizationId={org.id} />} />
+          <Field
+            label="Email classification"
+            value={org.emailClassification ? optionLabel(org.emailClassification) : "—"}
+          />
+          <Field label="Cloud organisation id" value={org.moesifCompanyId ?? "—"} />
+          <Field label="Cloud user id" value={org.cloudUserId ?? "—"} />
           <Field label="Registered on" value={formatDate(org.createdOn)} />
-          <Field label="Company name from domain" value={org.companyNameFromDomain ?? "—"} />
           <Field label="Country" value={org.countryName ?? "—"} />
-          <Field label="Company id" value={org.moesifCompanyId ?? "—"} />
 
           {org.fieldsInherited ? (
             <Tooltip title="The source sent only the mandatory fields for this organisation. The rest are shown from the same person's earlier registration and are not stored here.">
@@ -265,7 +304,9 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
                   <Box
                     key={card.orgPlatformId}
                     onClick={() =>
-                      navigate(`/plg/organizations/${org.id}/${card.product.code}`, { state: location.state })
+                      navigate(`/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${card.product.code}`, {
+                        state: location.state,
+                      })
                     }
                     sx={{
                       p: 1.5,

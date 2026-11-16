@@ -27,13 +27,14 @@ export type LifecycleStage = (typeof LIFECYCLE_STAGES)[number];
 /**
  * How a pairing is doing, wherever it has got to — the second axis.
  *
- * Set by an engineer, never derived. It decides which kind of playbook the
- * pairing is offered, so changing it changes the whole product tab.
+ * Set by an engineer, never derived; NONE until one marks it, shown as "—". It
+ * decides which kind of playbook the pairing is offered (NONE as HEALTHY).
  */
-export const HEALTH_STATES = ["HEALTHY", "AT_RISK"] as const;
+export const HEALTH_STATES = ["NONE", "HEALTHY", "AT_RISK"] as const;
 export type HealthState = (typeof HEALTH_STATES)[number];
 
 export const HEALTH_LABEL: Record<HealthState, string> = {
+  NONE: "None",
   HEALTHY: "Healthy",
   AT_RISK: "At risk",
 };
@@ -205,8 +206,11 @@ export interface PlatformStage {
 
 export interface OrganizationSummary {
   id: string;
-  organizationName: string;
-  registeredEmail: string;
+  /** Null for a cloud-platform organisation; reveal it with useCompanyReveal. */
+  organizationName: string | null;
+  /** The company id; what every screen shows in place of the name. */
+  moesifCompanyId: string | null;
+  registeredEmail: string | null;
   registeredName: string | null;
   registeredOn: string;
   platformStages: PlatformStage[];
@@ -262,15 +266,20 @@ export interface PlatformCard {
 
 export interface OrganizationDetail {
   id: string;
-  organizationName: string;
+  /** Null for a cloud-platform organisation; reveal it with useCompanyReveal. */
+  organizationName: string | null;
   createdOn: string;
-  registeredEmail: string;
+  registeredEmail: string | null;
   registeredName: string | null;
   owner: UserRef | null;
   countryName: string | null;
   companyNameFromDomain: string | null;
   /** The source's stable id for the company. */
   moesifCompanyId: string | null;
+  /** The Cloud user id of the organisation's owner. */
+  cloudUserId?: string | null;
+  /** The owner's email classification from a registration playbook (CORPORATE, PERSONAL, ...). */
+  emailClassification?: string | null;
   /** True when the Lead fields were resolved from the registrant's other organisations. */
   fieldsInherited: boolean;
   platformCards: PlatformCard[];
@@ -424,7 +433,10 @@ export interface LifecycleEntry {
 export interface ProductDetail {
   orgPlatformId: string;
   organizationId: string;
-  organizationName: string;
+  /** Null for a cloud-platform organisation; reveal it with useCompanyReveal. */
+  organizationName: string | null;
+  /** The company id; what every screen shows in place of the name. */
+  moesifCompanyId: string | null;
   product: ProductRef;
 
   lifecycleStage: LifecycleStage;
@@ -441,7 +453,7 @@ export interface ProductDetail {
   carriesPlaybooks: boolean;
 
   registeredOn: string;
-  registeredEmail: string;
+  registeredEmail: string | null;
 
   /** The third axis, with the provenance the other two carry. */
   subscriptionTier: SubscriptionTier | null;
@@ -504,14 +516,30 @@ export interface PatchRunTaskRequest {
 export interface RegistrationItem {
   orgPlatformId: string;
   organizationId: string;
-  organizationName: string;
+  /** Null for a cloud-platform organisation; reveal it with useCompanyReveal. */
+  organizationName: string | null;
+  /** The company id; what every screen shows in place of the name. */
+  moesifCompanyId: string | null;
   product: ProductRef;
-  registeredEmail: string;
+  registeredEmail: string | null;
   registeredName: string | null;
   registeredOn: string;
   lifecycleStage: LifecycleStage;
   stageName: string;
   owner: UserRef | null;
+  /** The organisation's listed registrations, newest first; the fields above are the newest one's. */
+  platforms: RegistrationPlatform[];
+}
+
+/** One of an organisation's listed registrations. */
+export interface RegistrationPlatform {
+  orgPlatformId: string;
+  product: ProductRef;
+  registeredOn: string;
+  lifecycleStage: LifecycleStage;
+  stageName: string;
+  /** Not acknowledged yet. */
+  isNew: boolean;
 }
 
 export interface SearchRegistrationsRequest {
@@ -550,7 +578,10 @@ export const QUEUE_REASON_LABEL: Record<QueueReason, string> = {
 export interface WorkQueueItem {
   orgPlatformId: string;
   organizationId: string;
-  organizationName: string;
+  /** Null for a cloud-platform organisation; reveal it with useCompanyReveal. */
+  organizationName: string | null;
+  /** The company id; what every screen shows in place of the name. */
+  moesifCompanyId: string | null;
   product: ProductRef;
   currentStage: LifecycleStage;
   stageName: string;
@@ -650,4 +681,20 @@ export interface DashboardAnalytics {
   registrationsByLifecycleStage: CountByLabel[];
   subscriptionMix: CountByLabel[];
   registrationsOverTime: TimeSeries;
+}
+
+// ---------------------------------------------------------------------------
+// The reveal
+// ---------------------------------------------------------------------------
+
+/** Where a revealed name and email came from. */
+export type IdentitySource = "DATABASE" | "CLOUD" | "UNRESOLVED" | "FAILED";
+
+/** One organisation's revealed identity (POST /plg/organizations/{id}/reveal). */
+export interface CompanyIdentity {
+  organizationId: string;
+  companyId: string | null;
+  organizationName: string | null;
+  email: string | null;
+  source: IdentitySource;
 }

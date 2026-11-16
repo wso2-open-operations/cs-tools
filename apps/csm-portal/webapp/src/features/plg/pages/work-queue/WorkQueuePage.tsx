@@ -32,6 +32,7 @@ import {
   type WorkQueueItem,
 } from "@features/plg/api/types";
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader, SectionCard, StatusChip } from "@features/plg/components/common";
+import { CompanyName, RevealButton } from "@features/plg/components/CompanyIdentity";
 import { formatDate } from "@features/plg/utils/format";
 import { selectLabelProps } from "@features/plg/components/selectLabelProps";
 
@@ -233,6 +234,7 @@ export default function WorkQueuePage() {
                         already filtered to one person. */}
                     {mine ? null : <TableCell>Owner</TableCell>}
                     <TableCell>Registered</TableCell>
+                    <TableCell padding="checkbox" aria-label="Reveal" />
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -242,13 +244,15 @@ export default function WorkQueuePage() {
                       hover
                       sx={{ cursor: "pointer" }}
                       onClick={() =>
-                        navigate(`/plg/organizations/${item.organizationId}/${item.product.code}`)
+                        navigate(`/plg/organizations/${encodeURIComponent(item.moesifCompanyId ?? item.organizationId)}/${item.product.code}`)
                       }
                     >
                       <TableCell>
-                        <Typography variant="body2" fontWeight={600}>
-                          {item.organizationName}
-                        </Typography>
+                        <CompanyName
+                          organizationId={item.organizationId}
+                          companyId={item.moesifCompanyId}
+                          fontWeight={600}
+                        />
                       </TableCell>
                       <TableCell>{item.product.name}</TableCell>
                       <TableCell>
@@ -287,6 +291,9 @@ export default function WorkQueuePage() {
                       </TableCell>
                       {mine ? null : <TableCell>{item.owner?.name ?? "—"}</TableCell>}
                       <TableCell>{formatDate(item.registeredOn)}</TableCell>
+                      <TableCell padding="checkbox">
+                        <RevealButton organizationId={item.organizationId} />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

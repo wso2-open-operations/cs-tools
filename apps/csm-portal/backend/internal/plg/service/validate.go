@@ -16,6 +16,9 @@ const (
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+// cloudIDRe is a Cloud organisation id: UUIDs in Cloud, plain tokens in local data.
+var cloudIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
 // codeRe constrains task codes. They are the stable identity used to match a
 // task across template revisions, so they must not carry punctuation or case
 // variation that would silently create a "new" task on the next save.
