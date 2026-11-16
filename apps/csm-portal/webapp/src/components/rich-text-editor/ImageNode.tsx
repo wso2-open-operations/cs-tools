@@ -32,21 +32,16 @@ import type { JSX } from "react";
 import { deriveAltFromFilename, sanitizeImageSrc } from "@components/rich-text-editor/richTextEditor";
 
 /**
- * Theme flag set by the reply box (`enterInsertsLineBreak`): images are inline-block
- * there, so a `<br>` after an image ends its line like after text and ONE Enter starts
- * the next line directly. A block image followed by `<br>` showed (and was exported)
- * with an extra blank line. Everywhere else images stay `display:block`.
- */
-export const INLINE_IMAGES_THEME_KEY = "inlineImages";
-
-const hasInlineImages = (config: EditorConfig): boolean =>
-  (config.theme as Record<string, unknown>)[INLINE_IMAGES_THEME_KEY] === true;
-
-/**
- * Lexical gives `createDOM` / `decorate` the editor config but `exportDOM` and plugins
- * only the editor, and its config field (`_config`) is private. So the editors that
- * use inline images are also recorded here (by `Editor`, at creation, alongside the
- * theme flag) for those two callers.
+ * The reply box (`enterInsertsLineBreak`) shows and exports images inline-block, so a `<br>`
+ * after an image ends its line like after text and ONE Enter starts the next line directly. A
+ * block image followed by `<br>` showed (and was exported) with an extra blank line. Everywhere
+ * else images stay `display:block`.
+ *
+ * The flag lives in this one set, keyed by the editor: Lexical hands the editor to every place
+ * that needs it (`createDOM(config, editor)`, `exportDOM(editor)`, `decorate(editor, config)`
+ * and plugins), while its config (`_config`) is private, and a flag in the theme would be a
+ * second copy to keep in step. `Editor` marks the editor when it is created, before any
+ * content renders; it is not undone, so the prop behind it must not change after mount.
  */
 const inlineImageEditors = new WeakSet<LexicalEditor>();
 
@@ -156,10 +151,11 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     };
   }
 
-  createDOM(config: EditorConfig): HTMLElement {
+  createDOM(_config: EditorConfig, editor: LexicalEditor): HTMLElement {
+    const inline = editorHasInlineImages(editor);
     const span = document.createElement("span");
-    span.style.display = hasInlineImages(config) ? "inline-block" : "block";
-    if (hasInlineImages(config)) span.style.verticalAlign = "bottom";
+    span.style.display = inline ? "inline-block" : "block";
+    if (inline) span.style.verticalAlign = "bottom";
     return span;
   }
 
@@ -195,13 +191,13 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     };
   }
 
-  decorate(_editor: LexicalEditor, config: EditorConfig): JSX.Element {
+  decorate(editor: LexicalEditor): JSX.Element {
     return (
       <ImageComponent
         src={this.__src}
         altText={this.__altText}
         nodeKey={this.__key}
-        inline={hasInlineImages(config)}
+        inline={editorHasInlineImages(editor)}
       />
     );
   }

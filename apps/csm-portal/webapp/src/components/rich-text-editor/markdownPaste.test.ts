@@ -15,7 +15,14 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { flattenTablesToParagraphs, imagesToLinks, isAppImageSrc, markdownToPasteDom, mergeAdjacentParagraphs } from "./markdownPaste";
+import {
+  appClipboardImageSrcs,
+  flattenTablesToParagraphs,
+  imagesToLinks,
+  isAppImageSrc,
+  markdownToPasteDom,
+  mergeAdjacentParagraphs,
+} from "./markdownPaste";
 
 const parse = (h: string) => new DOMParser().parseFromString(h, "text/html");
 
@@ -164,17 +171,62 @@ describe("mergeAdjacentParagraphs only merges plain, non-empty paragraphs", () =
   });
 });
 
+const PNG = "data:image/png;base64,iVBORw0KGgo=";
+const payload = (...nodes: unknown[]) => JSON.stringify({ namespace: "MyEditor", nodes });
+const imageNode = (src: string) => ({ type: "image", version: 1, src, altText: "x" });
+
 describe("isAppImageSrc", () => {
-  it("accepts blob: previews and stored /<uuid> images, and data: images only from an in-app clipboard", () => {
-    expect(isAppImageSrc("blob:https://csm.example.com/abc", false)).toBe(true);
-    expect(isAppImageSrc("/0b9f3c1e-aaaa-4bbb-8ccc-1234567890ab", false)).toBe(true);
-    expect(isAppImageSrc("data:image/png;base64,AAAA", false)).toBe(false);
-    expect(isAppImageSrc("data:image/png;base64,AAAA", true)).toBe(true);
+  it("accepts same-origin blob: previews and stored /<uuid> images, and data: images only when the in-app payload holds that exact src", () => {
+    expect(isAppImageSrc(`blob:${window.location.origin}/abc`, new Set())).toBe(true);
+    expect(isAppImageSrc("/0b9f3c1e-aaaa-4bbb-8ccc-1234567890ab", new Set())).toBe(true);
+    expect(isAppImageSrc(PNG, new Set())).toBe(false);
+    expect(isAppImageSrc(PNG, new Set([PNG]))).toBe(true);
+    expect(isAppImageSrc(PNG, new Set(["data:image/png;base64,AAAA"]))).toBe(false);
+  });
+
+  it("a blob: URL of another origin is not an image of this app", () => {
+    for (const src of ["blob:https://evil.example.com/abc", "blob:http://localhost:1/abc", `blob:${window.location.origin}.evil.com/abc`, `blob:${window.location.origin}`]) {
+      expect(isAppImageSrc(src, new Set()), src).toBe(false);
+    }
+  });
+
+  it("only raster data: images are ever kept, never svg or other types, even when the payload names them", () => {
+    for (const src of ["data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", "data:image/bmp;base64,AAAA", "data:text/html;base64,AAAA", "data:image/png;base64,AA AA"]) {
+      expect(isAppImageSrc(src, new Set([src])), src).toBe(false);
+    }
+    for (const type of ["png", "jpeg", "gif", "webp"]) {
+      const src = `data:image/${type};base64,AAAA`;
+      expect(isAppImageSrc(src, new Set([src])), type).toBe(true);
+    }
   });
 
   it("rejects remote, relative and scripted sources", () => {
     for (const src of ["https://x.com/a.png", "/img/a.png", "//evil.com/0b9f3c1e-aaaa-4bbb-8ccc-1234567890ab", "javascript:1", "blob:javascript:1", ""]) {
-      expect(isAppImageSrc(src, true), src).toBe(false);
+      expect(isAppImageSrc(src, new Set([src])), src).toBe(false);
     }
   });
+});
+
+describe("appClipboardImageSrcs (the application/x-lexical-editor payload)", () => {
+  it("collects the src of image nodes, at any depth", () => {
+    const nested = { type: "list", children: [{ type: "listitem", children: [{ type: "paragraph", children: [imageNode(PNG)] }] }] };
+    expect([...appClipboardImageSrcs(payload(imageNode("/a"), nested))].sort()).toEqual(["/a", PNG].sort());
+  });
+
+  it("is empty for a missing, malformed or imageless payload", () => {
+    for (const raw of ["", "not json", "null", "[]", "{}", '{"nodes":5}', payload(), payload({ type: "paragraph", children: [{ type: "text", text: PNG }] })]) {
+      expect(appClipboardImageSrcs(raw).size, raw).toBe(0);
+    }
+  });
+
+  it("ignores non-image nodes that merely have a src and non-string srcs", () => {
+    expect(appClipboardImageSrcs(payload({ type: "link", src: PNG }, { type: "image", src: 5 })).size).toBe(0);
+  });
+
+  it("survives a very deep payload", () => {
+    const depth = 20000;
+    const raw = '{"nodes":[' + '{"type":"paragraph","children":['.repeat(depth) + JSON.stringify(imageNode(PNG)) + "]}".repeat(depth) + "]}";
+    expect(() => appClipboardImageSrcs(raw)).not.toThrow();
+  });
+
 });

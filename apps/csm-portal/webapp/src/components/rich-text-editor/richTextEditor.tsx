@@ -685,8 +685,26 @@ function parseMsoList(el: Element): { id: string; level: number } | null {
   return { id: id ?? "", level: level >= 1 ? level : 1 };
 }
 
-/** A leading bullet or number glyph in text, followed by spacing: `·  x`, `o\u00a0x`, `1.  x`, `1.1. x`. */
-const LEADING_GLYPH = /^[\s\u00a0]*([·•§▪■◦○●-]|o|\(?[0-9a-zA-Z]{1,5}(?:\.[0-9a-zA-Z]{1,5})*[.)])[\s\u00a0]+(?=\S)/;
+/**
+ * A leading list marker written as literal text (a Word item whose `mso-list:Ignore` span or
+ * `supportLists` comment was lost, or plain text in the List Paragraph style): `·  x`, `1.  x`,
+ * `1.1. x`, `a)  x`, `iv.  x`. Deliberately narrow, because it is also tried on paragraphs that
+ * may be ordinary sentences (`Yes. We agree`, `Dr. Smith`, `Hello) there` must stay intact):
+ * - a bullet symbol, or 1-3 digits per segment (dotted outline allowed) ending in `.` or `)`,
+ *   followed by any spacing;
+ * - a letter, a valid roman numeral, `A.1.` or a lone `o` (all of which are also ordinary words
+ *   or initials) only with a tab or 2+ spaces/nbsp after it, which is how Word separates a glyph;
+ * - always followed by text. Residual cases: `A.  Smith` or `mix.  it` (a letter or a word that is a valid numeral, then two spaces) read as a list.
+ */
+const GLYPH_GAP = "[\\s\\u00a0]";
+const ROMAN = "m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})";
+const LEADING_GLYPH = new RegExp(
+  `^${GLYPH_GAP}*(?:([·•§▪■◦○●-]|\\(?\\d{1,3}(?:\\.\\d{1,3})*[.)])${GLYPH_GAP}+|` +
+    `(o|\\(?[a-z][.)]|\\(?(?=[ivxlcdm])${ROMAN}[.)]|[a-z](?:\\.\\d{1,3})+[.)])(?:\\t|${GLYPH_GAP}{2,}))(?=\\S)`,
+  "i",
+);
+/** The glyph text of a {@link LEADING_GLYPH} match (it has two alternative capture groups). */
+const matchedGlyph = (m: RegExpExecArray): string => m[1] ?? m[2];
 
 function firstTextNode(el: Element): Text | null {
   const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -740,7 +758,7 @@ function takeWordListGlyph(p: Element): string {
     const text = firstTextNode(p);
     const match = text ? LEADING_GLYPH.exec(text.textContent ?? "") : null;
     if (text && match) {
-      glyph = match[1];
+      glyph = matchedGlyph(match);
       text.textContent = (text.textContent ?? "").slice(match[0].length);
     }
   }

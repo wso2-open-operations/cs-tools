@@ -69,18 +69,57 @@ export function mergeAdjacentParagraphs(dom: Document): void {
   }
 }
 
-/** A local `blob:` preview or a stored image's `/<uuid>`: what this app's own editors put in an `<img>`. */
-const APP_IMAGE_SRC =
-  /^(?:blob:https?:\/\/[^\s"'<>]+|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+/** A stored image's `/<uuid>`: what this app's own editors put in an `<img>` once uploaded. */
+const STORED_IMAGE_SRC = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The only `data:` images ever kept: raster formats, never `svg+xml` or anything else. */
+const RASTER_DATA_IMAGE_SRC = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]*={0,2}$/i;
+
+/** A `blob:` preview of THIS page's origin (computed at call time); a foreign blob URL is not ours. */
+function isOwnBlobSrc(value: string): boolean {
+  const prefix = `blob:${window.location.origin}/`;
+  return value.length > prefix.length && value.startsWith(prefix) && !/[\s"'<>]/.test(value);
+}
 
 /**
- * Whether an `<img>` source is one this app's editors produce: a `blob:` preview or a stored
- * `/<uuid>` image, and, when the clipboard came from an editor of this app
- * (`application/x-lexical-editor`), any `data:image/...;base64,` source an older draft holds.
+ * The image `src`s inside an `application/x-lexical-editor` clipboard payload
+ * (`{ namespace, nodes: [serialized nodes] }`, see `$generateJSONFromSelectedNodes`), looked up
+ * through the nodes' children at any depth. Any page can put anything into that clipboard type,
+ * so its mere presence proves nothing: only a `data:` image the payload itself holds is trusted.
+ * Missing or malformed JSON gives an empty set (not from this app).
  */
-export function isAppImageSrc(src: string, fromApp: boolean): boolean {
+export function appClipboardImageSrcs(raw: string): ReadonlySet<string> {
+  const srcs = new Set<string>();
+  if (!raw) return srcs;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return srcs;
+  }
+  const nodes = (payload as { nodes?: unknown } | null)?.nodes;
+  if (!Array.isArray(nodes)) return srcs;
+  // Iterative: a hostile payload may nest far deeper than the call stack allows.
+  const pending: unknown[] = [...nodes];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (typeof node !== "object" || node === null) continue;
+    const { type, src, children } = node as { type?: unknown; src?: unknown; children?: unknown };
+    if (type === "image" && typeof src === "string") srcs.add(src);
+    if (Array.isArray(children)) pending.push(...children);
+  }
+  return srcs;
+}
+
+/**
+ * Whether an `<img>` source is one this app's editors produce: a `blob:` preview of this page's
+ * own origin, a stored `/<uuid>` image, or a raster `data:image/(png|jpeg|gif|webp);base64,`
+ * image that the clipboard's own editor payload (`appSrcs`, from {@link appClipboardImageSrcs})
+ * holds with exactly this `src` (an older draft's image).
+ */
+export function isAppImageSrc(src: string, appSrcs: ReadonlySet<string> = new Set()): boolean {
   const value = src.trim();
-  return APP_IMAGE_SRC.test(value) || (fromApp && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value));
+  if (STORED_IMAGE_SRC.test(value) || isOwnBlobSrc(value)) return true;
+  return RASTER_DATA_IMAGE_SRC.test(value) && appSrcs.has(value);
 }
 
 /**

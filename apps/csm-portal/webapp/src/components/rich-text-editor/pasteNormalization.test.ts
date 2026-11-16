@@ -457,6 +457,32 @@ describe("convertWordListsToHtmlLists: outlines and class-only paragraphs", () =
     expect(run("<p class=MsoListParagraph>1.  One</p><p class=MsoListParagraph>2.  Two</p>")).toBe("<ol><li>One</li><li>Two</li></ol>");
   });
 
+  it("leaves a sentence in the List Paragraph style alone (no mso-list, no marker): its first word is not a glyph", () => {
+    for (const text of ["Yes. We agree", "Dr. Smith will call", "Hello) there", "ok. fine", "A. Smith is here", "I. think so", "mild.  fine", "did.  it"]) {
+      const html = `<p class=MsoListParagraph>${text}</p>`;
+      expect(run(html), text).toBe(`<p class="MsoListParagraph">${text}</p>`);
+    }
+  });
+
+  it("still converts real literal markers in a class-only paragraph", () => {
+    const one = (glyph: string, gap: string) => run(`<p class=MsoListParagraph>${glyph}${gap}x</p>`);
+    expect(one("·", "&nbsp;&nbsp;")).toBe("<ul><li>x</li></ul>");
+    expect(one("1.", "  ")).toBe("<ol><li>x</li></ol>");
+    expect(one("1.1.", "  ")).toBe("<ol><li>x</li></ol>");
+    expect(one("2.3.1)", "&nbsp;&nbsp;")).toBe("<ol><li>x</li></ol>");
+    expect(one("a)", "&nbsp;&nbsp;")).toBe("<ol><li>x</li></ol>");
+    expect(one("(b)", "\t")).toBe("<ol><li>x</li></ol>");
+    expect(one("iv.", "&nbsp;&nbsp;")).toBe("<ol><li>x</li></ol>");
+    expect(one("IX.", "  ")).toBe("<ol><li>x</li></ol>");
+    expect(one("o", "&nbsp;&nbsp;")).toBe("<ul><li>x</li></ul>");
+  });
+
+  it("a Word item whose marker span was lost still loses only a real marker, never a first word", () => {
+    const lost = (text: string) => `<p class=MsoListParagraph style="mso-list:l0 level1 lfo1">${text}</p>`;
+    expect(run(lost("Yes. We agree"))).toBe("<ul><li>Yes. We agree</li></ul>");
+    expect(run(lost("1.  One"))).toBe("<ol><li>One</li></ol>");
+  });
+
   it("a class-only paragraph with an Ignore span or the supportLists comment is an item", () => {
     expect(run('<p class=MsoListParagraph><span style="mso-list:Ignore">·</span>x</p>')).toBe("<ul><li>x</li></ul>");
     expect(run("<p class=MsoListParagraph><!--[if !supportLists]-->1.<!--[endif]-->x</p>")).toBe("<ol><li>x</li></ol>");

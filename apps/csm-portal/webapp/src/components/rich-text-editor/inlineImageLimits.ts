@@ -37,9 +37,21 @@ export function rememberInlineImageSize(previewUrl: string, bytes: number): void
   previewSizes.set(previewUrl, bytes);
 }
 
-/** The remembered size of the file behind a preview URL (0 when unknown, e.g. a stored `/<uuid>` image). */
+/** The bytes a `data:...;base64,` image decodes to, from its length (0 for anything else). */
+export function dataImageBytes(src: string): number {
+  const comma = src.indexOf(",");
+  if (!/^data:/i.test(src) || comma < 0) return 0;
+  const body = src.slice(comma + 1);
+  const padding = body.endsWith("==") ? 2 : body.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((body.length * 3) / 4) - padding);
+}
+
+/**
+ * The size of the image behind a source: the remembered size of a `blob:` preview, the decoded
+ * size of a `data:` image, 0 when unknown (e.g. a stored `/<uuid>` image).
+ */
 export function inlineImageSize(src: string): number {
-  return previewSizes.get(src) ?? 0;
+  return /^data:/i.test(src) ? dataImageBytes(src) : (previewSizes.get(src) ?? 0);
 }
 
 /** Why an image was not taken: too many images, or too many bytes in all. */
@@ -52,8 +64,8 @@ export interface InlineImageRoom {
 
 /**
  * The images the editor's content holds now: `blob:` previews (sizes known from
- * {@link rememberInlineImageSize}) and stored `/<uuid>` images (size unknown,
- * counted as zero bytes).
+ * {@link rememberInlineImageSize}), `data:` images (sized from their base64) and stored
+ * `/<uuid>` images (size unknown, counted as zero bytes).
  */
 export function inlineImagesInEditor(editor: LexicalEditor): InlineImageRoom {
   return editor.getEditorState().read(() => {
@@ -65,6 +77,10 @@ export function inlineImagesInEditor(editor: LexicalEditor): InlineImageRoom {
         room.bytes += previewSizes.get(src) ?? 0;
       } else if (/^\/[0-9a-f-]{36}$/i.test(src)) {
         room.count += 1;
+      } else if (src.startsWith("data:")) {
+        // An older draft's embedded image, kept by a paste from this app: it counts like any other.
+        room.count += 1;
+        room.bytes += dataImageBytes(src);
       }
     }
     return room;

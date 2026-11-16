@@ -34,6 +34,7 @@ import {
   type LexicalNode,
 } from "lexical";
 import Editor from "./Editor";
+import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { hasCommentContent, preprocessCommentBodyHtml, trimTrailingLineBreaks } from "../../features/csm-cases/utils/commentContent";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { htmlToPdfPlainText } from "@utils/pdfReportKit";
@@ -799,8 +800,8 @@ describe.each(CONFIGS)("[%s] Keep Formatting of an image copied out of an editor
   const IN_APP = (src: string) => `<p>a <img src="${src}" alt="pic" style="max-width: 100%"> b</p>`;
 
   /** Pastes `html` (optionally with the Lexical marker) into an empty editor and keeps it. */
-  async function keep(html: string, fromApp: boolean, value?: string): Promise<{ m: Mounted }> {
-    const m = mount(cfg, { value, caret: value ? "p" : "root", uploader: true });
+  async function keep(html: string, fromApp: boolean | string, value?: string, uploader = true): Promise<{ m: Mounted }> {
+    const m = mount(cfg, { value, caret: value ? "p" : "root", uploader });
     firePasteWith(html, fromApp);
     const keepButton = screen.getByRole("button", { name: "Keep Formatting" });
     fireEvent.click(keepButton);
@@ -808,8 +809,9 @@ describe.each(CONFIGS)("[%s] Keep Formatting of an image copied out of an editor
     return { m };
   }
 
-  function firePasteWith(html: string, fromApp: boolean): void {
-    const data: Record<string, string> = { "text/html": html, "text/plain": "a pic b", ...(fromApp ? { "application/x-lexical-editor": LEXICAL } : {}) };
+  function firePasteWith(html: string, fromApp: boolean | string): void {
+    const lexical = typeof fromApp === "string" ? fromApp : LEXICAL;
+    const data: Record<string, string> = { "text/html": html, "text/plain": "a pic b", ...(fromApp ? { "application/x-lexical-editor": lexical } : {}) };
     const clipboardData = {
       getData: (type: string) => data[type] ?? "",
       items: [{ kind: "string", type: "text/html", getAsFile: () => null }],
@@ -823,13 +825,14 @@ describe.each(CONFIGS)("[%s] Keep Formatting of an image copied out of an editor
   }
 
   it("round trip: an ImageNode copied out of the editor pastes back as an image (blob: preview)", async () => {
-    const source = mount(cfg, { value: '<p>x <img src="blob:https://csm.example.com/7" alt="shot"></p>', caret: "none" });
+    const source = mount(cfg, { value: `<p>x <img src="blob:${location.origin}/7" alt="shot"></p>`, caret: "none" });
     await settle();
     const exported = source.html();
     expect(exported).toContain("<img");
     cleanup();
     const { m } = await keep(exported, true);
-    expect(m.html()).toMatch(/<img[^>]*src="blob:https:\/\/csm.example.com\/7"[^>]*alt="shot"/);
+    expect(m.html()).toContain(`src="blob:${location.origin}/7"`);
+    expect(m.html()).toContain('alt="shot"');
   });
 
   it("a stored /<uuid> image, with or without the editor marker, stays an image", async () => {
@@ -839,13 +842,79 @@ describe.each(CONFIGS)("[%s] Keep Formatting of an image copied out of an editor
     expect((await keep(IN_APP(src), false)).m.html()).toContain(`src="${src}"`);
   });
 
-  it("an older draft's data: image stays an image only when the clipboard is from an editor of this app", async () => {
-    const src = "data:image/png;base64,AAAA";
-    expect((await keep(IN_APP(src), true)).m.html()).toContain(`src="${src}"`);
+  const withImages = (...srcs: string[]) =>
+    JSON.stringify({ namespace: "MyEditor", nodes: [{ type: "paragraph", children: srcs.map((src) => ({ type: "image", version: 1, src, altText: "pic" })) }] });
+  const PNG = "data:image/png;base64,AAAA";
+
+  it("an older draft's data: image stays an image only when the editor payload of the clipboard holds that exact src", async () => {
+    expect((await keep(IN_APP(PNG), withImages(PNG))).m.html()).toContain(`src="${PNG}"`);
     cleanup();
-    const foreign = (await keep(IN_APP(src), false)).m.html();
+    const foreign = (await keep(IN_APP(PNG), false)).m.html();
     expect(foreign).not.toContain("<img");
     expect(foreign).not.toContain("data:image");
+  });
+
+  it("a forged editor marker does not make a data: image ours (empty, malformed, or another image's payload)", async () => {
+    for (const forged of [true, "not json", withImages("data:image/png;base64,BBBB"), withImages("/0b9f3c1e-aaaa-4bbb-8ccc-1234567890ab")]) {
+      const out = (await keep(IN_APP(PNG), forged)).m.html();
+      expect(out, String(forged)).not.toContain("<img");
+      expect(out, String(forged)).not.toContain("data:image");
+      cleanup();
+    }
+  });
+
+  it("never keeps an svg data: image, even when the payload names it", async () => {
+    const svg = "data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+";
+    const out = (await keep(IN_APP(svg), withImages(svg))).m.html();
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("svg");
+  });
+
+  it("a data: image over the size limit becomes its alt text and the user is told", async () => {
+    const big = `data:image/png;base64,${"A".repeat(Math.ceil(((inlineImageMaxBytes() + 1024) * 4) / 3))}`;
+    const { m } = await keep(IN_APP(big), withImages(big));
+    expect(m.html()).not.toContain("<img");
+    expect(m.html()).toContain("pic");
+    expect(m.onPasteError).toHaveBeenCalledWith("total");
+  });
+
+  it("with no image uploader (image insertion off) a data: image from the app becomes its alt text, reported as disabled", async () => {
+    const { m } = await keep(IN_APP(PNG), withImages(PNG), undefined, false);
+    expect(m.html()).not.toContain("<img");
+    expect(m.html()).toContain("pic");
+    expect(m.onPasteError).toHaveBeenCalledWith("disabled");
+  });
+
+  it("a kept data: image counts toward the 5-image limit of later pastes", async () => {
+    const five = Array.from({ length: 5 }, () => `<img src="${PNG}" alt="old">`).join("");
+    const m = mount(cfg, { value: `<p>${five}</p>`, caret: "none", uploader: true });
+    await settle();
+    firePasteWith(IN_APP(PNG), withImages(PNG));
+    fireEvent.click(screen.getByRole("button", { name: "Keep Formatting" }));
+    await settle();
+    expect(m.html().match(/<img/g)).toHaveLength(5);
+    expect(m.onPasteError).toHaveBeenCalledWith("count");
+  });
+
+  it("a clipboard with only the editor payload (no html, no text) inserts nothing, whatever its image srcs", async () => {
+    for (const src of ["data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", "javascript:alert(1)", "https://evil.example.com/p.png", PNG]) {
+      const m = mount(cfg, { uploader: true });
+      const data: Record<string, string> = { "application/x-lexical-editor": withImages(src) };
+      const clipboardData = { getData: (t: string) => data[t] ?? "", items: [] } as unknown as DataTransfer;
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData } as ClipboardEventInit & { clipboardData: DataTransfer });
+      act(() => { getEditable().dispatchEvent(event); });
+      await settle();
+      expect(event.defaultPrevented, src).toBe(true);
+      expect(m.html(), src).not.toContain("<img");
+      expect(getEditable().querySelector("img"), src).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("a blob: preview of another origin is a foreign image: never kept as an image", async () => {
+    const out = (await keep(IN_APP("blob:https://evil.example.com/7"), true)).m.html();
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("evil.example.com");
   });
 
   it("a remote image is a link even when the clipboard came from an editor of this app", async () => {
@@ -855,14 +924,14 @@ describe.each(CONFIGS)("[%s] Keep Formatting of an image copied out of an editor
   });
 
   it.runIf(cfg === "reply")("copied images still respect the 5-image limit: the sixth becomes its alt text and the user is told", async () => {
-    const five = Array.from({ length: 5 }, (_, i) => `<img src="blob:https://csm.example.com/${i + 1}" alt="i${i}">`).join("");
+    const five = Array.from({ length: 5 }, (_, i) => `<img src="blob:${location.origin}/${i + 1}" alt="i${i}">`).join("");
     const m = mount(cfg, { value: `<p>${five}</p>`, caret: "none", uploader: true });
     await settle();
-    firePasteWith(IN_APP("blob:https://csm.example.com/9"), true);
+    firePasteWith(IN_APP(`blob:${location.origin}/9`), true);
     fireEvent.click(screen.getByRole("button", { name: "Keep Formatting" }));
     await settle();
     expect(m.html().match(/<img/g)).toHaveLength(5);
-    expect(m.html()).not.toContain("csm.example.com/9");
+    expect(m.html()).not.toContain("/9");
     expect(m.html()).toContain("pic");
     expect(m.onPasteError).toHaveBeenCalledWith("count");
   });

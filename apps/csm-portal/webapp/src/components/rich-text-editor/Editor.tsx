@@ -65,6 +65,7 @@ import { isFlatClipboardHtml } from "@components/rich-text-editor/isFlatClipboar
 import {
   flattenTablesToParagraphs,
   imagesToLinks,
+  appClipboardImageSrcs,
   isAppImageSrc,
   markdownToPasteDom,
   mergeAdjacentParagraphs,
@@ -80,7 +81,7 @@ import Toolbar, {
 import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
-import { ImageNode, INLINE_IMAGES_THEME_KEY, markInlineImageEditor } from "@components/rich-text-editor/ImageNode";
+import { ImageNode, markInlineImageEditor } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
@@ -685,8 +686,12 @@ const PasteNormalizationPlugin = ({
     variant: "html" | "markdown";
     /** The clipboard also carried the picture file (stored by ClipboardImagePlugin). */
     hasImageFile: boolean;
-    /** The clipboard came from an editor of this app (`application/x-lexical-editor`). */
-    fromApp: boolean;
+    /**
+     * The image `src`s of the clipboard's `application/x-lexical-editor` payload (empty when it
+     * has none or it is malformed). Any page can set that type, so only these exact sources are
+     * trusted, never the type's presence.
+     */
+    appImageSrcs: ReadonlySet<string>;
   } | null>(null);
   /** The selection when the paste was held, restored before the dialog's choice is applied. */
   const heldSelection = useRef<RangeSelection | null>(null);
@@ -705,7 +710,15 @@ const PasteNormalizationPlugin = ({
 
         const html = clipboardData.getData("text/html");
         const text = clipboardData.getData("text/plain");
-        const fromApp = Boolean(clipboardData.getData("application/x-lexical-editor"));
+        // Falling through to Lexical's native paste would insert the `application/x-lexical-editor`
+        // nodes unsanitised (any page can set that type, with any image `src`). Real copies from
+        // this app always also carry text/html and text/plain, so a payload with nothing else is dropped.
+        const dropEditorPayload = (): boolean => {
+          if (!clipboardData.getData("application/x-lexical-editor")) return false;
+          event.preventDefault();
+          return true;
+        };
+        const appImageSrcs = appClipboardImageSrcs(clipboardData.getData("application/x-lexical-editor"));
 
         // A picture copied from a web page carries the image itself AND an
         // `<img src="https://...">` as its HTML. The image is stored by
@@ -735,7 +748,7 @@ const PasteNormalizationPlugin = ({
         ) {
           event.preventDefault();
           holdSelection();
-          setPendingPaste({ html, text, variant: "markdown", hasImageFile, fromApp });
+          setPendingPaste({ html, text, variant: "markdown", hasImageFile, appImageSrcs });
           return true;
         }
 
@@ -764,7 +777,7 @@ const PasteNormalizationPlugin = ({
         if (htmlHasContent) {
           event.preventDefault();
           holdSelection();
-          setPendingPaste({ html, text, variant: "html", hasImageFile, fromApp });
+          setPendingPaste({ html, text, variant: "html", hasImageFile, appImageSrcs });
           return true;
         }
 
@@ -774,7 +787,7 @@ const PasteNormalizationPlugin = ({
           const tokens = tokenizePlainTextPaste(text, {
             lineBreaks: lineBreaks && $selectionInPlainParagraphs(),
           });
-          if (tokens.length === 0) return false;
+          if (tokens.length === 0) return dropEditorPayload();
 
           event.preventDefault();
           editor.update(
@@ -799,7 +812,7 @@ const PasteNormalizationPlugin = ({
           return true;
         }
 
-        return false;
+        return dropEditorPayload();
       },
       COMMAND_PRIORITY_HIGH,
     );
@@ -819,16 +832,22 @@ const PasteNormalizationPlugin = ({
       collapseEmptyParagraphElements(dom);
       // Never hot-link or embed a foreign image: a link, or nothing when the picture file is stored
       // on its own. An image of this app (copied out of an editor: a `blob:` preview, a stored
-      // `/<uuid>`, an older draft's `data:`) stays an image, within the inline image limits.
+      // `/<uuid>`, an older draft's raster `data:` image that the clipboard's editor payload
+      // holds) stays an image, within the inline image limits; with no uploader a `data:` image
+      // is its alt text (image insertion is off, nothing is embedded as base64).
       let room = limitImages ? inlineImagesInEditor(editor) : null;
       const result: { refused: ImagePasteRefusal | null } = { refused: null };
       imagesToLinks(dom, {
         dropAll: pendingPaste.hasImageFile,
         decide: (img) => {
           const src = img.getAttribute("src") ?? "";
-          if (!isAppImageSrc(src, pendingPaste.fromApp)) return undefined;
+          if (!isAppImageSrc(src, pendingPaste.appImageSrcs)) return undefined;
+          if (/^data:/i.test(src.trim()) && !limitImages) {
+            result.refused ??= "disabled";
+            return "text";
+          }
           if (!room) return "keep";
-          const bytes = inlineImageSize(src);
+          const bytes = inlineImageSize(src.trim());
           const refusal = inlineImageRefusal(room, bytes);
           if (refusal) {
             result.refused ??= refusal;
@@ -1011,6 +1030,10 @@ const Editor = ({
    * (two Enters = one blank line) instead of starting a paragraph; toolbar block
    * conversions and plain-text paste follow suit. Off by default; ignored with
    * `enterToSubmit`. See `EnterLineBreakPlugin`.
+   *
+   * Fixed for the editor's lifetime: it also decides how images are drawn and exported (inline
+   * vs block, recorded once when the editor is created), so it must not change after mount.
+   * To change it, mount a new editor (give `Editor` a different `key`).
    */
   enterInsertsLineBreak?: boolean;
   /**
@@ -1064,13 +1087,12 @@ const Editor = ({
   const memoizedEditorConfig = useMemo(
     () => ({
       ...DEFAULT_EDITOR_CONFIG,
-      theme: { ...DEFAULT_EDITOR_CONFIG.theme, [INLINE_IMAGES_THEME_KEY]: lineBreakMode },
       onError: (error: Error) => {
         logger.error("Error occurred in rich text editor", error);
       },
       editable: !disabled,
     }),
-    [logger, disabled, lineBreakMode],
+    [logger, disabled],
   );
 
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -1307,7 +1329,14 @@ const Editor = ({
           <InitialValuePlugin initialHtml={value} />
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
-          {lineBreakMode ? <EnterLineBreakPlugin /> : <EnterEmptyRootPlugin onSubmit={disabled ? undefined : onSubmitKeyDown} enterToSubmit={enterToSubmit} />}
+          {lineBreakMode ? (
+            <EnterLineBreakPlugin />
+          ) : (
+            <EnterEmptyRootPlugin
+              onSubmit={disabled ? undefined : onSubmitKeyDown}
+              enterToSubmit={enterToSubmit}
+            />
+          )}
           <ListTabPlugin />
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>

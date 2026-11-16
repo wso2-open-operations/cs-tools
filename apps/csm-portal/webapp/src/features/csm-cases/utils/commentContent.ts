@@ -351,8 +351,41 @@ export function hasCommentContent(html: string): boolean {
  * as it is (never turned into an empty `<p></p>`).
  */
 export function trimTrailingLineBreaks(html: string): string {
-  const match = /(?:<br\s*\/?>\s*)+<\/p>\s*$/i.exec(html);
-  if (!match) return html;
-  if (/<p(?:\s[^>]*)?>\s*$/i.test(html.slice(0, match.index))) return html;
-  return html.slice(0, match.index) + match[0].replace(/^(?:<br\s*\/?>\s*)+/i, "");
+  // Scanned from the end, once: a regex over a long `<br>` run that does not end in `</p>` was
+  // quadratic (seconds for tens of thousands of breaks, and this runs on send).
+  const isSpace = (ch: string): boolean => /\s/.test(ch);
+  let end = html.length;
+  while (end > 0 && isSpace(html[end - 1])) end -= 1;
+  const tailStart = end - 4;
+  if (tailStart < 0 || html.slice(tailStart, end).toLowerCase() !== "</p>") return html;
+
+  // Peel `<br\s*/?>` tags (with the spacing around them) off the end of the last paragraph.
+  let runStart = -1;
+  let pos = tailStart;
+  for (;;) {
+    let j = pos;
+    while (j > 0 && isSpace(html[j - 1])) j -= 1;
+    if (j === 0 || html[j - 1] !== ">") break;
+    j -= 2;
+    if (html[j] === "/") j -= 1;
+    while (j >= 0 && isSpace(html[j])) j -= 1;
+    if (j < 2 || !/^<br$/i.test(html.slice(j - 2, j + 1))) break;
+    runStart = j - 2;
+    pos = runStart;
+  }
+  if (runStart < 0) return html;
+
+  // A paragraph that is nothing but breaks (`<p><br></p>`) is left as it is, never emptied.
+  let p = runStart;
+  while (p > 0 && isSpace(html[p - 1])) p -= 1;
+  if (p > 0 && html[p - 1] === ">") {
+    let k = p - 2;
+    while (k >= 0 && html[k] !== ">") k -= 1;
+    for (let i = k + 1; i < p - 1; i += 1) {
+      if (html[i] === "<" && (html[i + 1] === "p" || html[i + 1] === "P") && (i + 2 === p - 1 || isSpace(html[i + 2]))) {
+        return html;
+      }
+    }
+  }
+  return html.slice(0, runStart) + html.slice(tailStart);
 }

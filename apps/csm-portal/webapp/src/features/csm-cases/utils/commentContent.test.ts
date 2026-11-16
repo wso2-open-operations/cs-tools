@@ -462,4 +462,31 @@ describe("trimTrailingLineBreaks", () => {
     expect(trimTrailingLineBreaks("<ul><li>a</li></ul>")).toBe("<ul><li>a</li></ul>");
     expect(trimTrailingLineBreaks("plain<br>")).toBe("plain<br>");
   });
+
+  it("keeps the exact semantics around spacing, case and attributes", () => {
+    expect(trimTrailingLineBreaks("<p>a <br> <BR /> <Br/> </P>\n ")).toBe("<p>a </P>\n ");
+    expect(trimTrailingLineBreaks("<p>a<br\n/><br  ></p>")).toBe("<p>a</p>");
+    expect(trimTrailingLineBreaks("<p>a<br / ></p>")).toBe("<p>a<br / ></p>");
+    expect(trimTrailingLineBreaks("<p>a<brx></p>")).toBe("<p>a<brx></p>");
+    expect(trimTrailingLineBreaks("<p>a<br></p >")).toBe("<p>a<br></p >");
+    expect(trimTrailingLineBreaks('<p class="x" style="a>b">a<br></p>')).toBe('<p class="x" style="a>b">a</p>');
+    expect(trimTrailingLineBreaks('<p class="x"><br> <br></p>')).toBe('<p class="x"><br> <br></p>');
+    expect(trimTrailingLineBreaks("<p\n><br></p>")).toBe("<p\n><br></p>");
+    expect(trimTrailingLineBreaks("<p>a</p>  <br></p>")).toBe("<p>a</p>  </p>");
+    expect(trimTrailingLineBreaks("<pre>a<br></p>")).toBe("<pre>a</p>");
+    expect(trimTrailingLineBreaks("<br></p>")).toBe("</p>");
+    expect(trimTrailingLineBreaks("")).toBe("");
+  });
+
+  it("is linear: tens of thousands of <br> are trimmed or left alone fast", () => {
+    const brs = "<br>".repeat(50_000);
+    let started = performance.now();
+    expect(trimTrailingLineBreaks(`<p>a${brs}`)).toBe(`<p>a${brs}`);
+    expect(performance.now() - started).toBeLessThan(100);
+    started = performance.now();
+    expect(trimTrailingLineBreaks(`<p>a${brs}</p>`)).toBe("<p>a</p>");
+    expect(trimTrailingLineBreaks(`<p>${brs}</p>`)).toBe(`<p>${brs}</p>`);
+    expect(trimTrailingLineBreaks(`${"<br >".repeat(50_000)} x`)).toBe(`${"<br >".repeat(50_000)} x`);
+    expect(performance.now() - started).toBeLessThan(300);
+  });
 });
