@@ -93,6 +93,76 @@ describe("useMttrReportData", () => {
     expect(result.current.total).toBe(20);
   });
 
+  it("shows only the requested bands, in display order, without changing the request", async () => {
+    getResponseMock.mockResolvedValue(
+      jsonResponse({
+        generatedOn: "2026-11-16T00:00:00Z",
+        windowMonths: 3,
+        windowStart: "2026-08-16T00:00:00Z",
+        windowEnd: "2026-11-16T00:00:00Z",
+        creTeamIds: [],
+        bands: [
+          { band: "S1-S4", caseCount: 20, avgResolutionHours: 25 },
+          { band: "S1-S3", caseCount: 10, avgResolutionHours: 15 },
+          { band: "S1", caseCount: 2, avgResolutionHours: 5 },
+          { band: "S2", caseCount: 3, avgResolutionHours: 10 },
+          { band: "S3", caseCount: 5, avgResolutionHours: 20 },
+          { band: "S4", caseCount: 10, avgResolutionHours: 40 },
+        ],
+      }),
+    );
+    const { result } = renderHook(
+      () =>
+        useMttrReportData(
+          "mttr_bands",
+          { months: "3", bands: ["S4", "S1", "S2", "S3"] },
+          { bucket: "severity" },
+          undefined,
+          undefined,
+        ),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(getResponseMock).toHaveBeenCalledWith("/reports/mttr?months=3", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(result.current.slices.map((s) => s.label)).toEqual(["S1", "S2", "S3", "S4"]);
+  });
+
+  it("sends days instead of months for a 7 day window and orders S0 first of the single bands", async () => {
+    getResponseMock.mockResolvedValue(
+      jsonResponse({
+        generatedOn: "2026-11-16T00:00:00Z",
+        windowMonths: 0,
+        windowDays: 7,
+        windowStart: "2026-11-09T00:00:00Z",
+        windowEnd: "2026-11-16T00:00:00Z",
+        creTeamIds: [],
+        bands: [
+          { band: "S1", caseCount: 2, avgResolutionHours: 5 },
+          { band: "S0", caseCount: 1, avgResolutionHours: 3 },
+          { band: "S1-S4", caseCount: 3, avgResolutionHours: 4 },
+        ],
+      }),
+    );
+    const { result } = renderHook(
+      () =>
+        useMttrReportData(
+          "mttr_days",
+          { days: "7", bands: ["S1", "S0"] },
+          { bucket: "severity" },
+          undefined,
+          undefined,
+        ),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(getResponseMock).toHaveBeenCalledWith("/reports/mttr?days=7", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(result.current.slices.map((s) => s.label)).toEqual(["S0", "S1"]);
+  });
+
   it("appends a repeated creTeamId per team", async () => {
     getResponseMock.mockResolvedValue(
       jsonResponse({

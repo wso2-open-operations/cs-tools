@@ -1023,15 +1023,25 @@ func validateWidgets(d Dashboard, source string) error {
 		// validateWidgets, which generatedResourceRules is never consulted
 		// from.
 		if w.ResourceType == ResourceMTTR {
-			if w.Shape != ShapeBar {
-				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q only supports shape %q, not %q",
-					source, d.ID, w.ID, ResourceMTTR, ShapeBar, w.Shape)
+			if w.Shape != ShapeBar && w.Shape != ShapeCount {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q only supports shapes %q and %q, not %q",
+					source, d.ID, w.ID, ResourceMTTR, ShapeBar, ShapeCount, w.Shape)
 			}
 			if len(w.Slices) > 0 {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q has no \"slices\"; group with \"groupBy.bucket\"",
 					source, d.ID, w.ID, ResourceMTTR)
 			}
-			if w.GroupBy == nil || w.GroupBy.Bucket != "severity" {
+			if w.Shape == ShapeCount && w.GroupBy != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: an %q count shows one band and takes no \"groupBy\"",
+					source, d.ID, w.ID, ResourceMTTR)
+			}
+			if w.Shape == ShapeCount {
+				if b, ok := w.Query["bands"].([]any); !ok || len(b) != 1 {
+					return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: an %q count shows one band, so \"bands\" must name exactly one",
+						source, d.ID, w.ID, ResourceMTTR)
+				}
+			}
+			if w.Shape == ShapeBar && (w.GroupBy == nil || w.GroupBy.Bucket != "severity") {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: resourceType %q groups only by \"groupBy.bucket\" \"severity\"",
 					source, d.ID, w.ID, ResourceMTTR)
 			}

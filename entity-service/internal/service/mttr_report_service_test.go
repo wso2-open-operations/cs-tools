@@ -91,6 +91,7 @@ func TestMTTRReportCombinesBandsAndResolvesWindow(t *testing.T) {
 	}{
 		{"S1-S4", 10, 2.1},
 		{"S1-S3", 5, 3.2},
+		{"S0", 0, 0},
 		{"S1", 2, 2},
 		{"S2", 3, 4},
 		{"S3", 0, 0},
@@ -103,6 +104,28 @@ func TestMTTRReportCombinesBandsAndResolvesWindow(t *testing.T) {
 		}
 		if diff := b.AvgResolutionHours - c.wantAvg; diff > 1e-9 || diff < -1e-9 {
 			t.Errorf("band %s: AvgResolutionHours = %v, want %v", c.band, b.AvgResolutionHours, c.wantAvg)
+		}
+	}
+}
+
+func TestMTTRReportDayWindow(t *testing.T) {
+	repo := &fakeMTTRReportRepo{}
+	svc := service.NewMTTRReportService(repo)
+	now := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	got, err := svc.BuildReport(context.Background(), domain.MTTRReportRequest{WindowDays: 7, Now: now})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	wantStart := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	if got.WindowDays != 7 || got.WindowMonths != 0 || !got.WindowStart.Equal(wantStart) || !repo.gotStart.Equal(wantStart) {
+		t.Errorf("got days=%d months=%d start=%s, want 7/0/%s", got.WindowDays, got.WindowMonths, got.WindowStart, wantStart)
+	}
+	for _, req := range []domain.MTTRReportRequest{
+		{WindowDays: 3},
+		{WindowDays: 7, WindowMonths: 3},
+	} {
+		if _, err := svc.BuildReport(context.Background(), req); err == nil {
+			t.Errorf("request %+v accepted, want a validation error", req)
 		}
 	}
 }

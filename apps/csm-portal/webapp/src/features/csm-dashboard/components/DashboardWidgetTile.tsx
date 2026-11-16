@@ -66,7 +66,7 @@ import {
 } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
-import { formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
+import { formatHours, formatMttrBarLabel, formatMttrCases, formatMttrHours } from "@features/csm-dashboard/utils/timeCardTotals";
 import DashboardLineChart from "@features/csm-dashboard/components/DashboardLineChart";
 
 // Hides the per-widget refresh button by default and reveals it on hover or
@@ -483,10 +483,13 @@ function DashboardWidgetTile({
   // instead — skip this one's own network call rather than wasting it, but
   // still call the hook unconditionally (rules of hooks; a widget's shape
   // never changes across this component's lifetime).
+  // An MTTR count is one band's average hours, read from the same report call
+  // the MTTR bars use -- not from a search, so useWidgetData stays off.
+  const isMttrCount = shape === "count" && resourceType === "mttr";
   const {
     data,
     isLoading: isWidgetDataLoading,
-    isError,
+    isError: isWidgetDataError,
     error: widgetDataError,
   } = useWidgetData({
     widgetId,
@@ -495,7 +498,7 @@ function DashboardWidgetTile({
     shape,
     distinctBy,
     listLimit,
-    enabled: shape !== "pie" && shape !== "bar" && shape !== "line" && isVisible,
+    enabled: shape !== "pie" && shape !== "bar" && shape !== "line" && !isMttrCount && isVisible,
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
     sortBy,
@@ -574,11 +577,14 @@ function DashboardWidgetTile({
     filters,
     shape === "bar" && resourceType === "mttr" && groupBy?.bucket
       ? groupBy
-      : undefined,
+      : isMttrCount
+        ? { bucket: "severity" }
+        : undefined,
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
     isVisible,
   );
+  const isError = isMttrCount ? mttrData.isError : isWidgetDataError;
   const pieData = groupBy?.bucket
     ? resourceType === "mttr"
       ? mttrData
@@ -629,11 +635,14 @@ function DashboardWidgetTile({
   // own `isLoading`. This is the count/list-shape tile's loading state;
   // shape "pie"/"bar" reads `pieData.isLoading` instead, which already
   // folds in the same `isVisible` gate via the `enabled` argument above.
-  const isLoading = isWidgetDataLoading || awaitingCurrentUser || !isVisible;
+  const isLoading =
+    (isMttrCount ? mttrData.isLoading : isWidgetDataLoading) || awaitingCurrentUser || !isVisible;
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   // Thousands separators for shape "count"'s big number -- used both in the
   // visible Typography and the tile's aria-label, so both stay in sync.
-  const formattedCount = (data?.total ?? 0).toLocaleString();
+  const formattedCount = isMttrCount
+    ? formatMttrHours(mttrData.slices[0]?.value ?? 0)
+    : (data?.total ?? 0).toLocaleString();
 
   if (!config) {
     // resourceType came from a runtime-configurable backend registry (not a
@@ -892,7 +901,13 @@ function DashboardWidgetTile({
     const ChartComponent = shape === "pie" ? DashboardPieChart : DashboardBarChart;
     // A time card totals widget measuring hours shows "12.5 h" on its
     // chart and total; every other widget shows plain numbers.
-    const formatValue = groupBy?.measure === "hours" ? formatHours : undefined;
+    // An mttr widget's bars are average resolution hours.
+    const formatValue =
+      resourceType === "mttr"
+        ? formatMttrHours
+        : groupBy?.measure === "hours"
+          ? formatHours
+          : undefined;
     const tileHref = config.buildHref(resolvePlaceholders(filters), {
       widgetId,
       displayName: resolvedDisplayName,
@@ -999,7 +1014,8 @@ function DashboardWidgetTile({
           <Box sx={{ pb: resolvedDescription ? 1 : 2.5 }}>
             {renderHeader(
               shape === "bar" && !pieData.isLoading && !pieData.isError ? pieData.total : undefined,
-              formatValue,
+              // An mttr total is how many cases the bars average over, not hours.
+              resourceType === "mttr" ? formatMttrCases : formatValue,
             )}
           </Box>
           {resolvedDescription && (
@@ -1024,6 +1040,9 @@ function DashboardWidgetTile({
                 // sets `inlineLabels` on its own widget config, but guard it
                 // here too rather than relying on that alone.
                 {...(shape === "pie" ? { inlineLabels } : {})}
+                // An MTTR bar's own label is the short form; only the bar
+                // chart accepts it (MTTR is bar-only).
+                {...(shape === "bar" && resourceType === "mttr" ? { formatLabel: formatMttrBarLabel } : {})}
               />
             )}
           </Box>

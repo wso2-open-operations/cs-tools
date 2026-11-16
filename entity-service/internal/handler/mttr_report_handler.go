@@ -36,10 +36,10 @@ func NewMTTRReportHandler(svc service.MTTRReportService) *MTTRReportHandler {
 	return &MTTRReportHandler{svc: svc}
 }
 
-// GetMTTRReport handles GET /reports/mttr?months=N[&creTeamId=<id>&creTeamId=<id>...].
+// GetMTTRReport handles GET /reports/mttr?months=N|days=N[&creTeamId=<id>&creTeamId=<id>...].
 //
-// months is required: one of 1, 3, 6 or 12 -- the only trailing windows the
-// dashboard offers. creTeamId may repeat to restrict the report to one or
+// Exactly one window is required: months (1, 3, 6 or 12) or days (7) -- the
+// only trailing windows the dashboard offers. creTeamId may repeat to restrict the report to one or
 // more CRE teams; omitted, every team is included. The report groups cases
 // by severity band (S1-S4, S1-S3, S1, S2, S3, S4) and measures, for each,
 // the average time from a case's creation to the LAST time it entered
@@ -47,17 +47,31 @@ func NewMTTRReportHandler(svc service.MTTRReportService) *MTTRReportHandler {
 // the proposal that actually stuck), over cases whose last such entry falls
 // within the window.
 func (h *MTTRReportHandler) GetMTTRReport(w http.ResponseWriter, r *http.Request) {
-	raw := r.URL.Query().Get("months")
-	months, err := strconv.Atoi(raw)
-	if raw == "" || err != nil {
+	rawMonths := r.URL.Query().Get("months")
+	rawDays := r.URL.Query().Get("days")
+	if (rawMonths == "") == (rawDays == "") {
 		writeServiceError(w, r, &apierror.ValidationError{
-			Msg: "months is required and must be one of 1, 3, 6 or 12",
+			Msg: "exactly one of months (1, 3, 6 or 12) or days (7) is required",
 		})
 		return
 	}
-	req := domain.MTTRReportRequest{
-		WindowMonths: months,
-		CreTeamIDs:   r.URL.Query()["creTeamId"],
+	req := domain.MTTRReportRequest{CreTeamIDs: r.URL.Query()["creTeamId"]}
+	if rawMonths != "" {
+		months, err := strconv.Atoi(rawMonths)
+		if err != nil {
+			writeServiceError(w, r, &apierror.ValidationError{
+				Msg: "months must be one of 1, 3, 6 or 12",
+			})
+			return
+		}
+		req.WindowMonths = months
+	} else {
+		days, err := strconv.Atoi(rawDays)
+		if err != nil {
+			writeServiceError(w, r, &apierror.ValidationError{Msg: "days must be 7"})
+			return
+		}
+		req.WindowDays = days
 	}
 	report, err := h.svc.BuildReport(r.Context(), req)
 	if err != nil {

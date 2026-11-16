@@ -28,8 +28,11 @@ import "time"
 // bias the average toward fast, recently-opened cases.
 type MTTRReportRequest struct {
 	// WindowMonths is how many trailing months to measure, counted back from
-	// Now. One of 1, 3, 6 or 12.
+	// Now. One of 1, 3, 6 or 12. Exactly one of WindowMonths and WindowDays
+	// is set.
 	WindowMonths int
+	// WindowDays is how many trailing days to measure instead: 7.
+	WindowDays int
 	// CreTeamIDs restricts the report to cases whose account belongs to one
 	// of these CRE teams (account.cre_team_id). Empty means every team.
 	CreTeamIDs []string
@@ -53,8 +56,11 @@ type MTTRReportBand struct {
 
 // MTTRReport is the MTTR report: one row per severity band.
 type MTTRReport struct {
-	GeneratedOn  time.Time `json:"generatedOn"`
-	WindowMonths int       `json:"windowMonths"`
+	GeneratedOn time.Time `json:"generatedOn"`
+	// WindowMonths is 0 when the report was asked for a day window.
+	WindowMonths int `json:"windowMonths"`
+	// WindowDays is set only for a day window.
+	WindowDays int `json:"windowDays,omitempty"`
 	// WindowStart/WindowEnd are the instants the "entered Solution Proposed
 	// in window" filter ran against (WindowStart inclusive, WindowEnd
 	// exclusive).

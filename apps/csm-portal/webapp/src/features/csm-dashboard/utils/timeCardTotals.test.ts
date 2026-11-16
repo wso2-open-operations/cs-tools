@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { formatDayLabel, formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
+import { formatDayLabel, formatHours, formatMttrBarLabel, formatMttrCases, formatMttrHours } from "@features/csm-dashboard/utils/timeCardTotals";
 
 describe("formatHours", () => {
   it("rounds to one decimal and adds h", () => {
@@ -37,5 +37,31 @@ describe("formatDayLabel", () => {
   it("leaves anything that is not a day key unchanged", () => {
     expect(formatDayLabel("approved")).toBe("approved");
     expect(formatDayLabel("2026-10-30T00:00:00Z")).toBe("2026-10-30T00:00:00Z");
+  });
+});
+
+describe("formatMttrHours", () => {
+  it("keeps at most two decimals and appends the unit", () => {
+    expect(formatMttrHours(1259.6395427034176)).toBe("1,259.64 h");
+    expect(formatMttrHours(214.5)).toBe("214.5 h");
+    expect(formatMttrHours(266)).toBe("266 h");
+    expect(formatMttrHours(0)).toBe("0 h");
+  });
+});
+
+describe("formatMttrCases", () => {
+  it("labels the count with a singular or plural noun", () => {
+    expect(formatMttrCases(1)).toBe("1 case");
+    expect(formatMttrCases(5)).toBe("5 cases");
+    expect(formatMttrCases(0)).toBe("0 cases");
+  });
+});
+
+describe("formatMttrBarLabel", () => {
+  it("stays short enough for a bar of a crowded chart", () => {
+    expect(formatMttrBarLabel(3435.8522618300003)).toBe("3436h");
+    expect(formatMttrBarLabel(82.12713216074074)).toBe("82.1h");
+    expect(formatMttrBarLabel(0.250268441944)).toBe("0.3h");
+    expect(formatMttrBarLabel(0)).toBe("0h");
   });
 });

@@ -723,12 +723,18 @@ func (c *CustomerEntityClient) GetGroup(ctx context.Context, id string) ([]byte,
 }
 
 // GetMTTRReport calls GET /reports/mttr on the entity service: MTTR by
-// severity band over a trailing window. months is "1", "3", "6" or "12";
-// creTeamIDs (CRE "group" ids), when non-empty, restricts to those teams.
+// severity band over a trailing window: months ("1", "3", "6" or "12") or
+// days ("7"), exactly one of them set; creTeamIDs (CRE "group" ids), when non-empty, restricts to those teams.
 // Internal callers only, enforced by entity-service. Response is returned as
 // raw JSON.
-func (c *CustomerEntityClient) GetMTTRReport(ctx context.Context, months string, creTeamIDs []string) ([]byte, error) {
-	q := url.Values{"months": {months}}
+func (c *CustomerEntityClient) GetMTTRReport(ctx context.Context, months, days string, creTeamIDs []string) ([]byte, error) {
+	q := url.Values{}
+	if months != "" {
+		q.Set("months", months)
+	}
+	if days != "" {
+		q.Set("days", days)
+	}
 	for _, id := range creTeamIDs {
 		q.Add("creTeamId", id)
 	}

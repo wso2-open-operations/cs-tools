@@ -27,7 +27,7 @@ import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/
 /** The order every `GET /reports/mttr` response's bars render in — matches
  * the band order the backend itself returns, kept explicit here so a bar
  * chart's left-to-right order never depends on object key enumeration. */
-const BAND_ORDER: readonly string[] = ["S1-S4", "S1-S3", "S1", "S2", "S3", "S4"];
+const BAND_ORDER: readonly string[] = ["S1-S4", "S1-S3", "S0", "S1", "S2", "S3", "S4"];
 
 function bandSortIndex(band: string): number {
   const i = BAND_ORDER.indexOf(band);
@@ -64,7 +64,7 @@ function bandSortIndex(band: string): number {
  */
 export function useMttrReportData(
   widgetId: string,
-  /** This widget's own flat `query` (`months`, `creTeamIds`) -- already
+  /** This widget's own flat `query` (`months` or `days`, `creTeamIds`) -- already
    * resolved by the caller the same way every other widget's filters are. */
   baseFilters: Record<string, unknown>,
   groupBy: BeDashboardGroupByConfig | undefined,
@@ -86,18 +86,26 @@ export function useMttrReportData(
   const api = useBackendApi();
 
   const months = typeof baseFilters.months === "string" ? baseFilters.months : undefined;
+  // The trailing window is `months` or `days` (7), never both.
+  const days = !months && typeof baseFilters.days === "string" ? baseFilters.days : undefined;
   const creTeamIds = Array.isArray(baseFilters.creTeamIds)
     ? (baseFilters.creTeamIds.filter((v): v is string => typeof v === "string") as string[])
     : [];
-  const active = !!groupBy?.bucket && !!months;
+  // Optional: which bars to draw, in the order listed. The one report call
+  // always answers with all six bands; this only narrows what is shown, so it
+  // is deliberately not part of the query key.
+  const wantedBands = Array.isArray(baseFilters.bands)
+    ? baseFilters.bands.filter((v): v is string => typeof v === "string")
+    : [];
+  const active = !!groupBy?.bucket && (!!months || !!days);
   const teamKey = JSON.stringify([selectedTeamCreGroupId, selectedTeamSreGroupId]);
 
   const query = useQuery({
-    queryKey: [ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA, "mttr-report", widgetId, months, creTeamIds],
+    queryKey: [ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA, "mttr-report", widgetId, months, days, creTeamIds],
     queryFn: async (): Promise<BeMttrReport | null> => {
-      if (!months) return null;
+      if (!months && !days) return null;
       return withWidgetFetchSlot(async (signal) => {
-        const params = new URLSearchParams({ months });
+        const params = new URLSearchParams(months ? { months } : { days: days as string });
         for (const id of creTeamIds) params.append("creTeamId", id);
         const response = await api.getResponse(`/reports/mttr?${params.toString()}`, { signal });
         return (await response.json()) as BeMttrReport;
@@ -117,7 +125,9 @@ export function useMttrReportData(
   const isError = active && query.isError;
 
   const bands: BeMttrReportBand[] = query.data?.bands ?? [];
-  const sorted = [...bands].sort((a, b) => bandSortIndex(a.band) - bandSortIndex(b.band));
+  const shown =
+    wantedBands.length > 0 ? bands.filter((b) => wantedBands.includes(b.band)) : bands;
+  const sorted = [...shown].sort((a, b) => bandSortIndex(a.band) - bandSortIndex(b.band));
   const slices: PieSliceResult[] = sorted.map((b) => ({
     label: b.band,
     query: {},
