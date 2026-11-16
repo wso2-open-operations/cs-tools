@@ -56,7 +56,7 @@ func (f *fakeSender) SendEmail(_ context.Context, to, cc []string, subject, html
 
 func defs() []string   { return DefaultDefinitions() }
 func cre() Variant     { return CREVariant() }
-func someTo() []string { return []string{"a@wso2.com"} }
+func someTo() []string { return []string{"recipient@example.invalid"} }
 
 // TestCREVariantFilters pins the CRE report's own filter set: the source
 // selects stages Paused and Completed and EXCLUDES onboarding statuses
@@ -129,13 +129,13 @@ func TestSendReportSubjectAndAudience(t *testing.T) {
 		Rows: []slabreachreport.Row{{Team: "Atlas", CaseNumber: "CS01", Definition: "P1 - Response (Open Source)"}},
 	}}
 	send := &fakeSender{}
-	if err := SendReport(fetch, send, cre(), defs(), []string{"to@wso2.com"}, []string{"cc@wso2.com"}, "", true)(context.Background()); err != nil {
+	if err := SendReport(fetch, send, cre(), defs(), []string{"to@example.invalid"}, []string{"cc@example.invalid"}, "", true)(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
 	if send.subject != "Weekly SLA Breach Report" {
 		t.Fatalf("subject = %q", send.subject)
 	}
-	if len(send.to) != 1 || send.to[0] != "to@wso2.com" || len(send.cc) != 1 || send.cc[0] != "cc@wso2.com" {
+	if len(send.to) != 1 || send.to[0] != "to@example.invalid" || len(send.cc) != 1 || send.cc[0] != "cc@example.invalid" {
 		t.Fatalf("to=%v cc=%v", send.to, send.cc)
 	}
 	if !strings.Contains(send.body, "CS01") {
