@@ -66,7 +66,7 @@ import {
 } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
-import { formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
+import { formatHours, formatMttrCases, formatMttrHours } from "@features/csm-dashboard/utils/timeCardTotals";
 import DashboardLineChart from "@features/csm-dashboard/components/DashboardLineChart";
 
 // Hides the per-widget refresh button by default and reveals it on hover or
@@ -892,7 +892,13 @@ function DashboardWidgetTile({
     const ChartComponent = shape === "pie" ? DashboardPieChart : DashboardBarChart;
     // A time card totals widget measuring hours shows "12.5 h" on its
     // chart and total; every other widget shows plain numbers.
-    const formatValue = groupBy?.measure === "hours" ? formatHours : undefined;
+    // An mttr widget's bars are average resolution hours.
+    const formatValue =
+      resourceType === "mttr"
+        ? formatMttrHours
+        : groupBy?.measure === "hours"
+          ? formatHours
+          : undefined;
     const tileHref = config.buildHref(resolvePlaceholders(filters), {
       widgetId,
       displayName: resolvedDisplayName,
@@ -999,7 +1005,8 @@ function DashboardWidgetTile({
           <Box sx={{ pb: resolvedDescription ? 1 : 2.5 }}>
             {renderHeader(
               shape === "bar" && !pieData.isLoading && !pieData.isError ? pieData.total : undefined,
-              formatValue,
+              // An mttr total is how many cases the bars average over, not hours.
+              resourceType === "mttr" ? formatMttrCases : formatValue,
             )}
           </Box>
           {resolvedDescription && (

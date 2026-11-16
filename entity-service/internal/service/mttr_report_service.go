@@ -35,16 +35,20 @@ type MTTRReportService interface {
 // open-ended day count.
 var mttrReportAllowedWindowMonths = map[int]bool{1: true, 3: true, 6: true, 12: true}
 
+// mttrReportAllowedWindowDays are the trailing day windows the report accepts.
+var mttrReportAllowedWindowDays = map[int]bool{7: true}
+
 // mttrReportBands names, in response order, which case_severity_enum labels
-// each requested band combines. S0 (catastrophic) is deliberately never
-// included -- the requirement this report was built for only ever asked
-// for S1 through S4.
+// each requested band combines. The two combined bands stay S1 through S4
+// (S1-S3); S0 (catastrophic) is its own band, never folded into a combined
+// one, so the overall figure keeps meaning what it always did.
 var mttrReportBands = []struct {
 	band       string
 	severities []string
 }{
 	{"S1-S4", []string{"S1", "S2", "S3", "S4"}},
 	{"S1-S3", []string{"S1", "S2", "S3"}},
+	{"S0", []string{"S0"}},
 	{"S1", []string{"S1"}},
 	{"S2", []string{"S2"}},
 	{"S3", []string{"S3"}},
@@ -61,9 +65,17 @@ func NewMTTRReportService(repo repository.MTTRReportRepository) MTTRReportServic
 }
 
 func (s *mttrReportService) BuildReport(ctx context.Context, req domain.MTTRReportRequest) (domain.MTTRReport, error) {
-	if !mttrReportAllowedWindowMonths[req.WindowMonths] {
+	if (req.WindowMonths != 0) == (req.WindowDays != 0) {
+		return domain.MTTRReport{}, &apierror.ValidationError{
+			Msg: "exactly one of months (1, 3, 6 or 12) or days (7) is required"}
+	}
+	if req.WindowMonths != 0 && !mttrReportAllowedWindowMonths[req.WindowMonths] {
 		return domain.MTTRReport{}, &apierror.ValidationError{
 			Msg: "months must be one of 1, 3, 6 or 12"}
+	}
+	if req.WindowDays != 0 && !mttrReportAllowedWindowDays[req.WindowDays] {
+		return domain.MTTRReport{}, &apierror.ValidationError{
+			Msg: "days must be 7"}
 	}
 	now := req.Now
 	if now.IsZero() {
@@ -71,7 +83,7 @@ func (s *mttrReportService) BuildReport(ctx context.Context, req domain.MTTRRepo
 	}
 	now = now.UTC()
 	windowEnd := now
-	windowStart := windowEnd.AddDate(0, -req.WindowMonths, 0)
+	windowStart := windowEnd.AddDate(0, -req.WindowMonths, -req.WindowDays)
 
 	creTeamIDs := nonBlank(req.CreTeamIDs)
 	if err := validateUUIDs("creTeamIds", creTeamIDs); err != nil {
@@ -99,6 +111,7 @@ func (s *mttrReportService) BuildReport(ctx context.Context, req domain.MTTRRepo
 	return domain.MTTRReport{
 		GeneratedOn:  now,
 		WindowMonths: req.WindowMonths,
+		WindowDays:   req.WindowDays,
 		WindowStart:  windowStart,
 		WindowEnd:    windowEnd,
 		CreTeamIDs:   creTeamIDs,

@@ -27,7 +27,7 @@ import (
 // MTTRReportRepository reads the per-severity case counts and total
 // resolution time behind the MTTR report.
 type MTTRReportRepository interface {
-	// SeverityStats returns, for each of S1/S2/S3/S4 that has at least one
+	// SeverityStats returns, for each of S0/S1/S2/S3/S4 that has at least one
 	// matching case, the number of cases whose LAST entry into Solution
 	// Proposed falls within [windowStart, windowEnd), and the sum of each
 	// such case's own resolution time (that entry's timestamp minus the
@@ -86,7 +86,7 @@ SELECT c.severity::text,
   JOIN "case" c ON c.id = wi.id
   LEFT JOIN account a ON a.id = wi.account_id
  WHERE fsp.entered_on >= $1 AND fsp.entered_on < $2
-   AND c.severity IN ('S1', 'S2', 'S3', 'S4')
+   AND c.severity IN ('S0', 'S1', 'S2', 'S3', 'S4')
    AND (cardinality($3::uuid[]) = 0 OR a.cre_team_id = ANY($3::uuid[]))
  GROUP BY c.severity`
 
@@ -100,7 +100,7 @@ func (r *mttrReportRepository) SeverityStats(ctx context.Context, windowStart, w
 	}
 	defer rows.Close()
 
-	out := make([]domain.MTTRSeverityStat, 0, 4)
+	out := make([]domain.MTTRSeverityStat, 0, 5)
 	for rows.Next() {
 		var stat domain.MTTRSeverityStat
 		if err := rows.Scan(&stat.Severity, &stat.CaseCount, &stat.TotalResolutionSec); err != nil {

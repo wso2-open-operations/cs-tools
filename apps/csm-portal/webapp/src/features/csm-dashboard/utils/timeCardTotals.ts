@@ -35,3 +35,17 @@ export function formatDayLabel(key: string): string {
   const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return day.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+/** Labels an MTTR widget's header count: "5 cases" ("1 case"). */
+export function formatMttrCases(count: number): string {
+  return `${count.toLocaleString("en-US")} ${count === 1 ? "case" : "cases"}`;
+}
+
+/**
+ * Formats an average resolution time (MTTR, in hours) for a chart, its
+ * tooltip and the tile's total: at most two decimals, thousands separated,
+ * then " h" ("1,259.64 h", "214.5 h", "0 h").
+ */
+export function formatMttrHours(hours: number): string {
+  return `${(Math.round(hours * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })} h`;
+}

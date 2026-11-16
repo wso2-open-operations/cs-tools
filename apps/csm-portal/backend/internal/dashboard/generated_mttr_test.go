@@ -51,6 +51,38 @@ func TestParseGenerated_AcceptsMTTRWidgets(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_MTTRBands: "bands" picks which bars to show; an unknown
+// band is refused.
+func TestParseGenerated_MTTRBands(t *testing.T) {
+	ok := mttrDashboard(`{"id":"b","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":12,
+	  "query":{"months":"3","bands":["S0","S1","S2","S3","S4"]},"groupBy":{"bucket":"severity"}}`)
+	if _, err := ParseGenerated([]byte(ok)); err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	bad := mttrDashboard(`{"id":"b","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":12,
+	  "query":{"months":"3","bands":["S5"]},"groupBy":{"bucket":"severity"}}`)
+	if _, err := ParseGenerated([]byte(bad)); err == nil {
+		t.Fatal("bands [S5] was accepted, want an error")
+	}
+}
+
+// TestParseGenerated_MTTRWindow: a widget names exactly one of months or days
+// (days only "7").
+func TestParseGenerated_MTTRWindow(t *testing.T) {
+	ok := mttrDashboard(`{"id":"d","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
+	  "query":{"days":"7"},"groupBy":{"bucket":"severity"}}`)
+	if _, err := ParseGenerated([]byte(ok)); err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	for _, q := range []string{`{"days":"7","months":"3"}`, `{"days":"30"}`, `{}`} {
+		bad := mttrDashboard(`{"id":"d","displayName":"x","resourceType":"mttr","shape":"bar","gridWidth":6,
+		  "query":` + q + `,"groupBy":{"bucket":"severity"}}`)
+		if _, err := ParseGenerated([]byte(bad)); err == nil {
+			t.Errorf("query %s was accepted, want an error", q)
+		}
+	}
+}
+
 // TestParseGenerated_RejectsInvalidMTTRWidgets: an unknown months value, a
 // missing months, a missing groupBy, a groupBy.field, count/list/pie/line
 // shapes, and slices are all refused -- an MTTR widget has no record to

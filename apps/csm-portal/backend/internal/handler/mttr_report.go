@@ -26,12 +26,21 @@ import (
 
 // entityMTTRReportClient abstracts the entity service's MTTR report operation.
 type entityMTTRReportClient interface {
-	GetMTTRReport(ctx context.Context, months string, creTeamIDs []string) ([]byte, error)
+	GetMTTRReport(ctx context.Context, months, days string, creTeamIDs []string) ([]byte, error)
 }
 
 // mttrReportAllowedMonths are the only trailing windows the report accepts,
 // mirroring entity-service's own GET /reports/mttr.
 var mttrReportAllowedMonths = map[string]bool{"1": true, "3": true, "6": true, "12": true}
+
+// mttrReportAllowedDays are the trailing day windows the report accepts.
+var mttrReportAllowedDays = map[string]bool{"7": true}
+
+// mttrWindow is the trailing window asked for: exactly one of Months or Days.
+type mttrWindow struct {
+	Months string
+	Days   string
+}
 
 // MTTRReportHandler handles HTTP requests for the MTTR (mean time to
 // resolution) report: a thin proxy of entity-service's own GET /reports/mttr,
@@ -46,8 +55,8 @@ func NewMTTRReportHandler(entity entityMTTRReportClient) *MTTRReportHandler {
 	return &MTTRReportHandler{entity: entity}
 }
 
-// GetMTTRReport handles GET /reports/mttr?months=N[&creTeamId=<id>&creTeamId=<id>...].
-// months is required: one of "1", "3", "6" or "12". creTeamId may repeat; each
+// GetMTTRReport handles GET /reports/mttr?months=N|days=N[&creTeamId=<id>&creTeamId=<id>...].
+// Exactly one window is required: months ("1", "3", "6" or "12") or days ("7"). creTeamId may repeat; each
 // must be a UUID (a dashboard widget's own creTeamIds are already resolved to
 // real group ids at generation time, see internal/handler/dashboard_teams.go).
 func (h *MTTRReportHandler) GetMTTRReport(w http.ResponseWriter, r *http.Request) {
@@ -58,9 +67,11 @@ func (h *MTTRReportHandler) GetMTTRReport(w http.ResponseWriter, r *http.Request
 	}
 
 	q := r.URL.Query()
-	months := q.Get("months")
-	if !mttrReportAllowedMonths[months] {
-		writeError(w, http.StatusBadRequest, "months is required and must be one of 1, 3, 6 or 12.")
+	window := mttrWindow{Months: q.Get("months"), Days: q.Get("days")}
+	if (window.Months == "") == (window.Days == "") ||
+		(window.Months != "" && !mttrReportAllowedMonths[window.Months]) ||
+		(window.Days != "" && !mttrReportAllowedDays[window.Days]) {
+		writeError(w, http.StatusBadRequest, "exactly one of months (1, 3, 6 or 12) or days (7) is required.")
 		return
 	}
 	creTeamIDs := q["creTeamId"]
@@ -71,7 +82,7 @@ func (h *MTTRReportHandler) GetMTTRReport(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	result, err := h.entity.GetMTTRReport(r.Context(), months, creTeamIDs)
+	result, err := h.entity.GetMTTRReport(r.Context(), window.Months, window.Days, creTeamIDs)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetMTTRReport failed", "userID", user.UserID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve the MTTR report.")

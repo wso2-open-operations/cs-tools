@@ -4711,7 +4711,7 @@ export interface BeCaseFeedbackAggregateResponse {
 
 /** The MTTR severity bands `GET /reports/mttr` always returns, in this
  * order -- see `useMttrReportData`. */
-export type BeMttrBand = "S1-S4" | "S1-S3" | "S1" | "S2" | "S3" | "S4";
+export type BeMttrBand = "S1-S4" | "S1-S3" | "S0" | "S1" | "S2" | "S3" | "S4";
 
 /** One severity band's MTTR in a `GET /reports/mttr` response. */
 export interface BeMttrReportBand {
@@ -4725,7 +4725,9 @@ export interface BeMttrReportBand {
  * (`useMttrReportData`). */
 export interface BeMttrReport {
   generatedOn: string;
-  windowMonths: 1 | 3 | 6 | 12;
+  /** 0 when the report was asked for a day window (`windowDays`). */
+  windowMonths: 0 | 1 | 3 | 6 | 12;
+  windowDays?: 7;
   windowStart: string;
   windowEnd: string;
   creTeamIds: string[];

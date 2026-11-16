@@ -495,10 +495,9 @@ config, not hardcoded into the endpoint.
 ## GET /reports/mttr: mean time to resolution by severity band
 
 Backs a dashboard's MTTR numbers: for each severity band (`S1-S4`, `S1-S3`, `S1`, `S2`, `S3`,
-`S4` -- `S0`/catastrophic is deliberately never included, since the requirement this was built
-for only ever asked for S1 through S4), the average time from a case's `created_on` to the
+`S4`, plus `S0`/catastrophic as its own band; the two combined bands S1-S4 and S1-S3 never include S0, so the overall figure keeps its original meaning), the average time from a case's `created_on` to the
 **last** time it entered Solution Proposed, over cases whose last such entry falls within a
-trailing `months` window (`1`/`3`/`6`/`12` only -- any other value is a 400). An optional
+trailing window: `months` (`1`/`3`/`6`/`12`) or `days` (`7`), exactly one of them -- anything else is a 400; the response's `windowMonths` is 0 and `windowDays` set for a day window. An optional
 repeated `creTeamId` query param restricts to cases whose account's CRE team
 (`account.cre_team_id`) is one of the given `"group"` ids; omitted, every team is included.
 `internalOnly`-gated at the route, like `/reports/long-open-cases`, and not registered at all

@@ -127,8 +127,7 @@ func TestMTTRReportIntegration(t *testing.T) {
 	// S1, never entered Solution Proposed: only a Closed entry.
 	s1NeverProposed := caseRow(mttrAccountID, ago(10), "S1")
 	entered(s1NeverProposed, "CLOSED", ago(5))
-	// S0 (catastrophic), inside the window: must never appear -- this report
-	// only ever covers S1 through S4.
+	// S0 (catastrophic), inside the window: reported as its own severity.
 	s0 := caseRow(mttrAccountID, ago(15), "S0")
 	entered(s0, "SOLUTION_PROPOSED", ago(10))
 	// S2 with no activity at all: must not be counted.
@@ -163,8 +162,8 @@ func TestMTTRReportIntegration(t *testing.T) {
 	if _, ok := bySev["S4"]; ok {
 		t.Errorf("S4 entered outside the window, want it absent from the result, got %+v", bySev["S4"])
 	}
-	if _, ok := bySev["S0"]; ok {
-		t.Errorf("S0 (catastrophic) must never appear in the result, got %+v", bySev["S0"])
+	if got := bySev["S0"]; got.CaseCount != 1 || !closeTo(got.TotalResolutionSec, 5*86400) {
+		t.Errorf("S0 = %+v, want count 1, total ~%d seconds", got, 5*86400)
 	}
 
 	// Team filter: only the team-account's S1 case counts.
