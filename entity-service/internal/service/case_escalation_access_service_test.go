@@ -28,6 +28,7 @@ type fakeCaseEscalationAccessRepo struct {
 	grants   []domain.CaseDeescalatorGrant
 	internal bool
 	portal   bool
+	gone     bool
 	granted  []string
 	revoked  []string
 	listed   bool
@@ -54,6 +55,10 @@ func (f *fakeCaseEscalationAccessRepo) UserIsInternal(context.Context, string) (
 
 func (f *fakeCaseEscalationAccessRepo) IsPortalAdmin(context.Context, string) (bool, error) {
 	return f.portal, nil
+}
+
+func (f *fakeCaseEscalationAccessRepo) IsDeactivated(context.Context, string) (bool, error) {
+	return f.gone, nil
 }
 
 const deescalatorUserID = "6d300000-0000-4000-8000-000000000001"
@@ -89,6 +94,24 @@ func TestCaseEscalationAccessIsForAdminsOnly(t *testing.T) {
 	}
 	if len(repo.granted) != 1 || len(repo.revoked) != 1 {
 		t.Fatalf("granted=%v revoked=%v, want one each", repo.granted, repo.revoked)
+	}
+}
+
+// A deactivated admin is refused whether the admin comes from a token role or
+// the stored admin role.
+func TestCaseEscalationAccessRefusesADeactivatedAdmin(t *testing.T) {
+	repo := &fakeCaseEscalationAccessRepo{internal: true, portal: true, gone: true}
+	svc := newCaseEscalationAccess(repo)
+	for name, ctx := range map[string]context.Context{
+		"token admin role": callerWithRoles("admin@example.com", "cs_admin"),
+		"stored admin":     callerWithRoles("lead@example.com"),
+	} {
+		wantForbidden(t, svc.GrantDeescalator(ctx, deescalatorUserID), name)
+		_, err := svc.ListDeescalators(ctx)
+		wantForbidden(t, err, name)
+	}
+	if len(repo.granted) != 0 || repo.listed {
+		t.Fatalf("a deactivated admin reached the repository: %+v", repo)
 	}
 }
 

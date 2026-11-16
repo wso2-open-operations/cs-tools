@@ -60,6 +60,15 @@ func (s *caseEscalationAccessService) requireAdmin(ctx context.Context) (string,
 	if id.UserEmail == "" {
 		return "", &apierror.ForbiddenError{Msg: "escalation access needs a user token, not a service credential"}
 	}
+	// A deactivated admin must not pass on a token role (the portal backend's
+	// credential path reads no user row) or on the stored admin role.
+	gone, err := s.repo.IsDeactivated(ctx, id.UserEmail)
+	if err != nil {
+		return "", err
+	}
+	if gone {
+		return "", &apierror.ForbiddenError{Msg: "only a CSM admin can change who may de-escalate"}
+	}
 	if holdsAnyRole(id.Roles, s.adminRoles) {
 		return id.UserEmail, nil
 	}

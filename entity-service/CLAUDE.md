@@ -553,7 +553,7 @@ same response, so the portal decides from one read. A CSM admin manages the list
 `GET /case-escalation-access/deescalators` and `PUT`/`DELETE /case-escalation-access/deescalators/{userId}`
 (`CaseEscalationAccessService`): all three need a user token that is a CSM admin (a token role from
 `AUTH_ADMIN_ROLES`, or the stored `admin` role), as for rota access; a grant needs an active internal user; both
-changes are idempotent and audited. A holder who stops being active internal staff is listed as `active: false` (so
+changes are idempotent and audited; a deactivated admin (`is_active = FALSE`) is refused whichever way they are an admin. A holder who stops being active internal staff is listed as `active: false` (so
 it can be removed) and is left out of `deescalators`. Escalating is unchanged (any internal engineer).
 entity-service does not enforce de-escalation itself, as before: csm-portal-backend decides from this response.
 

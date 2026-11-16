@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -93,12 +94,16 @@ func TestCaseEscalationAccess_RefusesABadIdOrNoUserWithoutCallingOut(t *testing.
 	}
 }
 
-func TestCaseEscalationAccess_KeepsEntityServicesReasonForARefusal(t *testing.T) {
+func TestCaseEscalationAccess_AnswersARefusalWithAFixedMessage(t *testing.T) {
 	fake := &fakeCaseEscalationAccessClient{err: &apierror.Error{StatusCode: http.StatusForbidden, Body: `{"error":"only a CSM admin can change who may de-escalate"}`}}
 	h := NewCaseEscalationAccessHandler(fake)
 	w := httptest.NewRecorder()
 	h.PutDeescalator(w, withUser(deescalatorRequest(http.MethodPut, deescalatorTestUser)))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", w.Code)
+	}
+	assertErrorMessage(t, w, ErrMsgForbidden)
+	if strings.Contains(w.Body.String(), "CSM admin") {
+		t.Fatalf("entity-service's own text leaked: %s", w.Body.String())
 	}
 }

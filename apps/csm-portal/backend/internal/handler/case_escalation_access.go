@@ -55,7 +55,7 @@ func (h *CaseEscalationAccessHandler) ListDeescalators(w http.ResponseWriter, r 
 	result, err := h.entity.ListCaseDeescalators(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ListCaseDeescalators failed", "userID", user.UserID, "err", err)
-		writeMemberChangeError(w, err, "Failed to load who may de-escalate.")
+		mapUpstreamErrorGeneric(w, err, "Failed to load who may de-escalate.")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -63,7 +63,7 @@ func (h *CaseEscalationAccessHandler) ListDeescalators(w http.ResponseWriter, r 
 
 // PutDeescalator handles PUT /case-escalation-access/deescalators/{userId}.
 func (h *CaseEscalationAccessHandler) PutDeescalator(w http.ResponseWriter, r *http.Request) {
-	h.change(w, r, "PutCaseDeescalator", "Failed to let that person de-escalate.", h.entity.PutCaseDeescalator)
+	h.change(w, r, "PutCaseDeescalator", "Failed to let that person de-escalate. Only active internal staff can be given this right.", h.entity.PutCaseDeescalator)
 }
 
 // DeleteDeescalator handles DELETE /case-escalation-access/deescalators/{userId}.
@@ -71,8 +71,9 @@ func (h *CaseEscalationAccessHandler) DeleteDeescalator(w http.ResponseWriter, r
 	h.change(w, r, "DeleteCaseDeescalator", "Failed to remove that person's right to de-escalate.", h.entity.DeleteCaseDeescalator)
 }
 
-// change checks the path, forwards it and answers 204. A refusal keeps
-// entity-service's own reason ("only active internal staff ...").
+// change checks the path, forwards it and answers 204. Errors are mapped to
+// fixed messages, never entity-service's own text; the one refusal worth
+// explaining (a person who is not active internal staff) is in the PUT fallback.
 func (h *CaseEscalationAccessHandler) change(w http.ResponseWriter, r *http.Request, op, fallbackMsg string,
 	call func(ctx context.Context, userID string) ([]byte, error)) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -87,7 +88,7 @@ func (h *CaseEscalationAccessHandler) change(w http.ResponseWriter, r *http.Requ
 	}
 	if _, err := call(r.Context(), target); err != nil {
 		slog.ErrorContext(r.Context(), "entity "+op+" failed", "userID", user.UserID, "err", err)
-		writeMemberChangeError(w, err, fallbackMsg)
+		mapUpstreamErrorGeneric(w, err, fallbackMsg)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
