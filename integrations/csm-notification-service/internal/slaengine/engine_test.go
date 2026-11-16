@@ -120,15 +120,21 @@ func (s *fakeStore) GetClock(_ context.Context, caseID, clockType string) (Clock
 	return meta, ok, nil
 }
 
-func (s *fakeStore) SetPaused(_ context.Context, caseID, clockType string, paused bool) error {
+func (s *fakeStore) SetPaused(_ context.Context, caseID, clockType string, paused bool, slaID string) (bool, error) {
 	if s.failSetPaused {
-		return errors.New("set paused failed")
+		return false, errors.New("set paused failed")
 	}
 	key := caseID + "|" + clockType
 	meta := s.clocks[key]
+	// Mirrors setPausedIfMatchScript: skip only when both sides are
+	// non-empty and disagree -- a confirmed replacement since slaID was
+	// captured.
+	if meta.SLAID != "" && slaID != "" && meta.SLAID != slaID {
+		return false, nil
+	}
 	meta.Paused = paused
 	s.clocks[key] = meta
-	return nil
+	return true, nil
 }
 
 // ShiftWake mirrors the real Store: the baseline is claimed against the
@@ -247,18 +253,25 @@ func (s *fakeStore) ListClockKeys(_ context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// DeleteClock mirrors the real Store.DeleteClock: removes the clock hash and
+// DeleteClockIfMatch mirrors the real Store.DeleteClockIfMatch: skips
+// entirely (applied=false) when the tracked clock's own SLAID disagrees
+// with the given one -- same compare-and-delete semantics as
+// deleteClockHashIfMatchScript -- otherwise removes the clock hash and
 // every tier's wake entry (a delete on an absent wake member is a no-op,
 // same as the real RemoveWake).
-func (s *fakeStore) DeleteClock(_ context.Context, caseID, clockType string) error {
+func (s *fakeStore) DeleteClockIfMatch(_ context.Context, caseID, clockType, slaID string) (bool, error) {
 	if s.failDeleteClock {
-		return errors.New("delete clock failed")
+		return false, errors.New("delete clock failed")
 	}
-	delete(s.clocks, caseID+"|"+clockType)
+	key := caseID + "|" + clockType
+	if meta, ok := s.clocks[key]; ok && meta.SLAID != "" && slaID != "" && meta.SLAID != slaID {
+		return false, nil
+	}
+	delete(s.clocks, key)
 	for _, tier := range tierSequence {
 		delete(s.wake, wakeMember(caseID, clockType, tier))
 	}
-	return nil
+	return true, nil
 }
 
 // fakeChat is a chatSender test double.
@@ -851,7 +864,7 @@ func TestApplyStateEffects_Resume_NoEntityClient_SkipsShiftWithoutPanicking(t *t
 	// Pause the clock directly (bypassing ApplyStateEffects' own
 	// entity-based pause detection, which is not what this test is about)
 	// to set up the "currently paused" precondition a resume needs.
-	if err := st.SetPaused(context.Background(), "case-1", ClockWorkaround, true); err != nil {
+	if _, err := st.SetPaused(context.Background(), "case-1", ClockWorkaround, true, ""); err != nil {
 		t.Fatalf("seed pause: %v", err)
 	}
 
@@ -3438,21 +3451,21 @@ func TestApplyStateEffects_PauseStatus_DrivenByEntityService_NotByStatusString(t
 
 func TestEntityPauseStatus_NoEntityClient_DefaultsToNotPaused(t *testing.T) {
 	e := &Engine{}
-	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+	if got, _ := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
 		t.Error("entityPauseStatus() = true with no entity client, want false (fail open toward sending, not suppressing)")
 	}
 }
 
 func TestEntityPauseStatus_LookupFailure_DefaultsToNotPaused(t *testing.T) {
 	e := &Engine{entity: &fakeEntityClockStatus{err: errors.New("unreachable")}}
-	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+	if got, _ := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
 		t.Error("entityPauseStatus() = true on a lookup failure, want false (fail open)")
 	}
 }
 
 func TestEntityPauseStatus_NotFound_DefaultsToNotPaused(t *testing.T) {
 	e := &Engine{entity: &fakeEntityClockStatus{}} // no states -- Found: false
-	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+	if got, _ := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
 		t.Error("entityPauseStatus() = true when entity-service has no record, want false")
 	}
 }
