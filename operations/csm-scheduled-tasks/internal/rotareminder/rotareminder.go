@@ -20,14 +20,15 @@
 //
 //   - WeekdayReminder: the next working day's Morning (with its on-call
 //     person) and Evening windows, one email per window carrying its
-//     invitation. A Monday is announced on the Friday before it.
-//   - WeekendNotice: runs every evening from Sunday to Thursday for the coming
+//     invitation. Runs Sunday to Thursday, so a Monday is announced on the
+//     Sunday before it.
+//   - WeekendNotice: runs every morning from Monday to Thursday for the coming
 //     weekend. Once the weekend is fully marked (Config.Required: by default
 //     3 on LK Weekend and 1 on Americas Weekend, each day) it sends one summary
 //     email to everybody on the weekend and one invitation email per team per
 //     day (LK Saturday, Americas Saturday, LK Sunday, Americas Sunday), then
-//     records the send so later evenings send nothing. Until then it emails
-//     the family's rota admins what is missing, every evening.
+//     records the send so later mornings send nothing. Until then it emails
+//     the family's rota admins what is missing, every morning.
 //   - WeekendReminder: Friday's reminder. The summary again, the invitations
 //     again as updates (same event identities), and a cancellation for
 //     anybody taken off a window since the last send. With gaps it still
@@ -98,9 +99,17 @@ type Config struct {
 	// email shows for it ("CRE_MORNING_OC" -> "On-call"). A code that is not
 	// here is not announced.
 	Rotations map[string]string
-	// Copy is copied on every email (a lead who wants to see them). Empty by
+	// Copy is copied on the reminder emails (a lead who wants to see them):
+	// the weekday reminders, without their invitation, the weekend summary
+	// and the rota admins' email. Never on an email that carries an
+	// invitation or a cancellation, so it fills nobody's calendar. Empty by
 	// default: the emails go to the people on the shift.
 	Copy []string
+	// InviteCopy is copied on the emails that carry a calendar invitation or
+	// its cancellation (a weekday reminder with its invitation, a weekend
+	// invitation, a cancellation), and on no other. Never a guest of the
+	// event. Set on the Rota Access tab.
+	InviteCopy []string
 	// WeekendCopy is copied on the weekend summary email only, beside Copy:
 	// somebody who wants to know who is on the weekend, not every weekday
 	// reminder or invitation. Set on the Rota Access tab.
@@ -288,6 +297,10 @@ func announce(ctx context.Context, rota RotaReader, sender EmailSender, cfg Conf
 	type batch struct {
 		email   shiftEmail
 		windows []*window
+		// copy is the reminder for cfg.Copy without the invitation, sent
+		// after email when email carries one and went out (ok false: none).
+		copy   shiftEmail
+		copyOK bool
 	}
 	var batches []batch
 	for _, w := range pending {
@@ -298,11 +311,14 @@ func announce(ctx context.Context, rota RotaReader, sender EmailSender, cfg Conf
 			cfg.Tally.skipped("nobody on " + windowTitle(cfg, w.base) + " on " + longDay(w.day) + " has an email address")
 			continue
 		}
+		b := batch{email: email, windows: []*window{w}}
 		if cfg.invitesFor(w.base) {
 			inv := windowInvite(cfg, w, now)
-			email.attachments = []notify.Attachment{inviteAttachment(inv)}
+			b.email.attachments = []notify.Attachment{inviteAttachment(inv)}
+			// The reminder copies get the reminder, not the invitation.
+			b.copy, b.copyOK = buildReminderCopy(cfg, w, today)
 		}
-		batches = append(batches, batch{email, []*window{w}})
+		batches = append(batches, b)
 	}
 
 	var errs []error
@@ -327,6 +343,9 @@ func announce(ctx context.Context, rota RotaReader, sender EmailSender, cfg Conf
 			continue
 		}
 		sent++
+		if b.copyOK {
+			sendReminderCopy(ctx, sender, cfg, b.copy, b.windows)
+		}
 	}
 	slog.InfoContext(ctx, "rota reminder run complete",
 		"days", from+".."+to, "rostered", len(rostered), "windows", len(windows), "emails", len(batches), "sent", sent)
@@ -378,6 +397,23 @@ func sendWindowEmail(ctx context.Context, sender EmailSender, to, cc []string, e
 		return sender.SendEmail(ctx, to, cc, email.subject, email.body)
 	}
 	return err
+}
+
+// sendReminderCopy sends a window's reminder copy (buildReminderCopy) to
+// cfg.Copy. It is not counted and does not fail the run: the people on the
+// window already have their reminder, and a retry would send them it again
+// for the sake of a copy. A failure is logged with the window.
+func sendReminderCopy(ctx context.Context, sender EmailSender, cfg Config, email shiftEmail, windows []*window) {
+	to, cc := email.to, email.cc
+	if len(cfg.RedirectTo) > 0 {
+		to, cc = cfg.RedirectTo, nil
+	}
+	if err := sender.SendEmail(ctx, to, cc, cfg.subject(email.subject), email.body); err != nil {
+		for _, w := range windows {
+			slog.ErrorContext(ctx, "rota reminder: the copy of this window's reminder was not sent; its people got theirs",
+				"window", w.base, "day", w.date, "copies", len(email.to), "err", err)
+		}
+	}
 }
 
 // start is when the earliest person on the window starts.

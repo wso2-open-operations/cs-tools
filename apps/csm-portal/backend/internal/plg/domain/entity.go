@@ -399,6 +399,28 @@ type OrganizationSearchFilters struct {
 	RegisteredFrom    *time.Time         `json:"registeredFrom"`
 	RegisteredTo      *time.Time         `json:"registeredTo"`
 	Unowned           *bool              `json:"unowned"`
+	// The filters below are newer than entity-service's first PLG search and
+	// are left out of the body when unset (omitempty), so a search that does
+	// not use them is the body an entity-service without them accepts (it
+	// refuses unknown fields).
+	//
+	// OwnerEmails matches the organisation's PLG CS owner by email address,
+	// any of them, ignoring case; a registration matches by its
+	// organisation's owner. entity-service checks it.
+	OwnerEmails []string `json:"ownerEmails,omitempty"`
+	// CountryNames matches the organisation's country, any of them, ignoring
+	// case; CountryUnknown true matches the organisations with no country.
+	// A registration matches by its organisation's country. entity-service
+	// checks both.
+	CountryNames   []string `json:"countryNames,omitempty"`
+	CountryUnknown *bool    `json:"countryUnknown,omitempty"`
+	// PlaybookTask names a playbook task by its code; PlaybookAnswers matches
+	// the registrations that answered it with any of these option codes,
+	// PlaybookUnanswered true the ones with no answer. An organisation
+	// matches when any of its registrations does. entity-service checks them.
+	PlaybookTask       string   `json:"playbookTask,omitempty"`
+	PlaybookAnswers    []string `json:"playbookAnswers,omitempty"`
+	PlaybookUnanswered *bool    `json:"playbookUnanswered,omitempty"`
 }
 
 // SearchOrganizationsRequest is the body of POST /organizations/search.
@@ -407,6 +429,49 @@ type SearchOrganizationsRequest struct {
 	Pagination Pagination                `json:"pagination"`
 	SortBy     string                    `json:"sortBy"`
 	SortOrder  string                    `json:"sortOrder"`
+}
+
+// AggregateOrganizationsRequest is the body of POST /organizations/aggregate:
+// the organisations the search's filters select, counted per GroupBy ("owner"
+// or "country"). MaxGroups keeps the largest groups and folds the rest into
+// OthersCount; 0 keeps them all. entity-service checks both.
+type AggregateOrganizationsRequest struct {
+	Filters   OrganizationSearchFilters `json:"filters"`
+	GroupBy   string                    `json:"groupBy"`
+	MaxGroups int                       `json:"maxGroups,omitempty"`
+}
+
+// AggregateGroup is one group of an AggregateResponse. For the owner grouping,
+// Key is the owner's user id (or "unowned") and Label the owner's name; for
+// the country grouping, Key and Label are the country (or "unknown",
+// labelled "Unknown"); for the playbook answer grouping, Key is the option
+// code and Label its label (or "unanswered", labelled "Not answered").
+type AggregateGroup struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// AggregateRegistrationsRequest is the body of POST /registrations/aggregate:
+// the registrations the search's filters and UnacknowledgedOnly select,
+// counted per GroupBy ("country": the registration's organisation's country;
+// "playbookAnswer": its answer to Filters.PlaybookTask), with MaxGroups as an
+// organisation aggregate takes it. entity-service checks the grouping and its
+// limit.
+type AggregateRegistrationsRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	GroupBy            string                    `json:"groupBy"`
+	MaxGroups          int                       `json:"maxGroups,omitempty"`
+}
+
+// AggregateResponse answers POST /organizations/aggregate, in entity-service's
+// shared aggregate shape: the groups largest first, the folded rest, and every
+// record the filters selected.
+type AggregateResponse struct {
+	Groups       []AggregateGroup `json:"groups"`
+	OthersCount  int              `json:"othersCount"`
+	TotalRecords int              `json:"totalRecords"`
 }
 
 // PlatformStage is one registered platform with its own lifecycle stage — the
@@ -869,6 +934,45 @@ type SearchRegistrationsResponse struct {
 	Total         int                `json:"total"`
 	Limit         int                `json:"limit"`
 	Offset        int                `json:"offset"`
+}
+
+// RegistrationVolumeTrendRequest is the body of POST
+// /registrations/volume-trend: the registrations the search's filters select,
+// counted by registration day over a window, the case volume trend's window.
+// Days is the trailing window ending today (30 when nothing is set); StartDate,
+// EndDate and Bucket ("day", "week" or "month") are a fixed one. entity-service
+// checks the window and its limits.
+type RegistrationVolumeTrendRequest struct {
+	UnacknowledgedOnly bool                      `json:"unacknowledgedOnly"`
+	Filters            OrganizationSearchFilters `json:"filters"`
+	Days               int                       `json:"days,omitempty"`
+	StartDate          string                    `json:"startDate,omitempty"`
+	EndDate            string                    `json:"endDate,omitempty"`
+	Bucket             string                    `json:"bucket,omitempty"`
+}
+
+// VolumeTrendPoint is one day, or one bucket from Date to EndDate.
+type VolumeTrendPoint struct {
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Count   int    `json:"count"`
+}
+
+// VolumeTrendSeries is one named line of a VolumeTrendResponse.
+type VolumeTrendSeries struct {
+	Label  string             `json:"label"`
+	Points []VolumeTrendPoint `json:"points"`
+}
+
+// VolumeTrendResponse answers POST /registrations/volume-trend in the case
+// volume trend's shape, with one series, "Registered". StartDate, EndDate and
+// Bucket echo a fixed window, and are absent for the trailing one.
+type VolumeTrendResponse struct {
+	Days      int                 `json:"days"`
+	StartDate string              `json:"startDate,omitempty"`
+	EndDate   string              `json:"endDate,omitempty"`
+	Bucket    string              `json:"bucket,omitempty"`
+	Series    []VolumeTrendSeries `json:"series"`
 }
 
 // AcknowledgeRequest claims a pairing. Acknowledging also assigns the

@@ -17,8 +17,10 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -90,5 +92,33 @@ func TestEngine_MaxAttemptsStopsRetriesForThePeriod(t *testing.T) {
 				t.Errorf("alert says no more retries = %v, want %v", capped, !capped)
 			}
 		})
+	}
+}
+
+// denyLedger denies every claim, as entity-service does for a task whose
+// window is not now.
+type denyLedger struct{ fakeLedger }
+
+func (*denyLedger) Attempt(context.Context, string, time.Time, time.Duration) (ledger.Claim, error) {
+	return ledger.Claim{Allowed: false}, nil
+}
+
+// A task that is not due leaves no per-task line at the default log level;
+// the tick still reports how many ran.
+func TestEngine_NotDueTaskIsNotLoggedAtInfo(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	task := registry.Task{Name: "weekly_report", Schedule: "0 4 * * 1", Handler: func(context.Context) error { return nil }}
+	New([]registry.Task{task}, &denyLedger{}, &fakeEmail{}, time.Hour, nil, true).Tick(context.Background(), time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC))
+
+	out := buf.String()
+	if strings.Contains(out, "weekly_report") {
+		t.Errorf("not-due task was logged at info:\n%s", out)
+	}
+	if !strings.Contains(out, "ran=0") || !strings.Contains(out, "registered=1") {
+		t.Errorf("tick summary missing:\n%s", out)
 	}
 }

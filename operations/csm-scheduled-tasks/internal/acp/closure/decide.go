@@ -69,7 +69,7 @@ type Decision struct {
 // ShouldSuspend has no idempotency signal of its own here: the real signal
 // (closureStatus on the entity-service Project) isn't a parameter this
 // function receives, so it reports true on every evaluation once
-// daysRemaining <= 0, regardless of lastNoticeWindow. The caller is
+// daysRemaining < 0 (the day after the date), regardless of lastNoticeWindow. The caller is
 // responsible for checking closureStatus before actually invoking suspend.
 func Decide(now, endDate time.Time, lastNoticeWindow *NoticeWindow) Decision {
 	return decideFromDaysRemaining(daysBetween(now, endDate), lastNoticeWindow)
@@ -81,7 +81,12 @@ func Decide(now, endDate time.Time, lastNoticeWindow *NoticeWindow) Decision {
 // place that cascade is implemented. See Decide's own doc comment for the
 // ShouldSuspend idempotency note, which applies here identically.
 func decideFromDaysRemaining(daysRemaining int, lastNoticeWindow *NoticeWindow) Decision {
-	if daysRemaining <= 0 {
+	// The date itself (daysRemaining 0) is still the last reminder window, not
+	// the suspension: a project is suspended the day AFTER the date, which is
+	// how the process this replaces counted (days left of -1 or less). Both
+	// closure reasons share this, as the end date and the invoice due date
+	// were counted alike.
+	if daysRemaining < 0 {
 		alreadyNotified := lastNoticeWindow != nil && *lastNoticeWindow <= NoticeWindow0
 		return Decision{
 			DaysRemaining: daysRemaining,

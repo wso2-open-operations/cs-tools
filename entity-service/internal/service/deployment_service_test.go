@@ -191,12 +191,35 @@ func TestDeploymentService_SearchDeployments_NumbersFilter(t *testing.T) {
 	}
 }
 
-// UpdateDeployment is not supported on the plain Postgres data source (s.snMirror == nil).
-func TestDeploymentService_UpdateDeployment_NotSupportedOnPlainPostgres(t *testing.T) {
-	svc := NewDeploymentService(&stubDeploymentRepo{})
+// UpdateDeployment on the plain Postgres data source (no mirror wired)
+// delegates to repo.UpdateDeploymentFields with the caller's email.
+func TestDeploymentService_UpdateDeployment_PlainPostgres(t *testing.T) {
+	name := "Renamed"
+	var gotReq domain.UpdateDeploymentRequest
+	var gotBy string
+	svc := NewDeploymentService(&stubDeploymentRepo{
+		updateDeploymentFields: func(_ context.Context, r domain.UpdateDeploymentRequest, updatedBy string) (domain.UpdatedDeployment, error) {
+			gotReq, gotBy = r, updatedBy
+			return domain.UpdatedDeployment{ID: r.ID, UpdatedBy: updatedBy}, nil
+		},
+	})
 
-	if _, err := svc.UpdateDeployment(context.Background(), domain.UpdateDeploymentRequest{ID: testDeploymentUUID}); err == nil {
-		t.Error("UpdateDeployment: expected an error on the plain Postgres data source")
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	resp, err := svc.UpdateDeployment(ctx, domain.UpdateDeploymentRequest{ID: testDeploymentUUID, Name: &name})
+	if err != nil {
+		t.Fatalf("UpdateDeployment on plain Postgres: unexpected error: %v", err)
+	}
+	if gotReq.ID != testDeploymentUUID || gotReq.Name == nil || *gotReq.Name != name {
+		t.Errorf("repo got %+v", gotReq)
+	}
+	if gotBy != "jane.doe@example.com" || resp.Deployment.UpdatedBy != gotBy {
+		t.Errorf("updatedBy = %q / %q", gotBy, resp.Deployment.UpdatedBy)
+	}
+
+	// Validation still applies and the repo (which panics if unset) is not reached.
+	bare := NewDeploymentService(&stubDeploymentRepo{})
+	if _, err := bare.UpdateDeployment(ctx, domain.UpdateDeploymentRequest{ID: testDeploymentUUID}); err == nil {
+		t.Error("expected a validation error for an empty update")
 	}
 }
 

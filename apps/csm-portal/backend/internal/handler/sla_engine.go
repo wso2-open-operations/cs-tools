@@ -96,7 +96,7 @@ func (h *SLAEngineHandler) RequestRecalculation(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RecalculateCasePauseTotals handles POST /cases/{id}/sla/recalculate-pause
+// RecalculateCasePauseTotals handles POST /cases/{id}/sla/recalculate
 // -- recomputes one case's currently IN_PROGRESS SLA clocks' pause history
 // from the case's own state-change activity log, correcting
 // pause_duration/business_pause_duration when they disagree. No request

@@ -25,7 +25,7 @@ import type {
   ScheduleAbsenceKind,
   ScheduleAssignment,
   ScheduleShift,
-  ScheduleTier, RotaFamily } from "../types";
+  ScheduleTier, RotaFamily, SchedulePublicHoliday } from "../types";
 import {
   addDays,
   escalationGrid,
@@ -44,6 +44,7 @@ import {
   allocationTitle,
   allocationsByPersonAndDay,
 } from "../utils/engagementAllocations";
+import { holidaysByPersonAndDay, withHolidayNote } from "../utils/publicHolidays";
 import { accentOf } from "../utils/rotaHues";
 import { useTeamColour, useTeamName } from "../utils/teamColourContext";
 
@@ -78,6 +79,9 @@ interface WeekTableProps {
   /** The allocations could not be read: the week is drawn without them, with a
    *  quiet note saying so. */
   engagementsFailed?: boolean;
+  /** Public holidays of the people on screen: a name on its holiday is shaded
+   *  and the holiday named on hover. Not leave; changes no shift. */
+  publicHolidays?: SchedulePublicHoliday[];
   /** Set while a rota admin edits their own family's week; absent, the week
    *  is read only. */
   edit?: WeekEditControls;
@@ -327,11 +331,14 @@ export default function WeekTable({
   engagementAllocations = [],
   engagementPeople,
   engagementsFailed = false,
+  publicHolidays,
   edit,
 }: WeekTableProps): JSX.Element {
   const teamColourOf = useTeamColour();
   const teamNameOf = useTeamName();
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  /** Public holidays, `${userId}|${day}`. */
+  const holidayByPerson = useMemo(() => holidaysByPersonAndDay(publicHolidays ?? []), [publicHolidays]);
 
   const rows = useMemo(() => {
     type Row = {
@@ -695,7 +702,14 @@ export default function WeekTable({
                              restated the row heading against every name in it.
                              The tier stays: L1/L2/L3 is the one thing here
                              that nothing else says. */
-                          <div className="nm" key={a.id} title={`${a.engineer.name} · ${teamNameOf(a.teamKey)}`}>
+                          <div
+                            className={`nm${holidayByPerson.has(`${a.engineer.userId}|${iso}`) ? " ph" : ""}`}
+                            key={a.id}
+                            title={withHolidayNote(
+                              `${a.engineer.name} · ${teamNameOf(a.teamKey)}`,
+                              holidayByPerson.get(`${a.engineer.userId}|${iso}`),
+                            )}
+                          >
                             <span className="av" style={{ background: teamColourOf(a.teamKey) }}>
                               {initialsOf(a.engineer.name)}
                             </span>

@@ -483,9 +483,8 @@ func (r *conversationRepo) UpdateConversation(ctx context.Context, id string, st
 
 // insertConversationWorkItemQuery inserts the work_item half of a
 // conversation. id/number are COALESCEd so one query serves both callers:
-// NULL generates them (gen_random_uuid(), next_portal_work_item_number(),
-// migration 0140 -- the same numbering every natively created work item
-// uses), and a ServiceNow-first create supplies its own. COALESCE evaluates
+// NULL generates them (gen_random_uuid(), next_work_item_number('CONVERSATION'),
+// migration 0180 -- ServiceNow's CHAT000003121 format), and a ServiceNow-first create supplies its own. COALESCE evaluates
 // lazily, so a supplied number never draws from the sequence. Subject and
 // description carry the first message the same way csm-sync-service lands
 // u_initial_message (truncated subject, full description).
@@ -496,7 +495,7 @@ const insertConversationWorkItemQuery = `
 	)
 	VALUES (
 		COALESCE($1::uuid, gen_random_uuid()), NOW(), NOW(), $2, $2,
-		COALESCE($3, next_portal_work_item_number()), $4, $5, 'CONVERSATION'::work_item_type_enum, $6::uuid
+		COALESCE($3, next_work_item_number('CONVERSATION'::work_item_type_enum)), $4, $5, 'CONVERSATION'::work_item_type_enum, $6::uuid
 	)
 	RETURNING id, number, created_on`
 

@@ -125,6 +125,20 @@ func (h *Handlers) SearchOrganizations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// AggregateOrganizations serves POST /organizations/aggregate.
+func (h *Handlers) AggregateOrganizations(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateOrganizationsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.orgs.Aggregate(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // GetOrganization serves GET /organizations/{organizationId}.
 func (h *Handlers) GetOrganization(w http.ResponseWriter, r *http.Request) {
 	org, err := h.orgs.Get(r.Context(), r.PathValue("organizationId"))
@@ -288,6 +302,35 @@ func (h *Handlers) SearchRegistrations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.pairings.SearchRegistrations(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// RegistrationVolumeTrend serves POST /registrations/volume-trend. An empty
+// body is every registration over the trailing 30 days.
+func (h *Handlers) RegistrationVolumeTrend(w http.ResponseWriter, r *http.Request) {
+	var req domain.RegistrationVolumeTrendRequest
+	if !decodeOptionalRequest(w, r, &req) {
+		return
+	}
+	res, err := h.pairings.RegistrationVolumeTrend(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// AggregateRegistrations serves POST /registrations/aggregate.
+func (h *Handlers) AggregateRegistrations(w http.ResponseWriter, r *http.Request) {
+	var req domain.AggregateRegistrationsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.pairings.AggregateRegistrations(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

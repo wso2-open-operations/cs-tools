@@ -107,7 +107,7 @@ type escalationDetector interface {
 // already logs their failures and never returns an error to call sites, so
 // there is nothing for this dispatcher to join/propagate for them.
 type slaEngineService interface {
-	RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string)
+	RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, engagementType, product, team string)
 	ApplyStateEffects(ctx context.Context, caseID, newStatus string)
 	CompleteResponseClock(ctx context.Context, caseID string)
 	// PauseWorkaroundClock is called from handleWorkaroundProvided — the one
@@ -124,7 +124,7 @@ type slaEngineService interface {
 	RecalculateFromEntity(ctx context.Context) error
 	// ReviseClocks is called from handleSeverityChanged — see that method's
 	// own doc comment.
-	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string)
+	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -1337,7 +1337,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 		if err != nil {
 			slog.WarnContext(ctx, "dispatch: case.created createdAt not RFC3339, sla clocks not registered", "caseId", p.CaseID, "createdAt", p.CreatedAt, "err", err)
 		} else {
-			d.slaEngine.RegisterClocks(ctx, p.CaseID, p.Priority, createdAt, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.CaseType, p.Product, p.Team)
+			d.slaEngine.RegisterClocks(ctx, p.CaseID, p.Priority, createdAt, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.CaseType, p.EngagementType, p.Product, p.Team)
 		}
 	}
 
@@ -1545,6 +1545,10 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// own case number.
 			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
+		if isAnnouncementCaseType(p.CaseType) {
+			// An announcement's author is not shown to its project contacts.
+			return notifications.RenderAnnouncementCommentAddedEmail(displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		}
 		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
@@ -1565,10 +1569,11 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 // others (errors.Join, same as sendBreachAlert), each logged individually.
 //
 // One exception: isMigrationEngagementComment (case type "engagement",
-// engagement type "migration") routes to chataudience.Migration instead of
-// calling chataudience.Resolve at all — a migration engagement's frustration
-// alert always goes to the Migration audience alone, never the case's own
-// team/Incident Monitor, by explicit product direction.
+// engagement type "migration") ALSO adds chataudience.Migration on top of
+// chataudience.Resolve's own decision — a migration engagement's frustration
+// alert goes to both the case's own team/Incident Monitor (plus any
+// Onboarding/Evaluation/Americas/weekend overlay) and the Migration
+// audience, by explicit product direction.
 //
 // Deliberately best-effort and entirely independent of handleCommentAdded's
 // own email-sending return value: a failure here (entity-service's role
@@ -1645,16 +1650,24 @@ func (d *Dispatcher) checkFrustration(ctx context.Context, record eventbus.Recor
 	}
 
 	caseLink := d.links.CSMLink(p.CaseID)
-	var audiences []string
+	audiences := chataudience.Resolve(p.Team, p.IsEvaluationAccount, p.ProjectOnboardingStatus, d.clock(), d.googleChat.HasAudienceSpace)
 	if isMigrationEngagementComment(p) {
-		// A migration engagement's frustration alert goes to the Migration
-		// audience instead of the usual team/Incident Monitor routing --
-		// the one case this routes by engagement type rather than by team,
-		// so it replaces chataudience.Resolve's decision entirely rather
-		// than adding to it.
-		audiences = []string{chataudience.Migration}
-	} else {
-		audiences = chataudience.Resolve(p.Team, p.IsEvaluationAccount, p.ProjectOnboardingStatus, d.clock(), d.googleChat.HasAudienceSpace)
+		// A migration engagement's frustration alert ALSO goes to the
+		// Migration audience, on top of whatever chataudience.Resolve
+		// already decided (the case's own team/Incident Monitor, plus any
+		// Onboarding/Evaluation/Americas/weekend overlay) -- by explicit
+		// product direction, both the team actually working the case and
+		// whoever is watching migration engagements should see the alert.
+		found := false
+		for _, a := range audiences {
+			if a == chataudience.Migration {
+				found = true
+				break
+			}
+		}
+		if !found {
+			audiences = append(audiences, chataudience.Migration)
+		}
 	}
 	for _, audience := range audiences {
 		if err := d.googleChat.SendFrustrationAlert(ctx, audience, p.CaseNumber, p.WSO2CaseID, p.Product, result.Reason, result.FrustratedLevel, caseLink); err != nil {
@@ -1681,6 +1694,20 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 	if err != nil {
 		return err
 	}
+	// Customers see Work In Progress and Waiting On WSO2 as one In Progress
+	// state: they are emailed the merged label, and not at all when the change
+	// is a move between the two. Only the customer-portal group is affected
+	// (any link other than the CSM one); staff keep the real status and every
+	// change.
+	csmLink := d.links.CSMLink(p.CaseID)
+	if !customerSeesStatusChange(p.PreviousStatus, p.NewStatus) {
+		for caseLink := range groups {
+			if caseLink != csmLink {
+				delete(groups, caseLink)
+				delete(groupUserIDs, caseLink)
+			}
+		}
+	}
 	baseKey := recordBaseKey(record)
 	caseRef := displayCaseRef(p.CaseNumber, p.CaseID)
 	title := p.CaseTitle
@@ -1690,8 +1717,12 @@ func (d *Dispatcher) handleStatusChanged(ctx context.Context, record eventbus.Re
 		title = "Status changed to " + p.NewStatus
 	}
 	subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, title)
-	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
-		return notifications.RenderStatusChangedEmail(caseRef, p.NewStatus, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
+	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, csmLink, func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
+		status := p.NewStatus
+		if caseLink != csmLink {
+			status = customerStatus(status)
+		}
+		return notifications.RenderStatusChangedEmail(caseRef, status, caseLink, commentLinkFor(caseLink, ""), intendedFor), nil
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -1932,7 +1963,7 @@ func (d *Dispatcher) handleCaseTypeChanged(ctx context.Context, raw json.RawMess
 		return fmt.Errorf("dispatch: decode case.type_changed payload: %w", err)
 	}
 	if d.slaEngine != nil {
-		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.Priority, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, p.NewType)
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.Priority, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, p.NewType, p.NewEngagementType)
 	}
 	return nil
 }
@@ -2016,7 +2047,7 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// indefinitely. ReviseClocks re-syncs all three clock types with
 	// entity-service's current, post-revision state.
 	if d.slaEngine != nil {
-		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, "")
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, "", "")
 	}
 
 	// Registered before anything is claimed (see handleCaseCreated).
@@ -2099,6 +2130,12 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	}
 
 	return errors.Join(errs...)
+}
+
+// isAnnouncementCaseType reports whether caseType is an announcement
+// (case-insensitive, trimmed). An empty or unknown value is not.
+func isAnnouncementCaseType(caseType string) bool {
+	return strings.EqualFold(strings.TrimSpace(caseType), "ANNOUNCEMENT")
 }
 
 // groupByLink resolves each recipient's own case link (see
@@ -2331,7 +2368,7 @@ func displayInternalRef(wso2CaseID, caseID string) string {
 // carry one) — still a valid, if less descriptive, subject rather than a
 // missing one.
 func subjectLine(wso2CaseID, caseNumber, caseID, title string) string {
-	return fmt.Sprintf("[WSO2 Support] (%s/%s) %s", displayInternalRef(wso2CaseID, caseID), displayCaseRef(caseNumber, caseID), title)
+	return fmt.Sprintf("[%s Support] (%s/%s) %s", notifications.CompanyName(), displayInternalRef(wso2CaseID, caseID), displayCaseRef(caseNumber, caseID), title)
 }
 
 // maskPhone redacts all but the last 4 characters of an E.164 phone number
@@ -3009,7 +3046,7 @@ func (d *Dispatcher) handleProjectContactInvited(ctx context.Context, record eve
 
 // invitationSubject is the subject of the new and existing-account invitations.
 func invitationSubject(projectName string) string {
-	return "Invitation To Use WSO2 Support for " + projectName
+	return "Invitation To Use " + notifications.CompanyName() + " Support for " + projectName
 }
 
 // handleProjectContactRegistered sends the Welcome email after a contact's
@@ -3098,7 +3135,7 @@ func (d *Dispatcher) handleProjectContactRegistered(ctx context.Context, record 
 		PortalURL:   d.onboarding.PortalURL,
 		IntendedFor: intendedFor,
 	})
-	subject := "Welcome to WSO2 Support for " + projectName
+	subject := "Welcome to " + notifications.CompanyName() + " Support for " + projectName
 	if err := d.onboarding.Email.SendEmailFrom(ctx, d.onboarding.EmailFrom, to, nil, nil, d.onboarding.ReplyTo, subject, body, nil); err != nil {
 		return fail(fmt.Errorf("dispatch: send welcome email for membership %s: %w", p.MembershipSfID, err))
 	}

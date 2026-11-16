@@ -990,10 +990,10 @@ type mockSLAEngine struct {
 	pauseWorkaroundErr error
 	recalculateCalls   int
 	recalculateErr     error
-	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }
+	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string }
 }
 
-func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _ string) {
+func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _, _ string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.registerCalls = append(m.registerCalls, struct{ caseID, priority, caseNumber string }{caseID, priority, caseNumber})
@@ -1025,10 +1025,10 @@ func (m *mockSLAEngine) RecalculateFromEntity(_ context.Context) error {
 	return m.recalculateErr
 }
 
-func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string) {
+func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType})
+	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType})
 }
 
 // TestDispatcher_Handle_CaseCreated_RegistersSLAClocksWhenConfigured verifies
@@ -1303,12 +1303,13 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetected_SendsChatAlert(t *te
 	}
 }
 
-// TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementRoutesToMigrationAudience
-// verifies isMigrationEngagementComment's own routing override: a frustration
+// TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementAddsMigrationAudience
+// verifies isMigrationEngagementComment's own routing addition: a frustration
 // alert on a migration engagement (caseType "ENGAGEMENT", engagementType
-// "migration") goes to chataudience.Migration alone, even though the payload
-// carries a real Team that would otherwise resolve via chataudience.Resolve.
-func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementRoutesToMigrationAudience(t *testing.T) {
+// "migration") goes to BOTH whatever chataudience.Resolve itself decides for
+// the payload's Team (here, Incident Monitor, since the mock has no
+// configured space for "Castor") AND the Migration audience.
+func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementAddsMigrationAudience(t *testing.T) {
 	chat := &mockGoogleChatSender{}
 	links := &mockLinkResolver{isCustomer: true}
 	detector := &mockEscalationDetector{result: escalation.Result{
@@ -1316,17 +1317,19 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetected_MigrationEngagementR
 	}}
 	d := NewDispatcher(&mockEmailSender{}, chat, &mockCallSender{}, links, true, false, nil, true, "", nil).
 		WithFrustrationDetection(detector)
+	d.now = func() time.Time { return weekdayDaytime }
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001","caseTitle":"Migration stalled","caseComment":"this is unacceptable, still no update","commentId":"C-1","recipients":["test-recipient@example.com"],"authorEmail":"customer@acme.com","product":"WSO2 API Manager","team":"Castor","caseType":"ENGAGEMENT","engagementType":"migration"}}`)}
 
 	if err := d.Handle(context.Background(), record); err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(chat.frustrationCalls) != 1 {
-		t.Fatalf("expected 1 frustration Chat alert, got %d", len(chat.frustrationCalls))
+	if len(chat.frustrationCalls) != 2 {
+		t.Fatalf("expected 2 frustration Chat alerts (team/Incident Monitor + Migration), got %d", len(chat.frustrationCalls))
 	}
-	if got := chat.frustrationCalls[0].audience; got != chataudience.Migration {
-		t.Errorf("audience = %q, want %q (migration engagement overrides team routing)", got, chataudience.Migration)
+	gotAudiences := map[string]bool{chat.frustrationCalls[0].audience: true, chat.frustrationCalls[1].audience: true}
+	if !gotAudiences[chataudience.IncidentMonitor] || !gotAudiences[chataudience.Migration] {
+		t.Errorf("audiences = %v, want both %q and %q", gotAudiences, chataudience.IncidentMonitor, chataudience.Migration)
 	}
 }
 
@@ -2994,6 +2997,28 @@ func TestDispatcher_Handle_SubjectLine_StandardFormat(t *testing.T) {
 				t.Errorf("subject = %q, want %q", mock.calls[0].subject, tt.want)
 			}
 		})
+	}
+}
+
+// TestDispatcher_Handle_SubjectLine_UsesConfiguredCompanyName: subjectLine
+// builds "[<company> Support] ..." from notifications.CompanyName(), not a
+// hardcoded "WSO2" — a deployment that configures EMAIL_TEMPLATE_COMPANY_NAME
+// must see its own name in the subject, not WSO2's.
+func TestDispatcher_Handle_SubjectLine_UsesConfiguredCompanyName(t *testing.T) {
+	notifications.SetTemplateCompanyName("Acme")
+	t.Cleanup(func() { notifications.SetTemplateCompanyName("WSO2") })
+
+	mock := &mockEmailSender{}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["test-recipient@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 email sent, got %d", len(mock.calls))
+	}
+	if want := "[Acme Support] (WSO2-1000/CS0001001) Something broke"; mock.calls[0].subject != want {
+		t.Errorf("subject = %q, want %q", mock.calls[0].subject, want)
 	}
 }
 

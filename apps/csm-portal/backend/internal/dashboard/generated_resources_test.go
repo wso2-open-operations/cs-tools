@@ -208,6 +208,42 @@ func TestParseGenerated_AcceptsAccountAndProjectWidgets(t *testing.T) {
 	}
 }
 
+func TestParseGenerated_AcceptsProjectOnboardingDateFilters(t *testing.T) {
+	proj := func(rest string) string {
+		return opsDashboard(`{"id":"w","displayName":"W","resourceType":"project","shape":"list","gridWidth":6,"listLimit":5` + rest + `}`)
+	}
+	for _, k := range []string{"onboardingStartDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"} {
+		for _, suf := range []string{"From", "To"} {
+			for _, v := range []string{"2026-01-31", "__startOfQuarter:1__"} {
+				raw := proj(`,"query":{"` + k + suf + `":"` + v + `"}`)
+				if _, err := ParseGenerated([]byte(raw)); err != nil {
+					t.Errorf("%s%s=%s: %v", k, suf, v, err)
+				}
+			}
+		}
+	}
+	for _, f := range []string{"endDate", "goLivePlanDate", "goLiveDate", "onboardingExpiryDate", "productionReadinessCompletionDate"} {
+		raw := proj(`,"query":{"closureStates":["Open","Suspended","Restricted"]},"sortBy":{"field":"` + f + `","order":"desc"}`)
+		if _, err := ParseGenerated([]byte(raw)); err != nil {
+			t.Errorf("sortBy %s: %v", f, err)
+		}
+	}
+	bad := map[string]string{
+		"bad sortBy":           `,"query":{},"sortBy":{"field":"onboardingStartDate","order":"asc"}`,
+		"bad date":             `,"query":{"goLivePlanDateFrom":"next quarter"}`,
+		"timestamp on From":    `,"query":{"onboardingStartDateFrom":"2026-01-01T00:00:00Z"}`,
+		"timestamp on endDate": `,"query":{"endDateTo":"2026-01-01T00:00:00Z"}`,
+		"bad date on To":       `,"query":{"productionReadinessCompletionDateTo":"2026-13-45"}`,
+		"bad closure state":    `,"query":{"closureStates":["Closed"]}`,
+		"closureStates scalar": `,"query":{"closureStates":"Open"}`,
+	}
+	for name, rest := range bad {
+		if _, err := ParseGenerated([]byte(proj(rest))); !errors.Is(err, ErrGeneratedInvalid) {
+			t.Errorf("%s: err = %v, want ErrGeneratedInvalid", name, err)
+		}
+	}
+}
+
 func TestParseGenerated_RejectsAccountAndProjectWidgetsItCannotRun(t *testing.T) {
 	acc := func(shape, rest string) string {
 		return opsDashboard(`{"id":"w","displayName":"W","resourceType":"account","shape":"` + shape + `","gridWidth":6` + rest + `}`)

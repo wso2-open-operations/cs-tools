@@ -514,7 +514,7 @@ func (r *problemRepo) GetProblem(ctx context.Context, id string) (domain.Problem
 // createProblemPortalQuery is CreateProblem's (the plain-Postgres,
 // caller-initiated path) query -- structurally identical to
 // createProblemFromServiceNowQuery except id/number are generated here
-// (gen_random_uuid()/next_portal_work_item_number(), migration 0140) instead
+// (gen_random_uuid()/next_work_item_number('PROBLEM'), migration 0180) instead
 // of supplied by a prior ServiceNow response, and state is a fixed literal
 // ('NEW') rather than a parameter -- there is no ServiceNow response to
 // confirm one from on this path, and problem.state has no column default of
@@ -529,7 +529,7 @@ const createProblemPortalQuery = `
 		)
 		VALUES (
 			gen_random_uuid(), NOW(), NOW(), $1, $1,
-			next_portal_work_item_number(), $2, $6, 'PROBLEM'::work_item_type_enum, $3::uuid
+			next_work_item_number('PROBLEM'::work_item_type_enum), $2, $6, 'PROBLEM'::work_item_type_enum, $3::uuid
 		)
 		RETURNING id, number, subject, description, created_on, updated_on, created_by
 	),

@@ -108,6 +108,10 @@ export interface CsmCaseRow {
   /** CRE / engineer working the case. "Unassigned" for cases with no one picked up yet. */
   assignee: string;
   assigneeIsMe: boolean;
+  /** The assigned engineer's email, when the source carries one. Lets a list
+   * re-derive {@link assigneeIsMe} when the signed-in user's email arrives
+   * after the rows were fetched, without refetching them. */
+  assigneeEmail?: string;
   /** Who reported/opened the case — distinct from {@link assignee}. Optional:
    * absent for any `CsmCaseRow` source that doesn't resolve a creator (e.g.
    * `CsmCaseDetail`'s own {@link CsmCaseDetail.createdBy}, resolved from a

@@ -118,14 +118,14 @@ func emailWith(t *testing.T, sent []sentEmail, s string) sentEmail {
 	return sentEmail{}
 }
 
-// On Sunday evening a fully marked weekend gets one summary email to everybody
+// On Monday morning a fully marked weekend gets one summary email to everybody
 // on it and one invitation email per team per day, each to that team, all of
 // them guests of its event; the send is recorded.
 func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	store := &fakeStore{}
 	rota := &fakeRota{assignments: fullWeekend()}
 	mail := &fakeEmail{}
-	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-18 20:00", "rota_weekend_notice"))(context.Background()); err != nil {
+	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-19 09:00", "rota_weekend_notice"))(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if rota.from != "2026-10-24" || rota.to != "2026-10-25" {
@@ -188,18 +188,18 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 		t.Fatalf("recorded = %+v", store.recorded)
 	}
 
-	// The next evening finds the record and sends nothing.
+	// The next morning finds the record and sends nothing.
 	mail.sent = nil
-	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-19 20:00", "rota_weekend_notice"))(context.Background()); err != nil {
-		t.Fatalf("second evening: %v", err)
+	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-20 09:00", "rota_weekend_notice"))(context.Background()); err != nil {
+		t.Fatalf("second morning: %v", err)
 	}
 	if len(mail.sent) != 0 || len(store.recorded) != 1 {
-		t.Fatalf("second evening sent %d emails and recorded %d times, want nothing new", len(mail.sent), len(store.recorded))
+		t.Fatalf("second morning sent %d emails and recorded %d times, want nothing new", len(mail.sent), len(store.recorded))
 	}
 }
 
 // A weekend that is not fully marked is not announced: the rota admins are
-// told what is missing, every evening, until it is; then it goes out.
+// told what is missing, every morning, until it is; then it goes out.
 func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 	short := []teamschedule.Assignment{}
 	for _, a := range fullWeekend() {
@@ -214,7 +214,7 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 	store := &fakeStore{admins: []teamschedule.RotaAdmin{{Name: "Zoe Admin", Email: "zoe@example.com"}}}
 	rota := &fakeRota{assignments: short}
 	mail := &fakeEmail{}
-	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-18 20:00", "rota_weekend_notice"))(context.Background()); err != nil {
+	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-19 09:00", "rota_weekend_notice"))(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if len(mail.sent) != 1 || len(store.recorded) != 0 {
@@ -230,10 +230,10 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 		t.Fatalf("admin email = %+v", m)
 	}
 
-	// Once marked, the next evening announces it.
+	// Once marked, the next morning announces it.
 	rota.assignments = fullWeekend()
 	mail.sent = nil
-	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-19 20:00", "rota_weekend_notice"))(context.Background()); err != nil {
+	if err := WeekendNotice(rota, store, mail, weekendConfig("2026-10-20 09:00", "rota_weekend_notice"))(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if len(mail.sent) != 5 || len(store.recorded) != 1 {
@@ -245,7 +245,7 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 func TestWeekendNotice_NoRotaAdminAsksTheAlertAudience(t *testing.T) {
 	rota := &fakeRota{assignments: fullWeekend()[:2]}
 	mail := &fakeEmail{}
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.AlertTo = []string{"ops@example.com"}
 	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
@@ -267,7 +267,7 @@ func TestWeekendReminder_UpdatesAndCancels(t *testing.T) {
 	}}
 	rota := &fakeRota{assignments: fullWeekend()} // Sunday's LK Weekend now has Cid instead of Dan
 	mail := &fakeEmail{}
-	if err := WeekendReminder(rota, store, mail, weekendConfig("2026-10-23 15:00", "rota_weekend_reminder"))(context.Background()); err != nil {
+	if err := WeekendReminder(rota, store, mail, weekendConfig("2026-10-23 09:00", "rota_weekend_reminder"))(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if len(mail.sent) != 6 {
@@ -311,7 +311,7 @@ func TestWeekendReminder_GoesOutWithGapsAndTellsTheAdmins(t *testing.T) {
 	}
 	store := &fakeStore{admins: []teamschedule.RotaAdmin{{Name: "Zoe Admin", Email: "zoe@example.com"}}}
 	mail := &fakeEmail{}
-	if err := WeekendReminder(&fakeRota{assignments: short}, store, mail, weekendConfig("2026-10-23 15:00", "rota_weekend_reminder"))(context.Background()); err != nil {
+	if err := WeekendReminder(&fakeRota{assignments: short}, store, mail, weekendConfig("2026-10-23 09:00", "rota_weekend_reminder"))(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	admin := emailWith(t, mail.sent, "Action needed")
@@ -345,7 +345,7 @@ func TestMissingSlots_OnCallDoesNotCount(t *testing.T) {
 func TestWeekendNotice_AFailedSummaryFailsAndRecordsNothing(t *testing.T) {
 	store := &fakeStore{}
 	mail := &fakeEmail{failOn: "Weekend Rotation –"}
-	err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, store, mail, weekendConfig("2026-10-18 20:00", "rota_weekend_notice"))(context.Background())
+	err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, store, mail, weekendConfig("2026-10-19 09:00", "rota_weekend_notice"))(context.Background())
 	if err == nil || len(store.recorded) != 0 {
 		t.Fatalf("err = %v, recorded = %+v", err, store.recorded)
 	}
@@ -489,7 +489,7 @@ func TestWeekendNotice_AmericasHoursFollowLosAngeles(t *testing.T) {
 		rota.assignments = append(rota.assignments, assignment("Ivy", "ivy@example.com", "americas", "CRE_WEEKEND_NIGHT", d, d+" 21:00", d+" 23:59"))
 	}
 	mail := &fakeEmail{}
-	if err := WeekendNotice(rota, &fakeStore{}, mail, weekendConfig("2026-11-01 20:00", "rota_weekend_notice"))(context.Background()); err != nil {
+	if err := WeekendNotice(rota, &fakeStore{}, mail, weekendConfig("2026-11-02 09:00", "rota_weekend_notice"))(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 7 and Sunday, 8 November 2026")
@@ -533,7 +533,7 @@ func TestParseWindows(t *testing.T) {
 func TestWeekendReminder_AdminsAreToldOnlyAfterTheSummary(t *testing.T) {
 	short := fullWeekend()[1:] // Saturday's LK Weekend is one short
 	store := &fakeStore{admins: []teamschedule.RotaAdmin{{Name: "Zoe Admin", Email: "zoe@example.com"}}}
-	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg := weekendConfig("2026-10-23 09:00", "rota_weekend_reminder")
 
 	mail := &fakeEmail{failOn: "Weekend Rotation –"}
 	if err := WeekendReminder(&fakeRota{assignments: short}, store, mail, cfg)(context.Background()); err == nil {
@@ -566,7 +566,7 @@ func TestWeekendReminder_InvitesTurnedOffForOneRotationKeepsWhatWasSent(t *testi
 			{UID: americasSat, Sequence: 1, Attendees: []string{"ivy@example.com", "jay@example.com"}},
 		}},
 	}}
-	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg := weekendConfig("2026-10-23 09:00", "rota_weekend_reminder")
 	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND_NIGHT": true}
 	mail := &fakeEmail{}
 	if err := WeekendReminder(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil {
@@ -614,7 +614,7 @@ func TestWeekendReminder_InvitesTurnedOffKeepsAWindowGoneFromTheRota(t *testing.
 		}
 		rota = append(rota, a)
 	}
-	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg := weekendConfig("2026-10-23 09:00", "rota_weekend_reminder")
 	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND_NIGHT": true}
 	mail := &fakeEmail{}
 	if err := WeekendReminder(&fakeRota{assignments: rota}, store, mail, cfg)(context.Background()); err != nil {
@@ -639,7 +639,7 @@ func TestWeekendReminder_InvitesTurnedOffKeepsAWindowGoneFromTheRota(t *testing.
 // Every weekend rotation's invitations off: the summary alone, and it does not
 // promise an invitation.
 func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND": true, "CRE_WEEKEND_NIGHT": true}
 	mail := &fakeEmail{}
 	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
@@ -651,10 +651,10 @@ func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
 }
 
 // A weekend-only copy is on the Cc of the summary and nothing else: not the
-// invitation emails. The every-reminder copy is on both, and an address on
-// both lists is copied once.
+// invitation emails. The reminder copy is on the summary too, and an address
+// on both lists is copied once.
 func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Copy = []string{"lead@example.com"}
 	cfg.WeekendCopy = []string{"head@example.com", "Lead@example.com"}
 	mail := &fakeEmail{}
@@ -669,6 +669,58 @@ func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
 		if strings.Contains(m.subject, "Calendar invitation") && slices.Contains(m.cc, "head@example.com") {
 			t.Errorf("the weekend-only copy is on %q", m.subject)
 		}
+	}
+}
+
+// The invitation copies are on every weekend invitation email and not on the
+// summary; the reminder and weekend copies are on the summary and not on the
+// invitations.
+func TestWeekendNotice_InvitationCopiesAreOnTheInvitationsOnly(t *testing.T) {
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.WeekendCopy = []string{"head@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	if strings.Join(summary.cc, ",") != "lead@example.com,head@example.com" {
+		t.Errorf("summary cc = %v, want the lead and the head, not the invitation copy", summary.cc)
+	}
+	invitations := 0
+	for _, m := range mail.sent {
+		if !strings.Contains(m.subject, "Calendar invitation") {
+			continue
+		}
+		invitations++
+		if strings.Join(m.cc, ",") != "admin@example.com" {
+			t.Errorf("%q cc = %v, want the invitation copy only", m.subject, m.cc)
+		}
+	}
+	if invitations == 0 {
+		t.Fatal("no invitation email was sent")
+	}
+}
+
+// A cancellation is copied to the invitation copies only, never to the
+// reminder copies.
+func TestWeekendReminder_CancellationGoesToTheInvitationCopies(t *testing.T) {
+	store := &fakeStore{records: map[string]*teamschedule.ReminderRecord{
+		"2026-10-24": {Invites: []teamschedule.ReminderInvite{
+			{UID: "cre-rota-2026-10-25-cre_weekend@csm-team-schedule", Sequence: 1, Attendees: []string{"ann@example.com", "ben@example.com", "dan@example.com"}},
+		}},
+	}}
+	cfg := weekendConfig("2026-10-23 09:00", "rota_weekend_reminder")
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekendReminder(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	cancel := emailWith(t, mail.sent, "Cancelled:")
+	if strings.Join(cancel.cc, ",") != "admin@example.com" {
+		t.Errorf("cancellation cc = %v, want the invitation copy only", cancel.cc)
 	}
 }
 
@@ -700,7 +752,7 @@ func sreWeekend() []teamschedule.Assignment {
 func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 	rota := &fakeRota{assignments: fullWeekend(), other: map[string][]teamschedule.Assignment{"SRE": sreWeekend()}}
 	mail := &fakeEmail{}
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Support = SREWeekendSupport()
 	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
@@ -747,7 +799,7 @@ func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
 func TestWeekendNotice_SRETurnsAreInformationOnly(t *testing.T) {
 	rota := &fakeRota{assignments: fullWeekend(), otherErr: errors.New("entity-service down")}
 	mail := &fakeEmail{}
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Support = SREWeekendSupport()
 	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
@@ -780,7 +832,7 @@ func TestWeekendNotice_SRETurnsAreInformationOnly(t *testing.T) {
 // clock, labelled PDT, even when their window was saved in IST: the summary
 // once read "08:30 PM – 06:30 AM IST" for them.
 func TestWeekendNotice_AmericasRotationsReadPDTWhateverTheSavedZone(t *testing.T) {
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	windows, err := ParseWindows("CRE_WEEKEND_NIGHT=20:30-06:30 Asia/Colombo,CRE_WEEKEND_NIGHT_OC=20:30-06:30 Asia/Colombo")
 	if err != nil {
 		t.Fatal(err)

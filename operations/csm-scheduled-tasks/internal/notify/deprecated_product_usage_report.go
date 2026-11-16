@@ -16,7 +16,7 @@ var deprecatedProductUsageReportTemplateRaw string
 
 var deprecatedProductUsageReportTemplate = bakeLogo(deprecatedProductUsageReportTemplateRaw)
 
-// deprecatedUsageIntro is the introduction: the ServiceNow report's opening
+// deprecatedUsageIntro is the introduction: the previous system's report's opening
 // sentence, then the same call to action as the EOL product usage report.
 var deprecatedUsageIntro = []string{
 	"This monthly report highlights customers who use deprecated product versions in their deployments, as reflected in the deployment details available in the Customer Portal.",
@@ -27,7 +27,7 @@ var deprecatedUsageIntro = []string{
 
 // RenderDeprecatedProductUsageReport fills in the monthly deprecated product usage
 // report's HTML email template, the same branded shape as the other reports
-// here: the introduction the ServiceNow report carried, the report date and
+// here: the introduction the previous system's report carried, the report date and
 // totals, then one table per region in the report's order. Within a region
 // each account's cells (account, CS ABT, account manager, technical
 // owner) span all its version rows, and each project's cell spans its own,

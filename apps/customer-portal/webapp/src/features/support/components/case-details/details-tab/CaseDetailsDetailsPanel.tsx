@@ -237,7 +237,7 @@ export default function CaseDetailsDetailsPanel({
           </Box>
           {data?.internalId ? (
             <Box>
-              <Typography {...labelSx}>WSO2 Case ID</Typography>
+              <Typography {...labelSx}>Sequence ID</Typography>
               <Typography {...valueSx}>
                 {formatValue(data.internalId)}
               </Typography>

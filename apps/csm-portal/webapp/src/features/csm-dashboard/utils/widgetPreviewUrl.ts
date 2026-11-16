@@ -140,6 +140,40 @@ const OP_SEPARATOR = "~";
  * skipped for being value-less. */
 const VALUELESS_OPS = new Set(["isEmpty", "isNotEmpty"]);
 
+/**
+ * A preview param holds a list as its values joined by ",". A value may hold
+ * a comma itself (a country such as "Korea, Republic of", an organisation
+ * name), so a comma inside a value is written as `\,` and a backslash as
+ * `\\`, and the list is split only on a comma no backslash escapes. Any other
+ * backslash is read as it is, so a URL written before this (no value escaped)
+ * reads as it did, unless one of its values held a backslash right before a
+ * comma or another backslash.
+ */
+function joinParamValues(values: readonly string[]): string {
+  return values.map((v) => v.replace(/\\/g, "\\\\").replace(/,/g, "\\,")).join(",");
+}
+
+/** The inverse of {@link joinParamValues}. */
+function splitParamValues(raw: string): string[] {
+  const values: string[] = [];
+  let current = "";
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    const next = raw[i + 1];
+    if (c === "\\" && (next === "," || next === "\\")) {
+      current += next;
+      i++;
+    } else if (c === ",") {
+      values.push(current);
+      current = "";
+    } else {
+      current += c;
+    }
+  }
+  values.push(current);
+  return values;
+}
+
 /** Writes one filter entry's values under `key`. Two entries with the same
  * field and op would land on the same key; for `notIn` they simply add up
  * ("none of A" and "none of B" is "none of A or B"), so the second must extend
@@ -149,10 +183,10 @@ const VALUELESS_OPS = new Set(["isEmpty", "isNotEmpty"]);
 function setFilterParam(q: URLSearchParams, key: string, op: string, values: string[]): void {
   const existing = q.get(key);
   if (op === "notIn" && existing) {
-    q.set(key, [...new Set([...existing.split(","), ...values])].join(","));
+    q.set(key, joinParamValues([...new Set([...splitParamValues(existing), ...values])]));
     return;
   }
-  q.set(key, values.join(","));
+  q.set(key, joinParamValues(values));
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -349,9 +383,10 @@ export function buildWidgetPreviewHref(params: {
       const masked = value.map((v) =>
         v === params.currentUserId ? CURRENT_USER_SENTINEL : v,
       );
-      q.set(key, masked.join(","));
+      q.set(key, joinParamValues(masked));
     } else if (typeof value === "string") {
-      q.set(key, value === params.currentUserId ? CURRENT_USER_SENTINEL : value);
+      // Read back as a list like any flat param, so escaped the same way.
+      q.set(key, value === params.currentUserId ? CURRENT_USER_SENTINEL : joinParamValues([value]));
     } else if (typeof value === "number" && Number.isFinite(value)) {
       // A slice's own `query` can carry a plain number (e.g. the rating pie's
       // `{ rating: 5 }`, from `Math.round(avgRating)` — see
@@ -537,7 +572,7 @@ export function parseWidgetPreviewFilters(
       const sep = key.indexOf(OP_SEPARATOR);
       const field = sep === -1 ? key : key.slice(0, sep);
       const op = sep === -1 ? "in" : key.slice(sep + OP_SEPARATOR.length);
-      const values = raw === "" ? [] : raw.split(",");
+      const values = raw === "" ? [] : splitParamValues(raw);
       if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
       fieldFilters.push({ field, op, values });
     }
@@ -561,7 +596,7 @@ export function parseWidgetPreviewFilters(
     const sep = rest.indexOf(OP_SEPARATOR);
     const field = sep === -1 ? rest : rest.slice(0, sep);
     const op = sep === -1 ? "in" : rest.slice(sep + OP_SEPARATOR.length);
-    const values = raw === "" ? [] : raw.split(",");
+    const values = raw === "" ? [] : splitParamValues(raw);
     if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
     nestedFieldFilters.push({ field, op, values });
   }
@@ -570,7 +605,7 @@ export function parseWidgetPreviewFilters(
   for (const [key, raw] of searchParams.entries()) {
     if (RESERVED_PARAMS.has(key) || key.startsWith(NESTED_FILTER_PARAM_PREFIX)) continue;
 
-    const values = raw.split(",");
+    const values = splitParamValues(raw);
     if (values.includes(CURRENT_USER_SENTINEL)) needsCurrentUser = true;
     filters[key] = values;
   }

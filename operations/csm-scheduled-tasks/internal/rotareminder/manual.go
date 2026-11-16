@@ -199,7 +199,7 @@ func longDay(d time.Time) string { return dayList([]time.Time{d}) }
 func asTest(cfg Config, to string) Config {
 	cfg.Test = true
 	cfg.RedirectTo = []string{to}
-	cfg.Copy, cfg.WeekendCopy = nil, nil
+	cfg.Copy, cfg.WeekendCopy, cfg.InviteCopy = nil, nil, nil
 	cfg.AlertTo, cfg.AlertCc = []string{to}, nil
 	return cfg
 }

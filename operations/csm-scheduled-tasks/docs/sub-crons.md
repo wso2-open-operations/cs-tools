@@ -72,9 +72,9 @@ Colombo is UTC+5:30 with no daylight saving.
 | `availability_recalculation` | `0 3 * * *` | `AVAILABILITY_RECALC_ENABLED=true` | Trigger the service availability recompute |
 | `usage_rollup_daily` | `30 0 * * *` | `USAGE_ROLLUP_ENABLED=true` | Rebuild recent daily usage rows |
 | `usage_rollup_monthly` | `30 1 * * *` | `USAGE_ROLLUP_ENABLED=true` | Rebuild last and current month usage rows |
-| `rota_weekday_reminder` | `30 9 * * 1-5` | `EMAIL_BASE_URL` set (scheduled sends also need the Rota Access switch) | Remind the next working day's rota people |
-| `rota_weekend_notice` | `30 14 * * 0-4` | Same | Announce the coming weekend once it is fully marked |
-| `rota_weekend_reminder` | `30 9 * * 5` | Same | Friday re-send of the weekend summary, with updates and cancellations |
+| `rota_weekday_reminder` | `30 3 * * 0-4` | `EMAIL_BASE_URL` set (scheduled sends also need the Rota Access switch) | Remind the next working day's rota people, the day before (Sunday for Monday) |
+| `rota_weekend_notice` | `30 3 * * 1-4` | Same | Announce the coming weekend once it is fully marked |
+| `rota_weekend_reminder` | `30 3 * * 5` | Same | Friday re-send of the weekend summary, with updates and cancellations |
 | `rota_manual_reminder` | `*/5 * * * *` | Same | Fulfil "Send now" and "Send a test to me" requests |
 | `case_autoclosure` | `30 2 * * *` | `AUTOCLOSURE_ENABLED=true` | Remind and close cases idle in Awaiting Info or Solution Proposed |
 | `acp_reopen_check` | `30 3 * * *` | `ACP_REOPEN_CHECK_ENABLED=true` | Drive entity-service's daily ACP reopen check |
@@ -270,9 +270,9 @@ never saved the card gets no scheduled reminder.
 
 | Task | Default schedule (UTC) | Colombo | Announces |
 |---|---|---|---|
-| `rota_weekday_reminder` | `30 9 * * 1-5` | 15:00, Mon to Fri | The next working day's weekday rotations. Friday announces Monday |
-| `rota_weekend_notice` | `30 14 * * 0-4` | 20:00, Sun to Thu | The coming weekend, once every shift meets its minimum. Until then the rota admins are asked each evening |
-| `rota_weekend_reminder` | `30 9 * * 5` | 15:00, Fri | The weekend again: summary, invitations as updates, cancellations, gaps listed |
+| `rota_weekday_reminder` | `30 3 * * 0-4` | 09:00, Sun to Thu | The next working day's weekday rotations, the day before. Sunday announces Monday |
+| `rota_weekend_notice` | `30 3 * * 1-4` | 09:00, Mon to Thu | The coming weekend, once every shift meets its minimum (Monday when it already does). Until then the rota admins are asked each morning |
+| `rota_weekend_reminder` | `30 3 * * 5` | 09:00, Fri | The weekend again: summary, invitations as updates, cancellations, gaps listed |
 | `rota_manual_reminder` | `*/5 * * * *` | every tick | Requests queued by the card's "Send now" and "Send a test to me" |
 
 - **Reads:** the catalogue (`GET /team-schedule/catalogue`), assignments (`POST /team-schedule/assignments/search` with absent people excluded by entity-service), the saved settings (`GET /team-schedule/reminder-settings/{family}`), the rota admins, and the weekend send record. The Team Schedule is internal-only, so this client's id must be on entity-service's machine-client list.

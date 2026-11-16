@@ -242,6 +242,22 @@ func TestWeekdayReminder_MidWeekSaysTomorrow(t *testing.T) {
 	}
 }
 
+// The weekday task runs Sunday to Thursday at 09:00 IST: Sunday's run
+// announces Monday, the day after, and the email says tomorrow.
+func TestWeekdayReminder_SundayAnnouncesMonday(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, config("2026-10-18 09:00", weekdayRotations))(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rota.from != "2026-10-19" || len(mail.sent) != 1 ||
+		!strings.Contains(mail.sent[0].body, "rostered for the Morning rotation tomorrow, Monday, 19 October 2026") {
+		t.Fatalf("read %s, sent %+v", rota.from, mail.sent)
+	}
+}
+
 // "Today" is the day in the rota's own zone, not the server's: Thursday 20:00
 // UTC is already Friday in Colombo, so the next working day is Monday.
 func TestWeekdayReminder_CountsDaysInTheRotaZone(t *testing.T) {
@@ -575,6 +591,58 @@ func TestWeekdayReminder_InvitesTurnedOffForOneRotation(t *testing.T) {
 	}
 	if len(evening.attachments) != 1 || !strings.Contains(evening.body, "calendar invitation is attached") {
 		t.Errorf("Evening lost its invitation: %d attachments\n%s", len(evening.attachments), evening.body)
+	}
+}
+
+// A weekday reminder that carries its invitation is copied to the invitation
+// copies only. The reminder copies get a separate copy without the invitation
+// (and without the line saying it is attached); an address on both lists, or
+// on the window, gets no second email.
+func TestWeekdayReminder_InvitationAndReminderCopiesAreSeparate(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites, cfg.OrganizerEmail = true, "rota@example.com"
+	cfg.Copy = []string{"lead@example.com", "Both@example.com", "ann@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com", "both@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 2 {
+		t.Fatalf("sent %d emails, want the reminder and one copy: %+v", len(mail.sent), mail.sent)
+	}
+	reminder, copied := mail.sent[0], mail.sent[1]
+	if strings.Join(reminder.to, ",") != "ann@example.com" || strings.Join(reminder.cc, ",") != "admin@example.com,both@example.com" ||
+		len(reminder.attachments) != 1 {
+		t.Errorf("reminder to %v cc %v with %d attachments, want Ann, the invitation copies and the invitation",
+			reminder.to, reminder.cc, len(reminder.attachments))
+	}
+	if strings.Join(copied.to, ",") != "lead@example.com" || len(copied.cc) != 0 || len(copied.attachments) != 0 ||
+		strings.Contains(copied.body, "calendar invitation is attached") || copied.subject != reminder.subject {
+		t.Errorf("copy to %v cc %v with %d attachments (subject %q), want the lead only, no invitation\n%s",
+			copied.to, copied.cc, len(copied.attachments), copied.subject, copied.body)
+	}
+}
+
+// A weekday reminder whose rotation sends no invitation is one email, copied
+// to the reminder copies; the invitation copies are not on it.
+func TestWeekdayReminder_NoInvitationMeansReminderCopiesOnly(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites, cfg.OrganizerEmail = true, "rota@example.com"
+	cfg.InvitesOff = map[string]bool{"CRE_MORNING": true}
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.InviteCopy = []string{"admin@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Join(mail.sent[0].cc, ",") != "lead@example.com" || len(mail.sent[0].attachments) != 0 {
+		t.Fatalf("sent %+v, want one reminder copied to the lead", mail.sent)
 	}
 }
 

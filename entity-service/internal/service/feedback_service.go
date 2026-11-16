@@ -104,9 +104,9 @@ type snAggregateFeedbackResponse struct {
 }
 
 // feedbackUnavailableMsg is the reason returned by every
-// unavailableFeedbackService method. It matches the 503 description the
-// OpenAPI spec documents for the feedback endpoints.
-const feedbackUnavailableMsg = "case feedback is only supported for the ServiceNow data source"
+// unavailableFeedbackService method: only an unrecognised data source falls
+// back to it, since feedback is implemented natively on PostgreSQL.
+const feedbackUnavailableMsg = "case feedback is not available for this data source"
 
 // unavailableFeedbackService is the FeedbackService stand-in for a data
 // source that has no feedback store. Every operation reports a 503 rather than

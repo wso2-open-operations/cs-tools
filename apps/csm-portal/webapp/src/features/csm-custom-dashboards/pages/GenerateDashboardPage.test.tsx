@@ -273,29 +273,38 @@ describe("GenerateDashboardPage: the chat", () => {
     expect(screen.queryByText("Your dashboard will appear here")).not.toBeInTheDocument();
   });
 
-  it("says so when the first message can't be turned into a dashboard", async () => {
+  it("says so, and why, when the first message can't be turned into a dashboard", async () => {
     const message = "A cases-per-month line chart can cover at most 24 months.";
+    generateMock.mockRejectedValueOnce(new BackendApiError(422, message, { message, errorCode: "generate_declined" }));
+    renderPage();
+
+    // One message, the reason on its own line (the text matcher folds the line break).
+    await sendMessage("Hello", `The dashboard cannot be generated from the input. ${message}`);
+
+    expect(screen.getByText("Your dashboard will appear here")).toBeInTheDocument();
+  });
+
+  it("says the change can't be made, and why, when a follow-up message is declined", async () => {
+    const message = "A cases-per-month line chart can cover at most 24 months.";
+    generateMock
+      .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
+      .mockRejectedValueOnce(new BackendApiError(422, message, { message, errorCode: "generate_declined" }));
+    renderPage();
+    await sendMessage("My cases", "Here it is.");
+
+    await sendMessage("Per month for 3 years", `This dashboard cannot be modified with your input. ${message}`);
+
+    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
+  });
+
+  it("says only that the input did not work for a 422 that is not the backend's own", async () => {
+    const message = "upstream said no";
     generateMock.mockRejectedValueOnce(new BackendApiError(422, message, { message }));
     renderPage();
 
     await sendMessage("Hello", "The dashboard cannot be generated from the input.");
 
-    expect(screen.queryByText(message)).not.toBeInTheDocument();
-    expect(screen.getByText("Your dashboard will appear here")).toBeInTheDocument();
-  });
-
-  it("says the change can't be made when a follow-up message is declined", async () => {
-    const message = "A cases-per-month line chart can cover at most 24 months.";
-    generateMock
-      .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
-      .mockRejectedValueOnce(new BackendApiError(422, message, { message }));
-    renderPage();
-    await sendMessage("My cases", "Here it is.");
-
-    await sendMessage("Per month for 3 years", "This dashboard cannot be modified with your input.");
-
-    expect(screen.queryByText(message)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
+    expect(screen.queryByText(message, { exact: false })).not.toBeInTheDocument();
   });
 
   it.each([

@@ -88,12 +88,22 @@ func TestRotaReminderSettings_ForwardsInviteRotations(t *testing.T) {
 	if v, ok := fake.body["weekendCopyTo"]; !ok || v != nil {
 		t.Errorf("an older card's save forwarded weekendCopyTo %v (present %v), want null", v, ok)
 	}
+	if v, ok := fake.body["inviteCopyTo"]; !ok || v != nil {
+		t.Errorf("an older card's save forwarded inviteCopyTo %v (present %v), want null", v, ok)
+	}
 
 	withCc := strings.Replace(goodReminderBody, `"copyTo"`, `"weekendCopyTo":["head@example.com"],"copyTo"`, 1)
 	fake = &fakeReminderSettingsClient{reply: []byte(`{"family":"CRE"}`)}
 	NewRotaReminderSettingsHandler(fake).PutRotaReminderSettings(httptest.NewRecorder(), reminderSettingsRequest(http.MethodPut, "cre", withCc))
 	if cc, _ := fake.body["weekendCopyTo"].([]any); len(cc) != 1 || cc[0] != "head@example.com" {
 		t.Errorf("forwarded weekendCopyTo %v", fake.body["weekendCopyTo"])
+	}
+
+	withInviteCc := strings.Replace(goodReminderBody, `"copyTo"`, `"inviteCopyTo":["admin@example.com"],"copyTo"`, 1)
+	fake = &fakeReminderSettingsClient{reply: []byte(`{"family":"CRE"}`)}
+	NewRotaReminderSettingsHandler(fake).PutRotaReminderSettings(httptest.NewRecorder(), reminderSettingsRequest(http.MethodPut, "cre", withInviteCc))
+	if cc, _ := fake.body["inviteCopyTo"].([]any); len(cc) != 1 || cc[0] != "admin@example.com" {
+		t.Errorf("forwarded inviteCopyTo %v", fake.body["inviteCopyTo"])
 	}
 }
 

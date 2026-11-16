@@ -470,7 +470,7 @@ func parseWakeMember(member string) (caseID, clockType string, tier int, ok bool
 // ever runs from case.created — so it simply never gets SLA tracking. A
 // one-off script reading existing cases and calling this per case would
 // close that, not built here.
-func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string) {
+func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, engagementType, product, team string) {
 	if e.entity == nil {
 		slog.WarnContext(ctx, "slaengine: no entity-service client configured, sla clocks not registered", "caseId", caseID)
 		return
@@ -495,15 +495,16 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 		dueAt, tierDuration := dueAtAndTierDuration(startedAt, duration, state.Schedule, resolutionAvoidWeekend)
 
 		meta := ClockMeta{
-			CaseNumber: caseNumber,
-			WSO2CaseID: wso2CaseID,
-			CaseTitle:  caseTitle,
-			CaseType:   caseType,
-			Product:    product,
-			Team:       team,
-			Priority:   priority,
-			StartedAt:  startedAt,
-			Schedule:   state.Schedule,
+			CaseNumber:     caseNumber,
+			WSO2CaseID:     wso2CaseID,
+			CaseTitle:      caseTitle,
+			CaseType:       caseType,
+			EngagementType: engagementType,
+			Product:        product,
+			Team:           team,
+			Priority:       priority,
+			StartedAt:      startedAt,
+			Schedule:       state.Schedule,
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
@@ -1194,20 +1195,28 @@ func (e *Engine) alertTier(ctx context.Context, meta ClockMeta, caseID, clockTyp
 
 // sendBreachAlert builds and sends the Google Chat breach card for one tier
 // crossing, once per resolved Chat audience — team/standing-audience
-// routing (chataudience.Resolve), same as the design this replaces. Unlike
-// that design, isEvaluationAccount/onboardingStatus are always
-// false/"" here: case.created carries neither any more (see
+// routing (chataudience.Resolve), same as the design this replaces.
+// isEvaluationAccount/onboardingStatus now come from state.IsEvaluationAccount/
+// state.ProjectOnboardingStatus — the same GetClockState call already made
+// for the stale-alert check below, which entity-service now also resolves
+// these two on (see that call's own doc comment). They used to be
+// hardcoded false/"" here: case.created stopped carrying either fact (see
 // events.CaseCreatedPayload's own doc comment — a since-reverted feature
-// briefly needed them and entity-service stopped populating them), so this
-// alert routes on team alone, falling back to the fixed "Incident Monitor"
-// audience — a known, accepted reduction from the removed poll design's
-// own live entity-service lookup, not a bug. teamLeadName, by contrast, IS
-// resolved — from state.TeamLeadName below, the same GetClockState call
-// made for the stale-alert check, which entity-service now also resolves
-// this field on (see that call's own doc comment). Resolve's
-// own "Incident Monitor" fallback is retargeted to chataudience.SLADefault
-// right before sending (see that constant's own doc comment) — a different
-// webhook into the same Chat space, not a different space.
+// briefly needed them), and this call site was never updated to source
+// them another way until entity-service's GetClockState grew them, the
+// same way it already carried TeamLeadName for this identical reason. A
+// real, reported gap this closes: an onboarding-stage case's SLA breach
+// Chat alert never reached the Onboarding space at all, regardless of the
+// project's real onboarding_status, while the frustration-detection alert
+// (dispatch.checkFrustration, which gets these facts straight off its own
+// event payload) always had. Resolve's own "Incident Monitor" fallback is
+// retargeted to chataudience.SLADefault right before sending (see that
+// constant's own doc comment) — a different webhook into the same Chat
+// space, not a different space; this retargeting never applies to the
+// Onboarding/Evaluation audiences — Onboarding is added on top of the
+// team/Incident Monitor fallback rather than replacing it, and Evaluation
+// is returned exclusively (see chataudience.Resolve's own doc comment for
+// both).
 //
 // A failed send to one audience is logged (naming that Chat space) and NOT
 // retried — same explicit product decision, and same reasoning, as the
@@ -1254,6 +1263,24 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		return
 	}
 
+	// A migration engagement's only notification channel is frustration
+	// detection (dispatch.checkFrustration, routed to both the case's own
+	// team and the Migration audience) — by explicit product direction, an
+	// SLA breach on one must not also page the case's team Chat space/inbox
+	// the normal way. This can only ever fire in practice because
+	// entity-service's clock re-evaluation (ReviseCaseClocks/
+	// ApplyCaseStateEffects) has no case_type gate the way clock
+	// REGISTRATION at creation does — a case can be created as type "case",
+	// get a clock registered, and later transfer to a migration engagement
+	// without that clock ever being cancelled. The tier is still claimed/
+	// advanced and sla.tier_reached still publishes, same as the
+	// SERVICE_REQUEST skip above — only the Chat card and the two breach
+	// emails are suppressed.
+	if meta.CaseType == "ENGAGEMENT" && strings.EqualFold(meta.EngagementType, "migration") {
+		slog.InfoContext(ctx, "slaengine: migration engagement SLA breach, frustration-detection-only, skipping chat and email alert", "caseId", caseID, "clockType", clockType, "tier", tier)
+		return
+	}
+
 	caseNumber := meta.CaseNumber
 	if caseNumber == "" {
 		caseNumber = caseID
@@ -1263,7 +1290,7 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		openedAt = meta.StartedAt.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
 	}
 
-	audiences := chataudience.Resolve(meta.Team, false, "", e.clock(), e.chat.HasAudienceSpace)
+	audiences := chataudience.Resolve(meta.Team, state.IsEvaluationAccount, state.ProjectOnboardingStatus, e.clock(), e.chat.HasAudienceSpace)
 	caseLink := e.links.CSMLink(caseID)
 	for _, audience := range audiences {
 		// The Incident Monitor fallback posts through its own dedicated
@@ -1285,14 +1312,16 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 
 // sendBreachEmails sends the same tier crossing sendBreachAlert just posted
 // to Chat as two separate emails — one to the case's assigned engineer, one
-// to the case's team email group — on top of (not instead of) the Chat
+// to the case's team email group(s) — on top of (not instead of) the Chat
 // alert. A no-op when e.email is nil (no SLA breach email reaction
 // configured for this deployment). Either recipient is skipped silently
-// (logged at INFO, not WARN/ERROR) when entity-service couldn't resolve it
-// (state.AssigneeEmail/TeamEmail empty) — a case with no assignee, or a
-// team with no configured group_email, is a normal state, not a
-// misconfiguration this engine can fix; production has no real address to
-// send to in that case regardless.
+// (logged at INFO, not WARN/ERROR) when entity-service couldn't resolve any
+// address for it (state.AssigneeEmail/TeamEmail+OnboardingTeamEmail all
+// empty) — a case with no assignee, or a team with no configured
+// group_email, is a normal state, not a misconfiguration this engine can
+// fix; production has no real address to send to in that case regardless.
+// The "team" email's own "to" list can carry two addresses, not one — see
+// its call site's own doc comment just below for why.
 //
 // Unlike sendBreachAlert's own per-audience Chat sends, there is no
 // separate Redis claim guarding this against a duplicate send: the one
@@ -1334,15 +1363,20 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 	subject := notifications.SLABreachEmailSubject(clockType, data.Tier, meta.Priority, caseNumber, meta.WSO2CaseID)
 
 	// unresolvedLabel, when non-empty, names who this recipient WOULD have
-	// been (e.g. the team name) even though real is empty -- production has
+	// been (e.g. the team name) even though reals is empty -- production has
 	// nowhere to send regardless, but a debug deployment can still show it:
 	// sent to the configured debug recipients, with the body's "Sent to"
 	// line naming unresolvedLabel directly, so testing whether team routing
 	// itself resolved correctly doesn't depend on this environment also
 	// having that team's group_email configured. Assignee passes "" here --
 	// an unassigned case has no name worth surfacing this way.
-	send := func(recipientRole, real, unresolvedLabel string, render func(intendedFor string) string) {
-		if real == "" {
+	//
+	// reals can carry more than one address -- the "team" recipient below
+	// sends to BOTH the case's real CRE team and, for an onboarding-stage
+	// case, the Customer Onboarding team as well, in one email's "to" list,
+	// rather than picking one in place of the other.
+	send := func(recipientRole string, reals []string, unresolvedLabel string, render func(intendedFor string) string) {
+		if len(reals) == 0 {
 			if !e.emailDebugMode || unresolvedLabel == "" {
 				slog.InfoContext(ctx, "slaengine: sla breach email recipient not resolved, skipping", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
 				return
@@ -1360,7 +1394,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 			slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole, "unresolvedLabel", unresolvedLabel)
 			return
 		}
-		to := []string{real}
+		to := reals
 		var intendedFor string
 		if e.emailDebugMode {
 			if len(e.emailDebugRecipients) == 0 {
@@ -1368,7 +1402,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 					"caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
 				return
 			}
-			intendedFor = real
+			intendedFor = strings.Join(reals, ", ")
 			to = e.emailDebugRecipients
 		}
 		body := render(intendedFor)
@@ -1379,16 +1413,42 @@ func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, c
 		slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
 	}
 
-	send("assignee", state.AssigneeEmail, "", func(intendedFor string) string {
+	assigneeEmails := nonEmptyUnique(state.AssigneeEmail)
+	send("assignee", assigneeEmails, "", func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
 		return notifications.RenderSLABreachAssigneeEmail(state.AssigneeName, d)
 	})
-	send("team", state.TeamEmail, meta.Team, func(intendedFor string) string {
+	// TeamEmail is always the case's real CRE team, never swapped for the
+	// onboarding team (see entity-service's own GetClockState doc comment)
+	// -- OnboardingTeamEmail is a genuinely additional address, present
+	// only when the project is onboarding, so an onboarding-stage case's
+	// breach email reaches both inboxes rather than losing the CRE team's
+	// one. TeamLeadName/meta.Team (the greeting and displayed team name)
+	// stay the CRE team's own throughout -- the email never claims the
+	// onboarding team's lead leads the team actually working the case (a
+	// CodeRabbit-caught gap in an earlier version of this fix).
+	teamEmails := nonEmptyUnique(state.TeamEmail, state.OnboardingTeamEmail)
+	send("team", teamEmails, meta.Team, func(intendedFor string) string {
 		d := data
 		d.IntendedFor = intendedFor
 		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
 	})
+}
+
+// nonEmptyUnique returns values with blanks dropped and duplicates removed,
+// order preserved -- shared by sendBreachEmails' two recipient lists.
+func nonEmptyUnique(values ...string) []string {
+	var out []string
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // entityActiveClocksClient abstracts EntityClient.GetActiveCSMSLAClocks for
@@ -1851,7 +1911,18 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 // itself stores) -- comparing a lowercase "service_request" against the
 // guard's uppercase "SERVICE_REQUEST" would silently never match, which is
 // just as wrong as never updating the type at all.
-func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string) {
+//
+// newEngagementType is events.CaseTypeChangedPayload.NewEngagementType
+// (entity-service's raw, lowercase engagement type, e.g. "migration") --
+// NOT uppercased, matching EngagementType's own convention everywhere else
+// in this engine (unlike CaseType). Threaded through exactly the same way
+// as newType/CaseType just above, for the identical reason (a CodeRabbit-
+// caught gap in the first version of the migration-breach-suppression
+// fix): without this, a case transferring INTO a migration engagement kept
+// its stale pre-transfer EngagementType ("" from when it was plain "case")
+// forever, so sendBreachAlert's CaseType=="ENGAGEMENT" &&
+// EngagementType=="migration" guard never caught it either.
+func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType, newEngagementType string) {
 	if e.entity == nil {
 		return
 	}
@@ -1869,9 +1940,11 @@ func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber,
 		c := display
 		c.ClockType = clockType
 		c.CaseType = strings.ToUpper(newType)
+		c.EngagementType = newEngagementType
 		if oldMeta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
 			if newType == "" {
 				c.CaseType = oldMeta.CaseType
+				c.EngagementType = oldMeta.EngagementType
 			}
 			c.State = oldMeta.State
 		}
@@ -1956,16 +2029,17 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	}
 
 	meta := ClockMeta{
-		CaseNumber: c.CaseNumber,
-		WSO2CaseID: c.WSO2CaseID,
-		CaseTitle:  c.CaseTitle,
-		CaseType:   c.CaseType,
-		Product:    c.Product,
-		Team:       c.Team,
-		Priority:   c.Priority,
-		State:      c.State,
-		StartedAt:  startedAt,
-		Schedule:   c.Schedule,
+		CaseNumber:     c.CaseNumber,
+		WSO2CaseID:     c.WSO2CaseID,
+		CaseTitle:      c.CaseTitle,
+		CaseType:       c.CaseType,
+		EngagementType: c.EngagementType,
+		Product:        c.Product,
+		Team:           c.Team,
+		Priority:       c.Priority,
+		State:          c.State,
+		StartedAt:      startedAt,
+		Schedule:       c.Schedule,
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)

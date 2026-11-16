@@ -58,6 +58,33 @@ import type { PieSliceResult, WidgetPieData } from "@features/csm-dashboard/api/
  */
 const GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES = new Set<BeWidgetResourceType>(["incident", "problem"]);
 
+/** The key of the organisations with no owner in a PLG owner grouping
+ * (entity-service's `PlgUnownedGroupKey`); every other key is an owner's id. */
+const PLG_UNOWNED_GROUP_KEY = "unowned";
+
+/** The key of the organisations (or registrations) with no country in a PLG
+ * country grouping (entity-service's `PlgUnknownCountryGroupKey`); every
+ * other key is the country as written. */
+const PLG_UNKNOWN_COUNTRY_GROUP_KEY = "unknown";
+
+/** The key of the registrations with no answer in a PLG playbook answer
+ * grouping (entity-service's `PlgUnansweredGroupKey`); every other key is an
+ * answer's option code. */
+const PLG_UNANSWERED_GROUP_KEY = "unanswered";
+
+/**
+ * The case search's filter field for a case-family groupBy field whose bucket
+ * key it takes under another name: account and project buckets are keyed by
+ * id, which the search filters as `accountId` / `projectId`. The search has
+ * no `account` or `project` filter, so a bucket's query on its groupBy field
+ * was refused and the list it opened failed to load. Every other groupBy
+ * field is its own filter field.
+ */
+const CASE_GROUP_BY_FILTER_FIELD: ReadonlyMap<string, string> = new Map([
+  ["account", "accountId"],
+  ["project", "projectId"],
+]);
+
 /**
  * Builds a named bucket's own click-through `query` — the same shape
  * `DashboardWidgetTile`'s slice navigation merges under the widget's base
@@ -75,7 +102,9 @@ const GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES = new Set<BeWidgetResourceType>(["inc
  *    `incident_filters.go`'s, and `problem_filters.go`'s own
  *    `badXxxFilterCombo` checks all reject "state"/"eq"). A single-element
  *    `values` array with `op: "in"` is the correct, always-safe way to
- *    express "equals this one value" against any of these contracts.
+ *    express "equals this one value" against any of these contracts. A
+ *    case-family account or project bucket filters on the id field the case
+ *    search takes for it (`CASE_GROUP_BY_FILTER_FIELD`).
  * 2. `change_request`: has no generic filter-array entry for "state" at
  *    all — `ChangeRequestFieldFilter`'s own allowed field set
  *    (`createdOn`/`assignmentGroupId`/`approval`) excludes it. Change
@@ -92,7 +121,10 @@ function bucketQuery(
   field: string,
   key: string,
 ): Record<string, unknown> {
-  if (usesCaseFieldFilterDsl(resourceType) || GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES.has(resourceType)) {
+  if (usesCaseFieldFilterDsl(resourceType)) {
+    return { filters: [{ field: CASE_GROUP_BY_FILTER_FIELD.get(field) ?? field, op: "in", values: [key] }] };
+  }
+  if (GROUP_BY_FILTER_ARRAY_RESOURCE_TYPES.has(resourceType)) {
     return { filters: [{ field, op: "in", values: [key] }] };
   }
   if (resourceType === "change_request" && field === "state") {
@@ -111,7 +143,25 @@ function bucketQuery(
         return { projectIds: [key] };
       case "day":
         return { startDate: key, endDate: key };
+      case "team":
+        return { teamIds: [key] };
     }
+  }
+  // A PLG organisation owner bucket opens that owner's organisations; the
+  // aggregate's "unowned" bucket opens the ones with no owner.
+  if (resourceType === "plg_organization" && field === "owner") {
+    return key === PLG_UNOWNED_GROUP_KEY ? { unowned: true } : { ownerIds: [key] };
+  }
+  // A PLG country bucket opens that country's organisations or
+  // registrations; the "unknown" bucket opens the ones with no country.
+  if ((resourceType === "plg_organization" || resourceType === "plg_registration") && field === "country") {
+    return key === PLG_UNKNOWN_COUNTRY_GROUP_KEY ? { countryUnknown: true } : { countryNames: [key] };
+  }
+  // A PLG playbook answer bucket opens the registrations with that answer to
+  // the widget's `playbookTask` (which the merge keeps); "unanswered" opens
+  // the ones with none.
+  if (resourceType === "plg_registration" && field === "playbookAnswer") {
+    return key === PLG_UNANSWERED_GROUP_KEY ? { playbookUnanswered: true } : { playbookAnswers: [key] };
   }
   return { [field]: key };
 }
@@ -208,12 +258,12 @@ export function useWidgetGroupByData(
       // other widget's own call, so it needs both at least as much.
       return withWidgetFetchSlot(async (signal) => {
         return api.post<
-          { filters: Record<string, unknown>; groupBy: string; maxGroups?: number; measure?: string },
+          Record<string, unknown> & { groupBy: string; maxGroups?: number; measure?: string },
           BeGroupByResponse
         >(
           config.groupByEndpoint as string,
           {
-            filters: resolvedFilters,
+            ...(config.buildGroupByBody ? config.buildGroupByBody(resolvedFilters) : { filters: resolvedFilters }),
             groupBy: field,
             maxGroups: groupBy.maxGroups,
             ...measure,

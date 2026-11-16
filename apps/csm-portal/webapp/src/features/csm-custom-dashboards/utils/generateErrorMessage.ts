@@ -20,8 +20,8 @@ import { BackendApiError } from "@api/backend/client";
  * `generate*` messages) is shown as it is: 400 the prompt or the draft, 413
  * the draft too large, 429 the caller's own limit, 502 an unusable or cut-off
  * reply or the AI assistant unreachable, 503 generation unavailable or the AI
- * side's usage limit, 504 too slow. A 422 is not among them (see
- * generateErrorMessage). */
+ * side's usage limit, 504 too slow. A 422's message follows the chat's own
+ * first line instead (see generateErrorMessage). */
 const BACKEND_MESSAGE_STATUSES: ReadonlySet<number> = new Set([400, 413, 429, 502, 503, 504]);
 
 /** The start of every `errorCode` the backend puts on a generate failure it
@@ -33,9 +33,12 @@ const BACKEND_ERROR_CODE_PREFIX = "generate_";
  * What the generate chat answers when a message did not give a dashboard.
  *
  * A 422 is the request itself not working (the model declining it, a
- * refusal, or a team it cannot filter by): the chat says so in its own
- * words, "cannot be generated from the input" (or, with a draft on screen,
- * "cannot be modified with your input"), not the model's sentence.
+ * refusal, a team it cannot filter by, or a product or version that names
+ * none or several): the chat says so in its own words, "cannot be generated
+ * from the input" (or, with a draft on screen, "cannot be modified with your
+ * input"), and on the next line why, the backend's message (the model's own
+ * sentence for a decline) when it sent one. Without one, the first line
+ * alone.
  *
  * Otherwise the backend's own message when it sent one (its JSON body's
  * `message`, marked as the backend's by an `errorCode` starting `generate_`):
@@ -59,17 +62,15 @@ export function generateErrorMessage(err: unknown, editing: boolean): string {
     return "The portal didn't get an answer. Check your connection and try again.";
   }
   if (err.status === 422) {
-    return editing
+    const lead = editing
       ? "This dashboard cannot be modified with your input."
       : "The dashboard cannot be generated from the input.";
+    const reason = backendMessage(err);
+    return reason ? `${lead}\n${reason}` : lead;
   }
-  const fromBackend =
-    BACKEND_MESSAGE_STATUSES.has(err.status) &&
-    typeof err.payload?.errorCode === "string" &&
-    err.payload.errorCode.startsWith(BACKEND_ERROR_CODE_PREFIX);
-  const backendMessage = fromBackend && typeof err.payload?.message === "string" ? err.payload.message : undefined;
-  if (backendMessage) {
-    return backendMessage;
+  const message = BACKEND_MESSAGE_STATUSES.has(err.status) ? backendMessage(err) : undefined;
+  if (message) {
+    return message;
   }
   if (err.status === 504) {
     return "The AI assistant took too long to answer. Try again.";
@@ -86,4 +87,13 @@ export function generateErrorMessage(err: unknown, editing: boolean): string {
   return editing
     ? "Something went wrong while changing the dashboard. Try again."
     : "Something went wrong while creating the dashboard. Try again.";
+}
+
+/** The backend's own message on a failure: its JSON body's `message`, when
+ * the body's `errorCode` marks it as the backend's (BACKEND_ERROR_CODE_PREFIX)
+ * and it has some text. */
+function backendMessage(err: BackendApiError): string | undefined {
+  const { errorCode, message } = err.payload ?? {};
+  if (typeof errorCode !== "string" || !errorCode.startsWith(BACKEND_ERROR_CODE_PREFIX)) return undefined;
+  return typeof message === "string" ? message.trim() || undefined : undefined;
 }

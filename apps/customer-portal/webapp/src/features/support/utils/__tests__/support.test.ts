@@ -36,6 +36,7 @@ import {
   normalizeCaseTypeOptions,
   plainTextCommentToHtml,
   replaceInlineImageSources,
+  resolveActionStateKey,
   stripCodeWrapper,
   toUtcEndOfDay,
   toUtcStartOfDay,
@@ -565,6 +566,36 @@ describe("plainTextCommentToHtml", () => {
     expect(plainTextCommentToHtml("Line one\r\nLine two")).toBe("Line one<br>Line two");
   });
 
+  it("inserts a blank line after a greeting and before a sign-off even with only a single Enter", () => {
+    expect(
+      plainTextCommentToHtml(
+        "Hello,\nPlease let us know whether you need further support for this case. Please note that if you are unable to respond, the case will be closed off after one week.\nThanks,\nWSO2 Team",
+      ),
+    ).toBe(
+      "Hello,<br><br>Please let us know whether you need further support for this case. Please note that if you are unable to respond, the case will be closed off after one week.<br><br>Thanks,<br>WSO2 Team",
+    );
+  });
+
+  it("does not add a second blank line when the author already left one", () => {
+    expect(plainTextCommentToHtml("Hello,\n\nBody\n\nThanks,")).toBe("Hello,<br><br>Body<br><br>Thanks,");
+  });
+
+  it("does not add spacing around a sentence that merely starts with thanks", () => {
+    expect(plainTextCommentToHtml("Line one\nThanks for your patience\nLine three")).toBe(
+      "Line one<br>Thanks for your patience<br>Line three",
+    );
+  });
+
+  it("does not treat a greeting-worded sentence with its own comma as an opening greeting", () => {
+    expect(plainTextCommentToHtml("Hi, I checked the configuration,\nand it looks good.")).toBe(
+      "Hi, I checked the configuration,<br>and it looks good.",
+    );
+  });
+
+  it("adds a blank line before a sign-off with an escaped ampersand", () => {
+    expect(plainTextCommentToHtml("Body\nThanks & Regards,")).toBe("Body<br><br>Thanks &amp; Regards,");
+  });
+
   it("HTML-escapes a literal <, >, &, quote the author typed as plain text", () => {
     expect(plainTextCommentToHtml("Use < and > and & and \"quotes\" and it's")).toBe(
       "Use &lt; and &gt; and &amp; and &quot;quotes&quot; and it&#39;s",
@@ -682,5 +713,26 @@ describe("downloadSizeOf", () => {
     for (const v of [undefined, null, "", "abc", 0, -5, Number.NaN]) {
       expect(downloadSizeOf(v)).toBeUndefined();
     }
+  });
+});
+
+describe("resolveActionStateKey", () => {
+  const caseStates = [
+    { id: "3", label: "Closed" },
+    { id: "10", label: "In Progress" },
+  ];
+
+  it("looks the state up by label when the project lists it", () => {
+    expect(resolveActionStateKey("Closed", caseStates)).toBe(3);
+  });
+
+  it("sends the Waiting On WSO2 key even though the list no longer holds it", () => {
+    expect(resolveActionStateKey("Waiting on WSO2", caseStates)).toBe(1003);
+    expect(resolveActionStateKey("Reject Solution", caseStates)).toBe(1003);
+    expect(resolveActionStateKey("Waiting on WSO2", undefined)).toBe(1003);
+  });
+
+  it("returns undefined for an action with no state", () => {
+    expect(resolveActionStateKey("Open Related Case", caseStates)).toBeUndefined();
   });
 });

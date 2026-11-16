@@ -30,7 +30,7 @@ var tokenFetchTimeout = 10 * time.Second
 const maxResponseBytes = 8 << 20
 
 // Report is one deprecated product usage report as entity-service returns it: the
-// customers running a product version past its EOL date in an active
+// customers running a product version whose support status is Deprecated in an active
 // Primary Production deployment, grouped by region, then account, then
 // project. entity-service sends null for a text it lacks (region, CS ABT,
 // project key) and leaves out a person's missing name or email; both decode
@@ -85,7 +85,7 @@ type Project struct {
 	Versions   []Version `json:"versions"`
 }
 
-// Version is one product version past its EOL date.
+// Version is one deprecated product version.
 type Version struct {
 	ProductVersionID string `json:"productVersionId"`
 	ProductName      string `json:"productName"`

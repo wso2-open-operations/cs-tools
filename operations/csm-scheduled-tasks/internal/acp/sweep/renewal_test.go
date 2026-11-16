@@ -78,7 +78,7 @@ func runRenewal(t *testing.T, reader *mockEntityReader, proj project) (*mockProj
 	t.Helper()
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
-	if err := processProject(context.Background(), reader, updater, ntf, renewalNow, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, updater, ntf, renewalNow, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 	if len(ntf.sent) != 0 {
@@ -227,7 +227,7 @@ func TestProcessProject_InvoiceLookupFails_InvoiceNotReset(t *testing.T) {
 		},
 	}
 	updater := &mockProjectUpdater{}
-	err := processProject(context.Background(), reader, updater, &mockNotifier{}, renewalNow, renewalProject(390, "30_days_notice", "15_days_notice"))
+	_, err := processProject(context.Background(), reader, updater, &mockNotifier{}, renewalNow, renewalProject(390, "30_days_notice", "15_days_notice"))
 	if err == nil {
 		t.Fatal("processProject() error = nil, want the invoice lookup error")
 	}
@@ -247,7 +247,7 @@ func TestProcessProject_ResetWriteFails_ReturnsError(t *testing.T) {
 			return nil, errors.New("csm down")
 		},
 	}
-	err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, renewalNow, renewalProject(390, "30_days_notice", "open"))
+	_, err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, renewalNow, renewalProject(390, "30_days_notice", "open"))
 	if err == nil {
 		t.Error("processProject() error = nil, want the failed reset write")
 	}

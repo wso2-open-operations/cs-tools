@@ -133,8 +133,9 @@ func NewOutageRepository(db *Scoped) OutageRepository {
 // with no offering, no monitor and no incident is ordinary, not an error.
 //
 // cloud_monitor decides publication. One monitor per offering is the
-// invariant in the data (146 offerings, 146 monitors), and DISTINCT guards
-// the case where that stops being true rather than multiplying rows.
+// invariant in the data (146 offerings, 146 monitors), and LIMIT 1 guards
+// the case where that stops being true rather than multiplying rows. The
+// monitor's cloud is resolved to its registered slug here, active clouds only.
 const outageSelect = `
 SELECT o.id::text,
        COALESCE(o.number, ''),
@@ -144,7 +145,7 @@ SELECT o.id::text,
        COALESCE(o.name, ''),
        so.id::text,
        COALESCE(so.name, ''),
-       cm.cloud_offering::text,
+       cm.cloud_slug,
        wi.id::text,
        COALESCE(wi.number, ''),
        COALESCE(wi.subject, ''),
@@ -160,9 +161,11 @@ SELECT o.id::text,
   FROM outage o
   LEFT JOIN service_offering so ON so.id = o.service_offering_id
   LEFT JOIN LATERAL (
-       SELECT DISTINCT m.cloud_offering
+       SELECT c.slug AS cloud_slug
          FROM cloud_monitor m
+         JOIN cloud_registry c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
         WHERE m.service_offering_id = o.service_offering_id
+        ORDER BY m.id
         LIMIT 1
   ) cm ON TRUE
   -- work_item carries number and subject; incident extends it and carries
@@ -236,12 +239,11 @@ func scanOutage(row pgx.Row) (domain.Outage, error) {
 
 	// A monitor for the offering IS the publish switch, the same join the
 	// cloud status sweep uses to pick a dashboard.
+	// The query resolves the registry's slug, and only for an active cloud.
 	if cloud != nil && *cloud != "" {
-		slug := domain.CloudOfferingSlug(*cloud)
-		if slug != "" {
-			out.PublishesToStatusPage = true
-			out.StatusPageCloud = &slug
-		}
+		slug := *cloud
+		out.PublishesToStatusPage = true
+		out.StatusPageCloud = &slug
 	}
 
 	out.AffectedConfigurationItems = []domain.OutageConfigurationItemRef{}
@@ -748,18 +750,17 @@ func (r *outageRepo) PublicationFor(ctx context.Context, serviceOfferingID *stri
 		return false, nil, nil
 	}
 	const q = `
-SELECT m.cloud_offering::text FROM cloud_monitor m
- WHERE m.service_offering_id = $1::uuid LIMIT 1`
-	var cloud string
-	if err := r.db.QueryRow(ctx, q, *serviceOfferingID).Scan(&cloud); err != nil {
+SELECT c.slug FROM cloud_monitor m
+  JOIN cloud_registry c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
+ WHERE m.service_offering_id = $1::uuid
+ ORDER BY m.id
+ LIMIT 1`
+	var slug string
+	if err := r.db.QueryRow(ctx, q, *serviceOfferingID).Scan(&slug); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil, nil
 		}
 		return false, nil, fmt.Errorf("resolve publication: %w", err)
-	}
-	slug := domain.CloudOfferingSlug(cloud)
-	if slug == "" {
-		return false, nil, nil
 	}
 	return true, &slug, nil
 }
@@ -852,7 +853,11 @@ SELECT id::text, channel, comment, created_on, COALESCE(created_by, '')
 
 // MonitoredClouds lists every cloud an outage could become visible on.
 func (r *outageRepo) MonitoredClouds(ctx context.Context) ([]string, error) {
-	const q = `SELECT DISTINCT cloud_offering::text FROM cloud_monitor ORDER BY 1`
+	const q = `
+SELECT DISTINCT c.slug
+  FROM cloud_monitor m
+  JOIN cloud_registry c ON c.offering_key = m.cloud_offering AND c.is_active IS TRUE
+ ORDER BY 1`
 	rows, err := r.db.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("monitored clouds: %w", err)
@@ -861,13 +866,11 @@ func (r *outageRepo) MonitoredClouds(ctx context.Context) ([]string, error) {
 
 	clouds := []string{}
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, fmt.Errorf("scan cloud offering: %w", err)
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, fmt.Errorf("scan cloud slug: %w", err)
 		}
-		if slug := domain.CloudOfferingSlug(raw); slug != "" {
-			clouds = append(clouds, slug)
-		}
+		clouds = append(clouds, slug)
 	}
 	return clouds, rows.Err()
 }

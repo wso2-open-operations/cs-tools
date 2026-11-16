@@ -40,6 +40,7 @@ import {
   downloadProjectListCsv,
   downloadProjectListPdf,
 } from "@features/project-hub/utils/projectsExport";
+import { formatClosureState } from "@features/project-hub/utils/closureState";
 
 const DATE_LOCALE = "en-US";
 const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
@@ -213,7 +214,7 @@ const ProjectListTable = ({
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={project.closureState ?? "Active"}
+                        label={formatClosureState(project.closureState)}
                         size="small"
                         color={isSuspended ? "warning" : "success"}
                         variant="outlined"

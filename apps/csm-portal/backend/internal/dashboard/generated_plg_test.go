@@ -1,0 +1,410 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+package dashboard
+
+import (
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// plgDashboard wraps widgets in a generated cs dashboard.
+func plgDashboard(widgets ...string) string {
+	return `{"displayName":"PLG","type":"cs","isDefault":false,"targetTeam":"","isTeamBased":false,"widgets":[` + strings.Join(widgets, ",") + `]}`
+}
+
+// TestParseGenerated_AcceptsPlgWidgets checks the PLG counts and lists a
+// generated dashboard may hold: every flat filter, plain and relative
+// registration dates, and the organisation list's sorts.
+func TestParseGenerated_AcceptsPlgWidgets(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"trials","displayName":"IAM Organisations on a Trial","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"productCodes":["IAM"],"subscriptionTiers":["TRIAL","TRIAL_EXTENDED"]}}`,
+		`{"id":"unowned","displayName":"Unowned Activated Organisations","resourceType":"plg_organization","shape":"list","gridWidth":6,"listLimit":5,
+		  "sortBy":{"field":"name","order":"asc"},"query":{"lifecycleStages":["ACTIVATED","COMMERCIAL"],"unowned":true}}`,
+		`{"id":"newest","displayName":"Organisations Registered This Month","resourceType":"plg_organization","shape":"list","gridWidth":6,"listLimit":5,
+		  "sortBy":{"field":"registeredOn","order":"desc"},"query":{"registeredFrom":"__startOfMonth:0__","registeredTo":"__today__"}}`,
+		`{"id":"new-regs","displayName":"New Registrations","resourceType":"plg_registration","shape":"count","gridWidth":3,
+		  "query":{"unacknowledgedOnly":true}}`,
+		`{"id":"regs-2026","displayName":"API Platform Registrations in October 2026","resourceType":"plg_registration","shape":"list","gridWidth":6,"listLimit":5,
+		  "query":{"productCodes":["API_PLATFORM"],"registeredFrom":"2026-10-01","registeredTo":"2026-10-31"}}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if len(d.Widgets) != 5 {
+		t.Fatalf("widgets = %d, want 5", len(d.Widgets))
+	}
+}
+
+// TestParseGenerated_AcceptsPlgSlices checks a PLG pie or bar grouped with
+// slices: each slice's query takes the same filters as the widget's, so a
+// registration slice may set unacknowledgedOnly and relative registration
+// dates.
+func TestParseGenerated_AcceptsPlgSlices(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-product","displayName":"Organisations by Product","resourceType":"plg_organization","shape":"pie","gridWidth":6,
+		  "query":{"subscriptionTiers":["TRIAL","TRIAL_EXTENDED"]},
+		  "slices":[{"label":"Identity & Access Management","query":{"productCodes":["IAM"]}},{"label":"API Platform","query":{"productCodes":["API_PLATFORM"]}}]}`,
+		`{"id":"by-stage","displayName":"Organisations by Stage","resourceType":"plg_organization","shape":"bar","gridWidth":6,"query":{},
+		  "slices":[{"label":"Activated","query":{"lifecycleStages":["ACTIVATED"]}},{"label":"Unowned","query":{"unowned":true}}]}`,
+		`{"id":"signups","displayName":"Sign-ups, Last 3 Months","resourceType":"plg_registration","shape":"bar","gridWidth":6,"query":{"unacknowledgedOnly":true},
+		  "slices":[{"label":"2 Months Ago","query":{"registeredFrom":"__startOfMonth:-2__","registeredTo":"__endOfMonth:-2__"}},
+		            {"label":"Last Month","query":{"registeredFrom":"__startOfMonth:-1__","registeredTo":"__endOfMonth:-1__"}},
+		            {"label":"This Month","query":{"registeredFrom":"__startOfMonth:0__","registeredTo":"__today__"}}]}`,
+		`{"id":"new-by-tier","displayName":"New Registrations by Tier","resourceType":"plg_registration","shape":"pie","gridWidth":6,"query":{},
+		  "slices":[{"label":"Free","query":{"subscriptionTiers":["FREE"],"unacknowledgedOnly":true}},{"label":"Pay as You Go","query":{"subscriptionTiers":["PAYG"],"unacknowledgedOnly":true}}]}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if len(d.Widgets) != 4 || len(d.Widgets[2].Slices) != 3 {
+		t.Fatalf("widgets = %d, signups slices = %d, want 4 and 3", len(d.Widgets), len(d.Widgets[2].Slices))
+	}
+}
+
+// TestParseGenerated_AcceptsPlgRegistrationLines checks the registration trend
+// a generated dashboard may hold: the trailing days, a fixed window by day,
+// week or month (plain or relative dates), as bars, over the registration
+// filters.
+func TestParseGenerated_AcceptsPlgRegistrationLines(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"last-30","displayName":"PLG Sign-ups, Last 30 Days","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"productCodes":["IAM"]},"days":30}`,
+		`{"id":"per-month","displayName":"PLG Sign-ups per Month, Last 3 Months","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month","chart":"bar"}`,
+		`{"id":"per-week","displayName":"New Registrations per Week This Year","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"unacknowledgedOnly":true},"startDate":"__startOfYear:0__","endDate":"__endOfYear:0__","bucket":"week"}`,
+		`{"id":"oct-2026","displayName":"Sign-ups per Day in October 2026","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"lifecycleStages":["ACTIVATED"]},"startDate":"2026-10-01","endDate":"2026-10-31"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if w := d.Widgets[1]; w.Shape != ShapeLine || w.Bucket != LineBucketMonth || w.Chart != LineChartBar || w.StartDate != "__startOfMonth:-2__" {
+		t.Errorf("per-month = %+v, want a month line from __startOfMonth:-2__ as bars", w)
+	}
+	if w := d.Widgets[0]; w.Days != 30 || w.StartDate != "" {
+		t.Errorf("last-30 = days %d window %q, want the trailing 30 days", w.Days, w.StartDate)
+	}
+}
+
+// TestParseGenerated_AcceptsMyPlgWidgets checks "my PLG organisations" and
+// "my registrations": ownerIds exactly ["__current_user__"], on either PLG
+// type, in a query, a slice or a registration line.
+func TestParseGenerated_AcceptsMyPlgWidgets(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"mine","displayName":"My PLG Organisations","resourceType":"plg_organization","shape":"list","gridWidth":6,"listLimit":5,
+		  "sortBy":{"field":"name","order":"asc"},"query":{"ownerIds":["__current_user__"]}}`,
+		`{"id":"my-new","displayName":"My New Registrations","resourceType":"plg_registration","shape":"count","gridWidth":3,
+		  "query":{"ownerIds":["__current_user__"],"unacknowledgedOnly":true}}`,
+		`{"id":"mine-vs-unowned","displayName":"Mine and Unowned","resourceType":"plg_organization","shape":"pie","gridWidth":6,"query":{},
+		  "slices":[{"label":"Mine","query":{"ownerIds":["__current_user__"]}},{"label":"Unowned","query":{"unowned":true}}]}`,
+		`{"id":"my-signups","displayName":"My Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"ownerIds":["__current_user__"]},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if got := d.Widgets[0].Query["ownerIds"]; !reflect.DeepEqual(got, []any{"__current_user__"}) {
+		t.Errorf("mine ownerIds = %#v, want the placeholder kept for the webapp to resolve", got)
+	}
+}
+
+// TestParseGenerated_AcceptsPlgOwnerEmails checks "owned by <email>":
+// ownerEmails on either PLG type, in a query, a slice, a grouping by owner and
+// a registration line, kept as written.
+func TestParseGenerated_AcceptsPlgOwnerEmails(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"bobs","displayName":"Bob's PLG Organisations","resourceType":"plg_organization","shape":"list","gridWidth":6,"listLimit":5,
+		  "sortBy":{"field":"name","order":"asc"},"query":{"ownerEmails":["Bob.Owner@example.com"]}}`,
+		`{"id":"two-owners","displayName":"Registrations of Two Owners","resourceType":"plg_registration","shape":"count","gridWidth":3,
+		  "query":{"ownerEmails":["bob@example.com","alice@example.com"],"unowned":false}}`,
+		`{"id":"bob-vs-alice","displayName":"Bob and Alice","resourceType":"plg_organization","shape":"pie","gridWidth":6,"query":{},
+		  "slices":[{"label":"Bob","query":{"ownerEmails":["bob@example.com"]}},{"label":"Alice","query":{"ownerEmails":["alice@example.com"]}}]}`,
+		`{"id":"by-owner","displayName":"Bob and Alice by Owner","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{"ownerEmails":["bob@example.com","alice@example.com"]},"groupBy":{"field":"owner","maxGroups":5}}`,
+		`{"id":"bobs-signups","displayName":"Bob's Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"ownerEmails":["bob@example.com"]},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if got := d.Widgets[0].Query["ownerEmails"]; !reflect.DeepEqual(got, []any{"Bob.Owner@example.com"}) {
+		t.Errorf("bobs ownerEmails = %#v, want the address as written", got)
+	}
+	longest := strings.Repeat("a", 242) + "@example.com" // 254 characters
+	if _, err := ParseGenerated([]byte(plgDashboard(`{"id":"w","displayName":"W","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"ownerEmails":["  ` + longest + ` "]}}`))); err != nil {
+		t.Errorf("a 254-character owner email with spaces around it: %v", err)
+	}
+}
+
+// TestParseGenerated_AcceptsPlgOrganisationsByOwner checks "PLG
+// organisations by owner": a pie or bar grouped by owner on the server, with
+// the widget's filters and maxGroups kept.
+func TestParseGenerated_AcceptsPlgOrganisationsByOwner(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-owner","displayName":"PLG Organisations by Owner","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{},"groupBy":{"field":"owner","maxGroups":10}}`,
+		`{"id":"iam-by-owner","displayName":"Activated IAM Organisations by Owner","resourceType":"plg_organization","shape":"pie","gridWidth":6,
+		  "query":{"productCodes":["IAM"],"lifecycleStages":["ACTIVATED"]},"groupBy":{"field":"owner","maxGroups":5}}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[1].GroupBy; g == nil || g.Field != "owner" || g.MaxGroups != 5 {
+		t.Errorf("iam-by-owner groupBy = %+v, want owner with maxGroups 5", g)
+	}
+	if got := d.Widgets[1].Query["productCodes"]; !reflect.DeepEqual(got, []any{"IAM"}) {
+		t.Errorf("iam-by-owner productCodes = %#v, want the filter kept", got)
+	}
+}
+
+// TestParseGenerated_AcceptsPlgMaxGroupsUpTo50: a PLG grouping takes
+// maxGroups up to entity-service's 50, or none for its default.
+func TestParseGenerated_AcceptsPlgMaxGroupsUpTo50(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-owner","displayName":"By Owner","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{},"groupBy":{"field":"owner","maxGroups":50}}`,
+		`{"id":"by-country","displayName":"By Country","resourceType":"plg_registration","shape":"pie","gridWidth":6,
+		  "query":{},"groupBy":{"field":"country"}}`,
+	)
+	if _, err := ParseGenerated([]byte(raw)); err != nil {
+		t.Errorf("ParseGenerated: %v", err)
+	}
+}
+
+// TestParseGenerated_AcceptsPlgCountries checks "by country" on either PLG
+// type (a pie or bar grouped on the server), "in <country>" (countryNames,
+// written as the prompt names them), "no country" (countryUnknown), and
+// countries as slices.
+func TestParseGenerated_AcceptsPlgCountries(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"orgs-by-country","displayName":"PLG Organisations by Country","resourceType":"plg_organization","shape":"bar","gridWidth":6,
+		  "query":{"productCodes":["IAM"]},"groupBy":{"field":"country","maxGroups":10}}`,
+		`{"id":"new-by-country","displayName":"New Registrations by Country","resourceType":"plg_registration","shape":"pie","gridWidth":6,
+		  "query":{"unacknowledgedOnly":true},"groupBy":{"field":"country","maxGroups":8}}`,
+		`{"id":"in-sri-lanka","displayName":"Cloud Organisations in Sri Lanka or India","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"countryNames":["Sri Lanka","India"],"countryUnknown":false}}`,
+		`{"id":"no-country","displayName":"Registrations with No Country","resourceType":"plg_registration","shape":"list","gridWidth":6,"listLimit":5,
+		  "query":{"countryUnknown":true}}`,
+		`{"id":"sl-vs-in","displayName":"Sri Lanka and India","resourceType":"plg_registration","shape":"bar","gridWidth":6,"query":{},
+		  "slices":[{"label":"Sri Lanka","query":{"countryNames":["Sri Lanka"]}},{"label":"India","query":{"countryNames":["India"]}}]}`,
+		`{"id":"sl-signups","displayName":"Sri Lanka Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"countryNames":["Sri Lanka"]},"startDate":"__startOfMonth:-2__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[1].GroupBy; g == nil || g.Field != "country" || g.MaxGroups != 8 {
+		t.Errorf("new-by-country groupBy = %+v, want country with maxGroups 8", g)
+	}
+	if got := d.Widgets[2].Query["countryNames"]; !reflect.DeepEqual(got, []any{"Sri Lanka", "India"}) {
+		t.Errorf("in-sri-lanka countryNames = %#v, want the names as written", got)
+	}
+}
+
+// TestParseGenerated_AcceptsPlgPlaybookAnswers: the playbook answer
+// filters on both types, slices by answer, and registrations grouped by their
+// answer to the query's task.
+func TestParseGenerated_AcceptsPlgPlaybookAnswers(t *testing.T) {
+	raw := plgDashboard(
+		`{"id":"by-outcome","displayName":"Sign-ups by Assessment Outcome","resourceType":"plg_registration","shape":"bar","gridWidth":6,
+		  "query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","lifecycleStages":["REGISTRATION"]},"groupBy":{"field":"playbookAnswer","maxGroups":10}}`,
+		`{"id":"disposable","displayName":"Disposable Email Sign-ups","resourceType":"plg_registration","shape":"list","gridWidth":6,"listLimit":5,
+		  "query":{"playbookTask":"REGISTERED_EMAIL_CLASSIFICATION","playbookAnswers":["DISPOSABLE"]}}`,
+		`{"id":"excluded","displayName":"Excluded Organisations","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookAnswers":["EXCLUDED"]}}`,
+		`{"id":"not-assessed","displayName":"Organisations Not Assessed","resourceType":"plg_organization","shape":"count","gridWidth":3,
+		  "query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookUnanswered":true}}`,
+		`{"id":"outcome-slices","displayName":"Organisations by Outcome","resourceType":"plg_organization","shape":"pie","gridWidth":6,
+		  "query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME"},
+		  "slices":[{"label":"Monitor","query":{"playbookAnswers":["MONITOR"]}},{"label":"Not assessed","query":{"playbookUnanswered":true}}]}`,
+		`{"id":"mixed-slices","displayName":"Watch List","resourceType":"plg_registration","shape":"bar","gridWidth":6,"query":{},
+		  "slices":[{"label":"Monitor","query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookAnswers":["MONITOR"]}},
+		            {"label":"Disposable email","query":{"playbookTask":"REGISTERED_EMAIL_CLASSIFICATION","playbookAnswers":["DISPOSABLE"]}}]}`,
+		`{"id":"excluded-trend","displayName":"Excluded Sign-ups per Month","resourceType":"plg_registration","shape":"line","gridWidth":12,
+		  "query":{"playbookTask":"ELIGIBILITY_ASSESSMENT_OUTCOME","playbookAnswers":["EXCLUDED"]},"startDate":"__startOfYear:0__","endDate":"__today__","bucket":"month"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[0].GroupBy; g == nil || g.Field != "playbookAnswer" || g.MaxGroups != 10 {
+		t.Errorf("by-outcome groupBy = %+v, want playbookAnswer with maxGroups 10", g)
+	}
+}
+
+// TestParseGenerated_RejectsPlgWidgetsItCannotRun checks that a PLG widget
+// holds only what the PLG searches take and a prompt can name.
+func TestParseGenerated_RejectsPlgWidgetsItCannotRun(t *testing.T) {
+	org := func(shape, rest string) string {
+		return plgDashboard(`{"id":"w","displayName":"W","resourceType":"plg_organization","shape":"` + shape + `","gridWidth":6` + rest + `}`)
+	}
+	reg := func(shape, rest string) string {
+		return plgDashboard(`{"id":"w","displayName":"W","resourceType":"plg_registration","shape":"` + shape + `","gridWidth":6` + rest + `}`)
+	}
+	cases := []struct {
+		name, raw, want string
+	}{
+		{"line", org("line", `,"query":{},"days":30`), "shape must be count, list, pie or bar"},
+		{"pie without slices", org("pie", `,"query":{}`), "needs either"},
+		{"pie grouped by product on the server", org("pie", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "groups by owner or country only"},
+		{"bar grouped by an owner bucket", org("bar", `,"query":{},"groupBy":{"bucket":"month"}`), "groups by owner or country only"},
+		{"owner grouping and slices", org("pie", `,"query":{},"groupBy":{"field":"owner"},"slices":[{"label":"Unowned","query":{"unowned":true}}]`), `carries both "slices" and "groupBy"`},
+		{"owner grouping in hours", org("bar", `,"query":{},"groupBy":{"field":"owner","measure":"hours"}`), `"groupBy.measure"`},
+		{"registrations by owner", reg("pie", `,"query":{},"groupBy":{"field":"owner","maxGroups":5}`), "a PLG registration widget groups by country or playbookAnswer only"},
+		{"a registration line by owner", reg("line", `,"query":{},"days":30,"groupBy":{"field":"owner"}`), "groups by country or playbookAnswer only"},
+		{"a registration line by country", reg("line", `,"query":{},"days":30,"groupBy":{"field":"country"}`), `groups only as a pie or bar, not a "line"`},
+		{"an organisation count by country", org("count", `,"query":{},"groupBy":{"field":"country"}`), `groups only as a pie or bar, not a "count"`},
+		{"a registration list by country", reg("list", `,"query":{},"listLimit":5,"groupBy":{"field":"country"}`), `groups only as a pie or bar, not a "list"`},
+		{"countries as a string", org("count", `,"query":{"countryNames":"India"}`), "countryNames must be a list of strings"},
+		{"no countries", org("count", `,"query":{"countryNames":[]}`), "countryNames must be a list of 1 to 20 values"},
+		{"21 countries", reg("count", `,"query":{"countryNames":["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U"]}`), "countryNames must be a list of 1 to 20"},
+		{"a blank country", org("count", `,"query":{"countryNames":["India"," "]}`), "each value must be 1 to 100 characters"},
+		{"a 101-character country", org("count", `,"query":{"countryNames":["`+strings.Repeat("a", 101)+`"]}`), "each value must be 1 to 100 characters"},
+		{"countryUnknown as a string", reg("count", `,"query":{"countryUnknown":"true"}`), "countryUnknown must be true or false"},
+		{"a country and none", org("count", `,"query":{"countryNames":["India"],"countryUnknown":true}`), `query: "countryNames" and "countryUnknown" cannot be combined`},
+		{"no country, and a slice's country", reg("pie", `,"query":{"countryUnknown":true},"slices":[{"label":"India","query":{"countryNames":["India"]}}]`), `slices[0].query: "countryNames" and "countryUnknown" cannot be combined`},
+		{"a country, and a slice with none", org("bar", `,"query":{"countryNames":["India"]},"slices":[{"label":"None","query":{"countryUnknown":true}}]`), `slices[0].query: "countryNames" and "countryUnknown" cannot be combined`},
+		{"organisations by answer", org("bar", `,"query":{"playbookTask":"T"},"groupBy":{"field":"playbookAnswer"}`), "groups by owner or country only"},
+		{"an answer grouping with no task", reg("bar", `,"query":{},"groupBy":{"field":"playbookAnswer"}`), "grouping by playbookAnswer needs query.playbookTask"},
+		{"an answer grouping, the task in a slice only", reg("bar", `,"query":{},"groupBy":{"field":"playbookAnswer"},"slices":[{"label":"A","query":{"playbookTask":"T"}}]`), "grouping by playbookAnswer needs query.playbookTask"},
+		{"an answer grouping as a list", reg("list", `,"query":{"playbookTask":"T"},"listLimit":5,"groupBy":{"field":"playbookAnswer"}`), `groups only as a pie or bar, not a "list"`},
+		{"an answer grouping as a line", reg("line", `,"query":{"playbookTask":"T"},"days":30,"groupBy":{"field":"playbookAnswer"}`), `groups only as a pie or bar, not a "line"`},
+		{"a task as a list", reg("count", `,"query":{"playbookTask":["T"]}`), "playbookTask must be one code of 1 to 100 characters"},
+		{"a blank task", org("count", `,"query":{"playbookTask":" ","playbookAnswers":["A"]}`), "playbookTask must be one code of 1 to 100 characters"},
+		{"a 101-character task", org("count", `,"query":{"playbookTask":"`+strings.Repeat("T", 101)+`"}`), "playbookTask must be one code of 1 to 100 characters"},
+		{"answers as a string", reg("count", `,"query":{"playbookTask":"T","playbookAnswers":"A"}`), "playbookAnswers must be a list of strings"},
+		{"no answers", reg("count", `,"query":{"playbookTask":"T","playbookAnswers":[]}`), "playbookAnswers must be a list of 1 to 20 values"},
+		{"a blank answer", org("count", `,"query":{"playbookTask":"T","playbookAnswers":["A"," "]}`), "each value must be 1 to 100 characters"},
+		{"unanswered as a string", reg("count", `,"query":{"playbookTask":"T","playbookUnanswered":"true"}`), "playbookUnanswered must be true or false"},
+		{"answers with no task", org("count", `,"query":{"playbookAnswers":["A"]}`), `query: "playbookAnswers" needs "playbookTask"`},
+		{"unanswered with no task", reg("count", `,"query":{"playbookUnanswered":true}`), `query: "playbookUnanswered" needs "playbookTask"`},
+		{"a slice's answers with no task", org("bar", `,"query":{},"slices":[{"label":"A","query":{"playbookAnswers":["A"]}}]`), `slices[0].query: "playbookAnswers" needs "playbookTask"`},
+		{"answers and unanswered", reg("count", `,"query":{"playbookTask":"T","playbookAnswers":["A"],"playbookUnanswered":true}`), `query: "playbookAnswers" and "playbookUnanswered" cannot be combined`},
+		{"answers, and a slice not answered", org("bar", `,"query":{"playbookTask":"T","playbookAnswers":["A"]},"slices":[{"label":"None","query":{"playbookUnanswered":true}}]`), `slices[0].query: "playbookAnswers" and "playbookUnanswered" cannot be combined`},
+		{"slice with owner ids", org("bar", `,"query":{},"slices":[{"label":"Mine","query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}}]`), `slices[0].query.ownerIds can only be ["__current_user__"]`},
+		{"slice with an unknown stage", reg("pie", `,"query":{},"slices":[{"label":"Won","query":{"lifecycleStages":["WON"]}}]`), `"WON" is not a PLG registration lifecycle stage`},
+		{"slice unacknowledged on organisations", org("pie", `,"query":{},"slices":[{"label":"New","query":{"unacknowledgedOnly":true}}]`), `slices[0].query: "unacknowledgedOnly" is not a PLG organisation filter`},
+		{"slice with a bad date", reg("bar", `,"query":{},"slices":[{"label":"Sep","query":{"registeredFrom":"September"}}]`), "slices[0].query.registeredFrom must be a date"},
+		{"unknown product", org("count", `,"query":{"productCodes":["CHOREO"]}`), `"CHOREO" is not a PLG organisation product`},
+		{"lower-case stage", org("count", `,"query":{"lifecycleStages":["activated"]}`), `"activated" is not a PLG organisation lifecycle stage`},
+		{"unknown tier", org("count", `,"query":{"subscriptionTiers":["ENTERPRISE"]}`), `"ENTERPRISE" is not a PLG organisation subscription tier`},
+		{"owner ids", org("count", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]}`), `query.ownerIds can only be ["__current_user__"]`},
+		{"an owner email as a string", org("count", `,"query":{"ownerEmails":"bob@example.com"}`), "ownerEmails must be a list of strings"},
+		{"no owner emails", reg("count", `,"query":{"ownerEmails":[]}`), "ownerEmails must be a list of 1 to 20 email addresses"},
+		{"21 owner emails", org("count", `,"query":{"ownerEmails":["o0@example.com","o1@example.com","o2@example.com","o3@example.com","o4@example.com","o5@example.com","o6@example.com","o7@example.com","o8@example.com","o9@example.com","o10@example.com","o11@example.com","o12@example.com","o13@example.com","o14@example.com","o15@example.com","o16@example.com","o17@example.com","o18@example.com","o19@example.com","o20@example.com"]}`), "ownerEmails must be a list of 1 to 20 email addresses"},
+		{"an owner's name", org("count", `,"query":{"ownerEmails":["Bob"]}`), "each value must be an email address of at most 254 characters"},
+		{"no name before the @", reg("count", `,"query":{"ownerEmails":["@example.com"]}`), "each value must be an email address"},
+		{"no domain after the @", org("count", `,"query":{"ownerEmails":["bob@ "]}`), "each value must be an email address"},
+		{"a blank owner email", org("count", `,"query":{"ownerEmails":["bob@example.com"," "]}`), "each value must be an email address"},
+		{"a 255-character owner email", org("count", `,"query":{"ownerEmails":["`+strings.Repeat("a", 243)+`@example.com"]}`), "each value must be an email address of at most 254 characters"},
+		{"an owner email and unowned", org("count", `,"query":{"ownerEmails":["bob@example.com"],"unowned":true}`), `query: "ownerEmails" and "unowned" cannot be combined`},
+		{"an owner email, and an unowned slice", reg("bar", `,"query":{"ownerEmails":["bob@example.com"]},"slices":[{"label":"Unowned","query":{"unowned":true}}]`), `slices[0].query: "ownerEmails" and "unowned" cannot be combined`},
+		{"me and another owner", org("count", `,"query":{"ownerIds":["__current_user__","5e636a12-0000-4000-8000-000000000001"]}`), `query.ownerIds can only be ["__current_user__"]`},
+		{"me as a string", reg("count", `,"query":{"ownerIds":"__current_user__"}`), `ownerIds`},
+		{"free text", org("count", `,"query":{"query":"acme"}`), `"query" is not a PLG organisation filter`},
+		{"unowned as a string", org("count", `,"query":{"unowned":"true"}`), "unowned must be true or false"},
+		{"bad date", org("count", `,"query":{"registeredFrom":"last month"}`), "registeredFrom must be a date"},
+		{"organisation sort", org("list", `,"query":{},"listLimit":5,"sortBy":{"field":"owner","order":"asc"}`), "sorts by name or registeredOn"},
+		{"unacknowledged on organisations", org("count", `,"query":{"unacknowledgedOnly":true}`), `"unacknowledgedOnly" is not a PLG organisation filter`},
+		{"registration sort", reg("list", `,"query":{},"listLimit":5,"sortBy":{"field":"name","order":"asc"}`), "a PLG registration list takes no sortBy"},
+		{"registration groupBy", reg("count", `,"query":{},"groupBy":{"field":"product","maxGroups":5}`), "groups by country or playbookAnswer only"},
+		{"registration table", reg("table", `,"query":{}`), "shape must be count, list, pie, bar or line"},
+		{"registration line with a series", reg("line", `,"query":{},"days":30,"series":["opened"]`), `"series" is only meaningful for resourceType "case"`},
+		{"registration line over 90 days", reg("line", `,"query":{},"days":91`), `"days" is 91`},
+		{"registration line, days and a window", reg("line", `,"query":{},"days":30,"startDate":"2026-01-01","endDate":"2026-01-31"`), `"days" cannot be combined`},
+		{"registration line, this year by day", reg("line", `,"query":{},"startDate":"__startOfYear:0__","endDate":"__today__"`), "cover at most 90 days"},
+		{"registration line, a bucket alone", reg("line", `,"query":{},"bucket":"month"`), `"bucket" needs "startDate" and "endDate"`},
+		{"registration line, an owner filter", reg("line", `,"query":{"ownerIds":["5e636a12-0000-4000-8000-000000000001"]},"days":30`), `query.ownerIds can only be ["__current_user__"]`},
+		{"registration line, unknown chart", reg("line", `,"query":{},"days":30,"chart":"area"`), `unknown "chart" "area"`},
+		{"51 owner groups", org("bar", `,"query":{},"groupBy":{"field":"owner","maxGroups":51}`), "groupBy.maxGroups is 51; it must be between 1 and 50"},
+		{"negative owner groups", org("pie", `,"query":{},"groupBy":{"field":"owner","maxGroups":-1}`), "groupBy.maxGroups is -1"},
+		{"51 country groups", reg("bar", `,"query":{},"groupBy":{"field":"country","maxGroups":51}`), "groupBy.maxGroups is 51"},
+		{"negative answer groups", reg("pie", `,"query":{"playbookTask":"T"},"groupBy":{"field":"playbookAnswer","maxGroups":-1}`), "groupBy.maxGroups is -1"},
+	}
+	for _, c := range cases {
+		_, err := ParseGenerated([]byte(c.raw))
+		if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want ErrGeneratedInvalid mentioning %q", c.name, err, c.want)
+		}
+	}
+}
+
+// TestParseGenerated_TheCataloguePlgExamplesAreValid: every PLG widget the
+// catalogue shows the model (section 5e) passes this backend's own check, so
+// the catalogue cannot teach a PLG widget the save would refuse. The
+// catalogue writes a widget without the keys every widget has (id,
+// displayName, gridWidth); those are filled in, the rest is checked as
+// written.
+func TestParseGenerated_TheCataloguePlgExamplesAreValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "### 5e. PLG")
+	if !ok {
+		t.Fatal("catalogue has no section 5e")
+	}
+	section, _, _ = strings.Cut(section, "\n## ")
+	var blocks []string
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		blocks = append(blocks, block)
+		rest = next
+	}
+	if len(blocks) == 0 {
+		t.Fatal("found no PLG example in section 5e")
+	}
+	for i, block := range blocks {
+		var w map[string]any
+		if err := json.Unmarshal([]byte(block), &w); err != nil {
+			t.Fatalf("section 5e example %d is not JSON: %v\n%s", i+1, err, block)
+		}
+		for key, value := range map[string]any{"id": "example", "displayName": "Example", "gridWidth": 6} {
+			if _, set := w[key]; !set {
+				w[key] = value
+			}
+		}
+		widget, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseGenerated([]byte(plgDashboard(string(widget)))); err != nil {
+			t.Errorf("section 5e example %d is rejected: %v\n%s", i+1, err, block)
+		}
+	}
+}

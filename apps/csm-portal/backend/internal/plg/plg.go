@@ -48,6 +48,7 @@ import (
 
 	csmhandler "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/config"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/domain"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/entityclient"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/handler"
 	plgmw "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/middleware"
@@ -127,6 +128,27 @@ func Mount(
 	return nil
 }
 
+// PlaybookLister lists every PLG playbook template, with its tasks.
+type PlaybookLister func(ctx context.Context) ([]domain.Playbook, error)
+
+// NewPlaybookLister returns a PlaybookLister reading entity-service with the
+// configuration and credentials Mount uses (its own client: the AI dashboard
+// generator is built before Mount runs). It sends no user: the list is every
+// PLG user's to read.
+func NewPlaybookLister(cfgPath string, entityDefaults config.EntityDefaults) (PlaybookLister, error) {
+	cfg, err := config.LoadWith(cfgPath, entityDefaults)
+	if err != nil {
+		return nil, fmt.Errorf("plg: %w", err)
+	}
+	timeout := time.Duration(cfg.Entity.TimeoutSeconds) * time.Second
+	entity := entityclient.New(entityclient.Config{
+		BaseURL:    cfg.Entity.BaseURL,
+		Timeout:    timeout,
+		HTTPClient: entityHTTPClient(cfg.Entity.OAuth, timeout),
+	})
+	return entity.ListAll, nil
+}
+
 // register mounts PLG's routes, each wrapped in the identity middleware.
 //
 // Every path is prefixed /plg — csm-portal's backend has 116 routes of its own
@@ -194,6 +216,7 @@ func register(
 
 	// Organisations and the overview tab.
 	add("POST /plg/organizations/search", csmhandler.PermUsePlg, h.SearchOrganizations)
+	add("POST /plg/organizations/aggregate", csmhandler.PermUsePlg, h.AggregateOrganizations)
 	add("GET /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.GetOrganization)
 	add("PATCH /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.PatchOrganization)
 
@@ -210,6 +233,8 @@ func register(
 
 	// New registrations.
 	add("POST /plg/registrations/search", csmhandler.PermUsePlg, h.SearchRegistrations)
+	add("POST /plg/registrations/volume-trend", csmhandler.PermUsePlg, h.RegistrationVolumeTrend)
+	add("POST /plg/registrations/aggregate", csmhandler.PermUsePlg, h.AggregateRegistrations)
 	add("POST /plg/registrations/{orgPlatformId}/acknowledge", csmhandler.PermUsePlg, h.Acknowledge)
 
 	// Playbook manager.

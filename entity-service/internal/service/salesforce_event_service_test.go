@@ -414,6 +414,17 @@ func TestHandleEvent_OverlengthPhoneLeavesExisting(t *testing.T) {
 	}
 }
 
+// TestMapSalesEntityCustomer_NoPrimaryPartner: a customer with no primary
+// partner (absent or blank) maps to nil, which clears the stored one.
+func TestMapSalesEntityCustomer_NoPrimaryPartner(t *testing.T) {
+	for _, v := range []*string{nil, sampleStr("  ")} {
+		got := mapSalesEntityCustomer(context.Background(), salesentity.Customer{ID: "001xx", Name: sampleStr("Acme"), PrimaryPartnerAccountID: v})
+		if got.PrimaryPartnerSfID != nil {
+			t.Errorf("PrimaryPartnerSfID = %q, want nil", *got.PrimaryPartnerSfID)
+		}
+	}
+}
+
 func TestMapSalesEntityCustomer_NumberIsId(t *testing.T) {
 	got := mapSalesEntityCustomer(context.Background(), salesentity.Customer{ID: "001xx", Name: sampleStr("Acme")})
 	if got.Number != "001xx" {
@@ -467,6 +478,7 @@ func fullCustomer() salesentity.Customer {
 	c.AccountVertical = sampleStr("Banking")
 	c.LostReasonCategory = sampleStr("Commercial")
 	c.DeactivationDate = sampleStr("2027-01-31")
+	c.PrimaryPartnerAccountID = sampleStr("001xx0000009")
 	return c
 }
 
@@ -527,6 +539,8 @@ func TestHandleEvent_MapsFullColumnSet(t *testing.T) {
 		{"account_vertical", eqStr(got.AccountVertical, "Banking")},
 		{"lost_reason_category", eqStr(got.LostReasonCategory, "Commercial")},
 		{"deactivation_date", eqDate(got.DeactivationDate, "2027-01-31")},
+		{"life_cycle", eqStr(got.LifeCycle, "Lost Prospect")},
+		{"primary_partner_sf_id", eqStr(got.PrimaryPartnerSfID, "001xx0000009")},
 		{"number is the Salesforce Id", got.Number == "001xx0000001"},
 	}
 	for _, c := range checks {

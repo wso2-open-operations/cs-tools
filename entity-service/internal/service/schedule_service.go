@@ -305,6 +305,18 @@ func (s *scheduleService) requireRotaWriter(ctx context.Context, teamKey string)
 	return nil
 }
 
+// RotaWriterCheck is svc's own "may the caller change teamKey's rota" check
+// (its lead, its rota manager, a rota admin of its family, or an admin), for
+// another service that must allow exactly the same people. nil for a
+// ScheduleService it does not recognise.
+func RotaWriterCheck(svc ScheduleService) RotaWriterAuthorizer {
+	s, ok := svc.(*scheduleService)
+	if !ok {
+		return nil
+	}
+	return s.requireRotaWriter
+}
+
 // containsFold is a case-insensitive membership test over team keys.
 //
 // team.key is stored lowercase and both repository reads return it as stored,
@@ -595,9 +607,38 @@ func (s *scheduleService) ApplyRange(ctx context.Context, req domain.ApplySchedu
 		}
 	}
 	if _, err := s.requireRotaWriterOverSpan(ctx, req.TeamKey, req.UserID, req.From, req.To, false); err != nil {
-		return domain.ApplyScheduleRangeResponse{}, err
+		// A clear may still go ahead on rows filed under a team the person is
+		// not on, with no span putting them there -- what is left on the
+		// Americas team after a Brazil rotation ended, say. Nobody else can
+		// reach those rows: their own team's lead clears only their own
+		// team's rows. So the team's lead, or a rota admin for it, may take
+		// them off. Only a clear: nothing new is put on a non-member.
+		if req.ShiftCode != "" || !s.mayClearRowsFiledUnder(ctx, req.TeamKey, req.UserID, req.From) {
+			return domain.ApplyScheduleRangeResponse{}, err
+		}
 	}
+	// Regular hours being set replace the person's regular hours for the day
+	// on another team the caller may also change (see regularHoursConflict).
+	req.MayReplaceOn = func(teamKey string) bool { return s.requireRotaWriter(ctx, teamKey) == nil }
 	return s.repo.ApplyRange(ctx, req, auth.IdentityFromContext(ctx).UserEmail)
+}
+
+// mayClearRowsFiledUnder reports whether the caller may clear what is filed
+// under teamKey for somebody who is not a member of it: the caller may change
+// that team's rota, and the person really is not on the team (a member is
+// requireRotaWriterOverSpan's business, and was refused there for a reason).
+//
+// From today on only: a former member's past days are the record of what they
+// worked, and stay as they are.
+func (s *scheduleService) mayClearRowsFiledUnder(ctx context.Context, teamKey, userID, from string) bool {
+	if from < time.Now().UTC().Format("2006-01-02") {
+		return false
+	}
+	if s.requireRotaWriter(ctx, teamKey) != nil {
+		return false
+	}
+	member, err := s.repo.UserInTeam(ctx, userID, teamKey)
+	return err == nil && !member
 }
 
 // maxAllocatedToLength is team_schedule_absence.allocated_to's width.
@@ -649,13 +690,17 @@ func (s *scheduleService) DeleteAbsenceKind(ctx context.Context, code string) er
 	if err != nil {
 		return err
 	}
-	// A rota admin deletes only their own family's tags; a lead who is none
-	// may delete any custom tag, as before.
-	admin, err := s.rotaAdminFamilies(ctx)
+	// A rota admin or lead deletes only their own family's tags; a portal
+	// admin who runs no rota (whether or not they lead a team) may delete any
+	// custom tag.
+	families, portalAdmin, err := s.tagFamilies(ctx)
 	if err != nil {
 		return err
 	}
-	return s.repo.DeleteAbsenceKind(ctx, code, email, admin)
+	if len(families) == 0 && !portalAdmin {
+		return errNoTagFamily
+	}
+	return s.repo.DeleteAbsenceKind(ctx, code, email, families)
 }
 
 // requireAnyTeamLead is the gate for the shared tag catalogue: an internal
@@ -747,6 +792,7 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	req.Label = strings.TrimSpace(req.Label)
 	req.Bucket = strings.ToUpper(strings.TrimSpace(req.Bucket))
 	req.ColourToken = strings.ToUpper(strings.TrimSpace(req.ColourToken))
+	req.Description = strings.TrimSpace(req.Description)
 	switch {
 	case req.ShortCode == "" || utf8.RuneCountInString(req.ShortCode) > 12:
 		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "shortCode is required and at most 12 characters"}
@@ -755,6 +801,12 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	// EXCLUDED -- off the rota entirely -- is not a lead's to invent more of.
 	case req.Bucket != "LEAVE" && req.Bucket != "ALLOCATION":
 		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "bucket must be LEAVE or ALLOCATION"}
+	// Leave shows on the timesheet as leave; only an allocation takes
+	// somebody off it.
+	case req.ExcludesFromTimesheet && req.Bucket != "ALLOCATION":
+		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "only an allocation tag can exclude people from the timesheet; leave shows on it as leave"}
+	case utf8.RuneCountInString(req.Description) > 300:
+		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "description is at most 300 characters"}
 	case !absenceKindColours[req.ColourToken]:
 		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: fmt.Sprintf("colourToken %q is not one the rota can draw", req.ColourToken)}
 	}
@@ -767,13 +819,22 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}
-	// A rota admin's tag is their family's; a lead who is no rota admin adds
-	// a shared one, as before.
-	admin, err := s.rotaAdminFamilies(ctx)
+	// A tag belongs to its creator's family -- a rota admin's family, or the
+	// family of the team a lead leads -- and only that family's rosters offer
+	// it. A portal admin who runs no rota (whether or not they lead a team)
+	// names any family, or adds a shared tag.
+	families, portalAdmin, err := s.tagFamilies(ctx)
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}
-	family, err := kindFamilyFor(admin, req.Family)
+	if portalAdmin {
+		if families, err = portalAdminTagFamily(req.Family); err != nil {
+			return domain.ScheduleAbsenceKind{}, err
+		}
+	} else if len(families) == 0 {
+		return domain.ScheduleAbsenceKind{}, errNoTagFamily
+	}
+	family, err := kindFamilyFor(families, req.Family)
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}

@@ -207,6 +207,39 @@ func TestCaseTypeTransferIntegration_RelatedCaseMustBeACaseLikeTicket(t *testing
 	}
 }
 
+// Only a case keeps a related case: related_case_id is a column of "case"
+// alone. Setting one on any other case-like ticket is refused by name (it used
+// to update no row and answer 404 "case not found" for a ticket that exists),
+// and nothing is written.
+func TestCaseTypeTransferIntegration_RelatedCaseCanOnlyBeSetOnACase(t *testing.T) {
+	f := newCTFixture(t)
+	f.cleanupExtras(t)
+	cases := repository.NewCaseRepository(f.scoped)
+	target := ctQueryID
+
+	for name, id := range map[string]string{"engagement": ctEngagementID, "service request": ctServiceReqID, "security report analysis": ctSRAID} {
+		_, err := cases.UpdateCaseFields(f.ctx, domain.UpdateCaseRequest{ID: id, RelatedCaseID: &target}, "", ctActor)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Errorf("relating a case on a %s: want a ValidationError, got %v", name, err)
+			continue
+		}
+		if !strings.Contains(ve.Msg, "can only be set on a case") || !strings.Contains(ve.Msg, name) {
+			t.Errorf("relating a case on a %s: message %q should say it is case-only and name the type", name, ve.Msg)
+		}
+	}
+
+	_, err := cases.UpdateCaseFields(f.ctx, domain.UpdateCaseRequest{ID: ctMissingID, RelatedCaseID: &target}, "", ctActor)
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Errorf("relating a case on a missing ticket: want a NotFoundError, got %v", err)
+	}
+
+	if _, err := cases.UpdateCaseFields(f.ctx, domain.UpdateCaseRequest{ID: ctIncidentID, RelatedCaseID: &target}, "", ctActor); err != nil {
+		t.Errorf("relating a case on a case: %v", err)
+	}
+}
+
 // The customer's attachments are on the ticket, not on its type: after the
 // conversion the engagement lists them (the ones uploaded through the portal and
 // the ones that came from ServiceNow alike) and each can be opened by id. A

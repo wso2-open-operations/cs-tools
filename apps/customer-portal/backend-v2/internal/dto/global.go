@@ -177,6 +177,18 @@ type GlobalSearchResponse struct {
 	Cases         []GlobalSearchCase    `json:"cases"`
 }
 
+// globalSearchCaseState is a case's state in a global search result. Work In
+// Progress and Waiting On WSO2 become the merged In Progress state (matched on
+// the label or the id, since on the Postgres data source entity-service sends
+// the raw enum as both); every other state is passed on as entity-service sent
+// it, so nothing else about global search changes.
+func globalSearchCaseState(state entity.ChoiceListItem) *ReferenceItem {
+	if inProgressFamilyFromText(state.Label) || inProgressFamilyFromText(state.ID) {
+		return &ReferenceItem{ID: caseStateInProgressID, Label: caseStateInProgressLabel}
+	}
+	return &ReferenceItem{ID: state.ID, Label: state.Label}
+}
+
 // MapGlobalSearchResponse builds the portal response from entity-service's
 // GlobalSearchResponse.
 func MapGlobalSearchResponse(r entity.GlobalSearchResponse) GlobalSearchResponse {
@@ -220,7 +232,7 @@ func MapGlobalSearchResponse(r entity.GlobalSearchResponse) GlobalSearchResponse
 			out.CaseType = &ReferenceItem{ID: c.CaseType.ID, Label: c.CaseType.Name}
 		}
 		if c.State != nil {
-			out.State = &ReferenceItem{ID: c.State.ID, Label: c.State.Label}
+			out.State = globalSearchCaseState(*c.State)
 		}
 		if c.Severity != nil {
 			out.Severity = &ReferenceItem{ID: c.Severity.ID, Label: c.Severity.Label}

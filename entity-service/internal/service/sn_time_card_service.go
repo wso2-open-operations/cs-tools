@@ -252,6 +252,11 @@ func buildTimeCardSearchPayload(req domain.SearchTimeCardsRequest) (snTimeCardSe
 		if err := validateUUIDs("userIds", req.Filters.UserIDs); err != nil {
 			return snTimeCardSearchPayload{}, err
 		}
+		// Refused rather than dropped: without it the search would match
+		// every engineer's cards, not the team's.
+		if len(req.Filters.TeamIDs) > 0 {
+			return snTimeCardSearchPayload{}, &apierror.ValidationError{Msg: "filters.teamIds is not supported when DATA_SOURCE=servicenow"}
+		}
 
 		snStates := make([]string, 0, len(req.Filters.States))
 		for _, state := range req.Filters.States {

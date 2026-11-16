@@ -23,16 +23,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/closure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
 )
 
 // invoiceLinkedReader builds a mockEntityReader wired to resolve a single
 // due invoice: one linked opportunity (eligible, EULA 3.4 — no grace
 // period, so dueDate is the anchor as-is), one eligible invoice on it,
-// firing the terminal (day-0) window as of `now`.
+// firing the terminal window as of `now`. The invoice fell due the day
+// before `now`: a project is suspended the day after its due date, the
+// due date itself still being the 7-day reminder.
 func invoiceLinkedReader(t *testing.T, now time.Time) *mockEntityReader {
 	t.Helper()
-	dueDate := now.Format("2006-01-02")
+	dueDate := now.AddDate(0, 0, -1).Format("2006-01-02")
 	return &mockEntityReader{
 		searchProjectOpportunityLinksFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			return oppLinksResponse("p1", "opp1"), nil
@@ -66,7 +69,7 @@ func TestProcessProject_InvoiceCascade_FiresNotifyAndSuspendOnDueDate(t *testing
 		// subscription one entirely.
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -138,7 +141,7 @@ func TestProcessProject_InvoiceCascade_IsPartnerWithoutPrimaryPartnerDisablesCas
 		Account: &projectAccountRef{ID: "a1", IsPartner: &isPartner},
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -174,7 +177,7 @@ func TestProcessProject_InvoiceCascade_HasPrimaryPartnerOverridesIsPartner(t *te
 		Account: &projectAccountRef{ID: "a1", IsPartner: &isPartner},
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -191,7 +194,7 @@ func TestProcessProject_InvoiceCascade_NoDueInvoiceIsNoOp(t *testing.T) {
 
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -217,7 +220,7 @@ func TestProcessProject_InvoiceCascade_SkipsNotifyWhenAlreadyClosedForAnyReason(
 		ClosureState: &closureState,
 	}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -277,7 +280,7 @@ func TestProcessProject_InvoiceCascade_HasPrimaryPartnerForcesGracePeriod(t *tes
 
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	err := processProject(context.Background(), reader, updater, ntf, now, proj)
+	_, err := processProject(context.Background(), reader, updater, ntf, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -299,7 +302,7 @@ func TestProcessProject_InvoiceCascade_HasPrimaryPartnerForcesGracePeriod(t *tes
 func TestProcessProject_InvoiceCascade_PassesInvoiceSfIDToInternalNoticeOnly(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	reader := invoiceLinkedReader(t, now)
-	dueDate := now.Format("2006-01-02")
+	dueDate := now.AddDate(0, 0, -1).Format("2006-01-02")
 	reader.searchInvoicesFn = func(ctx context.Context, body []byte) ([]byte, error) {
 		return []byte(`{"invoices":[{
 			"id":"inv1","invoiceDate":"2026-01-01","invoicedDueDate":"` + dueDate + `",
@@ -309,7 +312,7 @@ func TestProcessProject_InvoiceCascade_PassesInvoiceSfIDToInternalNoticeOnly(t *
 	ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -339,7 +342,7 @@ func TestProcessProject_InvoiceCascade_PassesInvoiceSfIDToInternalNoticeOnly(t *
 // only when an invoice has no name, so the field is never blank.
 func TestProcessProject_InvoiceNoticeShowsInvoiceNumber(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	dueDate := now.Format("2006-01-02")
+	dueDate := now.AddDate(0, 0, -1).Format("2006-01-02")
 	tests := []struct {
 		name        string
 		invoiceJSON string
@@ -365,7 +368,7 @@ func TestProcessProject_InvoiceNoticeShowsInvoiceNumber(t *testing.T) {
 			ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
 			proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-			if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+			if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 				t.Fatalf("processProject() error = %v, want nil", err)
 			}
 			for _, n := range ntf.sent {
@@ -386,7 +389,7 @@ func TestProcessProject_InvoiceNoticeShowsInvoiceNumber(t *testing.T) {
 // in its own box with its own Salesforce link), while timing is still
 // decided by the earliest-due one and the customer-facing notice lists none.
 func TestProcessProject_InternalInvoiceNoticeListsEveryDueInvoice(t *testing.T) {
-	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) // the earlier invoice's due date: day 0
+	now := time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC) // the day after the earlier invoice's due date
 	reader := twoInvoiceReader()
 	reader.getAccountFn = func(ctx context.Context, id string) ([]byte, error) {
 		return []byte(`{"hasPrimaryPartner":false}`), nil
@@ -394,7 +397,7 @@ func TestProcessProject_InternalInvoiceNoticeListsEveryDueInvoice(t *testing.T) 
 	ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
 	proj := project{ID: "p1", Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	if err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), reader, &mockProjectUpdater{}, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
@@ -416,5 +419,36 @@ func TestProcessProject_InternalInvoiceNoticeListsEveryDueInvoice(t *testing.T) 
 	}
 	if strings.Join(internal.InvoiceSfIDs, ",") != "a0I-earlier,a0I-later" {
 		t.Errorf("InvoiceSfIDs = %v, want [a0I-earlier a0I-later] (one per listed invoice, same order)", internal.InvoiceSfIDs)
+	}
+}
+
+// On the invoice's due date itself the project is not suspended: it gets the
+// 7-day reminder, and the suspension comes the day after.
+func TestProcessProject_InvoiceDueToday_RemindsAndDoesNotSuspend(t *testing.T) {
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	reader := invoiceLinkedReader(t, now)
+	reader.searchInvoicesFn = func(ctx context.Context, body []byte) ([]byte, error) {
+		return []byte(`{"invoices":[{
+			"id":"inv1","invoiceDate":"2026-01-01","invoicedDueDate":"` + now.Format("2006-01-02") + `",
+			"opportunity":{"id":"opp1","name":"Opp One"}
+		}]}`), nil
+	}
+	updater := &mockProjectUpdater{}
+	ntf := &mockNotifier{sendFn: func(ctx context.Context, n notify.Notice) (bool, error) { return true, nil }}
+	proj := project{ID: "p1", SfID: strPtr("a0dSF1"), Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
+
+	if _, err := processProject(context.Background(), reader, updater, ntf, now, proj); err != nil {
+		t.Fatalf("processProject() error = %v, want nil", err)
+	}
+	if len(ntf.sent) == 0 {
+		t.Fatal("no notice sent, want the 7-day reminder")
+	}
+	for _, n := range ntf.sent {
+		if n.Window != closure.NoticeWindow7 {
+			t.Errorf("notice %q has window %v, want the 7-day window", n.Subject, n.Window)
+		}
+	}
+	if wroteField(updater.calls, "invoiceDueDateClosureState") || len(updater.sfSuspendCalls) != 0 {
+		t.Errorf("the project was suspended on its due date: writes %+v, Salesforce suspends %v", updater.calls, updater.sfSuspendCalls)
 	}
 }

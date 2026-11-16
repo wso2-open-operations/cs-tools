@@ -104,6 +104,8 @@ type RunNowOptions struct {
 	DryRun bool
 	// Limit is the daily limit for this run; 0 means not given.
 	Limit int
+	// FullSweep forces a run to evaluate every project live (acp_closure).
+	FullSweep bool
 	// States is the subset of states to work; nil means not given.
 	States []string
 	// FromDate and ToDate are an explicit inclusive reporting window, plain

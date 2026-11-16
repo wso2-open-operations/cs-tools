@@ -82,7 +82,8 @@ func TestGithubSNFirstIntegration_TakesServiceNowIDs(t *testing.T) {
 		t.Errorf("the GitHub series advanced for a ServiceNow-numbered record: %d->%d, %d->%d", numberBefore, n, wso2Before, w)
 	}
 
-	// The GitHub series still numbers a record ServiceNow did not create.
+	// The GitHub series still numbers a record with no project (see
+	// github_native_numbering_integration_test.go for the project-bound case).
 	ghID, ghNumber, err := repo.CreateServiceRequestFromIssue(ctx, NewServiceRequestFromIssue{
 		Subject: "x", Description: "### Markdown", IssueNumber: 43, Owner: snFirstGHOwner, Repository: snFirstRepo,
 		Catalog: "General Requests", CreatedBy: "octocat",

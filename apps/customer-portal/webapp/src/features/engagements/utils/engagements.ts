@@ -20,7 +20,6 @@ import {
   CaseType,
   SUPPORT_STATE_AWAITING_INFO,
   SUPPORT_STATE_CLOSED,
-  SUPPORT_STATE_WAITING_ON_WSO2,
 } from "@features/support/constants/supportConstants";
 import type {
   AllCasesFilterValues,
@@ -224,11 +223,10 @@ export function computeEngagementsStatValues(
   }
   const completed =
     stats.stateCount?.find((s) => s.label === SUPPORT_STATE_CLOSED)?.count ?? 0;
+  // Waiting On WSO2 is part of In Progress now, so on hold is just Awaiting Info.
   const onHold =
-    (stats.stateCount?.find((s) => s.label === SUPPORT_STATE_AWAITING_INFO)
-      ?.count ?? 0) +
-    (stats.stateCount?.find((s) => s.label === SUPPORT_STATE_WAITING_ON_WSO2)
-      ?.count ?? 0);
+    stats.stateCount?.find((s) => s.label === SUPPORT_STATE_AWAITING_INFO)
+      ?.count ?? 0;
   return {
     total: stats.totalCount ?? 0,
     active: stats.activeCount ?? 0,

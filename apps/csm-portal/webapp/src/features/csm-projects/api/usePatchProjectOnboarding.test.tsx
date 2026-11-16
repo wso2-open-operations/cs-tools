@@ -40,9 +40,7 @@ function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  queryClient.invalidateQueries = invalidateQueriesMock.mockImplementation(() =>
-    Promise.resolve(),
-  );
+  queryClient.invalidateQueries = invalidateQueriesMock;
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
@@ -50,6 +48,7 @@ describe("usePatchProjectOnboarding", () => {
   beforeEach(() => {
     patchMock.mockReset();
     invalidateQueriesMock.mockReset();
+    invalidateQueriesMock.mockImplementation(() => Promise.resolve());
   });
 
   it("PATCHes /projects/{id} with exactly the given onboarding fields", async () => {
@@ -109,6 +108,24 @@ describe("usePatchProjectOnboarding", () => {
       .find((a) => a.predicate);
     expect(withPredicate?.predicate?.({ queryKey: ["csm-projects-search", {}] })).toBe(true);
     expect(withPredicate?.predicate?.({ queryKey: ["something-else"] })).toBe(false);
+  });
+
+  it("stays pending until the project detail refetch completes", async () => {
+    patchMock.mockResolvedValue(RESPONSE);
+    let release: () => void = () => {};
+    invalidateQueriesMock.mockImplementation(
+      (arg: { queryKey?: unknown[] }) =>
+        arg.queryKey ? new Promise<void>((r) => (release = r)) : Promise.resolve(),
+    );
+    const { result } = renderHook(() => usePatchProjectOnboarding("proj-1"), { wrapper });
+
+    act(() => {
+      result.current.mutate({ onboardingStatus: "Completed" });
+    });
+    await waitFor(() => expect(invalidateQueriesMock).toHaveBeenCalled());
+    expect(result.current.isPending).toBe(true);
+    act(() => release());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
   it("does not invalidate when the backend rejects, and surfaces the error", async () => {

@@ -206,7 +206,7 @@ func TestSLAStatusService_GetClockState(t *testing.T) {
 	})
 
 	t.Run("result is passed through unchanged", func(t *testing.T) {
-		want := domain.SLAClockState{Found: true, IsActive: true, Stage: "IN_PROGRESS"}
+		want := domain.SLAClockState{Found: true, IsActive: true, Stage: "IN_PROGRESS", ProjectOnboardingStatus: "IN_PROGRESS", IsEvaluationAccount: true}
 		repo := stubSLAStatusRepo{clockState: func(context.Context, string, string) (domain.SLAClockState, error) {
 			return want, nil
 		}}

@@ -1,9 +1,9 @@
 // Package deprecatedusagescan is the monthly deprecated product usage report sub-cron: on
 // the first Monday of each month it fetches, from entity-service, the
-// customers still running a product version past its EOL date in an active
+// customers still running a Deprecated product version in an active
 // Primary Production deployment, and mails them to the accounts' managers
 // and technical owners and the CS leadership group, one table per region.
-// It replaces a ServiceNow scheduled report. Built the way this component's
+// It replaces the previous system's scheduled report. Built the way this component's
 // own CLAUDE.md ("Per-task report emails") describes: its own template, its
 // own render function, and its recipients wired through cmd/server/main.go.
 package deprecatedusagescan
@@ -28,8 +28,8 @@ const TaskName = "deprecated_product_usage_report"
 // sends only when the date is the 1st to the 7th (see SendReport).
 const DefaultSchedule = "30 4 * * 1"
 
-// Subject is the report's mail subject, the subject the ServiceNow report
-// had.
+// Subject is the report's mail subject, the subject the previous system's
+// report had.
 const Subject = "Deprecated Product Version Usage Monthly Report"
 
 // Timezone is the zone the run date is taken in: the report's date, and
@@ -64,20 +64,23 @@ type Options struct {
 	Now func() time.Time
 	// Anchor returns the scheduled firing time of the run being made (its
 	// period key, schedule.PeriodKey). The engine retries a failed run on
-	// every tick until the next Monday, so a scheduled run takes its date
-	// from here, not the clock: a first-Monday send that fails and succeeds
-	// on a later day still sends, as of that Monday. Nil (a manual run-now)
+	// every tick until the next Monday, so whether this is the month's first
+	// Monday is decided from here, not the clock: a first-Monday send that
+	// fails and succeeds on a later day still sends. Nil (a manual run-now)
 	// is the clock.
 	Anchor func() time.Time
 }
 
 // SendReport returns a registry.Task.Handler that mails the report.
 //
-// The run date is the run's scheduled Monday (Options.Anchor) in Timezone,
-// or today for a manual run. A run for a Monday on the 8th or later
-// succeeds without sending: the schedule wakes the task every Monday and
-// only the first one of the month is the report's. The report is fetched as
-// of the run date, so a retry later in the week lists the same versions.
+// Whether to send is decided by the run's scheduled Monday
+// (Options.Anchor) in Timezone, or today for a manual run: a run for a
+// Monday on the 8th or later succeeds without sending, as the schedule
+// wakes the task every Monday and only the first one of the month is the
+// report's. The report is dated the day it actually runs, in Timezone:
+// unlike the EOL report, whose date drives its query, this one lists the
+// versions' current status, so a first-Monday run retried on Thursday shows
+// Thursday's catalogue and says so.
 //
 // The audience is the task's own SUB_CRON_RECIPIENTS entry (to: the CS
 // leadership group; cc) plus every listed account's manager and technical
@@ -95,16 +98,16 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			return nil
 		}
 
-		clock := opts.Now
+		scheduled := opts.Now
 		if opts.Anchor != nil {
-			clock = opts.Anchor
+			scheduled = opts.Anchor
 		}
-		asOf := runDate(clock)
-		if !opts.AnyDay && asOf.Day() > 7 {
-			slog.Info("deprecated product usage report: not the first Monday of the month; not sent", "date", asOf.Format("2006-01-02"))
+		monday := runDate(scheduled)
+		if !opts.AnyDay && monday.Day() > 7 {
+			slog.Info("deprecated product usage report: not the first Monday of the month; not sent", "date", monday.Format("2006-01-02"))
 			return nil
 		}
-		date := asOf.Format("2006-01-02")
+		date := runDate(opts.Now).Format("2006-01-02")
 
 		report, err := reports.Report(ctx, date)
 		if err != nil {

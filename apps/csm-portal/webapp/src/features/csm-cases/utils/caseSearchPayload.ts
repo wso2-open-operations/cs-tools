@@ -394,6 +394,7 @@ export function mapCaseSearchViewToRow(
     workState: c.workState ?? null,
     assignee,
     assigneeIsMe,
+    assigneeEmail: assigneeEmail || undefined,
     createdBy,
     slaClockType: "ack",
     minutesToBreach: 0,

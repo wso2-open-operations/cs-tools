@@ -94,7 +94,7 @@ func readSupport(ctx context.Context, rota RotaReader, cfg Config, sat, sun time
 	return out
 }
 
-// WeekendNotice returns the handler run every evening from Sunday to Thursday
+// WeekendNotice returns the handler run every morning from Monday to Thursday
 // for the coming weekend. Once the weekend is fully marked it sends the
 // summary and the invitations and records the send, after which it sends
 // nothing more; until then it asks the rota admins to finish the rota.
@@ -201,7 +201,7 @@ func weekend(ctx context.Context, rota RotaReader, store ReminderStore, sender E
 
 	var failed []failure
 	if len(gaps) > 0 && !final {
-		// Nothing goes to the rota until it is complete; the next evening's
+		// Nothing goes to the rota until it is complete; the next morning's
 		// run checks again. A failed admin email fails the run, which is
 		// retried until then.
 		adminErr := askRotaAdmins(ctx, store, sender, cfg, days, gaps, final)
@@ -347,7 +347,7 @@ func weekend(ctx context.Context, rota RotaReader, store ReminderStore, sender E
 		slog.InfoContext(ctx, "rota reminder: weekend test sent; not recorded", "weekend", period, "to", cfg.RedirectTo)
 	} else if err := store.RecordReminder(ctx, cfg.Family, weekendKind, period, invites, sentBy); err != nil {
 		// The emails went out; failing the run would send them again.
-		failed = append(failed, failure{label: "recording the send (the next evening may send it again)", err: err})
+		failed = append(failed, failure{label: "recording the send (the next morning may send it again)", err: err})
 	}
 	slog.InfoContext(ctx, "rota reminder: weekend sent", "weekend", period, "final", final,
 		"windows", len(pending), "invites", len(invites), "gaps", len(gaps), "failed", len(failed))

@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -58,6 +59,13 @@ func TestTimeCardService_AggregateTimeCards_RefusesBadRequests(t *testing.T) {
 		{"negative maxGroups", domain.AggregateTimeCardsRequest{GroupBy: "user", MaxGroups: -1}, "maxGroups must not be negative"},
 		{"a search filter the search refuses", domain.AggregateTimeCardsRequest{GroupBy: "user",
 			Filters: &domain.SearchTimeCardsFilters{UserID: &bad}}, "filters"},
+		{"a team id that is not a UUID", domain.AggregateTimeCardsRequest{GroupBy: "user",
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: []string{"cc6da6e6-e58b-6bd3-271d-d5e5e6e23a5c", bad}}}, "filters contains invalid UUID"},
+		{"team without teams", domain.AggregateTimeCardsRequest{GroupBy: "team"}, "groupBy team requires filters.teamIds"},
+		{"team with an empty team list", domain.AggregateTimeCardsRequest{GroupBy: "team",
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: []string{}}}, "groupBy team requires filters.teamIds"},
+		{"more than 100 teams", domain.AggregateTimeCardsRequest{GroupBy: "team",
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: teamIDs(101)}}, "teamIds must not contain more than 100 values"},
 		{"day without dates", domain.AggregateTimeCardsRequest{GroupBy: "day"}, "groupBy day requires filters.startDate and filters.endDate"},
 		{"day with only a start", domain.AggregateTimeCardsRequest{GroupBy: "day",
 			Filters: &domain.SearchTimeCardsFilters{StartDate: ptr("2026-10-01")}}, "groupBy day requires filters.startDate and filters.endDate"},
@@ -94,6 +102,14 @@ func TestTimeCardService_AggregateTimeCards_PassesGoodRequests(t *testing.T) {
 		{"state ranked by count", domain.AggregateTimeCardsRequest{GroupBy: "state", Measure: "count"}, 10},
 		{"day, 31 days", domain.AggregateTimeCardsRequest{GroupBy: "day", Filters: aggregateDates("2026-10-01", "2026-10-31")}, 10},
 		{"day, one day", domain.AggregateTimeCardsRequest{GroupBy: "day", Filters: aggregateDates("2026-10-05", "2026-10-05")}, 10},
+		{"team, ranked by minutes, own cap", domain.AggregateTimeCardsRequest{GroupBy: "team", Measure: "minutes", MaxGroups: 4,
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: []string{"cc6da6e6-e58b-6bd3-271d-d5e5e6e23a5c"}}}, 4},
+		{"team, default: every team named, past the usual cap of 10", domain.AggregateTimeCardsRequest{GroupBy: "team",
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: teamIDs(12)}}, 12},
+		{"team, 100 teams", domain.AggregateTimeCardsRequest{GroupBy: "team",
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: teamIDs(100)}}, 100},
+		{"user, in two teams", domain.AggregateTimeCardsRequest{GroupBy: "user",
+			Filters: &domain.SearchTimeCardsFilters{TeamIDs: []string{"cc6da6e6-e58b-6bd3-271d-d5e5e6e23a5c", "ecd25d38-81f4-e11a-9d7b-86ab8976c426"}}}, 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, got, gotMax, called := aggregateTimeCardsService()
@@ -121,6 +137,19 @@ func TestTimeCardService_AggregateTimeCards_NeedsACaller(t *testing.T) {
 	}
 }
 
+// TestSNTimeCardService_SearchTimeCards_RefusesTeamIDs: ServiceNow has no
+// team filter, and dropping it would return every engineer's cards.
+func TestSNTimeCardService_SearchTimeCards_RefusesTeamIDs(t *testing.T) {
+	_, err := buildTimeCardSearchPayload(domain.SearchTimeCardsRequest{Filters: &domain.SearchTimeCardsFilters{
+		TeamIDs: []string{"cc6da6e6-e58b-6bd3-271d-d5e5e6e23a5c"}}})
+	if err == nil || !strings.Contains(err.Error(), "filters.teamIds is not supported when DATA_SOURCE=servicenow") {
+		t.Fatalf("error = %v, want the servicenow refusal", err)
+	}
+	if _, err := buildTimeCardSearchPayload(domain.SearchTimeCardsRequest{Filters: &domain.SearchTimeCardsFilters{}}); err != nil {
+		t.Fatalf("no team filter: error = %v, want none", err)
+	}
+}
+
 // TestSNTimeCardService_AggregateTimeCards_IsRefused: DATA_SOURCE=servicenow
 // has no time card aggregate.
 func TestSNTimeCardService_AggregateTimeCards_IsRefused(t *testing.T) {
@@ -128,4 +157,13 @@ func TestSNTimeCardService_AggregateTimeCards_IsRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not supported when DATA_SOURCE=servicenow") {
 		t.Fatalf("error = %v, want the servicenow refusal", err)
 	}
+}
+
+// teamIDs is n distinct well-formed team ids.
+func teamIDs(n int) []string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
+	}
+	return ids
 }

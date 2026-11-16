@@ -59,7 +59,7 @@ type caseSLAPauseRecalcResponse struct {
 	Clocks     []caseSLAPauseRecalcClockResponse `json:"clocks"`
 }
 
-// RecalculatePauseTotals handles POST /cases/{id}/sla/recalculate-pause --
+// RecalculatePauseTotals handles POST /cases/{id}/sla/recalculate --
 // admin-only (gated by service.CaseSLARecalcService itself, trusting
 // csm-portal-backend's own PermAdmin route check -- see that service's own
 // doc comment). No request body.

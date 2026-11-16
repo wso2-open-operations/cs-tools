@@ -98,7 +98,9 @@ type NewChangeRequestFromIssue struct {
 	// record ServiceNow numbered (created ServiceNow-first). Such a record
 	// keeps ServiceNow's text on an edit, as on create; a record of the GitHub
 	// series (SR-GH-/CHG-GH-) keeps the issue's Markdown, which the portal
-	// renders by that prefix. Empty always writes Description.
+	// renders by that prefix. A record numbered natively (project-bound, no
+	// ServiceNowDescription supplied) also takes Description, because this
+	// field is empty for it. Empty always writes Description.
 	ServiceNowDescription string
 }
 
@@ -517,12 +519,23 @@ func (r *githubMutationRepository) CreateServiceRequestFromIssue(ctx context.Con
 			                       account_id, github_issue_number,
 			                       project_id, github_owner, github_repository)
 			VALUES (COALESCE(NULLIF($9, '')::uuid, gen_random_uuid()), NOW(), NOW(), $1, $1,
-			        -- ServiceNow's numbers when it created the record first. COALESCE
-			        -- stops at the first non-null argument, so the GitHub series is not
-			        -- advanced for a record that does not use it.
-			        COALESCE(NULLIF($10, ''), next_github_service_request_number()),
+			        -- Numbers supplied by the caller first (a record created in the
+			        -- backing system first). Otherwise a record with a project takes
+			        -- the native series a portal-created service request takes: the CS
+			        -- number and the project-key id (<KEY>-<n>). A record with no
+			        -- project cannot have a project-key id (next_wso2_id raises), so
+			        -- it keeps the GitHub series. COALESCE and CASE both stop at the
+			        -- first branch that applies, so no sequence is advanced for a
+			        -- record that does not use it.
+			        COALESCE(NULLIF($10, ''),
+			                 CASE WHEN NULLIF($6, '') IS NOT NULL
+			                      THEN next_work_item_number('SERVICE_REQUEST'::work_item_type_enum)
+			                      ELSE next_github_service_request_number() END),
 			        -- Required for SERVICE_REQUEST by work_item_wso2_id_required_by_type.
-			        COALESCE(NULLIF($11, ''), next_github_service_request_wso2_id()),
+			        COALESCE(NULLIF($11, ''),
+			                 CASE WHEN NULLIF($6, '') IS NOT NULL
+			                      THEN next_wso2_id(NULLIF($6, '')::uuid)
+			                      ELSE next_github_service_request_wso2_id() END),
 			        $2, 'SERVICE_REQUEST', $3,
 			        NULLIF($4, '')::uuid, $5,
 			        NULLIF($6, '')::uuid, NULLIF($7, ''), NULLIF($8, ''))

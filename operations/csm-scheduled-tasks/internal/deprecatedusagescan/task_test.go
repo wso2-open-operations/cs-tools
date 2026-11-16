@@ -131,10 +131,11 @@ func TestSendReportSkipsMondaysAfterTheFirstWeek(t *testing.T) {
 	}
 }
 
-func TestSendReportRetriedLaterInTheWeekStillSendsAsOfTheFirstMonday(t *testing.T) {
+func TestSendReportRetriedLaterInTheWeekStillSendsDatedTheDayItRan(t *testing.T) {
 	// The first Monday of December 2026 is the 7th. Its run failed and the
-	// engine retries it on the 9th: the clock is in the second week, the
-	// period is not.
+	// engine retries it on the 9th: the period is the first Monday, so it
+	// still sends, but the report lists today's status, so it is dated the
+	// 9th, not the 7th.
 	reports := &fakeReports{report: sampleReport()}
 	email := &fakeEmail{}
 	handler := deprecatedusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
@@ -142,8 +143,8 @@ func TestSendReportRetriedLaterInTheWeekStillSendsAsOfTheFirstMonday(t *testing.
 	if err := handler(context.Background()); err != nil || email.calls != 1 {
 		t.Fatalf("err=%v sent=%d, want the retry to send", err, email.calls)
 	}
-	if reports.gotAsOf != "2026-12-07" {
-		t.Errorf("asOf = %q, want the first Monday, 2026-12-07", reports.gotAsOf)
+	if reports.gotAsOf != "2026-12-09" {
+		t.Errorf("asOf = %q, want the day it ran, 2026-12-09", reports.gotAsOf)
 	}
 
 	// A second-week Monday's own run still does not send.

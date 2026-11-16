@@ -119,11 +119,14 @@ type User struct {
 // classification, so it is deliberately not read: a partner account is one
 // whose accountClassification is "Partner".
 type Customer struct {
-	ID                      string  `json:"id"`
-	Owner                   *User   `json:"owner"`
-	TechnicalOwner          *string `json:"technicalOwner"`
-	RenewalManager          *User   `json:"renewalManager"`
-	AccountClassification   *string `json:"accountClassification"`
+	ID                    string  `json:"id"`
+	Owner                 *User   `json:"owner"`
+	TechnicalOwner        *string `json:"technicalOwner"`
+	RenewalManager        *User   `json:"renewalManager"`
+	AccountClassification *string `json:"accountClassification"`
+	// Status is the account's status (its life cycle in CSM). Only "Customer"
+	// accounts are evaluated. The live (isRealTime) customer-search selects it.
+	Status                  *string `json:"status"`
 	PrimaryPartnerAccountID *string `json:"primaryPartnerAccountId"`
 }
 

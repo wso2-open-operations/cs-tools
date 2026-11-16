@@ -74,6 +74,8 @@ import {
 } from "@features/csm-cases/utils/callRequestState";
 import { resolveAccountTier, type Account } from "@features/csm-accounts/types/csmAccounts";
 import AccountPreviewDrawer from "@features/csm-accounts/components/AccountPreviewDrawer";
+import { StatusChip } from "@features/plg/components/common";
+import type { OrganizationSummary, RegistrationItem } from "@features/plg/api/types";
 import type { Project } from "@features/csm-projects/types/csmProjects";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import ProjectPreviewDrawer from "@features/csm-projects/components/ProjectPreviewDrawer";
@@ -748,6 +750,122 @@ function UserWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Elem
   );
 }
 
+/** PLG organisations (`POST /plg/organizations/search` rows), with the PLG
+ * Organizations page's own columns: each registered product with its
+ * lifecycle stage, and the owner ("Unassigned" when there is none). A row
+ * opens the organisation's PLG page with the dashboard's return state. */
+function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
+  const organizations = items as unknown as OrganizationSummary[];
+  const dashboardReturnState = useDashboardReturnState();
+  const navigate = useNavTransition();
+  return (
+    <DashboardMiniTable
+      isLoading={isLoading}
+      emptyMessage="No organisations match this widget's filters."
+      columns={[
+        { label: "Organisation", width: "minmax(140px, 2fr)" },
+        { label: "Products", width: "minmax(160px, 2fr)" },
+        { label: "Owner", width: "minmax(100px, 1fr)" },
+        { label: "Registered", width: "minmax(90px, 1fr)" },
+      ]}
+      rows={organizations.map((org) => ({
+        key: org.id,
+        onClick: () =>
+          navigate(`/plg/organizations/${encodeURIComponent(org.id)}`, {
+            state: dashboardReturnState,
+          }),
+        cells: [
+          <Box key="name" sx={{ minWidth: 0 }}>
+            <Typography variant="body2" noWrap title={org.organizationName}>
+              {org.organizationName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap component="div">
+              {org.registeredEmail}
+            </Typography>
+          </Box>,
+          <Box key="products" sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+            {(org.platformStages ?? []).map((ps) => (
+              <Box key={ps.orgPlatformId} sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Chip size="small" variant="outlined" label={ps.product.name} />
+                <StatusChip value={ps.lifecycleStage} kind="lifecycle" />
+              </Box>
+            ))}
+          </Box>,
+          org.owner ? (
+            <Typography key="owner" variant="body2" noWrap>
+              {org.owner.name}
+            </Typography>
+          ) : (
+            <Typography key="owner" variant="body2" color="warning.main">
+              Unassigned
+            </Typography>
+          ),
+          <Typography key="registered" variant="body2" noWrap>
+            {formatDate(org.registeredOn)}
+          </Typography>,
+        ],
+      }))}
+    />
+  );
+}
+
+/** PLG registrations (`POST /plg/registrations/search` rows): one row per
+ * organisation and product, with the product's lifecycle stage and the
+ * organisation's owner. A row opens that product's tab on the organisation's
+ * PLG page with the dashboard's return state. */
+function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
+  const registrations = items as unknown as RegistrationItem[];
+  const dashboardReturnState = useDashboardReturnState();
+  const navigate = useNavTransition();
+  return (
+    <DashboardMiniTable
+      isLoading={isLoading}
+      emptyMessage="No registrations match this widget's filters."
+      columns={[
+        { label: "Organisation", width: "minmax(140px, 2fr)" },
+        { label: "Product", width: "minmax(120px, 1.5fr)" },
+        { label: "Stage", width: "minmax(100px, 1fr)" },
+        { label: "Owner", width: "minmax(100px, 1fr)" },
+        { label: "Registered", width: "minmax(90px, 1fr)" },
+      ]}
+      rows={registrations.map((r) => ({
+        key: r.orgPlatformId,
+        onClick: () =>
+          navigate(
+            `/plg/organizations/${encodeURIComponent(r.organizationId)}/${encodeURIComponent(r.product.code)}`,
+            { state: dashboardReturnState },
+          ),
+        cells: [
+          <Box key="name" sx={{ minWidth: 0 }}>
+            <Typography variant="body2" noWrap title={r.organizationName}>
+              {r.organizationName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap component="div">
+              {r.registeredEmail}
+            </Typography>
+          </Box>,
+          <Typography key="product" variant="body2" noWrap title={r.product.name}>
+            {r.product.name}
+          </Typography>,
+          <StatusChip key="stage" value={r.lifecycleStage} kind="lifecycle" />,
+          r.owner ? (
+            <Typography key="owner" variant="body2" noWrap>
+              {r.owner.name}
+            </Typography>
+          ) : (
+            <Typography key="owner" variant="body2" color="warning.main">
+              Unassigned
+            </Typography>
+          ),
+          <Typography key="registered" variant="body2" noWrap>
+            {formatDate(r.registeredOn)}
+          </Typography>,
+        ],
+      }))}
+    />
+  );
+}
+
 function ProductVulnerabilityWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const vulnerabilities = items as unknown as BeProductVulnerabilityView[];
   const dashboardReturnState = useDashboardReturnState();
@@ -1025,4 +1143,6 @@ export const WIDGET_LIST_RENDERERS: Record<
   task: TaskWidgetList,
   call_request: CallRequestWidgetList,
   case_feedback: CaseFeedbackWidgetList,
+  plg_organization: PlgOrganizationWidgetList,
+  plg_registration: PlgRegistrationWidgetList,
 };
