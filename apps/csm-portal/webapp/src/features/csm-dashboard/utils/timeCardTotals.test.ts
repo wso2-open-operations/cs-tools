@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { formatDayLabel, formatHours, formatMttrCases, formatMttrHours } from "@features/csm-dashboard/utils/timeCardTotals";
+import { formatDayLabel, formatHours, formatMttrBarLabel, formatMttrCases, formatMttrHours } from "@features/csm-dashboard/utils/timeCardTotals";
 
 describe("formatHours", () => {
   it("rounds to one decimal and adds h", () => {
@@ -54,5 +54,14 @@ describe("formatMttrCases", () => {
     expect(formatMttrCases(1)).toBe("1 case");
     expect(formatMttrCases(5)).toBe("5 cases");
     expect(formatMttrCases(0)).toBe("0 cases");
+  });
+});
+
+describe("formatMttrBarLabel", () => {
+  it("stays short enough for a bar of a crowded chart", () => {
+    expect(formatMttrBarLabel(3435.8522618300003)).toBe("3436h");
+    expect(formatMttrBarLabel(82.12713216074074)).toBe("82.1h");
+    expect(formatMttrBarLabel(0.250268441944)).toBe("0.3h");
+    expect(formatMttrBarLabel(0)).toBe("0h");
   });
 });

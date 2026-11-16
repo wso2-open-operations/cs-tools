@@ -66,6 +66,26 @@ func TestParseGenerated_MTTRBands(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_MTTRCount: a count shows one band's number -- exactly one
+// band named, no groupBy.
+func TestParseGenerated_MTTRCount(t *testing.T) {
+	ok := mttrDashboard(`{"id":"c","displayName":"x","resourceType":"mttr","shape":"count","gridWidth":3,
+	  "query":{"months":"3","bands":["S1-S4"]}}`)
+	if _, err := ParseGenerated([]byte(ok)); err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	for _, w := range []string{
+		`"query":{"months":"3"}`,
+		`"query":{"months":"3","bands":["S1","S2"]}`,
+		`"query":{"months":"3","bands":["S1"]},"groupBy":{"bucket":"severity"}`,
+	} {
+		bad := mttrDashboard(`{"id":"c","displayName":"x","resourceType":"mttr","shape":"count","gridWidth":3,` + w + `}`)
+		if _, err := ParseGenerated([]byte(bad)); err == nil {
+			t.Errorf("%s was accepted, want an error", w)
+		}
+	}
+}
+
 // TestParseGenerated_MTTRWindow: a widget names exactly one of months or days
 // (days only "7").
 func TestParseGenerated_MTTRWindow(t *testing.T) {
@@ -130,7 +150,7 @@ func TestValidateWidgets_MTTRIsBarOnly(t *testing.T) {
 	pie := base
 	pie.Shape = ShapePie
 	pie.GroupBy = &GroupByConfig{Bucket: "severity"}
-	if err := validateWidgets(widget(pie), "test.json"); err == nil || !strings.Contains(err.Error(), `only supports shape "bar"`) {
+	if err := validateWidgets(widget(pie), "test.json"); err == nil || !strings.Contains(err.Error(), `only supports shapes "bar" and "count"`) {
 		t.Errorf("pie: err = %v, want the bar-only refusal", err)
 	}
 

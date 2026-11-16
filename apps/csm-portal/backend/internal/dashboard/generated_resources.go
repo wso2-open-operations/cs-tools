@@ -246,7 +246,10 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 		// way a pie's wedges must -- and DashboardPieChart's percentage
 		// (slice.value / total) would divide hours by a case count anyway,
 		// which is meaningless even setting the overlap aside.
-		shapes: []Shape{ShapeBar},
+		shapes: []Shape{ShapeBar, ShapeCount},
+		// A count shows one band's number, so it takes no groupBy and must
+		// name that band (see the MTTR check in checkGeneratedResourceWidget).
+		groupByOn: []Shape{ShapeBar},
 		flat: map[string]valueRule{
 			"months":     {kind: valuesScalarEnum, values: []string{"1", "3", "6", "12"}},
 			"days":       {kind: valuesScalarEnum, values: []string{"7"}},
@@ -435,6 +438,13 @@ func checkGeneratedResourceWidget(i int, w WidgetTemplate, rules resourceRules) 
 		}
 		if held != 1 {
 			return fmt.Errorf("%w: %s.query: a %s widget needs exactly one of %s", ErrGeneratedInvalid, at, rules.noun, strings.Join(rules.requiredOne, ", "))
+		}
+	}
+	// An MTTR count is one band's number: exactly one band named, no groupBy
+	// (groupByOn above). The bar draws every band it names.
+	if w.ResourceType == ResourceMTTR && w.Shape == ShapeCount {
+		if b, ok := w.Query["bands"].([]any); !ok || len(b) != 1 {
+			return fmt.Errorf("%w: %s.query: an MTTR count shows one band, so \"bands\" must name exactly one", ErrGeneratedInvalid, at)
 		}
 	}
 	if err := checkGeneratedQuery(at+".query", w.Query, rules); err != nil {

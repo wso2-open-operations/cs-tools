@@ -36,6 +36,16 @@ export function formatDayLabel(key: string): string {
   return day.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/**
+ * A short label for the top of an MTTR bar, where seven bars share a narrow
+ * tile: whole hours from 100 up, one decimal below, no thousands separator
+ * ("3436h", "82.1h", "0.3h"). The tooltip keeps the full `formatMttrHours`.
+ */
+export function formatMttrBarLabel(hours: number): string {
+  const rounded = hours >= 100 ? Math.round(hours) : Math.round(hours * 10) / 10;
+  return `${rounded}h`;
+}
+
 /** Labels an MTTR widget's header count: "5 cases" ("1 case"). */
 export function formatMttrCases(count: number): string {
   return `${count.toLocaleString("en-US")} ${count === 1 ? "case" : "cases"}`;

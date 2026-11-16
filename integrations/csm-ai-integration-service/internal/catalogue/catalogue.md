@@ -110,10 +110,10 @@ state, user, project, day or team, counting cards or summing hours; no `line`).
 An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`/`bar` with `slices` or
 `groupBy` by `state` only (no `line`). An `account` or `project` widget is `count`, `list`, or `pie`/`bar`
 with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
-with `groupBy.bucket` (section 5d) or rating `slices` (no `line`). An `mttr` widget is **only** `bar`
-with `groupBy.bucket` (section 5f) — never `count`, `list`, `pie`, `slices`, `groupBy.field` or `line`
-(there is no single MTTR record to count or list, and the six bands overlap — S1-S4 and S1-S3 are
-sums of the individual ones — so they can never be pie wedges of one whole).
+with `groupBy.bucket` (section 5d) or rating `slices` (no `line`). An `mttr` widget is **only** a `bar`
+with `groupBy.bucket` (section 5f), or a `count` of one band with no `groupBy` — never `list`, `pie`,
+`slices`, `groupBy.field` or `line` (there is no MTTR record to list, and the bands overlap — S1-S4 and
+S1-S3 are sums of the individual ones — so they can never be pie wedges of one whole).
 
 Fields that belong to one shape must not appear on another (`listLimit`/`sortBy` on lists only,
 `slices`/`groupBy` on pie/bar only, `days`/`series`/`startDate`/`endDate`/`bucket` on line only).
@@ -632,6 +632,9 @@ it: the one call always answers with all seven bands at once (in this order); `b
 | `S3` | S3 (medium) cases only |
 | `S4` | S4 (low) cases only |
 
+**As a number, not a chart** ("MTTR as a number", "just the number", "average resolution time of S1"):
+a `count` with `query.bands` naming exactly **one** band and no `groupBy`; it shows that band's average
+in hours. One number per band, so "S1 to S4 as numbers" is four `count` widgets (`gridWidth` 3 each).
 "MTTR by severity" with no band named shows every band side by side; "MTTR for S1 to S4" or "S1, S2,
 S3, S4" is the same `bar` widget with `"bands": ["S1","S2","S3","S4"]`; a single band ("S1 MTTR") is
 `"bands": ["S1"]`. There is no `slices`/per-band-widget shape for MTTR. The values are average hours.
@@ -647,6 +650,11 @@ S3, S4" is the same `bar` widget with `"bands": ["S1","S2","S3","S4"]`; a single
 { "id": "mttr-rigel-by-severity", "displayName": "Rigel: MTTR by Severity (Last 6 Months)",
   "resourceType": "mttr", "shape": "bar", "gridWidth": 6,
   "query": { "months": "6", "creTeamIds": ["rigel"] }, "groupBy": { "bucket": "severity" } }
+```
+
+```json
+{ "id": "mttr-s1-number", "displayName": "S1 MTTR (Last Month)", "resourceType": "mttr",
+  "shape": "count", "gridWidth": 3, "query": { "months": "1", "bands": ["S1"] } }
 ```
 
 ```json
@@ -828,6 +836,7 @@ Never set both `slices` and `groupBy`.
 | "MTTR for the last month / quarter / 6 months / year" | `months` `"1"` / `"3"` / `"6"` / `"12"`; "quarter" and "year" are the closest of these (3 and 12), note what differs |
 | "Rigel's MTTR", "MTTR for team Sirius" | `creTeamIds` with that team's key(s) |
 | "MTTR of S1-S4 cases", "MTTR for S1, S2, S3, S4" | `bands` `["S1","S2","S3","S4"]` (section 5f) |
+| "MTTR as a number", "just the number", one band's average | `count` with `bands` of that one band (section 5f) |
 | MTTR for a single case, account, project or engineer; MTTR over time | not expressible (section 5f) |
 | "accounts", "customers" (as organisations), "clients" | `resourceType: "account"` (section 5c); "customers" adds `lifeCycle "Customer"` |
 | "partners" / "prospects" / "lost customers" (accounts) | `lifeCycle` `"Partner"` / `"Prospect"` / `"Lost Customer"` |
@@ -1027,9 +1036,9 @@ If two readings are plausible and the table does not settle it, pick the one abo
     answers" section; never an organisation `line`.
 14. An `mttr` widget: a flat `query` with only one of `months` (`"1"`/`"3"`/`"6"`/`"12"`) or `days` (`"7"`) and
     `creTeamIds` (CRE team keys only) and `bands` (which bars to show; "S1-S4" means
-    `["S1","S2","S3","S4"]`); shape `bar` only (never `pie` — the six bands overlap, so
-    they can never be wedges of one whole) with `groupBy: {"bucket": "severity"}` only —
-    never `count`, `list`, `slices`, `groupBy.field` or `line`.
+    `["S1","S2","S3","S4"]`); shape `bar` (never `pie` — the bands overlap, so
+    they can never be wedges of one whole) with `groupBy: {"bucket": "severity"}`, or `count` with
+    exactly one band in `bands` and no `groupBy` — never `list`, `slices`, `groupBy.field` or `line`.
 15. The output is a single JSON object.
 16. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).
