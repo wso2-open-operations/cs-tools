@@ -127,6 +127,7 @@ describe("useMttrReportData", () => {
       signal: expect.any(AbortSignal),
     });
     expect(result.current.slices.map((s) => s.label)).toEqual(["S1", "S2", "S3", "S4"]);
+    expect(result.current.total).toBe(20);
   });
 
   it("sends days instead of months for a 7 day window and orders S0 first of the single bands", async () => {
@@ -161,6 +162,9 @@ describe("useMttrReportData", () => {
       signal: expect.any(AbortSignal),
     });
     expect(result.current.slices.map((s) => s.label)).toEqual(["S0", "S1"]);
+    // The header counts the cases behind the bars shown (S0 1 + S1 2), not
+    // the S1-S4 band that is not shown.
+    expect(result.current.total).toBe(3);
   });
 
   it("appends a repeated creTeamId per team", async () => {

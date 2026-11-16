@@ -3302,7 +3302,7 @@ describe("DashboardWidgetTile: PLG data the user may not read", () => {
       });
     });
 
-    it("shape bar: puts a short label on each bar, and says how many cases the header covers", async () => {
+    it("shape bar: puts a short label on each bar, and says how many cases the shown bars cover", async () => {
       getResponseMock.mockResolvedValue({ json: async () => mttrReport });
       renderWithClient(
         <DashboardWidgetTile
@@ -3314,7 +3314,7 @@ describe("DashboardWidgetTile: PLG data the user may not read", () => {
           groupBy={{ bucket: "severity" }}
         />,
       );
-      await waitFor(() => expect(screen.getByText("5 cases")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("2 cases")).toBeInTheDocument());
       expect(screen.getByText(/bar:S1:3435.85/)).toHaveTextContent("label:3436h");
     });
   });
