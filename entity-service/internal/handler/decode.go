@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 // sanitizeLog strips CR/LF characters from a string to prevent log injection.
@@ -168,6 +169,13 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		// tell apart carries its machine-readable errorCode (apierror/codes.go).
 		log.Printf("Forbidden: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(fe.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSONWithCode(w, http.StatusForbidden, fe.Msg, fe.Code)
+
+	case errors.Is(err, repository.ErrNoCallerIdentity):
+		// 403 – the scoped repository was reached with no resolved caller
+		// identity. Fail closed with the same refusal the access service gives
+		// a caller it cannot grant any scope to; never fall back to unrestricted.
+		log.Printf("Forbidden: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(err.Error())) // #nosec G706 -- path and message sanitized
+		apierror.WriteJSON(w, http.StatusForbidden, "no access for this user")
 
 	case errors.As(err, &nfe):
 		// 404 – resource not found; message is safe to return.

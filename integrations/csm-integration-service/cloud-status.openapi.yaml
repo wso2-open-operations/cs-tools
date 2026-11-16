@@ -1,0 +1,395 @@
+openapi: 3.0.1
+info:
+  title: CSM Cloud Status API
+  version: 1.0.0
+  description: >
+    The public cloud status reads (monitors, incidents, incident detail,
+    availabilities and availability history), published as an API of their
+    own so that a consumer that needs only these reads subscribes to them
+    alone. The service serves them on the same port as the CSM Integration
+    Service API, and each operation here is the same as in openapi.yaml.
+    Fronted by Choreo's API Manager gateway (subscription + client
+    credentials); this service performs no inbound auth of its own.
+security:
+  - oauth2ClientCredentials: []
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+
+  /cloud-status/monitors:
+    get:
+      summary: The public status dashboard's monitor view for one cloud.
+      description: >
+        Postgres-backed, forwarded to the entity service verbatim. Consumed by
+        wso2-enterprise/uptime-dashboard, which renders status.*.choreo.dev.
+        The response shape is that dashboard's and is reproduced field for
+        field from the ServiceNow resource it replaces.
+      operationId: getCloudStatusMonitors
+      parameters:
+        - name: cloud
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+      responses:
+        "200":
+          description: An object keyed by region, each holding the groups shown in that column.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudStatusResult'
+        "400":
+          description: BadRequest (unknown cloud)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream rejected this service's credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound (upstream has no such resource)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cloud-status/incidents/{id}:
+    get:
+      summary: One outage's public detail view.
+      description: >
+        Postgres-backed, forwarded verbatim. *** THE 200 BODY HAS TWO SHAPES,
+        AND THE SPARSE ONE IS THE COMMON CASE. *** An outage with no linked
+        incident, or one whose incident is still New, On Hold or Canceled,
+        returns an object carrying only `attachments` — no id, begin or type.
+        That is the majority of outages. Forwarding raw bytes is what keeps
+        both shapes intact.
+
+
+        `comments` are the outage's customer-facing external communications,
+        newest first — NOT the linked incident's comments, work notes or
+        approval history, which are internal and which ServiceNow does not
+        publish either.
+      operationId: getCloudStatusIncidentDetail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: >-
+            The outage id. Either the 32-hex form the dashboard has always
+            used or the dashed uuid is accepted, so links created before the
+            cutover still resolve after it.
+        - name: cloud
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+      responses:
+        "200":
+          description: The outage's detail, or an attachments-only object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudStatusResult'
+        "400":
+          description: BadRequest (unknown cloud or missing id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No outage with that id belongs to that cloud.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream rejected this service's credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cloud-status/incidents:
+    get:
+      summary: Six months of incident history for one cloud.
+      description: >
+        Postgres-backed, forwarded verbatim. Keyed "YYYY-M"; every month key is
+        present whether or not it has incidents, because the dashboard renders
+        a row per key.
+      operationId: getCloudStatusIncidents
+      parameters:
+        - name: cloud
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+      responses:
+        "200":
+          description: Six month keys.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudStatusResult'
+        "400":
+          description: BadRequest (unknown cloud)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream rejected this service's credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound (upstream has no such resource)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cloud-status/availabilities:
+    get:
+      summary: Weighted uptime per region per window for one cloud.
+      description: >
+        Postgres-backed, forwarded verbatim. *** THE availability FIELD IS A
+        JSON STRING FOR SIX CLOUDS AND A BARE NUMBER FOR asgardeo. *** That is
+        what the ServiceNow resource emits and what the dashboard renders;
+        anything that decodes and re-encodes this body would flatten the
+        distinction. This service forwards raw bytes precisely so it cannot.
+      operationId: getCloudStatusAvailabilities
+      parameters:
+        - name: cloud
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+      responses:
+        "200":
+          description: An object keyed by region, each holding four windows in render order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudStatusResult'
+        "400":
+          description: BadRequest (unknown cloud)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream rejected this service's credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound (upstream has no such resource)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /cloud-status/availability-history:
+    get:
+      summary: The 90-day daily uptime chart for one cloud.
+      description: >
+        Postgres-backed, forwarded verbatim. Nested region -> group -> monitor.
+        Unlike the availabilities endpoint this one applies no weighting.
+      operationId: getCloudStatusAvailabilityHistory
+      parameters:
+        - name: cloud
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
+      responses:
+        "200":
+          description: An object keyed by region, each holding the groups shown in that column.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudStatusResult'
+        "400":
+          description: BadRequest (unknown cloud)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (upstream rejected this service's credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: NotFound (upstream has no such resource)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          # Placeholder — fill in with the actual token endpoint for this service's
+          # Choreo-managed API once it's provisioned. Not a real/guessed URL.
+          tokenUrl: "<token_url>"
+          scopes: {}
+
+  schemas:
+    CloudStatusResult:
+      type: object
+      description: >
+        The envelope ServiceNow's Scripted REST APIs return, reproduced here
+        so these endpoints are a DROP-IN REPLACEMENT rather than a second
+        integration. uptime-dashboard checks
+        `json?.result?.message == "success"` and then reads
+        `json.result.data`, so cutting over is a change to its endpoint URLs
+        and nothing else — no new controller, no parallel code path.
+
+
+        `data` is forwarded byte-for-byte from entity-service. That matters
+        beyond tidiness: on /availabilities the `availability` field is a
+        JSON STRING for six clouds and a bare NUMBER for asgardeo, and a
+        decode/re-encode would flatten the distinction.
+      properties:
+        result:
+          type: object
+          properties:
+            code:
+              type: integer
+              description: 0 on success. The dashboard gates on message, not this.
+            message:
+              type: string
+              enum: [success]
+            cloud:
+              type: string
+            data:
+              description: The endpoint's payload, forwarded unchanged.
+          required: [code, message, cloud, data]
+      required: [result]
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string

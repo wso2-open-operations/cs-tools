@@ -110,6 +110,29 @@ describe("DeploymentProductList", () => {
     ).toBeInTheDocument();
   });
 
+  it("names the configured company in the products heading", () => {
+    const originalConfig = window.config;
+    window.config = { ...originalConfig, CUSTOMER_PORTAL_COMPANY_NAME: "Acme Corp" };
+    vi.mocked(usePostDeploymentProductsSearchAll).mockReturnValue({
+      data: mockProducts,
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof usePostDeploymentProductsSearchAll>);
+    try {
+      renderWithProviders(
+        <DeploymentProductList
+          deploymentId="dep-123"
+          projectId="proj-1"
+          {...defaultSelectionProps}
+        />,
+      );
+      expect(screen.getByText("Acme Corp Products")).toBeInTheDocument();
+      expect(screen.queryByText("WSO2 Products")).not.toBeInTheDocument();
+    } finally {
+      window.config = originalConfig;
+    }
+  });
+
   it("should render product labels and descriptions", () => {
     vi.mocked(usePostDeploymentProductsSearchAll).mockReturnValue({
       data: mockProducts,

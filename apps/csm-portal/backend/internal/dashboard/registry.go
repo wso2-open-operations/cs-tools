@@ -772,7 +772,9 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	// injectImpliedTypeFilters).
 	ResourceServiceRequest: true, ResourceSecurityReportAnalysis: true,
 	ResourceAnnouncement: true, ResourceEngagement: true,
-	ResourceCaseFeedback: true,
+	ResourceCaseFeedback:    true,
+	ResourcePlgOrganization: true,
+	ResourcePlgRegistration: true,
 }
 
 var validWidgetShapes = map[Shape]bool{
@@ -1094,9 +1096,16 @@ func validateWidgets(d Dashboard, source string) error {
 			}
 		}
 		if w.Shape == ShapeLine {
-			if w.ResourceType != ResourceCase {
-				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: shape %q only supports resourceType %q, got %q",
-					source, d.ID, w.ID, ShapeLine, ResourceCase, w.ResourceType)
+			// Cases (Opened and Closed, POST /cases/volume-trend) and PLG
+			// registrations (one line, Registered, POST
+			// /plg/registrations/volume-trend), with the same window rules.
+			if w.ResourceType != ResourceCase && w.ResourceType != ResourcePlgRegistration {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: shape %q only supports resourceType %q or %q, got %q",
+					source, d.ID, w.ID, ShapeLine, ResourceCase, ResourcePlgRegistration, w.ResourceType)
+			}
+			if w.ResourceType == ResourcePlgRegistration && w.Series != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"series\" is only meaningful for resourceType %q; a %q line has one line",
+					source, d.ID, w.ID, ResourceCase, ResourcePlgRegistration)
 			}
 			if w.Days < 0 || w.Days > maxWidgetLineDays {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"days\" is %d; it must be between 1 and %d (or omitted for the default)",

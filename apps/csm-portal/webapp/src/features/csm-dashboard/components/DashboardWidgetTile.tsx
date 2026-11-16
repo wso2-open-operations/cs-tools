@@ -40,8 +40,10 @@ import { useWidgetPieData, type PieSliceResult } from "@features/csm-dashboard/a
 import { useWidgetGroupByData } from "@features/csm-dashboard/api/useWidgetGroupByData";
 import { useCaseFeedbackTrendData } from "@features/csm-dashboard/api/useCaseFeedbackTrendData";
 import { useCaseVolumeTrendData } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
+import { usePlgRegistrationTrendData } from "@features/csm-dashboard/api/usePlgRegistrationTrendData";
 import {
   isCaseFamilyResourceType,
+  isPlgResourceType,
   WIDGET_RESOURCE_CONFIG,
 } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
@@ -49,6 +51,7 @@ import GenericColumnList from "@features/csm-dashboard/components/GenericColumnL
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
 import { linePointFilters } from "@features/csm-dashboard/utils/linePointQuery";
+import { plgLinePointFilters } from "@features/csm-dashboard/utils/plgLinePointQuery";
 import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
@@ -235,6 +238,14 @@ interface DashboardWidgetTileProps {
    * every other shape, and a no-op for shape "count" below `xl` — this
    * never changes what a laptop-width viewer sees. */
   dense?: boolean;
+}
+
+/** What a tile says in place of its data when the backend refuses the
+ * user's role (403). */
+function noAccessMessage(resourceType: BeWidgetResourceType): string {
+  if (resourceType === "time_card") return "You don't have access to time card totals.";
+  if (isPlgResourceType(resourceType)) return "You don't have access to PLG data.";
+  return "You don't have access to this data.";
 }
 
 /**
@@ -471,7 +482,12 @@ function DashboardWidgetTile({
   // instead — skip this one's own network call rather than wasting it, but
   // still call the hook unconditionally (rules of hooks; a widget's shape
   // never changes across this component's lifetime).
-  const { data, isLoading: isWidgetDataLoading, isError } = useWidgetData({
+  const {
+    data,
+    isLoading: isWidgetDataLoading,
+    isError,
+    error: widgetDataError,
+  } = useWidgetData({
     widgetId,
     resourceType,
     filters,
@@ -549,16 +565,31 @@ function DashboardWidgetTile({
   // /cases/volume-trend`, always exactly two series) — unrelated to
   // slices/groupBy, so this is independent of `pieData` above. Called
   // unconditionally (rules of hooks), gated by its own `enabled` argument.
-  const volumeTrendData = useCaseVolumeTrendData(
+  // A PLG registration line is the same chart over `POST
+  // /plg/registrations/volume-trend` (one series, Registered); the case
+  // trend is never asked for it.
+  const isPlgRegistrationLine = shape === "line" && resourceType === "plg_registration";
+  const caseVolumeTrendData = useCaseVolumeTrendData(
     widgetId,
     filters,
     days,
     selectedTeamCreGroupId,
     selectedTeamSreGroupId,
     currentUserId,
-    shape === "line" && isVisible,
+    shape === "line" && !isPlgRegistrationLine && isVisible,
     startDate && endDate ? { startDate, endDate, bucket } : undefined,
   );
+  const plgRegistrationTrendData = usePlgRegistrationTrendData(
+    widgetId,
+    filters,
+    days,
+    selectedTeamCreGroupId,
+    selectedTeamSreGroupId,
+    currentUserId,
+    isPlgRegistrationLine && isVisible,
+    startDate && endDate ? { startDate, endDate, bucket } : undefined,
+  );
+  const volumeTrendData = isPlgRegistrationLine ? plgRegistrationTrendData : caseVolumeTrendData;
   // True while this widget carries a `__current_user__` filter and the
   // signed-in user's profile hasn't loaded yet. `useWidgetData`/
   // `useWidgetPieData` hold their requests in that window (see
@@ -608,6 +639,15 @@ function DashboardWidgetTile({
   });
   const Icon = config.icon;
   const isListShape = shape === "list";
+  // A PLG count or list the user may not read (only PLG users may: CS
+  // engineers and admins) answers 403; the tile says so instead of an error,
+  // and a count tile then links nowhere. Read from the status, as
+  // `useWidgetGroupByData` does. Only the PLG resourceTypes, so every other
+  // widget's error stays as it is.
+  const isForbidden =
+    isPlgResourceType(resourceType) &&
+    isError &&
+    (widgetDataError as { status?: unknown } | null)?.status === 403;
   // Shared by the shape-"list" branch and, when `inlineDrilldown` is set, an
   // expanded slice's own inline list on the pie/bar branch below — both
   // render through the same per-resourceType (or generic, `columns`-
@@ -742,7 +782,7 @@ function DashboardWidgetTile({
           <Skeleton variant="rounded" height={28 * (listLimit ?? 4) + 40} sx={{ mt: 1 }} />
         ) : isError ? (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Could not load this widget.
+            {isForbidden ? noAccessMessage(resourceType) : "Could not load this widget."}
           </Typography>
         ) : (
           <>
@@ -945,9 +985,7 @@ function DashboardWidgetTile({
           <Box sx={{ pointerEvents: "auto" }}>
             {pieData.isForbidden ? (
               <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
-                {resourceType === "time_card"
-                  ? "You don't have access to time card totals."
-                  : "You don't have access to this data."}
+                {noAccessMessage(resourceType)}
               </Typography>
             ) : (
               <ChartComponent
@@ -978,12 +1016,14 @@ function DashboardWidgetTile({
     // the trend's own cache already keeps today's point fresh server-side
     // (entity-service's case-volume-trend cache), so a manual refresh here
     // has nothing to accomplish.
+    // A PLG registration point opens that day's (or week's, month's)
+    // registrations instead (`plgLinePointFilters`).
     const handlePointClick = (date: string, lineSeries: BeLineSeries, pointEndDate?: string): void => {
+      const pointFilters = isPlgRegistrationLine
+        ? plgLinePointFilters(filters, date, pointEndDate)
+        : linePointFilters(filters, date, lineSeries, pointEndDate);
       navigate(
-        config.buildHref(
-          resolvePlaceholders(linePointFilters(filters, date, lineSeries, pointEndDate)),
-          { widgetId, displayName: resolvedDisplayName },
-        ),
+        config.buildHref(resolvePlaceholders(pointFilters), { widgetId, displayName: resolvedDisplayName }),
         { state: dashboardReturnState },
       );
     };
@@ -995,15 +1035,22 @@ function DashboardWidgetTile({
             {resolvedDescription}
           </Typography>
         )}
-        <DashboardLineChart
-          points={volumeTrendData.points}
-          isLoading={volumeTrendData.isLoading}
-          isError={volumeTrendData.isError}
-          series={series}
-          bucket={startDate && endDate ? bucket : undefined}
-          chart={chart}
-          onPointClick={linePointClickThrough ? handlePointClick : undefined}
-        />
+        {volumeTrendData.isForbidden ? (
+          <Typography variant="body2" color="text.secondary">
+            {noAccessMessage(resourceType)}
+          </Typography>
+        ) : (
+          <DashboardLineChart
+            points={volumeTrendData.points}
+            isLoading={volumeTrendData.isLoading}
+            isError={volumeTrendData.isError}
+            series={isPlgRegistrationLine ? ["opened"] : series}
+            seriesLabels={isPlgRegistrationLine ? { opened: "Registered" } : undefined}
+            bucket={startDate && endDate ? bucket : undefined}
+            chart={chart}
+            onPointClick={linePointClickThrough ? handlePointClick : undefined}
+          />
+        )}
       </Card>
     );
   }
@@ -1014,7 +1061,7 @@ function DashboardWidgetTile({
   } else if (isError) {
     body = (
       <Typography variant="body2" color="text.secondary">
-        Could not load this widget.
+        {isForbidden ? noAccessMessage(resourceType) : "Could not load this widget."}
       </Typography>
     );
   } else {
@@ -1111,28 +1158,31 @@ function DashboardWidgetTile({
         ...cardRefreshRevealSx,
       }}
     >
-      <Box
-        component={RouterLink}
-        to={href}
-        state={dashboardReturnState}
-        // The visible count + label sit in the pointer-events-none content
-        // layer above this anchor, not inside it as descendant text anymore
-        // (that's the whole point -- see the comment above), so it needs its
-        // own accessible name instead of inheriting one from its content.
-        aria-label={`${resolvedDisplayName}: ${formattedCount}`}
-        sx={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 0,
-          display: "block",
-          borderRadius: "inherit",
-          cursor: "pointer",
-          color: "inherit",
-          textDecoration: "none",
-          ...widgetHoverSx,
-          "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
-        }}
-      />
+      {/* No link to data the user may not read. */}
+      {!isForbidden && (
+        <Box
+          component={RouterLink}
+          to={href}
+          state={dashboardReturnState}
+          // The visible count + label sit in the pointer-events-none content
+          // layer above this anchor, not inside it as descendant text anymore
+          // (that's the whole point -- see the comment above), so it needs its
+          // own accessible name instead of inheriting one from its content.
+          aria-label={`${resolvedDisplayName}: ${formattedCount}`}
+          sx={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            display: "block",
+            borderRadius: "inherit",
+            cursor: "pointer",
+            color: "inherit",
+            textDecoration: "none",
+            ...widgetHoverSx,
+            "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+          }}
+        />
+      )}
       <Box sx={{ position: "relative", zIndex: 1, height: "100%", pointerEvents: "none" }}>
         {/* Refresh sits to the LEFT of the (always-visible) info icon when
             both are present, rather than stacking one on top of the other —

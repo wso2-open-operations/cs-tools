@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, IconButton, TextField, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { SendHorizontal, X } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Box, Button, Chip, Collapse, IconButton, TextField, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { ChevronDown, ChevronRight, SendHorizontal, X } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 export interface GenerateChatMessage {
   id: string;
@@ -30,6 +30,34 @@ export const GENERATE_PROMPT_MAX_LENGTH = 2000;
 const GREETING =
   "Describe the dashboard you'd like, and I'll build it with live data. You can ask for changes afterwards.";
 const EDIT_GREETING = "Ask for a change to this dashboard, and I'll update the preview. Save when you're happy with it.";
+
+/**
+ * What the chat can build, in the user's words, under "What can I ask about?".
+ * It follows the AI integration service's catalogue.md by hand: a data type or
+ * filter added there is added here too.
+ */
+const ASK_ABOUT: { title: string; detail: string }[] = [
+  {
+    title: "Cases, service requests, engagements, security reports and announcements",
+    detail:
+      "by state, severity, issue type, product and version, project, customer, region, CRE or SRE team, " +
+      "assignee (mine or unassigned), who raised them, escalation, SLA breaches, tags (patch, regression…), " +
+      "onboarding status, and when they were created, updated, resolved, closed or moved to a state",
+  },
+  { title: "Time cards", detail: "by state, engineer, project, day or team" },
+  { title: "Incidents, change requests and problems", detail: "by state, priority and date" },
+  { title: "Customers and projects", detail: "by lifecycle, health, risks and team" },
+  { title: "Customer satisfaction", detail: "ratings and CSAT" },
+  {
+    title: "PLG organisations and sign-ups",
+    detail: "by product, lifecycle stage, tier, owner, country and playbook answers",
+  },
+];
+
+const ASK_ABOUT_FOOTER = [
+  "Shown as counts, lists, pie or bar charts, and trends of cases opened and closed or of PLG sign-ups.",
+  "Periods such as today, this week or month, the last 30 days, or a named month, quarter or year.",
+];
 
 const EXAMPLE_PROMPTS = [
   "My open cases by severity",
@@ -49,7 +77,8 @@ interface GenerateChatPanelProps {
 }
 
 /**
- * The chat side of the generate page: a greeting, example prompts (shown until
+ * The chat side of the generate page: a greeting, a "What can I ask about?"
+ * list (closed until clicked; the Help page is not on every server), example prompts (shown until
  * the first message, and not when editing a saved dashboard; clicking one fills
  * the box so it can be edited before sending), the messages, and the input. Enter sends, Shift+Enter adds a line.
  * The box has the cursor when the panel opens, after an example prompt is
@@ -66,6 +95,8 @@ export default function GenerateChatPanel({
   editing = false,
 }: GenerateChatPanelProps): JSX.Element {
   const [draft, setDraft] = useState("");
+  const [askAboutOpen, setAskAboutOpen] = useState(false);
+  const askAboutId = useId();
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const canSend = draft.trim().length > 0 && !busy;
@@ -132,6 +163,35 @@ export default function GenerateChatPanel({
         role="log"
       >
         <Bubble role="assistant" text={editing ? EDIT_GREETING : GREETING} />
+        <Box sx={{ alignSelf: "flex-start", maxWidth: "85%" }}>
+          <Button
+            size="small"
+            variant="text"
+            startIcon={askAboutOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            aria-expanded={askAboutOpen}
+            aria-controls={askAboutId}
+            onClick={() => setAskAboutOpen((open) => !open)}
+          >
+            What can I ask about?
+          </Button>
+          <Collapse in={askAboutOpen} unmountOnExit>
+            <Box id={askAboutId} sx={{ px: 1.5, pt: 0.5, display: "flex", flexDirection: "column", gap: 1 }}>
+              {ASK_ABOUT.map(({ title, detail }) => (
+                <Typography key={title} variant="body2">
+                  <Box component="span" sx={{ fontWeight: 600 }}>
+                    {title}
+                  </Box>
+                  : {detail}.
+                </Typography>
+              ))}
+              {ASK_ABOUT_FOOTER.map((line) => (
+                <Typography key={line} variant="body2" color="text.secondary">
+                  {line}
+                </Typography>
+              ))}
+            </Box>
+          </Collapse>
+        </Box>
         {messages.length === 0 && !editing && (
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
             {EXAMPLE_PROMPTS.map((prompt) => (

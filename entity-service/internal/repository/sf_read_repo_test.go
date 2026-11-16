@@ -18,6 +18,7 @@ package repository
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -55,5 +56,33 @@ func TestEntityRef(t *testing.T) {
 	}
 	if got := entityRef(&id, &name); !reflect.DeepEqual(got, &domain.EntityRef{ID: "x", Name: "Acme"}) {
 		t.Errorf("got %+v", got)
+	}
+}
+
+// TestScanOpportunityAndLink_SfID: the opportunity and link reads return the
+// Salesforce id as the last column, NULL staying nil.
+func TestScanOpportunityAndLink_SfID(t *testing.T) {
+	oppSfID, linkSfID := "006xx0000001", "a3Uxx0000001"
+	var none *string
+
+	opp, err := scanOpportunity(scanRow{vals: []any{"opp-1", none, none, none, none, none, none, &oppSfID}})
+	if err != nil || opp.SfID == nil || *opp.SfID != oppSfID {
+		t.Fatalf("opportunity sfId = %v (err %v), want %s", opp.SfID, err, oppSfID)
+	}
+	if !strings.Contains(sfOpportunitySelect, "o.stage, o.sf_id\n") {
+		t.Error("sfOpportunitySelect does not end with o.sf_id")
+	}
+
+	link, err := scanLink(scanRow{vals: []any{"link-1", none, none, none, none, &linkSfID}})
+	if err != nil || link.SfID == nil || *link.SfID != linkSfID {
+		t.Fatalf("link sfId = %v (err %v), want %s", link.SfID, err, linkSfID)
+	}
+	if !strings.Contains(sfLinkSelect, "o.name, l.link_sf_id\n") {
+		t.Error("sfLinkSelect does not end with l.link_sf_id")
+	}
+
+	unlinked, err := scanLink(scanRow{vals: []any{"link-2", none, none, none, none, none}})
+	if err != nil || unlinked.SfID != nil {
+		t.Fatalf("link with no Salesforce id: sfId = %v (err %v), want nil", unlinked.SfID, err)
 	}
 }

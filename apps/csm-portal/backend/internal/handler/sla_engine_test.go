@@ -164,7 +164,7 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_RequiresUser(t *testing.T) 
 	const caseID = "11111111-1111-1111-1111-111111111111"
 	h := NewSLAEngineHandler(&stubSLAEngineClient{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate-pause", nil)
+	req := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate", nil)
 	req.SetPathValue("id", caseID)
 
 	h.RecalculateCasePauseTotals(rec, req)
@@ -178,7 +178,7 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_RejectsInvalidCaseID(t *tes
 	client := &stubSLAEngineClient{}
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
-	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/sla/recalculate-pause", nil))
+	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/sla/recalculate", nil))
 	req.SetPathValue("id", "case-1")
 
 	h.RecalculateCasePauseTotals(rec, req)
@@ -197,7 +197,7 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_ForwardsCaseIDAndReturnsRes
 	client := &stubSLAEngineClient{caseRecalcResult: []byte(`{"hasHistory":true,"clocks":[]}`)}
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
-	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate-pause", nil))
+	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate", nil))
 	req.SetPathValue("id", caseID)
 
 	h.RecalculateCasePauseTotals(rec, req)
@@ -218,7 +218,7 @@ func TestSLAEngineHandler_RecalculateCasePauseTotals_UpstreamErrorMapped(t *test
 	client := &stubSLAEngineClient{caseRecalcErr: &apierror.Error{StatusCode: http.StatusForbidden}}
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
-	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate-pause", nil))
+	req := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/sla/recalculate", nil))
 	req.SetPathValue("id", caseID)
 
 	h.RecalculateCasePauseTotals(rec, req)

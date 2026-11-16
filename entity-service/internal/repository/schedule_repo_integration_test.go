@@ -1858,6 +1858,93 @@ func TestScheduleIntegration_SearchAssignmentsCanLeaveOutSomebodyAway(t *testing
 	}
 }
 
+// An allocation that moves nobody (Allo-INT, ENG, ...) does not hide a turn on
+// the same day, so excludeAbsent keeps the turn: the person still works it and
+// must get its reminder.
+func TestScheduleIntegration_SearchAssignmentsExcludeAbsentKeepsAnAllocatedTurn(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	code := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	const tuesday = "2026-09-22"
+
+	var kind string
+	if err := pool.QueryRow(ctx, `SELECT code FROM team_schedule_absence_kind
+		WHERE bucket = 'ALLOCATION' AND moves_to_team_key IS NULL AND is_active
+		ORDER BY sort_order LIMIT 1`).Scan(&kind); err != nil {
+		t.Fatalf("no allocation kind that moves nobody: %v", err)
+	}
+	if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: code,
+		From: schedMonday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: kind,
+		From: tuesday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyAbsence(%s): %v", kind, err)
+	}
+
+	rows, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
+		From: schedMonday, To: tuesday, TeamKeys: []string{schedTeamKey},
+		ExcludeAbsent: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchAssignments: %v", err)
+	}
+	if len(rows) != 2 || rows[0].RotaDate != schedMonday || rows[1].RotaDate != tuesday {
+		t.Fatalf("got %d turns, want Mon and Tue (an allocation on Tue keeps the turn)", len(rows))
+	}
+}
+
+// A moving tag whose destination team is not set (unmatched when it was
+// configured, or the team deleted) is still a move away, not an allocation
+// that moves nobody: excludeAbsent keeps leaving the person out.
+func TestScheduleIntegration_SearchAssignmentsExcludeAbsentCountsAMoveWithNoDestination(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	code := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	const kind, tuesday = "FIXTURE_UNSET_MOVE", "2026-09-22"
+	cleanup := func() {
+		mustExec(t, pool, `DELETE FROM team_schedule_absence_activity WHERE kind_code = $1`, kind)
+		mustExec(t, pool, `DELETE FROM team_schedule_absence WHERE kind_id IN (SELECT id FROM team_schedule_absence_kind WHERE code = $1)`, kind)
+		mustExec(t, pool, `DELETE FROM team_schedule_absence_kind WHERE code = $1`, kind)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	mustExec(t, pool, `
+		INSERT INTO team_schedule_absence_kind
+		  (code, short_code, label, bucket, colour_token, sort_order, is_active,
+		   created_by, updated_by, moves_to_team_key, works_rota_there, shows_as_shift_code)
+		VALUES ($1, 'FXU', 'Fixture unset move', 'ALLOCATION', 'BR', 999, TRUE,
+		        'test', 'test', NULL, FALSE, $2)`, kind, code)
+
+	if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: code,
+		From: schedMonday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: kind,
+		From: tuesday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyAbsence: %v", err)
+	}
+
+	rows, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
+		From: schedMonday, To: tuesday, TeamKeys: []string{schedTeamKey},
+		ExcludeAbsent: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchAssignments: %v", err)
+	}
+	if len(rows) != 1 || rows[0].RotaDate != schedMonday {
+		t.Fatalf("got %d turns, want only Mon (a move with no destination on Tue)", len(rows))
+	}
+}
+
 // A span that moves somebody to another team keeps them on that team's
 // shifts, and away from their own, exactly as the on-duty lookup has it.
 func TestScheduleIntegration_SearchAssignmentsExcludeAbsentFollowsAMove(t *testing.T) {
@@ -2681,5 +2768,154 @@ func TestScheduleIntegration_TheNightCoverMoveTakesTheNightsWithIt(t *testing.T)
 	}
 	if got := teamOfTurn(t, pool, schedOtherID, "SRE_TZ3", wed); got != schedSreTeamKey {
 		t.Errorf("after the move was cut short, Wednesday's night is filed under %q, want %q", got, schedSreTeamKey)
+	}
+}
+
+// One person works one set of regular hours a day. IST on their own team and
+// PDT on the Americas team do not overlap in time, so the no-overlap
+// constraint let both through and the roster showed IST and PDT every day.
+// A rotation turn on top of regular hours is still fine.
+func TestScheduleIntegration_ApplyRangeRefusesASecondSetOfRegularHours(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+
+	ist := domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: "CRE_REGULAR",
+		From: schedMonday, To: schedMonday,
+	}
+	if _, err := repo.ApplyRange(ctx, ist, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyRange IST on their own team: %v", err)
+	}
+
+	pdt := ist
+	pdt.TeamKey, pdt.ShiftCode = schedOtherTeam, "CRE_AMERICAS"
+	_, err := repo.ApplyRange(ctx, pdt, schedLeadEmail)
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("ApplyRange PDT over IST on another team: got %v, want a ConflictError", err)
+	}
+	if !strings.Contains(conflict.Msg, schedMonday) {
+		t.Errorf("conflict message %q does not name the day", conflict.Msg)
+	}
+
+	_, err = repo.CreateAssignment(ctx, domain.CreateScheduleAssignmentRequest{
+		UserID: schedMemberID, TeamKey: schedOtherTeam, ShiftCode: "CRE_AMERICAS", RotaDate: schedMonday,
+	}, schedLeadEmail)
+	if !errors.As(err, &conflict) {
+		t.Fatalf("CreateAssignment PDT over IST: got %v, want a ConflictError", err)
+	}
+
+	morning := ist
+	morning.ShiftCode = "CRE_MORNING"
+	morning.TeamKey = schedOtherTeam
+	if _, err := repo.ApplyRange(ctx, morning, schedLeadEmail); err != nil {
+		t.Fatalf("a rotation turn on top of regular hours was refused: %v", err)
+	}
+
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment a JOIN team_schedule_shift s ON s.id = a.shift_id
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $2::date AND s.code = 'CRE_AMERICAS'`,
+		schedMemberID, schedMonday); n != 0 {
+		t.Fatalf("%d PDT rows on the day, want none", n)
+	}
+
+	// Moving them to PDT on their own team replaces the day, so it is allowed.
+	own := ist
+	own.ShiftCode = "CRE_AMERICAS"
+	if _, err := repo.ApplyRange(ctx, own, schedLeadEmail); err != nil {
+		t.Fatalf("replacing IST with PDT on the same team was refused: %v", err)
+	}
+}
+
+// From the roster, regular hours set on one team replace the person's regular
+// hours that day on another team the caller may also change, and the history
+// of the other team says what replaced them. Where the caller may not change
+// that team, they are told whose rota it is and nothing is written.
+// A write to a person's day waits for another write to the same day, so the
+// second reads what the first left: two leads cannot both pass the one-set-of-
+// regular-hours check and commit IST and PDT side by side.
+func TestScheduleIntegration_ApplyRangeWaitsForTheSamePersonDay(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`,
+		"team-schedule-person-day:"+schedMemberID+":"+schedMonday); err != nil {
+		t.Fatalf("hold the day: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+			UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: "CRE_REGULAR",
+			From: schedMonday, To: schedMonday,
+		}, schedLeadEmail)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("ApplyRange finished while another write held the day (err %v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatalf("release the day: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ApplyRange after the day was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ApplyRange still waiting after the day was released")
+	}
+}
+
+func TestScheduleIntegration_ApplyRangeReplacesRegularHoursOnAnotherTeam(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+
+	pdt := domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedOtherTeam, ShiftCode: "CRE_AMERICAS",
+		From: schedMonday, To: schedMonday,
+	}
+	if _, err := repo.ApplyRange(ctx, pdt, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyRange PDT on the other team: %v", err)
+	}
+
+	ist := pdt
+	ist.TeamKey, ist.ShiftCode = schedTeamKey, "CRE_REGULAR"
+	ist.MayReplaceOn = func(string) bool { return false }
+	_, err := repo.ApplyRange(ctx, ist, schedLeadEmail)
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) || !strings.Contains(conflict.Msg, "rota") {
+		t.Fatalf("IST over another team's PDT the caller may not change: got %v, want a ConflictError naming whose rota", err)
+	}
+
+	ist.MayReplaceOn = func(team string) bool { return strings.EqualFold(team, schedOtherTeam) }
+	if _, err := repo.ApplyRange(ctx, ist, schedLeadEmail); err != nil {
+		t.Fatalf("IST over PDT the caller may change was refused: %v", err)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment a JOIN team_schedule_shift s ON s.id = a.shift_id
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $2::date AND NOT s.is_rotation AND NOT s.is_escalation`,
+		schedMemberID, schedMonday); n != 1 {
+		t.Fatalf("%d sets of regular hours on the day, want 1", n)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment a JOIN team_schedule_shift s ON s.id = a.shift_id
+		 WHERE a.user_id = $1::uuid AND a.rota_date = $2::date AND s.code = 'CRE_REGULAR' AND a.team_key = $3`,
+		schedMemberID, schedMonday, schedTeamKey); n != 1 {
+		t.Fatal("IST is not the regular hours left on the day")
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_assignment_activity
+		 WHERE user_id = $1::uuid AND team_key = $2 AND rota_date = $3::date AND action = 'DELETED'
+		   AND shift_code = 'CRE_AMERICAS' AND note LIKE 'replaced by % on ' || $4`,
+		schedMemberID, schedOtherTeam, schedMonday, schedTeamKey); n != 1 {
+		t.Fatalf("%d history rows on the other team for the replaced PDT, want 1", n)
 	}
 }

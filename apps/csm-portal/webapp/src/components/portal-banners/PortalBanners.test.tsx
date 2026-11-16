@@ -62,6 +62,28 @@ describe("PortalBannerList", () => {
     });
   });
 
+  it("shows a stored banner without a style element or a form, even when it was saved through the API", () => {
+    const sneaky = {
+      ...banner,
+      html:
+        `<div data-banner="1"><style>body{display:none}</style>Hello engineers` +
+        `<form action="/steal"><input name="a"></form><button type="button" data-close-banner="true">Close</button></div>`,
+    };
+    const { container } = render(<PortalBannerList banners={[sneaky]} />);
+    expect(screen.getByText(/Hello engineers/)).toBeInTheDocument();
+    // The list renders its own style element first, so look inside the strip, where a stored one would be.
+    expect(container.querySelector(".portal-banner-strip style")).toBeNull();
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText(/Hello engineers/)).not.toBeInTheDocument();
+  });
+
+  it("contains a banner's painting, so fixed-position content stays in the strip", () => {
+    const { container } = render(<PortalBannerList banners={[banner]} />);
+    expect(container.querySelector("style")?.textContent ?? "").toMatch(/\.portal-banner-strip\{[^}]*contain:paint/);
+  });
+
   it("shows a current banner and dismisses it from the close button", () => {
     render(<PortalBannerList banners={[banner]} />);
     expect(screen.getByText("Hello engineers")).toBeInTheDocument();

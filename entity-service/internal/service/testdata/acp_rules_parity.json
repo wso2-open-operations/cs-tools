@@ -8,6 +8,12 @@
     {"now": "2026-10-29T00:00:00Z", "end": "2027-01-27T00:00:00Z", "want": 90},
     {"now": "2026-10-29T23:59:00Z", "end": "2026-11-05T00:00:00Z", "want": 7}
   ],
+  "suspensionBoundary": [
+    {"now": "2026-10-29T09:30:00Z", "end": "2026-10-30T00:00:00Z", "suspends": false},
+    {"now": "2026-10-29T09:30:00Z", "end": "2026-10-29T00:00:00Z", "suspends": false},
+    {"now": "2026-10-29T00:00:00Z", "end": "2026-10-29T00:00:00Z", "suspends": false},
+    {"now": "2026-10-29T09:30:00Z", "end": "2026-10-28T00:00:00Z", "suspends": true}
+  ],
   "opportunityCounts": [
     {"stage": "50 - Closed Won", "eula": "EULA 3.3", "want": true},
     {"stage": "50 - Closed Won", "eula": "", "want": true},

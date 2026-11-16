@@ -49,14 +49,14 @@ func TestProcessProject_SavedSuspendIsNotRepeated(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	for _, section := range []string{savedLegacyOK, savedACP} {
 		t.Run("end date "+section, func(t *testing.T) {
-			end := now // day 0
+			end := now.AddDate(0, 0, -1) // the day after the end date
 			proj := project{
 				ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 				EndDate: &end, ClosureState: strPtr("Open"),
 				SuspensionProcessState: savedState(section, ""),
 			}
 			updater, ntf := &mockProjectUpdater{}, delivering()
-			if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
+			if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
 				t.Fatalf("processProject() error = %v", err)
 			}
 			if len(ntf.sent) != 0 || len(updater.calls) != 0 || len(updater.checks) != 0 || len(updater.sfSuspendCalls) != 0 {
@@ -70,7 +70,7 @@ func TestProcessProject_SavedSuspendIsNotRepeated(t *testing.T) {
 				SuspensionProcessState: savedState("", section),
 			}
 			updater, ntf := &mockProjectUpdater{}, delivering()
-			if err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, ntf, now, proj); err != nil {
+			if _, err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, ntf, now, proj); err != nil {
 				t.Fatalf("processProject() error = %v", err)
 			}
 			if len(ntf.sent) != 0 || len(updater.calls) != 0 || len(updater.checks) != 0 || len(updater.sfSuspendCalls) != 0 {
@@ -83,14 +83,14 @@ func TestProcessProject_SavedSuspendIsNotRepeated(t *testing.T) {
 // A suspension the legacy process saved as failed was not completed: ACP acts.
 func TestProcessProject_SavedSuspendFailedActsAsBefore(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := now
+	end := now.AddDate(0, 0, -1) // the day after the end date
 	proj := project{
 		ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 		EndDate: &end, ClosureState: strPtr("Open"),
 		SuspensionProcessState: savedState(savedLegacyFailed, ""),
 	}
 	updater, ntf := &mockProjectUpdater{}, delivering()
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v", err)
 	}
 	if !wroteField(updater.calls, "endDateClosureState") {
@@ -101,13 +101,13 @@ func TestProcessProject_SavedSuspendFailedActsAsBefore(t *testing.T) {
 // No saved record: unchanged (notice and suspension).
 func TestProcessProject_NoSavedRecordUnchanged(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := now
+	end := now.AddDate(0, 0, -1) // the day after the end date
 	proj := project{
 		ID: "p1", Name: "Example Project", Account: &projectAccountRef{ID: "a1"},
 		EndDate: &end, ClosureState: strPtr("Open"),
 	}
 	updater, ntf := &mockProjectUpdater{}, delivering()
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v", err)
 	}
 	if len(ntf.sent) == 0 || !wroteField(updater.calls, "endDateClosureState") {
@@ -126,7 +126,7 @@ func TestProcessProject_SavedSuspendDoesNotSilenceOtherTrack(t *testing.T) {
 		SuspensionProcessState: savedState(savedLegacyOK, ""),
 	}
 	updater, ntf := &mockProjectUpdater{}, delivering()
-	if err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v", err)
 	}
 	if len(ntf.sent) == 0 {
@@ -148,7 +148,7 @@ func TestProcessProject_SavedSuspendResetsOnRenewal(t *testing.T) {
 		SuspensionProcessState: savedState(savedLegacyOK, ""),
 	}
 	updater, ntf := &mockProjectUpdater{}, delivering()
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v", err)
 	}
 	if len(ntf.sent) != 0 || len(updater.calls) != 1 || !strings.Contains(string(updater.calls[0].body), `"event_type":"open"`) {

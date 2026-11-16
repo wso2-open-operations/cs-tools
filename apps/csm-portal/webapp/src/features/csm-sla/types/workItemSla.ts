@@ -101,3 +101,31 @@ export interface TaskSlaSearchResponse {
   limit: number;
   offset: number;
 }
+
+/**
+ * One currently-active clock's own outcome from `POST /cases/{id}/sla/recalculate`
+ * (admin-only). `skipReason` is only present when `skipped` is true;
+ * `oldBusinessPauseSeconds`/`newBusinessPauseSeconds` are only present when
+ * the clock's own schedule is business-days.
+ */
+export interface CaseSlaRecalcClock {
+  target: string;
+  schedule: string;
+  skipped: boolean;
+  skipReason?: string;
+  oldPauseSeconds: number;
+  newPauseSeconds: number;
+  oldBusinessPauseSeconds?: number;
+  newBusinessPauseSeconds?: number;
+  updated: boolean;
+}
+
+/**
+ * Response for `POST /cases/{id}/sla/recalculate`. `hasHistory` is false
+ * (clocks always empty) when the case has no state-change activity history
+ * to replay -- every clock is left exactly as it is, never guessed at.
+ */
+export interface CaseSlaRecalcResponse {
+  hasHistory: boolean;
+  clocks: CaseSlaRecalcClock[];
+}

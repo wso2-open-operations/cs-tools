@@ -857,7 +857,25 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			name: "line widget on a resourceType other than case",
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "incident", "shape": "line", "gridWidth": 6,
 			 "query": {}}`,
-			want: `widget "w": shape "line" only supports resourceType "case"`,
+			want: `widget "w": shape "line" only supports resourceType "case" or "plg_registration", got "incident"`,
+		},
+		{
+			name: "line widget on PLG organisations",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "plg_organization", "shape": "line", "gridWidth": 6,
+			 "query": {}}`,
+			want: `widget "w": shape "line" only supports resourceType "case" or "plg_registration", got "plg_organization"`,
+		},
+		{
+			name: "PLG registration line widget with a series",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "plg_registration", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": ["opened"]}`,
+			want: `widget "w": "series" is only meaningful for resourceType "case"; a "plg_registration" line has one line`,
+		},
+		{
+			name: "PLG registration line widget over a window above the cap",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "plg_registration", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2024-01-01", "endDate": "2026-01-31", "bucket": "month"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 24 months`,
 		},
 		{
 			name: "line widget with days above the endpoint's own cap",
@@ -1270,6 +1288,83 @@ func TestLoadDir_AcceptsGroupByLinkResourceType(t *testing.T) {
 	w := dashboards[0].Widgets[0]
 	if w.GroupBy == nil || w.GroupBy.LinkResourceType != ResourceAccount {
 		t.Fatalf("groupBy = %+v, want linkResourceType %q", w.GroupBy, ResourceAccount)
+	}
+}
+
+// A PLG organisation widget loads like any other resourceType: a count and a
+// list, with the PLG list's own filters passed through as they are.
+func TestLoadDir_AcceptsPlgOrganizationWidgets(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "d.json", `{
+	  "id": "d", "displayName": "D", "type": "cs",
+	  "widgets": [
+	    {"id": "iam-orgs", "displayName": "IAM organisations", "resourceType": "plg_organization", "shape": "count", "gridWidth": 3,
+	     "query": {"productCodes": ["IAM"]}},
+	    {"id": "unowned", "displayName": "Unowned organisations", "resourceType": "plg_organization", "shape": "list", "gridWidth": 6,
+	     "query": {"unowned": true}, "listLimit": 5}
+	  ]
+	}`)
+
+	dashboards, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	for i, w := range dashboards[0].Widgets {
+		if w.ResourceType != ResourcePlgOrganization {
+			t.Errorf("widgets[%d].resourceType = %q, want %q", i, w.ResourceType, ResourcePlgOrganization)
+		}
+	}
+}
+
+// A PLG registration widget loads too, its "new registrations" flag beside
+// the PLG list's other filters.
+func TestLoadDir_AcceptsPlgRegistrationWidgets(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "d.json", `{
+	  "id": "d", "displayName": "D", "type": "cs",
+	  "widgets": [
+	    {"id": "new", "displayName": "New registrations", "resourceType": "plg_registration", "shape": "count", "gridWidth": 3,
+	     "query": {"unacknowledgedOnly": true}},
+	    {"id": "iam", "displayName": "IAM registrations", "resourceType": "plg_registration", "shape": "list", "gridWidth": 6,
+	     "query": {"productCodes": ["IAM"]}, "listLimit": 5}
+	  ]
+	}`)
+
+	dashboards, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	for i, w := range dashboards[0].Widgets {
+		if w.ResourceType != ResourcePlgRegistration {
+			t.Errorf("widgets[%d].resourceType = %q, want %q", i, w.ResourceType, ResourcePlgRegistration)
+		}
+	}
+}
+
+// TestLoadDir_AcceptsPlgRegistrationLineWidgets: a PLG registration line takes
+// the case line's trailing days or fixed window, its bars and its filters.
+func TestLoadDir_AcceptsPlgRegistrationLineWidgets(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "d.json", `{
+	  "id": "d", "displayName": "D", "type": "cs",
+	  "widgets": [
+	    {"id": "last30", "displayName": "Sign-ups", "resourceType": "plg_registration", "shape": "line", "gridWidth": 6,
+	     "query": {"productCodes": ["IAM"]}, "days": 30},
+	    {"id": "year", "displayName": "Sign-ups this year", "resourceType": "plg_registration", "shape": "line", "gridWidth": 6,
+	     "query": {"unacknowledgedOnly": true}, "startDate": "__startOfYear:0__", "endDate": "__today__", "bucket": "month", "chart": "bar"}
+	  ]
+	}`)
+
+	dashboards, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	last30, year := dashboards[0].Widgets[0], dashboards[0].Widgets[1]
+	if last30.Shape != ShapeLine || last30.ResourceType != ResourcePlgRegistration || last30.Days != 30 {
+		t.Errorf("last30 = %s %s days %d, want a plg_registration line over 30 days", last30.ResourceType, last30.Shape, last30.Days)
+	}
+	if year.StartDate != "__startOfYear:0__" || year.EndDate != "__today__" || year.Bucket != LineBucketMonth || year.Chart != LineChartBar {
+		t.Errorf("year = %q to %q by %q as %q, want this year so far by month as bars", year.StartDate, year.EndDate, year.Bucket, year.Chart)
 	}
 }
 

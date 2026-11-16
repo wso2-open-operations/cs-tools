@@ -48,14 +48,14 @@ func NewSalesforceReadRepository(db *pgxpool.Pool) SalesforceReadRepository {
 }
 
 const (
-	sfOpportunitySelect = `SELECT o.id::text, o.name, a.id::text, a.name, o.eula_version, o.eula_version_decimal::text, o.stage
+	sfOpportunitySelect = `SELECT o.id::text, o.name, a.id::text, a.name, o.eula_version, o.eula_version_decimal::text, o.stage, o.sf_id
 	FROM sf_opportunity o LEFT JOIN account a ON a.id = o.account_id`
 	sfInvoiceSelect = `SELECT i.id::text, i.name, i.invoiced_amount::text,
 	to_char(i.invoice_date, 'YYYY-MM-DD'), to_char(i.invoiced_paid_date, 'YYYY-MM-DD'),
 	to_char(i.invoiced_due_date, 'YYYY-MM-DD'), to_char(i.original_invoice_due_date, 'YYYY-MM-DD'),
 	o.id::text, o.name, i.classification, i.sf_id
 	FROM sf_invoice i LEFT JOIN sf_opportunity o ON o.id = i.opportunity_id`
-	sfLinkSelect = `SELECT l.id::text, p.id::text, p.name, o.id::text, o.name
+	sfLinkSelect = `SELECT l.id::text, p.id::text, p.name, o.id::text, o.name, l.link_sf_id
 	FROM sf_opportunity_link l
 	LEFT JOIN project p ON p.id = l.project_id
 	LEFT JOIN sf_opportunity o ON o.id = l.opportunity_id`
@@ -101,7 +101,7 @@ func entityRef(id, name *string) *domain.EntityRef {
 func scanOpportunity(row pgx.Row) (domain.Opportunity, error) {
 	var o domain.Opportunity
 	var accountID, accountName *string
-	err := row.Scan(&o.ID, &o.Name, &accountID, &accountName, &o.EulaVersion, &o.EulaVersionDecimal, &o.Stage)
+	err := row.Scan(&o.ID, &o.Name, &accountID, &accountName, &o.EulaVersion, &o.EulaVersionDecimal, &o.Stage, &o.SfID)
 	o.Account = entityRef(accountID, accountName)
 	return o, err
 }
@@ -118,7 +118,7 @@ func scanInvoice(row pgx.Row) (domain.Invoice, error) {
 func scanLink(row pgx.Row) (domain.ProjectOpportunityLink, error) {
 	var l domain.ProjectOpportunityLink
 	var projectID, projectName, oppID, oppName *string
-	err := row.Scan(&l.ID, &projectID, &projectName, &oppID, &oppName)
+	err := row.Scan(&l.ID, &projectID, &projectName, &oppID, &oppName, &l.SfID)
 	l.Project = entityRef(projectID, projectName)
 	l.Opportunity = entityRef(oppID, oppName)
 	return l, err

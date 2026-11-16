@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useCallback } from "react";
 import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useLogger } from "@hooks/useLogger";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
@@ -84,10 +85,26 @@ export function useGetCsmCases(
   const logger = useLogger();
   const api = useBackendApi();
   // Signed-in email, to resolve `assigneeIsMe` per row against the assigned
-  // engineer's email. In the key so a late-arriving claim recomputes — this
-  // applies to every row regardless of the assignee filter, so it stays
-  // unconditional.
+  // engineer's email. Deliberately NOT in the query key: the ID-token claims
+  // decode asynchronously, so keying on it made every page load fire the same
+  // search twice (once with no email, once with it). Rows are fetched without
+  // it and `assigneeIsMe` is derived in `select` below, so a late-arriving
+  // claim re-derives the flag without refetching.
   const currentUserEmail = useIdTokenClaims()?.email;
+  const withAssigneeIsMe = useCallback(
+    (data: CsmCasesListResponse): CsmCasesListResponse => {
+      const myEmail = currentUserEmail?.toLowerCase();
+      return {
+        ...data,
+        cases: data.cases.map((c) => ({
+          ...c,
+          assigneeIsMe:
+            !!c.assigneeEmail && !!myEmail && c.assigneeEmail.toLowerCase() === myEmail,
+        })),
+      };
+    },
+    [currentUserEmail],
+  );
   // The caller's platform UUID, fetched once app-wide (CurrentUserProvider)
   // and used only to resolve an `@me` assignee filter (see
   // `resolveAssignedUserIds`) — nothing else reads it. Only fold it into the
@@ -107,7 +124,8 @@ export function useGetCsmCases(
     // (["S1","S2"] and ["S2","S1"] are the same query). `assignees` holds
     // engineer emails (+ the `@me` sentinel); it's resolved to UUIDs in the
     // queryFn, but keying on the raw selection is enough since resolution is
-    // deterministic. `currentUserEmail` is already in the key, covering `@me`.
+    // deterministic. The signed-in email is not in the key (see above); `@me`
+    // resolution is covered by `currentUserId` below.
     // Every field of `CasesFilters` that reaches `buildCaseSearchFilters`
     // below must appear here — one that doesn't (as `csTeams` didn't, until
     // its own bar control made that visible) makes React Query treat a
@@ -151,7 +169,6 @@ export function useGetCsmCases(
       // combination an OR-group row carries is already the exact shape the
       // request payload itself sends.
       JSON.stringify(filters.anyOfBranches),
-      currentUserEmail ?? "",
       wantsMe ? (currentUserId ?? "") : "",
       page,
       pageSize,
@@ -199,6 +216,9 @@ export function useGetCsmCases(
         api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
           pagination,
           sortBy: { field: sortField, order: sortOrder },
+          // The list never renders a description (the preview drawer loads
+          // the case detail itself), so don't ship it with every row.
+          excludeFields: ["description"],
           filters: buildCaseSearchFilters(
             resolvedFilters,
             search,
@@ -219,7 +239,7 @@ export function useGetCsmCases(
       if (!isIdentifierQuery) {
         const casesResponse = await runSearch();
         const cases: CsmCaseRow[] = (casesResponse.cases ?? []).map((c) =>
-          mapCaseSearchViewToRow(c, currentUserEmail),
+          mapCaseSearchViewToRow(c, undefined),
         );
         return {
           cases,
@@ -258,13 +278,13 @@ export function useGetCsmCases(
       ]);
 
       const exactRows = (exactResponse.cases ?? []).map((c) =>
-        mapCaseSearchViewToRow(c, currentUserEmail),
+        mapCaseSearchViewToRow(c, undefined),
       );
       const exactIds = new Set(exactRows.map((c) => c.id));
       // Dropped from every page of the free-text leg, not just the first, so a
       // pinned case can't also reappear further down its own result set.
       const textRows = (textResponse.cases ?? [])
-        .map((c) => mapCaseSearchViewToRow(c, currentUserEmail))
+        .map((c) => mapCaseSearchViewToRow(c, undefined))
         .filter((c) => !exactIds.has(c.id));
 
       // Nothing was pinned after all (no exact hit), so the extra leading row
@@ -314,5 +334,6 @@ export function useGetCsmCases(
     gcTime: Infinity,
     refetchOnMount: false,
     placeholderData: keepPreviousData,
+    select: withAssigneeIsMe,
   });
 }

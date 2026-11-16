@@ -57,7 +57,7 @@ func TestSettings_TurnedOff(t *testing.T) {
 	if err := WeekdayReminder(&fakeRota{}, mail, cfg)(context.Background()); err != nil || len(mail.sent) != 0 {
 		t.Errorf("weekday: err %v, sent %d", err, len(mail.sent))
 	}
-	wcfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	wcfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	wcfg.Settings = fakeSettings{s: off}
 	rota := &fakeRota{assignments: fullWeekend()}
 	if err := WeekendNotice(rota, &fakeStore{}, mail, wcfg)(context.Background()); err != nil || len(mail.sent) != 0 || rota.reads != 0 {
@@ -74,7 +74,7 @@ func TestSettings_ReplaceTheConfiguration(t *testing.T) {
 	s.CopyTo = []string{"lead@example.com"}
 	store := &fakeStore{admins: []teamschedule.RotaAdmin{{Name: "Zoe Admin", Email: "zoe@example.com"}}}
 	mail := &fakeEmail{}
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Settings = fakeSettings{s: s}
 	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestSettings_ReplaceTheConfiguration(t *testing.T) {
 // Rota Access tab turn them on.
 func TestSettings_ReadFailureAndNothingSaved(t *testing.T) {
 	mail := &fakeEmail{}
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Settings = fakeSettings{err: errors.New("entity-service down")}
 	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err == nil || len(mail.sent) != 0 {
 		t.Errorf("err %v, sent %d", err, len(mail.sent))
@@ -152,7 +152,7 @@ func TestSettings_EmptyMapsKeepTheConfiguration(t *testing.T) {
 	s := savedSettings()
 	s.WeekendRequired = map[string]int{}
 	s.Windows = map[string]teamschedule.ReminderWindow{}
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Settings = fakeSettings{s: s}
 	got, on, err := withSettings(context.Background(), cfg, true)
 	if err != nil || !on {
@@ -170,7 +170,7 @@ func TestSettings_EmptyMapsKeepTheConfiguration(t *testing.T) {
 // invitations switch can only turn invitations off: a save that left a
 // rotation, or the invitations, untouched keeps what the deployment set.
 func TestSettings_OverrideCodeByCodeAndNeverTurnInvitesOn(t *testing.T) {
-	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg := weekendConfig("2026-10-19 09:00", "rota_weekend_notice")
 	cfg.Required = map[string]int{"CRE_WEEKEND": 3, "CRE_WEEKEND_NIGHT": 1}
 	cfg.Invites = false // the deployment has them off
 	saved := &teamschedule.ReminderSettings{
@@ -208,6 +208,7 @@ func TestSettings_InviteRotations(t *testing.T) {
 	saved := savedSettings()
 	saved.InviteRotations = map[string]bool{"CRE_MORNING": false, "CRE_EVENING": true}
 	saved.WeekendCopyTo = []string{"head@example.com"}
+	saved.InviteCopyTo = []string{"admin@example.com"}
 	cfg.Settings = fakeSettings{s: saved}
 	got, on, err := withSettings(context.Background(), cfg, false)
 	if err != nil || !on {
@@ -215,6 +216,9 @@ func TestSettings_InviteRotations(t *testing.T) {
 	}
 	if strings.Join(got.WeekendCopy, ",") != "head@example.com" {
 		t.Errorf("weekend copy %v, want the saved one", got.WeekendCopy)
+	}
+	if strings.Join(got.InviteCopy, ",") != "admin@example.com" {
+		t.Errorf("invitation copy %v, want the saved one", got.InviteCopy)
 	}
 	if got.invitesFor("CRE_MORNING") || !got.invitesFor("CRE_EVENING") || !got.invitesFor("CRE_WEEKEND") {
 		t.Errorf("invitations: Morning %v, Evening %v, LK Weekend %v; want off, on, on",

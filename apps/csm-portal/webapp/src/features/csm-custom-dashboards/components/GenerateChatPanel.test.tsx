@@ -36,6 +36,28 @@ describe("GenerateChatPanel", () => {
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", "Describe a dashboard…");
   });
 
+  it("lists what can be asked about, closed until clicked", () => {
+    renderPanel();
+    const toggle = screen.getByRole("button", { name: "What can I ask about?" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/Time cards/)).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/Time cards/)).toBeInTheDocument();
+    expect(screen.getByText(/product and version, project, customer, region/)).toBeInTheDocument();
+    expect(screen.getByText(/PLG organisations and sign-ups/)).toBeInTheDocument();
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps what can be asked about when editing, and after the first message", () => {
+    const messages: GenerateChatMessage[] = [{ id: "1", role: "user", text: "Hello there" }];
+    renderPanel({ messages, editing: true });
+    fireEvent.click(screen.getByRole("button", { name: "What can I ask about?" }));
+    expect(screen.getByText(/Customer satisfaction/)).toBeInTheDocument();
+  });
+
   it("hides the example prompts once there are messages", () => {
     const messages: GenerateChatMessage[] = [{ id: "1", role: "user", text: "Hello there" }];
     renderPanel({ messages });

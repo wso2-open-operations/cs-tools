@@ -22,7 +22,9 @@ package service
 // it. Keep the two copies in step: a rule changed in one and not the other
 // makes ACP suspend a project every day and this check reopen it, with a
 // suspension notice and a "Back to Open state" email each time.
-// testdata/acp_rules_parity.json holds the cases both copies must agree on:
+// The suspension boundary is one of those rules: ACP suspends only when the
+// days remaining are below 0 (the day after the date), so this check treats a
+// track as clear at 0 or more. testdata/acp_rules_parity.json holds the cases both copies must agree on:
 // TestACPRulesParity runs them here, and ACP's own parity tests run the same
 // file against its rules.
 //
@@ -131,8 +133,10 @@ func acpWithSectionOpen(raw json.RawMessage, key string) (json.RawMessage, error
 }
 
 // acpDaysBetween is the number of whole days from now to end, rounded up when
-// end is ahead (closure.daysBetween). ACP suspends at 0 or less, so a track
-// may reopen only when this is above 0.
+// end is ahead (closure.daysBetween). ACP suspends only once the date is past,
+// that is when this is below 0: on the date itself (0) the project still gets
+// the last reminder and is not suspended. A track may therefore reopen when
+// this is 0 or more, and must stay suspended when it is below 0.
 func acpDaysBetween(now, end time.Time) int {
 	days := end.Sub(now).Hours() / 24
 	if days != float64(int(days)) {
@@ -262,7 +266,8 @@ func acpInvoiceCounts(inv acpInvoice, projectStart *time.Time) bool {
 
 // acpInvoiceTrackClear reports whether nothing is left on the invoice track
 // that ACP would suspend for: no counted invoice, or the earliest due counted
-// invoice (the one ACP times the track by) is not past its suspend date. A
+// invoice (the one ACP times the track by) is not past its suspend date (the
+// suspend date itself is not past, so it is still clear). A
 // Partner account without a primary partner has no invoice track at all, so
 // it is clear too. Invoices with no invoice date count as dated from the zero
 // time, as in ACP.
@@ -286,5 +291,5 @@ func acpInvoiceTrackClear(now time.Time, invoices []acpInvoice, projectStart *ti
 		invoiceDate = *first.InvoiceDate
 	}
 	suspendOn := acpInvoiceSuspendDate(invoiceDate, *first.DueDate, first.EULAVersion, hasPrimaryPartner)
-	return acpDaysBetween(now, suspendOn) > 0
+	return acpDaysBetween(now, suspendOn) >= 0
 }

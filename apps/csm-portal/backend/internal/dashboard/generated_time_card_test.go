@@ -98,6 +98,35 @@ func TestParseGenerated_AcceptsTimeCardTotals(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsTimeCardTeams: a team's members' cards (teamIds,
+// registry keys or names the team wrapper turns into group ids, or the
+// viewer's selected team), alone, with the other filters, in a slice, or
+// grouped one bar per team.
+func TestParseGenerated_AcceptsTimeCardTeams(t *testing.T) {
+	raw := timeCardDashboard(
+		`{"id":"rigel-hours","displayName":"Rigel Hours per Member","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"teamIds":["rigel"],"startDate":"__startOfMonth:0__","endDate":"__today__"},"groupBy":{"field":"user","measure":"hours"}}`,
+		`{"id":"by-abt","displayName":"Hours by ABT","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"teamIds":["rigel","Atlas","sirius"],"states":["approved"]},"groupBy":{"field":"team","measure":"hours","maxGroups":10}}`,
+		`{"id":"my-team-pending","displayName":"My Team's Pending Time Cards","resourceType":"time_card","shape":"list","gridWidth":6,"listLimit":10,
+		  "sortBy":{"field":"workDate","order":"desc"},"query":{"teamIds":["__current_team__"],"states":["pending","submitted"]}}`,
+		`{"id":"my-team-by-team","displayName":"My Team","resourceType":"time_card","shape":"bar","gridWidth":4,
+		  "query":{"teamIds":["__current_team__"]},"groupBy":{"field":"team"}}`,
+		`{"id":"two-teams","displayName":"Rigel and Atlas","resourceType":"time_card","shape":"pie","gridWidth":4,
+		  "query":{},"slices":[{"label":"Rigel","query":{"teamIds":["rigel"]}},{"label":"Atlas","query":{"teamIds":["atlas"]}}]}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[1].GroupBy; g == nil || g.Field != "team" || g.Measure != MeasureHours || g.MaxGroups != 10 {
+		t.Errorf("by-abt groupBy = %+v, want team / hours / 10", g)
+	}
+	if got, _ := json.Marshal(d.Widgets[1].Query["teamIds"]); string(got) != `["rigel","Atlas","sirius"]` {
+		t.Errorf("by-abt teamIds = %s, want the keys as written (the team wrapper resolves them)", got)
+	}
+}
+
 // TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid: every
 // grouped time card widget the catalogue shows the model (section 5a) passes
 // this backend's own check, so the catalogue cannot teach a widget the save
@@ -289,8 +318,8 @@ func TestParseGenerated_RejectsTimeCardWidgetsItCannotRun(t *testing.T) {
 	cases := []struct {
 		name, raw, want string
 	}{
-		{"group by approver", tc("bar", `,"query":{},"groupBy":{"field":"approver","maxGroups":10}`), "groups by state, user, project or day only"},
-		{"group by a bucket", tc("bar", `,"query":{},"groupBy":{"bucket":"week"}`), "groups by state, user, project or day only"},
+		{"group by approver", tc("bar", `,"query":{},"groupBy":{"field":"approver","maxGroups":10}`), "groups by state, user, project, day or team only"},
+		{"group by a bucket", tc("bar", `,"query":{},"groupBy":{"bucket":"week"}`), "groups by state, user, project, day or team only"},
 		{"an unknown measure", tc("bar", `,"query":{},"groupBy":{"field":"user","measure":"minutes"}`), `unknown "groupBy.measure" "minutes"`},
 		{"day with no window", tc("bar", `,"query":{},"groupBy":{"field":"day"}`), "needs query.startDate and query.endDate"},
 		{"day with only an end", tc("bar", `,"query":{"endDate":"__today__"},"groupBy":{"field":"day"}`), "needs query.startDate and query.endDate"},
@@ -315,6 +344,13 @@ func TestParseGenerated_RejectsTimeCardWidgetsItCannotRun(t *testing.T) {
 		{"a date that is not one", tc("count", `,"query":{"startDate":"last month"}`), "startDate must be a date"},
 		{"an unknown relative date", tc("count", `,"query":{"endDate":"__yesterday__"}`), "endDate must be a date"},
 		{"a slice with a bad filter", tc("pie", `,"query":{},"slices":[{"label":"A","query":{"state":["pending"]}}]`), `slices[0].query: "state" is not a time card filter`},
+		{"team grouping without teams", tc("bar", `,"query":{},"groupBy":{"field":"team","measure":"hours"}`), "grouping by team needs query.teamIds"},
+		{"team grouping with a slice's teams only", tc("pie", `,"query":{},"groupBy":{"field":"team"},"slices":[{"label":"A","query":{"teamIds":["rigel"]}}]`), "grouping by team needs query.teamIds"},
+		{"team grouping as a pie", tc("pie", `,"query":{"teamIds":["rigel","atlas"]},"groupBy":{"field":"team","measure":"hours"}`), "grouped by team must be a bar, not a pie"},
+		{"teams as a string", tc("count", `,"query":{"teamIds":"rigel"}`), "teamIds must be a list of strings"},
+		{"no teams", tc("count", `,"query":{"teamIds":[]}`), "teamIds must be a list of 1 to 20 team keys"},
+		{"21 teams", tc("count", `,"query":{"teamIds":["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u"]}`), "teamIds must be a list of 1 to 20 team keys"},
+		{"a blank team", tc("count", `,"query":{"teamIds":["rigel"," "]}`), "each value must be a team's key"},
 		{"a sort it does not have", tc("list", `,"query":{},"listLimit":5,"sortBy":{"field":"createdOn","order":"desc"}`), "sorts by workDate or updatedOn"},
 	}
 	for _, c := range cases {

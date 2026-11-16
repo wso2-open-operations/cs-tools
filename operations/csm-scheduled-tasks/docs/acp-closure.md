@@ -59,8 +59,9 @@ How a cascade decides (`internal/acp/closure/decide.go`):
 
 - Days remaining are rounded **up**, so a project is never treated as further
   out than it is.
-- **0 or fewer days**: fire the day-0 window. Notify if no day-0 notice is
-  recorded, and suspend. Suspension has no idempotency of its own here: the
+- **Below 0 days** (the day after the date): fire the day-0 window. Notify if no
+  day-0 notice is recorded, and suspend. On the date itself (0 days) the project
+  is still in the 7-day window and is not suspended. Suspension has no idempotency of its own here: the
   caller checks the closure state.
 - **Otherwise** the narrowest window already reached and not yet recorded. Windows
   are thresholds, not exact days: a project that reaches 10 days with nothing
@@ -107,7 +108,7 @@ Per cascade, in order, and a failure stops that project:
 3. **Record the notice** in the cascade's section of `suspensionProcessState`:
    `actionSendEmailNotification` is `SUCCESSFUL` if delivered, `IGNORED` if not
    (for instance, every recipient was filtered out).
-4. **Suspend**, on day 0 only (section 5).
+4. **Suspend**, on the day-0 window only, the day after the date (section 5).
 
 Each record write replaces the whole `suspensionProcessState`, so each cascade
 builds on the previous cascade's write, not on the snapshot read at the start.
@@ -135,7 +136,7 @@ changes a closure state: reopening a suspended project is not done here
 - **Customer** notices are never `[ACP]`-prefixed and never name the account.
   Future tense before day 0 (`Upcoming Project Suspension Notice`), past tense
   after. The invoice cascade sends a `Payment Reminder` instead.
-- **Customer recipients** are the project's `BUSINESS_CONTACT` contacts. With none,
+- **Customer recipients** are the project's `BUSINESS_CONTACT` contacts with a well-formed email. With none,
   the account's primary contacts. With neither, no customer notice goes out and an
   `[Urgent] [ACP] No Business Contacts Specified` nudge goes to the internal
   recipients instead.

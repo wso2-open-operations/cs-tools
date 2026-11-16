@@ -77,6 +77,7 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool, access service.Acce
 	// --- organisations -------------------------------------------------------
 	mux.HandleFunc("POST /plg/organizations/search", organizationHandler.SearchOrganizations)
 	mux.HandleFunc("POST /plg/organizations/identities", organizationHandler.Identities)
+	mux.HandleFunc("POST /plg/organizations/aggregate", organizationHandler.AggregateOrganizations)
 	mux.HandleFunc("GET /plg/organizations/{organizationId}", organizationHandler.GetOrganization)
 	mux.HandleFunc("PATCH /plg/organizations/{organizationId}", organizationHandler.PatchOrganization)
 
@@ -103,6 +104,8 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool, access service.Acce
 
 	// --- registrations -------------------------------------------------------
 	mux.HandleFunc("POST /plg/registrations/search", pairingHandler.SearchRegistrations)
+	mux.HandleFunc("POST /plg/registrations/volume-trend", pairingHandler.RegistrationVolumeTrend)
+	mux.HandleFunc("POST /plg/registrations/aggregate", pairingHandler.AggregateRegistrations)
 	mux.HandleFunc("POST /plg/registrations/{orgPlatformId}/acknowledge",
 		pairingHandler.Acknowledge) // W1
 

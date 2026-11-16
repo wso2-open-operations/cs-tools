@@ -25,10 +25,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/dashboards"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/playbooks"
 )
 
 type fakeGenerator struct {
@@ -103,18 +105,26 @@ func TestGenerateReturnsTheDecline(t *testing.T) {
 
 func TestGenerateRejectsABadRequestWithoutACall(t *testing.T) {
 	for name, body := range map[string]string{
-		"not JSON":       `prompt`,
-		"two objects":    `{"prompt":"p"}{"prompt":"q"}`,
-		"unknown field":  `{"prompt":"p","current":{}}`,
-		"empty prompt":   `{"prompt":"   "}`,
-		"long prompt":    `{"prompt":"` + strings.Repeat("é", promptMaxLength+1) + `"}`,
-		"draft an array": `{"prompt":"p","draft":[1]}`,
-		"team no key":    `{"prompt":"p","teams":[{"name":"Rigel","field":"creTeam"}]}`,
-		"team pipe":      `{"prompt":"p","teams":[{"key":"r","name":"Ri|gel","field":"creTeam"}]}`,
-		"team field":     `{"prompt":"p","teams":[{"key":"r","name":"Rigel","field":"accountId"}]}`,
-		"team family":    `{"prompt":"p","teams":[{"key":"r","name":"Rigel","family":"sme","field":"creTeam"}]}`,
-		"body too big":   `{"prompt":"p","draft":{"x":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}}`,
-		"draft too big":  `{"prompt":"p","draft":` + draftOfSize(draftMaxBytes+1) + `}`,
+		"not JSON":        `prompt`,
+		"two objects":     `{"prompt":"p"}{"prompt":"q"}`,
+		"unknown field":   `{"prompt":"p","current":{}}`,
+		"empty prompt":    `{"prompt":"   "}`,
+		"long prompt":     `{"prompt":"` + strings.Repeat("é", promptMaxLength+1) + `"}`,
+		"draft an array":  `{"prompt":"p","draft":[1]}`,
+		"team no key":     `{"prompt":"p","teams":[{"name":"Rigel","field":"creTeam"}]}`,
+		"team pipe":       `{"prompt":"p","teams":[{"key":"r","name":"Ri|gel","field":"creTeam"}]}`,
+		"team field":      `{"prompt":"p","teams":[{"key":"r","name":"Rigel","field":"accountId"}]}`,
+		"team family":     `{"prompt":"p","teams":[{"key":"r","name":"Rigel","family":"sme","field":"creTeam"}]}`,
+		"body too big":    `{"prompt":"p","draft":{"x":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}}`,
+		"draft too big":   `{"prompt":"p","draft":` + draftOfSize(draftMaxBytes+1) + `}`,
+		"answers no code": `{"prompt":"p","playbookAnswers":[{"name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"A"}]}]}`,
+		"answers type":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"BOOLEAN","options":[{"code":"A","label":"A"}]}]}`,
+		"answers none":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"CHECKLIST","options":[]}]}`,
+		"answers label":   `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":" "}]}]}`,
+		"answers pipe":    `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"Yes|No"}]}]}`,
+		"answers newline": `{"prompt":"p","playbookAnswers":[{"code":"O","name":"Out\ncome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"A"}]}]}`,
+		"answers too many": `{"prompt":"p","playbookAnswers":[` + strings.TrimSuffix(strings.Repeat(
+			`{"code":"O","name":"Outcome","valueType":"SINGLE_SELECT","options":[{"code":"A","label":"A"}]},`, maxPlaybookAnswers+1), ",") + `]}`,
 	} {
 		gen := &fakeGenerator{}
 		status, out := post(t, &DashboardHandler{generator: gen}, body)
@@ -128,6 +138,23 @@ func TestGenerateRejectsABadRequestWithoutACall(t *testing.T) {
 	}
 	if status, _ := post(t, &DashboardHandler{generator: gen}, `{"prompt":"p","draft":`+draftOfSize(draftMaxBytes)+`}`); status != http.StatusOK {
 		t.Errorf("a draft of exactly %d bytes: status %d, want 200", draftMaxBytes, status)
+	}
+}
+
+// TestGeneratePassesThePlaybookAnswersOn: the generator gets the playbook
+// answer fields as sent.
+func TestGeneratePassesThePlaybookAnswersOn(t *testing.T) {
+	gen := &fakeGenerator{res: dashboards.Result{Candidates: []json.RawMessage{json.RawMessage(`{}`)}}}
+	status, out := post(t, &DashboardHandler{generator: gen}, `{"prompt":"p","teams":[],"playbookAnswers":[
+		{"code":"ELIGIBILITY_ASSESSMENT_OUTCOME","name":"Eligibility Assessment Outcome","valueType":"SINGLE_SELECT",
+		 "options":[{"code":"MONITOR","label":"Monitor"},{"code":"EXCLUDED","label":"Excluded"}]}]}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body %v", status, out)
+	}
+	want := []playbooks.Field{{Code: "ELIGIBILITY_ASSESSMENT_OUTCOME", Name: "Eligibility Assessment Outcome", ValueType: "SINGLE_SELECT",
+		Options: []playbooks.Option{{Code: "MONITOR", Label: "Monitor"}, {Code: "EXCLUDED", Label: "Excluded"}}}}
+	if !reflect.DeepEqual(gen.got.PlaybookAnswers, want) {
+		t.Errorf("generator got %+v, want %+v", gen.got.PlaybookAnswers, want)
 	}
 }
 

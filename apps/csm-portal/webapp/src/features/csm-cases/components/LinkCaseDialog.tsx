@@ -49,6 +49,13 @@ interface LinkCaseDialogProps {
   onClose: () => void;
   /** Link the current case to `targetCaseId` as either its parent or a related case. */
   onLink: (targetCaseId: string, linkType: CaseLinkType) => void;
+  /**
+   * Why the current ticket can't have a related case, when it can't. Only a case
+   * keeps one (the backend refuses `relatedCaseId` on a service request,
+   * engagement, security report or announcement), so for those the option is
+   * shown disabled with this reason. Undefined: both options are offered.
+   */
+  relatedUnavailableReason?: string;
 }
 
 /**
@@ -75,6 +82,7 @@ export default function LinkCaseDialog({
   isLinking,
   onClose,
   onLink,
+  relatedUnavailableReason,
 }: LinkCaseDialogProps): JSX.Element {
   const [linkType, setLinkType] = useState<CaseLinkType>("parent");
   const [input, setInput] = useState("");
@@ -166,8 +174,17 @@ export default function LinkCaseDialog({
             />
             <FormControlLabel
               value="related"
-              disabled={isLinking}
-              control={<Radio size="small" />}
+              disabled={isLinking || !!relatedUnavailableReason}
+              control={
+                <Radio
+                  size="small"
+                  inputProps={
+                    relatedUnavailableReason
+                      ? { "aria-describedby": "link-case-related-unavailable" }
+                      : undefined
+                  }
+                />
+              }
               label="As related case"
             />
           </RadioGroup>
@@ -176,6 +193,15 @@ export default function LinkCaseDialog({
               ? "The hierarchical major-case/child-case relationship — this case can't close while it has open children linked this way."
               : "A looser cross-link; not subject to the child-case close restriction."}
           </Typography>
+          {relatedUnavailableReason && (
+            <Typography
+              id="link-case-related-unavailable"
+              variant="caption"
+              color="text.secondary"
+            >
+              {relatedUnavailableReason}
+            </Typography>
+          )}
 
           {selected ? (
             // Confirm-before-committing panel — same shape as

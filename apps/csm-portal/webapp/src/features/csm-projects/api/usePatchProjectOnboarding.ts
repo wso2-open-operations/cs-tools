@@ -21,17 +21,11 @@ import {
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { PROJECT_ONBOARDING_STATUSES } from "@features/csm-projects/utils/projectFilters";
 
-/** The onboarding status labels `PATCH /projects/{id}` accepts. */
-export const PROJECT_ONBOARDING_STATUSES = [
-  "Not-Started",
-  "In-Progress",
-  "On-Hold",
-  "Completed",
-  "Cancelled",
-  "Expired",
-  "Not-Applicable",
-] as const;
+// Defined beside the filter vocabulary (a config-free module the URL parser
+// can import); re-exported here for this hook's callers.
+export { PROJECT_ONBOARDING_STATUSES };
 
 export type ProjectOnboardingStatusValue = (typeof PROJECT_ONBOARDING_STATUSES)[number];
 
@@ -40,10 +34,11 @@ export type ProjectOnboardingStatusValue = (typeof PROJECT_ONBOARDING_STATUSES)[
  * one must be sent. `onboardingOwner` is the id of an active internal user.
  * The backend has no way to clear the owner or any of the dates (omitted or
  * `null` means unchanged), so a caller must never send `null`/an empty value
- * expecting that. The four date fields are calendar dates as `YYYY-MM-DD`;
- * the backend rejects a plan/go-live/expiry date earlier than the start date.
+ * expecting that. The five date fields are calendar dates as `YYYY-MM-DD`;
+ * the backend rejects a plan/go-live/expiry/readiness date earlier than the start date.
  * Note the read side names two of them differently (`goLivePlanDate`,
- * `goLiveDate`, see `ProjectDetails`).
+ * `goLiveDate`, see `ProjectDetails`), and the readiness date is
+ * `productionReadinessCompletionDate`.
  */
 export interface ProjectOnboardingPatch {
   onboardingStatus?: ProjectOnboardingStatusValue;
@@ -52,6 +47,7 @@ export interface ProjectOnboardingPatch {
   onboardingGoLivePlanDate?: string;
   onboardingGoLiveDate?: string;
   onboardingExpiryDate?: string;
+  onboardingProductionReadinessCompletionDate?: string;
 }
 
 interface ProjectOnboardingPatchResponse {
@@ -64,6 +60,7 @@ interface ProjectOnboardingPatchResponse {
     goLivePlanDate?: string | null;
     goLiveDate?: string | null;
     onboardingExpiryDate?: string | null;
+    productionReadinessCompletionDate?: string | null;
   };
 }
 
@@ -94,13 +91,16 @@ export function usePatchProjectOnboarding(
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [ApiQueryKeys.CSM_PROJECT_DETAIL, projectId ?? ""],
-      });
       // The projects list (`useSearchProjects.ts`) keys its cache with a raw
       // literal, not `ApiQueryKeys.CSM_PROJECTS`.
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         predicate: (q) => q.queryKey[0] === "csm-projects-search",
+      });
+      // Returned so the mutation stays pending until the detail refetch lands:
+      // the tab captures its date-validation baseline from the project on a
+      // pencil click, and a click before the refetch would use the old values.
+      return queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CSM_PROJECT_DETAIL, projectId ?? ""],
       });
     },
   });

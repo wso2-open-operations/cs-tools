@@ -327,6 +327,11 @@ func timeCardWhereClause(f *domain.SearchTimeCardsFilters) (string, []any) {
 	if len(f.UserIDs) > 0 {
 		add("tc.user_id = ANY($%d::uuid[])", f.UserIDs)
 	}
+	if len(f.TeamIDs) > 0 {
+		// Today's roster: a card counts for the teams its engineer is in now,
+		// whichever team they were in when they logged it.
+		add("EXISTS (SELECT 1 FROM team_member tm WHERE tm.user_id = tc.user_id AND tm.team_id = ANY($%d::uuid[]))", f.TeamIDs)
+	}
 	if f.ApproverID != nil {
 		// Their own cards are always excluded -- see SearchTimeCardsFilters.ApproverID's own doc comment.
 		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM time_card_approver tca WHERE tca.time_card_id = tc.id AND tca.approver_id = $%d) AND tc.user_id <> $%d", argIdx, argIdx)
@@ -457,6 +462,9 @@ func (r *timeCardRepo) AggregateTimeCards(ctx context.Context, req domain.Aggreg
 	if req.GroupBy == domain.TimeCardGroupByDay {
 		return r.aggregateTimeCardsByDay(ctx, req)
 	}
+	if req.GroupBy == domain.TimeCardGroupByTeam {
+		return r.aggregateTimeCardsByTeam(ctx, req, maxGroups)
+	}
 	col, ok := timeCardAggregateColumns[req.GroupBy]
 	if !ok {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
@@ -538,6 +546,62 @@ func (r *timeCardRepo) aggregateTimeCardsByDay(ctx context.Context, req domain.A
 	resp := timeCardAggregateResponse(buckets)
 	zero := 0
 	resp.OthersMinutes = &zero
+	return resp, nil
+}
+
+// aggregateTimeCardsByTeam is AggregateTimeCards for the "team" grouping: one
+// bucket per team in Filters.TeamIDs (the service has required them), with the
+// matched cards of that team's current members (team_member), a team with none
+// at zero. A card counts once in each of those teams its engineer is in, so the
+// totals are the buckets' sums, the top maxGroups shown and the rest in
+// "others".
+func (r *timeCardRepo) aggregateTimeCardsByTeam(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error) {
+	if req.Filters == nil || len(req.Filters.TeamIDs) == 0 {
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy team requires filters.teamIds"}
+	}
+	rank := "bucket_count DESC, bucket_minutes DESC"
+	if req.Measure == domain.TimeCardMeasureMinutes {
+		rank = "bucket_minutes DESC, bucket_count DESC"
+	}
+	where, args := timeCardWhereClause(req.Filters)
+	args = append(args, req.Filters.TeamIDs)
+	query := fmt.Sprintf(`
+		WITH matched AS (
+			SELECT tc.id AS id, tc.user_id AS user_id, %s AS minutes
+			%s %s
+		)
+		SELECT t.id::TEXT AS bucket, t.name AS bucket_label,
+		       COUNT(m.id) AS bucket_count, COALESCE(SUM(m.minutes), 0) AS bucket_minutes
+		FROM team t
+		LEFT JOIN matched m ON EXISTS (SELECT 1 FROM team_member tm WHERE tm.team_id = t.id AND tm.user_id = m.user_id)
+		WHERE t.id = ANY($%d::uuid[])
+		GROUP BY t.id, t.name
+		ORDER BY %s, bucket_label, bucket`, timeCardMinutesExpr, timeCardFromJoins, where, len(args), rank)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return domain.AggregateResponse{}, fmt.Errorf("aggregate time cards by team: %w", err)
+	}
+	defer rows.Close()
+
+	buckets, _, err := scanTimeCardBuckets(rows, false)
+	if err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	shown := buckets
+	if maxGroups > 0 && maxGroups < len(buckets) {
+		shown = buckets[:maxGroups]
+	}
+	resp := timeCardAggregateResponse(shown)
+	othersCount, othersMinutes := 0, 0
+	for _, b := range buckets[len(shown):] {
+		othersCount += b.Count
+		othersMinutes += *b.TotalMinutes
+	}
+	resp.OthersCount = othersCount
+	resp.OthersMinutes = &othersMinutes
+	resp.TotalRecords += othersCount
+	*resp.TotalMinutes += othersMinutes
 	return resp, nil
 }
 

@@ -35,7 +35,7 @@ import (
 // Under dual-write a portal service request is created in ServiceNow first and
 // takes ServiceNow's numbers: its CS number and its WSO2 Case ID (<KEY>-<n>).
 // A service request raised from a GitHub issue had none of that -- it was
-// written to Postgres only and numbered SR-GH-<n> / WSO2-GH-<n>, and ServiceNow
+// written to Postgres only and numbered SR-GH-<n> / WSO2-GH-<n> (now only when it has no project), and ServiceNow
 // never saw it.
 //
 // It is now created the way the repositories did before the cutover -- through

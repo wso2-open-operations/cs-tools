@@ -212,7 +212,7 @@ type githubSyncService struct {
 	// snCases creates a service request in ServiceNow first, under
 	// dual-write, so it takes ServiceNow's CS number and WSO2 Case ID as a
 	// portal-created one does (github_sn_case.go). Nil writes Postgres only
-	// and numbers the record SR-GH-<n>. Set with WithServiceNowGithubCases.
+	// and numbers the record natively (SR-GH-<n> when it has no project). Set with WithServiceNowGithubCases.
 	snCases snGithubCaseAPI
 	// slaEngine registers the CSM SLA clocks for a service request created
 	// from an issue, as caseService.CreateCase does for one created in the

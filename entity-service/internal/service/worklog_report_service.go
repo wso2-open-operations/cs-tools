@@ -919,9 +919,10 @@ func worklogBucketType(itemType, severity string) string {
 }
 
 // weekdaysBetween counts Monday-to-Friday days in the inclusive range.
-// Public holidays are not modelled anywhere in the schema, so they are not
-// deducted; the delivered mail's worked-day figures top out at 5, which is
-// consistent with that.
+// Public holidays are not deducted. They are stored per country since
+// migration 0283 (team_schedule_public_holiday, PublicHolidayService), but
+// whether the worklog should deduct them is still to be decided; until then
+// the delivered mail's worked-day figures top out at 5, as before.
 func weekdaysBetween(from, to time.Time) float64 {
 	var n float64
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {

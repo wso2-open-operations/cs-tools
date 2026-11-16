@@ -37,6 +37,10 @@ import (
 // disables the cascade (see below), or when the decision simply doesn't
 // fire yet — mirroring buildSubscriptionCascade's own no-op shape.
 //
+// A partner account is now skipped whole before either cascade (see
+// skipByAccount), so the isPartner && !hasPrimaryPartner rule below no longer
+// meets one from ACP's Run; it stays as the cascade's own correct rule.
+//
 // isPartner does NOT gate this cascade on its own, and deliberately isn't
 // checked before fetching invoice/account data. Legacy's
 // calculateEventTypeFromDate (ACPMainProcess.js) checks hasPrimaryPartner

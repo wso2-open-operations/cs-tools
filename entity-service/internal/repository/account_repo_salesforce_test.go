@@ -94,7 +94,7 @@ func TestUpdateAccountFromSalesforceQuery_ColumnSet(t *testing.T) {
 		{"number", `^COALESCE\(account\.number, `},
 		// Salesforce-owned columns available today: plain assignment.
 		{"name", `^\$2$`},
-		{"phone", `^CASE WHEN \$31 THEN account\.phone ELSE \$8 END$`},
+		{"phone", `^CASE WHEN \$32 THEN account\.phone ELSE \$8 END$`},
 		{"technical_owner_id", `^\$15$`},
 		{"street", `^\$16$`},
 		{"city", `^\$17$`},
@@ -112,6 +112,8 @@ func TestUpdateAccountFromSalesforceQuery_ColumnSet(t *testing.T) {
 		{"account_vertical", `^COALESCE\(\$28, account\.account_vertical\)$`},
 		{"lost_reason_category", `^COALESCE\(\$29, account\.lost_reason_category\)$`},
 		{"deactivation_date", `^COALESCE\(\$30, account\.deactivation_date\)$`},
+		// Plain assignment: a primary partner removed in Salesforce clears here.
+		{"primary_partner_sf_id", `^\$31$`},
 		// A CREATED/UPDATED/RESTORED event brings a soft-deleted account back.
 		{"deleted_on", `^NULL$`},
 	}
@@ -148,24 +150,24 @@ func TestInsertAccountFromSalesforceQuery_ColumnSet(t *testing.T) {
 	for _, c := range []string{"number", "sf_id", "name", "street", "city", "state_province", "postal_code", "country",
 		"account_manager_id", "activation_date", "lost_date", "lost_reason", "customer_success_manager_id",
 		"secondary_technical_owner_id", "renewal_account_manager_id", "account_vertical", "lost_reason_category",
-		"deactivation_date"} {
+		"deactivation_date", "primary_partner_sf_id"} {
 		if !cols[c] {
 			t.Errorf("insert does not write %s", c)
 		}
 	}
-	// upsertAccountFromSalesforce passes the insert args[:30], so it must
-	// reference exactly $1-$30.
+	// upsertAccountFromSalesforce passes the insert args[:31], so it must
+	// reference exactly $1-$31.
 	params := map[string]bool{}
 	for _, m := range regexp.MustCompile(`\$(\d+)`).FindAllStringSubmatch(insertAccountFromSalesforceQuery, -1) {
 		params[m[1]] = true
 	}
-	for i := 1; i <= 30; i++ {
+	for i := 1; i <= 31; i++ {
 		if !params[strconv.Itoa(i)] {
 			t.Errorf("insert does not reference $%d", i)
 		}
 	}
-	if len(params) != 30 {
-		t.Errorf("insert references %d distinct parameters, want 30", len(params))
+	if len(params) != 31 {
+		t.Errorf("insert references %d distinct parameters, want 31", len(params))
 	}
 }
 
@@ -275,8 +277,8 @@ func TestUpsertAccountFromSalesforce_ResolutionAndLedger(t *testing.T) {
 			if (len(inserts) == 1) != tc.wantInsert {
 				t.Fatalf("inserts = %d, want insert %v", len(inserts), tc.wantInsert)
 			}
-			if tc.wantInsert && len(inserts[0].args) != 30 {
-				t.Errorf("insert args = %d, want 30", len(inserts[0].args))
+			if tc.wantInsert && len(inserts[0].args) != 31 {
+				t.Errorf("insert args = %d, want 31", len(inserts[0].args))
 			}
 			if len(q.rowQueries) != 1 || !strings.Contains(q.rowQueries[0].sql, "INSERT INTO salesforce_ingest_state") {
 				t.Fatalf("ledger writes = %+v, want one salesforce_ingest_state upsert", q.rowQueries)
@@ -299,8 +301,8 @@ func TestUpsertAccountFromSalesforce_AbsentSE1FieldsAreNull(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 	args := q.statements("UPDATE account")[0].args
-	if len(args) != 31 {
-		t.Fatalf("update args = %d, want 31", len(args))
+	if len(args) != 32 {
+		t.Fatalf("update args = %d, want 32", len(args))
 	}
 	if p, ok := args[20].(*string); !ok || p == nil || *p != "user-1" {
 		t.Errorf("$21 account_manager_id = %v, want user-1", args[20])

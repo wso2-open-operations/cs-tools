@@ -172,18 +172,65 @@ describe("CsmBannersPage", () => {
     expect(preview.innerHTML).not.toContain('data-banner-type="info"');
   });
 
-  it("lets a six-digit colour be typed and expands a short hex on blur", async () => {
+  it("asks for pasted HTML when Custom is chosen, with no colour pickers or text editor", async () => {
     renderPage();
     await screen.findByRole("tab", { name: "Published (1)" });
     fireEvent.click(screen.getByRole("button", { name: "New banner" }));
     fireEvent.click(screen.getByRole("button", { name: "Banner type Custom" }));
-    const hex = screen.getByRole("textbox", { name: "Text hex" });
-    fireEvent.change(hex, { target: { value: "#112" } });
-    expect(hex).toHaveValue("#112");
-    fireEvent.blur(hex);
-    expect(hex).toHaveValue("#111122");
-    fireEvent.change(hex, { target: { value: "#112233" } });
-    expect(hex).toHaveValue("#112233");
+    expect(screen.getByText("Paste your own HTML to make the banner.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /Banner HTML/ })).toBeInTheDocument();
+    expect(screen.getByText(/Paste your own HTML here to make a custom banner/)).toBeInTheDocument();
+    expect(screen.getByText(/3rem \(48px\) tall/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Text hex" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Background hex" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Text")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Background")).not.toBeInTheDocument();
+  });
+
+  it("previews and saves a custom banner from pasted HTML", async () => {
+    renderPage();
+    await screen.findByRole("tab", { name: "Published (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "New banner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Banner type Custom" }));
+    const pasted = '<div style="background:#112233;color:#fff;line-height:3rem">Planned downtime <script>alert(1)</script></div>';
+    fireEvent.change(screen.getByRole("textbox", { name: /Banner HTML/ }), { target: { value: pasted } });
+    const preview = screen.getByTestId("banner-preview");
+    expect(preview).toHaveTextContent("Planned downtime");
+    expect(preview.innerHTML).toContain('data-banner-type="custom"');
+    expect(preview.innerHTML).not.toContain("<script");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const [, body] = api.post.mock.calls[0] as [string, { html: string }];
+    expect(body.html).toContain("data-banner-custom");
+    expect(body.html).toContain("background:#112233");
+    expect(body.html).not.toContain("<script");
+  });
+
+  it("marks a custom banner without HTML as required", async () => {
+    renderPage();
+    await screen.findByRole("tab", { name: "Published (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "New banner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Banner type Custom" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Banner HTML/ }), { target: { value: "<script>alert(1)</script>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText(/Required\. Paste the HTML for the banner\./)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("does not save a custom banner whose HTML shows nothing, but accepts a picture", async () => {
+    renderPage();
+    await screen.findByRole("tab", { name: "Published (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "New banner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Banner type Custom" }));
+    const box = screen.getByRole("textbox", { name: /Banner HTML/ });
+    fireEvent.change(box, { target: { value: '<div style="background:red"></div>' } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText(/Required\. Paste the HTML for the banner\./)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: '<img src="https://cdn.example.com/banner.png" alt="">' } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
   });
 
   it("marks a missing message as required when save is pressed", async () => {

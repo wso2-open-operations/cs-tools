@@ -142,6 +142,10 @@ type rotaAdminOf struct {
 	member   bool
 }
 
+func (r *rotaAdminOf) LeadFamiliesFor(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
+
 func (r *rotaAdminOf) LeadTeamsFor(context.Context, string) ([]string, error) {
 	if r.led == nil {
 		return []string{}, nil

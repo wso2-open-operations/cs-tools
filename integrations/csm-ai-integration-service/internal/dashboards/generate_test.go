@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/claude"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/playbooks"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-ai-integration-service/internal/teams"
 )
 
@@ -169,6 +170,26 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	}
 	if user != "Top 10 customers by open cases.\n\nToday's date: "+fixedToday || maxTok != maxTokens || model != "claude-sonnet-5-5" {
 		t.Errorf("user, max_tokens, model = %q, %d, %q", user, maxTok, model)
+	}
+}
+
+// TestGenerateSendsThePlaybookAnswersAfterTheTeams: the PLG playbook answers
+// section follows the Teams section in the system prompt.
+func TestGenerateSendsThePlaybookAnswersAfterTheTeams(t *testing.T) {
+	useFixedToday(t)
+	gw := &fakeGateway{text: validGenerated}
+	team := []teams.Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}}
+	answers := []playbooks.Field{{Code: "ELIGIBILITY_ASSESSMENT_OUTCOME", Name: "Eligibility Assessment Outcome", ValueType: "SINGLE_SELECT",
+		Options: []playbooks.Option{{Code: "MONITOR", Label: "Monitor"}, {Code: "EXCLUDED", Label: "Excluded"}}}}
+	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second).
+		Generate(context.Background(), Request{Prompt: "p", Teams: team, PlaybookAnswers: answers}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	system, _, _, _ := gw.request(t)
+	if system != playbooks.WithPlaybookAnswers(teams.WithTeams("CATALOGUE\n", team), answers) ||
+		!strings.Contains(system, "| Eligibility Assessment Outcome | `ELIGIBILITY_ASSESSMENT_OUTCOME` | one answer | `MONITOR` Monitor, `EXCLUDED` Excluded |") ||
+		strings.Index(system, "## Teams") > strings.Index(system, "## PLG playbook answers") {
+		t.Errorf("system = %q, want the catalogue, the Teams section, then the playbook answers", system)
 	}
 }
 

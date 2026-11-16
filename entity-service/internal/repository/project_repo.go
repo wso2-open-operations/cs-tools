@@ -119,14 +119,24 @@ const projectClosureColumns = `INITCAP(REPLACE(p.wso2_closure_state::TEXT, '_', 
 const accountIsPartnerColumn = `CASE WHEN a.id IS NULL THEN NULL
 	ELSE COALESCE(LOWER(TRIM(a.classification)) = 'partner', FALSE) END`
 
+// projectSearchSortColumns maps each sortBy value the Postgres data source accepts to
+// its column (nulls always last).
+var projectSearchSortColumns = map[string]string{
+	"endDate":                           "p.end_date",
+	"goLivePlanDate":                    "p.onboarding_go_live_plan_date",
+	"goLiveDate":                        "p.onboarding_go_live_date",
+	"onboardingExpiryDate":              "p.onboarding_expiry_date",
+	"productionReadinessCompletionDate": "p.onboarding_production_readiness_completion_date",
+}
+
 // projectSearchOrderBy builds ORDER BY from a whitelist; the service has already
 // rejected any other sortBy/sortOrder, so raw input never reaches the SQL.
 func projectSearchOrderBy(sortBy, sortOrder string) string {
-	if sortBy == "endDate" {
+	if col, ok := projectSearchSortColumns[sortBy]; ok {
 		if sortOrder == "desc" {
-			return "p.end_date DESC NULLS LAST, p.id"
+			return col + " DESC NULLS LAST, p.id"
 		}
-		return "p.end_date ASC NULLS LAST, p.id"
+		return col + " ASC NULLS LAST, p.id"
 	}
 	if sortOrder == "asc" {
 		return "p.created_on ASC, p.id"
@@ -252,6 +262,39 @@ func buildProjectSearchWhere(req domain.SearchProjectsRequest, scope SearchScope
 		argIdx++
 	}
 
+	// closureStates: include-side counterpart of ExcludeClosureStates, with the
+	// same vocabulary and upper-casing. A NULL wso2_closure_state matches none.
+	if len(req.ClosureStates) > 0 {
+		upper := make([]string, len(req.ClosureStates))
+		for i, s := range req.ClosureStates {
+			upper[i] = strings.ToUpper(s)
+		}
+		where += fmt.Sprintf(" AND p.wso2_closure_state::text = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, upper)
+		argIdx++
+	}
+
+	// Onboarding date ranges: inclusive yyyy-MM-dd bounds (validated by the
+	// service); a project with no such date never matches a bound.
+	for _, f := range []struct{ col, from, to string }{
+		{"p.onboarding_start_date", req.OnboardingStartDateFrom, req.OnboardingStartDateTo},
+		{"p.onboarding_go_live_plan_date", req.GoLivePlanDateFrom, req.GoLivePlanDateTo},
+		{"p.onboarding_go_live_date", req.GoLiveDateFrom, req.GoLiveDateTo},
+		{"p.onboarding_expiry_date", req.OnboardingExpiryDateFrom, req.OnboardingExpiryDateTo},
+		{"p.onboarding_production_readiness_completion_date", req.ProductionReadinessCompletionDateFrom, req.ProductionReadinessCompletionDateTo},
+	} {
+		if f.from != "" {
+			where += fmt.Sprintf(" AND %s >= $%d::date", f.col, argIdx)
+			filterArgs = append(filterArgs, f.from)
+			argIdx++
+		}
+		if f.to != "" {
+			where += fmt.Sprintf(" AND %s <= $%d::date", f.col, argIdx)
+			filterArgs = append(filterArgs, f.to)
+			argIdx++
+		}
+	}
+
 	// onboardingStatus: any of the given ServiceNow labels, compared ignoring
 	// case and separators, as the case search's projectOnboardingStatus does.
 	if len(req.OnboardingStatus) > 0 {
@@ -295,6 +338,8 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 		        `+projectClosureColumns+`, p.suspension_process_overridden,
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        p.onboarding_go_live_date, p.verification_enabled,
+		        p.onboarding_go_live_plan_date, p.onboarding_expiry_date, p.onboarding_start_date,
+		        p.onboarding_production_readiness_completion_date,
 		        a.id, a.name, a.region, a.sub_region, `+accountIsPartnerColumn+`,
 		        onb.id,
 		        COALESCE(onb.name, NULLIF(TRIM(CONCAT_WS(' ', onb.first_name, onb.last_name)), '')),
@@ -381,6 +426,8 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 				&p.ComplianceViolationClosureState, &p.ComplianceViolationDate, &p.SuspensionProcessState,
 				&p.SuspensionProcessOverridden,
 				&p.OnboardingStatus, &p.GoLiveDate, &verificationEnabled,
+				&p.GoLivePlanDate, &p.OnboardingExpiryDate, &p.OnboardingStartDate,
+				&p.ProductionReadinessCompletionDate,
 				&aID, &aName, &acct.Region, &acct.SubRegion, &acct.IsPartner,
 				&ownerID, &ownerName, &ownerEmail,
 				&p.ActiveCasesCount,
@@ -509,7 +556,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        `+accountIsPartnerColumn+`,
 		        p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date,
-		        p.onboarding_start_date,
+		        p.onboarding_start_date, p.onboarding_production_readiness_completion_date,
 		        EXTRACT(EPOCH FROM p.total_query_duration) / 3600,
 		        EXTRACT(EPOCH FROM p.remaining_query_duration) / 3600,
 		        -- ASSUMPTION, not confirmed against a live payload: project.consumed_duration
@@ -559,7 +606,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		&v.SuspensionProcessOverridden,
 		&v.OnboardingStatus, &v.Account.IsPartner,
 		&v.GoLivePlanDate, &v.GoLiveDate, &v.OnboardingExpiryDate,
-		&v.OnboardingStartDate,
+		&v.OnboardingStartDate, &v.ProductionReadinessCompletionDate,
 		&v.TotalQueryHours, &v.RemainingQueryHours,
 		&v.ConsumedQueryHours,
 		&v.TotalOnboardingHours, &v.ConsumedOnboardingHours, &v.RemainingOnboardingHours,
@@ -668,8 +715,9 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 	// runs.
 	var accountID *string
 	var stored OnboardingDates
-	err := tx.QueryRow(ctx, `SELECT account_id, onboarding_start_date, onboarding_go_live_plan_date, onboarding_go_live_date, onboarding_expiry_date
-		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry)
+	err := tx.QueryRow(ctx, `SELECT account_id, onboarding_start_date, onboarding_go_live_plan_date, onboarding_go_live_date, onboarding_expiry_date,
+		onboarding_production_readiness_completion_date
+		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry, &stored.ProductionReadiness)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProjectUpdateResult{}, &apierror.NotFoundError{Msg: "project not found"}
 	}
@@ -725,6 +773,7 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		merged := OnboardingDates{
 			Start: dates.Start, GoLivePlan: firstDate(dates.GoLivePlan, stored.GoLivePlan),
 			GoLive: firstDate(dates.GoLive, stored.GoLive), Expiry: firstDate(dates.Expiry, stored.Expiry),
+			ProductionReadiness: firstDate(dates.ProductionReadiness, stored.ProductionReadiness),
 		}
 		if err := merged.checkOrder(merged.Start); err != nil {
 			return domain.ProjectUpdateResult{}, err
@@ -750,6 +799,7 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		    onboarding_go_live_plan_date = COALESCE($11::date, onboarding_go_live_plan_date),
 		    onboarding_go_live_date = COALESCE($12::date, onboarding_go_live_date),
 		    onboarding_expiry_date = COALESCE($13::date, onboarding_expiry_date),
+		    onboarding_production_readiness_completion_date = COALESCE($15::date, onboarding_production_readiness_completion_date),
 		    updated_on = NOW(),
 		    updated_by = $5
 		WHERE id = $1
@@ -758,7 +808,7 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		closureEnumLabel(req.ComplianceViolationClosureState), updatedBy, req.VerificationEnabled, suspensionStateArg(req.SuspensionProcessState),
 		onboardingStatus, onboardingOwner,
 		dates.Start, dates.GoLivePlan, dates.GoLive, dates.Expiry,
-		req.SuspensionProcessOverridden,
+		req.SuspensionProcessOverridden, dates.ProductionReadiness,
 	).Scan(&res.ID, &res.UpdatedOn, &res.UpdatedBy, &res.VerificationEnabled, &res.SuspensionProcessOverridden)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
@@ -802,10 +852,12 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 	err = tx.QueryRow(ctx, `
 		SELECT INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		       onb.id::TEXT, COALESCE(onb.name, NULLIF(TRIM(CONCAT_WS(' ', onb.first_name, onb.last_name)), '')), onb.email,
-		       p.onboarding_start_date, p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date
+		       p.onboarding_start_date, p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date,
+		       p.onboarding_production_readiness_completion_date
 		FROM project p LEFT JOIN "user" onb ON onb.id = p.onboarding_owner_id
 		WHERE p.id = $1`, id).Scan(&res.OnboardingStatus, &ownerID, &ownerName, &ownerEmail,
-		&res.OnboardingStartDate, &res.GoLivePlanDate, &res.GoLiveDate, &res.OnboardingExpiryDate)
+		&res.OnboardingStartDate, &res.GoLivePlanDate, &res.GoLiveDate, &res.OnboardingExpiryDate,
+		&res.ProductionReadinessCompletionDate)
 	if err != nil {
 		return domain.ProjectUpdateResult{}, fmt.Errorf("update project: read onboarding: %w", err)
 	}
@@ -1113,4 +1165,3 @@ func consumptionEnumToStatus(enumVal *string, hasSecretKey bool) int {
 		return 1
 	}
 }
-

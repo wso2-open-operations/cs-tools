@@ -15,6 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
+import type { BeWidgetResourceType } from "@api/backend/types";
 import {
   appendWidgetTitleParam,
   buildWidgetPreviewHref,
@@ -283,6 +284,16 @@ describe("widget preview URL — filter op round-trip", () => {
     const entries = (parsed.filters as { filters: unknown[] }).filters;
     expect(entries).toEqual(input);
   });
+
+  it("round-trips the states a case entered and the window it entered them in", () => {
+    const input = [
+      { field: "stateEntered", op: "in", values: ["waiting_on_wso2", "awaiting_info"] },
+      { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+      { field: "stateEnteredOn", op: "lte", values: ["2026-11-30"] },
+    ];
+    const entries = (roundTrip(input).filters as { filters: unknown[] }).filters;
+    expect(entries).toEqual(input);
+  });
 });
 
 /**
@@ -366,6 +377,61 @@ describe("widget preview URL — anyOf round-trip", () => {
   });
 });
 
+describe("widget preview URL — a value holding a comma", () => {
+  function roundTrip(filters: Record<string, unknown>, resourceType: BeWidgetResourceType) {
+    const href = buildWidgetPreviewHref({ previewSlug: "p", widgetId: "w1", displayName: "W", filters, resourceType });
+    return parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters;
+  }
+
+  it("keeps a PLG country with a comma one country", () => {
+    expect(
+      roundTrip({ countryNames: ["Korea, Republic of", "Sri Lanka"] }, "plg_organization").countryNames,
+    ).toEqual(["Korea, Republic of", "Sri Lanka"]);
+  });
+
+  it("keeps a single string value with a comma one value", () => {
+    expect(roundTrip({ organizationName: "Example, Inc." }, "plg_organization").organizationName).toEqual([
+      "Example, Inc.",
+    ]);
+  });
+
+  it("keeps commas in a case filter's values, and still adds up repeated notIn entries", () => {
+    const filters = roundTrip(
+      {
+        filters: [
+          { field: "product", op: "notIn", values: ["Example, Gateway"] },
+          { field: "product", op: "notIn", values: ["Other", "Example, Gateway"] },
+          { field: "tag", op: "in", values: ["a,b", "c"] },
+        ],
+      },
+      "case",
+    );
+    expect(filters.filters).toEqual([
+      { field: "product", op: "notIn", values: ["Example, Gateway", "Other"] },
+      { field: "tag", op: "in", values: ["a,b", "c"] },
+    ]);
+  });
+
+  it("keeps commas in a non-case resourceType's own filters array", () => {
+    const filters = roundTrip(
+      { filters: [{ field: "assignmentGroupId", op: "in", values: ["x, y", "z"] }] },
+      "change_request",
+    );
+    expect(filters.filters).toEqual([{ field: "assignmentGroupId", op: "in", values: ["x, y", "z"] }]);
+  });
+
+  it("keeps backslashes, including one at a value's end or before a comma", () => {
+    const values = ["C:\\dir", "ends\\", "\\,", "plain"];
+    expect(roundTrip({ countryNames: values }, "plg_registration").countryNames).toEqual(values);
+  });
+
+  it("reads a URL written before values were escaped as it did", () => {
+    const { filters } = parseWidgetPreviewFilters(new URLSearchParams("severities=critical,high&q=a\\b,c"));
+    expect(filters.severities).toEqual(["critical", "high"]);
+    expect(filters.q).toEqual(["a\\b", "c"]);
+  });
+});
+
 describe("widgetFilterChipLabel", () => {
   it("reads the default op as field: value and the others in words", () => {
     expect(widgetFilterChipLabel({ field: "severity", value: "critical" })).toBe("severity: critical");
@@ -443,6 +509,17 @@ describe("describeWidgetFilters", () => {
       { field: "createdOn", op: "gte", value: "30 days ago" },
       { field: "createdOn", op: "lte", value: "Today" },
     ]);
+  });
+
+  it("shows the states a case entered and the window in words", () => {
+    expect(
+      describeWidgetFilters({
+        filters: [
+          { field: "stateEntered", op: "in", values: ["waiting_on_wso2"] },
+          { field: "stateEnteredOn", op: "gte", values: ["__today__"] },
+        ],
+      }).map(widgetFilterChipLabel),
+    ).toEqual(["stateEntered: waiting_on_wso2", "stateEnteredOn on or after Today"]);
   });
 
   it("still shows a value-less op (isEmpty/isNotEmpty) rather than silently dropping it", () => {
@@ -593,5 +670,57 @@ describe("widget preview URL — non-case resourceType's own filters array (chan
     const { filters } = parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1]));
     expect(filters.states).toEqual(["scheduled"]);
     expect(filters.filters).toEqual([{ field: "approval", op: "eq", values: ["approved"] }]);
+  });
+});
+
+describe("a case widget on one product's versions", () => {
+  const filters = [
+    { field: "product", op: "in", values: ["WSO2 API Manager"] },
+    { field: "productVersion", op: "in", values: ["4.3.0", "4.3.1"] },
+  ];
+
+  it("round-trips the product and its versions through the preview URL", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      widgetId: "w1",
+      displayName: "W",
+      filters: { filters },
+      resourceType: "case",
+    });
+
+    expect(parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters).toEqual({ filters });
+  });
+
+  it("shows the product and its versions as chips", () => {
+    expect(describeWidgetFilters({ filters }).map(widgetFilterChipLabel)).toEqual([
+      "product: WSO2 API Manager",
+      "productVersion: 4.3.0, 4.3.1",
+    ]);
+  });
+});
+
+describe("a case widget on account regions", () => {
+  const filters = [
+    { field: "region", op: "in", values: ["APAC", "EMEA"] },
+    { field: "region", op: "notIn", values: ["EMEA"] },
+  ];
+
+  it("round-trips the regions, kept and left out, through the preview URL", () => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "security-reports",
+      widgetId: "w1",
+      displayName: "W",
+      filters: { filters },
+      resourceType: "security_report_analysis",
+    });
+
+    expect(parseWidgetPreviewFilters(new URLSearchParams(href.split("?")[1])).filters).toEqual({ filters });
+  });
+
+  it("shows the regions as chips", () => {
+    expect(describeWidgetFilters({ filters }).map(widgetFilterChipLabel)).toEqual([
+      "region: APAC, EMEA",
+      "region not in EMEA",
+    ]);
   });
 });

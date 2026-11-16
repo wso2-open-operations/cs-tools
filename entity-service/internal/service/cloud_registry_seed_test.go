@@ -14,61 +14,39 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package domain
+package service
 
-// The availability weighting the public status dashboard publishes.
-//
-// *** THESE NUMBERS EXIST NOWHERE ELSE. *** They were read out of the
-// DEPLOYED ServiceNow resource script (sys_ws_operation.operation_script for
-// /availabilities, Global scope, 490 lines) on 2026-09-29. The copy committed
-// to wso2-enterprise/uptime-dashboard under servicenow/scripted-rest-api/
-// carries a single `"": 50` placeholder behind a FIXME and three EMPTY maps --
-// running it would return 0 or NaN for every cloud. Whatever is in that repo
-// was never what served traffic, so do not "reconcile" these against it.
-//
-// They are a product decision, not a derivation: how much each component
-// counts toward a region's published uptime. Recomputing them from anything
-// would change a figure customers read.
-//
-// STRUCTURE. ServiceNow keeps ONE FLAT MAP PER CLOUD covering every region,
-// and slices it by calling query() once per PARENT SERVICE -- so each
-// calculateX only ever sees the offerings under the parent it was called
-// with. That is why the weights in a cloud sum to 100 x (number of regions)
-// rather than 100. Reproduced exactly: one map per cloud, sliced by parent.
-//
-// VERIFIED 2026-09-29 against the dev database: every offering under all 18
-// parents has a weight, every weight has an offering, and each cloud's map
-// partitions exactly across its regions (choreo 8+9+9=26, choreo-eu 8+9=17,
-// bijira 7+8+7+8=30, moesif 11, devant 8+10+8+10=36, agent-manager 11+3=14).
-// Every region's weights sum to exactly 100.
+import (
+	"context"
+	"errors"
 
-// AvailabilityRegion is one region of a cloud, as the dashboard keys it, and
-// the parent service whose offerings make it up.
-type AvailabilityRegion struct {
-	// Key is the literal, lower-case, oddly-spaced key the frontend reads --
-	// "us - dp", "eu - dp - eu". Not derived; copied.
-	Key string
-	// ParentID is the service (not offering) whose children are weighted.
-	ParentID string
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+)
+
+// The seven clouds that existed before the registry became data, kept here as
+// the golden fixture: the availability and routing tests assert against the
+// same plans the code used to hold, so a change to how the registry is read
+// shows up as a failing expectation. The data itself is loaded per environment
+// by a seed step kept outside the repository; this fixture is the reference it
+// was written from.
+
+// seededCloudOfferings maps each seeded slug to its stored cloud_offering value.
+var seededCloudOfferings = map[string]string{
+	"asgardeo":      "ASGARDEO",
+	"choreo":        "CHOREO",
+	"bijira":        "BIJIRA",
+	"devant":        "DEVANT",
+	"moesif":        "MOESIF",
+	"choreo-eu":     "CHOREO_EU",
+	"agent-manager": "AGENT_MANAGER",
 }
 
-// CloudAvailabilityPlan is everything needed to compute one cloud's uptime.
-type CloudAvailabilityPlan struct {
-	// Regions in the order ServiceNow declares them.
-	Regions []AvailabilityRegion
-	// Weights maps a service offering to its share of its region, as a
-	// percentage. NIL means the cloud is UNWEIGHTED and takes a plain mean --
-	// which is asgardeo, and only asgardeo.
-	Weights map[string]float64
-}
+// seededCloudOrder is the order the registry returns them (sort_order).
+var seededCloudOrder = []string{"asgardeo", "choreo", "bijira", "devant", "moesif", "choreo-eu", "agent-manager"}
 
-// Weighted reports whether this cloud uses a weighted average.
-func (p CloudAvailabilityPlan) Weighted() bool { return p.Weights != nil }
-
-// CloudAvailabilityPlans is the whole contract, keyed by dashboard cloud slug.
-var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
+var seededCloudPlans = map[string]domain.CloudAvailabilityPlan{
 	"asgardeo": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "us", ParentID: "492c649b-471e-f510-a0a2-9cd3846d43e3"},
 			{Key: "eu", ParentID: "40ae701b-479e-f510-a0a2-9cd3846d43cb"},
 		},
@@ -76,7 +54,7 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 		Weights: nil,
 	},
 	"choreo": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "cp", ParentID: "aedc9983-47e4-8e90-a0a2-9cd3846d43e5"},
 			{Key: "us - dp", ParentID: "550d9d83-47e4-8e90-a0a2-9cd3846d43ef"},
 			{Key: "eu - dp", ParentID: "5e1dd983-47e4-8e90-a0a2-9cd3846d4317"},
@@ -112,7 +90,7 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 		},
 	},
 	"choreo-eu": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "eu - cp", ParentID: "cfede2d7-1b38-3e90-0bb3-da47b04bcbae"},
 			{Key: "eu - dp - eu", ParentID: "246f6e5b-1b38-3e90-0bb3-da47b04bcb45"},
 		},
@@ -138,7 +116,7 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 		},
 	},
 	"bijira": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "cp - us", ParentID: "b02a0119-1bca-e210-a002-c9d3604bcb1a"},
 			{Key: "dp - us", ParentID: "d716af3b-1b03-a210-a002-c9d3604bcb5d"},
 			{Key: "cp - eu", ParentID: "a0c22ca0-1b4c-be10-182c-0dc5604bcbb6"},
@@ -179,7 +157,7 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 		},
 	},
 	"moesif": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "us", ParentID: "9458cdd5-1bdf-b6d0-a002-c9d3604bcbf3"},
 		},
 		// 11 offerings across 1 region(s); sums to 100 = 1 x 100.
@@ -198,7 +176,7 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 		},
 	},
 	"devant": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "cp - us", ParentID: "bf0e1e82-1bcc-be50-0bb3-da47b04bcb9a"},
 			{Key: "dp - us", ParentID: "f55e16c2-1bcc-be50-0bb3-da47b04bcb40"},
 			{Key: "cp - eu", ParentID: "62d30e53-1b00-b290-a002-c9d3604bcbcc"},
@@ -245,7 +223,7 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 		},
 	},
 	"agent-manager": {
-		Regions: []AvailabilityRegion{
+		Regions: []domain.AvailabilityRegion{
 			{Key: "cp - us", ParentID: "1cf18e12-3b5b-8710-3e1e-088aa4e45ac0"},
 			{Key: "dp - us", ParentID: "a7b24ed2-3b5b-8710-3e1e-088aa4e45a17"},
 		},
@@ -267,4 +245,57 @@ var CloudAvailabilityPlans = map[string]CloudAvailabilityPlan{
 			"a8194ada-3b9b-8710-3e1e-088aa4e45a8b": 15,
 		},
 	},
+}
+
+// seededDefinitions builds the registry rows the migration seeds.
+func seededDefinitions() []domain.CloudDefinition {
+	defs := make([]domain.CloudDefinition, 0, len(seededCloudOrder))
+	for _, slug := range seededCloudOrder {
+		defs = append(defs, domain.CloudDefinition{
+			Slug:           slug,
+			DisplayName:    slug,
+			OfferingKey:    seededCloudOfferings[slug],
+			IncidentPrefix: slug,
+			Plan:           seededCloudPlans[slug],
+		})
+	}
+	return defs
+}
+
+// fixtureClouds is a registry loader double. defs is what the "database"
+// holds; err, when set, makes the read fail. calls counts reads.
+type fixtureClouds struct {
+	defs  []domain.CloudDefinition
+	err   error
+	calls int
+}
+
+func (f *fixtureClouds) Clouds(context.Context) ([]domain.CloudDefinition, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.defs, nil
+}
+
+var errFixtureDB = errors.New("fixture: database unavailable")
+
+// Clouds on each fake: the seven seeded clouds unless a test installs its own
+// registry double.
+func (f *fakeDashboardRepo) Clouds(ctx context.Context) ([]domain.CloudDefinition, error) {
+	if f.registry != nil {
+		return f.registry.Clouds(ctx)
+	}
+	return seededDefinitions(), nil
+}
+
+func (f *replayDashboardRepo) Clouds(context.Context) ([]domain.CloudDefinition, error) {
+	return seededDefinitions(), nil
+}
+
+func (f *fakeCloudStatusRepo) Clouds(ctx context.Context) ([]domain.CloudDefinition, error) {
+	if f.registry != nil {
+		return f.registry.Clouds(ctx)
+	}
+	return seededDefinitions(), nil
 }

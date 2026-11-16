@@ -58,6 +58,22 @@ type project struct {
 	// project genuinely without a synced Salesforce record has no value
 	// here, and the notice then falls back to plain (unlinked) text.
 	SfID *string `json:"sfId"`
+	// SubscriptionType is the project's type, a lowercase snake_case value
+	// (entity-service's SubscriptionType enum); see ineligibleSubscriptionTypes.
+	// Nil when the response has none.
+	SubscriptionType *string `json:"subscriptionType"`
+	// SuspensionProcessOverridden is the CSM project record's "suspension
+	// process overridden" flag: true means the project is never evaluated.
+	// entity-service returns it on every project read (default false); nil
+	// means the response had none (an entity-service that predates it), which
+	// is skipped, not evaluated: see skipIneligible.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden"`
+	// accountStatus and accountStatusRead are set by the Salesforce details
+	// source only (CSM's project read has no account status): the account's
+	// status as Salesforce gave it, and that it was read at all. The status
+	// filter applies only when it was read.
+	accountStatus     *string
+	accountStatusRead bool
 	// StartDate is nil only when genuinely absent on the wire — mirrors
 	// EndDate's existing nullable-pointer convention.
 	StartDate *time.Time `json:"startDate"`
@@ -293,6 +309,8 @@ type searchProjectsRequest struct {
 type searchProjectOpportunityLinksRequest struct {
 	Pagination pagination `json:"pagination"`
 	ProjectID  string     `json:"projectId"`
+	// OpportunityID restricts to the links of one opportunity (screening).
+	OpportunityID string `json:"opportunityId,omitempty"`
 }
 
 // searchInvoicesRequest mirrors the fields of csm-integration-service's
@@ -312,7 +330,34 @@ type searchInvoicesRequest struct {
 type Result struct {
 	ProjectsEvaluated int
 	ProjectsExcluded  int
-	Failures          []ProjectFailure
+	// ProjectsActed counts projects with at least one notice sent or
+	// recorded, or a suspension attempted (what ACP_DAILY_LIMIT caps).
+	ProjectsActed int
+	// ProjectsFiltered counts projects read but not decided because the
+	// selection filter excludes them (see ineligibleSubscriptionTypes). They
+	// are included in ProjectsEvaluated, which counts every project read.
+	ProjectsFiltered int
+	// ProjectsFilteredOverridden counts projects whose suspension process is
+	// overridden, ProjectsFilteredOverrideUnknown those whose read carried no
+	// such flag (skipped, fail closed). Both are decided from the project
+	// read, and are included in ProjectsEvaluated.
+	ProjectsFilteredOverridden, ProjectsFilteredOverrideUnknown int
+	// ProjectsFilteredStatus counts projects whose account status is not
+	// "Customer", ProjectsFilteredNoStatus those whose account has no status
+	// (skipped too: the legacy selection required Customer), and
+	// ProjectsFilteredPartner those whose account is itself a partner. All
+	// are decided after the details are read, and are included in
+	// ProjectsEvaluated.
+	ProjectsFilteredStatus, ProjectsFilteredNoStatus, ProjectsFilteredPartner int
+	// ProjectsScreenedOut counts listed projects skipped by screening before
+	// any re-read or Salesforce call; ScreenCandidates counts the others by
+	// reason (zero values when screening did not run).
+	ProjectsScreenedOut int
+	ScreenCandidates    map[string]int
+	// NotEvaluatedByLimit counts listed projects left unevaluated because
+	// the limit was reached.
+	NotEvaluatedByLimit int
+	Failures            []ProjectFailure
 	// Skipped are projects whose own record is unusable (dataError): logged
 	// and left for someone to fix, without failing the run.
 	Skipped []ProjectFailure

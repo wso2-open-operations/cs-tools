@@ -13,7 +13,7 @@ import {
   ArrowLeft as ArrowBackIcon,
 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 
 
 import { useOrganization, useSetOrganizationOwner } from "@features/plg/api/hooks";
@@ -118,19 +118,28 @@ function optionLabel(code: string): string {
   return code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
 }
 
+/** The page this one was opened from, when the caller says (a dashboard
+ * widget's row passes `from` and its own page's state as `parentState`). */
+interface BackState {
+  from?: string;
+  parentState?: unknown;
+}
+
 export default function OrganizationDetailPage() {
   const { organizationId, productCode } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: org, isPending, error } = useOrganization(organizationId);
+  const backState = location.state as BackState | null;
 
   // A link by record id settles on the Cloud organisation id, the id people use.
   const pathId = org ? organizationPathId(org) : undefined;
   useEffect(() => {
     if (pathId && organizationId !== pathId) {
       const tab = productCode ? `/${productCode}` : "";
-      navigate(`/plg/organizations/${encodeURIComponent(pathId)}${tab}`, { replace: true });
+      navigate(`/plg/organizations/${encodeURIComponent(pathId)}${tab}`, { replace: true, state: location.state });
     }
-  }, [pathId, organizationId, productCode, navigate]);
+  }, [pathId, organizationId, productCode, navigate, location.state]);
 
   if (error) return <ErrorBlock error={error} />;
   if (isPending || !org) return <LoadingSpinner />;
@@ -145,8 +154,19 @@ export default function OrganizationDetailPage() {
           column flex box. A fragment made each child of this page its own flex item,
           and MUI Card is overflow:hidden — so flexbox shrank the filter card and it
           clipped instead of the page scrolling. */}
-      <Button startIcon={<ArrowBackIcon />} onClick={() => navigate("/plg/organizations")} sx={{ mb: 1 }}>
-        All organisations
+      {/* Back to the page this one was opened from, with that page's own state, so
+          its Back still works too; opened from the PLG pages (no `from`), to the
+          organisation list as before. */}
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={() =>
+          backState?.from
+            ? navigate(backState.from, { state: backState.parentState ?? undefined })
+            : navigate("/plg/organizations")
+        }
+        sx={{ mb: 1 }}
+      >
+        {backState?.from ? "Back" : "All organisations"}
       </Button>
 
       {/* The company id, never the name: the name and email stay hidden until
@@ -159,11 +179,14 @@ export default function OrganizationDetailPage() {
       <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
         <Tabs
           value={selected}
+          // The page's state goes with a tab switch, so Back still knows where
+          // the page was opened from.
           onChange={(_, value: string) =>
             navigate(
               value === "overview"
                 ? `/plg/organizations/${encodeURIComponent(organizationPathId(org))}`
                 : `/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${value}`,
+              { state: location.state },
             )
           }
           variant="scrollable"
@@ -206,6 +229,7 @@ export default function OrganizationDetailPage() {
  */
 function OverviewTab({ organizationId }: { organizationId: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: org } = useOrganization(organizationId);
   const setOwner = useSetOrganizationOwner(organizationId);
 
@@ -280,7 +304,9 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
                   <Box
                     key={card.orgPlatformId}
                     onClick={() =>
-                      navigate(`/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${card.product.code}`)
+                      navigate(`/plg/organizations/${encodeURIComponent(organizationPathId(org))}/${card.product.code}`, {
+                        state: location.state,
+                      })
                     }
                     sx={{
                       p: 1.5,

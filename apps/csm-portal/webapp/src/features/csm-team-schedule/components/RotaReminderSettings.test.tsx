@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { RotaReminderSettings as Settings, SaveRotaReminderSettings } from "../types";
@@ -38,6 +38,41 @@ vi.mock("../api/useRotaReminderSettings", () => ({
 
 // The Send now section has its own tests; here only the settings form.
 vi.mock("./RotaReminderSendNow", () => ({ default: () => null }));
+
+// The people the Cc pickers offer: CRE team members and heads, CRE rota
+// admins (one on no team), and an SRE member and an inactive grant that must
+// not be offered.
+vi.mock("../api/useTeamSchedule", () => ({
+  useScheduleCatalogue: () => ({
+    data: {
+      teams: [
+        {
+          key: "vega", name: "Vega", family: "CRE", sortOrder: 1,
+          members: [
+            { userId: "1", name: "Ana Lead", email: "a@x.test", isLead: true, role: "lead" },
+            { userId: "2", name: "Bo Engineer", email: "B@x.test", isLead: false, role: "engineer" },
+          ],
+          heads: [{ userId: "3", name: "Cy Head", email: "head@x.test", isLead: false, role: "americas_team_lead" }],
+        },
+        {
+          key: "apollo", name: "Apollo", family: "SRE", sortOrder: 2,
+          members: [{ userId: "4", name: "Sre Person", email: "sre@x.test", isLead: false, role: "engineer" }],
+        },
+      ],
+    },
+  }),
+}));
+vi.mock("../api/useRotaAccess", () => ({
+  useRotaAccess: () => ({
+    data: {
+      rotaAdmins: [
+        { userId: "5", name: "Dee Admin", email: "admin@x.test", family: "CRE", active: true, grantedBy: "", grantedOn: "" },
+        { userId: "6", name: "Old Admin", email: "old@x.test", family: "CRE", active: false, grantedBy: "", grantedOn: "" },
+        { userId: "7", name: "Sre Admin", email: "sreadmin@x.test", family: "SRE", active: true, grantedBy: "", grantedOn: "" },
+      ],
+    },
+  }),
+}));
 
 type Callbacks ={ onSuccess?: (s: Settings) => void; onError?: (e: Error) => void };
 
@@ -71,7 +106,16 @@ const americasField = () => screen.getByRole("spinbutton", { name: AMERICAS });
 const startField = () => screen.getByLabelText(/^Start\b/);
 const endField = () => screen.getByLabelText(/^End\b/);
 const zoneField = () => screen.getByRole("combobox", { name: "Time zone" });
-const copyField = () => screen.getByLabelText("Cc on every reminder");
+const copyField = () => screen.getByLabelText("Cc on reminder emails");
+
+/** Picks a member in a Cc picker: type part of the name, choose the match. */
+function pick(label: string, typed: string, name: RegExp | string): void {
+  const input = screen.getByLabelText(label);
+  // A real focus, so the picker focused before it loses focus and closes.
+  act(() => input.focus());
+  fireEvent.change(input, { target: { value: typed } });
+  fireEvent.mouseDown(within(screen.getByRole("listbox")).getByRole("option", { name }));
+}
 const saveButton = () => screen.getByRole("button", { name: /^(Save reminder settings|Saving…)$/ });
 const discardButton = () => screen.getByRole("button", { name: "Discard changes" });
 
@@ -122,6 +166,18 @@ describe("RotaReminderSettings", () => {
     expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).not.toBeChecked();
   });
 
+  it("says when each reminder goes out: 09:00 IST the day before, the weekend on Monday and Friday", () => {
+    render(<RotaReminderSettings />);
+    expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).toHaveAccessibleDescription(
+      /one email at 09:00 IST the day before \(Sunday to Thursday; on Sunday for Monday\), with a calendar invitation unless invitations are turned off below/,
+    );
+    const weekend = screen.getByRole("checkbox", { name: "Send weekend reminders" });
+    expect(weekend).toHaveAccessibleDescription(/Sent at 09:00 IST on Monday once the weekend is fully marked/);
+    expect(weekend).toHaveAccessibleDescription(/On Friday at 09:00 IST a final reminder with any changes goes to everyone on the weekend, even if gaps remain/);
+    expect(weekend).toHaveAccessibleDescription(/only the CRE rota admins hear about it: a 09:00 IST email each morning, Monday to Thursday/);
+    expect(screen.getByText(/an email can arrive up to an hour later/)).toBeInTheDocument();
+  });
+
   it("groups the settings under Settings, in Automatic reminders, Weekend rota and Cc", () => {
     render(<RotaReminderSettings />);
     expect(screen.getByRole("heading", { name: "Settings", level: 4 })).toBeInTheDocument();
@@ -140,8 +196,9 @@ describe("RotaReminderSettings", () => {
     expect(hours.getByRole("combobox", { name: "Time zone" })).toBeInTheDocument();
 
     const copies = within(screen.getByRole("group", { name: "Cc" }));
-    expect(copies.getByLabelText("Cc on every reminder")).toBeInTheDocument();
-    expect(copyField()).toHaveAttribute("rows", "3");
+    expect(copies.getByLabelText("Cc on reminder emails")).toHaveAttribute("role", "combobox");
+    expect(copies.getByLabelText("Cc on calendar invitations")).toHaveAttribute("role", "combobox");
+    expect(copies.getByLabelText("Cc on weekend reminders only")).toHaveAttribute("role", "combobox");
   });
 
   it("marks the head counts, the hours and the time zone required, and the copies optional", () => {
@@ -166,7 +223,8 @@ describe("RotaReminderSettings", () => {
     fireEvent.change(startField(), { target: { value: "09:00" } });
     fireEvent.change(endField(), { target: { value: "17:30" } });
     fireEvent.change(zoneField(), { target: { value: "Asia/Colombo" } });
-    fireEvent.change(copyField(), { target: { value: " a@x.test, B@x.test\n\nA@X.test " } });
+    pick("Cc on reminder emails", "ana", /Ana Lead/);
+    pick("Cc on reminder emails", "bo", /Bo Engineer/);
     expect(saveButton()).toBeEnabled();
     fireEvent.click(saveButton());
 
@@ -185,6 +243,7 @@ describe("RotaReminderSettings", () => {
       inviteRotations: ALL_INVITES_ON,
       copyTo: ["a@x.test", "B@x.test"],
       weekendCopyTo: [],
+      inviteCopyTo: [],
     });
   });
 
@@ -201,25 +260,80 @@ describe("RotaReminderSettings", () => {
       inviteRotations: ALL_INVITES_ON,
       copyTo: [],
       weekendCopyTo: [],
+      inviteCopyTo: [],
     });
   });
 
-  it("saves the weekend-only Cc apart from the every-reminder Cc", () => {
-    settings.data = { ...LOADED, copyTo: ["lead@x.test"] };
+  it("saves the three Cc lists apart: reminder emails, calendar invitations, weekend summary", () => {
+    settings.data = { ...LOADED, copyTo: ["a@x.test"] };
     render(<RotaReminderSettings />);
-    fireEvent.change(screen.getByLabelText("Cc on weekend reminders only"), {
-      target: { value: " head@x.test\nHEAD@x.test " },
-    });
+    pick("Cc on calendar invitations", "dee", /Dee Admin/);
+    pick("Cc on weekend reminders only", "head", /Cy Head/);
     fireEvent.click(saveButton());
-    expect(lastBody()).toMatchObject({ copyTo: ["lead@x.test"], weekendCopyTo: ["head@x.test"] });
+    expect(lastBody()).toMatchObject({
+      copyTo: ["a@x.test"],
+      inviteCopyTo: ["admin@x.test"],
+      weekendCopyTo: ["head@x.test"],
+    });
   });
 
-  it("shows the saved weekend-only Cc, and refuses an address that is not an email there", () => {
-    settings.data = { ...LOADED, weekendCopyTo: ["head@x.test"] };
+  it("offers only active CRE members, team members, heads and rota admins, by name or email", () => {
     render(<RotaReminderSettings />);
-    const field = screen.getByLabelText("Cc on weekend reminders only");
-    expect(field).toHaveValue("head@x.test");
-    fireEvent.change(field, { target: { value: "not an address" } });
+    const input = copyField();
+    act(() => input.focus());
+    const offered = within(screen.getByRole("listbox"))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(offered).toEqual([
+      "Ana Leada@x.test",
+      "Bo EngineerB@x.test",
+      "Cy Headhead@x.test",
+      "Dee Adminadmin@x.test",
+    ]);
+    fireEvent.change(input, { target: { value: "admin@" } });
+    expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(1);
+    fireEvent.change(input, { target: { value: "sre" } });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No CRE member matches");
+  });
+
+  it("does not offer somebody already picked, and Enter picks the highlighted match without saving", () => {
+    settings.data = { ...LOADED, copyTo: ["a@x.test"] };
+    render(<RotaReminderSettings />);
+    const input = copyField();
+    act(() => input.focus());
+    expect(within(screen.getByRole("listbox")).queryByRole("option", { name: /Ana Lead/ })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "bo" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mutate).not.toHaveBeenCalled();
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({ copyTo: ["a@x.test", "B@x.test"] });
+  });
+
+  it("closes the list after a pick, so it never covers Save, and opens it again on typing", () => {
+    render(<RotaReminderSettings />);
+    pick("Cc on calendar invitations", "dee", /Dee Admin/);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Cc on calendar invitations"), { target: { value: "c" } });
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("shows a saved address that is not a CRE member as a marked chip that can be removed", () => {
+    settings.data = { ...LOADED, weekendCopyTo: ["head@x.test", "outsider@y.test"] };
+    render(<RotaReminderSettings />);
+    expect(screen.getByText("Cy Head")).toBeInTheDocument();
+    expect(screen.getByText("outsider@y.test")).toBeInTheDocument();
+    expect(screen.getByText("Not a CRE member")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove outsider@y.test" }));
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({ weekendCopyTo: ["head@x.test"] });
+  });
+
+  it("shows the saved invitation Cc, and refuses a saved address that is not an email", () => {
+    settings.data = { ...LOADED, inviteCopyTo: ["admin@x.test", "not an address"] };
+    render(<RotaReminderSettings />);
+    expect(screen.getByText("Dee Admin")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Send weekend reminders" }));
     fireEvent.click(saveButton());
     expect(mutate).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent('"not an address" is not an email address.');
@@ -288,8 +402,9 @@ describe("RotaReminderSettings", () => {
   });
 
   it("refuses an address that is not an email, without saving", () => {
+    settings.data = { ...LOADED, copyTo: ["ana@example.test", "not-an-email"] };
     render(<RotaReminderSettings />);
-    fireEvent.change(copyField(), { target: { value: "ana@example.test, not-an-email" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Send weekend reminders" }));
     fireEvent.click(saveButton());
     expect(screen.getByRole("alert")).toHaveTextContent("not-an-email");
     expect(mutate).not.toHaveBeenCalled();
@@ -349,10 +464,11 @@ describe("RotaReminderSettings", () => {
   it("puts changes back with Discard", () => {
     settings.data = LOADED;
     render(<RotaReminderSettings />);
-    fireEvent.change(copyField(), { target: { value: "a@x.test" } });
+    pick("Cc on reminder emails", "ana", /Ana Lead/);
+    expect(within(screen.getByRole("list", { name: "Copied" })).getByText("Ana Lead")).toBeInTheDocument();
     expect(discardButton()).toBeEnabled();
     fireEvent.click(discardButton());
-    expect(copyField()).toHaveValue("");
+    expect(screen.queryByRole("list", { name: "Copied" })).not.toBeInTheDocument();
     expect(saveButton()).toBeDisabled();
     expect(discardButton()).toBeDisabled();
   });

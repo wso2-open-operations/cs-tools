@@ -53,6 +53,14 @@ func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
 
+	// Optional logo overrides for every email; unset keeps the built-in URLs.
+	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_WHITE_URL"))
+	// Optional footer-icon override for the onboarding emails; unset keeps the built-in icon.
+	notifications.SetFooterIconURL(os.Getenv("EMAIL_FOOTER_ICON_URL"))
+	// Optional company-name override for the templates' footer disclaimer/signoff
+	// and the dispatch package's email subjects; unset keeps "WSO2".
+	notifications.SetTemplateCompanyName(os.Getenv("EMAIL_TEMPLATE_COMPANY_NAME"))
+
 	// Email is not yet configured for every deployment, so its config is read
 	// with os.Getenv (never mustEnv) — a missing or invalid configuration only
 	// surfaces as an error the first time a caller requests the email

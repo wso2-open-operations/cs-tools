@@ -18,6 +18,7 @@ package rotareminder
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -52,7 +53,13 @@ func recipients(people []teamschedule.Assignment) (to, named []string) {
 // finish addresses an email to to, copies cfg.Copy, and renders data as its
 // body.
 func finish(cfg Config, to []string, subject string, data notify.RotaReminderData) shiftEmail {
-	email := shiftEmail{to: to, cc: without(cfg.Copy, to), subject: subject}
+	return finishCopied(cfg, to, cfg.Copy, subject, data)
+}
+
+// finishCopied is finish with its own copy list: cfg.InviteCopy for an email
+// that carries an invitation or a cancellation.
+func finishCopied(cfg Config, to, copied []string, subject string, data notify.RotaReminderData) shiftEmail {
+	email := shiftEmail{to: to, cc: without(copied, to), subject: subject}
 	if len(cfg.RedirectTo) > 0 {
 		data.IntendedFor = append(append([]string{}, email.to...), email.cc...)
 	}
@@ -103,7 +110,36 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 	for _, a := range w.people {
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
-	return finish(cfg, to, fmt.Sprintf("[%s] %s – %s (%s)", cfg.Family, title, date, when), data), true
+	subject := fmt.Sprintf("[%s] %s – %s (%s)", cfg.Family, title, date, when)
+	if cfg.invitesFor(w.base) {
+		// It carries the invitation: only the invitation copies see it.
+		return finishCopied(cfg, to, cfg.InviteCopy, subject, data), true
+	}
+	return finish(cfg, to, subject, data), true
+}
+
+// buildReminderCopy is the copy of a weekday window's reminder for cfg.Copy
+// when the reminder itself carries the invitation: the same reminder without
+// the invitation (and without the line that says it is attached), addressed
+// to the copies that are not on the window or already copied on the
+// invitation. ok is false when there is nobody to send it to.
+func buildReminderCopy(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
+	plain := cfg
+	plain.InvitesOff = maps.Clone(cfg.InvitesOff)
+	if plain.InvitesOff == nil {
+		plain.InvitesOff = map[string]bool{}
+	}
+	plain.InvitesOff[w.base] = true
+	email, ok := buildEmail(plain, w, today)
+	if !ok {
+		return shiftEmail{}, false
+	}
+	to := without(cfg.Copy, append(append([]string{}, email.to...), cfg.InviteCopy...))
+	if len(to) == 0 {
+		return shiftEmail{}, false
+	}
+	email.to, email.cc = to, nil
+	return email, true
 }
 
 // buildWeekendEmail writes the weekend's summary: to everybody on the windows
@@ -447,7 +483,7 @@ func buildInviteEmail(cfg Config, w *window, stamp time.Time) (shiftEmail, Invit
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
 	inv := windowInvite(cfg, w, stamp)
-	email := finish(cfg, to, fmt.Sprintf("[%s] Calendar invitation: %s – %s (%s)", cfg.Family, title, date, when), data)
+	email := finishCopied(cfg, to, cfg.InviteCopy, fmt.Sprintf("[%s] Calendar invitation: %s – %s (%s)", cfg.Family, title, date, when), data)
 	email.attachments = []notify.Attachment{inviteAttachment(inv)}
 	return email, inv, true
 }
@@ -470,7 +506,7 @@ func buildCancelEmail(cfg Config, inv Invite, emails []string, stamp time.Time) 
 		ScheduleURL: cfg.ScheduleURL,
 		Closing:     "If you believe this is a mistake, please contact your team lead.",
 	}
-	email := finish(cfg, emails, fmt.Sprintf("[%s] Cancelled: %s – %s", cfg.Family, inv.Summary, date), data)
+	email := finishCopied(cfg, emails, cfg.InviteCopy, fmt.Sprintf("[%s] Cancelled: %s – %s", cfg.Family, inv.Summary, date), data)
 	email.attachments = []notify.Attachment{inviteAttachment(cancel)}
 	return email
 }
@@ -496,7 +532,8 @@ func buildAdminEmail(cfg Config, admins []teamschedule.RotaAdmin, days []time.Ti
 	when := dayList(days)
 	intro := fmt.Sprintf("The %s weekend rota for %s is not fully marked in the Team Schedule, so the weekend reminder and its "+
 		"calendar invitations have not been sent yet.", cfg.Family, when)
-	after := "Please mark the missing rotations. The reminder goes out automatically at the next evening check once the rota is complete."
+	after := "Please mark the missing rotations. The rota is checked again each morning at 09:00 IST until Thursday, and the reminder goes out " +
+		"at the first check that finds it complete. On Friday at 09:00 IST the reminder goes out anyway, with the rotations marked by then."
 	if final {
 		intro = fmt.Sprintf("The %s weekend rota for %s is still not fully marked in the Team Schedule. The weekend reminder has been "+
 			"sent with the rotations marked so far.", cfg.Family, when)
