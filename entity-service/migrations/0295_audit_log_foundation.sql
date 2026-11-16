@@ -123,7 +123,11 @@ DECLARE
     old_row    JSONB  := CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) END;
     new_row    JSONB  := CASE WHEN TG_OP <> 'DELETE' THEN to_jsonb(NEW) END;
     record_id  TEXT   := audit_record_key(COALESCE(new_row, old_row), key_columns);
-    actor      TEXT   := COALESCE(NULLIF(current_setting('app.viewer_email', true), ''), session_user::text);
+    -- app.audit_actor is the person behind the request even when the code runs
+    -- with an escalated (system) identity, which clears app.viewer_email.
+    actor      TEXT   := COALESCE(NULLIF(current_setting('app.audit_actor', true), ''),
+                                  NULLIF(current_setting('app.viewer_email', true), ''),
+                                  session_user::text);
     request_id TEXT   := NULLIF(current_setting('app.request_id', true), '');
     field      TEXT;
     old_value  JSONB;
@@ -284,6 +288,10 @@ DECLARE
     created_count  INT := 0;
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtextextended('csm_audit_log_partitions', 0));
+    -- Creating a partition needs a strong lock on the audit table. Waiting for it
+    -- would hold up every audit write queued behind it, so give up instead; the
+    -- caller retries.
+    PERFORM set_config('lock_timeout', '2s', true);
 
     FOR i IN 0..p_months_ahead LOOP
         month_start    := (this_month + make_interval(months => i))::date;
@@ -291,6 +299,15 @@ BEGIN
         partition_name := 'csm_audit_log_' || to_char(month_start, 'YYYY_MM');
 
         IF to_regclass(format('public.%I', partition_name)) IS NULL THEN
+            -- Creating the partition would fail while rows for that month sit in the
+            -- catch-all, and that failure would stop every later month too.
+            IF EXISTS (SELECT 1 FROM csm_audit_log_default
+                        WHERE created_on >= month_start::timestamp AT TIME ZONE 'UTC'
+                          AND created_on <  month_end::timestamp AT TIME ZONE 'UTC') THEN
+                RAISE WARNING 'audit: not creating %: rows for that month are in csm_audit_log_default; move them first', partition_name;
+                CONTINUE;
+            END IF;
+
             EXECUTE format(
                 'CREATE TABLE public.%I PARTITION OF public.csm_audit_log FOR VALUES FROM (%L) TO (%L)',
                 partition_name, month_start || ' 00:00:00+00', month_end || ' 00:00:00+00');
@@ -370,6 +387,12 @@ DECLARE
     registered RECORD;
     trigger_state "char";
 BEGIN
+    IF p_repair THEN
+        -- Re-creating a trigger locks the business table; give up rather than queue
+        -- behind its writers.
+        PERFORM set_config('lock_timeout', '2s', true);
+    END IF;
+
     FOR registered IN
         SELECT ac.*, to_regclass(format('%I.%I', ac.schema_name, ac.table_name)) AS table_oid
           FROM audit_config ac
@@ -398,8 +421,15 @@ BEGIN
         RETURN NEXT;
 
         IF p_repair THEN
-            PERFORM register_audit(registered.schema_name, registered.table_name, registered.key_columns,
-                                   registered.excluded_columns, registered.masked_columns);
+            -- One table that cannot be repaired must not stop the others. It stays
+            -- wrong, so the next reconcile without repair reports it.
+            BEGIN
+                PERFORM register_audit(registered.schema_name, registered.table_name, registered.key_columns,
+                                       registered.excluded_columns, registered.masked_columns);
+            EXCEPTION WHEN OTHERS THEN
+                RAISE WARNING 'audit: could not repair the trigger on %.%: %',
+                    registered.schema_name, registered.table_name, SQLERRM;
+            END;
         END IF;
     END LOOP;
 

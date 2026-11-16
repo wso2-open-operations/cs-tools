@@ -85,7 +85,7 @@ func TestAuditLogMaintenance_NothingWrongGivesEmptyLists(t *testing.T) {
 		t.Fatalf("RunMaintenance: %v", err)
 	}
 
-	if resp.HealthProblems == nil || resp.RepairedTriggers == nil || resp.UnresolvedTriggers == nil {
+	if resp.HealthProblems == nil || resp.RepairedTriggers == nil || resp.UnresolvedTriggers == nil || resp.StepErrors == nil {
 		t.Error("lists must be empty, not nil, so the JSON shows [] and not null")
 	}
 	if len(resp.HealthProblems)+len(resp.RepairedTriggers)+len(resp.UnresolvedTriggers) != 0 {
@@ -105,17 +105,23 @@ func TestAuditLogMaintenance_ReportsHealthProblems(t *testing.T) {
 	}
 }
 
-func TestAuditLogMaintenance_FailedStepDoesNotStopTheOthers(t *testing.T) {
-	repo := &fakeAuditLogRepo{createErr: errors.New("boom")}
+func TestAuditLogMaintenance_FailedStepIsReportedAndDoesNotStopTheOthers(t *testing.T) {
+	repo := &fakeAuditLogRepo{createErr: errors.New("pq: password authentication failed for user secret_user"), healthProblems: []string{"too few future months"}}
 
-	_, err := NewAuditLogMaintenanceService(repo, 3).RunMaintenance(context.Background())
-	if err == nil {
-		t.Fatal("expected the failed step to be returned as an error")
+	resp, err := NewAuditLogMaintenanceService(repo, 3).RunMaintenance(context.Background())
+	if err != nil {
+		t.Fatalf("a failed step must be reported in the response, not as an error: %v", err)
 	}
 
 	want := "create(3) health reconcile(true) reconcile(false)"
 	if got := strings.Join(repo.calls, " "); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
+	}
+	if len(resp.StepErrors) != 1 || len(resp.HealthProblems) != 1 {
+		t.Errorf("stepErrors = %v, healthProblems = %v; want the failure and the later step's result both kept", resp.StepErrors, resp.HealthProblems)
+	}
+	if strings.Contains(resp.StepErrors[0], "secret_user") || strings.Contains(resp.StepErrors[0], "password") {
+		t.Errorf("step error leaks database detail: %q", resp.StepErrors[0])
 	}
 }
 
@@ -147,10 +153,33 @@ func TestAuditLogMaintenance_StillBrokenTriggerIsUnresolvedNotRepaired(t *testin
 	}
 }
 
-func TestAuditLogMaintenance_ReconcileErrorIsReturned(t *testing.T) {
+func TestAuditLogMaintenance_ReconcileErrorIsReportedAsAStepError(t *testing.T) {
 	repo := &fakeAuditLogRepo{reconcileErr: errors.New("boom")}
 
-	if _, err := NewAuditLogMaintenanceService(repo, 3).RunMaintenance(context.Background()); err == nil {
-		t.Fatal("expected a reconcile failure to be returned as an error")
+	resp, err := NewAuditLogMaintenanceService(repo, 3).RunMaintenance(context.Background())
+	if err != nil {
+		t.Fatalf("RunMaintenance: %v", err)
+	}
+	if len(resp.StepErrors) != 1 {
+		t.Errorf("stepErrors = %v, want one", resp.StepErrors)
+	}
+}
+
+func TestAuditLogMaintenance_NothingWrongHasNoStepErrors(t *testing.T) {
+	resp, err := NewAuditLogMaintenanceService(&fakeAuditLogRepo{}, 3).RunMaintenance(context.Background())
+	if err != nil {
+		t.Fatalf("RunMaintenance: %v", err)
+	}
+	if resp.StepErrors == nil || len(resp.StepErrors) != 0 {
+		t.Errorf("stepErrors = %v, want an empty list", resp.StepErrors)
+	}
+}
+
+func TestAuditLogMaintenance_CancelledRequestIsAnError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := NewAuditLogMaintenanceService(&fakeAuditLogRepo{}, 3).RunMaintenance(ctx); err == nil {
+		t.Fatal("a cancelled request should not be answered as a success")
 	}
 }

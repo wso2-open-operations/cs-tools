@@ -18334,8 +18334,8 @@ paths:
         checks the log's health, and puts back audit triggers that are missing or disabled on registered
         tables. Safe to repeat. It tries every step even if one fails.
 
-        A 200 means the steps ran, not that everything is fine: read the lists. Health problems and
-        unresolved triggers need a person. A repaired trigger was off for a while, so the history had a
+        A 200 means the request was handled, not that everything is fine: read the lists. Health
+        problems, unresolved triggers and step errors need a person. A repaired trigger was off for a while, so the history had a
         gap. Retiring old partitions is not part of this; an admin does that by hand.
       responses:
         "200":
@@ -18357,7 +18357,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
-          description: A step could not run.
+          description: |
+            Unexpected failure, for example the request was cancelled. A step that could not run is
+            not a 500: it is reported in stepErrors with a 200, so the other steps' results are kept.
           content:
             application/json:
               schema:
@@ -33047,6 +33049,13 @@ components:
           description: Triggers that are still wrong after the repair.
           items:
             $ref: '#/components/schemas/AuditTriggerProblem'
+        stepErrors:
+          type: array
+          description: |
+            Steps that could not run at all, in words that carry no database detail (the full error
+            is in the service log). The other steps still ran and are reported above.
+          items:
+            type: string
 
     ErrorResponse:
       type: object

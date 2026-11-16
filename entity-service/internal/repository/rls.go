@@ -67,7 +67,7 @@ func setCallerIdentity(ctx context.Context, tx pgx.Tx, scope SearchScope) error 
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.is_internal', $1, true)", fmt.Sprintf("%t", scope.Unrestricted)); err != nil {
 		return fmt.Errorf("set caller identity: is_internal: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.viewer_email', $1, true)", scope.ViewerEmail); err != nil {
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.viewer_email', $1, true), set_config('app.audit_actor', $2, true)", scope.ViewerEmail, scope.auditActor()); err != nil {
 		return fmt.Errorf("set caller identity: viewer_email: %w", err)
 	}
 	// app.viewer_project_ids: same reasoning as queueIdentity's identical

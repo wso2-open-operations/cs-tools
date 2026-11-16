@@ -335,7 +335,8 @@ type Config struct {
 	// another drainer never changes it.
 	ACPReactivationPollInterval time.Duration
 	// AuditLogMonthsAhead is how many months past the current one get a
-	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3).
+	// partition (CSM_AUDIT_LOG_MONTHS_AHEAD, default 3, from 2 to 24). Below 2
+	// the audit log's own health check reports a problem every day.
 	AuditLogMonthsAhead int
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
@@ -1091,7 +1092,7 @@ func Load() *Config {
 	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
 	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
-	cfg.AuditLogMonthsAhead = envPositiveInt("CSM_AUDIT_LOG_MONTHS_AHEAD", 3)
+	cfg.AuditLogMonthsAhead = envIntInRange("CSM_AUDIT_LOG_MONTHS_AHEAD", 3, 2, 24)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
@@ -1727,6 +1728,18 @@ func envPositiveInt(key string, def int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// envIntInRange reads a positive integer like envPositiveInt, and also falls
+// back to def, with a warning that names the value, when it is outside lo..hi.
+func envIntInRange(key string, def, lo, hi int) int {
+	n := envPositiveInt(key, def)
+	if n < lo || n > hi {
+		slog.Warn("configuration value out of range, using the default",
+			"key", key, "value", n, "min", lo, "max", hi, "default", def)
 		return def
 	}
 	return n
