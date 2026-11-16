@@ -29,7 +29,7 @@ import (
 // Internal-caller-only, like SLAStatusRepository: the report is mailed to
 // an internal distribution list and has no per-caller scoping of its own.
 type SLABreachReportRepository interface {
-	ListBreaches(ctx context.Context, from, to time.Time, definitions, stages []string) ([]domain.SLABreachRow, error)
+	ListBreaches(ctx context.Context, from, to time.Time, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) ([]domain.SLABreachRow, error)
 }
 
 type slaBreachReportRepo struct {
@@ -91,10 +91,16 @@ const slaBreachReportQuery = `
 	  AND s.original_breached_on <  $2
 	  AND sp.name = ANY($3)
 	  AND ($4::TEXT[] IS NULL OR cardinality($4::TEXT[]) = 0 OR s.stage::TEXT = ANY($4))
+	  AND ($5::TEXT[] IS NULL OR cardinality($5::TEXT[]) = 0 OR p.onboarding_status::TEXT = ANY($5))
+	  -- "is not one of" keeps a case with no project, and so no status:
+	  -- ServiceNow's own operator does not discard an empty value, and
+	  -- dropping those rows here would silently shrink the report.
+	  AND ($6::TEXT[] IS NULL OR cardinality($6::TEXT[]) = 0
+	       OR p.onboarding_status IS NULL OR NOT (p.onboarding_status::TEXT = ANY($6)))
 	ORDER BY COALESCE(cre.name, ''), sp.name, s.original_breached_on`
 
 // ListBreaches runs slaBreachReportQuery over [from, to).
-func (r *slaBreachReportRepo) ListBreaches(ctx context.Context, from, to time.Time, definitions, stages []string) ([]domain.SLABreachRow, error) {
+func (r *slaBreachReportRepo) ListBreaches(ctx context.Context, from, to time.Time, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) ([]domain.SLABreachRow, error) {
 	// work_item is RLS-protected (see migration 100003 and the repo's own
 	// RLS notes): without an explicit scope every row is filtered out and
 	// the report looks like a quiet week rather than a broken query. This
@@ -102,7 +108,7 @@ func (r *slaBreachReportRepo) ListBreaches(ctx context.Context, from, to time.Ti
 	// the same reasoning SearchActiveSLAStatuses' own call documents.
 	ctx = WithCallerIdentity(ctx, SearchScope{Unrestricted: true})
 
-	rows, err := r.db.Query(ctx, slaBreachReportQuery, from, to, definitions, stages)
+	rows, err := r.db.Query(ctx, slaBreachReportQuery, from, to, definitions, stages, onboardingStatuses, excludeOnboardingStatuses)
 	if err != nil {
 		return nil, fmt.Errorf("query sla breaches: %w", err)
 	}

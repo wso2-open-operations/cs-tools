@@ -37,35 +37,41 @@ func NewSLABreachReportHandler(svc service.SLABreachReportService) *SLABreachRep
 	return &SLABreachReportHandler{svc: svc}
 }
 
-// GetSLABreachReport handles
-// GET /reports/sla-breaches?definitions=<name>,<name>&stages=<stage>&week=YYYY-MM-DD.
+// csvParam flattens a repeated query parameter whose values may also be
+// comma-separated, trimming and dropping blanks.
+func csvParam(raw []string) []string {
+	var out []string
+	for _, group := range raw {
+		for _, v := range strings.Split(group, ",") {
+			if v = strings.TrimSpace(v); v != "" {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// GetSLABreachReport handles GET /reports/sla-breaches with
+// definitions, stages, onboardingStatuses, excludeOnboardingStatuses and
+// week.
 //
 // definitions is required and may be given once comma-separated or
 // repeated; the service answers a missing list with a validation error.
-// stages is optional (empty means every stage). week is optional, is any
-// date inside the week to report on, and defaults to the week before now
-// -- it exists so a missed run can be re-sent for the right week rather
-// than silently reporting the wrong one. The scheduled task that mails the
-// report is the only expected caller.
+// The other filters are optional and each means "no restriction" when
+// absent. onboardingStatuses is ServiceNow's "Onboarding Status is one
+// of", excludeOnboardingStatuses its "is not one of" -- one report uses
+// each, which is why both exist rather than a single flag. week is any
+// date inside the week to report on and defaults to the week before now,
+// so a missed run can be re-sent for the right week rather than silently
+// reporting the wrong one. The scheduled tasks that mail the two reports
+// are the only expected callers.
 func (h *SLABreachReportHandler) GetSLABreachReport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
-	var definitions []string
-	for _, raw := range q["definitions"] {
-		for _, d := range strings.Split(raw, ",") {
-			if d = strings.TrimSpace(d); d != "" {
-				definitions = append(definitions, d)
-			}
-		}
-	}
-	var stages []string
-	for _, raw := range q["stages"] {
-		for _, s := range strings.Split(raw, ",") {
-			if s = strings.TrimSpace(s); s != "" {
-				stages = append(stages, s)
-			}
-		}
-	}
+	definitions := csvParam(q["definitions"])
+	stages := csvParam(q["stages"])
+	onboardingStatuses := csvParam(q["onboardingStatuses"])
+	excludeOnboardingStatuses := csvParam(q["excludeOnboardingStatuses"])
 
 	var week time.Time
 	if raw := strings.TrimSpace(q.Get("week")); raw != "" {
@@ -78,9 +84,11 @@ func (h *SLABreachReportHandler) GetSLABreachReport(w http.ResponseWriter, r *ht
 	}
 
 	report, err := h.svc.BuildReport(r.Context(), domain.SLABreachReportRequest{
-		Week:        week,
-		Definitions: definitions,
-		Stages:      stages,
+		Week:                      week,
+		Definitions:               definitions,
+		Stages:                    stages,
+		OnboardingStatuses:        onboardingStatuses,
+		ExcludeOnboardingStatuses: excludeOnboardingStatuses,
 	})
 	if err != nil {
 		writeServiceError(w, r, err)

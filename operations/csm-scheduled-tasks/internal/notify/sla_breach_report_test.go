@@ -24,17 +24,20 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
 )
 
+const (
+	testSLAHeading = "Weekly SLA Breach Report"
+	testSLAIntro   = "Cases handled by the CRE team."
+)
+
 func slaBreachFixture() slabreachreport.Report {
-	loc := time.FixedZone("UTC", 0)
+	loc := time.UTC
 	return slabreachreport.Report{
 		PeriodStart: time.Date(2026, 11, 2, 0, 0, 0, 0, loc),
 		PeriodEnd:   time.Date(2026, 11, 9, 0, 0, 0, 0, loc),
-		Onboarding: []slabreachreport.Row{
+		Rows: []slabreachreport.Row{
 			{Team: "Atlas", CaseNumber: "CS0001", Subject: "Gateway down", Account: "Acme",
 				Severity: "CRITICAL", Definition: "P1 - Response (Open Source)",
 				BreachedOn: time.Date(2026, 11, 3, 9, 30, 0, 0, loc)},
-		},
-		CRE: []slabreachreport.Row{
 			{Team: "Castor", CaseNumber: "CS0002", Subject: "Slow queries", Account: "Globex",
 				Severity: "HIGH", Definition: "P2 - Resolution (Open Source)",
 				BreachedOn: time.Date(2026, 11, 4, 11, 0, 0, 0, loc)},
@@ -48,13 +51,12 @@ func slaBreachFixture() slabreachreport.Report {
 	}
 }
 
-// TestRenderSLABreachReportHasBothSections is the whole point of the two
-// lists: each section must carry its own rows and its own count.
-func TestRenderSLABreachReportHasBothSections(t *testing.T) {
-	body := RenderSLABreachReport(slaBreachFixture(), "")
+// TestRenderSLABreachReportCarriesHeadingIntroAndRows: the heading and
+// intro are what distinguish the two reports' mails from each other.
+func TestRenderSLABreachReportCarriesHeadingIntroAndRows(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
 	for _, want := range []string{
-		"Weekly SLA Breach Report (Onboarding)",
-		"1 Case", "3 Cases",
+		testSLAHeading, testSLAIntro, "4 Cases",
 		"CS0001", "CS0002", "CS0003", "CS0004",
 		"Team: Atlas", "Team: Castor", "Team: Draco",
 	} {
@@ -64,10 +66,23 @@ func TestRenderSLABreachReportHasBothSections(t *testing.T) {
 	}
 }
 
+// TestRenderSLABreachReportHeadingIsVariantSpecific guards against the
+// onboarding report rendering the CRE report's title.
+func TestRenderSLABreachReportHeadingIsVariantSpecific(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(),
+		"Weekly SLA Breach Report (Onboarding)", "Cases handled by the Onboarding team.", "")
+	if !strings.Contains(body, "Weekly SLA Breach Report (Onboarding)") {
+		t.Fatal("heading must reach the body")
+	}
+	if !strings.Contains(body, "Cases handled by the Onboarding team.") {
+		t.Fatal("intro must reach the body")
+	}
+}
+
 // TestRenderSLABreachReportGroupsContiguousTeams: Castor's two rows share
 // one heading, so there must be exactly three team headings, not four.
 func TestRenderSLABreachReportGroupsContiguousTeams(t *testing.T) {
-	body := RenderSLABreachReport(slaBreachFixture(), "")
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
 	if got := strings.Count(body, "Team: "); got != 3 {
 		t.Fatalf("team headings = %d, want 3 (Castor's two rows share one)", got)
 	}
@@ -76,18 +91,18 @@ func TestRenderSLABreachReportGroupsContiguousTeams(t *testing.T) {
 	}
 }
 
-// TestRenderSLABreachReportEmptySectionSaysSo keeps a quiet section
-// legible rather than rendering an empty table.
-func TestRenderSLABreachReportEmptySectionSaysSo(t *testing.T) {
+// TestRenderSLABreachReportEmptyWeekSaysSo keeps a quiet week legible
+// rather than rendering an empty table.
+func TestRenderSLABreachReportEmptyWeekSaysSo(t *testing.T) {
 	body := RenderSLABreachReport(slabreachreport.Report{
 		PeriodStart: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
 		PeriodEnd:   time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC),
-	}, "")
-	if got := strings.Count(body, "No SLA breaches this week."); got != 2 {
-		t.Fatalf("empty notices = %d, want one per section", got)
+	}, testSLAHeading, testSLAIntro, "")
+	if !strings.Contains(body, "No SLA breaches this week.") {
+		t.Fatal("an empty week must say so")
 	}
 	if !strings.Contains(body, "0 Cases") {
-		t.Fatal("an empty section still reports its count")
+		t.Fatal("an empty report still reports its count")
 	}
 }
 
@@ -95,12 +110,13 @@ func TestRenderSLABreachReportEmptySectionSaysSo(t *testing.T) {
 // addresses a case by number, so the link must use it -- and stay plain
 // text with no base URL configured.
 func TestRenderSLABreachReportLinksByCaseNumber(t *testing.T) {
-	withBase := RenderSLABreachReport(slaBreachFixture(), "https://internal.support.wso2.com/support/cases")
+	withBase := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro,
+		"https://internal.support.wso2.com/support/cases")
 	if !strings.Contains(withBase, `href="https://internal.support.wso2.com/support/cases/CS0002"`) {
 		t.Fatal("case number must link to <base>/<number>")
 	}
-	without := RenderSLABreachReport(slaBreachFixture(), "")
-	if strings.Contains(without, "href=\"https://internal.support.wso2.com") {
+	without := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
+	if strings.Contains(without, `href="https://internal.support.wso2.com`) {
 		t.Fatal("no base URL configured must leave the cell as plain text")
 	}
 }
@@ -109,8 +125,8 @@ func TestRenderSLABreachReportLinksByCaseNumber(t *testing.T) {
 // markup.
 func TestRenderSLABreachReportEscapesRowData(t *testing.T) {
 	body := RenderSLABreachReport(slabreachreport.Report{
-		CRE: []slabreachreport.Row{{Team: "T", CaseNumber: "CS1", Subject: `<script>alert(1)</script>`}},
-	}, "")
+		Rows: []slabreachreport.Row{{Team: "T", CaseNumber: "CS1", Subject: `<script>alert(1)</script>`}},
+	}, testSLAHeading, testSLAIntro, "")
 	if strings.Contains(body, "<script>alert(1)</script>") {
 		t.Fatal("a subject containing markup must be escaped")
 	}
@@ -119,7 +135,7 @@ func TestRenderSLABreachReportEscapesRowData(t *testing.T) {
 // TestRenderSLABreachReportNamesTheWeek: PeriodEnd is exclusive, so the
 // label must end on the day before it.
 func TestRenderSLABreachReportNamesTheWeek(t *testing.T) {
-	body := RenderSLABreachReport(slaBreachFixture(), "")
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
 	if !strings.Contains(body, "2 Nov - 8 Nov 2026") {
 		t.Fatal("week label must run to the day before the exclusive end")
 	}

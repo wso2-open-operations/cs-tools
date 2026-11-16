@@ -19,7 +19,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -40,18 +39,6 @@ const SLABreachReportTimezone = "Asia/Colombo"
 // SLABreachReportMaxDefinitions bounds how many policy names one request
 // may carry.
 const SLABreachReportMaxDefinitions = 50
-
-// slaBreachOnboardingStatuses are the project.onboarding_status values that
-// put a row in the report's Onboarding section rather than the CRE one --
-// the source report's own "Onboarding Status is not one of In-Progress,
-// Not-Started" filter, read as a split rather than an exclusion so one
-// query serves both halves.
-//
-// A THIRD hand-kept copy of the same list: repository's own
-// slaClockStateOnboardingStatuses and csm-notification-service's
-// chataudience.onboardingStatuses are the other two. Changing one without
-// the others silently disagrees about which team owns a case.
-var slaBreachOnboardingStatuses = []string{"IN_PROGRESS", "NOT_STARTED"}
 
 type slaBreachReportService struct {
 	repo repository.SLABreachReportRepository
@@ -90,8 +77,12 @@ func SLABreachReportWeek(week, now time.Time, loc *time.Location) (time.Time, ti
 	return thisMonday.AddDate(0, 0, -7), thisMonday
 }
 
-// BuildReport validates the request, resolves the week and splits the
-// week's breaches into the onboarding and CRE sections.
+// BuildReport validates the request, resolves the week and lists the
+// week's breaches under the request's own filters.
+//
+// Deliberately NOT a split by onboarding status: the two ServiceNow
+// reports differ in their stage filter too, and their status sets are
+// not complements, so each is its own call with its own filters.
 func (s *slaBreachReportService) BuildReport(ctx context.Context, req domain.SLABreachReportRequest) (domain.SLABreachReport, error) {
 	definitions := make([]string, 0, len(req.Definitions))
 	for _, d := range req.Definitions {
@@ -109,32 +100,41 @@ func (s *slaBreachReportService) BuildReport(ctx context.Context, req domain.SLA
 			Msg: fmt.Sprintf("definitions may name at most %d SLA definitions", SLABreachReportMaxDefinitions)}
 	}
 
-	stages := make([]string, 0, len(req.Stages))
-	for _, st := range req.Stages {
-		if st = strings.ToUpper(strings.TrimSpace(st)); st != "" {
-			stages = append(stages, st)
-		}
-	}
+	stages := upperNonEmpty(req.Stages)
+	onboarding := upperNonEmpty(req.OnboardingStatuses)
+	excludeOnboarding := upperNonEmpty(req.ExcludeOnboardingStatuses)
 
 	from, to := SLABreachReportWeek(req.Week, req.Now, s.loc)
 
-	rows, err := s.repo.ListBreaches(ctx, from, to, definitions, stages)
+	rows, err := s.repo.ListBreaches(ctx, from, to, definitions, stages, onboarding, excludeOnboarding)
 	if err != nil {
 		return domain.SLABreachReport{}, err
 	}
+	if rows == nil {
+		// Non-nil even with zero rows: Rows has no omitempty, so a nil
+		// slice would serialize as null and the task reads len() on it.
+		rows = make([]domain.SLABreachRow, 0)
+	}
+	return domain.SLABreachReport{PeriodStart: from, PeriodEnd: to, Rows: rows}, nil
+}
 
-	report := domain.SLABreachReport{
-		PeriodStart: from,
-		PeriodEnd:   to,
-		Onboarding:  make([]domain.SLABreachRow, 0),
-		CRE:         make([]domain.SLABreachRow, 0),
-	}
-	for _, row := range rows {
-		if slices.Contains(slaBreachOnboardingStatuses, row.OnboardingStatus) {
-			report.Onboarding = append(report.Onboarding, row)
-			continue
+// upperNonEmpty trims, upper-cases and drops the blanks from one filter
+// list, and maps spaces and hyphens to underscores.
+//
+// The enum values these match are upper-case, underscored Postgres enums
+// (IN_PROGRESS, NOT_STARTED), while ServiceNow writes the same values
+// "In progress" on sla.stage and "In-Progress" on onboarding status. A
+// configuration copied from the source report would otherwise match
+// nothing at all, silently, and the report would look like a quiet week.
+func upperNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		v = strings.ToUpper(strings.TrimSpace(v))
+		v = strings.ReplaceAll(v, " ", "_")
+		v = strings.ReplaceAll(v, "-", "_")
+		if v != "" {
+			out = append(out, v)
 		}
-		report.CRE = append(report.CRE, row)
 	}
-	return report, nil
+	return out
 }

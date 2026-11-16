@@ -18,10 +18,19 @@ package domain
 
 import "time"
 
-// SLABreachReportRequest asks for one week's SLA breaches, split into the
-// two audiences the ServiceNow "Weekly SLA Breach Report" mailed as two
-// attachments: cases whose project is still onboarding, and everything
-// else (the CRE team's own cases).
+// SLABreachReportRequest asks for one week's SLA breaches under one set
+// of filters.
+//
+// The ServiceNow originals are TWO separate report definitions --
+// "Weekly SLA Breach Report" and "Weekly SLA Breach Report (Onboarding)"
+// -- which share their ten SLA definitions but differ in BOTH their
+// stage filter and their onboarding-status filter. So this is one
+// parameterised query run once per report, never one query split in two.
+//
+// Their status sets are not complements: the onboarding report takes
+// IN_PROGRESS only, while the other excludes IN_PROGRESS and NOT_STARTED,
+// so a NOT_STARTED case appears in neither. Reproduced as configured
+// rather than "fixed" here.
 type SLABreachReportRequest struct {
 	// Week, when set, is any instant inside the week to report on. Zero
 	// means "the week before Now".
@@ -34,6 +43,15 @@ type SLABreachReportRequest struct {
 	// Stages are the sla.stage values the report covers, matched exactly
 	// and upper-cased by the caller. Empty means every stage.
 	Stages []string
+	// OnboardingStatuses keeps only cases whose project carries one of
+	// these onboarding statuses -- ServiceNow's "Onboarding Status is one
+	// of". Empty applies no such restriction.
+	OnboardingStatuses []string
+	// ExcludeOnboardingStatuses drops cases whose project carries one of
+	// these -- ServiceNow's "is not one of". A case with no project, and
+	// so no status at all, is KEPT: ServiceNow's "is not one of" does not
+	// discard an empty value. Empty applies no exclusion.
+	ExcludeOnboardingStatuses []string
 }
 
 // SLABreachRow is one breached SLA clock, as the report lists it.
@@ -71,13 +89,12 @@ type SLABreachRow struct {
 	OnboardingStatus string `json:"onboardingStatus"`
 }
 
-// SLABreachReport is one week's breaches, already split in two.
+// SLABreachReport is one week's breaches under one set of filters.
 type SLABreachReport struct {
 	// PeriodStart is inclusive, PeriodEnd exclusive.
 	PeriodStart time.Time `json:"periodStart"`
 	PeriodEnd   time.Time `json:"periodEnd"`
-	// Onboarding holds rows whose project is still onboarding.
-	Onboarding []SLABreachRow `json:"onboarding"`
-	// CRE holds every other row.
-	CRE []SLABreachRow `json:"cre"`
+	// Rows are the matching breaches, ordered by the account's
+	// integration CS team, then SLA definition, then breach time.
+	Rows []SLABreachRow `json:"rows"`
 }

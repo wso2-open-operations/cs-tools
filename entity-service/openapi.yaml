@@ -13846,21 +13846,23 @@ paths:
   /reports/sla-breaches:
     get:
       summary: >-
-        Build the weekly SLA breach report: the SLA clocks on the named
-        definitions that breached during one calendar week, split into the
-        cases whose project is still onboarding and everything else.
-        Read-only. Internal callers only.
+        Build one weekly SLA breach report: the SLA clocks on the named
+        definitions that breached during one calendar week, under the
+        given stage and onboarding-status filters. Read-only. Internal
+        callers only.
       description: >-
         A clock is listed when its policy is one of `definitions` (matched
         exactly), it has breached, its recorded breach time falls at or
         after the first instant of the week and before the first instant of
-        the next, in the report's timezone (Asia/Colombo), and -- when
-        `stages` is given -- its stage is one of them. `week` is any date
-        inside the week reported and defaults to the week before now; a
-        week runs Monday to Monday. Rows are ordered by the account's
-        integration CS team, then SLA definition, then breach time. A row
-        lands in `onboarding` when its project's onboarding status is
-        IN_PROGRESS or NOT_STARTED, and in `cre` otherwise.
+        the next, in the report's timezone (Asia/Colombo), and it passes
+        whichever of `stages`, `onboardingStatuses` and
+        `excludeOnboardingStatuses` are given. `week` is any date inside
+        the week reported and defaults to the week before now; a week runs
+        Monday to Monday. Rows are ordered by the account's integration CS
+        team, then SLA definition, then breach time. Stage and status
+        values are matched case-insensitively with spaces and hyphens
+        treated as underscores, so ServiceNow's own spelling ("In
+        progress", "In-Progress") matches the stored enum.
       operationId: getSLABreachReport
       parameters:
         - name: definitions
@@ -13896,6 +13898,32 @@ paths:
           description: >-
             Any date inside the week reported, YYYY-MM-DD. Defaults to the
             week before now.
+        - name: onboardingStatuses
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            Keep only cases whose project carries one of these onboarding
+            statuses (ServiceNow's "is one of"). Omitted applies no such
+            restriction.
+        - name: excludeOnboardingStatuses
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: >-
+            Drop cases whose project carries one of these (ServiceNow's
+            "is not one of"). A case with no project, and so no status, is
+            kept. Omitted applies no exclusion.
       responses:
         "200":
           description: The report.
@@ -36285,16 +36313,13 @@ components:
           type: string
           format: date-time
           description: First instant of the next week, exclusive.
-        onboarding:
+        rows:
           type: array
           items:
             $ref: '#/components/schemas/SLABreachRow'
-          description: Rows whose project is still onboarding.
-        cre:
-          type: array
-          items:
-            $ref: '#/components/schemas/SLABreachRow'
-          description: Every other row.
+          description: >-
+            The matching breaches, ordered by the account's integration CS
+            team, then SLA definition, then breach time.
     ProductRegressionReport:
       type: object
       description: One monthly product regression report.

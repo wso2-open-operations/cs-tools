@@ -20,24 +20,72 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/slabreachreport"
 )
 
-// TaskName is the registry (and SUB_CRON_SCHEDULES / SUB_CRON_RECIPIENTS)
-// name of this task.
-const TaskName = "sla_breach_weekly_report"
+// Variant is one of the ServiceNow weekly SLA breach reports.
+//
+// There are two, and they are SEPARATE report definitions, not two
+// sections of one: they share their ten SLA definitions but differ in
+// both their stage filter and their onboarding-status filter, and those
+// status sets are not complements (the onboarding report takes
+// IN_PROGRESS only; the other excludes IN_PROGRESS and NOT_STARTED, so a
+// NOT_STARTED case appears in neither). Each is its own task and its own
+// email, which is also how the source is configured.
+type Variant struct {
+	// Key names the variant in config and in the task name; lower-case,
+	// stable, never shown to a reader.
+	Key string
+	// Subject is the mail's subject, word for word the source report's
+	// own title.
+	Subject string
+	// Heading titles the table in the body.
+	Heading string
+	// Intro is the one line naming whose cases these are.
+	Intro string
+	// Stages are the sla.stage values this report covers.
+	Stages []string
+	// OnboardingStatuses is ServiceNow's "Onboarding Status is one of".
+	OnboardingStatuses []string
+	// ExcludeOnboardingStatuses is its "is not one of".
+	ExcludeOnboardingStatuses []string
+}
 
-// Subject is the mail's subject, word for word the one the source report
-// has always carried.
-const Subject = "Weekly SLA Breach Report"
+// CREVariant is the plain "Weekly SLA Breach Report": the CRE team's
+// cases.
+//
+// Stage {PAUSED, COMPLETED} and onboarding status not one of
+// {IN_PROGRESS, NOT_STARTED}, exactly as the source report's filter is
+// configured.
+func CREVariant() Variant {
+	return Variant{
+		Key:                       "cre",
+		Subject:                   "Weekly SLA Breach Report",
+		Heading:                   "Weekly SLA Breach Report",
+		Intro:                     "Cases handled by the CRE team.",
+		Stages:                    []string{"PAUSED", "COMPLETED"},
+		ExcludeOnboardingStatuses: []string{"IN_PROGRESS", "NOT_STARTED"},
+	}
+}
+
+// TaskName is the registry (and SUB_CRON_SCHEDULES / SUB_CRON_RECIPIENTS)
+// name of a variant's task. The CRE report keeps the unsuffixed name it
+// was registered under.
+func TaskName(v Variant) string {
+	if v.Key == "cre" {
+		return "sla_breach_weekly_report"
+	}
+	return "sla_breach_weekly_report_" + v.Key
+}
 
 // ReportFetcher is the subset of *slabreachreport.Client this package
 // depends on.
 type ReportFetcher interface {
-	Report(ctx context.Context, definitions, stages []string) (slabreachreport.Report, error)
+	Report(ctx context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) (slabreachreport.Report, error)
 }
 
 // EmailSender is the subset of *notify.Client this package depends on.
@@ -45,15 +93,15 @@ type EmailSender interface {
 	SendEmail(ctx context.Context, to, cc []string, subject, htmlBody string) error
 }
 
-// DefaultDefinitions are the ten SLA definitions the source report's
-// filter named, in its own order.
+// DefaultDefinitions are the ten SLA definitions both source reports'
+// filters name, in their own order.
 //
 // These are matched against sla_policy.name EXACTLY. They are the
 // ServiceNow definition names; if Postgres carries a policy under a
 // different name the report silently finds nothing, which is why
-// SLA_BREACH_REPORT_DEFINITIONS can replace the whole list without a code
-// change. Confirm against `SELECT DISTINCT name FROM sla_policy` before
-// the first real send.
+// SLA_BREACH_REPORT_DEFINITIONS can replace the whole list without a
+// code change. Confirm against `SELECT DISTINCT name FROM sla_policy`
+// before the first real send.
 func DefaultDefinitions() []string {
 	return []string{
 		"P1 - Resolution (Open Source)",
@@ -69,11 +117,25 @@ func DefaultDefinitions() []string {
 	}
 }
 
-// DefaultStages are the clock stages the source report's "Stage is one of"
-// filter selected. Replaceable by SLA_BREACH_REPORT_STAGES; an empty
-// override means every stage.
-func DefaultStages() []string {
-	return []string{"PAUSED", "COMPLETED"}
+// Definitions resolves the shared definition list, overridable wholesale
+// by SLA_BREACH_REPORT_DEFINITIONS.
+func Definitions() []string {
+	if override := ParseList(os.Getenv("SLA_BREACH_REPORT_DEFINITIONS")); len(override) > 0 {
+		return override
+	}
+	return DefaultDefinitions()
+}
+
+// ApplyStageOverride replaces a variant's stage filter from
+// SLA_BREACH_REPORT_<KEY>_STAGES when that variable is set. Set-but-empty
+// means every stage, which is a real choice, so this tests for presence
+// rather than for a non-empty value.
+func ApplyStageOverride(v Variant) Variant {
+	name := "SLA_BREACH_REPORT_" + strings.ToUpper(v.Key) + "_STAGES"
+	if raw, set := os.LookupEnv(name); set {
+		v.Stages = ParseList(raw)
+	}
+	return v
 }
 
 // ParseList splits a comma-separated override into a trimmed list.
@@ -90,7 +152,7 @@ func ParseList(raw string) []string {
 }
 
 // SendReport returns a registry.Task.Handler that fetches last week's SLA
-// breaches and mails them to to/cc.
+// breaches for one variant and mails them to to/cc.
 //
 // The audience is this task's own SUB_CRON_RECIPIENTS entry, nothing
 // else, as for the regression reports. With no "to" the handler succeeds
@@ -101,39 +163,36 @@ func ParseList(raw string) []string {
 // A clean week is the result this report exists to show, and silence
 // would be indistinguishable from the task being broken -- the exact
 // confusion the regression reports' own "expect silence" caveat causes.
-// Flip this by returning early on an empty report if the source's
-// behaviour turns out to be the opposite.
 //
 // emailsEnabled is cmd/server/main.go's ALERTS_ENABLED. When false the
 // handler succeeds without contacting entity-service.
-func SendReport(reports ReportFetcher, email EmailSender, definitions, stages, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
+func SendReport(reports ReportFetcher, email EmailSender, v Variant, definitions, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled {
 			return nil
 		}
 		if len(to) == 0 {
-			slog.Info("weekly sla breach report has no recipients; skipping")
+			slog.Info("sla breach report has no recipients; skipping", "report", v.Key)
 			return nil
 		}
 		if len(definitions) == 0 {
 			// entity-service rejects an empty list rather than reporting
 			// every policy; fail loudly here instead of sending a 400 on
 			// every tick.
-			return fmt.Errorf("slabreachscan: no SLA definitions configured")
+			return fmt.Errorf("slabreachscan %s: no SLA definitions configured", v.Key)
 		}
 
-		report, err := reports.Report(ctx, definitions, stages)
+		report, err := reports.Report(ctx, definitions, v.Stages, v.OnboardingStatuses, v.ExcludeOnboardingStatuses)
 		if err != nil {
-			return fmt.Errorf("slabreachscan: fetch report: %w", err)
+			return fmt.Errorf("slabreachscan %s: fetch report: %w", v.Key, err)
 		}
 		slog.Info("sending the weekly sla breach report",
-			"periodStart", report.PeriodStart, "periodEnd", report.PeriodEnd,
-			"onboarding", len(report.Onboarding), "cre", len(report.CRE),
-			"to", len(to), "cc", len(cc))
+			"report", v.Key, "periodStart", report.PeriodStart, "periodEnd", report.PeriodEnd,
+			"rows", len(report.Rows), "to", len(to), "cc", len(cc))
 
-		body := notify.RenderSLABreachReport(report, caseLinkBase)
-		if err := email.SendEmail(ctx, to, cc, Subject, body); err != nil {
-			return fmt.Errorf("slabreachscan: send report: %w", err)
+		body := notify.RenderSLABreachReport(report, v.Heading, v.Intro, caseLinkBase)
+		if err := email.SendEmail(ctx, to, cc, v.Subject, body); err != nil {
+			return fmt.Errorf("slabreachscan %s: send report: %w", v.Key, err)
 		}
 		return nil
 	}

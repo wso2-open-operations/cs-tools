@@ -39,16 +39,14 @@ var tokenFetchTimeout = 10 * time.Second
 // generous ceiling.
 const maxResponseBytes = 8 << 20
 
-// Report is one week's SLA breaches as entity-service returns it, already
-// split into the two sections the source report mailed as two
-// attachments.
+// Report is one week's SLA breaches under one report's filters, as
+// entity-service returns it.
 type Report struct {
 	PeriodStart time.Time `json:"periodStart"`
 	PeriodEnd   time.Time `json:"periodEnd"`
-	// Onboarding holds rows whose project is still onboarding.
-	Onboarding []Row `json:"onboarding"`
-	// CRE holds every other row.
-	CRE []Row `json:"cre"`
+	// Rows are the matching breaches, ordered by the account's
+	// integration CS team, then SLA definition, then breach time.
+	Rows []Row `json:"rows"`
 }
 
 // Row is one breached SLA clock.
@@ -111,14 +109,25 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
 }
 
-// Report fetches last week's breaches for the named SLA definitions and
-// stages. entity-service decides which week "last week" is, in the
-// report's own timezone, from the instant of the call.
-func (c *Client) Report(ctx context.Context, definitions, stages []string) (Report, error) {
+// Report fetches last week's breaches under one report's filters.
+// entity-service decides which week "last week" is, in the report's own
+// timezone, from the instant of the call.
+//
+// onboardingStatuses is ServiceNow's "Onboarding Status is one of" and
+// excludeOnboardingStatuses its "is not one of"; the two reports use one
+// each. An empty filter is omitted entirely rather than sent blank, so
+// the server reads it as "no restriction".
+func (c *Client) Report(ctx context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) (Report, error) {
 	q := url.Values{}
 	q.Set("definitions", strings.Join(definitions, ","))
 	if len(stages) > 0 {
 		q.Set("stages", strings.Join(stages, ","))
+	}
+	if len(onboardingStatuses) > 0 {
+		q.Set("onboardingStatuses", strings.Join(onboardingStatuses, ","))
+	}
+	if len(excludeOnboardingStatuses) > 0 {
+		q.Set("excludeOnboardingStatuses", strings.Join(excludeOnboardingStatuses, ","))
 	}
 
 	endpoint := c.baseURL + "/reports/sla-breaches?" + q.Encode()

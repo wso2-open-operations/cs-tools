@@ -692,29 +692,21 @@ func main() {
 		})
 	}
 
-	// The weekly SLA breach report: last week's breached clocks on the
-	// covered SLA definitions, in two sections (the onboarding team's
-	// cases and the CRE team's), mailed as one email. Default schedule:
+	// The weekly SLA breach reports: last week's breached clocks on the
+	// covered SLA definitions. There are TWO source reports, separate
+	// definitions with different stage and onboarding-status filters, so
+	// each variant is its own task and its own email. Default schedule:
 	// 09:00 Monday India Standard Time, i.e. 03:30 UTC (these cron
-	// strings are UTC). Audience, schedule and the debug divert are all
-	// looked up by task name like every other report.
+	// strings are UTC). Audience, schedule and the debug divert all
+	// resolve by task name like every other report.
 	//
 	// registry.Task.To/Cc are left nil DELIBERATELY, for the same reason
 	// the regression reports leave them nil: the engine mails task.To on
 	// every failed attempt and retries a failed period every tick, and
 	// the audience here is leadership mail groups. Failures go to
-	// ALERT_RECIPIENTS alone; slaBreachTo is carried to the
-	// EMAIL_BASE_URL check by name instead.
-	slaBreachDefinitions := slabreachscan.DefaultDefinitions()
-	if override := slabreachscan.ParseList(os.Getenv("SLA_BREACH_REPORT_DEFINITIONS")); len(override) > 0 {
-		slaBreachDefinitions = override
-	}
-	slaBreachStages := slabreachscan.DefaultStages()
-	if raw, set := os.LookupEnv("SLA_BREACH_REPORT_STAGES"); set {
-		// Set-but-empty means "every stage", which is a real choice here,
-		// so LookupEnv rather than the len() check the definitions use.
-		slaBreachStages = slabreachscan.ParseList(raw)
-	}
+	// ALERT_RECIPIENTS alone; the tasks are carried to the EMAIL_BASE_URL
+	// check by name instead.
+	slaBreachDefinitions := slabreachscan.Definitions()
 	slaBreachCaseLinkBase := strings.TrimRight(os.Getenv("SLA_BREACH_REPORT_LINK_BASE_URL"), "/")
 	if slaBreachCaseLinkBase != "" {
 		if err := httpsec.RequireSecureURL(slaBreachCaseLinkBase); err != nil {
@@ -722,25 +714,30 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	slaBreachTo, slaBreachCc := recipientsFor(recipientOverrides, slabreachscan.TaskName)
-	if len(slaBreachTo) > 0 {
-		regressionTasksWithRecipients = append(regressionTasksWithRecipients, slabreachscan.TaskName)
+	for _, v := range []slabreachscan.Variant{slabreachscan.CREVariant()} {
+		v = slabreachscan.ApplyStageOverride(v)
+		name := slabreachscan.TaskName(v)
+		to, cc := recipientsFor(recipientOverrides, name)
+		if len(to) > 0 {
+			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
+		}
+		v, to, cc := v, to, cc
+		regressionTasks = append(regressionTasks, registry.Task{
+			Name:     name,
+			Schedule: scheduleFor(scheduleOverrides, name, "30 3 * * 1"),
+			Handler: slabreachscan.SendReport(slaBreachReportClient,
+				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
+				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return slabreachscan.SendReport(slaBreachReportClient, email,
+						v, slaBreachDefinitions, orRecipients(to, rec), cc,
+						slaBreachCaseLinkBase, alertsEnabled)
+				}),
+		})
 	}
-	regressionTasks = append(regressionTasks, registry.Task{
-		Name:     slabreachscan.TaskName,
-		Schedule: scheduleFor(scheduleOverrides, slabreachscan.TaskName, "30 3 * * 1"),
-		Handler: slabreachscan.SendReport(slaBreachReportClient,
-			notify.ForReport(emailClient, debugFor(recipientOverrides, slabreachscan.TaskName)),
-			slaBreachDefinitions, slaBreachStages, slaBreachTo, slaBreachCc, slaBreachCaseLinkBase, alertsEnabled),
-		// --recipients/--cc of a manual run-now only; see reportRunNow.
-		RunNowFlags: reportRunNowFlags,
-		RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, slabreachscan.TaskName)), emailClient,
-			func(email notify.Sender, rec []string) func(ctx context.Context) error {
-				return slabreachscan.SendReport(slaBreachReportClient, email,
-					slaBreachDefinitions, slaBreachStages, orRecipients(slaBreachTo, rec), slaBreachCc,
-					slaBreachCaseLinkBase, alertsEnabled)
-			}),
-	})
 
 	// The monthly time card report: each project in TIME_CARD_REPORT_PROJECT_KEYS
 	// gets last calendar month's approved effort per case, mailed to the

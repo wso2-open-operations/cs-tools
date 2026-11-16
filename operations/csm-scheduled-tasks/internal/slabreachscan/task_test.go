@@ -27,16 +27,17 @@ import (
 )
 
 type fakeFetcher struct {
-	report   slabreachreport.Report
-	err      error
-	calls    int
-	gotDefs  []string
-	gotStage []string
+	report                    slabreachreport.Report
+	err                       error
+	calls                     int
+	gotDefs, gotStage         []string
+	gotOnboarding, gotExclude []string
 }
 
-func (f *fakeFetcher) Report(_ context.Context, definitions, stages []string) (slabreachreport.Report, error) {
+func (f *fakeFetcher) Report(_ context.Context, definitions, stages, onboardingStatuses, excludeOnboardingStatuses []string) (slabreachreport.Report, error) {
 	f.calls++
 	f.gotDefs, f.gotStage = definitions, stages
+	f.gotOnboarding, f.gotExclude = onboardingStatuses, excludeOnboardingStatuses
 	return f.report, f.err
 }
 
@@ -53,13 +54,39 @@ func (f *fakeSender) SendEmail(_ context.Context, to, cc []string, subject, html
 	return nil
 }
 
-func defs() []string { return DefaultDefinitions() }
+func defs() []string   { return DefaultDefinitions() }
+func cre() Variant     { return CREVariant() }
+func someTo() []string { return []string{"a@wso2.com"} }
+
+// TestCREVariantFilters pins the CRE report's own filter set: the source
+// selects stages Paused and Completed and EXCLUDES onboarding statuses
+// In-Progress and Not-Started. It must not carry an "is one of" status
+// filter -- that belongs to the other report.
+func TestCREVariantFilters(t *testing.T) {
+	v := cre()
+	if len(v.Stages) != 2 || v.Stages[0] != "PAUSED" || v.Stages[1] != "COMPLETED" {
+		t.Fatalf("stages = %#v", v.Stages)
+	}
+	if len(v.ExcludeOnboardingStatuses) != 2 ||
+		v.ExcludeOnboardingStatuses[0] != "IN_PROGRESS" || v.ExcludeOnboardingStatuses[1] != "NOT_STARTED" {
+		t.Fatalf("excluded statuses = %#v", v.ExcludeOnboardingStatuses)
+	}
+	if len(v.OnboardingStatuses) != 0 {
+		t.Fatalf("the CRE report must not restrict to a status set, got %#v", v.OnboardingStatuses)
+	}
+	if got := TaskName(v); got != "sla_breach_weekly_report" {
+		t.Fatalf("task name = %q", got)
+	}
+	if v.Subject != "Weekly SLA Breach Report" {
+		t.Fatalf("subject = %q", v.Subject)
+	}
+}
 
 // TestSendReportSkipsWithoutRecipients: with no "to" the task must not
-// even reach entity-service -- no report to send is no reason to query.
+// even reach entity-service.
 func TestSendReportSkipsWithoutRecipients(t *testing.T) {
 	fetch, send := &fakeFetcher{}, &fakeSender{}
-	if err := SendReport(fetch, send, defs(), DefaultStages(), nil, nil, "", true)(context.Background()); err != nil {
+	if err := SendReport(fetch, send, cre(), defs(), nil, nil, "", true)(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
 	if fetch.calls != 0 || send.calls != 0 {
@@ -70,7 +97,7 @@ func TestSendReportSkipsWithoutRecipients(t *testing.T) {
 // TestSendReportSkipsWhenEmailsDisabled covers ALERTS_ENABLED=false.
 func TestSendReportSkipsWhenEmailsDisabled(t *testing.T) {
 	fetch, send := &fakeFetcher{}, &fakeSender{}
-	if err := SendReport(fetch, send, defs(), DefaultStages(), []string{"a@wso2.com"}, nil, "", false)(context.Background()); err != nil {
+	if err := SendReport(fetch, send, cre(), defs(), someTo(), nil, "", false)(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
 	if fetch.calls != 0 || send.calls != 0 {
@@ -87,7 +114,7 @@ func TestSendReportSendsAnEmptyWeek(t *testing.T) {
 		PeriodEnd:   time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC),
 	}}
 	send := &fakeSender{}
-	if err := SendReport(fetch, send, defs(), DefaultStages(), []string{"a@wso2.com"}, nil, "", true)(context.Background()); err != nil {
+	if err := SendReport(fetch, send, cre(), defs(), someTo(), nil, "", true)(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
 	if send.calls != 1 {
@@ -99,12 +126,10 @@ func TestSendReportSendsAnEmptyWeek(t *testing.T) {
 // checks the configured audience is what reaches the sender.
 func TestSendReportSubjectAndAudience(t *testing.T) {
 	fetch := &fakeFetcher{report: slabreachreport.Report{
-		CRE: []slabreachreport.Row{{Team: "Atlas", CaseNumber: "CS01", Definition: "P1 - Response (Open Source)"}},
+		Rows: []slabreachreport.Row{{Team: "Atlas", CaseNumber: "CS01", Definition: "P1 - Response (Open Source)"}},
 	}}
 	send := &fakeSender{}
-	to := []string{"to@wso2.com"}
-	cc := []string{"cc@wso2.com"}
-	if err := SendReport(fetch, send, defs(), DefaultStages(), to, cc, "", true)(context.Background()); err != nil {
+	if err := SendReport(fetch, send, cre(), defs(), []string{"to@wso2.com"}, []string{"cc@wso2.com"}, "", true)(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
 	if send.subject != "Weekly SLA Breach Report" {
@@ -114,22 +139,28 @@ func TestSendReportSubjectAndAudience(t *testing.T) {
 		t.Fatalf("to=%v cc=%v", send.to, send.cc)
 	}
 	if !strings.Contains(send.body, "CS01") {
-		t.Fatalf("body is missing the case number")
+		t.Fatal("body is missing the case number")
 	}
 }
 
-// TestSendReportPassesFiltersThrough: the ten definitions and the stages
-// must reach entity-service unchanged.
-func TestSendReportPassesFiltersThrough(t *testing.T) {
+// TestSendReportPassesEveryFilterThrough: the ten definitions and the
+// variant's own three filters must reach entity-service unchanged.
+func TestSendReportPassesEveryFilterThrough(t *testing.T) {
 	fetch, send := &fakeFetcher{}, &fakeSender{}
-	if err := SendReport(fetch, send, defs(), DefaultStages(), []string{"a@wso2.com"}, nil, "", true)(context.Background()); err != nil {
+	if err := SendReport(fetch, send, cre(), defs(), someTo(), nil, "", true)(context.Background()); err != nil {
 		t.Fatalf("SendReport: %v", err)
 	}
 	if len(fetch.gotDefs) != 10 {
-		t.Fatalf("definitions = %d, want the 10 the source report named", len(fetch.gotDefs))
+		t.Fatalf("definitions = %d, want the 10 the source reports name", len(fetch.gotDefs))
 	}
-	if len(fetch.gotStage) != 2 || fetch.gotStage[0] != "PAUSED" || fetch.gotStage[1] != "COMPLETED" {
+	if len(fetch.gotStage) != 2 || fetch.gotStage[0] != "PAUSED" {
 		t.Fatalf("stages = %v", fetch.gotStage)
+	}
+	if len(fetch.gotExclude) != 2 {
+		t.Fatalf("excluded statuses = %v", fetch.gotExclude)
+	}
+	if len(fetch.gotOnboarding) != 0 {
+		t.Fatalf("the CRE report must send no is-one-of status filter, got %v", fetch.gotOnboarding)
 	}
 }
 
@@ -137,8 +168,7 @@ func TestSendReportPassesFiltersThrough(t *testing.T) {
 // empty list, so fail here rather than 400 on every tick.
 func TestSendReportRefusesWithoutDefinitions(t *testing.T) {
 	fetch, send := &fakeFetcher{}, &fakeSender{}
-	err := SendReport(fetch, send, nil, DefaultStages(), []string{"a@wso2.com"}, nil, "", true)(context.Background())
-	if err == nil {
+	if err := SendReport(fetch, send, cre(), nil, someTo(), nil, "", true)(context.Background()); err == nil {
 		t.Fatal("want an error with no definitions configured")
 	}
 	if fetch.calls != 0 || send.calls != 0 {
@@ -151,11 +181,24 @@ func TestSendReportRefusesWithoutDefinitions(t *testing.T) {
 func TestSendReportPropagatesFetchFailure(t *testing.T) {
 	fetch := &fakeFetcher{err: errors.New("boom")}
 	send := &fakeSender{}
-	if err := SendReport(fetch, send, defs(), DefaultStages(), []string{"a@wso2.com"}, nil, "", true)(context.Background()); err == nil {
+	if err := SendReport(fetch, send, cre(), defs(), someTo(), nil, "", true)(context.Background()); err == nil {
 		t.Fatal("want the fetch error propagated")
 	}
 	if send.calls != 0 {
 		t.Fatalf("send calls = %d, want 0", send.calls)
+	}
+}
+
+// TestApplyStageOverride: set-but-empty means every stage, which is a
+// real choice and must not fall back to the default.
+func TestApplyStageOverride(t *testing.T) {
+	t.Setenv("SLA_BREACH_REPORT_CRE_STAGES", "BREACHED")
+	if got := ApplyStageOverride(cre()).Stages; len(got) != 1 || got[0] != "BREACHED" {
+		t.Fatalf("stages = %#v", got)
+	}
+	t.Setenv("SLA_BREACH_REPORT_CRE_STAGES", "")
+	if got := ApplyStageOverride(cre()).Stages; len(got) != 0 {
+		t.Fatalf("set-but-empty = %#v, want every stage", got)
 	}
 }
 

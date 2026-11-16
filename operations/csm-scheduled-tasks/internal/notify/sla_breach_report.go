@@ -40,24 +40,28 @@ const slaBreachReportTimezone = "Asia/Colombo"
 // heading row spans them all.
 const slaBreachRowColumns = 6
 
-// RenderSLABreachReport fills in the weekly SLA breach report's HTML email
-// template: the introduction the source report has always carried, then
-// the two tables it mailed as two attachments -- the onboarding team's
-// cases, then the CRE team's -- each grouped by the account's integration
-// CS team. caseLinkBase is a case page prefix; when set, each row's case
-// number links to <caseLinkBase>/<case number>, else it is plain text.
-// [YEAR] is today's year, the footer-only detail every template here has.
-func RenderSLABreachReport(r slabreachreport.Report, caseLinkBase string) string {
+// RenderSLABreachReport fills in one weekly SLA breach report's HTML
+// email template: the introduction the source report has always carried,
+// then its single table, grouped by the account's integration CS team.
+//
+// heading names the report ("Weekly SLA Breach Report (Onboarding)") and
+// intro is its one-line description of whose cases these are -- the two
+// ServiceNow reports are separate definitions with separate filters, so
+// each renders its own mail. caseLinkBase is a case page prefix; when
+// set, each row's case number links to <caseLinkBase>/<case number>,
+// else it is plain text. [YEAR] is today's year, the footer-only detail
+// every template here has.
+func RenderSLABreachReport(r slabreachreport.Report, heading, intro, caseLinkBase string) string {
 	loc, err := time.LoadLocation(slaBreachReportTimezone)
 	if err != nil {
 		loc = time.UTC
 	}
 	replacer := strings.NewReplacer(
+		"<!-- [HEADING] -->", escapeHTML(heading),
+		"<!-- [INTRO] -->", escapeHTML(intro),
 		"<!-- [WEEK] -->", escapeHTML(slaBreachWeekLabel(r, loc)),
-		"<!-- [ONBOARDING_TOTAL] -->", escapeHTML(slaBreachCaseCount(len(r.Onboarding))),
-		"<!-- [ONBOARDING_ROWS] -->", renderSLABreachRows(r.Onboarding, caseLinkBase, loc),
-		"<!-- [CRE_TOTAL] -->", escapeHTML(slaBreachCaseCount(len(r.CRE))),
-		"<!-- [CRE_ROWS] -->", renderSLABreachRows(r.CRE, caseLinkBase, loc),
+		"<!-- [TOTAL] -->", escapeHTML(slaBreachCaseCount(len(r.Rows))),
+		"<!-- [ROWS] -->", renderSLABreachRows(r.Rows, caseLinkBase, loc),
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
 	)
 	return replacer.Replace(slaBreachReportTemplate)
