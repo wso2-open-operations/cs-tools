@@ -896,6 +896,20 @@ describe.each(CONFIGS)("[%s] Keep Formatting of an image copied out of an editor
     expect(m.onPasteError).toHaveBeenCalledWith("count");
   });
 
+  it("a draft's data: image counts toward the limit whatever the case of its DATA: prefix", async () => {
+    // The URL check lets "DATA:" in (it matches the scheme case-insensitively), so the count must too.
+    const upper = PNG.replace(/^data:/, "DATA:");
+    const five = Array.from({ length: 5 }, () => `<img src="${upper}" alt="old">`).join("");
+    const m = mount(cfg, { value: `<p>${five}</p>`, caret: "none", uploader: true });
+    await settle();
+    expect(m.html().match(/src="DATA:/g)).toHaveLength(5);
+    firePasteWith(IN_APP(PNG), withImages(PNG));
+    fireEvent.click(screen.getByRole("button", { name: "Keep Formatting" }));
+    await settle();
+    expect(m.html().match(/<img/g)).toHaveLength(5);
+    expect(m.onPasteError).toHaveBeenCalledWith("count");
+  });
+
   it("a clipboard with only the editor payload (no html, no text) inserts nothing, whatever its image srcs", async () => {
     for (const src of ["data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", "javascript:alert(1)", "https://evil.example.com/p.png", PNG]) {
       const m = mount(cfg, { uploader: true });

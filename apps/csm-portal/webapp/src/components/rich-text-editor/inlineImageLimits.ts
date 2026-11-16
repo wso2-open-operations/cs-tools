@@ -77,8 +77,9 @@ export function inlineImagesInEditor(editor: LexicalEditor): InlineImageRoom {
         room.bytes += previewSizes.get(src) ?? 0;
       } else if (/^\/[0-9a-f-]{36}$/i.test(src)) {
         room.count += 1;
-      } else if (src.startsWith("data:")) {
+      } else if (/^data:/i.test(src)) {
         // An older draft's embedded image, kept by a paste from this app: it counts like any other.
+        // Case-insensitive, like `dataImageBytes` and the URL check that let it in (`DATA:` passes).
         room.count += 1;
         room.bytes += dataImageBytes(src);
       }
