@@ -62,28 +62,23 @@ func NewSLABreachReportRepository(db *Scoped) SLABreachReportRepository {
 const slaBreachReportQuery = `
 	SELECT
 		COALESCE(cre.name, ''),
-		COALESCE(wi.number, ''),
 		COALESCE(wi.wso2_id, ''),
-		wi.id::TEXT,
-		COALESCE(wi.subject, ''),
-		COALESCE(a.name, ''),
+		COALESCE(wi.number, ''),
+		COALESCE(prod.name, ''),
+		COALESCE(c.issue_type::TEXT, ''),
 		COALESCE(c.severity::TEXT, ''),
-		COALESCE(prod.name || COALESCE(' ' || pv.version, ''), ''),
+		COALESCE(sp.target::TEXT, ''),
+		COALESCE(s.business_elapsed_percentage, 0),
 		sp.name,
 		s.original_breached_on,
-		COALESCE(s.stage::TEXT, ''),
-		COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), ''), ''),
 		COALESCE(p.onboarding_status::TEXT, '')
 	FROM sla s
 	JOIN sla_policy sp ON sp.id = s.sla_policy_id
 	JOIN work_item wi ON wi.id = s.work_item_id
 	LEFT JOIN "case" c ON c.id = wi.id
-	LEFT JOIN deployed_product dp ON dp.id = wi.deployed_product_id
-	LEFT JOIN product prod ON prod.id = dp.product_id
-	LEFT JOIN product_version pv ON pv.id = dp.version_id
+	LEFT JOIN product prod ON prod.id = wi.product_id
 	LEFT JOIN account a ON a.id = wi.account_id
 	LEFT JOIN "group" cre ON cre.id = a.cre_team_id
-	LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 	LEFT JOIN project p ON p.id = wi.project_id
 	WHERE wi.type = ANY(` + caseLikeWorkItemTypes + `)
 	  AND s.has_breached IS TRUE
@@ -120,9 +115,9 @@ func (r *slaBreachReportRepo) ListBreaches(ctx context.Context, from, to time.Ti
 	for rows.Next() {
 		var row domain.SLABreachRow
 		if err := rows.Scan(
-			&row.Team, &row.CaseNumber, &row.WSO2CaseID, &row.CaseID, &row.Subject,
-			&row.Account, &row.Severity, &row.Product, &row.Definition,
-			&row.BreachedOn, &row.Stage, &row.AssigneeName, &row.OnboardingStatus,
+			&row.Team, &row.WSO2CaseID, &row.CaseNumber, &row.Product,
+			&row.CaseType, &row.Priority, &row.Target, &row.BusinessElapsedPercent,
+			&row.Definition, &row.BreachedOn, &row.OnboardingStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan sla breach row: %w", err)
 		}

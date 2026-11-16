@@ -54,38 +54,43 @@ type SLABreachReportRequest struct {
 	ExcludeOnboardingStatuses []string
 }
 
-// SLABreachRow is one breached SLA clock, as the report lists it.
+// SLABreachRow is one breached SLA clock, carrying exactly the columns
+// the ServiceNow report lists -- WSO2 Case Id, WSO2 Product, Integration
+// CS Team, Case Type, Priority, Target, Business elapsed percentage --
+// plus CaseNumber, which the report does not show but the case link
+// needs.
 type SLABreachRow struct {
 	// Team is the account's integration CS team -- ServiceNow's
-	// account.u_integration_cs_team, which Postgres carries as the
-	// account's CRE group. The report groups on it.
+	// account.u_integration_cs_team. The report groups on it.
 	Team string `json:"team"`
-	// CaseNumber is ServiceNow's own case number (e.g. "CS0023001").
-	CaseNumber string `json:"caseNumber"`
-	// WSO2CaseID is the portal's own reference (e.g. "WSO2-1000").
+	// WSO2CaseID is the portal's own reference (e.g. "WSO2-1000"), the
+	// report's first column.
 	WSO2CaseID string `json:"wso2CaseId"`
-	// CaseID is the raw work item id, used to build the case link.
-	CaseID string `json:"caseId"`
-	// Subject is the case title.
-	Subject string `json:"subject"`
-	// Account is the customer account's name.
-	Account string `json:"account"`
-	// Severity is the case severity (e.g. "CRITICAL").
-	Severity string `json:"severity"`
-	// Product is the deployed product and version, when resolvable.
+	// CaseNumber is ServiceNow's own case number. Not a column in the
+	// source report; carried because the support portal addresses a case
+	// by number, so the link needs it.
+	CaseNumber string `json:"caseNumber"`
+	// Product is the WSO2 product the case is filed against.
 	Product string `json:"product"`
-	// Definition is the sla_policy name -- the report's "SLA definition",
-	// and its sort key within a team.
+	// CaseType is the case's issue type (e.g. "QUESTION").
+	CaseType string `json:"caseType"`
+	// Priority is the case severity (e.g. "S2"), which the source report
+	// labels Priority.
+	Priority string `json:"priority"`
+	// Target is the SLA policy's target: RESPONSE, RESOLUTION or
+	// WORKAROUND.
+	Target string `json:"target"`
+	// BusinessElapsedPercent is how far through its business-hours
+	// duration the clock ran. Over 100 on a breached clock.
+	BusinessElapsedPercent float64 `json:"businessElapsedPercent"`
+	// Definition is the sla_policy name. Not a column in the source
+	// report, but its sort key within a team.
 	Definition string `json:"definition"`
-	// BreachedOn is sla.original_breached_on, the clock's real breach time.
+	// BreachedOn is sla.original_breached_on, the clock's real breach
+	// time -- the field the week window filters on.
 	BreachedOn time.Time `json:"breachedOn"`
-	// Stage is the clock's stage at report time.
-	Stage string `json:"stage"`
-	// AssigneeName is who the case is assigned to, when assigned.
-	AssigneeName string `json:"assigneeName"`
-	// OnboardingStatus is the case's project onboarding status, the field
-	// that decides which of the two sections a row belongs to. Carried on
-	// the row so the split stays visible to a reader of the response.
+	// OnboardingStatus is the case's project onboarding status, the
+	// field that decides which report a row belongs to.
 	OnboardingStatus string `json:"onboardingStatus"`
 }
 

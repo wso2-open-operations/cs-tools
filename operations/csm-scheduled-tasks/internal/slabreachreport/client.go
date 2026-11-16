@@ -49,21 +49,20 @@ type Report struct {
 	Rows []Row `json:"rows"`
 }
 
-// Row is one breached SLA clock.
+// Row is one breached SLA clock, carrying the columns the source report
+// lists plus the case number its link needs.
 type Row struct {
-	Team             string    `json:"team"`
-	CaseNumber       string    `json:"caseNumber"`
-	WSO2CaseID       string    `json:"wso2CaseId"`
-	CaseID           string    `json:"caseId"`
-	Subject          string    `json:"subject"`
-	Account          string    `json:"account"`
-	Severity         string    `json:"severity"`
-	Product          string    `json:"product"`
-	Definition       string    `json:"definition"`
-	BreachedOn       time.Time `json:"breachedOn"`
-	Stage            string    `json:"stage"`
-	AssigneeName     string    `json:"assigneeName"`
-	OnboardingStatus string    `json:"onboardingStatus"`
+	Team                   string    `json:"team"`
+	WSO2CaseID             string    `json:"wso2CaseId"`
+	CaseNumber             string    `json:"caseNumber"`
+	Product                string    `json:"product"`
+	CaseType               string    `json:"caseType"`
+	Priority               string    `json:"priority"`
+	Target                 string    `json:"target"`
+	BusinessElapsedPercent float64   `json:"businessElapsedPercent"`
+	Definition             string    `json:"definition"`
+	BreachedOn             time.Time `json:"breachedOn"`
+	OnboardingStatus       string    `json:"onboardingStatus"`
 }
 
 // Config is the entity-service connection: the same OAuth client

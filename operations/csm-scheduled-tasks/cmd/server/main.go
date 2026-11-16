@@ -695,10 +695,17 @@ func main() {
 	// The weekly SLA breach reports: last week's breached clocks on the
 	// covered SLA definitions. There are TWO source reports, separate
 	// definitions with different stage and onboarding-status filters, so
-	// each variant is its own task and its own email. Default schedule:
-	// 09:00 Monday India Standard Time, i.e. 03:30 UTC (these cron
-	// strings are UTC). Audience, schedule and the debug divert all
-	// resolve by task name like every other report.
+	// each variant is its own task and its own email.
+	//
+	// Default schedule 10:00 Monday, from the source scheduled report
+	// (Run Weekly, Mon, Time 10:00:00). Its Time zone field is
+	// "-- None --", meaning the ServiceNow instance's own default, which
+	// this repo takes as GMT -- the same assumption the availability
+	// port already makes. These cron strings are UTC, so that is
+	// 0 10 * * 1. If the instance default turns out to be IST, this
+	// becomes 30 4 * * 1; SUB_CRON_SCHEDULES changes it without a
+	// deploy. Audience, schedule and the debug divert all resolve by
+	// task name like every other report.
 	//
 	// registry.Task.To/Cc are left nil DELIBERATELY, for the same reason
 	// the regression reports leave them nil: the engine mails task.To on
@@ -724,7 +731,7 @@ func main() {
 		v, to, cc := v, to, cc
 		regressionTasks = append(regressionTasks, registry.Task{
 			Name:     name,
-			Schedule: scheduleFor(scheduleOverrides, name, "30 3 * * 1"),
+			Schedule: scheduleFor(scheduleOverrides, name, "0 10 * * 1"),
 			Handler: slabreachscan.SendReport(slaBreachReportClient,
 				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
 				v, slaBreachDefinitions, to, cc, slaBreachCaseLinkBase, alertsEnabled),

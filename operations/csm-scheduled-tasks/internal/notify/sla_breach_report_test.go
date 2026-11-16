@@ -31,38 +31,59 @@ const (
 
 func slaBreachFixture() slabreachreport.Report {
 	loc := time.UTC
+	row := func(team, wso2, number, product, ctype, prio, target string, pct float64) slabreachreport.Row {
+		return slabreachreport.Row{
+			Team: team, WSO2CaseID: wso2, CaseNumber: number, Product: product,
+			CaseType: ctype, Priority: prio, Target: target, BusinessElapsedPercent: pct,
+			Definition: "P1 - Response (Open Source)",
+			BreachedOn: time.Date(2026, 11, 3, 9, 30, 0, 0, loc),
+		}
+	}
 	return slabreachreport.Report{
 		PeriodStart: time.Date(2026, 11, 2, 0, 0, 0, 0, loc),
 		PeriodEnd:   time.Date(2026, 11, 9, 0, 0, 0, 0, loc),
 		Rows: []slabreachreport.Row{
-			{Team: "Atlas", CaseNumber: "CS0001", Subject: "Gateway down", Account: "Acme",
-				Severity: "CRITICAL", Definition: "P1 - Response (Open Source)",
-				BreachedOn: time.Date(2026, 11, 3, 9, 30, 0, 0, loc)},
-			{Team: "Castor", CaseNumber: "CS0002", Subject: "Slow queries", Account: "Globex",
-				Severity: "HIGH", Definition: "P2 - Resolution (Open Source)",
-				BreachedOn: time.Date(2026, 11, 4, 11, 0, 0, 0, loc)},
-			{Team: "Castor", CaseNumber: "CS0003", Subject: "Token error", Account: "Initech",
-				Severity: "MEDIUM", Definition: "P3 - Response (Open Source)",
-				BreachedOn: time.Date(2026, 11, 5, 14, 0, 0, 0, loc)},
-			{Team: "Draco", CaseNumber: "CS0004", Subject: "Cert expiry", Account: "Umbrella",
-				Severity: "LOW", Definition: "Query - Response (Open Source)",
-				BreachedOn: time.Date(2026, 11, 6, 8, 0, 0, 0, loc)},
+			row("Atlas", "WSO2-1001", "CS0001", "WSO2 API Manager", "QUESTION", "S1", "RESPONSE", 3315.17),
+			row("Castor", "WSO2-1002", "CS0002", "WSO2 Identity Server", "ERROR", "S2", "RESOLUTION", 810.83),
+			row("Castor", "WSO2-1003", "CS0003", "WSO2 API Manager", "QUESTION", "S3", "WORKAROUND", 153.71),
+			row("Draco", "WSO2-1004", "CS0004", "WSO2 Enterprise Integrator", "QUESTION", "S4", "RESPONSE", 148.42),
 		},
 	}
 }
 
-// TestRenderSLABreachReportCarriesHeadingIntroAndRows: the heading and
-// intro are what distinguish the two reports' mails from each other.
-func TestRenderSLABreachReportCarriesHeadingIntroAndRows(t *testing.T) {
+// TestRenderSLABreachReportCarriesTheReportsOwnColumns pins the six
+// columns the source report lists, and the values that fill them.
+func TestRenderSLABreachReportCarriesTheReportsOwnColumns(t *testing.T) {
 	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
 	for _, want := range []string{
-		testSLAHeading, testSLAIntro, "4 Cases",
-		"CS0001", "CS0002", "CS0003", "CS0004",
-		"Team: Atlas", "Team: Castor", "Team: Draco",
+		"WSO2 Case Id", "WSO2 Product", "Case Type", "Priority", "Target", "Business Elapsed %",
+		"WSO2-1001", "WSO2 API Manager", "QUESTION", "S1", "RESPONSE", "3315%",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered body is missing %q", want)
 		}
+	}
+}
+
+// TestRenderSLABreachReportCountsTaskSLAs: the source counts clocks, not
+// cases -- one case can contribute two breaches in a week.
+func TestRenderSLABreachReportCountsTaskSLAs(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
+	if !strings.Contains(body, "4 total Task SLAs") {
+		t.Fatal(`body must carry "4 total Task SLAs"`)
+	}
+}
+
+// TestRenderSLABreachReportGroupsByIntegrationCSTeam mirrors the source's
+// own grouping label and per-group counts; Castor's two rows share one
+// heading.
+func TestRenderSLABreachReportGroupsByIntegrationCSTeam(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
+	if got := strings.Count(body, "Integration CS Team: "); got != 3 {
+		t.Fatalf("team headings = %d, want 3 (Castor's two rows share one)", got)
+	}
+	if !strings.Contains(body, `Integration CS Team: Castor <span style="font-weight:400; color:#8a8f98;">(2)</span>`) {
+		t.Fatal("Castor's heading must carry its own count of 2")
 	}
 }
 
@@ -71,28 +92,14 @@ func TestRenderSLABreachReportCarriesHeadingIntroAndRows(t *testing.T) {
 func TestRenderSLABreachReportHeadingIsVariantSpecific(t *testing.T) {
 	body := RenderSLABreachReport(slaBreachFixture(),
 		"Weekly SLA Breach Report (Onboarding)", "Cases handled by the Onboarding team.", "")
-	if !strings.Contains(body, "Weekly SLA Breach Report (Onboarding)") {
-		t.Fatal("heading must reach the body")
-	}
-	if !strings.Contains(body, "Cases handled by the Onboarding team.") {
-		t.Fatal("intro must reach the body")
+	if !strings.Contains(body, "Weekly SLA Breach Report (Onboarding)") ||
+		!strings.Contains(body, "Cases handled by the Onboarding team.") {
+		t.Fatal("heading and intro must reach the body")
 	}
 }
 
-// TestRenderSLABreachReportGroupsContiguousTeams: Castor's two rows share
-// one heading, so there must be exactly three team headings, not four.
-func TestRenderSLABreachReportGroupsContiguousTeams(t *testing.T) {
-	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
-	if got := strings.Count(body, "Team: "); got != 3 {
-		t.Fatalf("team headings = %d, want 3 (Castor's two rows share one)", got)
-	}
-	if !strings.Contains(body, `Team: Castor <span style="font-weight:400; color:#8a8f98;">(2)</span>`) {
-		t.Fatal("Castor's heading must carry its own count of 2")
-	}
-}
-
-// TestRenderSLABreachReportEmptyWeekSaysSo keeps a quiet week legible
-// rather than rendering an empty table.
+// TestRenderSLABreachReportEmptyWeekSaysSo: the onboarding report really
+// does come back empty, so this is the common case, not an edge case.
 func TestRenderSLABreachReportEmptyWeekSaysSo(t *testing.T) {
 	body := RenderSLABreachReport(slabreachreport.Report{
 		PeriodStart: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
@@ -101,19 +108,22 @@ func TestRenderSLABreachReportEmptyWeekSaysSo(t *testing.T) {
 	if !strings.Contains(body, "No SLA breaches this week.") {
 		t.Fatal("an empty week must say so")
 	}
-	if !strings.Contains(body, "0 Cases") {
+	if !strings.Contains(body, "0 total Task SLAs") {
 		t.Fatal("an empty report still reports its count")
 	}
 }
 
-// TestRenderSLABreachReportLinksByCaseNumber: the support portal
-// addresses a case by number, so the link must use it -- and stay plain
-// text with no base URL configured.
-func TestRenderSLABreachReportLinksByCaseNumber(t *testing.T) {
-	withBase := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro,
+// TestRenderSLABreachReportShowsWSO2IdButLinksByCaseNumber: the column
+// is the WSO2 reference, but the support portal addresses a case by its
+// ServiceNow number.
+func TestRenderSLABreachReportShowsWSO2IdButLinksByCaseNumber(t *testing.T) {
+	body := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro,
 		"https://internal.support.wso2.com/support/cases")
-	if !strings.Contains(withBase, `href="https://internal.support.wso2.com/support/cases/CS0002"`) {
-		t.Fatal("case number must link to <base>/<number>")
+	if !strings.Contains(body, `href="https://internal.support.wso2.com/support/cases/CS0002"`) {
+		t.Fatal("href must use the case number")
+	}
+	if !strings.Contains(body, `>WSO2-1002</a>`) {
+		t.Fatal("the link text must be the WSO2 case id, the source report's own column")
 	}
 	without := RenderSLABreachReport(slaBreachFixture(), testSLAHeading, testSLAIntro, "")
 	if strings.Contains(without, `href="https://internal.support.wso2.com`) {
@@ -125,10 +135,10 @@ func TestRenderSLABreachReportLinksByCaseNumber(t *testing.T) {
 // markup.
 func TestRenderSLABreachReportEscapesRowData(t *testing.T) {
 	body := RenderSLABreachReport(slabreachreport.Report{
-		Rows: []slabreachreport.Row{{Team: "T", CaseNumber: "CS1", Subject: `<script>alert(1)</script>`}},
+		Rows: []slabreachreport.Row{{Team: "T", WSO2CaseID: "WSO2-1", Product: `<script>alert(1)</script>`}},
 	}, testSLAHeading, testSLAIntro, "")
 	if strings.Contains(body, "<script>alert(1)</script>") {
-		t.Fatal("a subject containing markup must be escaped")
+		t.Fatal("a product containing markup must be escaped")
 	}
 }
 

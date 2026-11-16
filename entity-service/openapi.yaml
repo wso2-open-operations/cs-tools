@@ -36271,37 +36271,41 @@ components:
           nullable: true
     SLABreachRow:
       type: object
+      description: >-
+        One breached SLA clock, carrying the columns the source report
+        lists plus the case number its link needs.
       properties:
         team:
           type: string
           description: The account's integration CS team; the report groups on it.
-        caseNumber:
-          type: string
         wso2CaseId:
           type: string
-        caseId:
+        caseNumber:
           type: string
-        subject:
-          type: string
-        account:
-          type: string
-        severity:
-          type: string
+          description: Not a column in the source report; the case link needs it.
         product:
           type: string
+        caseType:
+          type: string
+        priority:
+          type: string
+          description: The case severity, which the source report labels Priority.
+        target:
+          type: string
+          description: The SLA policy's target - RESPONSE, RESOLUTION or WORKAROUND.
+        businessElapsedPercent:
+          type: number
+          format: double
+          description: Over 100 on a breached clock.
         definition:
           type: string
-          description: The SLA definition (sla_policy name) that breached.
+          description: The SLA policy name; the sort key within a team.
         breachedOn:
           type: string
           format: date-time
-        stage:
-          type: string
-        assigneeName:
-          type: string
         onboardingStatus:
           type: string
-          description: The project onboarding status that decided the row's section.
+          description: The project onboarding status that decided which report this row belongs to.
     SLABreachReport:
       type: object
       properties:

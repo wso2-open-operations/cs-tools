@@ -79,13 +79,11 @@ func slaBreachWeekLabel(r slabreachreport.Report, loc *time.Location) string {
 	return start.Format("2 Jan") + " - " + last.Format("2 Jan 2006")
 }
 
-// slaBreachCaseCount is "1 Case" or "N Cases", as the source report
-// counted.
+// slaBreachCaseCount is "N total Task SLAs", the line the source report
+// prints above its table. A clock, not a case, is the unit: one case can
+// contribute a Response and a Resolution breach in the same week.
 func slaBreachCaseCount(n int) string {
-	if n == 1 {
-		return "1 Case"
-	}
-	return strconv.Itoa(n) + " Cases"
+	return strconv.Itoa(n) + " total Task SLAs"
 }
 
 // renderSLABreachRows builds one table's body: for each integration CS
@@ -107,16 +105,16 @@ func renderSLABreachRows(rows []slabreachreport.Row, caseLinkBase string, loc *t
 	for i, row := range rows {
 		if i == 0 || row.Team != team {
 			team = row.Team
-			fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">Team: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
+			fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">Integration CS Team: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
 				slaBreachRowColumns, orDash(escapeHTML(team)), slaBreachTeamCount(rows, i))
 		}
 		b.WriteString("<tr>")
 		fmt.Fprintf(&b, nowrapCell, slaBreachCaseLink(caseLinkBase, row))
-		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Subject)))
-		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Account)))
-		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Severity)))
-		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Definition)))
-		fmt.Fprintf(&b, nowrapCell, orDash(escapeHTML(slaBreachTime(row.BreachedOn, loc))))
+		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Product)))
+		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.CaseType)))
+		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Priority)))
+		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Target)))
+		fmt.Fprintf(&b, nowrapCell, escapeHTML(slaBreachPercent(row.BusinessElapsedPercent)))
 		b.WriteString("</tr>")
 	}
 	return b.String()
@@ -141,19 +139,28 @@ func slaBreachTime(t time.Time, loc *time.Location) string {
 	return t.In(loc).Format("2 Jan 15:04")
 }
 
-// slaBreachCaseLink is the row's case number, linked to the case page
-// (<caseLinkBase>/<case number>) when a base URL is configured. The
-// support portal addresses a case by its number, not its id -- the same
-// link shape the migration case scan uses. A row without a number falls
-// back to the portal's own reference so the cell is never blank, and is
-// left as plain text because the link needs the number.
+// slaBreachPercent renders the business elapsed percentage the way the
+// source report's column does: a whole number with a percent sign. It is
+// over 100 on every breached clock, which is the point of showing it.
+func slaBreachPercent(pct float64) string {
+	return strconv.FormatFloat(pct, 'f', 0, 64) + "%"
+}
+
+// slaBreachCaseLink is the row's WSO2 case id -- the source report's own
+// first column -- linked to the case page when a base URL is configured.
+//
+// The DISPLAYED text is the WSO2 id ("WSO2-1000"), but the href uses the
+// case number ("CS0023001"): the support portal addresses a case by
+// number, not by the portal reference. A row missing the number stays
+// plain text, since there is nothing to link to.
 func slaBreachCaseLink(caseLinkBase string, row slabreachreport.Row) string {
-	if row.CaseNumber == "" {
-		return orDash(escapeHTML(row.WSO2CaseID))
+	text := row.WSO2CaseID
+	if text == "" {
+		text = row.CaseNumber
 	}
-	if caseLinkBase == "" {
-		return escapeHTML(row.CaseNumber)
+	if caseLinkBase == "" || row.CaseNumber == "" {
+		return orDash(escapeHTML(text))
 	}
 	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.CaseNumber)
-	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(row.CaseNumber))
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
