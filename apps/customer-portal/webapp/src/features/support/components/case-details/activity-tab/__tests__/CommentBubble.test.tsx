@@ -178,4 +178,28 @@ describe("CommentBubble", () => {
     renderBubble();
     expect(screen.getByText(/Feb 12, 2026/)).toBeInTheDocument();
   });
+
+  describe("nested list wrapper from the CSM editor", () => {
+    // Old comments carry only the class; new ones also carry an inline
+    // `list-style-type: none`. Both must survive sanitising and show no marker.
+    const wrap = (attrs: string) =>
+      `<ul><li value="1">Parent</li><li value="2" ${attrs}><ul><li value="1">Child</li></ul></li></ul>`;
+
+    it.each([
+      ["class only (old comment)", 'class="editor-list-item-nested"'],
+      [
+        "class and inline style (new comment)",
+        'class="editor-list-item-nested" style="list-style-type: none"',
+      ],
+    ])("hides the wrapper marker, %s, and keeps normal bullets", (_label, attrs) => {
+      const { container } = renderBubble({
+        comment: { ...mockComment, id: "nested-1", content: wrap(attrs) },
+      });
+      const wrapper = container.querySelector("li.editor-list-item-nested");
+      const normal = container.querySelector("li:not(.editor-list-item-nested)");
+      expect(wrapper).not.toBeNull();
+      expect(getComputedStyle(wrapper as Element).listStyleType).toBe("none");
+      expect(getComputedStyle(normal as Element).listStyleType).not.toBe("none");
+    });
+  });
 });
