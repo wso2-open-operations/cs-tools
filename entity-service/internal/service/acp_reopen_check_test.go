@@ -140,8 +140,8 @@ func TestACPInternalAddress(t *testing.T) {
 	}
 }
 
-// During the move from wso2.com to choreolabs.com an internal person may
-// have either address, so both domains are kept and a third is not.
+// Several internal domains can be configured (ACP_INTERNAL_EMAIL_DOMAINS):
+// an address in any of them is kept, any other is not.
 func TestBuildProjectReactivatedPayload_SeveralInternalDomains(t *testing.T) {
 	c := &salesentity.Customer{
 		Owner:          &salesentity.CustomerUser{Email: acpStr("owner@example.com")},
@@ -158,14 +158,14 @@ func TestBuildProjectReactivatedPayload_SeveralInternalDomains(t *testing.T) {
 	}
 }
 
-// With nothing configured the notice may go to either of the company's
-// domains; a configured list replaces them.
+// With nothing configured the notice goes to @wso2.com only, as before; a
+// configured list replaces it, trimmed and lower-cased.
 func TestACPReopen_InternalDomains(t *testing.T) {
-	if got := (&ACPReopen{}).internalDomains(); !reflect.DeepEqual(got, []string{"@wso2.com", "@choreolabs.com"}) {
+	if got := (&ACPReopen{}).internalDomains(); !reflect.DeepEqual(got, []string{"@wso2.com"}) {
 		t.Errorf("default = %v", got)
 	}
-	r := &ACPReopen{InternalDomains: []string{" @Example.COM ", ""}}
-	if got := r.internalDomains(); !reflect.DeepEqual(got, []string{"@example.com"}) {
+	r := &ACPReopen{InternalDomains: []string{" @Example.COM ", "", "@example.org"}}
+	if got := r.internalDomains(); !reflect.DeepEqual(got, []string{"@example.com", "@example.org"}) {
 		t.Errorf("configured = %v, want trimmed and lower-cased", got)
 	}
 }
